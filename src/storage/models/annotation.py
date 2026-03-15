@@ -1,0 +1,222 @@
+"""
+创建时间: 2026-03-15
+创建者: TraeAI
+任务: postgresql-migration
+说明: 标注相关表 ORM 模型定义
+
+本模块定义标注相关的数据表：
+- ChunkAnnotation: 分块标注表
+- ChunkCharacter: 分块角色表
+- ChunkRelation: 分块关系表
+- ChunkDialogue: 分块对话表
+- ChunkForeshadowing: 分块伏笔表
+- CharacterAppearance: 角色出场表
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from sqlalchemy import Index, Integer, String, Text, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column
+
+from .base import Base
+
+
+class ChunkAnnotation(Base):
+    """
+    分块标注表
+
+    创建时间: 2026-03-15
+    创建者: TraeAI
+    任务: postgresql-migration
+    说明: 存储分块的标注信息（情感、事件类型等）
+    """
+
+    __tablename__ = "chunk_annotation"
+
+    chunk_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), primary_key=True
+    )
+    emotional_valence: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    pivot_moment: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    cliffhanger: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    has_foreshadowing: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    foreshadowing_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    foreshadowing_desc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    run_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index("idx_chunk_annotation_run_id", "run_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChunkAnnotation(chunk_id={self.chunk_id}, event_type={self.event_type})>"
+
+
+class ChunkCharacter(Base):
+    """
+    分块角色表
+
+    创建时间: 2026-03-15
+    创建者: TraeAI
+    任务: postgresql-migration
+    说明: 存储分块中出现的角色信息
+    """
+
+    __tablename__ = "chunk_characters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    role_function: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    action_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    emotion_score: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index("idx_chunk_characters_chunk_id", "chunk_id"),
+        Index("idx_chunk_characters_name", "name"),
+        Index("idx_chunk_characters_run_id", "run_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChunkCharacter(chunk_id={self.chunk_id}, name={self.name})>"
+
+
+class ChunkRelation(Base):
+    """
+    分块关系表
+
+    创建时间: 2026-03-15
+    创建者: TraeAI
+    任务: postgresql-migration
+    说明: 存储分块中角色之间的关系变化
+    """
+
+    __tablename__ = "chunk_relations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    from_char: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    to_char: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    change: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index("idx_chunk_relations_chunk_id", "chunk_id"),
+        Index("idx_chunk_relations_run_id", "run_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChunkRelation(chunk_id={self.chunk_id}, from={self.from_char}, to={self.to_char})>"
+
+
+class ChunkDialogue(Base):
+    """
+    分块对话表
+
+    创建时间: 2026-03-15
+    创建者: TraeAI
+    任务: postgresql-migration
+    说明: 存储分块中的对话信息
+    """
+
+    __tablename__ = "chunk_dialogues"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    speaker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    run_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index("idx_chunk_dialogues_chunk_id", "chunk_id"),
+        Index("idx_chunk_dialogues_run_id", "run_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChunkDialogue(chunk_id={self.chunk_id}, speaker={self.speaker})>"
+
+
+class ChunkForeshadowing(Base):
+    """
+    分块伏笔表
+
+    创建时间: 2026-03-15
+    创建者: TraeAI
+    任务: postgresql-migration
+    说明: 存储分块中的伏笔分析结果
+    """
+
+    __tablename__ = "chunk_foreshadowing"
+
+    chunk_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), primary_key=True
+    )
+    foreshadowing_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    anchor_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    anchor_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index("idx_chunk_foreshadowing_run_id", "run_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChunkForeshadowing(chunk_id={self.chunk_id})>"
+
+
+class CharacterAppearance(Base):
+    """
+    角色出场表
+
+    创建时间: 2026-03-15
+    创建者: TraeAI
+    任务: postgresql-migration
+    说明: 存储角色出场信息和身份线索
+    """
+
+    __tablename__ = "character_appearances"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    raw_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    identity_clue: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    clue_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        Index("idx_character_appearances_chunk_id", "chunk_id"),
+        Index("idx_character_appearances_raw_name", "raw_name"),
+        Index("idx_character_appearances_run_id", "run_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CharacterAppearance(chunk_id={self.chunk_id}, raw_name={self.raw_name})>"

@@ -1,0 +1,339 @@
+from __future__ import annotations
+
+import re
+import statistics
+from collections import Counter
+from typing import Dict, List, Set
+
+import jieba
+
+
+CLASSICAL_PATTERNS = [
+    r"之[^\s]{0,3}[者也乎哉]",
+    r"[岂宁庸]不[^\s]{0,5}[耶乎哉]",
+    r"[乃则]若[^\s]{0,5}[者也]",
+    r"[因遂乃]即[^\s]{0,5}[者也乎]",
+    r"何[^\s]{0,3}[耶乎哉兮]",
+    r"[呜噫嗟夫][^\s]{0,3}[哉兮也]",
+]
+
+FUNCTION_WORDS = {
+    "之",
+    "其",
+    "者",
+    "也",
+    "所",
+    "以",
+    "而",
+    "与",
+    "则",
+    "乃",
+    "于",
+    "乎",
+    "矣",
+    "焉",
+    "哉",
+    "兮",
+    "尔",
+    "若",
+    "为",
+    "何",
+}
+
+SEMANTIC_CATEGORIES = {
+    "人物": ["人", "者", "夫", "子", "男", "女", "老", "少", "亲", "友"],
+    "自然": ["天", "地", "山", "水", "风", "雨", "云", "月", "日", "星"],
+    "器物": ["剑", "刀", "书", "琴", "酒", "茶", "衣", "冠", "马", "车"],
+    "建筑": ["楼", "阁", "亭", "台", "殿", "堂", "门", "窗", "墙", "院"],
+    "情感": ["爱", "恨", "情", "愁", "喜", "怒", "悲", "乐", "思", "念"],
+    "动作": ["行", "走", "坐", "卧", "立", "起", "来", "去", "入", "出"],
+    "时间": ["年", "月", "日", "时", "晨", "暮", "春", "夏", "秋", "冬"],
+    "空间": ["东", "西", "南", "北", "上", "下", "前", "后", "左", "右"],
+    "颜色": ["红", "白", "黑", "青", "黄", "绿", "紫", "金", "银", "翠"],
+    "数量": ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"],
+}
+
+CLASSICAL_IMAGERY = {
+    "月",
+    "风",
+    "花",
+    "雪",
+    "云",
+    "雨",
+    "山",
+    "水",
+    "江",
+    "河",
+    "松",
+    "竹",
+    "梅",
+    "兰",
+    "菊",
+    "柳",
+    "桃",
+    "杏",
+    "荷",
+    "莲",
+    "鹤",
+    "雁",
+    "燕",
+    "莺",
+    "蝶",
+    "蝉",
+    "萤",
+    "鱼",
+    "龙",
+    "凤",
+    "楼",
+    "阁",
+    "亭",
+    "台",
+    "桥",
+    "舟",
+    "帆",
+    "灯",
+    "烛",
+    "香",
+    "琴",
+    "棋",
+    "书",
+    "画",
+    "剑",
+    "酒",
+    "茶",
+    "梦",
+    "魂",
+    "影",
+}
+
+IDIOM_SET: Set[str] = set()
+
+
+def _load_idiom_set() -> Set[str]:
+    global IDIOM_SET
+    if IDIOM_SET:
+        return IDIOM_SET
+
+    try:
+        from src.lexicons.loader import load_lexicon
+
+        idioms = load_lexicon("idioms")
+        IDIOM_SET = set(idioms)
+    except FileNotFoundError:
+        IDIOM_SET = {
+            "一帆风顺",
+            "一鸣惊人",
+            "一诺千金",
+            "一举两得",
+            "一马当先",
+            "三心二意",
+            "四面楚歌",
+            "五光十色",
+            "六神无主",
+            "七上八下",
+            "八仙过海",
+            "九牛一毛",
+            "十全十美",
+            "百发百中",
+            "千方百计",
+            "万紫千红",
+            "心旷神怡",
+            "兴高采烈",
+            "喜出望外",
+            "眉开眼笑",
+            "愁眉苦脸",
+            "垂头丧气",
+            "怒发冲冠",
+            "惊慌失措",
+            "忐忑不安",
+            "心平气和",
+            "从容不迫",
+            "悠然自得",
+            "怡然自乐",
+            "泰然处之",
+            "井井有条",
+            "有条不紊",
+            "一丝不苟",
+            "精益求精",
+            "尽善尽美",
+            "画龙点睛",
+            "锦上添花",
+            "雪中送炭",
+            "如虎添翼",
+            "画蛇添足",
+            "守株待兔",
+            "刻舟求剑",
+            "掩耳盗铃",
+            "自相矛盾",
+            "亡羊补牢",
+            "叶公好龙",
+            "杯弓蛇影",
+            "狐假虎威",
+            "井底之蛙",
+            "对牛弹琴",
+        }
+
+    return IDIOM_SET
+
+
+def compute_idiom_density(
+    texts: List[str],
+) -> float:
+    if not texts:
+        return 0.0
+
+    idioms = _load_idiom_set()
+
+    all_words: List[str] = []
+    idiom_count = 0
+
+    for text in texts:
+        words = list(jieba.cut(text))
+        all_words.extend(words)
+        for word in words:
+            if word in idioms:
+                idiom_count += 1
+
+    total_words = len(all_words)
+    if total_words == 0:
+        return 0.0
+
+    return idiom_count / total_words
+
+
+def compute_classical_sentence_ratio(
+    texts: List[str],
+) -> float:
+    if not texts:
+        return 0.0
+
+    classical_count = 0
+    total_sentences = 0
+
+    for text in texts:
+        sentences = re.split(r"[。！？\n]", text)
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 4:
+                continue
+            total_sentences += 1
+            for pattern in CLASSICAL_PATTERNS:
+                if re.search(pattern, sentence):
+                    classical_count += 1
+                    break
+
+    return classical_count / total_sentences if total_sentences > 0 else 0.0
+
+
+def compute_vocab_breadth(
+    all_tokens: List[str],
+) -> float:
+    if not all_tokens:
+        return 0.0
+
+    total_tokens = len(all_tokens)
+    unique_tokens = len(set(all_tokens))
+
+    return unique_tokens / (total_tokens + 1e-6)
+
+
+def compute_avg_word_len(
+    texts: List[str],
+) -> float:
+    if not texts:
+        return 0.0
+
+    all_words: List[str] = []
+    for text in texts:
+        words = list(jieba.cut(text))
+        all_words.extend([w for w in words if w.strip()])
+
+    if not all_words:
+        return 0.0
+
+    total_len = sum(len(word) for word in all_words)
+    total_words = len(all_words)
+
+    return total_len / (total_words + 1e-6)
+
+
+def compute_sent_len_std(
+    texts: List[str],
+) -> float:
+    if not texts:
+        return 0.0
+
+    all_sentences = []
+    for text in texts:
+        sentences = re.split(r"[。！？\n]", text)
+        for sent in sentences:
+            sent = sent.strip()
+            if sent:
+                all_sentences.append(sent)
+
+    if len(all_sentences) < 2:
+        return 0.0
+
+    sent_lengths = [len(sent) for sent in all_sentences]
+
+    return statistics.stdev(sent_lengths)
+
+
+def compute_function_word_vector(
+    texts: List[str],
+) -> Dict[str, float]:
+    if not texts:
+        return {word: 0.0 for word in FUNCTION_WORDS}
+
+    total_chars = sum(len(text) for text in texts)
+    if total_chars == 0:
+        return {word: 0.0 for word in FUNCTION_WORDS}
+
+    all_chars = []
+    for text in texts:
+        all_chars.extend([c for c in text if c in FUNCTION_WORDS])
+
+    counts = Counter(all_chars)
+
+    return {word: counts.get(word, 0) / total_chars for word in FUNCTION_WORDS}
+
+
+def compute_category_density(
+    texts: List[str],
+) -> Dict[str, float]:
+    if not texts:
+        return {category: 0.0 for category in SEMANTIC_CATEGORIES.keys()}
+
+    total_chars = sum(len(text) for text in texts)
+    if total_chars == 0:
+        return {category: 0.0 for category in SEMANTIC_CATEGORIES.keys()}
+
+    all_chars = []
+    for text in texts:
+        all_chars.extend([c for c in text])
+
+    char_counts = Counter(all_chars)
+
+    result = {}
+    for category, chars in SEMANTIC_CATEGORIES.items():
+        category_count = sum(char_counts.get(c, 0) for c in chars)
+        result[category] = category_count / total_chars
+
+    return result
+
+
+def compute_imagery_density(
+    texts: List[str],
+) -> float:
+    if not texts:
+        return 0.0
+
+    total_chars = sum(len(text) for text in texts)
+    if total_chars == 0:
+        return 0.0
+
+    all_chars = []
+    for text in texts:
+        all_chars.extend([c for c in text if c in CLASSICAL_IMAGERY])
+
+    return len(all_chars) / total_chars

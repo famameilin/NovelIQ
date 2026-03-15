@@ -1,0 +1,167 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+.env.local
+
+# Environment Variables - 包含敏感信息，必须忽略
+.env
+
+# IDE
+.idea/
+.vscode/
+.VSCodeCounter/
+*.swp
+*.swo
+*~
+
+# Trae IDE 工作文件
+.trae/
+
+# Claude Code 配置
+CLAUDE.md
+
+# Issues 文件夹
+issues/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Logs
+logs/
+*.log
+
+# Uploads - 用户上传的文件
+data/uploads/
+
+# Outputs - 分析输出结果
+outputs/
+
+# Cache
+.cache/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Distribution
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+coverage.xml
+*.cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Local development files
+*.local
+temp_test*
+temp_*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Alembic - 保留版本文件但忽略可能的临时文件
+alembic/versions/__pycache__/
+
+# Project specific
+results.json
+novel_analysis.db
+analysis_log_*.txt
+server_terminal_log.txt
+server_console_log_*.txt
+log.txt
+monitor_progress.py
+test_token_usage.py
+重明传.json
+
+# Deprecated - 废弃代码，不上传
+deprecated/
+
+# Tests 根目录文件不上传（子目录保留）
+/tests/*.py

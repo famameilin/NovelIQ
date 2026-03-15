@@ -1,0 +1,240 @@
+"""
+创建时间: 2026-03-12
+创建者: TraeAI
+任务: 项目文件结构整理与拆解 - 从 settings.py 拆分模型相关配置类
+
+本模块包含模型相关的配置数据类。
+
+修改时间: 2026-03-12
+修改者: TraeAI
+修改内容: 将thinking配置从各模型配置中移出，统一到独立的thinking配置块
+
+修改时间: 2026-03-16
+修改者: TraeAI
+修改内容: 支持从环境变量读取模型配置，敏感信息不再硬编码在 settings.json
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class ThinkingConfig:
+    """任务级思考模式配置"""
+
+    enabled: bool = False
+    budget_tokens: int | None = None
+
+
+@dataclass
+class TaskModelSettings:
+    """任务模型配置（不包含thinking，thinking统一在顶层配置）"""
+
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    timeout_s: float | None = None
+    max_retries: int = 2
+    temperature: float = 0.7
+    top_p: float = 0.8
+    top_k: int = 20
+    presence_penalty: float = 1.5
+
+
+@dataclass
+class EmbeddingModelSettings:
+    """嵌入模型配置"""
+
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    timeout_s: float | None = None
+    max_retries: int = 2
+
+
+@dataclass
+class ModelsSettings:
+    """
+    任务级模型配置集合
+
+    修改时间: 2026-03-12
+    修改者: TraeAI
+    修改内容: 添加 cloud_annotation 配置，用于本地标注失败后的云端fallback
+    """
+
+    annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
+    cloud_annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
+    incremental_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
+    semantic_chunking: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
+    full_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
+    diagnosis: TaskModelSettings = field(default_factory=TaskModelSettings)
+
+
+@dataclass
+class ThinkingSettings:
+    """
+    各任务thinking开关配置
+
+    创建时间: 2026-03-12
+    创建者: TraeAI
+    任务: 将thinking配置从各模型配置中独立出来
+    """
+
+    annotation: bool = False
+    cloud_annotation: bool = True
+    incremental_disambig: bool = True
+    full_disambig: bool = True
+    diagnosis: bool = True
+
+
+def _get_env_var(prefix: str, suffix: str, default: str | None = None) -> str | None:
+    """获取环境变量值"""
+    return os.getenv(f"{prefix}_{suffix}", default)
+
+
+def _parse_task_model_settings(
+    data: dict[str, Any] | None, env_prefix: str = ""
+) -> TaskModelSettings:
+    """
+    解析任务模型配置
+    
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 支持从环境变量覆盖配置，优先级：环境变量 > JSON配置
+    """
+    env_base_url = _get_env_var(env_prefix, "BASE_URL")
+    env_model = _get_env_var(env_prefix, "MODEL")
+    env_api_key = _get_env_var(env_prefix, "API_KEY")
+    env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
+    env_max_retries = _get_env_var(env_prefix, "MAX_RETRIES")
+
+    json_data = data or {}
+
+    timeout_val = None
+    if env_timeout:
+        try:
+            timeout_val = float(env_timeout)
+        except ValueError:
+            pass
+    elif json_data.get("timeout_s") is not None:
+        timeout_val = json_data.get("timeout_s")
+
+    max_retries_val = 2
+    if env_max_retries:
+        try:
+            max_retries_val = int(env_max_retries)
+        except ValueError:
+            max_retries_val = json_data.get("max_retries", 2)
+    else:
+        max_retries_val = json_data.get("max_retries", 2)
+
+    return TaskModelSettings(
+        base_url=env_base_url or json_data.get("base_url"),
+        model=env_model or json_data.get("model"),
+        api_key=env_api_key or json_data.get("api_key"),
+        timeout_s=timeout_val,
+        max_retries=max_retries_val,
+        temperature=json_data.get("temperature", 0.7),
+        top_p=json_data.get("top_p", 0.8),
+        top_k=json_data.get("top_k", 20),
+        presence_penalty=json_data.get("presence_penalty", 1.5),
+    )
+
+
+def _parse_embedding_model_settings(
+    data: dict[str, Any] | None, env_prefix: str = ""
+) -> EmbeddingModelSettings:
+    """
+    解析嵌入模型配置
+    
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 支持从环境变量覆盖配置，优先级：环境变量 > JSON配置
+    """
+    env_base_url = _get_env_var(env_prefix, "BASE_URL")
+    env_model = _get_env_var(env_prefix, "MODEL")
+    env_api_key = _get_env_var(env_prefix, "API_KEY")
+    env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
+    env_max_retries = _get_env_var(env_prefix, "MAX_RETRIES")
+
+    json_data = data or {}
+
+    timeout_val = None
+    if env_timeout:
+        try:
+            timeout_val = float(env_timeout)
+        except ValueError:
+            pass
+    elif json_data.get("timeout_s") is not None:
+        timeout_val = json_data.get("timeout_s")
+
+    max_retries_val = 2
+    if env_max_retries:
+        try:
+            max_retries_val = int(env_max_retries)
+        except ValueError:
+            max_retries_val = json_data.get("max_retries", 2)
+    else:
+        max_retries_val = json_data.get("max_retries", 2)
+
+    return EmbeddingModelSettings(
+        base_url=env_base_url or json_data.get("base_url"),
+        model=env_model or json_data.get("model"),
+        api_key=env_api_key or json_data.get("api_key"),
+        timeout_s=timeout_val,
+        max_retries=max_retries_val,
+    )
+
+
+def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
+    """
+    解析任务级模型配置集合
+
+    修改时间: 2026-03-12
+    修改者: TraeAI
+    修改内容: 添加 cloud_annotation 配置解析
+    
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 传递环境变量前缀给各模型配置解析器
+    """
+    if not data:
+        data = {}
+    return ModelsSettings(
+        annotation=_parse_task_model_settings(data.get("annotation"), "ANNOTATION"),
+        cloud_annotation=_parse_task_model_settings(
+            data.get("cloud_annotation"), "CLOUD_ANNOTATION"
+        ),
+        incremental_disambig=_parse_task_model_settings(
+            data.get("incremental_disambig"), "INCREMENTAL_DISAMBIG"
+        ),
+        semantic_chunking=_parse_embedding_model_settings(
+            data.get("semantic_chunking"), "SEMANTIC_CHUNKING"
+        ),
+        full_disambig=_parse_task_model_settings(
+            data.get("full_disambig"), "FULL_DISAMBIG"
+        ),
+        diagnosis=_parse_task_model_settings(data.get("diagnosis"), "DIAGNOSIS"),
+    )
+
+
+def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
+    """
+    解析thinking配置
+
+    创建时间: 2026-03-12
+    创建者: TraeAI
+    任务: 将thinking配置从各模型配置中独立出来
+    """
+    if not data:
+        return ThinkingSettings()
+    return ThinkingSettings(
+        annotation=data.get("annotation", False),
+        cloud_annotation=data.get("cloud_annotation", True),
+        incremental_disambig=data.get("incremental_disambig", True),
+        full_disambig=data.get("full_disambig", True),
+        diagnosis=data.get("diagnosis", True),
+    )

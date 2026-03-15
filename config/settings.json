@@ -1,0 +1,253 @@
+{
+  "models": {
+    "annotation": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": null,
+      "max_retries": 2,
+      "temperature": 0.0,
+      "top_p": 0.8,
+      "top_k": 20,
+      "presence_penalty": 1.5
+    },
+    "cloud_annotation": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": 180,
+      "max_retries": 2,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "presence_penalty": 1.5
+    },
+    "incremental_disambig": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": 180,
+      "max_retries": 2,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "presence_penalty": 1.5
+    },
+    "semantic_chunking": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": null,
+      "max_retries": 2
+    },
+    "full_disambig": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": 180,
+      "max_retries": 2,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "presence_penalty": 1.5
+    },
+    "diagnosis": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": 180,
+      "max_retries": 2,
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "presence_penalty": 1.5
+    }
+  },
+  "thinking": {
+    "annotation": false,
+    "cloud_annotation": false,
+    "incremental_disambig": true,
+    "full_disambig": true,
+    "diagnosis": true
+  },
+  "logging": {
+    "console_level": "INFO",
+    "file_level": "DEBUG",
+    "log_dir": "logs",
+    "rotation": "10 MB",
+    "retention": "7 days",
+    "compression": "zip",
+    "modules": {
+      "api": {"file": "api.log", "level": "DEBUG"},
+      "workflow": {"file": "workflow.log", "level": "INFO"},
+      "model": {"file": "model.log", "level": "DEBUG"},
+      "metrics": {"file": "metrics.log", "level": "INFO"},
+      "knowledge": {"file": "knowledge.log", "level": "DEBUG"},
+      "rag": {"file": "rag.log", "level": "DEBUG"}
+    },
+    "third_party_level": "WARNING",
+    "json_parse_preview_chars": 200
+  },
+  "chunking": {
+    "max_chars": 2000,
+    "overlap": 200,
+    "split_by_chapter": true,
+    "use_semantic_chunking": true,
+    "semantic_threshold": 0.7,
+    "semantic_max_chars": 3000,
+    "semantic_window_size": 3,
+    "semantic_percentile": 10,
+    "semantic_min_chars": 50,
+    "semantic_use_dynamic_threshold": true
+  },
+  "database": {
+    "pool_size": 5,
+    "max_overflow": 10,
+    "pool_timeout": 30,
+    "pool_recycle": 3600,
+    "echo": false
+  },
+  "paths": {
+    "upload_dir": "data/uploads",
+    "results_dir": "outputs",
+    "log_dir": "logs",
+    "lexicons_dir": "data/lexicons"
+  },
+  "api": {
+    "title": "小说量化分析 API",
+    "version": "0.1.0",
+    "description": "小说文本量化分析服务的 RESTful API",
+    "docs_url": "/api/docs",
+    "redoc_url": "/api/redoc",
+    "openapi_url": "/api/openapi.json",
+    "cors_origins": ["*"],
+    "cors_allow_credentials": true,
+    "cors_allow_methods": ["*"],
+    "cors_allow_headers": ["*"],
+    "novel_name_max_length": 50,
+    "query_limit": 50
+  },
+  "analysis": {
+    "incremental_disambig_interval": 10,
+    "analysis_log_rotation": "10 MB",
+    "analysis_log_retention": "30 days",
+    "sentence_preview_max_chars": 100,
+    "sentence_pool_max_chars": 80,
+    "cloud_annotation_fallback_enabled": true,
+    "two_phase_annotation": {
+      "enabled": true,
+      "parallel": true
+    },
+    "progress": {
+      "preprocess": 10,
+      "annotate": 25,
+      "aggregate": 50,
+      "topic_model": 70,
+      "diagnose": 85
+    }
+  },
+  "topic_model": {
+    "single_book": {
+      "num_topics": 25,
+      "passes": 10,
+      "iterations": 500
+    },
+    "multi_book": {
+      "num_topics": 120,
+      "passes": 15,
+      "iterations": 1000
+    },
+    "common": {
+      "alpha": "auto",
+      "eta": "auto",
+      "random_state": 42,
+      "chunksize": 2000,
+      "minimum_probability": 0.01,
+      "no_below": 5,
+      "no_above": 0.5
+    }
+  },
+  "diagnosis": {
+    "pivot_blocks_limit": 20,
+    "pivot_moments_limit": 10,
+    "high_tension_limit": 10,
+    "relation_changes_limit": 50,
+    "foreshadowing_limit": 30,
+    "first_last_max_chars": 500,
+    "topic_words_top_n": 10,
+    "text_limits": {
+      "pivot_block": 300,
+      "pivot_moment": 400,
+      "high_tension": 300,
+      "foreshadowing": 200,
+      "summary": 4000
+    }
+  },
+  "metrics": {
+    "mtld_threshold": 0.72,
+    "emotion_recovery_threshold": 0.3,
+    "slope_threshold": 0.01,
+    "std_dev_threshold": 0.15,
+    "middle_collapse_min_chunks": 10,
+    "character_max_iter": 100
+  },
+  "rag": {
+    "enabled": true,
+    "embedding_enabled": true,
+    "similarity_threshold": 0.7,
+    "lookback_chunks": 10,
+    "top_k": 3,
+    "level1_enabled": true,
+    "level2_enabled": true,
+    "level3_enabled": true
+  },
+  "prompts": {
+    "local_annotation_system": "你是一个网文标注系统。",
+    "local_annotation_format": "请对输入文本进行结构化标注，严格输出 JSON，不要输出任何其他内容。\n\n【输出格式】\n{\n  \"emotional_valence\": \"strong_positive|mild_positive|neutral|mild_negative|strong_negative\",\n  \"event_type\": \"冲突|铺垫|转折\",\n  \"pivot_moment\": true|false,\n  \"cliffhanger\": true|false,\n  \"has_foreshadowing\": true|false,\n  \"foreshadowing_type\": \"causal|thematic\" 或 null（无伏笔时使用JSON的null，不要用字符串\"null\"）,\n  \"foreshadowing_desc\": \"描述或空字符串\",\n  \"characters\": [{\"name\": \"人名\", \"role_function\": \"主体|客体|发送者|接收者|帮助者|反对者\", \"action\": \"核心行为\", \"action_type\": \"战斗|逃跑|对话|决策|移动|情感|其他\", \"emotion_score\": \"strong_positive|mild_positive|neutral|mild_negative|strong_negative\"}],\n  \"character_appearances\": [{\"raw_name\": \"文中原始称呼\", \"identity_clue\": \"一句话描述身份相关行为\", \"clue_type\": \"none|self_introduction|named_by_other|alias_revealed|appearance_desc\"}],\n  \"relations\": [{\"from\": \"人名\", \"to\": \"人名\", \"type\": \"师徒|敌对|盟友|爱慕|家族|利益|主从\", \"change\": \"强化|弱化|新建|断裂|无变化\"}]（注意：\"from\"和\"to\"必须是两个不同的人物名称，不能指向同一人物）,\n  \"dialogues\": [{\"speaker\": \"人名\"}],\n  \"chunk_summary\": \"简短总结本chunk的核心事件和人物（50字以内，必须包含出场人名）\"\n}\n\n【关系类型判断规则】\n- 家族：有明确家族称呼（如\"妈妈\"、\"姐姐\"、\"三妈妈\"）或血缘/婚姻关系描述\n- 敌对：有实质性伤害意图或敌对行为，非打闹/教育场景\n- 主从：有明显的主仆、上下级、师徒等从属关系\n- 注意：家族内部的打闹、告状、教育应判断为\"家族\"关系\n\n【人名格式规则】\n1. characters[].name 和 dialogues[].speaker 必须使用人物的正式名/本名，不要使用别名、绰号或带括号的格式\n2. 例如：文本中提到\"侯飞白（猴子）\"，应输出\"侯飞白\"而非\"侯飞白（猴子）\"\n3. 如果提供了【人物别名对照表】，必须使用对照表中的正式名\n\n【严格限制】\n- characters[].name 必须是【待分析文本】、<Previous_Context>、<Active_Entities>、<Next_Preview> 或 alias_map 中**逐字出现**的词语\n- 禁止使用任何文本中未出现的描述性词语作为名字\n- 如人物在文本中无任何称呼，使用「匿名_C{chunk_id}_{序号}」作为占位名\n  其中 chunk_id 见 <Current_Chunk_ID> 标签\n  示例：若 <Current_Chunk_ID>3</Current_Chunk_ID>，则使用「匿名_C3_1」「匿名_C3_2」\n- relations[].from 和 relations[].to 同上规则\n- dialogues[].speaker 同上规则\n- chunk_summary 必须包含出场人名，否则滚动记忆流传递无效信息",
+    "local_annotation_few_shot": [
+      {
+        "user": "赵云飞冷冷地看着跪在地上的李明，眼中没有丝毫怜悯。「你以为你是谁？竟敢染指我赵家的禁地。」\n李明咬紧牙关，双手撑地，缓缓抬起头：「赵长老，我只是路过，并非有意冒犯。」\n「路过？」赵云飞嗤笑一声，右手微抬，一道灵力压下，「在这秘境之中，我的话就是规矩。」\n李明感受到那股令人窒息的压力，心中暗自盘算——此时不是正面冲突的时机。",
+        "assistant": "{\n  \"emotional_valence\": \"mild_negative\",\n  \"event_type\": \"冲突\",\n  \"pivot_moment\": false,\n  \"cliffhanger\": false,\n  \"has_foreshadowing\": false,\n  \"foreshadowing_type\": null,\n  \"foreshadowing_desc\": \"\",\n  \"characters\": [\n    {\"name\": \"赵云飞\", \"role_function\": \"反对者\", \"action\": \"以灵力压制李明\", \"action_type\": \"战斗\", \"emotion_score\": \"mild_negative\"},\n    {\"name\": \"李明\", \"role_function\": \"主体\", \"action\": \"跪地承受压力并暗中盘算\", \"action_type\": \"决策\", \"emotion_score\": \"mild_negative\"}\n  ],\n  \"relations\": [\n    {\"from\": \"赵云飞\", \"to\": \"李明\", \"type\": \"敌对\", \"change\": \"强化\"}\n  ],\n  \"dialogues\": [\n    {\"speaker\": \"赵云飞\"},\n    {\"speaker\": \"李明\"}\n  ],\n  \"chunk_summary\": \"赵云飞以灵力压制李明，李明隐忍暗中盘算\"\n}"
+      },
+      {
+        "user": "林婉儿坐在窗边，手中捧着一本古籍，阳光透过窗棂洒在她的侧脸上。她轻轻翻过一页，嘴角微微上扬。「这段关于灵草培育的记载倒是详细。」\n一旁的丫鬟小翠端着茶盘走来，「小姐，老爷请您去前厅一趟，说是有客人到访。」\n林婉儿合上书本，轻轻点头，「知道了，我这就去。」",
+        "assistant": "{\n  \"emotional_valence\": \"neutral\",\n  \"event_type\": \"铺垫\",\n  \"pivot_moment\": false,\n  \"cliffhanger\": false,\n  \"has_foreshadowing\": true,\n  \"foreshadowing_type\": \"causal\",\n  \"foreshadowing_desc\": \"客人到访可能引出后续剧情\",\n  \"characters\": [\n    {\"name\": \"林婉儿\", \"role_function\": \"主体\", \"action\": \"阅读古籍并准备前往前厅\", \"action_type\": \"移动\", \"emotion_score\": \"mild_positive\"},\n    {\"name\": \"小翠\", \"role_function\": \"帮助者\", \"action\": \"传话邀请小姐\", \"action_type\": \"对话\", \"emotion_score\": \"neutral\"}\n  ],\n  \"relations\": [\n    {\"from\": \"小翠\", \"to\": \"林婉儿\", \"type\": \"主从\", \"change\": \"无变化\"}\n  ],\n  \"dialogues\": [\n    {\"speaker\": \"林婉儿\"},\n    {\"speaker\": \"小翠\"}\n  ],\n  \"chunk_summary\": \"林婉儿阅读古籍，小翠传话客人到访\"\n}"
+      },
+      {
+        "user": "「终于……找到了！」陈轩握紧手中的天命玉，浑身浴血，却难掩眼中的狂喜。身后，三大宗门的长老们已经倒下大半，仅存的几位也是重伤难行。\n「陈轩！你休想活着离开！」玄天道宗宗主怒吼着，拼尽最后一丝灵力冲来。\n陈轩转身，嘴角勾起一抹冷笑：「就凭你？」他抬手一挥，天命玉光芒大盛，一道璀璨的光柱贯穿天际——",
+        "assistant": "{\n  \"emotional_valence\": \"strong_positive\",\n  \"event_type\": \"转折\",\n  \"pivot_moment\": true,\n  \"cliffhanger\": true,\n  \"has_foreshadowing\": false,\n  \"foreshadowing_type\": null,\n  \"foreshadowing_desc\": \"\",\n  \"characters\": [\n    {\"name\": \"陈轩\", \"role_function\": \"主体\", \"action\": \"激活天命玉释放光柱\", \"action_type\": \"战斗\", \"emotion_score\": \"strong_positive\"},\n    {\"name\": \"玄天道宗宗主\", \"role_function\": \"反对者\", \"action\": \"拼死冲向陈轩\", \"action_type\": \"战斗\", \"emotion_score\": \"strong_negative\"}\n  ],\n  \"relations\": [\n    {\"from\": \"陈轩\", \"to\": \"玄天道宗宗主\", \"type\": \"敌对\", \"change\": \"断裂\"}\n  ],\n  \"dialogues\": [\n    {\"speaker\": \"陈轩\"},\n    {\"speaker\": \"玄天道宗宗主\"}\n  ],\n  \"chunk_summary\": \"陈轩激活天命玉，与玄天道宗宗主决战\"\n}"
+      },
+      {
+        "user": "「伯安，快给你三妈妈道歉。」赵兰英抚了抚周凤兰的手，随即对伯安喝道。\n「三妈妈，对，对不起。」伯安低下头对两女说道。\n「你以为伯安是诚心道歉？姐——这小兔崽子肯定还在暗地里做鬼脸。」周凤兰扭头哼声：「我就大人不计小人过错，算你小子好运！」伸手便是一个脑瓜弹，打得伯安龇牙咧嘴。",
+        "assistant": "{\n  \"emotional_valence\": \"mild_negative\",\n  \"event_type\": \"铺垫\",\n  \"pivot_moment\": false,\n  \"cliffhanger\": false,\n  \"has_foreshadowing\": false,\n  \"foreshadowing_type\": null,\n  \"foreshadowing_desc\": \"\",\n  \"characters\": [\n    {\"name\": \"伯安\", \"role_function\": \"主体\", \"action\": \"被迫道歉后被弹脑瓜\", \"action_type\": \"情感\", \"emotion_score\": \"mild_negative\"},\n    {\"name\": \"赵兰英\", \"role_function\": \"发送者\", \"action\": \"命令伯安道歉\", \"action_type\": \"对话\", \"emotion_score\": \"neutral\"},\n    {\"name\": \"周凤兰\", \"role_function\": \"反对者\", \"action\": \"告状并弹伯安脑瓜\", \"action_type\": \"情感\", \"emotion_score\": \"mild_positive\"}\n  ],\n  \"relations\": [\n    {\"from\": \"赵兰英\", \"to\": \"伯安\", \"type\": \"家族\", \"change\": \"无变化\"},\n    {\"from\": \"周凤兰\", \"to\": \"伯安\", \"type\": \"家族\", \"change\": \"无变化\"}\n  ],\n  \"dialogues\": [\n    {\"speaker\": \"赵兰英\"},\n    {\"speaker\": \"伯安\"},\n    {\"speaker\": \"周凤兰\"}\n  ],\n  \"character_appearances\": [\n    {\"raw_name\": \"伯安\", \"identity_clue\": \"被叫名字道歉\", \"clue_type\": \"named_by_other\"},\n    {\"raw_name\": \"周凤兰\", \"identity_clue\": \"被称为三妈妈\", \"clue_type\": \"named_by_other\"}\n  ],\n  \"chunk_summary\": \"周凤兰告状后弹伯安脑瓜，家族日常打闹\"\n}"
+      }
+    ],
+    "local_disambiguate_system": "你是一个人名消歧系统。以下是从文本中提取的候选人名列表，请识别哪些是同一人物的不同称呼，并输出别名映射表。\n\n【文化常识】\n- \"名\"是本名，\"字\"是表字，两者是同一人的不同称呼\n- 例如：\"字是伯安，名是重明\" → 伯安和重明是同一人\n- 绰号/外号 → 本名，例如：猴子 → 侯飞白\n\n请输出 JSON 格式：\n{\n  \"alias_map\": {\n    \"别名/绰号/字\": \"id\",\n    ...\n  }\n}\n\n【映射规则】\n- Key（曾用名）：别名/绰号/字/外貌描述\n- Value（id）：该人物最常用、最能唯一标识其身份的名称\n  - 不强求 id 必须是\"本名\"，高频者优先\n  - 例如：伯安出现312次，贺重明出现3次 → id = \"伯安\"\n  - id 必须来自候选人名列表\n\n【候选人名格式】\n每个名字附带出现频次，格式：伯安（次数：312）\n频次可作为选择 Value 的参考：高频名字更适合作为唯一标识。\n\n【重要规则】\n1. 映射方向：Key 是别名，Value 是 id（高频优先）\n2. id 必须是候选人名列表中的名字之一\n3. 上下文例句中引号内的内容是某人说的话，说话者≠被命名者\n   例如：赵兰英说\"就叫伯安\"——这里伯安是被命名的孩子，不是赵兰英的别名\n4. 如果一个名字没有别名，则映射到自身，例如 {\"白芷\": \"白芷\"}\n5. 如果无法确定是否为同一人物，保持独立\n\n【示例】\n输入：猴子（次数：5）、侯飞白（次数：150）、伯安（次数：312）、贺重明（次数：3）\n输出：\n{\n  \"alias_map\": {\n    \"猴子\": \"侯飞白\",\n    \"贺重明\": \"伯安\"\n  }\n}\n解释：伯安出现频次远高于贺重明，故作为 id。\n\n【隐性马甲识别】\n如果某人物的\"外貌描述性称呼\"（如灰衣人、白发少女）与\"正式名字\"在同一场景中出现，或存在身份揭示线索（如\"真容\"、\"原形\"、\"竟是\"），可能是同一人物的不同称呼。",
+    "local_anonymous_disambig_system": "你是一个人名消歧系统。以下是匿名占位名及其对应的完整上下文，请根据上下文判断这些匿名人物的真实身份。\n\n【匿名占位名格式】\n- 格式：匿名_C{chunk_id}_{序号}\n- 例如：匿名_C1_0 表示第 1 个 chunk 中的第 1 个匿名人物\n- 这些名字是因为模型输出的人名未在原文中出现而自动生成的占位名\n\n【判断依据】\n1. 查看上下文中是否有明确称呼该人物的名字\n2. 查看对话中是否有其他人称呼该人物\n3. 查看前后文中是否有身份揭示的线索\n\n请输出 JSON 格式：\n{\n  \"alias_map\": {\n    \"匿名_C1_0\": \"真实名\",\n    ...\n  }\n}\n\n【重要规则】\n1. 【最关键】映射方向：Key 必须是匿名占位名，Value 必须是真实名\n2. 真实名必须是【已知正式名】列表中的名字之一，不能使用列表之外的名字\n3. 如果无法确定真实身份，映射到自身（保持匿名），例如 {\"匿名_C1_0\": \"匿名_C1_0\"}\n4. 如果上下文中没有明确称呼，不要猜测\n\n【示例】\n输入：\n匿名_C1_0 的上下文：\n[前文] 周凤兰站在门口...\n[当前段落] 周凤兰扭头哼声：\"我就大人不计小人过错，算你小子好运！\"伸手便是一个脑瓜弹，打得伯安龇牙咧嘴。\n[后文] 二妈妈走了过来...\n\n已知正式名：周凤兰、伯安、二妈妈\n\n输出：\n{\n  \"alias_map\": {\n    \"匿名_C1_0\": \"伯安\"\n  }\n}\n解释：上下文中\"打得伯安龇牙咧嘴\"明确指出被打的人是伯安，所以匿名_C1_0 是伯安。",
+    "cloud_diagnose_system": "你是一个网文诊断系统。你必须只输出一个JSON对象，不要输出任何其他文字。\n\n输出格式示例：\n{\n  \"foreshadow_rate\": 0.0,\n  \"arc_scores\": {\"人物名1\": 8.0, \"人物名2\": 7.0, \"人物名3\": 6.0},\n  \"narrative_type\": \"寓言\",\n  \"topic_labels\": [\"困境\", \"希望\"],\n  \"diagnosis\": \"诊断内容...\",\n  \"power_stance_score\": 3,\n  \"power_stance_reason\": \"代表性段落依据...\",\n  \"common_people_dignity\": 4,\n  \"dignity_reason\": \"判断依据...\",\n  \"value_logic_type\": \"善义有价值\",\n  \"value_logic_reason\": \"判断依据...\",\n  \"cultural_depth_score\": 3,\n  \"cultural_depth_reason\": \"判断依据...\",\n  \"emotion_curve_type\": \"白手起家\"\n}\n\n字段说明：\n- foreshadow_rate: 伏笔兑现率(0-1之间的小数)\n- arc_scores: 人物弧度评分字典，Key为人物名称，Value为评分(每个0-10分)，必须使用人物名称作为Key，而非纯数值数组\n- narrative_type: 叙事类型(如：寓言、爽文、虐文等)\n- topic_labels: 主题标签列表\n- diagnosis: 宏观诊断分析(自然语言)\n\n情感曲线形态分类（必须输出以下字段）：\n- emotion_curve_type: 情感曲线形态类型，必须是以下六种原型之一：\n  - \"白手起家\": 情感从低谷逐渐上升\n  - \"伊卡洛斯\": 情感先升后降\n  - \"落坑爬出\": 情感先降后升\n  - \"持续下降\": 情感持续走低\n  - \"灰姑娘\": 情感先降后升再降\n  - \"俄狄浦斯\": 情感先升后降再升\n\n叙事价值立场评估（必须输出以下六个字段）：\n- power_stance_score: 强欺弱场景的叙事情感倾向评分(整数0-5，0=欣赏强者，5=谴责压迫)\n- power_stance_reason: 代表性段落依据(字符串)\n- common_people_dignity: 普通人的叙事尊严评分(整数0-5，0=纯背景板，5=认真书写)\n- dignity_reason: 判断依据(字符串)\n- value_logic_type: 核心价值逻辑类型(只能是以下三个值之一：善义有价值、强者为王、混合型)\n- value_logic_reason: 判断依据(字符串)\n\n文化内涵真实性评估（必须输出以下两个字段）：\n- cultural_depth_score: 文化内涵真实性评分(整数0-5，0=纯装饰，5=核心叙事逻辑)\n  判断标准：词表命中的传统文化词汇是作为核心叙事逻辑使用，还是仅作为背景装饰\n  0分：传统文化词汇仅为表面装饰，与叙事无关\n  1分：传统文化词汇作为背景点缀，偶尔参与叙事\n  2分：传统文化词汇参与部分情节设计\n  3分：传统文化词汇融入主要情节，有一定叙事功能\n  4分：传统文化词汇深度参与叙事，构成重要情节逻辑\n  5分：传统文化词汇作为核心叙事逻辑，是故事推进的关键要素\n- cultural_depth_reason: 评分说明(字符串，需引用具体段落或情节作为依据)\n\n重要约束：\n1. value_logic_type 只能是「善义有价值」「强者为王」「混合型」三者之一，不允许其他值\n2. power_stance_score、common_people_dignity、cultural_depth_score 必须是整数，不允许小数\n3. 所有九个字段都必须输出，不能缺失\n4. emotion_curve_type 只能是六种原型之一，不允许其他值\n5. arc_scores 必须是字典格式，Key为人物名称\n\n主题命名规则：\n输入中的topic_words字段包含LDA分析出的主题词列表。\n请为每个主题生成一个简洁的主题名称（2-4个汉字），\n并按权重从高到低排序返回topic_labels数组。",
+    "local_annotation_system_v2": "你是专业的叙事分析助手，任务是对中文网络小说的文本块进行结构化标注。\n\n## 你的任务范围\n\n对当前文本块完成以下标注，每项都有明确的判断标准：\n\n1. 整体情感倾向（emotional_valence）\n2. 事件类型（event_type）\n3. 是否为情节转折点（pivot_moment）\n4. 是否以悬念结尾（cliffhanger）\n5. 本块核心事件摘要（chunk_summary）\n6. 出场人物快照（characters）\n7. 人物关系变化（relations）\n8. 对话说话人（dialogues）\n9. 人名线索记录（character_appearances）\n\n## 各字段判断标准\n\n### emotional_valence\n判断本块文本的整体情感基调，以叙事者视角而非单一人物视角判断：\n- positive：整体氛围积极，以胜利/团圆/成长/希望为主导\n- negative：整体氛围压抑，以失败/离别/受苦/绝望为主导\n- neutral：情感混杂或以叙述/说明为主，无明显倾向\n\n注意：不要被单个词语误导，「她笑着走向死亡」整体是 negative。\n\n### event_type\n判断本块在叙事结构中的功能：\n- 冲突：人物之间或人物与环境之间存在直接对抗、争执、战斗\n- 转折：情节方向发生明显改变，前后产生反差\n- 铺垫：为后续情节做准备，包括日常推进、世界观阐述、人物交代\n\n三者互斥，选最主要的功能。\n\n### pivot_moment\n布尔值。满足以下任一条件为 true：\n- 主要人物命运发生根本性转变\n- 重要秘密/身份被揭露\n- 重大决定被做出且不可逆\n\n### cliffhanger\n布尔值。本块在章节末尾且满足以下条件为 true：\n- 重要问题悬而未决\n- 危机在高峰处中断\n- 读者强烈想知道下一步\n\n### chunk_summary\n50字以内，只写核心事件和涉及人物，不写氛围和心理，供下一块使用，要求信息密度高。\n\n### characters\n只记录本块中有实际行为或台词的人物，旁白提及不算。\n- name：使用别名表中的正式名，若无正式名用原文称呼\n- role_function：【主体|客体|发送者|接收者|帮助者|反对者】\n- action：一个动词短语，本块中最重要的一个行为\n- emotion_score：五档枚举，见下方说明\n\n### emotion_score 五档说明\n- strong_positive：明显的喜悦/兴奋/得意/感激\n- mild_positive：轻微的满足/平静的高兴/淡淡的期待\n- neutral：情绪平稳或情绪混杂无主导\n- mild_negative：轻微的不安/失落/担忧/疲惫\n- strong_negative：明显的愤怒/悲伤/恐惧/绝望\n\n### relations\n只记录本块中发生实质变化的关系，无变化不填。\n- change 为「无变化」时不输出该条记录\n\n### dialogues\n只记录有实际对话内容的块，纯叙述块输出空数组。\n【重要】每个人物单独一个对象，禁止用顿号连接多个人名。\n- 多人同时说话时，每个人单独输出一个对象\n- 例如：三人齐声说「是！」，应输出三个对象：[{\"speaker\":\"张三\"},{\"speaker\":\"李四\"},{\"speaker\":\"王五\"}]\n- 禁止输出：{\"speaker\":\"张三、李四、王五\"}\n\n### character_appearances\n记录本块中出现的身份线索，用于后续人名消解。\nclue_type 为 none 时不输出该条记录。",
+    "local_annotation_format_v2": "请对输入文本进行结构化标注，严格输出 JSON，不要输出任何其他内容。\n\n【输出格式】\n{\n  \"emotional_valence\": \"positive|negative|neutral\",\n  \"event_type\": \"冲突|铺垫|转折\",\n  \"pivot_moment\": true|false,\n  \"cliffhanger\": true|false,\n  \"chunk_summary\": \"50字以内的核心事件摘要\",\n  \"characters\": [\n    {\n      \"name\": \"正式名或原文称呼\",\n      \"role_function\": \"主体|客体|发送者|接收者|帮助者|反对者\",\n      \"action\": \"核心行为动词短语\",\n      \"emotion_score\": \"strong_positive|mild_positive|neutral|mild_negative|strong_negative\"\n    }\n  ],\n  \"relations\": [\n    {\n      \"from\": \"人物A\",\n      \"to\": \"人物B\",\n      \"type\": \"师徒|敌对|盟友|爱慕|家族|利益|主从\",\n      \"change\": \"强化|弱化|新建|断裂\"\n    }\n  ],\n  \"dialogues\": [\n    {\n      \"speaker\": \"说话人名称\"\n    }\n  ],\n  \"character_appearances\": [\n    {\n      \"raw_name\": \"原文出现的名称\",\n      \"identity_clue\": \"身份线索内容\",\n      \"clue_type\": \"self_introduction|named_by_other|alias_revealed|appearance_desc\"\n    }\n  ]\n}\n\n【关系类型判断规则】\n- 家族：有明确家族称呼或血缘/婚姻关系描述\n- 敌对：有实质性伤害意图或敌对行为，非打闹/教育场景\n- 主从：有明显的主仆、上下级、师徒等从属关系\n- 注意：家族内部的打闹、告状、教育应判断为「家族」关系\n\n【dialogues 格式规则 - 重要】\n1. 每个人物单独一个对象，禁止用顿号「、」连接多个人名\n2. 多人同时说话时，每个人单独输出一个对象\n3. 例如：三人齐声说「是！」，应输出：[{\"speaker\":\"张三\"},{\"speaker\":\"李四\"},{\"speaker\":\"王五\"}]\n4. 禁止输出：{\"speaker\":\"张三、李四、王五\"}\n\n【人名格式规则】\n1. characters[].name 和 dialogues[].speaker 必须使用人物的正式名/本名\n2. 如果提供了【人物别名对照表】，必须使用对照表中的正式名\n3. 如人物在文本中无任何称呼，使用「匿名_C{chunk_id}_{序号}」作为占位名\n\n【严格限制】\n- characters[].name 必须是文本中逐字出现的词语\n- 禁止使用任何文本中未出现的描述性词语作为名字\n- relations[].from 和 relations[].to 同上规则\n- dialogues[].speaker 同上规则\n- chunk_summary 必须包含出场人名",
+    "local_annotation_few_shot_v2": [
+      {
+        "user": "<全局背景>\n书名：测试小说\n核心人物：赵云飞、李明\n当前位置：全书第 15.0%（第 3 章）\n</全局背景>\n\n<已知别名表>\n{}\n</已知别名表>\n\n<活跃实体状态>\n[]\n</活跃实体状态>\n\n<Previous_Chunk>\n（无前文）\n</Previous_Chunk>\n\n<Current_Chunk>\n赵云飞冷冷地看着跪在地上的李明，眼中没有丝毫怜悯。「你以为你是谁？竟敢染指我赵家的禁地。」\n李明咬紧牙关，双手撑地，缓缓抬起头：「赵长老，我只是路过，并非有意冒犯。」\n「路过？」赵云飞嗤笑一声，右手微抬，一道灵力压下，「在这秘境之中，我的话就是规矩。」\n李明感受到那股令人窒息的压力，心中暗自盘算——此时不是正面冲突的时机。\n</Current_Chunk>\n\n<Next_Chunk>\n（无后文）\n</Next_Chunk>",
+        "assistant": "{\n  \"emotional_valence\": \"negative\",\n  \"event_type\": \"冲突\",\n  \"pivot_moment\": false,\n  \"cliffhanger\": false,\n  \"chunk_summary\": \"赵云飞以灵力压制李明，李明隐忍暗中盘算\",\n  \"characters\": [\n    {\"name\": \"赵云飞\", \"role_function\": \"反对者\", \"action\": \"以灵力压制李明\", \"emotion_score\": \"mild_negative\"},\n    {\"name\": \"李明\", \"role_function\": \"主体\", \"action\": \"跪地承受压力并暗中盘算\", \"emotion_score\": \"mild_negative\"}\n  ],\n  \"relations\": [\n    {\"from\": \"赵云飞\", \"to\": \"李明\", \"type\": \"敌对\", \"change\": \"强化\"}\n  ],\n  \"dialogues\": [\n    {\"speaker\": \"赵云飞\"},\n    {\"speaker\": \"李明\"}\n  ],\n  \"character_appearances\": []\n}"
+      },
+      {
+        "user": "<全局背景>\n书名：测试小说\n核心人物：林婉儿\n当前位置：全书第 25.0%（第 5 章）\n</全局背景>\n\n<已知别名表>\n{}\n</已知别名表>\n\n<活跃实体状态>\n[]\n</活跃实体状态>\n\n<Previous_Chunk>\n（无前文）\n</Previous_Chunk>\n\n<Current_Chunk>\n林婉儿坐在窗边，手中捧着一本古籍，阳光透过窗棂洒在她的侧脸上。她轻轻翻过一页，嘴角微微上扬。「这段关于灵草培育的记载倒是详细。」\n一旁的丫鬟小翠端着茶盘走来，「小姐，老爷请您去前厅一趟，说是有客人到访。」\n林婉儿合上书本，轻轻点头，「知道了，我这就去。」\n</Current_Chunk>\n\n<Next_Chunk>\n（无后文）\n</Next_Chunk>",
+        "assistant": "{\n  \"emotional_valence\": \"neutral\",\n  \"event_type\": \"铺垫\",\n  \"pivot_moment\": false,\n  \"cliffhanger\": false,\n  \"chunk_summary\": \"林婉儿阅读古籍，小翠传话客人到访\",\n  \"characters\": [\n    {\"name\": \"林婉儿\", \"role_function\": \"主体\", \"action\": \"阅读古籍并准备前往前厅\", \"emotion_score\": \"mild_positive\"},\n    {\"name\": \"小翠\", \"role_function\": \"帮助者\", \"action\": \"传话邀请小姐\", \"emotion_score\": \"neutral\"}\n  ],\n  \"relations\": [],\n  \"dialogues\": [\n    {\"speaker\": \"林婉儿\"},\n    {\"speaker\": \"小翠\"}\n  ],\n  \"character_appearances\": []\n}"
+      },
+      {
+        "user": "<全局背景>\n书名：测试小说\n核心人物：陈轩\n当前位置：全书第 80.0%（第 16 章）\n</全局背景>\n\n<已知别名表>\n{}\n</已知别名表>\n\n<活跃实体状态>\n[]\n</活跃实体状态>\n\n<Previous_Chunk>\n（无前文）\n</Previous_Chunk>\n\n<Current_Chunk>\n「终于……找到了！」陈轩握紧手中的天命玉，浑身浴血，却难掩眼中的狂喜。身后，三大宗门的长老们已经倒下大半，仅存的几位也是重伤难行。\n「陈轩！你休想活着离开！」玄天道宗宗主怒吼着，拼尽最后一丝灵力冲来。\n陈轩转身，嘴角勾起一抹冷笑：「就凭你？」他抬手一挥，天命玉光芒大盛，一道璀璨的光柱贯穿天际——\n</Current_Chunk>\n\n<Next_Chunk>\n（无后文）\n</Next_Chunk>",
+        "assistant": "{\n  \"emotional_valence\": \"positive\",\n  \"event_type\": \"转折\",\n  \"pivot_moment\": true,\n  \"cliffhanger\": true,\n  \"chunk_summary\": \"陈轩激活天命玉，与玄天道宗宗主决战\",\n  \"characters\": [\n    {\"name\": \"陈轩\", \"role_function\": \"主体\", \"action\": \"激活天命玉释放光柱\", \"emotion_score\": \"strong_positive\"},\n    {\"name\": \"玄天道宗宗主\", \"role_function\": \"反对者\", \"action\": \"拼死冲向陈轩\", \"emotion_score\": \"strong_negative\"}\n  ],\n  \"relations\": [\n    {\"from\": \"陈轩\", \"to\": \"玄天道宗宗主\", \"type\": \"敌对\", \"change\": \"断裂\"}\n  ],\n  \"dialogues\": [\n    {\"speaker\": \"陈轩\"},\n    {\"speaker\": \"玄天道宗宗主\"}\n  ],\n  \"character_appearances\": []\n}"
+      },
+      {
+        "user": "<全局背景>\n书名：测试小说\n核心人物：张三、李四、王五\n当前位置：全书第 10.0%（第 2 章）\n</全局背景>\n\n<已知别名表>\n{}\n</已知别名表>\n\n<活跃实体状态>\n[]\n</活跃实体状态>\n\n<Previous_Chunk>\n（无前文）\n</Previous_Chunk>\n\n<Current_Chunk>\n贺铮目光如刀，扫视着跪在地上的三人。\n张三、李四、王五齐刷刷地单膝跪地，冷汗瞬间浸透了后背。\n「铁帅！末将教子无方，罪该万死！」三人异口同声地说道。\n贺铮没说话，只是冷冷地端起酒碗灌了一口。\n</Current_Chunk>\n\n<Next_Chunk>\n（无后文）\n</Next_Chunk>",
+        "assistant": "{\n  \"emotional_valence\": \"negative\",\n  \"event_type\": \"冲突\",\n  \"pivot_moment\": false,\n  \"cliffhanger\": false,\n  \"chunk_summary\": \"张三、李四、王五向贺铮请罪\",\n  \"characters\": [\n    {\"name\": \"张三\", \"role_function\": \"客体\", \"action\": \"跪地请罪\", \"emotion_score\": \"strong_negative\"},\n    {\"name\": \"李四\", \"role_function\": \"客体\", \"action\": \"跪地请罪\", \"emotion_score\": \"strong_negative\"},\n    {\"name\": \"王五\", \"role_function\": \"客体\", \"action\": \"跪地请罪\", \"emotion_score\": \"strong_negative\"},\n    {\"name\": \"贺铮\", \"role_function\": \"主体\", \"action\": \"冷眼审视三人\", \"emotion_score\": \"mild_negative\"}\n  ],\n  \"relations\": [\n    {\"from\": \"贺铮\", \"to\": \"张三\", \"type\": \"主从\", \"change\": \"强化\"},\n    {\"from\": \"贺铮\", \"to\": \"李四\", \"type\": \"主从\", \"change\": \"强化\"},\n    {\"from\": \"贺铮\", \"to\": \"王五\", \"type\": \"主从\", \"change\": \"强化\"}\n  ],\n  \"dialogues\": [\n    {\"speaker\": \"张三\"},\n    {\"speaker\": \"李四\"},\n    {\"speaker\": \"王五\"}\n  ],\n  \"character_appearances\": []\n}"
+      }
+    ],
+    "local_annotation_user_template": "<全局背景>\n书名：{novel_title}\n核心人物：{main_characters}\n当前位置：全书第 {position_pct}%（第 {chapter_id} 章）\n</全局背景>\n\n<已知别名表>\n{alias_map}\n</已知别名表>\n\n<活跃实体状态>\n{active_entities}\n</活跃实体状态>\n\n<Previous_Chunk>\n{prev_chunk_text}\n</Previous_Chunk>\n\n<Current_Chunk>\n{chunk_text}\n</Current_Chunk>\n\n<Next_Chunk>\n{next_chunk_text}\n</Next_Chunk>",
+    "foreshadowing_system": "你是专业的叙事结构分析助手，当前任务只有一个：识别中文网络小说段落中的伏笔。\n\n## 伏笔的严格定义\n\n伏笔必须同时满足以下三个条件：\n\n1. 【具体锚点】有具体的物件、台词、细节或异常行为作为文本载体，你必须能从原文中找到并直接复制这段文字\n\n2. 【多余性】这个细节在当前段落中是「多余的」——删掉它不影响当前情节的推进，但保留它暗示着后文会用到\n\n3. 【可描述兑现方式】你能用一句话说清楚「如果后文兑现，大概会是什么形式」，哪怕只是方向性的猜测\n\n## 不是伏笔的情况\n\n❌ 氛围渲染：「夜色深沉，似有不祥之兆」→ 无具体锚点，删掉不影响任何后续情节\n\n❌ 性格描写：「他向来心狠手辣，从不手软」→ 人物塑造，不是预埋细节\n\n❌ 模糊预感：「她总觉得此行凶多吉少」→ 心理描写，无具体物件或行为锚点\n\n❌ 正常情节推进：「他拔出剑，砍向敌人」→ 服务当前情节的必要动作，删掉则情节断裂\n\n❌ 世界观或功法阐述：任何背景设定说明 → 信息铺垫，不是叙事预埋\n\n## 置信度判断标准\n\nhigh：锚点具体（有明确的名字/物件/台词），且明显多余于当前情节，你能清楚描述兑现方向\n\nmedium：有一定暗示，但锚点不够具体，或你无法清楚描述兑现方式，只能说「感觉后面会有用」\n\nlow：纯粹是直觉，找不到可以直接复制的文本锚点 → 此时必须输出 has_foreshadowing: false\n\n## 关于 anchor_text 的强制要求\n\nanchor_text 必须是从原文中一字不差直接复制的原文片段，不得改写、概括或加入任何你自己的词语。如果你无法从原文找到可以直接复制的锚点，说明这不是伏笔，应输出 has_foreshadowing: false。",
+    "foreshadowing_user_template": "<全局背景>\n书名：{novel_title}\n核心人物：{main_characters}\n当前位置：全书第 {position_pct}%（第 {chapter_id} 章）\n</全局背景>\n\n<前文摘要>\n{prev_chunk_summary}\n</前文摘要>\n\n<Previous_Chunk>\n{prev_chunk_text}\n</Previous_Chunk>\n\n<Current_Chunk>\n{chunk_text}\n</Current_Chunk>\n\n<Next_Chunk>\n{next_chunk_text}\n</Next_Chunk>\n\n请判断当前段落是否包含伏笔，严格按照以下JSON格式输出，不要输出任何其他内容：\n\n{{\n  \"has_foreshadowing\": true或false,\n  \"foreshadowing_type\": \"causal或thematic或null\",\n  \"anchor_text\": \"从原文直接复制的锚点原文，has_foreshadowing为false时输出空字符串\",\n  \"anchor_reason\": \"不超过25字，说明为何判断是伏笔以及可能的兑现方向，has_foreshadowing为false时输出空字符串\",\n  \"confidence\": \"high或medium或low\"\n}}",
+    "foreshadowing_examples": "以下是三个判断示例，覆盖典型情况：\n\n## 示例一：高置信因果伏笔\n\n<Current_Chunk>\n陈浮跟着师父走过那条小巷，无意间低头，见地上有一块残破的玉佩，背面刻着一个「归」字。他捡起来打量了几眼，师父头也不回地说：「扔掉，晦气。」他迟疑片刻，还是悄悄塞进了袖中。\n</Current_Chunk>\n\n输出：\n{{\n  \"has_foreshadowing\": true,\n  \"foreshadowing_type\": \"causal\",\n  \"anchor_text\": \"背面刻着一个「归」字。他迟疑片刻，还是悄悄塞进了袖中\",\n  \"anchor_reason\": \"违命保留刻字玉佩，「归」字含义及玉佩来历后文必有交代\",\n  \"confidence\": \"high\"\n}}\n\n---\n\n## 示例二：中置信因果伏笔\n\n<Current_Chunk>\n宴会进行到一半，林相突然起身，说是身体不适要先行告退。没有人注意到，他离开时顺手将桌上的一个酒杯翻转过来，杯底朝上。\n</Current_Chunk>\n\n输出：\n{{\n  \"has_foreshadowing\": true,\n  \"foreshadowing_type\": \"causal\",\n  \"anchor_text\": \"他离开时顺手将桌上的一个酒杯翻转过来，杯底朝上\",\n  \"anchor_reason\": \"离席时隐秘翻杯，疑似暗号或约定信号，兑现方式不明确\",\n  \"confidence\": \"medium\"\n}}\n\n---\n\n## 示例三：不是伏笔\n\n<Current_Chunk>\n夜已深了，谢云坐在窗边，看着院子里的那棵老槐树发呆。风吹过来，树叶沙沙作响，他忽然觉得心里有什么东西松动了。明天，又是新的一天。\n</Current_Chunk>\n\n输出：\n{{\n  \"has_foreshadowing\": false,\n  \"foreshadowing_type\": null,\n  \"anchor_text\": \"\",\n  \"anchor_reason\": \"\",\n  \"confidence\": \"high\"\n}}\n\n判断依据：氛围渲染加心理描写，「心里松动」无具体锚点，删掉整段不影响任何后续情节，不构成伏笔。\n---"
+  }
+}

@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+
+from loguru import logger
+
+
+_active_file_handlers: dict[str, int] = {}
+
+
+class AnalysisLogger:
+    def __init__(self, log_base_dir: Path, task_id: str):
+        self._task_id = task_id
+        self._log_dir = log_base_dir / task_id
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._local_prompt_file = self._log_dir / "local_prompts.jsonl"
+        self._cloud_prompt_file = self._log_dir / "cloud_prompts.jsonl"
+        self._annotation_file = self._log_dir / "annotations.jsonl"
+        self._handler_id: int | None = None
+        self._setup_file_loggers()
+
+    def _setup_file_loggers(self) -> None:
+        global _active_file_handlers
+        log_file = self._log_dir / "analysis.log"
+        log_key = str(log_file)
+        if log_key in _active_file_handlers:
+            try:
+                logger.remove(_active_file_handlers[log_key])
+            except ValueError:
+                pass
+        self._handler_id = logger.add(
+            str(log_file),
+            level="DEBUG",
+            rotation="10 MB",
+            retention="30 days",
+            encoding="utf-8",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+        )
+        _active_file_handlers[log_key] = self._handler_id
+
+    @property
+    def task_id(self) -> str:
+        return self._task_id
+
+    @property
+    def log_dir(self) -> Path:
+        return self._log_dir
+
+    def log_local_prompt(
+        self,
+        chunk_id: int | None,
+        messages: List[Dict[str, str]],
+        response: str,
+        metadata: Dict[str, Any] | None = None,
+    ) -> None:
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "chunk_id": chunk_id,
+            "messages": messages,
+            "response": response,
+            "metadata": metadata or {},
+        }
+        self._append_jsonl(self._local_prompt_file, entry)
+
+    def log_cloud_prompt(
+        self,
+        messages: List[Dict[str, str]],
+        response: str,
+        metadata: Dict[str, Any] | None = None,
+    ) -> None:
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "messages": messages,
+            "response": response,
+            "metadata": metadata or {},
+        }
+        self._append_jsonl(self._cloud_prompt_file, entry)
+
+    def log_annotation(
+        self,
+        chunk_id: int,
+        annotation: Dict[str, Any],
+        raw_response: str,
+        metadata: Dict[str, Any] | None = None,
+    ) -> None:
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "chunk_id": chunk_id,
+            "annotation": annotation,
+            "raw_response": raw_response,
+            "metadata": metadata or {},
+        }
+        self._append_jsonl(self._annotation_file, entry)
+
+    def _append_jsonl(self, file_path: Path, entry: Dict[str, Any]) -> None:
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def write_summary(self, summary: Dict[str, Any]) -> None:
+        summary_file = self._log_dir / "summary.json"
+        summary_file.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def close(self) -> None:
+        global _active_file_handlers
+        if self._handler_id is not None:
+            try:
+                logger.remove(self._handler_id)
+                log_key = str(self._log_dir / "analysis.log")
+                if log_key in _active_file_handlers:
+                    del _active_file_handlers[log_key]
+            except ValueError:
+                pass
+
+
+def get_or_create_analysis_logger(
+    log_base_dir: Path,
+    task_id: str,
+) -> AnalysisLogger:
+    return AnalysisLogger(log_base_dir, task_id)

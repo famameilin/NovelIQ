@@ -1,0 +1,396 @@
+"""
+小说服务类
+
+创建时间: 2025-03-11
+创建者: TraeAI
+任务: 小说服务
+
+修改时间: 2026-03-14
+修改者: TraeAI
+任务: services 使用 Repository 模式重构
+修改内容:
+- 移除 .db 路径相关逻辑，改用 RunRepository 管理任务元数据
+- 任务元数据存储到数据库 analysis_runs 表
+- get_db_path_by_task_id 改为 get_run_by_task_id
+
+修改时间: 2026-03-15
+修改者: TraeAI
+任务: postgresql-migration
+修改内容:
+- 完全移除 .db 文件扫描逻辑，改为从 PostgreSQL 恢复任务元数据
+- 移除 _get_runs_from_db 和 _get_novel_id_from_db 方法
+- 使用 RunRepository 从 PostgreSQL 查询任务状态
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+import uuid
+import aiofiles
+import os
+from loguru import logger
+
+from src.api.exceptions import InvalidFileError, FileStorageError, NovelNotFoundError
+from src.storage.db import get_session_factory
+from src.storage.repositories import RunRepository
+
+
+class NovelService:
+    """
+    小说服务类
+
+    管理小说文件上传、任务创建和状态查询。
+    使用 PostgreSQL 数据库存储任务元数据。
+
+    修改时间: 2026-03-15
+    修改者: TraeAI
+    任务: postgresql-migration
+    修改内容: 完全移除 .db 文件依赖，使用 PostgreSQL
+    """
+
+    def __init__(self, upload_dir: Path):
+        self.upload_dir = upload_dir
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        self._novels: dict[str, dict] = {}
+        self._tasks: dict[str, dict] = {}
+        self._scan_existing_novels()
+
+    def _scan_existing_novels(self) -> None:
+        """
+        扫描已存在的小说文件和任务元数据
+
+        创建时间: 2025-03-11
+        创建者: TraeAI
+        任务: 小说服务初始化
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 从 PostgreSQL 数据库恢复任务元数据，移除 .db 文件扫描
+        """
+        for file_path in self.upload_dir.glob("*.txt"):
+            filename = file_path.name
+            if "_" in filename:
+                novel_id = filename.split("_")[0]
+                original_filename = "_".join(filename.split("_")[1:])
+                self._novels[novel_id] = {
+                    "novel_id": novel_id,
+                    "filename": original_filename,
+                    "file_path": str(file_path),
+                    "status": "uploaded",
+                }
+                logger.debug(f"Restored novel metadata: {novel_id} - {original_filename}")
+
+        self._restore_tasks_from_database()
+
+    def _restore_tasks_from_database(self) -> None:
+        """
+        从 PostgreSQL 数据库恢复任务元数据
+
+        创建时间: 2026-03-15
+        创建者: TraeAI
+        任务: postgresql-migration
+        说明: 从 analysis_runs 表恢复所有任务元数据
+        """
+        try:
+            session_factory = get_session_factory()
+            with session_factory() as session:
+                run_repo = RunRepository(session)
+                for novel_id in self._novels.keys():
+                    runs = run_repo.get_runs_by_novel(novel_id)
+                    for run in runs:
+                        run_id = run["run_id"]
+                        task_id = run_id[:8] if len(run_id) >= 8 else run_id
+                        self._tasks[task_id] = {
+                            "task_id": task_id,
+                            "novel_id": novel_id,
+                            "status": run["status"],
+                            "run_id": run_id,
+                        }
+                        logger.debug(f"Restored task metadata: {task_id} for novel {novel_id}")
+        except Exception as e:
+            logger.warning(f"Failed to restore tasks from database: {e}")
+
+    async def save_upload(self, file_content: bytes, filename: str) -> str:
+        if not filename.endswith(".txt"):
+            raise InvalidFileError("只支持 .txt 文件")
+
+        novel_id = str(uuid.uuid4())[:8]
+
+        file_path = self.upload_dir / f"{novel_id}_{filename}"
+        try:
+            async with aiofiles.open(file_path, "wb") as f:
+                await f.write(file_content)
+        except Exception as e:
+            raise FileStorageError(f"文件保存失败: {e}")
+
+        self._novels[novel_id] = {
+            "novel_id": novel_id,
+            "filename": filename,
+            "file_path": str(file_path),
+            "status": "uploaded",
+        }
+
+        logger.info(f"Novel uploaded: {novel_id} - {filename}")
+        return novel_id
+
+    def get_novel(self, novel_id: str) -> dict:
+        if novel_id not in self._novels:
+            raise NovelNotFoundError(f"小说不存在: {novel_id}")
+        return self._novels[novel_id]
+
+    def get_db_path(self, novel_id: str) -> Path:
+        """
+        创建时间: 2025-03-11
+        创建者: TraeAI
+        任务: 获取数据库路径
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 标记为废弃，PostgreSQL 不需要文件路径
+
+        .. deprecated::
+            此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
+        """
+        novel = self.get_novel(novel_id)
+        return Path(novel["file_path"]).with_suffix(".db")
+
+    def get_db_path_by_task_id(self, task_id: str) -> Path:
+        """
+        创建时间: 2025-03-11
+        创建者: TraeAI
+        任务: 获取任务对应的数据库路径
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 标记为废弃，PostgreSQL 不需要文件路径
+
+        .. deprecated::
+            此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
+        """
+        return self.upload_dir / f"{task_id}.db"
+
+    def get_run_by_task_id(self, task_id: str) -> dict | None:
+        """
+        获取任务对应的运行记录
+
+        创建时间: 2026-03-14
+        创建者: TraeAI
+        任务: services 使用 Repository 模式重构
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 从 PostgreSQL 数据库查询运行记录
+
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            运行记录字典，不存在则返回 None
+        """
+        if task_id not in self._tasks:
+            return None
+
+        task = self._tasks[task_id]
+        return task
+
+    def create_task(self, novel_id: str) -> str:
+        """
+        创建分析任务
+
+        创建时间: 2025-03-11
+        创建者: TraeAI
+        任务: 创建分析任务
+
+        修改时间: 2026-03-14
+        修改者: TraeAI
+        任务: services 使用 Repository 模式重构
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 任务元数据存储到 PostgreSQL analysis_runs 表
+
+        Args:
+            novel_id: 小说ID
+
+        Returns:
+            任务ID
+        """
+        self.get_novel(novel_id)
+        task_id = str(uuid.uuid4())[:8]
+
+        self._tasks[task_id] = {
+            "task_id": task_id,
+            "novel_id": novel_id,
+            "status": "pending",
+        }
+
+        logger.info(f"Created task: {task_id} for novel {novel_id}")
+        return task_id
+
+    def get_task(self, task_id: str) -> dict:
+        if task_id not in self._tasks:
+            raise NovelNotFoundError(f"任务不存在: {task_id}")
+        return self._tasks[task_id]
+
+    def update_task_status(self, task_id: str, status: str) -> None:
+        """
+        更新任务状态
+
+        创建时间: 2025-03-11
+        创建者: TraeAI
+        任务: 更新任务状态
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 更新内存缓存中的状态，数据库状态由 AnalysisService 更新
+        """
+        if task_id in self._tasks:
+            self._tasks[task_id]["status"] = status
+
+    def get_tasks_by_novel(self, novel_id: str) -> list[dict]:
+        return [t for t in self._tasks.values() if t.get("novel_id") == novel_id]
+
+    def get_latest_completed_task(self, novel_id: str) -> dict | None:
+        """
+        获取小说的最新已完成任务
+
+        创建时间: 2026-03-11
+        创建者: Claude
+        任务: 修复analyze接口重复创建任务的问题
+        """
+        tasks = self.get_tasks_by_novel(novel_id)
+        completed_tasks = [t for t in tasks if t.get("status") == "completed"]
+        if not completed_tasks:
+            return None
+        return completed_tasks[-1]
+
+    def get_latest_task(self, novel_id: str) -> dict | None:
+        """
+        获取小说的最新任务
+
+        创建时间: 2026-03-11
+        创建者: Claude
+        任务: 修复analyze接口在中断后应返回已有任务的问题
+
+        优先级：completed > running > pending > failed
+        """
+        tasks = self.get_tasks_by_novel(novel_id)
+        if not tasks:
+            return None
+
+        priority_order = {"completed": 4, "running": 3, "pending": 2, "failed": 1}
+        sorted_tasks = sorted(
+            tasks, key=lambda t: (priority_order.get(t.get("status", ""), 0), t.get("task_id", "")), reverse=True
+        )
+        return sorted_tasks[0] if sorted_tasks else None
+
+    def get_task_counts_by_status(self, novel_id: str) -> dict[str, int]:
+        """
+        获取各状态的任务数量
+
+        创建时间: 2026-03-11
+        创建者: Claude
+        任务: 用于analyze接口判断多任务情况
+        """
+        tasks = self.get_tasks_by_novel(novel_id)
+        counts: dict[str, int] = {"completed": 0, "running": 0, "pending": 0, "failed": 0}
+        for task in tasks:
+            status = task.get("status", "unknown")
+            if status in counts:
+                counts[status] += 1
+        return counts
+
+    def get_single_valid_task(self, novel_id: str) -> tuple[dict | None, str | None]:
+        """
+        获取唯一的合法任务
+
+        创建时间: 2026-03-11
+        创建者: Claude
+        任务: 获取唯一的合法任务
+
+        返回: (task, error_message)
+        - 如果只有一个任务，返回它
+        - 如果有多个任务，按规则判断：
+          - 一个running + 其他failed → 返回running
+          - 多个completed/多个running/多个failed/多个pending → 返回错误
+        """
+        tasks = self.get_tasks_by_novel(novel_id)
+        if not tasks:
+            return None, None
+
+        if len(tasks) == 1:
+            return tasks[0], None
+
+        counts = self.get_task_counts_by_status(novel_id)
+
+        if counts["running"] == 1 and counts["completed"] == 0 and counts["pending"] == 0:
+            running_tasks = [t for t in tasks if t.get("status") == "running"]
+            return running_tasks[0], None
+
+        if counts["completed"] > 1:
+            return None, f"存在多个已完成任务({counts['completed']}个)，请指定task_id"
+        if counts["running"] > 1:
+            return None, f"存在多个运行中任务({counts['running']}个)，请指定task_id"
+        if counts["failed"] > 1:
+            return None, f"存在多个失败任务({counts['failed']}个)，请指定task_id"
+        if counts["pending"] > 1:
+            return None, f"存在多个待处理任务({counts['pending']}个)，请指定task_id"
+        if counts["running"] > 0 and counts["failed"] > 0:
+            return None, f"存在多个任务(running:{counts['running']}, failed:{counts['failed']})，请指定task_id"
+
+        priority_order = {"completed": 4, "running": 3, "pending": 2, "failed": 1}
+        sorted_tasks = sorted(
+            tasks, key=lambda t: (priority_order.get(t.get("status", ""), 0), t.get("task_id", "")), reverse=True
+        )
+        return sorted_tasks[0], None
+
+    def list_novels(self) -> list[dict]:
+        return list(self._novels.values())
+
+    def delete_novel(self, novel_id: str) -> bool:
+        """
+        删除小说及其相关数据
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 移除 .db 文件删除逻辑，数据由数据库级联删除
+        """
+        if novel_id not in self._novels:
+            raise NovelNotFoundError(f"小说不存在: {novel_id}")
+
+        novel = self._novels[novel_id]
+        file_path = Path(novel["file_path"])
+
+        if file_path.exists():
+            os.remove(file_path)
+
+        tasks_to_delete = [tid for tid, t in self._tasks.items() if t.get("novel_id") == novel_id]
+        for tid in tasks_to_delete:
+            del self._tasks[tid]
+
+        del self._novels[novel_id]
+        logger.info(f"Novel deleted: {novel_id}")
+        return True
+
+    def delete_task(self, task_id: str) -> bool:
+        """
+        删除任务
+
+        修改时间: 2026-03-15
+        修改者: TraeAI
+        任务: postgresql-migration
+        修改内容: 移除 .db 文件删除逻辑
+        """
+        if task_id not in self._tasks:
+            raise NovelNotFoundError(f"任务不存在: {task_id}")
+
+        del self._tasks[task_id]
+        logger.info(f"Task deleted: {task_id}")
+        return True

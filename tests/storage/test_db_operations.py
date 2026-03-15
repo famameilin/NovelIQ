@@ -1,0 +1,162 @@
+"""
+测试数据库操作
+
+修改时间: 2026-03-15
+修改者: TraeAI
+任务: storage-layer-decoupling
+修改内容: 使用 SessionFactory 替代 connect_db/create_tables，确保正确关闭连接
+
+修改时间: 2026-03-15
+修改者: TraeAI
+任务: postgresql-migration
+修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入，添加 analysis_runs 记录创建
+
+修改时间: 2026-03-15
+修改者: TraeAI
+任务: 配置独立测试数据库
+修改内容: 改用 pytest 风格，使用 db_session fixture
+
+修改时间: 2026-03-15
+修改者: TraeAI
+任务: postgresql-migration-cleanup
+修改内容: 重命名测试文件，移除 sqlite 相关命名
+"""
+import sys
+from pathlib import Path
+import uuid
+from unittest.mock import patch
+
+import pytest
+from sqlalchemy import text
+
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+from src.chunking.chunker import chunk_text
+from src.models.cloud.schema import CloudAnalysis
+from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
+from src.storage.repositories import (
+    ChunkRepository,
+    AnnotationRepository,
+    StatsRepository,
+    RunRepository,
+    ChunkStyleData,
+)
+
+
+class MockEmbeddingClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def get_embedding(self, text: str):
+        import random
+        return [random.random() for _ in range(768)]
+
+    @staticmethod
+    def compute_similarity(vec1, vec2):
+        return 0.5
+
+
+@pytest.fixture
+def mock_embedding():
+    with patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient):
+        yield
+
+
+def test_create_and_insert(db_session, mock_embedding) -> None:
+    text_content = "\n\n".join(["a" * 600] * 2)
+    chunks = chunk_text(text_content, max_chars=1000, split_by_chapter=False)
+
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id=f"test_novel_{uuid.uuid4().hex[:8]}", source_path="test", title="Test Novel")
+
+    chunk_repo = ChunkRepository(db_session)
+    ann_repo = AnnotationRepository(db_session)
+
+    stats_repo = StatsRepository(db_session)
+
+    chunk_repo.insert_chunks(run_id, chunks)
+    ann_repo.insert_chunk_annotation(
+        run_id,
+        chunks[0].index,
+        ChunkAnnotation(
+            emotional_valence="neutral",
+            event_type="铺垫",
+            pivot_moment=False,
+            cliffhanger=False,
+            has_foreshadowing=False,
+            foreshadowing_type=None,
+            foreshadowing_desc="",
+        ),
+    )
+    ann_repo.insert_chunk_characters(
+        run_id,
+        chunks[0].index,
+        [
+            CharacterSnapshot(
+                name="张三",
+                role_function="主体",
+                action="走",
+                action_type="移动",
+                emotion_score="neutral",
+            )
+        ],
+    )
+    chunk_repo.insert_chunk_style(
+        run_id,
+        [
+            ChunkStyleData(
+                chunk_id=chunks[0].index,
+                mtld=1.0,
+                ttr=0.5,
+                avg_sent_len=12.0,
+                sent_len_std=3.0,
+                d_value=0.8,
+                pause_density=0.2,
+                fight_density=0.1,
+                exclaim_density=0.05,
+                dialogue_ratio=0.3,
+                question_density=0.02,
+                sensory_density=0.04,
+                metaphor_density=0.01,
+                cultural_density=0.0,
+                function_word_vector="{}",
+                category_density_combat=0.0,
+                category_density_body=0.0,
+                category_density_relation=0.0,
+                category_density_faction=0.0,
+                category_density_command=0.0,
+                category_density_action=0.0,
+                category_density_psychology=0.0,
+                category_density_measure=0.0,
+                category_density_emotion=0.0,
+                category_density_color=0.0,
+            )
+        ],
+    )
+    rows = chunk_repo.fetch_chunk_texts(run_id)
+    assert len(rows) == len(chunks)
+    assert rows[0][0] == 0
+
+
+def test_insert_cloud_analysis(db_session) -> None:
+    novel_id = f"n1_{uuid.uuid4().hex[:8]}"
+    analysis = CloudAnalysis(
+        novel_id=novel_id,
+        foreshadow_rate=0.5,
+        arc_scores=[0.2, 0.4],
+        narrative_type="三幕",
+        topic_labels=["成长"],
+        diagnosis="ok",
+    )
+
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+
+    stats_repo = StatsRepository(db_session)
+    stats_repo.insert_cloud_analysis(run_id, analysis)
+    row = db_session.execute(
+        text("SELECT novel_id, foreshadow_rate FROM cloud_analysis WHERE run_id = :run_id"),
+        {"run_id": run_id},
+    ).fetchone()
+    assert row[0] == novel_id
+    assert row[1] == 0.5

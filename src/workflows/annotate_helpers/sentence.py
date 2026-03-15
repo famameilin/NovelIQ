@@ -1,0 +1,337 @@
+"""
+创建时间: 2026-03-13
+创建者: TraeAI
+任务: 项目文件结构整理与拆分 - 标注辅助函数模块
+修改时间: 2026-03-14
+修改者: TraeAI
+修改内容: 从 cli.annotate_helpers 迁移到 workflows.annotate_helpers，解决循环依赖
+说明: 本模块从 src.cli.annotate_helpers 迁移而来，用于解决 workflows 与 cli 之间的循环依赖问题。
+本模块包含例句构建、全局上下文抽取等辅助函数。
+
+修改时间: 2026-03-14
+修改者: TraeAI
+任务: workflows 使用 Repository 模式重构
+修改内容: 添加 run_id 参数支持，使用 StatsRepository 替代直接调用 operations 函数
+
+修改时间: 2026-03-15
+修改者: TraeAI
+任务: postgresql-migration
+修改内容: 使用 SQLAlchemy text() 包装 SQL 语句，替换 ? 占位符为命名参数
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from loguru import logger
+from sqlalchemy import text
+
+from src.config import settings
+from src.lexicons.loader import load_lexicon
+from src.models.local.unified_client import UnifiedModelClient
+
+if TYPE_CHECKING:
+    pass
+
+
+def extract_speaker_from_sentence(sentence: str) -> str | None:
+    patterns = [
+        r'^([^，。！？「」『』""\s]{2,4})[说道问道答道笑道冷笑道怒道喝道叫道喊道]',
+        r'[说道问道答道笑道冷笑道怒道喝道叫道喊道]([^，。！？「」『』""\s]{2,4})',
+        r'^([^，。！？「」『』""\s]{2,4})[：:]["「『]',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, sentence)
+        if match:
+            speaker = match.group(1).strip()
+            if len(speaker) <= 4 and not any(c in speaker for c in '，。！？「」『』""'):
+                return speaker
+    return None
+
+
+def annotate_dialogue_structure(sentence: str) -> str:
+    if '"' not in sentence and "「" not in sentence and "『" not in sentence:
+        return sentence
+    speaker = extract_speaker_from_sentence(sentence)
+    if speaker:
+        return f"【说话者：{speaker}】{sentence}"
+    return sentence
+
+
+def compute_dialogue_lengths(text: str, speakers: list[str]) -> list[int]:
+    """
+    Compute per-speaker dialogue lengths.
+    """
+    if not text or not speakers:
+        return [0] * len(speakers)
+
+    speaker_lengths: dict[str, int] = {speaker: 0 for speaker in speakers}
+
+    patterns = [
+        (r"「(.*?)」", 1),
+        (r'"([^"]*)"', 1),
+        (r'"(.*?)"', 1),
+        (r"'(.*?)'", 1),
+    ]
+
+    sentences = re.split(r"[。！？\n]+", text)
+
+    for sentence in sentences:
+        speaker = extract_speaker_from_sentence(sentence)
+        if speaker and speaker in speaker_lengths:
+            for pattern, _ in patterns:
+                matches = re.findall(pattern, sentence, re.DOTALL)
+                for match in matches:
+                    speaker_lengths[speaker] += len(match)
+
+    return [speaker_lengths.get(speaker, 0) for speaker in speakers]
+
+
+def build_context_sentences(
+    conn,
+    candidates: list[str] | list[dict],
+    alias_keywords: list[str] | None = None,
+    prev_chunks: int = 3,
+) -> dict[str, str]:
+    """
+    Build context sentences for candidate names.
+    """
+    if alias_keywords is None:
+        alias_keywords = ["某", "名", "号", "就是", "称号", "全名"]
+
+    if candidates and isinstance(candidates[0], dict):
+        name_list: list[str] = [c["name"] for c in candidates]  # type: ignore[index]
+    else:
+        name_list = list(candidates)  # type: ignore[arg-type]
+
+    result = _build_sentence_pool(conn, name_list, alias_keywords)
+    _add_prev_summaries(conn, result, name_list, prev_chunks)
+    _add_identity_clues(conn, result, name_list)
+
+    return result
+
+
+def extract_new_names_from_db(conn, alias_map: dict, last_n_chunks: int = 10) -> list[dict]:
+    """
+    Extract new names and count frequency.
+
+    修改时间: 2026-03-15
+    修改者: TraeAI
+    任务: postgresql-migration
+    修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符
+    """
+    known = set(alias_map.keys()) | set(alias_map.values())
+    rows = conn.execute(
+        text("""
+            SELECT name, COUNT(*) as count 
+            FROM chunk_characters
+            WHERE chunk_id > (SELECT MAX(chunk_id) FROM chunk_characters) - :last_n_chunks
+            GROUP BY name
+            ORDER BY count DESC
+        """),
+        {"last_n_chunks": last_n_chunks},
+    ).fetchall()
+    return [{"name": r[0], "count": r[1]} for r in rows if r[0] not in known]
+
+
+def build_prev_summary(annotation) -> str:
+    if annotation is None:
+        return ""
+    parts = []
+    if annotation.characters:
+        names = [c.name for c in annotation.characters]
+        parts.append(f"人物：{', '.join(names)}")
+    parts.append(f"事件类型：{annotation.event_type}")
+    parts.append(f"情感倾向：{annotation.emotional_valence}")
+    return "；".join(parts)
+
+
+def _load_alias_keywords() -> list[str]:
+    """
+    加载别名关键词词典
+
+    修改时间: 2026-03-14
+    修改者: TraeAI
+    修改内容: 使用相对路径
+    """
+    lexicon_dir = Path("data/lexicons")
+    try:
+        return load_lexicon("alias_keywords", lexicon_dir)
+    except FileNotFoundError:
+        logger.warning("alias_keywords lexicon not found, using default")
+        return []
+
+
+def _extract_and_save_global_context(
+    conn,
+    all_chunks: list,
+    novel_id: str,
+    novel_title: str | None,
+    use_context_enhancement: bool,
+    resume: bool,
+    annotation_client: UnifiedModelClient,
+    run_id: str | None = None,
+) -> str | None:
+    """
+    提取并保存全局上下文
+
+    修改时间: 2026-03-14
+    修改者: TraeAI
+    任务: workflows 使用 Repository 模式重构
+    修改内容: 添加 run_id 参数，支持 Repository 模式
+    """
+    if not use_context_enhancement or resume:
+        return None
+
+    from src.context import extract_global_context, format_global_context_for_prompt, save_global_context
+
+    first_chunks = [text for _, text in all_chunks[:3]]
+    if not first_chunks:
+        return None
+
+    logger.info("extracting global context from first chunks")
+    global_context = extract_global_context(first_chunks, client=annotation_client)
+
+    if run_id:
+        from src.storage.repositories import StatsRepository
+
+        stats_repo = StatsRepository(conn)
+        stats_repo.insert_global_context(
+            run_id,
+            novel_id,
+            ",".join(global_context.get("core_characters", [])),
+            global_context.get("world_setting", ""),
+            novel_title,
+        )
+    else:
+        save_global_context(
+            conn,
+            novel_id,
+            global_context.get("core_characters", []),
+            global_context.get("world_setting", ""),
+            novel_title,
+        )
+
+    global_context_str = format_global_context_for_prompt(global_context)
+    logger.info(f"global context extracted: {len(global_context.get('core_characters', []))} core characters")
+
+    return global_context_str
+
+
+def _build_sentence_pool(
+    conn,
+    name_list: list[str],
+    alias_keywords: list[str],
+) -> dict[str, str]:
+    """
+    修改时间: 2026-03-15
+    修改者: TraeAI
+    任务: postgresql-migration
+    修改内容: 使用 SQLAlchemy text() 包装 SQL 语句
+    """
+    from src.metrics.text_utils import split_sentences
+
+    result = {}
+    sentences_pool: dict[str, list[str]] = {name: [] for name in name_list}
+
+    rows = conn.execute(text("SELECT text FROM chunks ORDER BY chunk_id")).fetchall()
+    for (text_content,) in rows:
+        for sentence in split_sentences(text_content):
+            for name in name_list:
+                if name in sentence:
+                    annotated = _annotate_dialogue_structure(sentence)
+                    if any(kw in sentence for kw in alias_keywords):
+                        sentences_pool[name].insert(
+                            0, annotated.strip()[: settings.analysis.sentence_preview_max_chars]
+                        )
+                    elif len(sentences_pool[name]) < 3:
+                        sentences_pool[name].append(annotated.strip()[: settings.analysis.sentence_pool_max_chars])
+
+    for name, sents in sentences_pool.items():
+        if sents:
+            result[name] = " | ".join(sents[:3])
+
+    return result
+
+
+def _annotate_dialogue_structure(sentence: str) -> str:
+    return annotate_dialogue_structure(sentence)
+
+
+def _add_prev_summaries(
+    conn,
+    result: dict[str, str],
+    name_list: list[str],
+    prev_chunks: int,
+) -> None:
+    """
+    修改时间: 2026-03-15
+    修改者: TraeAI
+    任务: postgresql-migration
+    修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符
+    """
+    for name in name_list:
+        chunk_rows = conn.execute(
+            text("""
+                SELECT DISTINCT cc.chunk_id 
+                FROM chunk_characters cc 
+                WHERE cc.name = :name
+                ORDER BY cc.chunk_id DESC LIMIT 1
+            """),
+            {"name": name},
+        ).fetchall()
+
+        if chunk_rows:
+            chunk_id = chunk_rows[0][0]
+            summaries = []
+            for i in range(1, prev_chunks + 1):
+                row = conn.execute(
+                    text("""
+                        SELECT summary FROM chunk_summaries 
+                        WHERE chunk_id = :chunk_id
+                    """),
+                    {"chunk_id": chunk_id - i},
+                ).fetchone()
+                if row and row[0]:
+                    summaries.append(row[0])
+
+            if summaries:
+                result[name] = f"【前文总结】{' | '.join(summaries)}\n{result.get(name, '')}"
+
+
+def _add_identity_clues(
+    conn,
+    result: dict[str, str],
+    name_list: list[str],
+) -> None:
+    """
+    修改时间: 2026-03-15
+    修改者: TraeAI
+    任务: postgresql-migration
+    修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符，使用 unnest 替代 IN 子句
+    """
+    if not name_list:
+        return
+
+    appearances = conn.execute(
+        text("""
+            SELECT raw_name, identity_clue, clue_type 
+            FROM character_appearances 
+            WHERE raw_name = ANY(:names)
+        """),
+        {"names": name_list},
+    ).fetchall()
+
+    clue_type_labels = {
+        "self_introduction": "自报身份",
+        "alias_revealed": "身份提示",
+        "named_by_other": "被点名",
+        "appearance_desc": "外貌描述",
+    }
+
+    for raw_name, clue, clue_type in appearances:
+        if raw_name in result and clue_type in clue_type_labels:
+            label = clue_type_labels[clue_type]
+            result[raw_name] += f" | 【{label}】{clue}"
