@@ -5,16 +5,24 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分stats_repository
 说明: 全局统计和Token使用统计相关操作
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - 补充遗漏方法
+修改内容: 添加 insert_cloud_analysis, insert_global_context, fetch_global_context, update_global_context, fetch_novel_title
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple
+import json
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.storage.models import GlobalStats, TokenUsage
+from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
+from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, TokenUsage
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -221,3 +229,225 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> Dict[
 
     result = session.execute(stmt).fetchall()
     return {row.model: {"call_count": row.count, "total_tokens": row.total} for row in result}
+
+
+def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:
+    """
+    插入云端分析结果
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        analysis: 云端分析数据
+    """
+    arc_scores_json: str
+    if isinstance(analysis.arc_scores, dict):
+        arc_scores_json = json.dumps(analysis.arc_scores, ensure_ascii=False)
+    else:
+        arc_scores_json = json.dumps(list(analysis.arc_scores), ensure_ascii=False)
+
+    cloud_analysis = CloudAnalysis(
+        novel_id=analysis.novel_id,
+        foreshadow_rate=analysis.foreshadow_rate,
+        arc_scores=arc_scores_json,
+        narrative_type=analysis.narrative_type,
+        topic_labels=json.dumps(list(analysis.topic_labels), ensure_ascii=False),
+        diagnosis=analysis.diagnosis,
+        value_logic_type=analysis.value_logic_type,
+        value_logic_reason=analysis.value_logic_reason,
+        power_stance_score=analysis.power_stance_score,
+        power_stance_reason=analysis.power_stance_reason,
+        common_people_dignity=analysis.common_people_dignity,
+        dignity_reason=analysis.dignity_reason,
+        cultural_depth_score=analysis.cultural_depth_score,
+        cultural_depth_reason=analysis.cultural_depth_reason,
+        emotion_curve_type=analysis.emotion_curve_type,
+        run_id=run_id,
+    )
+    session.add(cloud_analysis)
+    session.commit()
+
+
+def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> Optional[Dict[str, Any]]:
+    """
+    获取云端分析结果
+
+    Args:
+        session: 数据库会话
+        novel_id: 小说ID
+        run_id: 运行ID
+
+    Returns:
+        云端分析结果字典，不存在则返回 None
+    """
+    stmt = (
+        select(CloudAnalysis)
+        .where(
+            CloudAnalysis.novel_id == novel_id,
+            (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
+        )
+        .limit(1)
+    )
+
+    row = session.execute(stmt).fetchone()
+    result = row[0] if row else None
+
+    if result is None:
+        stmt = (
+            select(CloudAnalysis)
+            .where(
+                CloudAnalysis.foreshadow_rate.isnot(None),
+                (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
+            )
+            .order_by(CloudAnalysis.id.desc())
+            .limit(1)
+        )
+        row = session.execute(stmt).fetchone()
+        result = row[0] if row else None
+
+    if result is None:
+        return None
+
+    return {
+        "novel_id": result.novel_id,
+        "foreshadow_rate": result.foreshadow_rate,
+        "arc_scores": result.arc_scores,
+        "narrative_type": result.narrative_type,
+        "topic_labels": result.topic_labels,
+        "diagnosis": result.diagnosis,
+        "value_logic_type": result.value_logic_type,
+        "value_logic_reason": result.value_logic_reason,
+        "power_stance_score": result.power_stance_score,
+        "power_stance_reason": result.power_stance_reason,
+        "common_people_dignity": result.common_people_dignity,
+        "dignity_reason": result.dignity_reason,
+        "cultural_depth_score": result.cultural_depth_score,
+        "cultural_depth_reason": result.cultural_depth_reason,
+        "emotion_curve_type": result.emotion_curve_type,
+        "run_id": result.run_id,
+    }
+
+
+def insert_global_context(
+    session: Session,
+    run_id: str,
+    novel_id: str,
+    core_characters: str,
+    world_setting: str,
+    novel_title: str | None = None,
+) -> None:
+    """
+    插入全局上下文
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        novel_id: 小说ID
+        core_characters: 核心角色
+        world_setting: 世界观设定
+        novel_title: 小说标题（可选）
+    """
+    now = datetime.now().isoformat()
+    stmt = (
+        pg_insert(GlobalContext)
+        .values(
+            novel_id=novel_id,
+            novel_title=novel_title,
+            core_characters=core_characters,
+            world_setting=world_setting,
+            updated_at=now,
+            run_id=run_id,
+        )
+        .on_conflict_do_update(
+            index_elements=["novel_id"],
+            set_={
+                "novel_title": novel_title,
+                "core_characters": core_characters,
+                "world_setting": world_setting,
+                "updated_at": now,
+                "run_id": run_id,
+            },
+        )
+    )
+    session.execute(stmt)
+    session.commit()
+
+
+def fetch_global_context(session: Session, run_id: str, novel_id: str) -> Optional[Tuple[str, str, str, str]]:
+    """
+    获取全局上下文
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        novel_id: 小说ID
+
+    Returns:
+        (novel_title, core_characters, world_setting, updated_at) 元组，不存在则返回 None
+    """
+    stmt = select(
+        GlobalContext.novel_title,
+        GlobalContext.core_characters,
+        GlobalContext.world_setting,
+        GlobalContext.updated_at,
+    ).where(
+        GlobalContext.novel_id == novel_id,
+        GlobalContext.run_id == run_id,
+    )
+    result = session.execute(stmt).fetchone()
+    if result is None:
+        return None
+    return (result.novel_title, result.core_characters, result.world_setting, result.updated_at)
+
+
+def update_global_context(session: Session, run_id: str, novel_id: str, **kwargs: Any) -> None:
+    """
+    更新全局上下文
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        novel_id: 小说ID
+        **kwargs: 要更新的字段
+    """
+    allowed_fields = {"core_characters", "world_setting"}
+    update_data = {}
+    for key, value in kwargs.items():
+        if key in allowed_fields:
+            update_data[key] = value
+    if not update_data:
+        return
+    update_data["updated_at"] = datetime.now().isoformat()
+
+    stmt = (
+        update(GlobalContext)
+        .where(GlobalContext.novel_id == novel_id, GlobalContext.run_id == run_id)
+        .values(**update_data)
+    )
+    session.execute(stmt)
+    session.commit()
+
+
+def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> Optional[str]:
+    """
+    获取小说标题
+
+    Args:
+        session: 数据库会话
+        novel_id: 小说ID
+        run_id: 运行ID
+
+    Returns:
+        小说标题，不存在则返回 None
+    """
+    stmt = (
+        select(GlobalContext.novel_title)
+        .where(
+            GlobalContext.novel_id == novel_id,
+            (GlobalContext.run_id == run_id) | (GlobalContext.run_id.is_(None)),
+        )
+        .limit(1)
+    )
+
+    result = session.execute(stmt).fetchone()
+    return result.novel_title if result else None
