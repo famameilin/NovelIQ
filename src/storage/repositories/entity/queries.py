@@ -1,0 +1,238 @@
+"""
+实体查询相关操作
+
+创建时间: 2026-03-17
+创建者: TraeAI
+任务: code-quality-refactor - 拆分entity_repository
+说明: 实体查询、别名查询等操作
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from sqlalchemy import and_, select, update
+from sqlalchemy.dialects.postgresql import insert
+
+from src.storage.models import Entity, EntityAlias
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+
+def insert_entity(
+    session: Session,
+    novel_id: str,
+    canonical: str,
+    entity_type: str,
+    first_chunk: int | None = None,
+    description: str | None = None,
+    confidence: float = 1.0,
+    run_id: str | None = None,
+) -> int | None:
+    """插入实体"""
+    entity = Entity(
+        novel_id=novel_id,
+        canonical=canonical,
+        entity_type=entity_type,
+        first_chunk=first_chunk,
+        last_chunk=first_chunk,
+        description=description,
+        confidence=confidence,
+        run_id=run_id,
+    )
+    session.add(entity)
+    session.commit()
+    return entity.entity_id
+
+
+def insert_entity_alias(
+    session: Session,
+    entity_id: int,
+    alias: str,
+    alias_type: str | None = None,
+    source_chunk: int | None = None,
+    run_id: str | None = None,
+) -> int | None:
+    """插入实体别名"""
+    stmt = (
+        insert(EntityAlias)
+        .values(
+            entity_id=entity_id,
+            alias=alias,
+            alias_type=alias_type,
+            source_chunk=source_chunk,
+            confirm_count=1,
+            run_id=run_id,
+        )
+        .on_conflict_do_nothing(constraint="uq_entity_aliases_entity_alias")
+        .returning(EntityAlias.alias_id)
+    )
+
+    result = session.execute(stmt)
+    session.commit()
+    row = result.fetchone()
+    return row[0] if row else None
+
+
+def insert_entity_embedding(session: Session, entity_id: int, embedding: List[float]) -> None:
+    """插入实体嵌入向量"""
+    stmt = update(Entity).where(Entity.entity_id == entity_id).values(embedding_vector=embedding)
+    session.execute(stmt)
+    session.commit()
+
+
+def fetch_entity_by_canonical(
+    session: Session,
+    novel_id: str,
+    canonical: str,
+    run_id: str | None = None,
+) -> Optional[Dict[str, Any]]:
+    """根据规范名获取实体"""
+    conditions = [Entity.novel_id == novel_id, Entity.canonical == canonical]
+    if run_id is not None:
+        conditions.append(Entity.run_id == run_id)
+
+    stmt = select(Entity).where(and_(*conditions))
+    result = session.execute(stmt)
+    entity = result.scalar_one_or_none()
+
+    if entity is None:
+        return None
+
+    return {
+        "entity_id": entity.entity_id,
+        "novel_id": entity.novel_id,
+        "canonical": entity.canonical,
+        "entity_type": entity.entity_type,
+        "first_chunk": entity.first_chunk,
+        "last_chunk": entity.last_chunk,
+        "description": entity.description,
+        "embedding_vector": entity.embedding_vector,
+        "confidence": entity.confidence,
+        "run_id": entity.run_id,
+    }
+
+
+def fetch_entity_by_alias(
+    session: Session,
+    novel_id: str,
+    alias: str,
+    run_id: str | None = None,
+) -> Optional[Dict[str, Any]]:
+    """根据别名获取实体"""
+    conditions = [Entity.novel_id == novel_id, EntityAlias.alias == alias]
+    if run_id is not None:
+        conditions.append(Entity.run_id == run_id)
+
+    stmt = (
+        select(Entity, EntityAlias.alias_type, EntityAlias.confirm_count)
+        .join(EntityAlias, Entity.entity_id == EntityAlias.entity_id)
+        .where(and_(*conditions))
+        .order_by(EntityAlias.confirm_count.desc())
+        .limit(1)
+    )
+    result = session.execute(stmt)
+    row = result.fetchone()
+
+    if row is None:
+        return None
+
+    entity, alias_type, confirm_count = row
+    return {
+        "entity_id": entity.entity_id,
+        "novel_id": entity.novel_id,
+        "canonical": entity.canonical,
+        "entity_type": entity.entity_type,
+        "first_chunk": entity.first_chunk,
+        "last_chunk": entity.last_chunk,
+        "description": entity.description,
+        "confidence": entity.confidence,
+        "alias_type": alias_type,
+        "confirm_count": confirm_count,
+        "run_id": entity.run_id,
+    }
+
+
+def fetch_all_aliases_for_entity(
+    session: Session,
+    entity_id: int,
+    run_id: str | None = None,
+) -> List[Dict[str, Any]]:
+    """获取实体的所有别名"""
+    conditions = [EntityAlias.entity_id == entity_id]
+    if run_id is not None:
+        conditions.append(EntityAlias.run_id == run_id)
+
+    stmt = select(EntityAlias).where(and_(*conditions)).order_by(EntityAlias.confirm_count.desc())
+    result = session.execute(stmt)
+    aliases = result.scalars().all()
+
+    return [
+        {
+            "alias_id": alias.alias_id,
+            "alias": alias.alias,
+            "alias_type": alias.alias_type,
+            "source_chunk": alias.source_chunk,
+            "confirm_count": alias.confirm_count,
+            "run_id": alias.run_id,
+        }
+        for alias in aliases
+    ]
+
+
+def update_entity_last_chunk(session: Session, entity_id: int, last_chunk: int) -> None:
+    """更新实体最后出现的分块"""
+    stmt = update(Entity).where(Entity.entity_id == entity_id).values(last_chunk=last_chunk)
+    session.execute(stmt)
+    session.commit()
+
+
+def increment_alias_confirm(session: Session, entity_id: int, alias: str) -> None:
+    """增加别名确认计数"""
+    stmt = (
+        update(EntityAlias)
+        .where(and_(EntityAlias.entity_id == entity_id, EntityAlias.alias == alias))
+        .values(confirm_count=EntityAlias.confirm_count + 1)
+    )
+    session.execute(stmt)
+    session.commit()
+
+
+def fetch_all_aliases_with_canonical(
+    session: Session, novel_id: str, run_id: str | None = None
+) -> List[Tuple[str, str]]:
+    """获取所有别名及其规范名映射"""
+    conditions = [Entity.novel_id == novel_id]
+    if run_id is not None:
+        conditions.append(Entity.run_id == run_id)
+
+    stmt = (
+        select(Entity.canonical, EntityAlias.alias)
+        .join(EntityAlias, Entity.entity_id == EntityAlias.entity_id)
+        .where(and_(*conditions))
+    )
+    result = session.execute(stmt)
+    return [tuple(row) for row in result.fetchall()]
+
+
+def fetch_entities_with_embeddings(
+    session: Session, novel_id: str, run_id: str | None = None
+) -> List[Tuple[int, str, str, bytes | None]]:
+    """获取实体及其嵌入向量"""
+    conditions = [
+        Entity.novel_id == novel_id,
+        Entity.embedding_vector.is_not(None),
+        Entity.description.is_not(None),
+    ]
+    if run_id is not None:
+        conditions.append(Entity.run_id == run_id)
+
+    stmt = select(
+        Entity.entity_id,
+        Entity.canonical,
+        Entity.description,
+        Entity.embedding_vector,
+    ).where(and_(*conditions))
+    result = session.execute(stmt)
+    return [tuple(row) for row in result.fetchall()]
