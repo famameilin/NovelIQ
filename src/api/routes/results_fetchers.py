@@ -108,9 +108,7 @@ def _fetch_rhythm_curve(run_id: str, stats_repo: StatsRepository) -> list:
     修改内容: 重构为使用 StatsRepository
     """
     rows = stats_repo.fetch_rhythm_curve_full(run_id)
-    return [
-        RhythmCurvePoint(chunk_id=row[0], tension_proxy=row[1], tension_composite=row[2]) for row in rows
-    ]
+    return [RhythmCurvePoint(chunk_id=row[0], tension_proxy=row[1], tension_composite=row[2]) for row in rows]
 
 
 def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> list:
@@ -284,7 +282,7 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
                 name=str(row[1]),
                 role_function=str(row[2]) if row[2] else None,
                 action=str(row[3]) if row[3] else None,
-                emotion_score=str(row[4]) if row[4] else None
+                emotion_score=str(row[4]) if row[4] else None,
             )
         )
 
@@ -296,7 +294,7 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
                 from_char=str(row[1]),
                 to_char=str(row[2]),
                 type=str(row[3]) if row[3] else "",
-                change=str(row[4]) if row[4] else ""
+                change=str(row[4]) if row[4] else "",
             )
         )
 
@@ -304,11 +302,7 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
     for row in dialogues_raw:
         cid = row[0]
         dialogues_by_chunk[cid].append(
-            ChunkDialogue(
-                speaker=str(row[1]),
-                tone=None,
-                length=int(row[2]) if row[2] is not None else None
-            )
+            ChunkDialogue(speaker=str(row[1]), length=int(row[2]) if row[2] is not None else None)
         )
 
     result: List[ChunkAnnotation] = []
@@ -344,7 +338,13 @@ def _fetch_character_relations(run_id: str, annotation_repo: AnnotationRepositor
     """
     rows = annotation_repo.fetch_chunk_relations_full(run_id)
     return [
-        CharacterRelation(chunk_id=int(row[0]), from_char=str(row[1]), to_char=str(row[2]), type=str(row[3]) if row[3] else "", change=str(row[4]) if row[4] else "")
+        CharacterRelation(
+            chunk_id=int(row[0]),
+            from_char=str(row[1]),
+            to_char=str(row[2]),
+            type=str(row[3]) if row[3] else "",
+            change=str(row[4]) if row[4] else "",
+        )
         for row in rows
     ]
 

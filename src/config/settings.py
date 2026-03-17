@@ -18,6 +18,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
+# Load .env file
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(env_path)
+
 from .schemas import (
     AnalysisSettings,
     APISettings,
@@ -32,6 +38,7 @@ from .schemas import (
     TopicModelSettings,
     DiagnosisSettings,
     ThinkingSettings,
+    StreamingSettings,
     _parse_analysis_settings,
     _parse_api_settings,
     _parse_chunking_settings,
@@ -45,6 +52,7 @@ from .schemas import (
     _parse_rag_settings,
     _parse_topic_model_settings,
     _parse_thinking_settings,
+    _parse_streaming_settings,
 )
 
 
@@ -56,10 +64,15 @@ class Settings:
     修改时间: 2026-03-12
     修改者: TraeAI
     修改内容: 添加 thinking 配置字段
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 添加 streaming 配置字段
     """
 
     models: ModelsSettings = field(default_factory=ModelsSettings)
     thinking: ThinkingSettings = field(default_factory=ThinkingSettings)
+    streaming: StreamingSettings = field(default_factory=StreamingSettings)
     logging: LoggingSettings = field(default_factory=LoggingSettings)
     chunking: ChunkingSettings = field(default_factory=ChunkingSettings)
     database: DatabaseSettings = field(default_factory=DatabaseSettings)
@@ -89,8 +102,7 @@ class Settings:
             base.chunking.max_chars = int(os.getenv("CHUNK_MAX_CHARS", "2000"))
         if os.getenv("CHUNK_OVERLAP"):
             base.chunking.overlap = int(os.getenv("CHUNK_OVERLAP", "200"))
-        if os.getenv("DB_TIMEOUT_S"):
-            base.database.timeout_s = float(os.getenv("DB_TIMEOUT_S", "30.0"))
+
         if os.getenv("UPLOAD_DIR"):
             base.paths.upload_dir = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
         if os.getenv("RESULTS_DIR"):
@@ -109,6 +121,7 @@ class Settings:
         return cls(
             models=_parse_models_settings(data.get("models")),
             thinking=_parse_thinking_settings(data.get("thinking")),
+            streaming=_parse_streaming_settings(data.get("streaming")),
             logging=_parse_logging_settings(data.get("logging")),
             chunking=_parse_chunking_settings(data.get("chunking")),
             database=_parse_database_settings(data.get("database")),

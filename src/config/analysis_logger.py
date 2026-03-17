@@ -12,12 +12,25 @@ _active_file_handlers: dict[str, int] = {}
 
 
 class AnalysisLogger:
+    """
+    分析日志记录器
+
+    创建时间: 2025-03-11
+    创建者: TraeAI
+    任务: 分析流程日志记录
+
+    修改时间: 2026-03-17
+    修改者: TraeAI
+    任务: 合并本地和云端日志为统一的 prompts.jsonl
+    修改内容: 移除 local_prompts.jsonl 和 cloud_prompts.jsonl 的区分，统一使用 prompts.jsonl
+    """
+
     def __init__(self, log_base_dir: Path, task_id: str):
         self._task_id = task_id
         self._log_dir = log_base_dir / task_id
         self._log_dir.mkdir(parents=True, exist_ok=True)
-        self._local_prompt_file = self._log_dir / "local_prompts.jsonl"
-        self._cloud_prompt_file = self._log_dir / "cloud_prompts.jsonl"
+        # 统一的 prompt 日志文件
+        self._prompts_file = self._log_dir / "prompts.jsonl"
         self._annotation_file = self._log_dir / "annotations.jsonl"
         self._handler_id: int | None = None
         self._setup_file_loggers()
@@ -49,13 +62,21 @@ class AnalysisLogger:
     def log_dir(self) -> Path:
         return self._log_dir
 
-    def log_local_prompt(
+    def log_prompt(
         self,
-        chunk_id: int | None,
         messages: List[Dict[str, str]],
         response: str,
         metadata: Dict[str, Any] | None = None,
+        chunk_id: int | None = None,
     ) -> None:
+        """
+        记录统一的 prompt/response 日志
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: 合并本地和云端日志
+        说明: 统一的日志记录方法，不再区分本地和云端
+        """
         entry = {
             "timestamp": datetime.now().isoformat(),
             "chunk_id": chunk_id,
@@ -63,21 +84,7 @@ class AnalysisLogger:
             "response": response,
             "metadata": metadata or {},
         }
-        self._append_jsonl(self._local_prompt_file, entry)
-
-    def log_cloud_prompt(
-        self,
-        messages: List[Dict[str, str]],
-        response: str,
-        metadata: Dict[str, Any] | None = None,
-    ) -> None:
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "messages": messages,
-            "response": response,
-            "metadata": metadata or {},
-        }
-        self._append_jsonl(self._cloud_prompt_file, entry)
+        self._append_jsonl(self._prompts_file, entry)
 
     def log_annotation(
         self,

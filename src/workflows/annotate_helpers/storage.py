@@ -32,6 +32,7 @@ def _store_annotation_results(
     chunk_text: str,
     use_context_enhancement: bool,
     run_id: str,
+    foreshadowing=None,
 ) -> None:
     """
     存储标注结果
@@ -50,6 +51,11 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: storage-layer-decoupling
     修改内容: 移除向后兼容代码，run_id 改为必需参数
+
+    修改时间: 2026-03-17
+    修改者: TraeAI
+    任务: 修复foreshadowing数据丢失问题
+    修改内容: 添加foreshadowing参数，存储独立的foreshadowing分析结果
     """
     from src.storage.repositories import AnnotationRepository, StatsRepository
 
@@ -71,10 +77,13 @@ def _store_annotation_results(
         ann_repo.insert_chunk_relations(run_id, chunk_id, annotation.relations)
 
     if annotation.dialogues:
-        from .sentence import compute_dialogue_lengths
-
-        speakers = [d.speaker for d in annotation.dialogues]
-        dialogue_lengths = compute_dialogue_lengths(chunk_text, speakers)
+        # 使用标注结果中的content字段计算对话长度
+        # 创建(说话人, 长度)的列表
+        dialogue_lengths = []
+        for dialogue in annotation.dialogues:
+            # 如果content字段存在，使用其长度；否则为0
+            content_length = len(dialogue.content) if hasattr(dialogue, "content") and dialogue.content else 0
+            dialogue_lengths.append(content_length)
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, annotation.dialogues, dialogue_lengths)
 
     if annotation.chunk_summary:
@@ -82,3 +91,7 @@ def _store_annotation_results(
 
     if annotation.character_appearances:
         stats_repo.insert_character_appearances(run_id, chunk_id, annotation.character_appearances)
+
+    # 存储独立的foreshadowing分析结果
+    if foreshadowing is not None:
+        ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)

@@ -108,7 +108,9 @@ def run_full_workflow(
         for r in helper_results
     ]
 
-    _log_workflow_summary(helper_results, total_elapsed, init_result.analysis_logger, init_result.novel_id, init_result.run_id)
+    _log_workflow_summary(
+        helper_results, total_elapsed, init_result.analysis_logger, init_result.novel_id, init_result.run_id
+    )
 
     init_result.session.close()
 

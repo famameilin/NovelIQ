@@ -10,11 +10,20 @@ Disambiguation helpers for the annotate workflow.
 修改者: TraeAI
 任务: postgresql-migration
 修改内容: 使用 SQLAlchemy text() 包装 SQL 语句，替换 ? 占位符为命名参数
+
+修改时间: 2026-03-16
+修改者: TraeAI
+任务: fix-disambiguation-three-phase
+修改内容: 
+- 增量消歧只维护内存 alias_map，不写数据库
+- 添加 checkpoint 保存/加载机制
 """
 
 from __future__ import annotations
 
+import json
 import re
+import time
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -32,6 +41,52 @@ if TYPE_CHECKING:
 
 
 DISAMBIG_MAX_RETRIES = 3
+
+
+def _save_disambig_checkpoint(conn, run_id: str, alias_map: dict[str, str]) -> None:
+    """
+    保存消歧 checkpoint 到数据库
+
+    创建时间: 2026-03-16
+    创建者: TraeAI
+    任务: fix-disambiguation-three-phase
+    说明: 将当前 alias_map 保存到数据库，支持断点续传
+    """
+    conn.execute(
+        text("""
+            INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at)
+            VALUES (:run_id, :alias_map, :updated_at)
+            ON CONFLICT (run_id) DO UPDATE SET
+                alias_map = EXCLUDED.alias_map,
+                updated_at = EXCLUDED.updated_at
+        """),
+        {"run_id": run_id, "alias_map": json.dumps(alias_map), "updated_at": time.time()},
+    )
+    conn.commit()
+    logger.debug(f"disambig checkpoint saved for run_id={run_id}")
+
+
+def _load_disambig_checkpoint(conn, run_id: str) -> dict[str, str] | None:
+    """
+    从数据库加载消歧 checkpoint
+
+    创建时间: 2026-03-16
+    创建者: TraeAI
+    任务: fix-disambiguation-three-phase
+    说明: 从数据库加载之前保存的 alias_map，用于断点续传
+
+    Returns:
+        之前保存的 alias_map，如果不存在则返回 None
+    """
+    row = conn.execute(
+        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
+        {"run_id": run_id},
+    ).fetchone()
+
+    if row:
+        logger.info(f"disambig checkpoint loaded for run_id={run_id}")
+        return json.loads(row[0])
+    return None
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
@@ -153,6 +208,7 @@ def _run_incremental_disambiguation(
     incremental_interval: int,
     current_idx: int,
     run_id: str,
+    checkpoint_interval: int = 50,
 ) -> dict[str, str]:
     """
     执行增量消歧
@@ -166,14 +222,20 @@ def _run_incremental_disambiguation(
     修改者: TraeAI
     任务: storage-layer-decoupling
     修改内容: 移除向后兼容代码，只使用 Repository 模式
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: fix-disambiguation-three-phase
+    修改内容: 
+    - 增量消歧只维护内存 alias_map，不写数据库
+    - 添加 checkpoint 保存机制
     """
-    from src.storage.repositories import AnnotationRepository
     from src.knowledge.graph import get_active_nodes_in_range
 
     if (current_idx + 1) % incremental_interval != 0:
         return alias_map
 
-    new_names = extract_new_names_from_db(conn, alias_map)
+    new_names = extract_new_names_from_db(conn, alias_map, current_chunk_id=chunk_id)
     if not new_names:
         return alias_map
 
@@ -203,9 +265,10 @@ def _run_incremental_disambiguation(
 
     if new_aliases:
         alias_map.update(new_aliases)
-        ann_repo = AnnotationRepository(conn)
-        ann_repo.update_character_names(run_id, new_aliases, novel_id="")
-        logger.debug(f"alias_map updated and saved: {len(alias_map)} entries")
+        logger.debug(f"alias_map updated in memory: {len(alias_map)} entries")
+
+        if (current_idx + 1) % checkpoint_interval == 0:
+            _save_disambig_checkpoint(conn, run_id, alias_map)
 
     return alias_map
 
@@ -230,6 +293,11 @@ def _run_final_disambiguation(
     修改者: TraeAI
     任务: storage-layer-decoupling
     修改内容: 移除向后兼容代码，只使用 Repository 模式
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: fix-disambiguation-three-phase
+    修改内容: 最终消歧后调用 apply_alias_corrections 批量修正数据
     """
     from src.storage.repositories import AnnotationRepository
 
@@ -257,6 +325,7 @@ def _run_final_disambiguation(
 
     if alias_map:
         ann_repo.update_character_names(run_id, alias_map, novel_id=novel_id)
+        ann_repo.apply_alias_corrections(run_id, alias_map)
         logger.info(f"applied alias_map with {len(alias_map)} entries to database")
 
     return alias_map

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional
 
+import litellm
 import numpy as np
-import openai
+from litellm.exceptions import APIConnectionError, Timeout
 from loguru import logger
+from openai import APIStatusError
 
 from src.config import settings
 
@@ -24,6 +26,10 @@ class EmbeddingClient:
     修改时间: 2026-03-13
     修改者: TraeAI
     修改内容: 提取 _log 方法统一处理日志记录，减少 get_embedding 方法中的重复代码
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 将 OpenAI SDK 替换为 LiteLLM，移除 _client 对象，改用 litellm.embedding() 函数调用
     """
 
     def __init__(
@@ -49,13 +55,10 @@ class EmbeddingClient:
             self._api_key = api_key or "sk-no-key-required"
             self._timeout_s = timeout_s
             self._max_retries = max_retries if max_retries is not None else 2
+        if self._model and "/" not in self._model and self._base_url:
+            if self._base_url.startswith("http://127.0.0.1") or self._base_url.startswith("http://localhost"):
+                self._model = f"openai/{self._model}"
 
-        self._client = openai.OpenAI(
-            base_url=self._base_url,
-            api_key=self._api_key,
-            timeout=self._timeout_s,
-            max_retries=self._max_retries,
-        )
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
         self._is_cloud = self._check_is_cloud()
@@ -117,6 +120,10 @@ class EmbeddingClient:
         修改时间: 2026-03-13
         修改者: TraeAI
         修改内容: 使用 _log 方法统一处理日志记录，减少重复代码
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        修改内容: 将 OpenAI SDK 调用替换为 litellm.embedding()
         """
         if not self._model:
             raise ValueError("embedding model is required")
@@ -133,19 +140,27 @@ class EmbeddingClient:
             chunk_id,
         )
         try:
-            response = self._client.embeddings.create(
+            response = litellm.embedding(
                 model=self._model,
                 input=text,
+                api_base=self._base_url,
+                api_key=self._api_key,
+                encoding_format="float",
             )
-            embedding = response.data[0].embedding
+            data = response["data"] if isinstance(response, dict) else response.data
+            first_item = data[0]
+            embedding = first_item["embedding"] if isinstance(first_item, dict) else first_item.embedding
 
-            if self._token_usage_callback and response.usage:
+            usage = response.get("usage") if isinstance(response, dict) else response.usage
+            if self._token_usage_callback and usage:
+                prompt_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else usage.prompt_tokens
+                total_tokens = usage.get("total_tokens") if isinstance(usage, dict) else usage.total_tokens
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",
                     "local",
-                    response.usage.prompt_tokens,
-                    response.usage.total_tokens,
+                    prompt_tokens,
+                    total_tokens,
                     None,
                     chunk_id,
                 )
@@ -159,7 +174,7 @@ class EmbeddingClient:
                 response.usage.total_tokens if response.usage else 0,
             )
             return embedding
-        except openai.APIConnectionError as e:
+        except APIConnectionError as e:
             self._log(
                 "info" if self._is_cloud else "error",
                 "get_embedding 连接错误: base_url={} error={}",
@@ -168,7 +183,7 @@ class EmbeddingClient:
                 str(e),
             )
             raise ConnectionError(f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动") from e
-        except openai.APITimeoutError as e:
+        except Timeout as e:
             self._log(
                 "info" if self._is_cloud else "error",
                 "get_embedding 超时错误: base_url={} error={}",
@@ -177,7 +192,7 @@ class EmbeddingClient:
                 str(e),
             )
             raise TimeoutError("embedding 服务请求超时，请检查服务响应") from e
-        except openai.APIStatusError as e:
+        except APIStatusError as e:
             self._log(
                 "info" if self._is_cloud else "error",
                 "get_embedding API错误: status={} base_url={} error={}",

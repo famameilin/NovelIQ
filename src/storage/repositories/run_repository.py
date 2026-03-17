@@ -122,13 +122,31 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             运行记录列表，按创建时间倒序排列
         """
-        stmt = (
-            select(AnalysisRun)
-            .where(AnalysisRun.novel_id == novel_id)
-            .order_by(AnalysisRun.created_at.desc())
-        )
+        stmt = select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict(run) for run in runs]
+
+    def get_run_by_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """
+        通过task_id获取运行记录
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: 修复服务重启后任务丢失问题
+        说明: task_id是run_id的前8位，用于API查询
+
+        Args:
+            task_id: 任务ID（run_id的前8位）
+
+        Returns:
+            运行记录字典，不存在则返回 None
+        """
+        # 使用LIKE匹配run_id的前8位
+        stmt = select(AnalysisRun).where(AnalysisRun.run_id.like(f"{task_id}%"))
+        run = self.session.execute(stmt).scalar_one_or_none()
+        if run is None:
+            return None
+        return self._to_dict(run)
 
     def get_latest_run(self, novel_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -141,10 +159,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
             最新运行记录字典，不存在则返回 None
         """
         stmt = (
-            select(AnalysisRun)
-            .where(AnalysisRun.novel_id == novel_id)
-            .order_by(AnalysisRun.created_at.desc())
-            .limit(1)
+            select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc()).limit(1)
         )
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:

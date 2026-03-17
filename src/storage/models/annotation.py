@@ -11,13 +11,17 @@
 - ChunkDialogue: 分块对话表
 - ChunkForeshadowing: 分块伏笔表
 - CharacterAppearance: 角色出场表
+
+修改时间: 2026-03-16
+修改者: TraeAI
+修改内容: 将 ChunkAnnotation 和 ChunkForeshadowing 的主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import Index, Integer, String, Text, ForeignKey
+from sqlalchemy import ForeignKeyConstraint, Index, Integer, String, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -31,13 +35,16 @@ class ChunkAnnotation(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储分块的标注信息（情感、事件类型等）
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
     """
 
     __tablename__ = "chunk_annotation"
 
-    chunk_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), primary_key=True
-    )
+    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
     emotional_valence: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     pivot_moment: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     event_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -45,16 +52,23 @@ class ChunkAnnotation(Base):
     has_foreshadowing: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     foreshadowing_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     foreshadowing_desc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
-    )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["analysis_runs.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_chunk_annotation_run_id", "run_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<ChunkAnnotation(chunk_id={self.chunk_id}, event_type={self.event_type})>"
+        return f"<ChunkAnnotation(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
 class ChunkCharacter(Base):
@@ -70,9 +84,7 @@ class ChunkCharacter(Base):
     __tablename__ = "chunk_characters"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chunk_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     role_function: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -83,6 +95,11 @@ class ChunkCharacter(Base):
     )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_chunk_characters_chunk_id", "chunk_id"),
         Index("idx_chunk_characters_name", "name"),
         Index("idx_chunk_characters_run_id", "run_id"),
@@ -105,9 +122,7 @@ class ChunkRelation(Base):
     __tablename__ = "chunk_relations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chunk_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     from_char: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     to_char: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -117,6 +132,11 @@ class ChunkRelation(Base):
     )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_chunk_relations_chunk_id", "chunk_id"),
         Index("idx_chunk_relations_run_id", "run_id"),
     )
@@ -138,9 +158,7 @@ class ChunkDialogue(Base):
     __tablename__ = "chunk_dialogues"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chunk_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     speaker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     run_id: Mapped[Optional[str]] = mapped_column(
@@ -148,6 +166,11 @@ class ChunkDialogue(Base):
     )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_chunk_dialogues_chunk_id", "chunk_id"),
         Index("idx_chunk_dialogues_run_id", "run_id"),
     )
@@ -164,28 +187,38 @@ class ChunkForeshadowing(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储分块中的伏笔分析结果
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
     """
 
     __tablename__ = "chunk_foreshadowing"
 
-    chunk_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), primary_key=True
-    )
+    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
     foreshadowing_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     anchor_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     anchor_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confidence: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
-    )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["analysis_runs.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_chunk_foreshadowing_run_id", "run_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<ChunkForeshadowing(chunk_id={self.chunk_id})>"
+        return f"<ChunkForeshadowing(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
 class CharacterAppearance(Base):
@@ -201,9 +234,7 @@ class CharacterAppearance(Base):
     __tablename__ = "character_appearances"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chunk_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     raw_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     identity_clue: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     clue_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -213,6 +244,11 @@ class CharacterAppearance(Base):
     )
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_character_appearances_chunk_id", "chunk_id"),
         Index("idx_character_appearances_raw_name", "raw_name"),
         Index("idx_character_appearances_run_id", "run_id"),

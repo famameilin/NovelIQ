@@ -183,10 +183,17 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         批量插入分块数据
 
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        修改内容: 插入前先删除该 run_id 的旧数据，避免主键冲突
+
         Args:
             run_id: 运行ID
             chunks: 分块序列
         """
+        stmt = delete(ChunkModel).where(ChunkModel.run_id == run_id)
+        self.session.execute(stmt)
+        
         mappings = [
             {
                 "chunk_id": chunk.index,

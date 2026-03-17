@@ -55,9 +55,14 @@ class MockAnnotationClient(AnnotationClient):
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: 重构本地标注客户端集成 Instructor
+    修改内容: 添加 _instructor_client 属性和 _get_instructor_client 方法
     """
 
-    def __init__(self):
+    def __init__(self, mock_content="{}", should_fail=False):
         self._config = MagicMock()
         self._config.thinking_enabled = False
         self._config.max_retries = 2
@@ -72,11 +77,16 @@ class MockAnnotationClient(AnnotationClient):
         self._fail_times_phase1 = 0
         self._fail_times_phase2 = 0
         self._token_usage_callback = None
+        self._instructor_client = None
+        self._client = None
+        self.mock_content = mock_content
+        self.should_fail = should_fail
+        self.call_count = 0
 
     def _is_cloud_api(self) -> bool:
         return False
 
-    def _log_annotation_start(self, is_cloud: bool, text: str, prev_summary, chunk_id):
+    def _log_annotation_start(self, is_cloud: bool, text: str, prev_summary, chunk_id, phase: str = ""):
         pass
 
     def _build_annotation_messages_v2(self, **kwargs):
@@ -85,10 +95,25 @@ class MockAnnotationClient(AnnotationClient):
     def _build_foreshadowing_messages(self, **kwargs):
         return [{"role": "system", "content": "test"}, {"role": "user", "content": "test"}]
 
-    def _call_annotation_api(self, messages, enable_thinking, chunk_id):
-        return MagicMock()
+    def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None):
+        self.call_count += 1
 
-    def _process_annotation_response(self, response, is_cloud):
+        if self.should_fail:
+            raise ConnectionError("Connection error")
+
+        if response_model is not None:
+            # For testing phase2
+            result = create_mock_foreshadowing()
+            response = MagicMock()
+            response.choices = [MagicMock(message=MagicMock(content="{}", reasoning_content="thinking"))]
+            return result, response
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content=self.mock_content, reasoning_content="thinking"))]
+
+        return mock_response
+
+    def _process_annotation_response(self, response, is_cloud, chunk_id=None, phase=""):
         return ("{}", None, None)
 
     def _parse_annotation(self, content):
@@ -99,6 +124,15 @@ class MockAnnotationClient(AnnotationClient):
 
     def _record_token_usage(self, response, phase, chunk_id):
         pass
+
+    def _get_instructor_client(self):
+        """Mock instructor client for testing"""
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_with_completion.return_value = (
+            create_mock_foreshadowing(),
+            MagicMock(),
+        )
+        return mock_instructor
 
 
 class TestPhase1Retry(unittest.TestCase):
@@ -199,43 +233,37 @@ class TestPhase2Retry(unittest.TestCase):
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: 重构本地标注客户端集成 Instructor
+    修改内容: 更新测试以适配 Instructor 集成
     """
 
     def test_phase2_success_on_first_attempt(self):
         """Phase2 第一次尝试成功"""
         client = MockAnnotationClient()
 
-        def mock_call_api(messages, enable_thinking, chunk_id):
-            return MagicMock()
-
-        def mock_process(response, is_cloud):
-            return ('{"has_foreshadowing": true, "foreshadowing_type": "因果伏笔", "foreshadowing_desc": "测试", "related_characters": []}', None, None)
-
-        client._call_annotation_api = mock_call_api
-        client._process_annotation_response = mock_process
-
         result = client._annotate_chunk_phase2(text="测试文本", chunk_id=1)
 
         self.assertIsInstance(result, ForeshadowingResult)
 
-    def test_phase2_retry_on_json_parse_failure(self):
-        """Phase2 JSON解析失败时重试"""
+    def test_phase2_retry_on_instructor_failure(self):
+        """Phase2 Instructor 调用失败时重试"""
         client = MockAnnotationClient()
         call_count = [0]
 
-        def mock_call_api(messages, enable_thinking, chunk_id):
+        def mock_call_annotation_api(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] < 3:
-                return MagicMock()
-            return MagicMock()
+                raise ConnectionError("Instructor connection failed")
+            
+            result = create_mock_foreshadowing()
+            response = MagicMock()
+            response.choices = [MagicMock(message=MagicMock(content="{}", reasoning_content="thinking"))]
+            return result, response
 
-        def mock_process(response, is_cloud):
-            if call_count[0] < 3:
-                return ("invalid json", None, None)
-            return ('{"has_foreshadowing": true, "foreshadowing_type": "因果伏笔", "foreshadowing_desc": "测试", "related_characters": []}', None, None)
-
-        client._call_annotation_api = mock_call_api
-        client._process_annotation_response = mock_process
+        client._call_annotation_api = mock_call_annotation_api
 
         result = client._annotate_chunk_phase2(text="测试文本", chunk_id=1)
 
@@ -250,20 +278,19 @@ class TestPhase2Retry(unittest.TestCase):
         local_call_count = [0]
         cloud_call_count = [0]
 
-        def local_call_api(messages, enable_thinking, chunk_id):
+        def local_call_annotation_api(*args, **kwargs):
             local_call_count[0] += 1
             raise ConnectionError("Local connection failed")
 
-        def cloud_call_api(messages, enable_thinking, chunk_id):
+        def cloud_call_annotation_api(*args, **kwargs):
             cloud_call_count[0] += 1
-            return MagicMock()
+            result = create_mock_foreshadowing()
+            response = MagicMock()
+            response.choices = [MagicMock(message=MagicMock(content="{}", reasoning_content="thinking"))]
+            return result, response
 
-        def mock_process(response, is_cloud):
-            return ('{"has_foreshadowing": true, "foreshadowing_type": "因果伏笔", "foreshadowing_desc": "测试", "related_characters": []}', None, None)
-
-        local_client._call_annotation_api = local_call_api
-        cloud_client._call_annotation_api = cloud_call_api
-        cloud_client._process_annotation_response = mock_process
+        local_client._call_annotation_api = local_call_annotation_api
+        cloud_client._call_annotation_api = cloud_call_annotation_api
 
         result = local_client._annotate_chunk_phase2(
             text="测试文本",
@@ -280,7 +307,7 @@ class TestPhase2Retry(unittest.TestCase):
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        def always_fail(messages, enable_thinking, chunk_id):
+        def always_fail(*args, **kwargs):
             raise ConnectionError("Connection failed")
 
         local_client._call_annotation_api = always_fail

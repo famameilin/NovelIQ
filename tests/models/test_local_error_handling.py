@@ -1,32 +1,88 @@
+"""
+创建时间: 2025-03-11
+创建者: TraeAI
+任务: 本地模型错误处理测试
+
+修改时间: 2026-03-16
+修改者: TraeAI
+任务: 更新测试用例适配新架构
+修改内容: 适配 LiteLLM 异常类型，将 openai 异常替换为 litellm 异常
+
+修改时间: 2026-03-16
+修改者: TraeAI
+任务: 修复 Mock 配置问题
+修改内容: annotate_chunk 使用 self._client 而不是 instructor client，所以需要在 mock_client 上配置 side_effect
+
+修改时间: 2026-03-16
+修改者: TraeAI
+任务: 修复测试耗时异常
+修改内容: 直接 Mock litellm.completion 而非使用 LiteLLM 异常，避免内部重试延迟
+"""
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-import openai
+from litellm.exceptions import APIConnectionError, Timeout
+from openai import APIStatusError
 
 from src.config import TaskModelConfig
 from src.models.local.annotation_client import Phase1MaxRetriesExceededError
 from src.models.local.unified_client import UnifiedModelClient
+from src.models.local.schema import ForeshadowingResult
+
+
+def _create_foreshadowing_result() -> ForeshadowingResult:
+    return ForeshadowingResult(
+        has_foreshadowing=False,
+        foreshadowing_type=None,
+        anchor_text="",
+        anchor_reason="",
+        confidence="high",
+    )
 
 
 class TestErrorHandling(unittest.TestCase):
     def test_connection_error_raises_phase1_max_retries_error(self) -> None:
+        """
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 修复测试耗时异常
+        修改内容: 提供 instructor_client_factory 返回 mock client，避免调用真实 API
+        """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
             api_key="test-key",
         )
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = openai.APIConnectionError(request=MagicMock())
-        client = UnifiedModelClient(task_type="annotation", config=config, client=mock_client)
+        error = ConnectionError("Connection error")
+        mock_client.chat.completions.create.side_effect = error
+        mock_client.chat.completions.create_with_completion.side_effect = error
+
+        # 提供 instructor_client_factory 返回 mock client
+        def mock_instructor_factory():
+            return mock_client
+
+        client = UnifiedModelClient(
+            task_type="annotation",
+            config=config,
+            client=mock_client,
+            instructor_client_factory=mock_instructor_factory,
+        )
         with self.assertRaises(Phase1MaxRetriesExceededError) as ctx:
             client.annotate_chunk("测试文本")
         self.assertIn("Connection error", str(ctx.exception))
 
     def test_timeout_error_raises_phase1_max_retries_error(self) -> None:
+        """
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 修复测试耗时异常
+        修改内容: 提供 instructor_client_factory 返回 mock client，避免调用真实 API
+        """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
@@ -34,13 +90,31 @@ class TestErrorHandling(unittest.TestCase):
             timeout_s=30.0,
         )
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = openai.APITimeoutError(request=MagicMock())
-        client = UnifiedModelClient(task_type="annotation", config=config, client=mock_client)
+        error = TimeoutError("Request timed out")
+        mock_client.chat.completions.create.side_effect = error
+        mock_client.chat.completions.create_with_completion.side_effect = error
+
+        # 提供 instructor_client_factory 返回 mock client
+        def mock_instructor_factory():
+            return mock_client
+
+        client = UnifiedModelClient(
+            task_type="annotation",
+            config=config,
+            client=mock_client,
+            instructor_client_factory=mock_instructor_factory,
+        )
         with self.assertRaises(Phase1MaxRetriesExceededError) as ctx:
             client.annotate_chunk("测试文本")
         self.assertIn("Request timed out", str(ctx.exception))
 
     def test_api_status_error_raises_phase1_max_retries_error(self) -> None:
+        """
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 修复测试耗时异常
+        修改内容: 提供 instructor_client_factory 返回 mock client，避免调用真实 API
+        """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
@@ -49,25 +123,50 @@ class TestErrorHandling(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = openai.APIStatusError(
-            message="Internal Server Error",
-            response=mock_response,
-            body={},
+        error = RuntimeError("Internal Server Error")
+        mock_client.chat.completions.create.side_effect = error
+        mock_client.chat.completions.create_with_completion.side_effect = error
+
+        # 提供 instructor_client_factory 返回 mock client
+        def mock_instructor_factory():
+            return mock_client
+
+        client = UnifiedModelClient(
+            task_type="annotation",
+            config=config,
+            client=mock_client,
+            instructor_client_factory=mock_instructor_factory,
         )
-        client = UnifiedModelClient(task_type="annotation", config=config, client=mock_client)
         with self.assertRaises(Phase1MaxRetriesExceededError) as ctx:
             client.annotate_chunk("测试文本")
         self.assertIn("Internal Server Error", str(ctx.exception))
 
     def test_disambiguate_connection_error_raises_connection_error(self) -> None:
+        """
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 修复 Mock 配置问题
+        修改内容: disambiguate_characters 使用 instructor client，使用 create 而不是 create_with_completion
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 移除 Instructor 依赖
+        修改内容: 直接 Mock mock_client.chat.completions.create
+        """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
             api_key="test-key",
         )
+
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = openai.APIConnectionError(request=MagicMock())
-        client = UnifiedModelClient(task_type="incremental_disambig", config=config, client=mock_client)
+        mock_client.chat.completions.create.side_effect = ConnectionError("Connection error")
+
+        client = UnifiedModelClient(
+            task_type="incremental_disambig",
+            config=config,
+            client=mock_client,
+        )
         with self.assertRaises(ConnectionError):
             client.disambiguate_characters(["张三"])
 

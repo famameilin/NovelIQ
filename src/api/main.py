@@ -13,6 +13,10 @@ FastAPI 应用入口模块
 修改者: TraeAI
 修改内容: 修复日志配置顺序问题，确保日志配置在导入 routes 模块之前完成，
           避免 NovelService 初始化时的 DEBUG 日志输出到控制台
+
+修改时间: 2026-03-16
+修改者: TraeAI
+修改内容: 添加 .env 文件加载，确保环境变量正确设置
 """
 
 from __future__ import annotations
@@ -20,6 +24,12 @@ from __future__ import annotations
 import socket
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(env_path)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

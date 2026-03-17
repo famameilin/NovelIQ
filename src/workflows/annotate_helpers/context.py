@@ -144,8 +144,6 @@ def _prepare_chunk_context(
     from src.context import (
         format_entities_for_prompt,
         get_active_entities,
-        get_next_text,
-        get_prev_tail_text,
     )
     from src.storage.repositories import ChunkRepository, EntityRepository
 
@@ -154,11 +152,12 @@ def _prepare_chunk_context(
     if use_context_enhancement and run_id is not None:
         chunk_repo = ChunkRepository(conn)
         entity_repo = EntityRepository(conn)
-        context.prev_tail_text = get_prev_tail_text(chunk_repo, run_id, chunk_id)
+        # 获取完整的 prev_chunk_text 和 next_chunk_text
+        context.prev_tail_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
+        context.next_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
         active_entities = get_active_entities(entity_repo, run_id, chunk_id, lookback=10)
         if active_entities:
             context.active_entities_str = format_entities_for_prompt(active_entities, alias_map=alias_map)
-        context.next_text = get_next_text(chunk_repo, run_id, chunk_id)
 
     if rag_retriever:
         context.known_aliases_str = rag_retriever.format_known_aliases_for_prompt()

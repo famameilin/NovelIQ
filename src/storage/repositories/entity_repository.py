@@ -105,16 +105,19 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         Returns:
             插入记录的ID
         """
-        stmt = insert(EntityAlias).values(
-            entity_id=entity_id,
-            alias=alias,
-            alias_type=alias_type,
-            source_chunk=source_chunk,
-            confirm_count=1,
-            run_id=run_id,
-        ).on_conflict_do_nothing(
-            constraint="uq_entity_aliases_entity_alias"
-        ).returning(EntityAlias.alias_id)
+        stmt = (
+            insert(EntityAlias)
+            .values(
+                entity_id=entity_id,
+                alias=alias,
+                alias_type=alias_type,
+                source_chunk=source_chunk,
+                confirm_count=1,
+                run_id=run_id,
+            )
+            .on_conflict_do_nothing(constraint="uq_entity_aliases_entity_alias")
+            .returning(EntityAlias.alias_id)
+        )
 
         result = self.session.execute(stmt)
         self.session.commit()
@@ -242,11 +245,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         if run_id is not None:
             conditions.append(EntityAlias.run_id == run_id)
 
-        stmt = (
-            select(EntityAlias)
-            .where(and_(*conditions))
-            .order_by(EntityAlias.confirm_count.desc())
-        )
+        stmt = select(EntityAlias).where(and_(*conditions)).order_by(EntityAlias.confirm_count.desc())
         result = self.session.execute(stmt)
         aliases = result.scalars().all()
 
@@ -393,18 +392,21 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         Returns:
             插入记录的ID
         """
-        stmt = insert(EntityRelation).values(
-            novel_id=novel_id,
-            from_entity=from_entity,
-            to_entity=to_entity,
-            rel_type=rel_type,
-            first_chunk=first_chunk,
-            last_chunk=first_chunk,
-            tension=tension,
-            run_id=run_id,
-        ).on_conflict_do_nothing(
-            constraint="uq_entity_relations"
-        ).returning(EntityRelation.rel_id)
+        stmt = (
+            insert(EntityRelation)
+            .values(
+                novel_id=novel_id,
+                from_entity=from_entity,
+                to_entity=to_entity,
+                rel_type=rel_type,
+                first_chunk=first_chunk,
+                last_chunk=first_chunk,
+                tension=tension,
+                run_id=run_id,
+            )
+            .on_conflict_do_nothing(constraint="uq_entity_relations")
+            .returning(EntityRelation.rel_id)
+        )
 
         result = self.session.execute(stmt)
         self.session.commit()
@@ -566,7 +568,9 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         result = self.session.execute(stmt)
         return [tuple(row) for row in result.fetchall()]
 
-    def fetch_entities_with_embeddings(self, novel_id: str, run_id: str | None = None) -> List[Tuple[int, str, str, bytes | None]]:
+    def fetch_entities_with_embeddings(
+        self, novel_id: str, run_id: str | None = None
+    ) -> List[Tuple[int, str, str, bytes | None]]:
         """
         获取实体及其嵌入向量
 
@@ -821,12 +825,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         if run_id is not None:
             conditions.append(EntitySnapshot.run_id == run_id)
 
-        stmt = (
-            select(EntitySnapshot)
-            .where(and_(*conditions))
-            .order_by(EntitySnapshot.chunk_id.desc())
-            .limit(limit)
-        )
+        stmt = select(EntitySnapshot).where(and_(*conditions)).order_by(EntitySnapshot.chunk_id.desc()).limit(limit)
         result = self.session.execute(stmt)
         snapshots = result.scalars().all()
 

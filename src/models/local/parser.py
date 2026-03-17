@@ -100,17 +100,39 @@ def make_empty_annotation() -> ChunkAnnotation:
         character_appearances=[],
         chunk_summary="",
     )
-    annotation.validate()
     return annotation
 
 
 def try_parse_json(content: str) -> Dict[str, Any] | None:
+    """
+    尝试解析 JSON，支持不完整的 JSON
+
+    修改时间: 2026-03-17
+    修改者: TraeAI
+    任务: 添加 streamingjson 支持，处理 LLM 流式输出的不完整 JSON
+    """
     try:
         data = json.loads(content)
         if isinstance(data, dict):
             return data
     except json.JSONDecodeError:
         pass
+
+    # 尝试使用 streamingjson 修复不完整的 JSON
+    try:
+        import streamingjson
+
+        lexer = streamingjson.Lexer()
+        lexer.append_string(content)
+        fixed = lexer.complete_json()
+        data = json.loads(fixed)
+        if isinstance(data, dict):
+            logger.debug("json repaired by streamingjson")
+            return data
+    except Exception:
+        pass
+
+    # 尝试使用 fix_json 作为后备
     fixed = fix_json(content)
     if fixed is not None:
         try:
@@ -177,7 +199,7 @@ def build_annotation(data: Dict[str, Any]) -> ChunkAnnotation:
     修改时间: 2026-03-14
     修改者: TraeAI
     修改内容:
-    - 支持三档 emotional_valence（positive/negative/neutral），兼容原有五档值
+    - 支持三档 emotional_valence（positive/negative/neutral）
     - 过滤 relations 中 change 为 "无变化" 的记录
     - 过滤 character_appearances 中 clue_type 为 "none" 的记录
     """
@@ -296,11 +318,6 @@ def build_annotation(data: Dict[str, Any]) -> ChunkAnnotation:
         character_appearances=character_appearances,
         chunk_summary=chunk_summary,
     )
-    try:
-        annotation.validate()
-    except ValueError as e:
-        logger.warning("annotation validation error: {}", e)
-        return make_empty_annotation()
     return annotation
 
 
