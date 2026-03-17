@@ -45,12 +45,6 @@
 - 解决方案: 从 annotation_client 导入 TwoPhaseAnnotationResult
 """
 
-修改时间: 2026-03-17
-修改者: TraeAI
-修改内容: 修复导入错误
-- 问题原因: TwoPhaseAnnotationResult 定义在 annotation_client.py，但从 schema.py 导入
-- 解决方案: 从 annotation_client 导入 TwoPhaseAnnotationResult
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
