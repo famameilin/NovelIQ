@@ -192,133 +192,215 @@ def fix_json(content: str) -> str | None:
     return None
 
 
+# 常量定义
+_VALID_ROLE_FUNCTIONS = ["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
+_VALID_ACTION_TYPES = ["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
+_VALID_EMOTION_SCORES = ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
+_VALID_RELATION_TYPES = ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
+_VALID_CLUE_TYPES = ["none", "self_introduction", "named_by_other", "alias_revealed", "appearance_desc"]
+_VALID_EMOTIONAL_VALENCES_V2 = ["positive", "negative", "neutral"]
+_VALID_EMOTIONAL_VALENCES_V1 = ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
+_VALID_EVENT_TYPES = ["冲突", "铺垫", "转折"]
+_VALID_FORESHADOWING_TYPES = ["causal", "thematic"]
+
+
+def _parse_characters(data: Dict[str, Any]) -> List[CharacterSnapshot]:
+    """
+    解析角色快照列表
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 提取build_annotation中的字符处理逻辑
+    """
+    characters = []
+    for c in data.get("characters", []):
+        if not isinstance(c, dict):
+            continue
+
+        role_function = c.get("role_function", "其他")
+        if role_function not in _VALID_ROLE_FUNCTIONS:
+            role_function = "其他"
+
+        action_type = c.get("action_type", "其他")
+        if action_type not in _VALID_ACTION_TYPES:
+            action_type = "其他"
+
+        emotion_score = c.get("emotion_score", "neutral")
+        if emotion_score not in _VALID_EMOTION_SCORES:
+            emotion_score = "neutral"
+
+        characters.append(
+            CharacterSnapshot(
+                name=c.get("name", ""),
+                role_function=role_function,
+                action=c.get("action", ""),
+                action_type=action_type,
+                emotion_score=emotion_score,
+            )
+        )
+    return characters
+
+
+def _parse_relations(data: Dict[str, Any]) -> List[RelationChangeSnapshot]:
+    """
+    解析关系变化快照列表
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 提取build_annotation中的关系处理逻辑
+    说明: 过滤 change 为 "无变化" 的记录
+    """
+    relations = []
+    for r in data.get("relations", []):
+        if not isinstance(r, dict):
+            continue
+
+        change = r.get("change", "无变化")
+        if change == "无变化":
+            continue
+
+        rel_type = r.get("type", "利益")
+        if rel_type not in _VALID_RELATION_TYPES:
+            rel_type = "利益"
+
+        relations.append(
+            RelationChangeSnapshot(
+                from_name=r.get("from", ""),
+                to_name=r.get("to", ""),
+                type=rel_type,
+                change=change,
+            )
+        )
+    return relations
+
+
+def _parse_dialogues(data: Dict[str, Any]) -> List[DialogueSnapshot]:
+    """
+    解析对话快照列表
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 提取build_annotation中的对话处理逻辑
+    """
+    dialogues = []
+    for d in data.get("dialogues", []):
+        if isinstance(d, dict):
+            dialogues.append(DialogueSnapshot(speaker=d.get("speaker", "")))
+    return dialogues
+
+
+def _parse_character_appearances(data: Dict[str, Any]) -> List[CharacterAppearance]:
+    """
+    解析角色出场信息列表
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 提取build_annotation中的角色出场处理逻辑
+    说明: 过滤 clue_type 为 "none" 的记录
+    """
+    appearances = []
+    for ca in data.get("character_appearances", []):
+        if not isinstance(ca, dict):
+            continue
+
+        clue_type_raw = ca.get("clue_type", "none")
+        if clue_type_raw == "none":
+            continue
+
+        clue_type: ClueType = clue_type_raw if clue_type_raw in _VALID_CLUE_TYPES else "none"
+        if clue_type == "none":
+            continue
+
+        appearances.append(
+            CharacterAppearance(
+                raw_name=ca.get("raw_name", ""),
+                identity_clue=ca.get("identity_clue", ""),
+                clue_type=clue_type,
+            )
+        )
+    return appearances
+
+
+def _normalize_emotional_valence(valence: Any) -> str:
+    """
+    标准化情感倾向值
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 提取build_annotation中的情感倾向处理逻辑
+    说明: 支持v1（五档）到v2（三档）的转换
+    """
+    if valence in _VALID_EMOTIONAL_VALENCES_V2:
+        return valence
+
+    if valence in _VALID_EMOTIONAL_VALENCES_V1:
+        if valence in ["strong_positive", "mild_positive"]:
+            return "positive"
+        elif valence in ["mild_negative", "strong_negative"]:
+            return "negative"
+        else:
+            return "neutral"
+
+    return "neutral"
+
+
+def _parse_event_type(event_type: Any) -> str:
+    """
+    解析事件类型
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 提取build_annotation中的事件类型处理逻辑
+    """
+    return event_type if event_type in _VALID_EVENT_TYPES else "铺垫"
+
+
+def _parse_foreshadowing_type(
+    has_foreshadowing: bool,
+    foreshadowing_type_raw: Any,
+) -> ForeshadowingType | None:
+    """
+    解析伏笔类型
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 提取build_annotation中的伏笔类型处理逻辑
+    """
+    if has_foreshadowing and foreshadowing_type_raw in _VALID_FORESHADOWING_TYPES:
+        return foreshadowing_type_raw
+    return None
+
+
 def build_annotation(data: Dict[str, Any]) -> ChunkAnnotation:
     """
     构建标注结果
 
-    修改时间: 2026-03-14
+    修改时间: 2026-03-17
     修改者: TraeAI
+    任务: code-quality-refactor - 重构build_annotation
     修改内容:
-    - 支持三档 emotional_valence（positive/negative/neutral）
-    - 过滤 relations 中 change 为 "无变化" 的记录
-    - 过滤 character_appearances 中 clue_type 为 "none" 的记录
+    - 提取各字段解析逻辑到独立函数
+    - 使用常量定义替代魔法字符串
+    - 简化主函数逻辑
     """
-    characters = []
-    valid_role_functions = ["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
-    valid_action_types = ["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
-    valid_emotion_scores = ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
-    for c in data.get("characters", []):
-        if isinstance(c, dict):
-            role_function = c.get("role_function", "其他")
-            if role_function not in valid_role_functions:
-                role_function = "其他"
-            action_type = c.get("action_type", "其他")
-            if action_type not in valid_action_types:
-                action_type = "其他"
-            emotion_score = c.get("emotion_score", "neutral")
-            if emotion_score not in valid_emotion_scores:
-                emotion_score = "neutral"
-            characters.append(
-                CharacterSnapshot(
-                    name=c.get("name", ""),
-                    role_function=role_function,
-                    action=c.get("action", ""),
-                    action_type=action_type,
-                    emotion_score=emotion_score,
-                )
-            )
-
-    valid_relation_types = ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
-    relations = []
-    for r in data.get("relations", []):
-        if isinstance(r, dict):
-            change = r.get("change", "无变化")
-            if change == "无变化":
-                continue
-            rel_type = r.get("type", "利益")
-            if rel_type not in valid_relation_types:
-                rel_type = "利益"
-            relations.append(
-                RelationChangeSnapshot(
-                    from_name=r.get("from", ""),
-                    to_name=r.get("to", ""),
-                    type=rel_type,
-                    change=change,
-                )
-            )
-
-    dialogues = []
-    for d in data.get("dialogues", []):
-        if isinstance(d, dict):
-            dialogues.append(
-                DialogueSnapshot(
-                    speaker=d.get("speaker", ""),
-                )
-            )
-
-    character_appearances = []
-    for ca in data.get("character_appearances", []):
-        if isinstance(ca, dict):
-            clue_type_raw = ca.get("clue_type", "none")
-            if clue_type_raw == "none":
-                continue
-            valid_clue_types = ["none", "self_introduction", "named_by_other", "alias_revealed", "appearance_desc"]
-            clue_type: ClueType = clue_type_raw if clue_type_raw in valid_clue_types else "none"
-            if clue_type == "none":
-                continue
-            character_appearances.append(
-                CharacterAppearance(
-                    raw_name=ca.get("raw_name", ""),
-                    identity_clue=ca.get("identity_clue", ""),
-                    clue_type=clue_type,
-                )
-            )
-
-    chunk_summary = data.get("chunk_summary", "")
-
-    valid_emotional_valences_v2 = ["positive", "negative", "neutral"]
-    valid_emotional_valences_v1 = ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
-    emotional_valence = data.get("emotional_valence", "neutral")
-    if emotional_valence in valid_emotional_valences_v2:
-        pass
-    elif emotional_valence in valid_emotional_valences_v1:
-        if emotional_valence in ["strong_positive", "mild_positive"]:
-            emotional_valence = "positive"
-        elif emotional_valence in ["mild_negative", "strong_negative"]:
-            emotional_valence = "negative"
-        else:
-            emotional_valence = "neutral"
-    else:
-        emotional_valence = "neutral"
-
-    valid_event_types = ["冲突", "铺垫", "转折"]
-    event_type = data.get("event_type", "铺垫")
-    if event_type not in valid_event_types:
-        event_type = "铺垫"
-
     has_foreshadowing = data.get("has_foreshadowing", False)
-    foreshadowing_type_raw = data.get("foreshadowing_type")
-    valid_foreshadowing_types = ["causal", "thematic"]
-    if has_foreshadowing and foreshadowing_type_raw in valid_foreshadowing_types:
-        foreshadowing_type: ForeshadowingType | None = foreshadowing_type_raw
-    else:
-        foreshadowing_type = None
 
-    annotation = ChunkAnnotation(
-        emotional_valence=emotional_valence,
-        event_type=event_type,
+    return ChunkAnnotation(
+        emotional_valence=_normalize_emotional_valence(data.get("emotional_valence", "neutral")),
+        event_type=_parse_event_type(data.get("event_type", "铺垫")),
         pivot_moment=data.get("pivot_moment", False),
         cliffhanger=data.get("cliffhanger", False),
         has_foreshadowing=has_foreshadowing,
-        foreshadowing_type=foreshadowing_type,
+        foreshadowing_type=_parse_foreshadowing_type(
+            has_foreshadowing, data.get("foreshadowing_type")
+        ),
         foreshadowing_desc=data.get("foreshadowing_desc", ""),
-        characters=characters,
-        relations=relations,
-        dialogues=dialogues,
-        character_appearances=character_appearances,
-        chunk_summary=chunk_summary,
+        characters=_parse_characters(data),
+        relations=_parse_relations(data),
+        dialogues=_parse_dialogues(data),
+        character_appearances=_parse_character_appearances(data),
+        chunk_summary=data.get("chunk_summary", ""),
     )
-    return annotation
 
 
 def parse_foreshadowing_result(data: Dict[str, Any]) -> ForeshadowingResult:
