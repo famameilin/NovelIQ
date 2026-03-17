@@ -171,3 +171,95 @@ def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float, floa
         )
         for row in result
     ]
+
+
+def fetch_emotion_curve_full(session: Session, run_id: str) -> List[Tuple[int, float, float, float, float]]:
+    """
+    获取情绪曲线完整数据
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+
+    Returns:
+        (chunk_id, pos_density, neg_density, net_density, smoothed_density) 元组列表
+    """
+    stmt = (
+        select(
+            EmotionCurve.chunk_id,
+            EmotionCurve.pos_density,
+            EmotionCurve.neg_density,
+            EmotionCurve.net_density,
+            EmotionCurve.smoothed_density,
+        )
+        .where((EmotionCurve.run_id == run_id) | (EmotionCurve.run_id.is_(None)))
+        .order_by(EmotionCurve.chunk_id)
+    )
+
+    result = session.execute(stmt).fetchall()
+    return [
+        (
+            row.chunk_id,
+            row.pos_density,
+            row.neg_density,
+            row.net_density,
+            row.smoothed_density,
+        )
+        for row in result
+    ]
+
+
+def fetch_rhythm_curve_full(session: Session, run_id: str) -> List[Tuple[int, float, float]]:
+    """
+    获取节奏曲线完整数据
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+
+    Returns:
+        (chunk_id, tension_proxy, tension_composite) 元组列表
+    """
+    stmt = (
+        select(
+            RhythmCurve.chunk_id,
+            RhythmCurve.tension_proxy,
+            RhythmCurve.tension_composite,
+        )
+        .where((RhythmCurve.run_id == run_id) | (RhythmCurve.run_id.is_(None)))
+        .order_by(RhythmCurve.chunk_id)
+    )
+
+    result = session.execute(stmt).fetchall()
+    return [
+        (
+            row.chunk_id,
+            row.tension_proxy,
+            row.tension_composite,
+        )
+        for row in result
+    ]
+
+
+def fetch_emotion_densities(session: Session, run_id: str) -> List[Tuple[float, float]]:
+    """
+    获取情绪密度数据
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+
+    Returns:
+        (pos_density, neg_density) 元组列表
+    """
+    stmt = (
+        select(
+            EmotionCurve.pos_density,
+            EmotionCurve.neg_density,
+        )
+        .where(EmotionCurve.run_id == run_id)
+        .order_by(EmotionCurve.chunk_id)
+    )
+
+    result = session.execute(stmt).fetchall()
+    return [(row.pos_density, row.neg_density) for row in result]
