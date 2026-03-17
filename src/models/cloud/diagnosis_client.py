@@ -17,12 +17,16 @@
 修改者: TraeAI
 任务: 移除 Instructor 依赖
 修改内容: 使用 LiteLLM 的 JSON Schema 模式替代 Instructor
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - 统一重试机制
+修改内容: 使用 RetryableOperation 替换自定义重试逻辑
 """
 
 from __future__ import annotations
 
 import json
-import time
 from typing import Any, Dict, List, Optional, Type, TypeVar
 
 from loguru import logger
@@ -78,26 +82,16 @@ class DiagnosisClient(BaseCloudModelClient):
             len(messages),
         )
 
-        last_error: Exception | None = None
-        for attempt in range(1, self.MAX_RETRIES + 1):
-            try:
-                result = self._diagnose_once(payload, messages, novel_id)
-                if attempt > 1:
-                    logger.info("[云端模型] diagnose 重试成功: attempt={}/{}", attempt, self.MAX_RETRIES)
-                return result
-            except ValueError as e:
-                last_error = e
-                logger.warning(
-                    "[云端模型] diagnose 失败 (attempt {}/{}): {}",
-                    attempt,
-                    self.MAX_RETRIES,
-                    str(e),
-                )
-                if attempt < self.MAX_RETRIES:
-                    logger.info("[云端模型] diagnose 将在 {} 秒后重试...", self.RETRY_DELAY_SECONDS)
-                    time.sleep(self.RETRY_DELAY_SECONDS)
+        # 使用 RetryableOperation 执行带重试的调用
+        from src.workflows.retry_utils import RetryableOperation
 
-        raise ValueError(f"云端诊断失败，已重试 {self.MAX_RETRIES} 次: {last_error}")
+        operation = RetryableOperation(
+            max_retries=self.MAX_RETRIES,
+            retryable_exceptions=(ValueError,),
+            operation_name="cloud_diagnose",
+        )
+
+        return operation.execute(self._diagnose_once, payload, messages, novel_id)
 
     def _build_json_schema(self, response_model: Type[T]) -> dict[str, Any]:
         """

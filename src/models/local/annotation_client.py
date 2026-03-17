@@ -327,6 +327,11 @@ class AnnotationClient(BaseModelClient):
         创建时间: 2026-03-17
         创建者: TraeAI
         任务: code-quality-refactor - 提取单次调用逻辑
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: code-quality-refactor - 统一重试机制
+        修改内容: 使用 RetryableOperation 替换自定义重试逻辑
         """
         messages = self._build_messages(
             ctx.text,
@@ -344,32 +349,32 @@ class AnnotationClient(BaseModelClient):
         is_cloud = self._is_cloud_api()
         self._log_annotation_start(is_cloud, ctx.text, ctx.prev_summary, ctx.chunk_id, "single_call")
 
-        # 执行带重试的调用
-        last_error: Exception | None = None
-        for attempt in range(PHASE_MAX_RETRIES):
-            try:
-                annotation, _ = self._execute_single_call(ctx, messages)
-                foreshadowing = self._build_foreshadowing_from_annotation(annotation)
-                return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
-            except Exception as e:
-                last_error = e
-                logger.error(
-                    "single_call attempt {}/{} failed: {} chunk_id={}",
-                    attempt + 1, PHASE_MAX_RETRIES, str(e), ctx.chunk_id
-                )
+        # 使用 RetryableOperation 执行带重试的调用
+        from src.workflows.retry_utils import MaxRetriesExceededError, RetryableOperation
 
-        # 云端fallback
-        if ctx.cloud_client is not None:
-            try:
-                annotation, _ = ctx.cloud_client._execute_single_call(ctx, messages)
-                foreshadowing = self._build_foreshadowing_from_annotation(annotation)
-                return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
-            except Exception as e:
-                last_error = e
-
-        raise Phase1MaxRetriesExceededError(
-            f"single_call failed after {PHASE_MAX_RETRIES} retries: {str(last_error)}"
+        operation = RetryableOperation(
+            max_retries=PHASE_MAX_RETRIES,
+            retryable_exceptions=(ConnectionError, TimeoutError),
+            operation_name=f"single_call chunk_id={ctx.chunk_id}",
         )
+
+        try:
+            annotation, _ = operation.execute(self._execute_single_call, ctx, messages)
+            foreshadowing = self._build_foreshadowing_from_annotation(annotation)
+            return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
+        except MaxRetriesExceededError:
+            # 云端fallback
+            if ctx.cloud_client is not None:
+                logger.info("single_call local retries exhausted, trying cloud fallback chunk_id={}", ctx.chunk_id)
+                try:
+                    annotation, _ = ctx.cloud_client._execute_single_call(ctx, messages)
+                    foreshadowing = self._build_foreshadowing_from_annotation(annotation)
+                    return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
+                except Exception as e:
+                    raise Phase1MaxRetriesExceededError(
+                        f"single_call failed after {PHASE_MAX_RETRIES} retries and cloud fallback: {str(e)}"
+                    ) from e
+            raise
 
     def _annotate_chunk_two_phase_from_context(
         self,
