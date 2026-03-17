@@ -1143,6 +1143,78 @@ class AnnotationClient(BaseModelClient):
                 names.add(dialogue.speaker)
         return list(names)
 
+    def _execute_validation_retry_call(
+        self,
+        retry_messages: list[dict],
+        chunk_id: int | None,
+    ) -> tuple[ChunkAnnotation, str]:
+        """
+        执行单次验证重试调用
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: code-quality-refactor - 提取API调用逻辑
+        说明: 从_retry_with_validation中提取的API调用逻辑
+        """
+        model_name = get_model_with_provider(self._config.model, self._config)
+        if not model_name:
+            raise ValueError("model is required")
+        if self._client is None:
+            raise ValueError("client is required")
+
+        enable_thinking = self._config.thinking_enabled
+        thinking_params = self._get_thinking_params(enable_thinking)
+        extra_body = self._build_extra_body(enable_thinking)
+
+        request_params = {
+            "model": model_name,
+            "messages": cast(Any, retry_messages),
+            "temperature": self._config.temperature,
+            "top_p": self._config.top_p,
+            "presence_penalty": self._config.presence_penalty,
+            "extra_body": extra_body,
+        }
+        request_params.update(thinking_params)
+
+        response = self._client.chat.completions.create(**request_params)
+        message = response.choices[0].message
+        content = message.content or ""
+
+        extraction = extract_thinking_unified(
+            content=content,
+            reasoning_content=getattr(message, "reasoning_content", None),
+            support_reasoning_content=True,
+            support_think_tags=True,
+        )
+
+        thinking_content = extraction.thinking_content
+        content_clean = extraction.content_without_thinking
+
+        logger.info(
+            "annotate_chunk retry response: thinking_chars={} response_chars={}",
+            len(thinking_content) if thinking_content else 0,
+            len(content_clean),
+        )
+
+        result = self._parse_annotation(content_clean)
+        return result, content_clean
+
+    def _validate_annotation_names(
+        self,
+        annotation: ChunkAnnotation,
+        sources: dict,
+    ) -> list[str]:
+        """
+        验证标注结果中的名字
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: code-quality-refactor - 提取名字验证逻辑
+        说明: 提取名字并验证是否在有效来源中
+        """
+        names_in_result = self._extract_names_from_annotation(annotation)
+        return validate_names_in_sources(names_in_result, sources)
+
     def _retry_with_validation(
         self,
         original_user_prompt: str,
@@ -1155,9 +1227,13 @@ class AnnotationClient(BaseModelClient):
         """
         名字验证失败后的内部重试
 
-        修改时间: 2026-03-12
+        修改时间: 2026-03-17
         修改者: TraeAI
-        修改内容: 重试时thinking使用配置值而非硬编码True
+        任务: code-quality-refactor - 重构_retry_with_validation
+        修改内容:
+        - 提取_execute_validation_retry_call方法
+        - 提取_validate_annotation_names方法
+        - 简化主函数逻辑
         """
         result: ChunkAnnotation = make_empty_annotation()
         current_invalid_names = invalid_names
@@ -1174,48 +1250,11 @@ class AnnotationClient(BaseModelClient):
             retry_messages = [{"role": "user", "content": retry_prompt}]
 
             try:
-                model_name = get_model_with_provider(self._config.model, self._config)
-                if not model_name:
-                    raise ValueError("model is required")
-                if self._client is None:
-                    raise ValueError("client is required")
-                enable_thinking = self._config.thinking_enabled
-                thinking_params = self._get_thinking_params(enable_thinking)
-                extra_body = self._build_extra_body(enable_thinking)
-                
-                request_params = {
-                    "model": model_name,
-                    "messages": cast(Any, retry_messages),
-                    "temperature": self._config.temperature,
-                    "top_p": self._config.top_p,
-                    "presence_penalty": self._config.presence_penalty,
-                    "extra_body": extra_body,
-                }
-                request_params.update(thinking_params)
-                
-                response = self._client.chat.completions.create(**request_params)
-                message = response.choices[0].message
-                content = message.content or ""
-
-                extraction = extract_thinking_unified(
-                    content=content,
-                    reasoning_content=getattr(message, "reasoning_content", None),
-                    support_reasoning_content=True,
-                    support_think_tags=True,
+                result, content_clean = self._execute_validation_retry_call(
+                    retry_messages, chunk_id
                 )
 
-                thinking_content = extraction.thinking_content
-                content_clean = extraction.content_without_thinking
-
-                logger.info(
-                    "annotate_chunk retry response: thinking_chars={} response_chars={}",
-                    len(thinking_content) if thinking_content else 0,
-                    len(content_clean),
-                )
-
-                result = self._parse_annotation(content_clean)
-                names_in_result = self._extract_names_from_annotation(result)
-                current_invalid_names = validate_names_in_sources(names_in_result, sources)
+                current_invalid_names = self._validate_annotation_names(result, sources)
 
                 if not current_invalid_names:
                     logger.info(
@@ -1232,7 +1271,9 @@ class AnnotationClient(BaseModelClient):
                     chunk_id,
                 )
 
-                retry_prompt = build_retry_prompt(original_user_prompt, content_clean, current_invalid_names)
+                retry_prompt = build_retry_prompt(
+                    original_user_prompt, content_clean, current_invalid_names
+                )
 
             except Exception as e:
                 logger.error(
