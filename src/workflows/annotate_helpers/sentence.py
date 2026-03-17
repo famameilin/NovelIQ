@@ -89,11 +89,15 @@ def compute_dialogue_lengths(text: str, speakers: list[str]) -> list[int]:
     return [speaker_lengths.get(speaker, 0) for speaker in speakers]
 
 
+# 使用配置类替代魔法数字
+from src.config.schemas import ANNOTATION_CONFIG
+
+
 def build_context_sentences(
     conn,
     candidates: list[str] | list[dict],
     alias_keywords: list[str] | None = None,
-    prev_chunks: int = 3,
+    prev_chunks: int = ANNOTATION_CONFIG.prev_chunks,
 ) -> dict[str, str]:
     """
     Build context sentences for candidate names.
@@ -114,7 +118,7 @@ def build_context_sentences(
 
 
 def extract_new_names_from_db(
-    conn, alias_map: dict, last_n_chunks: int = 10, current_chunk_id: int | None = None
+    conn, alias_map: dict, last_n_chunks: int = ANNOTATION_CONFIG.last_n_chunks, current_chunk_id: int | None = None
 ) -> list[dict]:
     """
     Extract new names and count frequency.

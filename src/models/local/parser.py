@@ -192,16 +192,18 @@ def fix_json(content: str) -> str | None:
     return None
 
 
-# 常量定义
-_VALID_ROLE_FUNCTIONS = ["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
-_VALID_ACTION_TYPES = ["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
-_VALID_EMOTION_SCORES = ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
-_VALID_RELATION_TYPES = ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
-_VALID_CLUE_TYPES = ["none", "self_introduction", "named_by_other", "alias_revealed", "appearance_desc"]
+# 使用配置类替代魔法字符串
+from src.config.schemas import ANNOTATION_CONFIG
+
+_VALID_ROLE_FUNCTIONS = ANNOTATION_CONFIG.valid_role_functions
+_VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types
+_VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores
+_VALID_RELATION_TYPES = ANNOTATION_CONFIG.valid_relation_types
+_VALID_CLUE_TYPES = ANNOTATION_CONFIG.valid_clue_types
 _VALID_EMOTIONAL_VALENCES_V2 = ["positive", "negative", "neutral"]
-_VALID_EMOTIONAL_VALENCES_V1 = ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
-_VALID_EVENT_TYPES = ["冲突", "铺垫", "转折"]
-_VALID_FORESHADOWING_TYPES = ["causal", "thematic"]
+_VALID_EMOTIONAL_VALENCES_V1 = ANNOTATION_CONFIG.valid_emotion_scores
+_VALID_EVENT_TYPES = ANNOTATION_CONFIG.valid_event_types
+_VALID_FORESHADOWING_TYPES = ANNOTATION_CONFIG.valid_foreshadowing_types
 
 
 def _parse_characters(data: Dict[str, Any]) -> List[CharacterSnapshot]:

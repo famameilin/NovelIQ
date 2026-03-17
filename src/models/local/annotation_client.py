@@ -63,7 +63,9 @@ from .validator import validate_names_in_sources
 
 T = TypeVar("T")
 
-PHASE_MAX_RETRIES = 3
+# 使用配置类替代魔法数字
+from src.config.schemas import ANNOTATION_CONFIG
+PHASE_MAX_RETRIES = ANNOTATION_CONFIG.phase_max_retries
 
 
 @dataclass
@@ -1285,31 +1287,11 @@ class AnnotationClient(BaseModelClient):
 
         return result, current_invalid_names
 
-    def _get_instructor_client(self) -> Any:
-        """
-        获取结构化输出客户端（延迟初始化）
-
-        创建时间: 2026-03-16
-        创建者: TraeAI
-        任务: 重构本地标注客户端集成 Instructor
-        说明: 使用 instructor.from_litellm() 创建客户端，支持结构化输出
-
-        修改时间: 2026-03-16
-        修改者: TraeAI
-        任务: 重构 Instructor 客户端创建逻辑
-        修改内容: 统一使用 instructor.from_litellm()
-
-        修改时间: 2026-03-17
-        修改者: TraeAI
-        任务: 移除 Instructor 依赖
-        修改内容: 返回 None，不再使用 Instructor
-        """
-        return None
-
+    # _get_instructor_client 方法已移除（返回None的废弃方法）
     # _build_json_schema 方法已移至 BaseModelClient 基类
     # 创建时间: 2026-03-17
     # 修改者: TraeAI
-    # 任务: code-quality-refactor - 提取API调用基类
+    # 任务: code-quality-refactor - 清理注释代码
 
     def _call_annotation_api(
         self,

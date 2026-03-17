@@ -39,8 +39,9 @@ if TYPE_CHECKING:
     import networkx as nx
     from src.rag import RAGRetriever
 
-
-DISAMBIG_MAX_RETRIES = 3
+# 使用配置类替代魔法数字
+from src.config.schemas import ANNOTATION_CONFIG
+DISAMBIG_MAX_RETRIES = ANNOTATION_CONFIG.disambig_max_retries
 
 
 def _save_disambig_checkpoint(conn, run_id: str, alias_map: dict[str, str]) -> None:
@@ -208,7 +209,7 @@ def _run_incremental_disambiguation(
     incremental_interval: int,
     current_idx: int,
     run_id: str,
-    checkpoint_interval: int = 50,
+    checkpoint_interval: int = ANNOTATION_CONFIG.checkpoint_interval,
 ) -> dict[str, str]:
     """
     执行增量消歧

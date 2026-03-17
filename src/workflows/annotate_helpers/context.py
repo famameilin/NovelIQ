@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Optional
 from loguru import logger
 
 from src.config import settings
+from src.config.schemas import ANNOTATION_CONFIG
 from src.models.local.embedding import EmbeddingClient
 
 if TYPE_CHECKING:
@@ -155,7 +156,7 @@ def _prepare_chunk_context(
         # 获取完整的 prev_chunk_text 和 next_chunk_text
         context.prev_tail_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
-        active_entities = get_active_entities(entity_repo, run_id, chunk_id, lookback=10)
+        active_entities = get_active_entities(entity_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
         if active_entities:
             context.active_entities_str = format_entities_for_prompt(active_entities, alias_map=alias_map)
 
