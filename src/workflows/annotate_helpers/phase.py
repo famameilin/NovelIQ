@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Tuple
 
 from loguru import logger
@@ -30,6 +31,31 @@ if TYPE_CHECKING:
     import networkx as nx
     from src.rag import RAGRetriever
     from src.models.local.schema import TwoPhaseAnnotationResult
+
+
+@dataclass
+class AnnotationPhaseConfig:
+    """
+    标注阶段配置
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 简化多参数函数
+    说明: 封装_init_annotation_phase的多参数
+    """
+
+    conn: any
+    all_chunks: list
+    novel_id: str
+    novel_title: str | None = None
+    use_context_enhancement: bool = False
+    use_rag: bool = False
+    resume: bool = False
+    analysis_logger: AnalysisLogger | None = None
+    annotate_client: UnifiedModelClient | None = None
+    incremental_disambig_client: UnifiedModelClient | None = None
+    full_disambig_client: UnifiedModelClient | None = None
+    run_id: str = ""
 
 
 class ChunkAnnotationMaxRetriesExceededError(Exception):
@@ -128,6 +154,77 @@ class AnnotationPhaseResult:
         self.alias_map = alias_map
 
 
+def _init_annotation_phase_with_config(
+    config: AnnotationPhaseConfig,
+) -> AnnotationPhaseResult:
+    """
+    初始化标注阶段（使用配置对象）
+
+    创建时间: 2026-03-17
+    创建者: TraeAI
+    任务: code-quality-refactor - 简化多参数函数
+    说明: 使用 AnnotationPhaseConfig 替代多个参数
+    """
+    from .client_init import _init_annotation_clients, _setup_token_usage_callback
+    from .context import _init_rag_retriever
+    from .sentence import _load_alias_keywords, _extract_and_save_global_context
+
+    if config.run_id is None:
+        raise ValueError("run_id is required for annotation phase")
+
+    (annotation_client, cloud_annotation_client, incremental_client, full_client) = (
+        _init_annotation_clients(
+            config.analysis_logger,
+            config.annotate_client,
+            config.incremental_disambig_client,
+            config.full_disambig_client,
+        )
+    )
+
+    clients = [
+        annotation_client,
+        cloud_annotation_client,
+        config.incremental_disambig_client,
+        config.full_disambig_client,
+    ]
+    _setup_token_usage_callback(
+        config.conn, clients, config.novel_id, annotation_client, run_id=config.run_id
+    )
+
+    alias_keywords = _load_alias_keywords()
+    rag_retriever, character_graph, _ = _init_rag_retriever(
+        config.conn,
+        config.novel_id,
+        config.use_rag,
+        config.resume,
+        annotation_client._token_usage_callback,
+        run_id=config.run_id,
+    )
+
+    global_context_str = _extract_and_save_global_context(
+        config.conn,
+        config.all_chunks,
+        config.novel_id,
+        config.novel_title,
+        config.use_context_enhancement,
+        config.resume,
+        annotation_client,
+        run_id=config.run_id,
+    )
+
+    return AnnotationPhaseResult(
+        annotation_client=annotation_client,
+        cloud_annotation_client=cloud_annotation_client,
+        incremental_disambig_client=incremental_client,
+        full_disambig_client=full_client,
+        rag_retriever=rag_retriever,
+        character_graph=character_graph,
+        alias_keywords=alias_keywords,
+        global_context_str=global_context_str,
+        alias_map={},
+    )
+
+
 def _init_annotation_phase(
     conn,
     all_chunks: list,
@@ -160,43 +257,29 @@ def _init_annotation_phase(
     任务: storage-layer-decoupling
     修改内容: 添加 incremental_disambig_client 和 full_disambig_client 参数，支持测试注入 mock
 
+    修改时间: 2026-03-17
+    修改者: TraeAI
+    任务: code-quality-refactor - 简化多参数函数
+    修改内容: 改为调用 _init_annotation_phase_with_config，保持向后兼容
+
     Returns:
         AnnotationPhaseResult: 包含所有初始化后的资源
     """
-    from .client_init import _init_annotation_clients, _setup_token_usage_callback
-    from .context import _init_rag_retriever
-    from .sentence import _load_alias_keywords, _extract_and_save_global_context
-
-    if run_id is None:
-        raise ValueError("run_id is required for annotation phase")
-
-    (annotation_client, cloud_annotation_client, incremental_client, full_client) = (
-        _init_annotation_clients(analysis_logger, annotate_client, incremental_disambig_client, full_disambig_client)
+    config = AnnotationPhaseConfig(
+        conn=conn,
+        all_chunks=all_chunks,
+        novel_id=novel_id,
+        novel_title=novel_title,
+        use_context_enhancement=use_context_enhancement,
+        use_rag=use_rag,
+        resume=resume,
+        analysis_logger=analysis_logger,
+        annotate_client=annotate_client,
+        incremental_disambig_client=incremental_disambig_client,
+        full_disambig_client=full_disambig_client,
+        run_id=run_id,
     )
-
-    clients = [annotation_client, cloud_annotation_client, incremental_disambig_client, full_disambig_client]
-    _setup_token_usage_callback(conn, clients, novel_id, annotation_client, run_id=run_id)
-
-    alias_keywords = _load_alias_keywords()
-    rag_retriever, character_graph, _ = _init_rag_retriever(
-        conn, novel_id, use_rag, resume, annotation_client._token_usage_callback, run_id=run_id
-    )
-
-    global_context_str = _extract_and_save_global_context(
-        conn, all_chunks, novel_id, novel_title, use_context_enhancement, resume, annotation_client, run_id=run_id
-    )
-
-    return AnnotationPhaseResult(
-        annotation_client=annotation_client,
-        cloud_annotation_client=cloud_annotation_client,
-        incremental_disambig_client=incremental_client,
-        full_disambig_client=full_client,
-        rag_retriever=rag_retriever,
-        character_graph=character_graph,
-        alias_keywords=alias_keywords,
-        global_context_str=global_context_str,
-        alias_map={},
-    )
+    return _init_annotation_phase_with_config(config)
 
 
 def _process_single_chunk(
