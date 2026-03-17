@@ -91,7 +91,6 @@ class ChunkRelation(BaseModel):
 
 class ChunkDialogue(BaseModel):
     speaker: str
-    tone: Optional[str] = None
     length: Optional[int] = None
 
 
@@ -264,6 +263,7 @@ class TaskInfoResponse(BaseModel):
     任务: postgresql-migration-cleanup
     修改内容: 移除 db_path 字段，添加 run_id 字段
     """
+
     task_id: str
     novel_id: str
     status: str

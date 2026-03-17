@@ -561,7 +561,9 @@ class EntityRepositoryProtocol(Protocol):
         """
         ...
 
-    def fetch_active_entities(self, current_chunk_id: int, lookback: int = 10) -> List[Tuple[int, str, str, str, str, int]]:
+    def fetch_active_entities(
+        self, current_chunk_id: int, lookback: int = 10
+    ) -> List[Tuple[int, str, str, str, str, int]]:
         """
         获取活跃实体
 

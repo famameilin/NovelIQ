@@ -113,7 +113,9 @@ def build_context_sentences(
     return result
 
 
-def extract_new_names_from_db(conn, alias_map: dict, last_n_chunks: int = 10) -> list[dict]:
+def extract_new_names_from_db(
+    conn, alias_map: dict, last_n_chunks: int = 10, current_chunk_id: int | None = None
+) -> list[dict]:
     """
     Extract new names and count frequency.
 
@@ -121,18 +123,34 @@ def extract_new_names_from_db(conn, alias_map: dict, last_n_chunks: int = 10) ->
     修改者: TraeAI
     任务: postgresql-migration
     修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: fix-extract-new-names
+    修改内容: 添加 current_chunk_id 参数，查询当前 chunk 之前最近 N 个 chunk，
+             而不是数据库中最后 N 个 chunk
     """
     known = set(alias_map.keys()) | set(alias_map.values())
+
+    # 如果没有提供 current_chunk_id，使用数据库中的最大 chunk_id（向后兼容）
+    if current_chunk_id is None:
+        max_chunk_result = conn.execute(text("SELECT MAX(chunk_id) FROM chunk_characters"))
+        current_chunk_id = max_chunk_result.scalar() or 0
+
+    # 查询当前 chunk 之前最近 N 个 chunk 的名字
+    min_chunk_id = max(0, current_chunk_id - last_n_chunks)
+
     rows = conn.execute(
         text("""
-            SELECT name, COUNT(*) as count 
+            SELECT name, COUNT(*) as count
             FROM chunk_characters
-            WHERE chunk_id > (SELECT MAX(chunk_id) FROM chunk_characters) - :last_n_chunks
+            WHERE chunk_id > :min_chunk_id AND chunk_id <= :current_chunk_id
             GROUP BY name
             ORDER BY count DESC
         """),
-        {"last_n_chunks": last_n_chunks},
+        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id},
     ).fetchall()
+
     return [{"name": r[0], "count": r[1]} for r in rows if r[0] not in known]
 
 
@@ -220,6 +238,29 @@ def _extract_and_save_global_context(
     return global_context_str
 
 
+def _get_name_variants(name: str, name_set: set[str]) -> list[str]:
+    """
+    生成候选名的字符串变体。
+
+    创建时间: 2026-03-16
+    创建者: TraeAI
+    任务: fix-disambiguation-three-phase
+    说明: 三字及以上的名字，额外加一个去掉第一个字（通常是姓）的版本。
+          短形式已作为独立候选名存在时，不展开，避免污染两个不同人物的参考池。
+
+    示例：
+      贺重明, {"贺重明", "伯安"}     → ["贺重明", "重明"]
+      贺重明, {"贺重明", "重明", "伯安"} → ["贺重明"]   ← 重明已是独立候选，不展开
+      伯安,   {"伯安"}               → ["伯安"]
+    """
+    variants = [name]
+    if len(name) >= 3:
+        short = name[1:]
+        if short not in name_set:
+            variants.append(short)
+    return variants
+
+
 def _build_sentence_pool(
     conn,
     name_list: list[str],
@@ -230,8 +271,20 @@ def _build_sentence_pool(
     修改者: TraeAI
     任务: postgresql-migration
     修改内容: 使用 SQLAlchemy text() 包装 SQL 语句
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: fix-disambiguation-three-phase
+    修改内容: 使用变体反查表实现变体匹配，让揭示句能匹配到候选名
     """
     from src.metrics.text_utils import split_sentences
+
+    name_set = set(name_list)
+
+    variant_to_name: dict[str, str] = {}
+    for name in name_list:
+        for v in _get_name_variants(name, name_set):
+            variant_to_name[v] = name
 
     result = {}
     sentences_pool: dict[str, list[str]] = {name: [] for name in name_list}
@@ -239,15 +292,17 @@ def _build_sentence_pool(
     rows = conn.execute(text("SELECT text FROM chunks ORDER BY chunk_id")).fetchall()
     for (text_content,) in rows:
         for sentence in split_sentences(text_content):
-            for name in name_list:
-                if name in sentence:
-                    annotated = _annotate_dialogue_structure(sentence)
-                    if any(kw in sentence for kw in alias_keywords):
-                        sentences_pool[name].insert(
-                            0, annotated.strip()[: settings.analysis.sentence_preview_max_chars]
-                        )
-                    elif len(sentences_pool[name]) < 3:
-                        sentences_pool[name].append(annotated.strip()[: settings.analysis.sentence_pool_max_chars])
+            matched: dict[str, bool] = {}
+            for variant, canonical in variant_to_name.items():
+                if variant in sentence:
+                    matched[canonical] = True
+
+            for name in matched:
+                annotated = _annotate_dialogue_structure(sentence)
+                if any(kw in sentence for kw in alias_keywords):
+                    sentences_pool[name].insert(0, annotated.strip()[: settings.analysis.sentence_preview_max_chars])
+                elif len(sentences_pool[name]) < 3:
+                    sentences_pool[name].append(annotated.strip()[: settings.analysis.sentence_pool_max_chars])
 
     for name, sents in sentences_pool.items():
         if sents:

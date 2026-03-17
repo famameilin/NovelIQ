@@ -29,7 +29,7 @@ from src.models.local.unified_client import UnifiedModelClient
 if TYPE_CHECKING:
     import networkx as nx
     from src.rag import RAGRetriever
-    from src.models.local.schema import ChunkAnnotation
+    from src.models.local.schema import TwoPhaseAnnotationResult
 
 
 class ChunkAnnotationMaxRetriesExceededError(Exception):
@@ -58,7 +58,7 @@ def _annotate_chunk(
     known_aliases: str | None = None,
     next_preview: str | None = None,
     cloud_client: UnifiedModelClient | None = None,
-) -> "ChunkAnnotation":
+) -> "TwoPhaseAnnotationResult":
     """
     Chunk 标注函数
 
@@ -71,6 +71,11 @@ def _annotate_chunk(
     - 内层: 本地模型最多3次（任何错误类型）
     - 内层: 本地失败后云端1次
     - 云端失败直接终止整个任务
+
+    修改时间: 2026-03-17
+    修改者: TraeAI
+    任务: 修复foreshadowing数据丢失问题
+    修改内容: 返回TwoPhaseAnnotationResult，包含foreshadowing数据
     """
     try:
         return client.annotate_chunk(
@@ -232,7 +237,7 @@ def _process_single_chunk(
         conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.rag_retriever, run_id=run_id
     )
 
-    annotation = _annotate_chunk(
+    annotation_result = _annotate_chunk(
         phase_result.annotation_client,
         chunk_text,
         None,
@@ -246,7 +251,7 @@ def _process_single_chunk(
         next_preview=ctx.next_text,
         cloud_client=phase_result.cloud_annotation_client,
     )
-    _store_annotation_results(conn, chunk_id, annotation, chunk_text, use_context_enhancement, run_id=run_id)
+    _store_annotation_results(conn, chunk_id, annotation_result.annotation, chunk_text, use_context_enhancement, run_id=run_id, foreshadowing=annotation_result.foreshadowing)
     logger.debug(f"annotated chunk_id={chunk_id}")
 
     alias_map = _run_incremental_disambiguation(

@@ -21,7 +21,17 @@ class InputConfig:
 
 @dataclass(frozen=True)
 class TaskModelConfig:
-    """任务级模型配置"""
+    """
+    任务级模型配置
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 添加 provider 字段，支持明确指定 LLM provider
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 添加 stream_enabled 和 stream_cloud_only 字段支持流式响应
+    """
 
     base_url: str | None = None
     model: str | None = None
@@ -34,6 +44,9 @@ class TaskModelConfig:
     presence_penalty: float = 1.5
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
+    provider: str | None = None  # 明确指定 provider，如 openai, azure, anthropic 等
+    stream_enabled: bool = False  # 是否启用流式响应模式
+    stream_cloud_only: bool = True  # 是否仅在云端模型启用流式模式
 
     def validate(self) -> None:
         if self.timeout_s is not None and self.timeout_s <= 0:
@@ -56,12 +69,23 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
     修改时间: 2026-03-12
     修改者: TraeAI
     修改内容: thinking配置从顶层settings.thinking读取，而非各模型配置中
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 添加 provider 字段支持
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 添加 stream_enabled 支持
     """
     task_settings = getattr(settings.models, task_type, None)
     if task_settings is None:
         raise ValueError(f"未知的任务类型: {task_type}")
 
     thinking_enabled = getattr(settings.thinking, task_type, False)
+    stream_enabled = getattr(settings.streaming, task_type, False) if hasattr(settings, "streaming") else False
+
+    stream_cloud_only = getattr(settings.streaming, "cloud_only", True) if hasattr(settings, "streaming") else True
 
     return TaskModelConfig(
         base_url=task_settings.base_url,
@@ -75,4 +99,7 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
         presence_penalty=task_settings.presence_penalty,
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=None,
+        provider=getattr(task_settings, "provider", None),
+        stream_enabled=stream_enabled,
+        stream_cloud_only=stream_cloud_only,
     )

@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.exceptions import AnalysisNotCompleteError
+from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ResultsWriteResponse
 from src.api.routes.results_fetchers import (
     _fetch_emotion_curve,
@@ -121,7 +121,7 @@ router = APIRouter(prefix="/novels", tags=["results"])
 )
 async def get_results(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
+    run_id: str = Query(..., description="分析运行ID（完整UUID）"),
     novel_service: NovelService = Depends(get_novel_service),
 ) -> ResultsWriteResponse:
     """
@@ -133,33 +133,41 @@ async def get_results(
     修改者: TraeAI
     任务: postgresql-migration
     修改内容: 移除 has_db/get_db_path 等 SQLite 特有方法
-    """
-    task = novel_service.get_task(task_id)
-    task_status = task.get("status", "unknown")
-    if task_status != "completed":
-        raise AnalysisNotCompleteError(f"分析任务未完成，当前状态: {task_status}")
 
-    session_factory = SessionFactory(novel_service.upload_dir)
-    db_session = session_factory.get_session(task_id)
-    conn = db_session.connection
-    try:
-        run_id = task_id
-        stats_repo = StatsRepository(conn)
-        annotation_repo = AnnotationRepository(conn)
-        chunk_repo = ChunkRepository(conn)
+    修改时间: 2026-03-17
+    修改者: TraeAI
+    任务: 修复API参数问题
+    修改内容: 将task_id改为run_id，使用完整UUID查询
+    """
+    # 从数据库查询运行记录
+    from src.storage.db import get_session_factory
+    from src.storage.repositories import RunRepository
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run_repo = RunRepository(session)
+        run = run_repo.get_run(run_id)
+        if not run:
+            raise NovelNotFoundError(f"运行记录不存在: {run_id}")
+        if run["status"] != "completed":
+            raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
+
+    # 使用SQLAlchemy session直接查询数据
+    with session_factory() as session:
+        stats_repo = StatsRepository(session)
+        annotation_repo = AnnotationRepository(session)
+        chunk_repo = ChunkRepository(session)
 
         results_data, missing_fields, novel_name = _fetch_all_results_data(
-            novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo
+            novel_id, run_id, run_id, stats_repo, annotation_repo, chunk_repo
         )
 
-        file_path = _write_results_to_file(task_id, results_data)
+        file_path = _write_results_to_file(run_id, results_data)
 
         if missing_fields:
-            logger.warning(f"Task {task_id} has missing fields: {missing_fields}")
+            logger.warning(f"Task {run_id} has missing fields: {missing_fields}")
 
         return _build_results_response(file_path, novel_id, novel_name, missing_fields)
-    finally:
-        conn.close()
 
 
 def _fetch_all_results_data(
@@ -281,9 +289,7 @@ def _write_results_to_file(task_id: str, data: Dict[str, Any]) -> str:
     return str(file_path)
 
 
-def _get_session_and_run_id(
-    task_id: str, novel_service: NovelService
-) -> Tuple[Session, str]:
+def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> Tuple[Session, str]:
     """
     2026-03-14: TraeAI创建，任务refactor-routes-use-repository
     从 task_id 获取数据库连接和 run_id

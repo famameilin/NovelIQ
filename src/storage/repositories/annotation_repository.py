@@ -13,6 +13,11 @@
 修改者: TraeAI
 任务: postgresql-migration
 修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 模型替代原生 SQL
+
+修改时间: 2026-03-16
+修改者: TraeAI
+任务: fix-disambiguation-three-phase
+修改内容: 新增 apply_alias_corrections 方法
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Sequence, Set
 
+from loguru import logger
 from sqlalchemy import func, select, update, delete, or_
 from sqlalchemy.dialects.postgresql import insert
 
@@ -649,3 +655,50 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
             )
         ).scalar() or 0
         return chunks_count > 0 and annotations_count >= chunks_count
+
+    def apply_alias_corrections(self, run_id: str, alias_map: Dict[str, str]) -> None:
+        """
+        用最终消歧结果修正所有标注表里的错误名字
+
+        创建时间: 2026-03-16
+        创建者: TraeAI
+        任务: fix-disambiguation-three-phase
+        说明: 遍历 alias_map，将所有别名修正为规范名
+
+        Args:
+            run_id: 运行ID
+            alias_map: 别名到规范名的映射
+        """
+        correction_count = 0
+        for alias, canonical in alias_map.items():
+            if alias == canonical:
+                continue
+
+            self.session.execute(
+                update(ChunkCharacter)
+                .where(ChunkCharacter.name == alias, ChunkCharacter.run_id == run_id)
+                .values(name=canonical)
+            )
+
+            self.session.execute(
+                update(ChunkRelation)
+                .where(ChunkRelation.from_char == alias, ChunkRelation.run_id == run_id)
+                .values(from_char=canonical)
+            )
+
+            self.session.execute(
+                update(ChunkRelation)
+                .where(ChunkRelation.to_char == alias, ChunkRelation.run_id == run_id)
+                .values(to_char=canonical)
+            )
+
+            self.session.execute(
+                update(CharacterAppearance)
+                .where(CharacterAppearance.raw_name == alias, CharacterAppearance.run_id == run_id)
+                .values(raw_name=canonical)
+            )
+
+            correction_count += 1
+
+        self.session.commit()
+        logger.info(f"applied alias corrections: {correction_count} names updated")

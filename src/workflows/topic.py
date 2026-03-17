@@ -125,6 +125,11 @@ def run_topic_model(
     chunk_repo.insert_chunk_topics(run_id, topic_rows)
     logger.info(f"inserted {len(topic_rows)} topic assignments")
 
+    # 保存主题模型到磁盘
+    model_dir = Path("models") / "topic" / run_id
+    trainer.save_model(topic_model, model_dir)
+    logger.info(f"saved topic model to {model_dir}")
+
     logger.info("\n=== Topic Summary ===")
     for topic_id in range(topic_model.num_topics):
         words = topic_model.get_topic_words(topic_id, top_n=10)

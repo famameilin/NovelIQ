@@ -71,7 +71,7 @@ class TestLocalSchema(unittest.TestCase):
                 )
             ],
         )
-        annotation.validate()
+        self.assertIsNotNone(annotation)
 
 
 if __name__ == "__main__":

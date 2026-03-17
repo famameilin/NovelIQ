@@ -209,9 +209,7 @@ def _fetch_foreshadowing_chunks(conn: Session, limit: int = 30) -> List[Any]:
 
 
 def _fetch_first_last_chunk_summary(conn: Session, max_chars: int = 500) -> tuple:
-    result = conn.execute(
-        text("SELECT chunk_id, text FROM chunks ORDER BY chunk_id")
-    )
+    result = conn.execute(text("SELECT chunk_id, text FROM chunks ORDER BY chunk_id"))
     chunks = result.fetchall()
     if not chunks:
         return "", ""

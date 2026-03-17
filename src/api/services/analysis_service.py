@@ -215,9 +215,7 @@ class AnalysisService:
         loop = asyncio.get_event_loop()
 
         if not skip_stages["skip_preprocess"]:
-            self.task_manager.update_task(
-                task_id, stage="preprocess", progress=settings.analysis.progress.preprocess
-            )
+            self.task_manager.update_task(task_id, stage="preprocess", progress=settings.analysis.progress.preprocess)
             await loop.run_in_executor(
                 None,
                 lambda: self._run_preprocess(source_path, run_id, session, max_chars, overlap),
@@ -379,7 +377,9 @@ class AnalysisService:
         except Exception as e:
             elapsed = time.time() - start_time
             if session and run_id:
-                self._handle_analysis_failure(task_id, novel.get("novel_id", "unknown"), elapsed, e, analysis_logger, session, run_id)
+                self._handle_analysis_failure(
+                    task_id, novel.get("novel_id", "unknown"), elapsed, e, analysis_logger, session, run_id
+                )
             else:
                 self.novel_service.update_task_status(task_id, "failed")
                 self.task_manager.complete_task(task_id, success=False, error=str(e))
@@ -417,13 +417,22 @@ class AnalysisService:
             )
 
             elapsed = time.time() - start_time
-            self._handle_analysis_success(task_id, novel_id, elapsed, analysis_logger, session, run_id, log_prefix="Reanalysis")
+            self._handle_analysis_success(
+                task_id, novel_id, elapsed, analysis_logger, session, run_id, log_prefix="Reanalysis"
+            )
 
         except Exception as e:
             elapsed = time.time() - start_time
             if session and run_id:
                 self._handle_analysis_failure(
-                    task_id, novel.get("novel_id", "unknown"), elapsed, e, analysis_logger, session, run_id, log_prefix="Reanalysis"
+                    task_id,
+                    novel.get("novel_id", "unknown"),
+                    elapsed,
+                    e,
+                    analysis_logger,
+                    session,
+                    run_id,
+                    log_prefix="Reanalysis",
                 )
             else:
                 self.novel_service.update_task_status(task_id, "failed")
@@ -434,13 +443,20 @@ class AnalysisService:
             if session:
                 session.close()
 
-    def _run_preprocess(self, source_path: Path, run_id: str, session: Session, max_chars: int = 2000, overlap: int = 200) -> None:
+    def _run_preprocess(
+        self, source_path: Path, run_id: str, session: Session, max_chars: int = 2000, overlap: int = 200
+    ) -> None:
         from src.workflows import run_preprocess
 
         run_preprocess(source_path=source_path, run_id=run_id, session=session, max_chars=max_chars, overlap=overlap)
 
     def _run_annotate(
-        self, run_id: str, session: Session, novel_id: str, analysis_logger: AnalysisLogger | None, novel_title: str | None = None
+        self,
+        run_id: str,
+        session: Session,
+        novel_id: str,
+        analysis_logger: AnalysisLogger | None,
+        novel_title: str | None = None,
     ) -> None:
         from src.workflows import run_annotate
 

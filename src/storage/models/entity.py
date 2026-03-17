@@ -9,6 +9,10 @@
 任务: postgresql-migration
 修改内容: 使用 pgvector vector 类型，移除 LargeBinary
 
+修改时间: 2026-03-16
+修改者: TraeAI
+修改内容: EntityRegistry 使用复合外键引用 chunks 表
+
 本模块定义实体相关的数据表：
 - Entity: 实体表
 - EntityAlias: 实体别名表
@@ -22,7 +26,7 @@ from __future__ import annotations
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Float, Index, Integer, String, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Float, ForeignKeyConstraint, Index, Integer, String, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -179,25 +183,35 @@ class EntityRegistry(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储活跃实体的状态信息
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    修改内容: 使用复合外键引用 chunks 表
     """
 
     __tablename__ = "entity_registry"
 
     entity_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chunk_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chunks.chunk_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     last_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_emotion: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     emotion_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
-    )
+    run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["analysis_runs.run_id"],
+            ondelete="CASCADE",
+        ),
         Index("idx_entity_registry_chunk_id", "chunk_id"),
         Index("idx_entity_registry_run_id", "run_id"),
     )

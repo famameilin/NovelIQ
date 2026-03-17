@@ -69,16 +69,19 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
             return
 
         for stat_name, stat_value in stats_list:
-            stmt = pg_insert(GlobalStats).values(
-                stat_name=stat_name,
-                stat_value=stat_value,
-                run_id=run_id,
-            ).on_conflict_do_update(
-                index_elements=["stat_name"],
-                set_={
-                    "stat_value": stat_value,
-                    "run_id": run_id,
-                },
+            stmt = (
+                pg_insert(GlobalStats)
+                .values(
+                    stat_name=stat_name,
+                    stat_value=stat_value,
+                    run_id=run_id,
+                )
+                .on_conflict_do_update(
+                    index_elements=["stat_name", "run_id"],
+                    set_={
+                        "stat_value": stat_value,
+                    },
+                )
             )
             self.session.execute(stmt)
         self.session.commit()
@@ -93,15 +96,11 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             (stat_name, stat_value) 元组列表
         """
-        stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(
-            GlobalStats.run_id == run_id
-        )
+        stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(GlobalStats.run_id == run_id)
         result = self.session.execute(stmt)
         return [(row.stat_name, row.stat_value) for row in result.fetchall()]
 
-    def insert_emotion_curve(
-        self, run_id: str, rows: Iterable[Tuple[int, float, float, float, float]]
-    ) -> None:
+    def insert_emotion_curve(self, run_id: str, rows: Iterable[Tuple[int, float, float, float, float]]) -> None:
         """
         插入情绪曲线数据
 
@@ -114,22 +113,25 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
             return
 
         for chunk_id, pos_density, neg_density, net_density, smoothed_density in data_list:
-            stmt = pg_insert(EmotionCurve).values(
-                chunk_id=chunk_id,
-                pos_density=pos_density,
-                neg_density=neg_density,
-                net_density=net_density,
-                smoothed_density=smoothed_density,
-                run_id=run_id,
-            ).on_conflict_do_update(
-                index_elements=["chunk_id"],
-                set_={
-                    "pos_density": pos_density,
-                    "neg_density": neg_density,
-                    "net_density": net_density,
-                    "smoothed_density": smoothed_density,
-                    "run_id": run_id,
-                },
+            stmt = (
+                pg_insert(EmotionCurve)
+                .values(
+                    chunk_id=chunk_id,
+                    pos_density=pos_density,
+                    neg_density=neg_density,
+                    net_density=net_density,
+                    smoothed_density=smoothed_density,
+                    run_id=run_id,
+                )
+                .on_conflict_do_update(
+                    index_elements=["chunk_id", "run_id"],
+                    set_={
+                        "pos_density": pos_density,
+                        "neg_density": neg_density,
+                        "net_density": net_density,
+                        "smoothed_density": smoothed_density,
+                    },
+                )
             )
             self.session.execute(stmt)
         self.session.commit()
@@ -147,18 +149,21 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
             return
 
         for chunk_id, tension_proxy, tension_composite in data_list:
-            stmt = pg_insert(RhythmCurve).values(
-                chunk_id=chunk_id,
-                tension_proxy=tension_proxy,
-                tension_composite=tension_composite,
-                run_id=run_id,
-            ).on_conflict_do_update(
-                index_elements=["chunk_id"],
-                set_={
-                    "tension_proxy": tension_proxy,
-                    "tension_composite": tension_composite,
-                    "run_id": run_id,
-                },
+            stmt = (
+                pg_insert(RhythmCurve)
+                .values(
+                    chunk_id=chunk_id,
+                    tension_proxy=tension_proxy,
+                    tension_composite=tension_composite,
+                    run_id=run_id,
+                )
+                .on_conflict_do_update(
+                    index_elements=["chunk_id", "run_id"],
+                    set_={
+                        "tension_proxy": tension_proxy,
+                        "tension_composite": tension_composite,
+                    },
+                )
             )
             self.session.execute(stmt)
         self.session.commit()
@@ -217,29 +222,31 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
             novel_title: 小说标题（可选）
         """
         now = datetime.now().isoformat()
-        stmt = pg_insert(GlobalContext).values(
-            novel_id=novel_id,
-            novel_title=novel_title,
-            core_characters=core_characters,
-            world_setting=world_setting,
-            updated_at=now,
-            run_id=run_id,
-        ).on_conflict_do_update(
-            index_elements=["novel_id"],
-            set_={
-                "novel_title": novel_title,
-                "core_characters": core_characters,
-                "world_setting": world_setting,
-                "updated_at": now,
-                "run_id": run_id,
-            },
+        stmt = (
+            pg_insert(GlobalContext)
+            .values(
+                novel_id=novel_id,
+                novel_title=novel_title,
+                core_characters=core_characters,
+                world_setting=world_setting,
+                updated_at=now,
+                run_id=run_id,
+            )
+            .on_conflict_do_update(
+                index_elements=["novel_id"],
+                set_={
+                    "novel_title": novel_title,
+                    "core_characters": core_characters,
+                    "world_setting": world_setting,
+                    "updated_at": now,
+                    "run_id": run_id,
+                },
+            )
         )
         self.session.execute(stmt)
         self.session.commit()
 
-    def fetch_global_context(
-        self, run_id: str, novel_id: str
-    ) -> Optional[Tuple[str, str, str, str]]:
+    def fetch_global_context(self, run_id: str, novel_id: str) -> Optional[Tuple[str, str, str, str]]:
         """
         获取全局上下文
 
@@ -384,28 +391,36 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
 
     def _fetch_usage_by_task(self, run_id: str, novel_id: str) -> Dict[str, Any]:
         """按任务类型获取使用量"""
-        stmt = select(
-            TokenUsage.task_type,
-            func.count().label("count"),
-            func.sum(TokenUsage.total_tokens).label("total"),
-        ).where(
-            TokenUsage.novel_id == novel_id,
-            TokenUsage.run_id == run_id,
-        ).group_by(TokenUsage.task_type)
+        stmt = (
+            select(
+                TokenUsage.task_type,
+                func.count().label("count"),
+                func.sum(TokenUsage.total_tokens).label("total"),
+            )
+            .where(
+                TokenUsage.novel_id == novel_id,
+                TokenUsage.run_id == run_id,
+            )
+            .group_by(TokenUsage.task_type)
+        )
 
         result = self.session.execute(stmt).fetchall()
         return {row.task_type: {"call_count": row.count, "total_tokens": row.total} for row in result}
 
     def _fetch_usage_by_model(self, run_id: str, novel_id: str) -> Dict[str, Any]:
         """按模型获取使用量"""
-        stmt = select(
-            TokenUsage.model,
-            func.count().label("count"),
-            func.sum(TokenUsage.total_tokens).label("total"),
-        ).where(
-            TokenUsage.novel_id == novel_id,
-            TokenUsage.run_id == run_id,
-        ).group_by(TokenUsage.model)
+        stmt = (
+            select(
+                TokenUsage.model,
+                func.count().label("count"),
+                func.sum(TokenUsage.total_tokens).label("total"),
+            )
+            .where(
+                TokenUsage.novel_id == novel_id,
+                TokenUsage.run_id == run_id,
+            )
+            .group_by(TokenUsage.model)
+        )
 
         result = self.session.execute(stmt).fetchall()
         return {row.model: {"call_count": row.count, "total_tokens": row.total} for row in result}
@@ -420,25 +435,26 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
             summary: 摘要文本
         """
         now = datetime.now().isoformat()
-        stmt = pg_insert(ChunkSummary).values(
-            chunk_id=chunk_id,
-            summary=summary,
-            created_at=now,
-            run_id=run_id,
-        ).on_conflict_do_update(
-            index_elements=["chunk_id"],
-            set_={
-                "summary": summary,
-                "created_at": now,
-                "run_id": run_id,
-            },
+        stmt = (
+            pg_insert(ChunkSummary)
+            .values(
+                chunk_id=chunk_id,
+                summary=summary,
+                created_at=now,
+                run_id=run_id,
+            )
+            .on_conflict_do_update(
+                index_elements=["chunk_id", "run_id"],
+                set_={
+                    "summary": summary,
+                    "created_at": now,
+                },
+            )
         )
         self.session.execute(stmt)
         self.session.commit()
 
-    def insert_character_appearances(
-        self, run_id: str, chunk_id: int, appearances: Sequence[Any]
-    ) -> None:
+    def insert_character_appearances(self, run_id: str, chunk_id: int, appearances: Sequence[Any]) -> None:
         """
         插入角色出场信息
 
@@ -477,13 +493,15 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             (pos_density, neg_density, net_density) 元组列表
         """
-        stmt = select(
-            EmotionCurve.pos_density,
-            EmotionCurve.neg_density,
-            EmotionCurve.net_density,
-        ).where(
-            EmotionCurve.run_id == run_id
-        ).order_by(EmotionCurve.chunk_id)
+        stmt = (
+            select(
+                EmotionCurve.pos_density,
+                EmotionCurve.neg_density,
+                EmotionCurve.net_density,
+            )
+            .where(EmotionCurve.run_id == run_id)
+            .order_by(EmotionCurve.chunk_id)
+        )
 
         result = self.session.execute(stmt).fetchall()
         return [(row.pos_density, row.neg_density, row.net_density) for row in result]
@@ -503,12 +521,14 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             (pos_density, neg_density) 元组列表
         """
-        stmt = select(
-            EmotionCurve.pos_density,
-            EmotionCurve.neg_density,
-        ).where(
-            EmotionCurve.run_id == run_id
-        ).order_by(EmotionCurve.chunk_id)
+        stmt = (
+            select(
+                EmotionCurve.pos_density,
+                EmotionCurve.neg_density,
+            )
+            .where(EmotionCurve.run_id == run_id)
+            .order_by(EmotionCurve.chunk_id)
+        )
 
         result = self.session.execute(stmt).fetchall()
         return [(row.pos_density, row.neg_density) for row in result]
@@ -528,9 +548,7 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             (tension_composite,) 元组列表
         """
-        stmt = select(RhythmCurve.tension_composite).where(
-            RhythmCurve.run_id == run_id
-        ).order_by(RhythmCurve.chunk_id)
+        stmt = select(RhythmCurve.tension_composite).where(RhythmCurve.run_id == run_id).order_by(RhythmCurve.chunk_id)
 
         result = self.session.execute(stmt).fetchall()
         return [(row.tension_composite,) for row in result]
@@ -550,26 +568,31 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             (confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density) 元组列表
         """
-        stmt = select(
-            ChunkCulture.confucian_density,
-            ChunkCulture.taoist_density,
-            ChunkCulture.buddhist_density,
-            ChunkCulture.folk_density,
-            ChunkCulture.allusion_density,
-            ChunkCulture.imagery_density,
-        ).where(
-            ChunkCulture.run_id == run_id
-        ).order_by(ChunkCulture.chunk_id)
+        stmt = (
+            select(
+                ChunkCulture.confucian_density,
+                ChunkCulture.taoist_density,
+                ChunkCulture.buddhist_density,
+                ChunkCulture.folk_density,
+                ChunkCulture.allusion_density,
+                ChunkCulture.imagery_density,
+            )
+            .where(ChunkCulture.run_id == run_id)
+            .order_by(ChunkCulture.chunk_id)
+        )
 
         result = self.session.execute(stmt).fetchall()
-        return [(
-            row.confucian_density,
-            row.taoist_density,
-            row.buddhist_density,
-            row.folk_density,
-            row.allusion_density,
-            row.imagery_density,
-        ) for row in result]
+        return [
+            (
+                row.confucian_density,
+                row.taoist_density,
+                row.buddhist_density,
+                row.folk_density,
+                row.allusion_density,
+                row.imagery_density,
+            )
+            for row in result
+        ]
 
     def save_graph(self, run_id: str, graph_name: str, graph_json: str) -> None:
         """
@@ -586,17 +609,21 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
             graph_json: 图的 JSON 序列化字符串
         """
         now = datetime.now().isoformat()
-        stmt = pg_insert(GraphStorage).values(
-            graph_name=graph_name,
-            graph_json=graph_json,
-            updated_at=now,
-            run_id=run_id,
-        ).on_conflict_do_update(
-            constraint="uq_graph_storage_name_run",
-            set_={
-                "graph_json": graph_json,
-                "updated_at": now,
-            },
+        stmt = (
+            pg_insert(GraphStorage)
+            .values(
+                graph_name=graph_name,
+                graph_json=graph_json,
+                updated_at=now,
+                run_id=run_id,
+            )
+            .on_conflict_do_update(
+                constraint="uq_graph_storage_name_run",
+                set_={
+                    "graph_json": graph_json,
+                    "updated_at": now,
+                },
+            )
         )
         self.session.execute(stmt)
         self.session.commit()
@@ -634,24 +661,29 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             (chunk_id, pos_density, neg_density, net_density, smoothed_density) 元组列表
         """
-        stmt = select(
-            EmotionCurve.chunk_id,
-            EmotionCurve.pos_density,
-            EmotionCurve.neg_density,
-            EmotionCurve.net_density,
-            EmotionCurve.smoothed_density,
-        ).where(
-            (EmotionCurve.run_id == run_id) | (EmotionCurve.run_id.is_(None))
-        ).order_by(EmotionCurve.chunk_id)
+        stmt = (
+            select(
+                EmotionCurve.chunk_id,
+                EmotionCurve.pos_density,
+                EmotionCurve.neg_density,
+                EmotionCurve.net_density,
+                EmotionCurve.smoothed_density,
+            )
+            .where((EmotionCurve.run_id == run_id) | (EmotionCurve.run_id.is_(None)))
+            .order_by(EmotionCurve.chunk_id)
+        )
 
         result = self.session.execute(stmt).fetchall()
-        return [(
-            row.chunk_id,
-            row.pos_density,
-            row.neg_density,
-            row.net_density,
-            row.smoothed_density,
-        ) for row in result]
+        return [
+            (
+                row.chunk_id,
+                row.pos_density,
+                row.neg_density,
+                row.net_density,
+                row.smoothed_density,
+            )
+            for row in result
+        ]
 
     def fetch_rhythm_curve_full(self, run_id: str) -> List[Tuple[int, float, float]]:
         """
@@ -663,20 +695,25 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             (chunk_id, tension_proxy, tension_composite) 元组列表
         """
-        stmt = select(
-            RhythmCurve.chunk_id,
-            RhythmCurve.tension_proxy,
-            RhythmCurve.tension_composite,
-        ).where(
-            (RhythmCurve.run_id == run_id) | (RhythmCurve.run_id.is_(None))
-        ).order_by(RhythmCurve.chunk_id)
+        stmt = (
+            select(
+                RhythmCurve.chunk_id,
+                RhythmCurve.tension_proxy,
+                RhythmCurve.tension_composite,
+            )
+            .where((RhythmCurve.run_id == run_id) | (RhythmCurve.run_id.is_(None)))
+            .order_by(RhythmCurve.chunk_id)
+        )
 
         result = self.session.execute(stmt).fetchall()
-        return [(
-            row.chunk_id,
-            row.tension_proxy,
-            row.tension_composite,
-        ) for row in result]
+        return [
+            (
+                row.chunk_id,
+                row.tension_proxy,
+                row.tension_composite,
+            )
+            for row in result
+        ]
 
     def fetch_cloud_analysis(self, novel_id: str, run_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -689,19 +726,30 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             云端分析结果字典，不存在则返回 None
         """
-        stmt = select(CloudAnalysis).where(
-            CloudAnalysis.novel_id == novel_id,
-            (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
-        ).limit(1)
+        stmt = (
+            select(CloudAnalysis)
+            .where(
+                CloudAnalysis.novel_id == novel_id,
+                (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
+            )
+            .limit(1)
+        )
 
-        result = self.session.execute(stmt).scalar_one_or_none()
+        row = self.session.execute(stmt).fetchone()
+        result = row[0] if row else None
 
         if result is None:
-            stmt = select(CloudAnalysis).where(
-                CloudAnalysis.foreshadow_rate.isnot(None),
-                (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
-            ).order_by(CloudAnalysis.id.desc()).limit(1)
-            result = self.session.execute(stmt).scalar_one_or_none()
+            stmt = (
+                select(CloudAnalysis)
+                .where(
+                    CloudAnalysis.foreshadow_rate.isnot(None),
+                    (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
+                )
+                .order_by(CloudAnalysis.id.desc())
+                .limit(1)
+            )
+            row = self.session.execute(stmt).fetchone()
+            result = row[0] if row else None
 
         if result is None:
             return None
@@ -752,10 +800,14 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             小说标题，不存在则返回 None
         """
-        stmt = select(GlobalContext.novel_title).where(
-            GlobalContext.novel_id == novel_id,
-            (GlobalContext.run_id == run_id) | (GlobalContext.run_id.is_(None)),
-        ).limit(1)
+        stmt = (
+            select(GlobalContext.novel_title)
+            .where(
+                GlobalContext.novel_id == novel_id,
+                (GlobalContext.run_id == run_id) | (GlobalContext.run_id.is_(None)),
+            )
+            .limit(1)
+        )
 
         result = self.session.execute(stmt).fetchone()
         return result.novel_title if result else None
@@ -775,13 +827,19 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             是否有聚合数据
         """
-        emotion_count = self.session.execute(
-            select(func.count()).select_from(EmotionCurve).where(EmotionCurve.run_id == run_id)
-        ).scalar() or 0
+        emotion_count = (
+            self.session.execute(
+                select(func.count()).select_from(EmotionCurve).where(EmotionCurve.run_id == run_id)
+            ).scalar()
+            or 0
+        )
 
-        rhythm_count = self.session.execute(
-            select(func.count()).select_from(RhythmCurve).where(RhythmCurve.run_id == run_id)
-        ).scalar() or 0
+        rhythm_count = (
+            self.session.execute(
+                select(func.count()).select_from(RhythmCurve).where(RhythmCurve.run_id == run_id)
+            ).scalar()
+            or 0
+        )
 
         return emotion_count > 0 and rhythm_count > 0
 
@@ -800,9 +858,12 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             是否有主题数据
         """
-        count = self.session.execute(
-            select(func.count()).select_from(ChunkTopic).where(ChunkTopic.run_id == run_id)
-        ).scalar() or 0
+        count = (
+            self.session.execute(
+                select(func.count()).select_from(ChunkTopic).where(ChunkTopic.run_id == run_id)
+            ).scalar()
+            or 0
+        )
         return count > 0
 
     def has_diagnosis_data(self, run_id: str) -> bool:
@@ -820,9 +881,12 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             是否有诊断数据
         """
-        count = self.session.execute(
-            select(func.count()).select_from(CloudAnalysis).where(CloudAnalysis.run_id == run_id)
-        ).scalar() or 0
+        count = (
+            self.session.execute(
+                select(func.count()).select_from(CloudAnalysis).where(CloudAnalysis.run_id == run_id)
+            ).scalar()
+            or 0
+        )
         return count > 0
 
     def is_aggregate_complete(self, run_id: str) -> bool:
@@ -840,16 +904,22 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         Returns:
             聚合是否完成
         """
-        chunks_count = self.session.execute(
-            select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)
-        ).scalar() or 0
+        chunks_count = (
+            self.session.execute(select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)).scalar() or 0
+        )
 
-        emotion_count = self.session.execute(
-            select(func.count()).select_from(EmotionCurve).where(EmotionCurve.run_id == run_id)
-        ).scalar() or 0
+        emotion_count = (
+            self.session.execute(
+                select(func.count()).select_from(EmotionCurve).where(EmotionCurve.run_id == run_id)
+            ).scalar()
+            or 0
+        )
 
-        rhythm_count = self.session.execute(
-            select(func.count()).select_from(RhythmCurve).where(RhythmCurve.run_id == run_id)
-        ).scalar() or 0
+        rhythm_count = (
+            self.session.execute(
+                select(func.count()).select_from(RhythmCurve).where(RhythmCurve.run_id == run_id)
+            ).scalar()
+            or 0
+        )
 
         return chunks_count > 0 and emotion_count >= chunks_count and rhythm_count >= chunks_count

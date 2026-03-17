@@ -23,14 +23,13 @@
 
 修改时间: 2026-03-12
 修改者: TraeAI
-修改内容: 项目文件结构整理与拆解 - 重构为兼容层
+修改内容: 项目文件结构整理与拆解
 - 将标注功能委托给 AnnotationClient
 - 将消歧功能委托给 DisambiguationClient
-- 保持原有接口不变，确保向后兼容
 
 修改时间: 2026-03-12
 修改者: TraeAI
-修改内容: 添加私有方法代理以保持测试兼容性
+修改内容: 添加私有方法代理
 
 修改时间: 2026-03-12
 修改者: TraeAI
@@ -50,7 +49,7 @@ from src.config.analysis_logger import AnalysisLogger
 from .annotation_client import AnnotationClient
 from .base import TokenUsageCallback
 from .disambiguation_client import DisambiguationClient
-from .schema import ChunkAnnotation
+from .schema import ChunkAnnotation, TwoPhaseAnnotationResult
 
 if TYPE_CHECKING:
     from .annotation_client import AnnotationClient as AnnotationClientType
@@ -60,8 +59,7 @@ class UnifiedModelClient:
     """
     统一模型客户端，根据任务类型加载配置
 
-    这是一个兼容层，组合使用 AnnotationClient 和 DisambiguationClient。
-    保持原有接口不变，确保向后兼容。
+    组合使用 AnnotationClient 和 DisambiguationClient 提供完整功能。
     """
 
     def __init__(
@@ -72,7 +70,13 @@ class UnifiedModelClient:
         analysis_logger: AnalysisLogger | None = None,
         token_usage_callback: Optional[TokenUsageCallback] = None,
         novel_id: Optional[str] = None,
+        instructor_client_factory: Optional[Any] = None,
     ) -> None:
+        """
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 支持依赖注入 instructor_client_factory，便于测试
+        """
         self._task_type = task_type
         self._annotation_client = AnnotationClient(
             task_type=task_type,
@@ -81,6 +85,7 @@ class UnifiedModelClient:
             analysis_logger=analysis_logger,
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
+            instructor_client_factory=instructor_client_factory,
         )
         self._disambiguation_client = DisambiguationClient(
             task_type=task_type if task_type in ("incremental_disambig", "full_disambig") else "incremental_disambig",
@@ -89,6 +94,7 @@ class UnifiedModelClient:
             analysis_logger=analysis_logger,
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
+            instructor_client_factory=instructor_client_factory,
         )
 
         self._config = self._annotation_client._config
@@ -133,7 +139,7 @@ class UnifiedModelClient:
         known_aliases: str | None = None,
         next_preview: str | None = None,
         cloud_client: "UnifiedModelClient | None" = None,
-    ) -> ChunkAnnotation:
+    ) -> "TwoPhaseAnnotationResult":
         """
         对文本块进行语义标注
 
@@ -141,6 +147,11 @@ class UnifiedModelClient:
         修改者: TraeAI
         任务: 修复云端fallback未触发问题
         修改内容: 添加 cloud_client 参数，透传到 AnnotationClient
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 修复foreshadowing数据丢失问题
+        修改内容: 返回TwoPhaseAnnotationResult，包含foreshadowing数据
         """
         internal_cloud_client: AnnotationClientType | None = None
         if cloud_client is not None:

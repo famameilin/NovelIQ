@@ -92,8 +92,6 @@ class ReportPayload:
             dimension.validate()
         for chart in self.charts:
             chart.validate()
-        if self.cloud_analysis is not None:
-            self.cloud_analysis.validate()
 
     def to_dict(self) -> dict:
         return {

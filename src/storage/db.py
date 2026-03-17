@@ -85,13 +85,15 @@ def get_engine():
         echo=echo,
     )
 
-    @event.listens_for(_engine, "connect")
-    def set_postgresql_settings(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("SET TIME ZONE 'UTC'")
-        cursor.close()
+    if database_url.startswith("postgresql"):
 
-    logger.info(f"Created SQLAlchemy engine for PostgreSQL (pool_size={pool_size})")
+        @event.listens_for(_engine, "connect")
+        def set_postgresql_settings(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("SET TIME ZONE 'UTC'")
+            cursor.close()
+
+    logger.info(f"Created SQLAlchemy engine for {database_url.split(':')[0]} (pool_size={pool_size})")
 
     return _engine
 

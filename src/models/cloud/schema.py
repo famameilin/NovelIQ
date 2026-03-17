@@ -1,52 +1,66 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Union
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
 
 
-@dataclass(frozen=True)
-class CloudAnalysis:
-    novel_id: str | None
-    foreshadow_rate: float | None
-    arc_scores: Union[List[float], Dict[str, float]] = field(default_factory=list)
+class DisambiguationAliasMap(BaseModel):
+    """
+    人名消歧响应数据结构
+
+    创建时间: 2026-03-16
+    创建者: TraeAI
+    任务: 重构云端消歧客户端集成 Instructor
+    说明: 用于 Instructor 结构化输出的响应模型
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    alias_map: Dict[str, str] = Field(
+        default_factory=dict,
+        description="人名到规范名的映射，key 为候选人名，value 为规范名",
+    )
+
+
+class CloudAnalysis(BaseModel):
+    """
+    云端分析数据结构
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: 迁移数据模型至 Pydantic
+    修改内容: 从 dataclass 迁移至 Pydantic BaseModel，使用 field_validator 替代手动验证
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    novel_id: str | None = None
+    foreshadow_rate: float | None = Field(default=None, ge=0, le=1)
+    arc_scores: Union[List[float], Dict[str, float]] = Field(default_factory=list)
     narrative_type: str | None = None
-    topic_labels: List[str] = field(default_factory=list)
+    topic_labels: List[str] = Field(default_factory=list)
     diagnosis: str | None = None
     value_logic_type: ValueLogicType | str | None = None
     value_logic_reason: str | None = None
-    power_stance_score: int | None = None
+    power_stance_score: int | None = Field(default=None, ge=0, le=5)
     power_stance_reason: str | None = None
-    common_people_dignity: int | None = None
+    common_people_dignity: int | None = Field(default=None, ge=0, le=5)
     dignity_reason: str | None = None
-    cultural_depth_score: int | None = None
+    cultural_depth_score: int | None = Field(default=None, ge=0, le=5)
     cultural_depth_reason: str | None = None
     emotion_curve_type: str | None = None
 
-    def validate(self) -> None:
-        if self.foreshadow_rate is not None:
-            if self.foreshadow_rate < 0 or self.foreshadow_rate > 1:
-                raise ValueError("foreshadow_rate out of range")
-        if self.power_stance_score is not None:
-            if not isinstance(self.power_stance_score, int):
-                raise ValueError("power_stance_score must be int")
-            if self.power_stance_score < 0 or self.power_stance_score > 5:
-                raise ValueError("power_stance_score out of range")
-        if self.common_people_dignity is not None:
-            if not isinstance(self.common_people_dignity, int):
-                raise ValueError("common_people_dignity must be int")
-            if self.common_people_dignity < 0 or self.common_people_dignity > 5:
-                raise ValueError("common_people_dignity out of range")
-        if self.cultural_depth_score is not None:
-            if not isinstance(self.cultural_depth_score, int):
-                raise ValueError("cultural_depth_score must be int")
-            if self.cultural_depth_score < 0 or self.cultural_depth_score > 5:
-                raise ValueError("cultural_depth_score out of range")
-        if self.value_logic_type is not None:
+    @field_validator("value_logic_type")
+    @classmethod
+    def validate_value_logic_type(cls, v: ValueLogicType | str | None) -> ValueLogicType | str | None:
+        if v is not None:
             valid_types = ("善义有价值", "强者为王", "混合型")
-            if self.value_logic_type not in valid_types:
-                raise ValueError(f"value_logic_type must be one of {valid_types}, got: {self.value_logic_type}")
+            if v not in valid_types:
+                raise ValueError(f"value_logic_type must be one of {valid_types}, got: {v}")
+        return v
 
     def to_dict(self) -> dict:
         arc_scores_value: Union[List[float], Dict[str, float]]

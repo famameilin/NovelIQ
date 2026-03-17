@@ -12,13 +12,23 @@
 - 添加双次调用模式支持（第一次：基础标注，第二次：伏笔分析）
 - 添加并行和串行两种执行模式
 - 添加 `_build_annotation_messages_v2`、`_annotate_chunk_phase1`、`_annotate_chunk_phase2`、`_build_foreshadowing_messages` 方法
+
+修改时间: 2026-03-16
+修改者: TraeAI
+任务: 重构本地标注客户端集成 Instructor
+修改内容:
+- 集成 Instructor 实现结构化输出
+- 使用 `instructor.from_litellm()` 创建客户端
+- `_call_annotation_api` 方法支持 `response_model` 参数
+- 简化 `_parse_annotation` 方法，Instructor 自动解析
+- Phase2 伏笔分析使用 Instructor 结构化输出
 """
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Type, TypeVar, cast
 
 from loguru import logger
 
@@ -26,12 +36,12 @@ from src.config import TaskModelConfig, TaskType, settings
 from src.config.analysis_logger import AnalysisLogger
 
 from .base import BaseModelClient, TokenUsageCallback
+from .litellm_utils import get_model_with_provider
 from .parser import (
     build_annotation,
     extract_thinking_unified,
     make_empty_annotation,
     parse_active_entities,
-    parse_foreshadowing_result,
     try_parse_json,
     validate_foreshadowing_result,
 )
@@ -50,6 +60,8 @@ from .prompts import (
 )
 from .schema import ChunkAnnotation, ForeshadowingResult
 from .validator import validate_names_in_sources
+
+T = TypeVar("T")
 
 PHASE_MAX_RETRIES = 3
 
@@ -80,9 +92,10 @@ class NameValidationMaxRetriesExceededError(Exception):
     修改内容: 添加 invalid_names 属性，方便重试时获取无效名字列表
     """
 
-    def __init__(self, message: str, invalid_names: list[str] | None = None):
+    def __init__(self, message: str, invalid_names: list[str] | None = None, bad_output: str = ""):
         super().__init__(message)
         self.invalid_names = invalid_names or []
+        self.bad_output = bad_output
 
 
 
@@ -115,6 +128,15 @@ class AnnotationClient(BaseModelClient):
     修改时间: 2026-03-12
     修改者: TraeAI
     修改内容: 添加 task_type 参数支持，用于云端标注fallback
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: 重构本地标注客户端集成 Instructor
+    修改内容: 添加 _instructor_client 属性，使用 instructor.from_litellm() 创建客户端
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: 支持依赖注入 instructor_client_factory，便于测试
     """
 
     def __init__(
@@ -125,6 +147,7 @@ class AnnotationClient(BaseModelClient):
         analysis_logger: AnalysisLogger | None = None,
         token_usage_callback: Optional[TokenUsageCallback] = None,
         novel_id: Optional[str] = None,
+        instructor_client_factory: Optional[Any] = None,
     ) -> None:
         super().__init__(
             task_type=task_type,
@@ -134,6 +157,8 @@ class AnnotationClient(BaseModelClient):
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
         )
+        self._instructor_client: Any = None
+        self._instructor_client_factory = instructor_client_factory
 
     def annotate_chunk(
         self,
@@ -154,7 +179,7 @@ class AnnotationClient(BaseModelClient):
         position_pct: float | None = None,
         chapter_id: int | None = None,
         cloud_client: "AnnotationClient | None" = None,
-    ) -> ChunkAnnotation:
+    ) -> TwoPhaseAnnotationResult:
         """
         对文本块进行语义标注
 
@@ -174,6 +199,11 @@ class AnnotationClient(BaseModelClient):
         修改者: TraeAI
         任务: refactor-model-interaction-layer
         修改内容: 重构为调用私有子方法，保持接口不变
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 修复foreshadowing数据丢失问题
+        修改内容: 返回TwoPhaseAnnotationResult而不是ChunkAnnotation，包含foreshadowing数据
         """
         two_phase_enabled = settings.analysis.two_phase_annotation.enabled
 
@@ -197,7 +227,7 @@ class AnnotationClient(BaseModelClient):
                 chapter_id=chapter_id,
                 cloud_client=cloud_client,
             )
-            return two_phase_result.annotation
+            return two_phase_result
 
         messages = self._build_messages(
             text,
@@ -214,7 +244,7 @@ class AnnotationClient(BaseModelClient):
         original_user_prompt = messages[-1]["content"]
         is_cloud = self._is_cloud_api()
 
-        self._log_annotation_start(is_cloud, text, prev_summary, chunk_id)
+        self._log_annotation_start(is_cloud, text, prev_summary, chunk_id, "phase1")
 
         def _do_single_call(
             client: "AnnotationClient",
@@ -225,7 +255,7 @@ class AnnotationClient(BaseModelClient):
             enable_thinking = client._config.thinking_enabled
             response = client._call_annotation_api(current_messages, enable_thinking, chunk_id)
 
-            content_clean, thinking_content, extraction = client._process_annotation_response(response, client._is_cloud_api())
+            content_clean, thinking_content, extraction = client._process_annotation_response(response, client._is_cloud_api(), chunk_id, "phase1")
 
             client._log_prompt_response(
                 chunk_id, content_clean, thinking_content, extraction, current_messages, text, prev_summary
@@ -242,16 +272,16 @@ class AnnotationClient(BaseModelClient):
                 "next_preview": next_preview or "",
             }
 
-            annotation = client._validate_annotation(annotation, sources, chunk_id)
+            annotation = client._validate_annotation(annotation, sources, chunk_id, content_clean)
 
             client._record_token_usage(response, "single_call", chunk_id)
 
             return annotation, content_clean
 
         last_error: Exception | None = None
-        last_bad_output: str | None = None
         last_invalid_names: list[str] | None = None
-        content_clean = ""
+        last_bad_output: str = ""
+        content_clean: str = ""
         for attempt in range(PHASE_MAX_RETRIES):
             try:
                 logger.debug("single_call attempt {}/{} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, chunk_id)
@@ -263,11 +293,21 @@ class AnnotationClient(BaseModelClient):
                 annotation, content_clean = _do_single_call(self, retry_messages)
                 if attempt > 0:
                     logger.info("single_call succeeded on attempt {} chunk_id={}", attempt + 1, chunk_id)
-                return annotation
+                # 单阶段模式没有独立的foreshadowing分析，使用annotation中的字段
+                from .schema import ForeshadowingResult
+                foreshadowing = None
+                if hasattr(annotation, 'has_foreshadowing') and annotation.has_foreshadowing:
+                    foreshadowing = ForeshadowingResult(
+                        has_foreshadowing=annotation.has_foreshadowing,
+                        foreshadowing_type=getattr(annotation, 'foreshadowing_type', None),
+                        foreshadowing_desc=getattr(annotation, 'foreshadowing_desc', ''),
+                        confidence='medium'
+                    )
+                return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
             except NameValidationMaxRetriesExceededError as e:
                 last_error = e
                 last_invalid_names = e.invalid_names
-                last_bad_output = content_clean
+                last_bad_output = e.bad_output or content_clean
                 logger.error("single_call attempt {}/{} failed: {} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, str(e), chunk_id)
             except Exception as e:
                 last_error = e
@@ -286,7 +326,17 @@ class AnnotationClient(BaseModelClient):
                     retry_messages = messages[:-1] + [{"role": "user", "content": retry_prompt}]
                 annotation, _ = _do_single_call(cloud_client, retry_messages)
                 logger.info("single_call cloud succeeded chunk_id={}", chunk_id)
-                return annotation
+                # 单阶段模式没有独立的foreshadowing分析，使用annotation中的字段
+                from .schema import ForeshadowingResult
+                foreshadowing = None
+                if hasattr(annotation, 'has_foreshadowing') and annotation.has_foreshadowing:
+                    foreshadowing = ForeshadowingResult(
+                        has_foreshadowing=annotation.has_foreshadowing,
+                        foreshadowing_type=getattr(annotation, 'foreshadowing_type', None),
+                        foreshadowing_desc=getattr(annotation, 'foreshadowing_desc', ''),
+                        confidence='medium'
+                    )
+                return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
             except Exception as e:
                 last_error = e
                 logger.error("single_call cloud failed: {} chunk_id={}", str(e), chunk_id)
@@ -540,14 +590,14 @@ class AnnotationClient(BaseModelClient):
             retry_messages: list[dict] | None = None,
         ) -> tuple[ChunkAnnotation, str]:
             is_cloud = client._is_cloud_api()
-            client._log_annotation_start(is_cloud, text, None, chunk_id)
+            client._log_annotation_start(is_cloud, text, None, chunk_id, "phase1")
 
             current_messages = retry_messages if retry_messages else messages
 
             enable_thinking = client._config.thinking_enabled
             response = client._call_annotation_api(current_messages, enable_thinking, chunk_id)
 
-            content_clean, thinking_content, extraction = client._process_annotation_response(response, is_cloud)
+            content_clean, thinking_content, extraction = client._process_annotation_response(response, is_cloud, chunk_id, "phase1")
 
             client._log_prompt_response(
                 chunk_id, content_clean, thinking_content, extraction, current_messages, text, None
@@ -563,16 +613,16 @@ class AnnotationClient(BaseModelClient):
                 "next_preview": next_chunk_text or "",
             }
 
-            result = client._validate_annotation(result, sources, chunk_id)
+            result = client._validate_annotation(result, sources, chunk_id, content_clean)
 
             client._record_token_usage(response, "phase1", chunk_id)
 
             return result, content_clean
 
         last_error: Exception | None = None
-        last_bad_output: str | None = None
         last_invalid_names: list[str] | None = None
-        content_clean = ""
+        last_bad_output: str = ""
+        content_clean: str = ""
         for attempt in range(PHASE_MAX_RETRIES):
             try:
                 logger.debug("phase1 attempt {}/{} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, chunk_id)
@@ -588,7 +638,7 @@ class AnnotationClient(BaseModelClient):
             except NameValidationMaxRetriesExceededError as e:
                 last_error = e
                 last_invalid_names = e.invalid_names
-                last_bad_output = content_clean
+                last_bad_output = e.bad_output or content_clean
                 logger.error("phase1 attempt {}/{} failed: {} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, str(e), chunk_id)
             except Exception as e:
                 last_error = e
@@ -639,6 +689,11 @@ class AnnotationClient(BaseModelClient):
         修改者: TraeAI
         任务: Phase1/Phase2独立重试机制
         修改内容: 添加独立重试逻辑，本地3次失败后云端fallback
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地标注客户端集成 Instructor
+        修改内容: 使用 Instructor 结构化输出，直接返回 ForeshadowingResult
         """
         messages = self._build_foreshadowing_messages(
             text=text,
@@ -653,20 +708,24 @@ class AnnotationClient(BaseModelClient):
         )
 
         def _do_phase2(client: "AnnotationClient") -> ForeshadowingResult:
-            enable_thinking = client._config.thinking_enabled
-            response = client._call_annotation_api(messages, enable_thinking, chunk_id)
+            is_cloud = client._is_cloud_api()
+            client._log_annotation_start(is_cloud, text, prev_chunk_summary, chunk_id, "phase2")
 
-            content_clean, thinking_content, extraction = client._process_annotation_response(response, client._is_cloud_api())
+            enable_thinking = client._config.thinking_enabled
+
+            # Use the refactored _call_annotation_api
+            result, response = client._call_annotation_api(
+                messages=messages,
+                enable_thinking=enable_thinking,
+                chunk_id=chunk_id,
+                response_model=ForeshadowingResult,
+            )
+
+            content_clean, thinking_content, extraction = client._process_annotation_response(response, is_cloud, chunk_id, "phase2")
 
             client._log_prompt_response(
                 chunk_id, content_clean, thinking_content, extraction, messages, text, prev_chunk_summary
             )
-
-            parsed = try_parse_json(content_clean)
-            if parsed is None:
-                raise ValueError(f"phase2 json parse failed for chunk_id={chunk_id}")
-
-            result = parse_foreshadowing_result(parsed)
 
             client._record_token_usage(response, "phase2", chunk_id)
 
@@ -802,6 +861,7 @@ class AnnotationClient(BaseModelClient):
         text: str,
         prev_summary: str | None,
         chunk_id: int | None,
+        phase: str = "",
     ) -> None:
         """
         封装标注开始日志
@@ -810,23 +870,34 @@ class AnnotationClient(BaseModelClient):
         创建者: TraeAI
         任务: refactor-model-interaction-layer
         说明: 从 annotate_chunk 拆分出的开始日志逻辑
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 优化云端模型日志，显示更多调用信息
+        修改内容: 添加 novel_id、phase 参数到日志
         """
         if is_cloud:
             logger.info(
-                "[云端模型] annotate_chunk 开始: task_type={} model={} text_len={} chunk_id={}",
+                "[云端模型] annotate_chunk 开始: novel_id={} chunk_id={} phase={} task_type={} model={} text_len={} thinking_enabled={}",
+                self._novel_id,
+                chunk_id,
+                phase,
                 self._task_type,
                 self._config.model,
                 len(text),
-                chunk_id,
+                self._config.thinking_enabled,
             )
         else:
             logger.debug(
-                "annotate_chunk start task_type={} model={} text_len={} has_summary={} chunk_id={}",
+                "annotate_chunk start: novel_id={} chunk_id={} phase={} task_type={} model={} text_len={} has_summary={} thinking_enabled={}",
+                self._novel_id,
+                chunk_id,
+                phase,
                 self._task_type,
                 self._config.model,
                 len(text),
                 prev_summary is not None,
-                chunk_id,
+                self._config.thinking_enabled,
             )
 
     def _build_messages(
@@ -887,6 +958,14 @@ class AnnotationClient(BaseModelClient):
         return messages
 
     def _parse_annotation(self, content: str) -> ChunkAnnotation:
+        """
+        解析标注结果
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地标注客户端集成 Instructor
+        修改内容: 添加说明，此方法作为 fallback 使用，Instructor 会自动解析
+        """
         parsed = try_parse_json(content)
         if parsed is None:
             logger.error(
@@ -944,18 +1023,26 @@ class AnnotationClient(BaseModelClient):
             retry_messages = [{"role": "user", "content": retry_prompt}]
 
             try:
-                model_name = self._config.model
+                model_name = get_model_with_provider(self._config.model, self._config)
                 if not model_name:
                     raise ValueError("model is required")
+                if self._client is None:
+                    raise ValueError("client is required")
                 enable_thinking = self._config.thinking_enabled
-                response = self._client.chat.completions.create(
-                    model=model_name,
-                    messages=cast(Any, retry_messages),
-                    temperature=self._config.temperature,
-                    top_p=self._config.top_p,
-                    presence_penalty=self._config.presence_penalty,
-                    extra_body=self._build_extra_body(enable_thinking),
-                )
+                thinking_params = self._get_thinking_params(enable_thinking)
+                extra_body = self._build_extra_body(enable_thinking)
+                
+                request_params = {
+                    "model": model_name,
+                    "messages": cast(Any, retry_messages),
+                    "temperature": self._config.temperature,
+                    "top_p": self._config.top_p,
+                    "presence_penalty": self._config.presence_penalty,
+                    "extra_body": extra_body,
+                }
+                request_params.update(thinking_params)
+                
+                response = self._client.chat.completions.create(**request_params)
                 message = response.choices[0].message
                 content = message.content or ""
 
@@ -1006,11 +1093,38 @@ class AnnotationClient(BaseModelClient):
 
         return result, current_invalid_names
 
+    def _get_instructor_client(self) -> Any:
+        """
+        获取结构化输出客户端（延迟初始化）
+
+        创建时间: 2026-03-16
+        创建者: TraeAI
+        任务: 重构本地标注客户端集成 Instructor
+        说明: 使用 instructor.from_litellm() 创建客户端，支持结构化输出
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构 Instructor 客户端创建逻辑
+        修改内容: 统一使用 instructor.from_litellm()
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 移除 Instructor 依赖
+        修改内容: 返回 None，不再使用 Instructor
+        """
+        return None
+
+    # _build_json_schema 方法已移至 BaseModelClient 基类
+    # 创建时间: 2026-03-17
+    # 修改者: TraeAI
+    # 任务: code-quality-refactor - 提取API调用基类
+
     def _call_annotation_api(
         self,
         messages: List[dict],
         enable_thinking: bool,
         chunk_id: int | None,
+        response_model: Type[T] | None = None,
     ) -> Any:
         """
         封装API调用逻辑
@@ -1019,23 +1133,145 @@ class AnnotationClient(BaseModelClient):
         创建者: TraeAI
         任务: refactor-model-interaction-layer
         说明: 从 annotate_chunk 拆分出的API调用逻辑
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地标注客户端集成 Instructor
+        修改内容: 
+        1. 添加 response_model 参数支持结构化输出
+        2. 添加模型名称 provider 前缀处理
+        
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 修复thinking参数传递方式
+        修改内容:
+        1. 将thinking参数作为顶级参数传递
+        2. 添加timeout参数支持
+        
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 启用云端Stream模式
+        修改内容: 添加流式响应模式支持
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 移除 Instructor 依赖
+        修改内容: 使用 LiteLLM 的 JSON Schema 模式替代 Instructor
         """
         if not self._config.model:
             raise ValueError("model is required")
 
-        return self._client.chat.completions.create(
-            model=self._config.model,
-            messages=cast(Any, messages),
-            temperature=self._config.temperature,
-            top_p=self._config.top_p,
-            presence_penalty=self._config.presence_penalty,
-            extra_body=self._build_extra_body(enable_thinking),
-        )
+        model_name = get_model_with_provider(self._config.model, self._config)
+        thinking_params = self._get_thinking_params(enable_thinking)
+        extra_body = self._build_extra_body(enable_thinking)
+
+        # use_stream 检查已移至调用方，此处不再需要
+        # use_stream = self._should_use_stream()
+
+        if self._client is None:
+            raise ValueError("client is required")
+        
+        request_params: dict[str, Any] = {
+            "model": model_name,
+            "messages": cast(Any, messages),
+            "temperature": self._config.temperature,
+            "top_p": self._config.top_p,
+            "presence_penalty": self._config.presence_penalty,
+            "extra_body": extra_body,
+        }
+        
+        if response_model is not None:
+            request_params["response_format"] = self._build_json_schema(response_model)
+        
+        request_params.update(thinking_params)
+        
+        # 默认使用流式模式，传入 is_cloud 参数控制控制台输出
+        is_cloud = self._is_cloud_api()
+        response = self._call_annotation_api_stream(request_params, is_cloud=is_cloud)
+        
+        if response_model is not None:
+            parsed_result = self._parse_structured_response(response, response_model)
+            return parsed_result, response
+        
+        return response
+
+    def _parse_structured_response(self, response: Any, response_model: Type[T]) -> T:
+        """
+        解析结构化响应
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: 移除 Instructor 依赖
+        说明: 从响应中提取 JSON 并解析为 Pydantic 模型
+        """
+        if not response.choices:
+            raise ValueError("Empty response from API")
+        
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("Empty content in response")
+        
+        # 确保 content 是字符串类型
+        if not isinstance(content, str):
+            raise ValueError(f"Content must be a string, got {type(content).__name__}")
+        
+        json_data = try_parse_json(content)
+        if json_data is None:
+            raise ValueError(f"Failed to parse JSON from response: {content[:200]}")
+
+        return response_model.model_validate(json_data)
+
+    # _parse_structured_response, _call_annotation_api_stream, _build_stream_response
+    # 方法已移至 BaseModelClient 基类
+    # 创建时间: 2026-03-17
+    # 修改者: TraeAI
+    # 任务: code-quality-refactor - 提取API调用基类
+
+    def _should_use_stream(self) -> bool:
+        """
+        判断是否应该使用流式响应模式
+
+        创建时间: 2026-03-16
+        创建者: TraeAI
+        任务: 启用云端Stream模式
+        说明: 根据配置和是否为云端API决定是否使用流式模式
+        """
+        if not self._config.stream_enabled:
+            return False
+        
+        is_cloud = self._is_cloud_api()
+        if self._config.stream_cloud_only and not is_cloud:
+            return False
+        
+        return True
+
+    # _call_annotation_api_stream, _build_stream_response 方法已移至 BaseModelClient 基类
+    # 创建时间: 2026-03-17
+    # 修改者: TraeAI
+    # 任务: code-quality-refactor - 提取API调用基类
+
+    def _call_annotation_api_stream(self, request_params: dict[str, Any], is_cloud: bool = False) -> Any:
+        """
+        流式API调用 - 使用基类方法
+
+        创建时间: 2026-03-16
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: code-quality-refactor - 使用基类 _call_api_stream 方法
+        """
+        return self._call_api_stream(request_params, is_cloud)
+
+    # _build_stream_response 方法已移至 BaseModelClient 基类
+    # 创建时间: 2026-03-17
+    # 修改者: TraeAI
+    # 任务: code-quality-refactor - 提取API调用基类
 
     def _process_annotation_response(
         self,
         response: Any,
         is_cloud: bool,
+        chunk_id: int | None = None,
+        phase: str = "",
     ) -> tuple[str, str | None, Any]:
         """
         封装响应处理和thinking提取
@@ -1044,6 +1280,11 @@ class AnnotationClient(BaseModelClient):
         创建者: TraeAI
         任务: refactor-model-interaction-layer
         说明: 从 annotate_chunk 拆分出的响应处理逻辑
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 优化云端模型日志，显示更多调用信息
+        修改内容: 添加 chunk_id、phase、novel_id 参数到日志
 
         返回: (content_clean, thinking_content, extraction)
         """
@@ -1066,7 +1307,10 @@ class AnnotationClient(BaseModelClient):
 
         if is_cloud:
             logger.info(
-                "[云端模型] annotate_chunk 响应: has_thinking={} thinking_chars={} has_response={} response_chars={}",
+                "[云端模型] annotate_chunk 响应: novel_id={} chunk_id={} phase={} has_thinking={} thinking_chars={} has_response={} response_chars={}",
+                self._novel_id,
+                chunk_id,
+                phase,
                 has_thinking,
                 len(thinking_content) if thinking_content else 0,
                 has_response,
@@ -1074,14 +1318,20 @@ class AnnotationClient(BaseModelClient):
             )
         else:
             logger.info(
-                "annotate_chunk response: has_thinking={} thinking_chars={} has_response={} response_chars={}",
+                "annotate_chunk response: novel_id={} chunk_id={} phase={} has_thinking={} thinking_chars={} has_response={} response_chars={}",
+                self._novel_id,
+                chunk_id,
+                phase,
                 has_thinking,
                 len(thinking_content) if thinking_content else 0,
                 has_response,
                 len(content_clean),
             )
             logger.debug(
-                "annotate_chunk response received chars={} thinking_chars={} thinking_format={}",
+                "annotate_chunk response received: novel_id={} chunk_id={} phase={} chars={} thinking_chars={} thinking_format={}",
+                self._novel_id,
+                chunk_id,
+                phase,
                 len(content_clean),
                 len(thinking_content) if thinking_content else 0,
                 extraction.thinking_format,
@@ -1094,6 +1344,7 @@ class AnnotationClient(BaseModelClient):
         result: ChunkAnnotation,
         sources: dict,
         chunk_id: int | None,
+        content_clean: str = "",
     ) -> ChunkAnnotation:
         """
         验证标注结果中的人名是否在原文中出现
@@ -1102,6 +1353,10 @@ class AnnotationClient(BaseModelClient):
         创建者: TraeAI
         任务: 简化重试逻辑
         说明: 只验证，不重试。验证失败直接抛异常
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        修改内容: 添加 content_clean 参数，在异常中包含原始输出
         """
         names_in_result = self._extract_names_from_annotation(result)
         invalid_names = validate_names_in_sources(names_in_result, sources)
@@ -1115,6 +1370,7 @@ class AnnotationClient(BaseModelClient):
             raise NameValidationMaxRetriesExceededError(
                 f"名字验证失败: {invalid_names}",
                 invalid_names=invalid_names,
+                bad_output=content_clean,
             )
 
         return result
@@ -1186,11 +1442,11 @@ class AnnotationClient(BaseModelClient):
             metadata["thinking_content"] = thinking_content
             metadata["thinking_format"] = extraction.thinking_format
             metadata["thinking_tokens"] = extraction.thinking_tokens
-        self._analysis_logger.log_local_prompt(
-            chunk_id=chunk_id,
+        self._analysis_logger.log_prompt(
             messages=messages,
             response=content_clean,
             metadata=metadata,
+            chunk_id=chunk_id,
         )
 
     def _log_annotation_result(

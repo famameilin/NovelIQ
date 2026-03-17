@@ -9,38 +9,35 @@
           _process_disambiguate_response, _log_disambiguate_result，
           重构 disambiguate_characters 和 disambiguate_anonymous 使用公共方法
 
+修改时间: 2026-03-16
+修改者: TraeAI
+任务: 重构本地消歧客户端集成 Instructor
+修改内容: 集成 Instructor 实现结构化输出，简化 JSON 解析逻辑
+
+修改时间: 2026-03-17
+修改者: TraeAI
+任务: 移除 Instructor 依赖
+修改内容: 使用 LiteLLM 的 JSON Schema 模式替代 Instructor
+
 本模块包含人名消歧相关的模型客户端，负责处理人物别名识别和匿名人物识别。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, TypeVar, cast
 
-import openai
 from loguru import logger
 
 from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
+from src.utils.token_counter import count_messages_tokens, count_tokens
 
 from .base import BaseModelClient, TokenUsageCallback
-from .parser import extract_thinking_unified, parse_alias_map
+from .litellm_utils import get_model_with_provider
 from .prompts import DISAMBIGUATE_SYSTEM_PROMPT, ANONYMOUS_DISAMBIG_SYSTEM_PROMPT
+from .schema import DisambiguateResponseModel
 
-
-@dataclass
-class DisambiguateResponse:
-    """
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
-    说明: 消歧响应数据结构，封装响应内容和thinking内容
-    """
-
-    content_clean: str
-    thinking_content: Optional[str]
-    extraction: Optional[Any]
-    raw_response: Any
+T = TypeVar("T")
 
 
 class DisambiguationClient(BaseModelClient):
@@ -48,6 +45,10 @@ class DisambiguationClient(BaseModelClient):
     消歧专用客户端
 
     负责处理人物别名识别和匿名人物识别。
+
+    修改时间: 2026-03-16
+    修改者: TraeAI
+    任务: 支持依赖注入 instructor_client_factory，便于测试
     """
 
     def __init__(
@@ -58,6 +59,7 @@ class DisambiguationClient(BaseModelClient):
         analysis_logger: AnalysisLogger | None = None,
         token_usage_callback: Optional[TokenUsageCallback] = None,
         novel_id: Optional[str] = None,
+        instructor_client_factory: Optional[Any] = None,
     ) -> None:
         super().__init__(
             task_type=task_type,
@@ -67,6 +69,7 @@ class DisambiguationClient(BaseModelClient):
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
         )
+        self._instructor_client_factory = instructor_client_factory
 
     def _log_disambiguate_start(
         self,
@@ -79,120 +82,179 @@ class DisambiguationClient(BaseModelClient):
         创建者: TraeAI
         任务: refactor-model-interaction-layer
         说明: 统一记录消歧开始日志，区分云端/本地
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 优化云端模型日志，显示更多调用信息
+        修改内容: 添加 novel_id、thinking_enabled 参数到日志
         """
         if is_cloud:
             logger.info(
-                "[云端模型] {} 开始: task_type={} model={} count={}",
+                "[云端模型] {} 开始: novel_id={} task_type={} model={} count={} thinking_enabled={}",
                 log_type,
+                self._novel_id,
                 self._task_type,
                 self._config.model,
                 count,
+                self._config.thinking_enabled,
             )
         else:
             logger.debug(
-                "{} start task_type={} model={} count={}",
+                "{} start: novel_id={} task_type={} model={} count={} thinking_enabled={}",
                 log_type,
+                self._novel_id,
                 self._task_type,
                 self._config.model,
                 count,
+                self._config.thinking_enabled,
             )
+
+    # _build_json_schema 方法已移至 BaseModelClient 基类
+    # 创建时间: 2026-03-17
+    # 修改者: TraeAI
+    # 任务: code-quality-refactor - 提取API调用基类
 
     def _call_disambiguate_api(
         self,
         messages: List[Dict[str, str]],
         log_type: str,
-    ) -> Any:
+    ) -> DisambiguateResponseModel:
         """
         创建时间: 2026-03-13
         创建者: TraeAI
         任务: refactor-model-interaction-layer
         说明: 统一调用消歧API，处理响应字符串/对象两种情况
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地消歧客户端集成 Instructor
+        修改内容: 使用 Instructor 实现结构化输出，直接返回 DisambiguateResponseModel
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 移除 Instructor 依赖
+        修改内容: 使用 LiteLLM 的 JSON Schema 模式替代 Instructor
         """
         if not self._config.model:
             raise ValueError("model is required")
 
-        enable_thinking = self._config.thinking_enabled
-        response = self._client.chat.completions.create(
-            model=self._config.model,
-            messages=cast(Any, messages),
-            temperature=self._config.temperature,
-            top_p=self._config.top_p,
-            presence_penalty=self._config.presence_penalty,
-            extra_body=self._build_extra_body(enable_thinking),
+        if self._client is None:
+            raise ValueError("client is required")
+
+        model_name = get_model_with_provider(self._config.model, self._config)
+
+        request_params: dict[str, Any] = {
+            "model": model_name,
+            "messages": cast(Any, messages),
+            "temperature": self._config.temperature,
+            "top_p": self._config.top_p,
+            "presence_penalty": self._config.presence_penalty,
+            "response_format": self._build_json_schema(DisambiguateResponseModel),
+        }
+
+        # 使用tiktoken估算prompt token数量
+        model_for_token_count = self._config.model or "gpt-4"
+        prompt_tokens = count_messages_tokens(messages, model_for_token_count)
+
+        # 使用流式模式并实时输出到控制台（仅云端API）
+        is_cloud = self._is_cloud_api()
+        response = self._call_api_stream(request_params, is_cloud=is_cloud)
+
+        # 提取 thinking_content（如果存在）
+        thinking_content = None
+        if hasattr(response, "choices") and response.choices:
+            message = response.choices[0].message
+            thinking_content = getattr(message, "reasoning_content", None)
+            if thinking_content:
+                logger.debug(f"Extracted thinking_content: {len(thinking_content)} chars")
+
+        parsed_response = self._parse_structured_response(response, DisambiguateResponseModel)
+
+        # 将 thinking_content 附加到响应对象以便日志记录
+        if thinking_content:
+            parsed_response._thinking_content = thinking_content
+
+        # 估算completion token并记录token使用
+        response_content = (
+            response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
         )
-        return response
+        completion_tokens = count_tokens(response_content, model_for_token_count)
+        total_tokens = prompt_tokens + completion_tokens
+
+        self._record_token_usage_estimated(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            call_type=log_type,
+        )
+
+        return parsed_response
+
+    def _call_api_stream(self, request_params: dict[str, Any], is_cloud: bool = False) -> Any:
+        """
+        流式API调用
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: API控制台流式输出
+        说明: 使用流式模式调用API，实时输出到控制台（仅云端API）
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: code-quality-refactor - 使用基类 _call_api_stream 方法
+        """
+        return self._call_api_stream(request_params, is_cloud)
+
+    # _parse_structured_response 方法已移至 BaseModelClient 基类
+    # 创建时间: 2026-03-17
+    # 修改者: TraeAI
+    # 任务: code-quality-refactor - 提取API调用基类
 
     def _process_disambiguate_response(
         self,
-        response: Any,
+        response: DisambiguateResponseModel,
         is_cloud: bool,
         log_type: str,
-    ) -> DisambiguateResponse:
+    ) -> DisambiguateResponseModel:
         """
         创建时间: 2026-03-13
         创建者: TraeAI
         任务: refactor-model-interaction-layer
         说明: 统一处理消歧响应，提取thinking内容，记录响应日志
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地消歧客户端集成 Instructor
+        修改内容: 简化方法，Instructor 已返回结构化模型，无需手动解析
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 优化云端模型日志，显示更多调用信息
+        修改内容: 添加 novel_id 参数到日志
         """
-        if isinstance(response, str):
-            logger.warning("{} received string response from API", log_type)
-            content_clean = response
-            thinking_content = None
-            extraction = None
-        else:
-            message = response.choices[0].message
-            content = message.content or ""
-            reasoning_content = getattr(message, "reasoning_content", None)
-
-            extraction = extract_thinking_unified(
-                content=content,
-                reasoning_content=reasoning_content,
-                support_reasoning_content=True,
-                support_think_tags=True,
-            )
-
-            thinking_content = extraction.thinking_content
-            content_clean = extraction.content_without_thinking
-
-        has_thinking = bool(thinking_content and thinking_content.strip())
-        has_response = bool(content_clean and content_clean.strip())
+        alias_count = len(response.alias_map)
 
         if is_cloud:
             logger.info(
-                "[云端模型] {} 响应: has_thinking={} thinking_chars={} has_response={} response_chars={}",
+                "[云端模型] {} 响应: novel_id={} alias_count={}",
                 log_type,
-                has_thinking,
-                len(thinking_content) if thinking_content else 0,
-                has_response,
-                len(content_clean),
+                self._novel_id,
+                alias_count,
             )
         else:
             logger.info(
-                "{} response: has_thinking={} thinking_chars={} has_response={} response_chars={}",
+                "{} response: novel_id={} alias_count={}",
                 log_type,
-                has_thinking,
-                len(thinking_content) if thinking_content else 0,
-                has_response,
-                len(content_clean),
-            )
-            logger.debug(
-                "{} response received chars={} thinking_chars={}",
-                log_type,
-                len(content_clean),
-                len(thinking_content) if thinking_content else 0,
+                self._novel_id,
+                alias_count,
             )
 
-        return DisambiguateResponse(
-            content_clean=content_clean,
-            thinking_content=thinking_content,
-            extraction=extraction,
-            raw_response=response,
-        )
+        return response
 
     def _log_disambiguate_result(
         self,
         messages: List[Dict[str, str]],
-        response_data: DisambiguateResponse,
+        response_data: DisambiguateResponseModel,
         metadata: Dict[str, Any],
     ) -> None:
         """
@@ -200,22 +262,37 @@ class DisambiguationClient(BaseModelClient):
         创建者: TraeAI
         任务: refactor-model-interaction-layer
         说明: 统一记录消歧结果日志到 analysis_logger
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地消歧客户端集成 Instructor
+        修改内容: 适配 DisambiguateResponseModel，简化日志记录
+
+        修改时间: 2026-03-17
+        修改者: TraeAI
+        任务: 添加 thinking_content 记录
+        修改内容: 从响应对象提取并记录 thinking_content
         """
         if not self._analysis_logger:
             return
 
-        if response_data.thinking_content:
-            metadata["thinking_content"] = response_data.thinking_content
-            if not isinstance(response_data.raw_response, str) and response_data.extraction is not None:
-                metadata["thinking_format"] = response_data.extraction.thinking_format
-                if hasattr(response_data.extraction, "thinking_tokens"):
-                    metadata["thinking_tokens"] = response_data.extraction.thinking_tokens
+        # 将 Python dict 转换为标准 JSON 格式（双引号）
+        import json
 
-        self._analysis_logger.log_local_prompt(
-            chunk_id=None,
+        response_content = json.dumps(response_data.alias_map, ensure_ascii=False)
+
+        # 添加 thinking_content 到 metadata（如果存在）
+        thinking_content = getattr(response_data, "_thinking_content", None)
+        if thinking_content:
+            metadata["thinking_content"] = thinking_content
+            metadata["thinking_format"] = "reasoning_content"
+            metadata["thinking_tokens"] = len(thinking_content) // 2
+
+        self._analysis_logger.log_prompt(
             messages=messages,
-            response=response_data.content_clean,
+            response=response_content,
             metadata=metadata,
+            chunk_id=None,
         )
 
     def disambiguate_characters(
@@ -237,6 +314,11 @@ class DisambiguationClient(BaseModelClient):
         修改者: TraeAI
         修改内容: 重构使用公共方法 _log_disambiguate_start, _call_disambiguate_api,
                   _process_disambiguate_response, _log_disambiguate_result
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地消歧客户端集成 Instructor
+        修改内容: 使用 Instructor 结构化输出，简化结果处理
         """
         if not candidates:
             return {}
@@ -258,25 +340,44 @@ class DisambiguationClient(BaseModelClient):
             }
             self._log_disambiguate_result(messages, response_data, metadata)
 
-            result = parse_alias_map(response_data.content_clean, candidates)
-
-            if not isinstance(response, str):
-                self._record_token_usage(response, "local")
+            result = self._build_result_from_response(response_data, candidates)
 
             logger.debug("disambiguate_characters complete")
             return result
-        except openai.APIConnectionError as e:
-            self._handle_api_connection_error(e)
-            raise
-        except openai.APITimeoutError as e:
-            self._handle_api_timeout(e)
-            raise
-        except openai.APIStatusError as e:
-            self._handle_api_status_error(e)
-            raise
         except Exception as e:
             logger.error("disambiguate_characters unexpected error: {}", str(e))
+            from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
+
+            if isinstance(e, LiteLLMAPIConnectionError):
+                raise ConnectionError(str(e)) from e
             raise
+
+    def _build_result_from_response(
+        self,
+        response_data: DisambiguateResponseModel,
+        candidates: List[str] | List[Dict[str, int]],
+    ) -> Dict[str, str]:
+        """
+        创建时间: 2026-03-16
+        创建者: TraeAI
+        任务: 重构本地消歧客户端集成 Instructor
+        说明: 从 DisambiguateResponseModel 构建结果字典，确保所有候选名都有映射
+        """
+        name_list: list[str] = []
+        if candidates and isinstance(candidates[0], dict):
+            dict_candidates = cast(list[dict[str, int]], candidates)
+            name_list = [str(c["name"]) for c in dict_candidates]
+        else:
+            str_candidates = cast(list[str], candidates)
+            name_list = list(str_candidates)
+
+        result: dict[str, str] = {}
+        for name in name_list:
+            if name in response_data.alias_map:
+                result[name] = str(response_data.alias_map[name])
+            else:
+                result[name] = name
+        return result
 
     def _build_disambiguate_messages(
         self,
@@ -348,6 +449,11 @@ class DisambiguationClient(BaseModelClient):
         修改者: TraeAI
         修改内容: 重构使用公共方法 _log_disambiguate_start, _call_disambiguate_api,
                   _process_disambiguate_response, _log_disambiguate_result
+
+        修改时间: 2026-03-16
+        修改者: TraeAI
+        任务: 重构本地消歧客户端集成 Instructor
+        修改内容: 使用 Instructor 结构化输出，简化结果处理
         """
         if not anonymous_names:
             return {}
@@ -370,22 +476,10 @@ class DisambiguationClient(BaseModelClient):
             }
             self._log_disambiguate_result(messages, response_data, metadata)
 
-            result = parse_alias_map(response_data.content_clean, anonymous_names)
-
-            if not isinstance(response, str):
-                self._record_token_usage(response, "local")
+            result = self._build_result_from_response(response_data, anonymous_names)
 
             logger.debug("disambiguate_anonymous complete")
             return result
-        except openai.APIConnectionError as e:
-            self._handle_api_connection_error(e)
-            raise
-        except openai.APITimeoutError as e:
-            self._handle_api_timeout(e)
-            raise
-        except openai.APIStatusError as e:
-            self._handle_api_status_error(e)
-            raise
         except Exception as e:
             logger.error("disambiguate_anonymous unexpected error: {}", str(e))
             raise

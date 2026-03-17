@@ -153,6 +153,10 @@ def run_cloud_diagnose(
     cache = FileCache(cache_path) if cache_path else MemoryCache()
     cloud_client = client or ConfiguredCloudModelClient()
 
+    # 设置token使用回调
+    if session is not None:
+        _setup_diagnose_callback(cloud_client, session, payload.get("novel_id", "unknown"), run_id=run_id)
+
     def cloud_stage(stage_payload: dict, outputs: dict) -> CloudAnalysis:
         return cloud_client.diagnose(stage_payload)
 

@@ -70,10 +70,27 @@ def _init_annotation_clients(
     else:
         logger.info("cloud annotation fallback is disabled by config")
 
-    incremental_client = incremental_disambig_client or UnifiedModelClient(
-        "incremental_disambig", analysis_logger=analysis_logger
-    )
-    full_client = full_disambig_client or UnifiedModelClient("full_disambig", analysis_logger=analysis_logger)
+    # 增量消歧客户端：如果配置为空，回退到标注模型
+    if incremental_disambig_client:
+        incremental_client = incremental_disambig_client
+    else:
+        try:
+            incremental_client = UnifiedModelClient("incremental_disambig", analysis_logger=analysis_logger)
+            logger.info("incremental disambiguation client initialized")
+        except ValueError as e:
+            logger.warning(f"incremental disambiguation config not found, falling back to annotation model: {e}")
+            incremental_client = annotation_client
+
+    # 全量消歧客户端：如果配置为空，回退到标注模型
+    if full_disambig_client:
+        full_client = full_disambig_client
+    else:
+        try:
+            full_client = UnifiedModelClient("full_disambig", analysis_logger=analysis_logger)
+            logger.info("full disambiguation client initialized")
+        except ValueError as e:
+            logger.warning(f"full disambiguation config not found, falling back to annotation model: {e}")
+            full_client = annotation_client
 
     return annotation_client, cloud_annotation_client, incremental_client, full_client
 

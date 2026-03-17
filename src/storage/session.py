@@ -179,6 +179,7 @@ class SessionFactory:
         """
         if init_tables:
             from src.storage.db import init_db
+
             init_db()
 
         session_factory = get_session_factory()

@@ -47,10 +47,12 @@ from .model import (
     TaskModelSettings,
     ThinkingConfig,
     ThinkingSettings,
+    StreamingSettings,
     _parse_embedding_model_settings,
     _parse_models_settings,
     _parse_task_model_settings,
     _parse_thinking_settings,
+    _parse_streaming_settings,
 )
 
 __all__ = [
@@ -71,6 +73,7 @@ __all__ = [
     "PromptSettings",
     "RAGSettings",
     "SingleBookTopicSettings",
+    "StreamingSettings",
     "TaskModelSettings",
     "TextLimitsSettings",
     "ThinkingConfig",
@@ -89,6 +92,7 @@ __all__ = [
     "_parse_progress_settings",
     "_parse_prompt_settings",
     "_parse_rag_settings",
+    "_parse_streaming_settings",
     "_parse_task_model_settings",
     "_parse_thinking_settings",
     "_parse_topic_model_settings",

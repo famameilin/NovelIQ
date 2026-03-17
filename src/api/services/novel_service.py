@@ -234,8 +234,39 @@ class NovelService:
 
     def get_task(self, task_id: str) -> dict:
         if task_id not in self._tasks:
+            # 尝试从数据库加载
+            task = self._load_task_from_db(task_id)
+            if task:
+                self._tasks[task_id] = task
+                return task
             raise NovelNotFoundError(f"任务不存在: {task_id}")
         return self._tasks[task_id]
+
+    def _load_task_from_db(self, task_id: str) -> dict | None:
+        """
+        从数据库加载任务元数据
+
+        创建时间: 2026-03-17
+        创建者: TraeAI
+        任务: 修复服务重启后任务丢失问题
+        说明: 当内存中不存在任务时，从PostgreSQL查询
+        """
+        try:
+            session_factory = get_session_factory()
+            with session_factory() as session:
+                run_repo = RunRepository(session)
+                # 尝试通过task_id（run_id的前8位）查找
+                run = run_repo.get_run_by_task_id(task_id)
+                if run:
+                    return {
+                        "task_id": task_id,
+                        "novel_id": run["novel_id"],
+                        "status": run["status"],
+                        "run_id": run["run_id"],
+                    }
+        except Exception as e:
+            logger.warning(f"从数据库加载任务失败: {e}")
+        return None
 
     def update_task_status(self, task_id: str, status: str) -> None:
         """
