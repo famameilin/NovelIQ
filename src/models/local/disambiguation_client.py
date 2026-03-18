@@ -199,11 +199,12 @@ class DisambiguationClient(BaseModelClient):
         任务: API控制台流式输出
         说明: 使用流式模式调用API，实时输出到控制台（仅云端API）
 
-        修改时间: 2026-03-17
+        修改时间: 2026-03-18
         修改者: TraeAI
-        任务: code-quality-refactor - 使用基类 _call_api_stream 方法
+        任务: code-quality-refactor - 修复无限递归问题
+        修改内容: 调用基类方法而非自己
         """
-        return self._call_api_stream(request_params, is_cloud)
+        return super()._call_api_stream(request_params, is_cloud)
 
     # _parse_structured_response 方法已移至 BaseModelClient 基类
     # 创建时间: 2026-03-17

@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Any, Tuple
 
 from loguru import logger
 
@@ -30,7 +30,7 @@ from src.models.local.unified_client import UnifiedModelClient
 if TYPE_CHECKING:
     import networkx as nx
     from src.rag import RAGRetriever
-    from src.models.local.schema import TwoPhaseAnnotationResult
+    from src.models.local.annotation import TwoPhaseAnnotationResult
 
 
 @dataclass
@@ -44,7 +44,7 @@ class AnnotationPhaseConfig:
     说明: 封装_init_annotation_phase的多参数
     """
 
-    conn: any
+    conn: Any
     all_chunks: list
     novel_id: str
     novel_title: str | None = None
