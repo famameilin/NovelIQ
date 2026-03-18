@@ -29,7 +29,7 @@ from litellm.exceptions import APIConnectionError, Timeout
 from openai import APIStatusError
 
 from src.config import TaskModelConfig
-from src.models.local.annotation_client import Phase1MaxRetriesExceededError
+from src.models.local.annotation import Phase1MaxRetriesExceededError
 from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.schema import ForeshadowingResult
 
