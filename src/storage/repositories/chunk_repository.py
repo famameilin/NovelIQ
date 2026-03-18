@@ -18,20 +18,31 @@
 修改者: TraeAI
 任务: code-quality-refactor - 拆分chunk_repository.py
 修改内容: 将 ChunkStyleData 数据类移至 chunk/style_data.py
+修改内容: 将 style/culture/topic 操作移至子模块
 """
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from src.chunking.chunker import Chunk
 from src.storage.models import Chunk as ChunkModel
-from src.storage.models import ChunkCulture, ChunkEmbedding, ChunkStyle, ChunkTopic
+from src.storage.models import ChunkEmbedding
 from src.storage.repositories.base import BaseRepository
-from src.storage.repositories.chunk import ChunkStyleData
+from src.storage.repositories.chunk import (
+    ChunkStyleData,
+    clear_chunk_topics,
+    fetch_chunk_cultures_full,
+    fetch_chunk_styles,
+    fetch_chunk_styles_full,
+    fetch_chunk_topics_agg,
+    insert_chunk_culture,
+    insert_chunk_style,
+    insert_chunk_topics,
+)
 
 
 class ChunkRepository(BaseRepository["ChunkModel"]):
@@ -93,94 +104,23 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         return [(row[0], row[1]) for row in result.fetchall()]
 
     def fetch_chunk_styles(self, run_id: str) -> List[Tuple[int, float, float, float]]:
-        """
-        获取分块风格数据
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            (chunk_id, dialogue_ratio, sent_len_std, avg_sent_len) 元组列表
-        """
-        stmt = select(
-            ChunkStyle.chunk_id,
-            ChunkStyle.dialogue_ratio,
-            ChunkStyle.sent_len_std,
-            ChunkStyle.avg_sent_len,
-        ).where(ChunkStyle.run_id == run_id)
-        result = self.session.execute(stmt)
-        return [(row[0], row[1], row[2], row[3]) for row in result.fetchall()]
+        return fetch_chunk_styles(self.session, run_id)
 
     def insert_chunk_style(self, run_id: str, rows: Union[Iterable[ChunkStyleData], Iterable[Any]]) -> None:
-        """
-        插入分块风格数据
-
-        Args:
-            run_id: 运行ID
-            rows: 风格数据行
-        """
-        self.session.execute(delete(ChunkStyle).where(ChunkStyle.run_id == run_id))
-        style_rows = []
-        for row in rows:
-            if isinstance(row, ChunkStyleData):
-                style_rows.append(row.to_dict(run_id))
-            else:
-                style_rows.append(cast(dict, row))
-        if style_rows:
-            self.session.bulk_insert_mappings(ChunkStyle, style_rows)
+        insert_chunk_style(self.session, run_id, rows)
 
     def insert_chunk_culture(
         self,
         run_id: str,
         rows: Iterable[Tuple[int, float, float, float, float, float, float]],
     ) -> None:
-        """
-        插入分块文化数据
-
-        Args:
-            run_id: 运行ID
-            rows: 文化数据行 (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density)
-        """
-        self.session.execute(delete(ChunkCulture).where(ChunkCulture.run_id == run_id))
-        culture_rows = [
-            {
-                "chunk_id": row[0],
-                "confucian_density": row[1],
-                "taoist_density": row[2],
-                "buddhist_density": row[3],
-                "folk_density": row[4],
-                "allusion_density": row[5],
-                "imagery_density": row[6],
-                "run_id": run_id,
-            }
-            for row in rows
-        ]
-        if culture_rows:
-            self.session.bulk_insert_mappings(ChunkCulture, culture_rows)
+        insert_chunk_culture(self.session, run_id, rows)
 
     def insert_chunk_topics(self, run_id: str, rows: Iterable[Tuple[int, int, float]]) -> None:
-        """
-        插入分块主题数据
-
-        Args:
-            run_id: 运行ID
-            rows: 主题数据行 (chunk_id, topic_id, topic_weight)
-        """
-        topic_rows = [
-            {
-                "chunk_id": row[0],
-                "topic_id": row[1],
-                "topic_weight": row[2],
-                "run_id": run_id,
-            }
-            for row in rows
-        ]
-        if topic_rows:
-            self.session.bulk_insert_mappings(ChunkTopic, topic_rows)
+        insert_chunk_topics(self.session, run_id, rows)
 
     def clear_chunk_topics(self, run_id: str) -> None:
-        """清空分块主题数据"""
-        self.session.execute(delete(ChunkTopic).where(ChunkTopic.run_id == run_id))
+        clear_chunk_topics(self.session, run_id)
 
     def fetch_chunk_embedding(self, run_id: str, chunk_id: int) -> Optional[bytes]:
         """
@@ -203,73 +143,13 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def fetch_chunk_styles_full(
         self, run_id: str
     ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
-        """
-        获取完整的分块风格数据
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            (chunk_id, mtld, ttr, avg_sent_len, sent_len_std, d_value, pause_density, fight_density, exclaim_density, dialogue_ratio, question_density, sensory_density, metaphor_density, cultural_density, function_word_vector) 元组列表
-        """
-        stmt = select(
-            ChunkStyle.chunk_id,
-            ChunkStyle.mtld,
-            ChunkStyle.ttr,
-            ChunkStyle.avg_sent_len,
-            ChunkStyle.sent_len_std,
-            ChunkStyle.d_value,
-            ChunkStyle.pause_density,
-            ChunkStyle.fight_density,
-            ChunkStyle.exclaim_density,
-            ChunkStyle.dialogue_ratio,
-            ChunkStyle.question_density,
-            ChunkStyle.sensory_density,
-            ChunkStyle.metaphor_density,
-            ChunkStyle.cultural_density,
-            ChunkStyle.function_word_vector,
-        ).where(ChunkStyle.run_id == run_id)
-        result = self.session.execute(stmt)
-        return [tuple(row) for row in result.fetchall()]
+        return fetch_chunk_styles_full(self.session, run_id)
 
     def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float]]:
-        """
-        获取完整的分块文化数据
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density) 元组列表
-        """
-        stmt = select(
-            ChunkCulture.chunk_id,
-            ChunkCulture.confucian_density,
-            ChunkCulture.taoist_density,
-            ChunkCulture.buddhist_density,
-            ChunkCulture.folk_density,
-            ChunkCulture.allusion_density,
-        ).where(ChunkCulture.run_id == run_id)
-        result = self.session.execute(stmt)
-        return [tuple(row) for row in result.fetchall()]
+        return fetch_chunk_cultures_full(self.session, run_id)
 
     def fetch_chunk_topics_agg(self, run_id: str) -> List[Tuple[int, float]]:
-        """
-        获取聚合后的分块主题数据（每个分块的平均主题权重）
-
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            (chunk_id, avg_topic_weight) 元组列表
-        """
-        stmt = (
-            select(ChunkTopic.chunk_id, func.avg(ChunkTopic.topic_weight).label("avg_weight"))
-            .where(ChunkTopic.run_id == run_id)
-            .group_by(ChunkTopic.chunk_id)
-        )
-        result = self.session.execute(stmt)
-        return [(row[0], row[1]) for row in result.fetchall()]
+        return fetch_chunk_topics_agg(self.session, run_id)
 
     def fetch_chunk_counts(self, run_id: str) -> Tuple[int, int]:
         """
