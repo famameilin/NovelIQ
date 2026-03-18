@@ -31,27 +31,28 @@
 - 移除未使用的委托方法，简化代码
 - 移除未使用的方法（_get_instructor_client, _should_use_stream, _validate_and_retry_annotation）
 - 为委托方法添加 @deprecated 装饰器
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - Task 8 拆分annotation_client
+修改内容:
+- 将单次调用逻辑移至 annotation/single_call.py
+- 将伏笔构建逻辑移至 annotation/foreshadowing.py
+- 简化 annotate_chunk 方法，委托给子模块
 """
 
 from __future__ import annotations
 
-import warnings
 from typing import Any, Dict, List, Type, TypeVar
-
-from loguru import logger
 
 from src.config import TaskModelConfig, TaskType, settings
 from src.config.analysis_logger import AnalysisLogger
 
 from .annotation import (
-    PHASE_MAX_RETRIES,
     AnnotationContext,
-    Phase1MaxRetriesExceededError,
     TwoPhaseAnnotationResult,
-    _build_messages,
-    execute_validation_retry_call,
-    extract_names_from_annotation,
-    log_annotation_result,
+    annotate_single_call_with_retry,
+    build_foreshadowing_from_annotation,
     log_annotation_start as _log_annotation_start_impl,
     log_prompt_response,
     parse_annotation as _parse_annotation_impl,
@@ -61,33 +62,9 @@ from .annotation import (
 from .annotation.two_phase import annotate_chunk_two_phase as _annotate_chunk_two_phase_impl
 from .base import BaseModelClient, TokenUsageCallback
 from .litellm_utils import get_model_with_provider
-from .retry_handler import AnnotationRetryHandler, RetryConfig
-from .schema import ChunkAnnotation, ForeshadowingResult
-from .validator import validate_names_in_sources
+from .schema import ChunkAnnotation
 
 T = TypeVar("T")
-
-
-def _deprecated(message: str):
-    """
-    弃用装饰器
-
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - 为委托方法添加弃用警告
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            warnings.warn(
-                f"{func.__name__} is deprecated: {message}",
-                DeprecationWarning,
-                stacklevel=2
-            )
-            return func(*args, **kwargs)
-        wrapper.__name__ = func.__name__
-        wrapper.__doc__ = func.__doc__
-        return wrapper
-    return decorator
 
 
 class AnnotationClient(BaseModelClient):
@@ -98,8 +75,8 @@ class AnnotationClient(BaseModelClient):
 
     修改时间: 2026-03-18
     修改者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
-    修改内容: 将核心逻辑委托给子模块函数，移除未使用的方法
+    任务: code-quality-refactor - Task 8 拆分annotation_client
+    修改内容: 将核心逻辑委托给子模块函数
     """
 
     def __init__(
@@ -134,68 +111,6 @@ class AnnotationClient(BaseModelClient):
         )
         self._instructor_client_factory = instructor_client_factory
 
-    def _execute_single_call(
-        self,
-        ctx: AnnotationContext,
-        messages: list[dict],
-    ) -> tuple[ChunkAnnotation, Any]:
-        """
-        执行单次标注调用
-
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取单次调用逻辑
-        """
-        is_cloud = self._is_cloud_api()
-        enable_thinking = self._config.thinking_enabled
-        response = self._call_annotation_api(messages, enable_thinking, ctx.chunk_id)
-
-        content_clean, thinking_content, extraction = self._process_annotation_response(
-            response, is_cloud, ctx.chunk_id, "single_call"
-        )
-
-        self._log_prompt_response(
-            ctx.chunk_id, content_clean, thinking_content, extraction, messages, ctx.text, ctx.prev_summary
-        )
-
-        result = self._parse_annotation(content_clean)
-
-        sources = {
-            "text": ctx.text,
-            "prev_tail_text": ctx.prev_tail_text or "",
-            "active_entities": [],
-            "alias_map": ctx.alias_map or {},
-            "next_preview": ctx.next_preview or "",
-        }
-
-        result = self._validate_annotation(result, sources, ctx.chunk_id, content_clean)
-
-        self._record_token_usage(response, "single_call", ctx.chunk_id)
-
-        return result, response
-
-    def _build_foreshadowing_from_annotation(
-        self,
-        annotation: ChunkAnnotation,
-    ) -> ForeshadowingResult | None:
-        """
-        从标注结果构建伏笔分析结果
-
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取伏笔构建逻辑
-        """
-        if not annotation.has_foreshadowing:
-            return None
-
-        return ForeshadowingResult(
-            has_foreshadowing=True,
-            foreshadowing_type=annotation.foreshadowing_type,
-            anchor_text="",
-            anchor_reason=annotation.foreshadowing_desc or "",
-            confidence="high",
-        )
-
     def annotate_chunk(
         self,
         text: str,
@@ -223,9 +138,14 @@ class AnnotationClient(BaseModelClient):
         创建者: TraeAI
         任务: code-quality-refactor - 重构annotate_chunk
         修改内容:
-        - 提取_execute_single_call方法
-        - 提取_build_foreshadowing_from_annotation方法
+        - 提取单次调用逻辑到 single_call 模块
+        - 提取双阶段调用逻辑到 two_phase 模块
         - 简化主函数逻辑
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: code-quality-refactor - Task 8 拆分annotation_client
+        修改内容: 委托给子模块函数
         """
         ctx = AnnotationContext(
             text=text,
@@ -248,256 +168,30 @@ class AnnotationClient(BaseModelClient):
         )
 
         if settings.analysis.two_phase_annotation.enabled:
-            return self._annotate_chunk_two_phase_from_context(ctx)
+            return _annotate_chunk_two_phase_impl(
+                client=self,
+                text=ctx.text,
+                prev_summary=ctx.prev_summary,
+                alias_map=ctx.alias_map,
+                chunk_id=ctx.chunk_id,
+                global_context=ctx.global_context,
+                prev_tail_text=ctx.prev_tail_text,
+                active_entities=ctx.active_entities,
+                rag_evidence=ctx.rag_evidence,
+                known_aliases=ctx.known_aliases,
+                next_preview=ctx.next_preview,
+                prev_chunk_text=ctx.prev_chunk_text,
+                next_chunk_text=ctx.next_chunk_text,
+                novel_title=ctx.novel_title,
+                main_characters=ctx.main_characters,
+                position_pct=ctx.position_pct,
+                chapter_id=ctx.chapter_id,
+                cloud_client=ctx.cloud_client,
+            )
 
-        return self._annotate_single_call_with_retry(ctx)
-
-    def _annotate_single_call_with_retry(
-        self,
-        ctx: AnnotationContext,
-    ) -> TwoPhaseAnnotationResult:
-        """
-        单次标注调用（带重试）
-
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取单次调用逻辑
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 3 统一重试机制
-        修改内容: 使用 AnnotationRetryHandler 替代自定义重试逻辑
-        """
-        messages = _build_messages(
-            ctx.text,
-            ctx.prev_summary,
-            ctx.alias_map,
-            ctx.global_context,
-            ctx.prev_tail_text,
-            ctx.active_entities,
-            ctx.rag_evidence,
-            ctx.known_aliases,
-            ctx.next_preview,
-            ctx.chunk_id,
-        )
-
-        is_cloud = self._is_cloud_api()
-        self._log_annotation_start(is_cloud, ctx.text, ctx.prev_summary, ctx.chunk_id, "single_call")
-
-        config = RetryConfig(
-            max_retries=PHASE_MAX_RETRIES,
-            operation_name="single_call",
-            chunk_id=ctx.chunk_id,
-        )
-        handler = AnnotationRetryHandler[ChunkAnnotation](
-            config=config,
-            local_client=self,
-            cloud_client=ctx.cloud_client,
-            exception_type=Phase1MaxRetriesExceededError,
-        )
-
-        def operation(client: "AnnotationClient", retry_messages: list[dict] | None = None) -> ChunkAnnotation:
-            """执行单次调用"""
-            msgs = retry_messages if retry_messages else messages
-            annotation, _ = client._execute_single_call(ctx, msgs)
-            return annotation
-
-        annotation = handler.execute(operation)
-        foreshadowing = self._build_foreshadowing_from_annotation(annotation)
+        annotation = annotate_single_call_with_retry(self, ctx)
+        foreshadowing = build_foreshadowing_from_annotation(annotation)
         return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
-
-    def _annotate_chunk_two_phase_from_context(
-        self,
-        ctx: AnnotationContext,
-    ) -> TwoPhaseAnnotationResult:
-        """
-        双阶段标注（从上下文）
-
-        创建时间: 2026-03-17
-        修改者: TraeAI
-        任务: code-quality-refactor - 提取双阶段调用逻辑
-        """
-        return _annotate_chunk_two_phase_impl(
-            client=self,
-            text=ctx.text,
-            prev_summary=ctx.prev_summary,
-            alias_map=ctx.alias_map,
-            chunk_id=ctx.chunk_id,
-            global_context=ctx.global_context,
-            prev_tail_text=ctx.prev_tail_text,
-            active_entities=ctx.active_entities,
-            rag_evidence=ctx.rag_evidence,
-            known_aliases=ctx.known_aliases,
-            next_preview=ctx.next_preview,
-            prev_chunk_text=ctx.prev_chunk_text,
-            next_chunk_text=ctx.next_chunk_text,
-            novel_title=ctx.novel_title,
-            main_characters=ctx.main_characters,
-            position_pct=ctx.position_pct,
-            chapter_id=ctx.chapter_id,
-            cloud_client=ctx.cloud_client,
-        )
-
-    @_deprecated("use src.models.local.annotation.api_call.log_annotation_start instead")
-    def _log_annotation_start(
-        self,
-        is_cloud: bool,
-        text: str,
-        prev_summary: str | None,
-        chunk_id: int | None,
-        phase: str = "",
-    ) -> None:
-        """
-        封装标注开始日志
-
-        .. deprecated::
-            使用 src.models.local.annotation.api_call.log_annotation_start 代替
-
-        创建时间: 2026-03-13
-        创建者: TraeAI
-        任务: refactor-model-interaction-layer
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/api_call.py
-        """
-        _log_annotation_start_impl(
-            novel_id=self._novel_id,
-            task_type=self._task_type,
-            model=self._config.model,
-            thinking_enabled=self._config.thinking_enabled,
-            is_cloud=is_cloud,
-            text=text,
-            prev_summary=prev_summary,
-            chunk_id=chunk_id,
-            phase=phase,
-        )
-
-    @_deprecated("use src.models.local.annotation.api_call.parse_annotation instead")
-    def _parse_annotation(self, content: str) -> ChunkAnnotation:
-        """
-        解析标注结果
-
-        .. deprecated::
-            使用 src.models.local.annotation.api_call.parse_annotation 代替
-
-        修改时间: 2026-03-16
-        创建者: TraeAI
-        任务: 重构本地标注客户端集成 Instructor
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/api_call.py
-        """
-        return _parse_annotation_impl(content, None)
-
-    @_deprecated("use src.models.local.annotation.api_call.extract_names_from_annotation instead")
-    def _extract_names_from_annotation(self, annotation: ChunkAnnotation) -> list[str]:
-        """
-        从标注结果中提取所有名字
-
-        .. deprecated::
-            使用 src.models.local.annotation.api_call.extract_names_from_annotation 代替
-
-        创建时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/api_call.py
-        """
-        return extract_names_from_annotation(annotation)
-
-    @_deprecated("use src.models.local.annotation.api_call.execute_validation_retry_call instead")
-    def _execute_validation_retry_call(
-        self,
-        retry_messages: list[dict],
-        chunk_id: int | None,
-    ) -> tuple[ChunkAnnotation, str]:
-        """
-        执行单次验证重试调用
-
-        .. deprecated::
-            使用 src.models.local.annotation.api_call.execute_validation_retry_call 代替
-
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取API调用逻辑
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/api_call.py
-        """
-        return execute_validation_retry_call(
-            client=self,
-            retry_messages=retry_messages,
-            chunk_id=chunk_id,
-            config=self._config,
-            parse_annotation_func=self._parse_annotation,
-        )
-
-    @_deprecated("use src.models.local.validator.validate_names_in_sources directly instead")
-    def _validate_annotation_names(
-        self,
-        annotation: ChunkAnnotation,
-        sources: dict,
-    ) -> list[str]:
-        """
-        验证标注结果中的名字
-
-        .. deprecated::
-            使用 src.models.local.validator.validate_names_in_sources 直接调用代替
-
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取名字验证逻辑
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 使用 annotation/api_call.py 中的函数
-        """
-        names_in_result = self._extract_names_from_annotation(annotation)
-        return validate_names_in_sources(names_in_result, sources)
-
-    @_deprecated("use src.models.local.annotation.validation.retry_with_validation instead")
-    def _retry_with_validation(
-        self,
-        original_user_prompt: str,
-        bad_output: str,
-        invalid_names: list[str],
-        sources: dict,
-        chunk_id: int | None,
-        max_retries: int,
-    ) -> tuple[ChunkAnnotation, list[str]]:
-        """
-        名字验证失败后的内部重试
-
-        .. deprecated::
-            使用 src.models.local.annotation.validation.retry_with_validation 代替
-
-        修改时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 重构_retry_with_validation
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/validation.py
-        """
-        from src.models.local.annotation.validation import retry_with_validation
-
-        return retry_with_validation(
-            original_user_prompt=original_user_prompt,
-            bad_output=bad_output,
-            invalid_names=invalid_names,
-            sources=sources,
-            chunk_id=chunk_id,
-            max_retries=max_retries,
-            execute_retry_call_func=self._execute_validation_retry_call,
-            validate_names_func=self._validate_annotation_names,
-        )
 
     def _call_annotation_api(
         self,
@@ -570,7 +264,20 @@ class AnnotationClient(BaseModelClient):
         
         return response
 
-    @_deprecated("use src.models.local.annotation.response.process_annotation_response instead")
+    def _parse_annotation(self, content: str) -> ChunkAnnotation:
+        """解析标注结果（委托给子模块）"""
+        return _parse_annotation_impl(content, None)
+
+    def _validate_annotation(
+        self,
+        result: ChunkAnnotation,
+        sources: dict,
+        chunk_id: int | None,
+        content_clean: str = "",
+    ) -> ChunkAnnotation:
+        """验证标注结果（委托给子模块）"""
+        return _validate_annotation_impl(result, sources, chunk_id, content_clean)
+
     def _process_annotation_response(
         self,
         response: Any,
@@ -578,21 +285,7 @@ class AnnotationClient(BaseModelClient):
         chunk_id: int | None = None,
         phase: str = "",
     ) -> tuple[str, str | None, Any]:
-        """
-        封装响应处理和thinking提取
-
-        .. deprecated::
-            使用 src.models.local.annotation.response.process_annotation_response 代替
-
-        创建时间: 2026-03-13
-        创建者: TraeAI
-        任务: refactor-model-interaction-layer
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/response.py
-        """
+        """处理响应（委托给子模块）"""
         return process_annotation_response(
             response=response,
             is_cloud=is_cloud,
@@ -601,32 +294,27 @@ class AnnotationClient(BaseModelClient):
             phase=phase,
         )
 
-    @_deprecated("use src.models.local.annotation.api_call.validate_annotation instead")
-    def _validate_annotation(
+    def _log_annotation_start(
         self,
-        result: ChunkAnnotation,
-        sources: dict,
+        is_cloud: bool,
+        text: str,
+        prev_summary: str | None,
         chunk_id: int | None,
-        content_clean: str = "",
-    ) -> ChunkAnnotation:
-        """
-        验证标注结果中的人名是否在原文中出现
+        phase: str = "",
+    ) -> None:
+        """记录标注开始日志（委托给子模块）"""
+        _log_annotation_start_impl(
+            novel_id=self._novel_id,
+            task_type=self._task_type,
+            model=self._config.model,
+            thinking_enabled=self._config.thinking_enabled,
+            is_cloud=is_cloud,
+            text=text,
+            prev_summary=prev_summary,
+            chunk_id=chunk_id,
+            phase=phase,
+        )
 
-        .. deprecated::
-            使用 src.models.local.annotation.api_call.validate_annotation 代替
-
-        创建时间: 2026-03-14
-        创建者: TraeAI
-        任务: 简化重试逻辑
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/api_call.py
-        """
-        return _validate_annotation_impl(result, sources, chunk_id, content_clean)
-
-    @_deprecated("use src.models.local.annotation.response.log_prompt_response instead")
     def _log_prompt_response(
         self,
         chunk_id: int | None,
@@ -637,21 +325,7 @@ class AnnotationClient(BaseModelClient):
         text: str,
         prev_summary: str | None,
     ) -> None:
-        """
-        封装prompt和response日志记录
-
-        .. deprecated::
-            使用 src.models.local.annotation.response.log_prompt_response 代替
-
-        创建时间: 2026-03-13
-        创建者: TraeAI
-        任务: refactor-model-interaction-layer
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/response.py
-        """
+        """记录prompt和response日志（委托给子模块）"""
         log_prompt_response(
             analysis_logger=self._analysis_logger,
             chunk_id=chunk_id,
@@ -663,75 +337,4 @@ class AnnotationClient(BaseModelClient):
             prev_summary=prev_summary,
             model=self._config.model or "",
             task_type=self._task_type,
-        )
-
-    @_deprecated("use src.models.local.annotation.response.log_annotation_result instead")
-    def _log_annotation_result(
-        self,
-        chunk_id: int | None,
-        result: Any,
-        content_clean: str,
-        thinking_content: str | None,
-        extraction: Any,
-    ) -> None:
-        """
-        封装标注结果日志记录
-
-        .. deprecated::
-            使用 src.models.local.annotation.response.log_annotation_result 代替
-
-        创建时间: 2026-03-13
-        创建者: TraeAI
-        任务: refactor-model-interaction-layer
-
-        修改时间: 2026-03-18
-        修改者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/response.py
-        """
-        log_annotation_result(
-            analysis_logger=self._analysis_logger,
-            chunk_id=chunk_id,
-            result=result,
-            content_clean=content_clean,
-            thinking_content=thinking_content,
-            extraction=extraction,
-        )
-
-    @_deprecated("use src.models.local.annotation.messages._build_messages instead")
-    def _build_messages(
-        self,
-        text: str,
-        prev_summary: str | None = None,
-        alias_map: Dict[str, str] | None = None,
-        global_context: str | None = None,
-        prev_tail_text: str | None = None,
-        active_entities: str | None = None,
-        rag_evidence: str | None = None,
-        known_aliases: str | None = None,
-        next_preview: str | None = None,
-        chunk_id: int | None = None,
-    ) -> List[dict]:
-        """
-        构建标注消息
-
-        .. deprecated::
-            使用 src.models.local.annotation.messages._build_messages 代替
-
-        创建时间: 2026-03-18
-        创建者: TraeAI
-        任务: code-quality-refactor - Task 9 拆分annotation_client
-        修改内容: 委托给 annotation/messages.py
-        """
-        return _build_messages(
-            text=text,
-            prev_summary=prev_summary,
-            alias_map=alias_map,
-            global_context=global_context,
-            prev_tail_text=prev_tail_text,
-            active_entities=active_entities,
-            rag_evidence=rag_evidence,
-            known_aliases=known_aliases,
-            next_preview=next_preview,
-            chunk_id=chunk_id,
         )
