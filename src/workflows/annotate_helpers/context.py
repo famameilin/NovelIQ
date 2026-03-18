@@ -1,19 +1,15 @@
 """
+标注辅助函数模块 - 上下文管理
+
 创建时间: 2026-03-13
 创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 标注辅助函数模块
-修改时间: 2026-03-14
-修改者: TraeAI
-修改内容: 从 cli.annotate_helpers 迁移到 workflows.annotate_helpers，解决循环依赖
+任务: 项目文件结构整理与拆解
 
-说明: 本模块从 src.cli.annotate_helpers 迁移而来，用于解决 workflows 与 cli 之间的循环依赖问题。
+修改历史:
+- 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
+- 2026-03-14: 更新 RAGRetriever 初始化，使用 Repository 参数
 
-本模块包含上下文管理相关的数据类和函数。
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 更新 RAGRetriever 初始化和上下文函数调用，使用 Repository 参数
+说明: 本模块包含上下文管理相关的数据类和函数。
 """
 
 from __future__ import annotations
@@ -32,13 +28,7 @@ if TYPE_CHECKING:
 
 
 class ChunkContext:
-    """
-    Chunk上下文数据类
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
-    """
+    """Chunk上下文数据类"""
 
     def __init__(
         self,
@@ -63,22 +53,7 @@ def _init_rag_retriever(
     token_usage_callback,
     run_id: str | None = None,
 ) -> tuple[Optional["RAGRetriever"], Optional["nx.Graph"], Optional[EmbeddingClient]]:
-    """
-    初始化RAG检索器
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
-    说明: 从 run_annotate 中提取，负责初始化RAG检索器和知识图谱
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数，使用 EntityRepository 初始化 RAGRetriever
-
-    Returns:
-        Tuple: (rag_retriever, character_graph, embedding_client)
-    """
+    """初始化RAG检索器"""
     if not use_rag or not settings.rag.enabled:
         return None, None, None
 
@@ -129,19 +104,7 @@ def _prepare_chunk_context(
     rag_retriever: Optional["RAGRetriever"],
     run_id: Optional[str] = None,
 ) -> ChunkContext:
-    """
-    准备chunk上下文
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
-    说明: 从 run_annotate 中提取，负责准备单个chunk的上下文信息
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数，使用 Repository 调用上下文函数
-    """
+    """准备chunk上下文"""
     from src.context import (
         format_entities_for_prompt,
         get_active_entities,

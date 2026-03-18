@@ -1,25 +1,17 @@
 """
+标注辅助函数模块 - 结果存储
+
 创建时间: 2026-03-13
 创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 标注辅助函数模块
-修改时间: 2026-03-14
-修改者: TraeAI
-修改内容: 从 cli.annotate_helpers 迁移到 workflows.annotate_helpers，解决循环依赖
+任务: 项目文件结构整理与拆解
 
-说明: 本模块从 src.cli.annotate_helpers 迁移而来，用于解决 workflows 与 cli 之间的循环依赖问题。
-      导入路径已更新: from src.cli.annotate import -> from src.workflows.annotate import
+修改历史:
+- 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
+- 2026-03-14: 添加 run_id 参数，使用 Repository 模式
+- 2026-03-15: 移除向后兼容代码，只使用 Repository 模式
+- 2026-03-17: 添加 foreshadowing 参数，存储独立的 foreshadowing 分析结果
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id 参数支持，使用 AnnotationRepository/StatsRepository 替代直接调用 operations 函数
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 移除向后兼容代码，只使用 Repository 模式
-
-本模块包含结果存储相关的函数。
+说明: 本模块包含结果存储相关的函数。
 """
 
 from __future__ import annotations
@@ -34,29 +26,7 @@ def _store_annotation_results(
     run_id: str,
     foreshadowing=None,
 ) -> None:
-    """
-    存储标注结果
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
-    说明: 从 run_annotate 中提取，负责存储单个chunk的标注结果
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数，支持 Repository 模式
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 移除向后兼容代码，run_id 改为必需参数
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 修复foreshadowing数据丢失问题
-    修改内容: 添加foreshadowing参数，存储独立的foreshadowing分析结果
-    """
+    """存储标注结果"""
     from src.storage.repositories import AnnotationRepository, StatsRepository
 
     ann_repo = AnnotationRepository(conn)
