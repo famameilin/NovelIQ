@@ -1,44 +1,17 @@
 """
+AnnotationClient 模块
+
 创建时间: 2026-03-12
 创建者: TraeAI
 任务: 项目文件结构整理与拆解 - 从 unified_client.py 拆分标注专用客户端
 
-本模块包含文本标注相关的模型客户端，负责对文本块进行语义标注。
+修改历史:
+- 2026-03-14: 添加双次调用模式支持（第一次：基础标注，第二次：伏笔分析）
+- 2026-03-16: 集成 Instructor 实现结构化输出
+- 2026-03-18: 拆分核心逻辑到 annotation/ 子包，简化此类
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: Chunk 双次调用分析拆分
-修改内容:
-- 添加双次调用模式支持（第一次：基础标注，第二次：伏笔分析）
-- 添加并行和串行两种执行模式
-
-修改时间: 2026-03-16
-修改者: TraeAI
-任务: 重构本地标注客户端集成 Instructor
-修改内容:
-- 集成 Instructor 实现结构化输出
-- `_call_annotation_api` 方法支持 `response_model` 参数
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - Task 9 拆分annotation_client
-修改内容:
-- 将数据类和异常移至 annotation/context.py
-- 将Phase1逻辑移至 annotation/phase1.py
-- 将Phase2逻辑移至 annotation/phase2.py
-- 将双阶段逻辑移至 annotation/two_phase.py
-- 将API调用相关逻辑移至 annotation/api_call.py
-- 移除未使用的委托方法，简化代码
-- 移除未使用的方法（_get_instructor_client, _should_use_stream, _validate_and_retry_annotation）
-- 为委托方法添加 @deprecated 装饰器
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
-修改内容:
-- 将单次调用逻辑移至 annotation/single_call.py
-- 将伏笔构建逻辑移至 annotation/foreshadowing.py
-- 简化 annotate_chunk 方法，委托给子模块
+说明:
+- 此类现在主要作为协调器，核心逻辑已移至 src.models.local.annotation 子包
 """
 
 from __future__ import annotations
@@ -134,16 +107,8 @@ class AnnotationClient(BaseModelClient):
         """
         对文本块进行语义标注
 
-        修改时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 重构annotate_chunk
-        修改内容:
-        - 提取单次调用逻辑到 single_call 模块
-        - 提取双阶段调用逻辑到 two_phase 模块
-        - 简化主函数逻辑
-
         修改时间: 2026-03-18
-        修改者: TraeAI
+        创建者: TraeAI
         任务: code-quality-refactor - Task 8 拆分annotation_client
         修改内容: 委托给子模块函数
         """
@@ -210,17 +175,17 @@ class AnnotationClient(BaseModelClient):
         修改时间: 2026-03-16
         修改者: TraeAI
         任务: 重构本地标注客户端集成 Instructor
-        修改内容: 
+        修改内容:
         1. 添加 response_model 参数支持结构化输出
         2. 添加模型名称 provider 前缀处理
-        
+
         修改时间: 2026-03-16
         修改者: TraeAI
         任务: 修复thinking参数传递方式
         修改内容:
         1. 将thinking参数作为顶级参数传递
         2. 添加timeout参数支持
-        
+
         修改时间: 2026-03-16
         修改者: TraeAI
         任务: 启用云端Stream模式
@@ -240,7 +205,7 @@ class AnnotationClient(BaseModelClient):
 
         if self._client is None:
             raise ValueError("client is required")
-        
+
         request_params: dict[str, Any] = {
             "model": model_name,
             "messages": messages,
@@ -249,19 +214,19 @@ class AnnotationClient(BaseModelClient):
             "presence_penalty": self._config.presence_penalty,
             "extra_body": extra_body,
         }
-        
+
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
-        
+
         request_params.update(thinking_params)
-        
+
         is_cloud = self._is_cloud_api()
         response = self._call_api_stream(request_params, is_cloud=is_cloud)
-        
+
         if response_model is not None:
             parsed_result = self._parse_structured_response(response, response_model)
             return parsed_result, response
-        
+
         return response
 
     def _parse_annotation(self, content: str) -> ChunkAnnotation:
