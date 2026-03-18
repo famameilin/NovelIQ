@@ -1,4 +1,4 @@
-from .chunker import Chunk, chunk_text, chunk_documents, detect_chapters
+from .chunker import Chunk, chunk_text, chunk_documents, detect_chapters, SemanticChunker
 from .index import ChunkIndex, build_chunk_index
 
 __all__ = [
@@ -8,4 +8,5 @@ __all__ = [
     "chunk_text",
     "chunk_documents",
     "detect_chapters",
+    "SemanticChunker",
 ]
