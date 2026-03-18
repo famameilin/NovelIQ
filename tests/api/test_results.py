@@ -20,8 +20,11 @@ class TestResults:
         
         2026-03-13: TraeAI修改，任务refactor-api-layer-functions
         修改内容: get_results端点会先检查任务是否存在，不存在返回404
+        
+        2026-03-18: TraeAI修改，修复API参数问题
+        修改内容: 将task_id改为run_id，使用完整UUID查询
         """
-        response = client.get("/api/novels/nonexistent/results?task_id=nonexistent")
+        response = client.get("/api/novels/nonexistent/results?run_id=nonexistent")
         assert response.status_code == 404
 
     def test_get_emotion_curve_not_found(self):
