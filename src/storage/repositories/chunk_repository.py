@@ -13,11 +13,15 @@
 修改者: TraeAI
 任务: postgresql-migration
 修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 查询替代原生 SQL
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - 拆分chunk_repository.py
+修改内容: 将 ChunkStyleData 数据类移至 chunk/style_data.py
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union, cast
 
 from sqlalchemy import delete, func, or_, select
@@ -27,132 +31,7 @@ from src.chunking.chunker import Chunk
 from src.storage.models import Chunk as ChunkModel
 from src.storage.models import ChunkCulture, ChunkEmbedding, ChunkStyle, ChunkTopic
 from src.storage.repositories.base import BaseRepository
-
-
-@dataclass(frozen=True)
-class ChunkStyleData:
-    """
-    分块风格数据类
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Repository 基类和 Protocol 接口定义
-    说明: 封装分块风格指标数据，从 chunk_ops.py 迁移
-    """
-
-    chunk_id: int
-    mtld: float
-    ttr: float
-    avg_sent_len: float
-    sent_len_std: float
-    d_value: float
-    pause_density: float
-    fight_density: float
-    exclaim_density: float
-    dialogue_ratio: float
-    question_density: float
-    sensory_density: float
-    metaphor_density: float
-    cultural_density: float
-    function_word_vector: str
-    category_density_combat: float
-    category_density_body: float
-    category_density_relation: float
-    category_density_faction: float
-    category_density_command: float
-    category_density_action: float
-    category_density_psychology: float
-    category_density_measure: float
-    category_density_emotion: float
-    category_density_color: float
-
-    def to_tuple(
-        self,
-    ) -> Tuple[
-        int,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        str,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-    ]:
-        return (
-            self.chunk_id,
-            self.mtld,
-            self.ttr,
-            self.avg_sent_len,
-            self.sent_len_std,
-            self.d_value,
-            self.pause_density,
-            self.fight_density,
-            self.exclaim_density,
-            self.dialogue_ratio,
-            self.question_density,
-            self.sensory_density,
-            self.metaphor_density,
-            self.cultural_density,
-            self.function_word_vector,
-            self.category_density_combat,
-            self.category_density_body,
-            self.category_density_relation,
-            self.category_density_faction,
-            self.category_density_command,
-            self.category_density_action,
-            self.category_density_psychology,
-            self.category_density_measure,
-            self.category_density_emotion,
-            self.category_density_color,
-        )
-
-    def to_dict(self, run_id: str) -> dict:
-        """转换为字典格式，用于 bulk_insert_mappings"""
-        return {
-            "chunk_id": self.chunk_id,
-            "mtld": self.mtld,
-            "ttr": self.ttr,
-            "avg_sent_len": self.avg_sent_len,
-            "sent_len_std": self.sent_len_std,
-            "d_value": self.d_value,
-            "pause_density": self.pause_density,
-            "fight_density": self.fight_density,
-            "exclaim_density": self.exclaim_density,
-            "dialogue_ratio": self.dialogue_ratio,
-            "question_density": self.question_density,
-            "sensory_density": self.sensory_density,
-            "metaphor_density": self.metaphor_density,
-            "cultural_density": self.cultural_density,
-            "function_word_vector": self.function_word_vector,
-            "category_density_combat": self.category_density_combat,
-            "category_density_body": self.category_density_body,
-            "category_density_relation": self.category_density_relation,
-            "category_density_faction": self.category_density_faction,
-            "category_density_command": self.category_density_command,
-            "category_density_action": self.category_density_action,
-            "category_density_psychology": self.category_density_psychology,
-            "category_density_measure": self.category_density_measure,
-            "category_density_emotion": self.category_density_emotion,
-            "category_density_color": self.category_density_color,
-            "run_id": run_id,
-        }
+from src.storage.repositories.chunk import ChunkStyleData
 
 
 class ChunkRepository(BaseRepository["ChunkModel"]):
@@ -185,31 +64,23 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
         修改时间: 2026-03-16
         修改者: TraeAI
-        修改内容: 插入前先删除该 run_id 的旧数据，避免主键冲突
-
-        Args:
-            run_id: 运行ID
-            chunks: 分块序列
+        修改内容: 插入前先删除该 run_id 的旧数据
         """
-        stmt = delete(ChunkModel).where(ChunkModel.run_id == run_id)
-        self.session.execute(stmt)
-        
-        mappings = [
-            {
-                "chunk_id": chunk.index,
-                "chapter_id": None,
-                "char_offset": chunk.start,
-                "text": chunk.text,
-                "run_id": run_id,
-            }
+        self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
+        models = [
+            ChunkModel(
+                chunk_id=chunk.index,
+                chapter_id=None,
+                text=chunk.text,
+                run_id=run_id,
+            )
             for chunk in chunks
         ]
-        self.session.bulk_insert_mappings(ChunkModel, mappings)  # type: ignore[arg-type]
-        self.session.commit()
+        self.session.bulk_save_objects(models)
 
     def fetch_chunk_texts(self, run_id: str) -> List[Tuple[int, str]]:
         """
-        获取指定运行的所有分块文本
+        获取所有分块文本
 
         Args:
             run_id: 运行ID
@@ -219,11 +90,11 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         stmt = select(ChunkModel.chunk_id, ChunkModel.text).where(ChunkModel.run_id == run_id).order_by(ChunkModel.chunk_id)
         result = self.session.execute(stmt)
-        return [cast(Tuple[int, str], row) for row in result.fetchall()]
+        return [(row[0], row[1]) for row in result.fetchall()]
 
     def fetch_chunk_styles(self, run_id: str) -> List[Tuple[int, float, float, float]]:
         """
-        获取指定运行的分块风格数据
+        获取分块风格数据
 
         Args:
             run_id: 运行ID
@@ -231,13 +102,14 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         Returns:
             (chunk_id, dialogue_ratio, sent_len_std, avg_sent_len) 元组列表
         """
-        stmt = (
-            select(ChunkStyle.chunk_id, ChunkStyle.dialogue_ratio, ChunkStyle.sent_len_std, ChunkStyle.avg_sent_len)
-            .where(ChunkStyle.run_id == run_id)
-            .order_by(ChunkStyle.chunk_id)
-        )
+        stmt = select(
+            ChunkStyle.chunk_id,
+            ChunkStyle.dialogue_ratio,
+            ChunkStyle.sent_len_std,
+            ChunkStyle.avg_sent_len,
+        ).where(ChunkStyle.run_id == run_id)
         result = self.session.execute(stmt)
-        return [cast(Tuple[int, float, float, float], row) for row in result.fetchall()]
+        return [(row[0], row[1], row[2], row[3]) for row in result.fetchall()]
 
     def insert_chunk_style(self, run_id: str, rows: Union[Iterable[ChunkStyleData], Iterable[Any]]) -> None:
         """
@@ -245,49 +117,22 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
         Args:
             run_id: 运行ID
-            rows: 风格数据行，支持 ChunkStyleData 或元组形式
+            rows: 风格数据行
         """
-        mappings: List[dict] = []
+        self.session.execute(delete(ChunkStyle).where(ChunkStyle.run_id == run_id))
+        style_rows = []
         for row in rows:
             if isinstance(row, ChunkStyleData):
-                mappings.append(row.to_dict(run_id))
+                style_rows.append(row.to_dict(run_id))
             else:
-                row_tuple = tuple(row)
-                mappings.append(
-                    {
-                        "chunk_id": row_tuple[0],
-                        "mtld": row_tuple[1],
-                        "ttr": row_tuple[2],
-                        "avg_sent_len": row_tuple[3],
-                        "sent_len_std": row_tuple[4],
-                        "d_value": row_tuple[5],
-                        "pause_density": row_tuple[6],
-                        "fight_density": row_tuple[7],
-                        "exclaim_density": row_tuple[8],
-                        "dialogue_ratio": row_tuple[9],
-                        "question_density": row_tuple[10],
-                        "sensory_density": row_tuple[11],
-                        "metaphor_density": row_tuple[12],
-                        "cultural_density": row_tuple[13],
-                        "function_word_vector": row_tuple[14],
-                        "category_density_combat": row_tuple[15],
-                        "category_density_body": row_tuple[16],
-                        "category_density_relation": row_tuple[17],
-                        "category_density_faction": row_tuple[18],
-                        "category_density_command": row_tuple[19],
-                        "category_density_action": row_tuple[20],
-                        "category_density_psychology": row_tuple[21],
-                        "category_density_measure": row_tuple[22],
-                        "category_density_emotion": row_tuple[23],
-                        "category_density_color": row_tuple[24],
-                        "run_id": run_id,
-                    }
-                )
-        self.session.bulk_insert_mappings(ChunkStyle, mappings)  # type: ignore[arg-type]
-        self.session.commit()
+                style_rows.append(cast(dict, row))
+        if style_rows:
+            self.session.bulk_insert_mappings(ChunkStyle, style_rows)
 
     def insert_chunk_culture(
-        self, run_id: str, rows: Iterable[Tuple[int, float, float, float, float, float, float]]
+        self,
+        run_id: str,
+        rows: Iterable[Tuple[int, float, float, float, float, float, float]],
     ) -> None:
         """
         插入分块文化数据
@@ -296,7 +141,8 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             run_id: 运行ID
             rows: 文化数据行 (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density)
         """
-        mappings = [
+        self.session.execute(delete(ChunkCulture).where(ChunkCulture.run_id == run_id))
+        culture_rows = [
             {
                 "chunk_id": row[0],
                 "confucian_density": row[1],
@@ -309,8 +155,8 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             }
             for row in rows
         ]
-        self.session.bulk_insert_mappings(ChunkCulture, mappings)  # type: ignore[arg-type]
-        self.session.commit()
+        if culture_rows:
+            self.session.bulk_insert_mappings(ChunkCulture, culture_rows)
 
     def insert_chunk_topics(self, run_id: str, rows: Iterable[Tuple[int, int, float]]) -> None:
         """
@@ -320,7 +166,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             run_id: 运行ID
             rows: 主题数据行 (chunk_id, topic_id, topic_weight)
         """
-        mappings = [
+        topic_rows = [
             {
                 "chunk_id": row[0],
                 "topic_id": row[1],
@@ -329,32 +175,25 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             }
             for row in rows
         ]
-        self.session.bulk_insert_mappings(ChunkTopic, mappings)  # type: ignore[arg-type]
-        self.session.commit()
+        if topic_rows:
+            self.session.bulk_insert_mappings(ChunkTopic, topic_rows)
 
     def clear_chunk_topics(self, run_id: str) -> None:
-        """
-        清空指定运行的分块主题数据
-
-        Args:
-            run_id: 运行ID
-        """
-        stmt = delete(ChunkTopic).where(ChunkTopic.run_id == run_id)
-        self.session.execute(stmt)
-        self.session.commit()
+        """清空分块主题数据"""
+        self.session.execute(delete(ChunkTopic).where(ChunkTopic.run_id == run_id))
 
     def fetch_chunk_embedding(self, run_id: str, chunk_id: int) -> Optional[bytes]:
         """
-        获取指定分块的嵌入向量
+        获取分块嵌入向量
 
         Args:
             run_id: 运行ID
             chunk_id: 分块ID
 
         Returns:
-            嵌入向量列表，不存在则返回 None
+            嵌入向量字节，不存在则返回 None
         """
-        stmt = select(ChunkEmbedding.embedding_vector).where(
+        stmt = select(ChunkEmbedding.embedding).where(
             ChunkEmbedding.run_id == run_id, ChunkEmbedding.chunk_id == chunk_id
         )
         result = self.session.execute(stmt)
@@ -363,7 +202,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
     def fetch_chunk_styles_full(
         self, run_id: str
-    ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float]]:
+    ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
         """
         获取完整的分块风格数据
 
@@ -371,28 +210,27 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             run_id: 运行ID
 
         Returns:
-            (chunk_id, mtld, ttr, avg_sent_len, d_value, pause_density, fight_density,
-             dialogue_ratio, sensory_density, metaphor_density, cultural_density) 元组列表
+            (chunk_id, mtld, ttr, avg_sent_len, sent_len_std, d_value, pause_density, fight_density, exclaim_density, dialogue_ratio, question_density, sensory_density, metaphor_density, cultural_density, function_word_vector) 元组列表
         """
-        stmt = (
-            select(
-                ChunkStyle.chunk_id,
-                ChunkStyle.mtld,
-                ChunkStyle.ttr,
-                ChunkStyle.avg_sent_len,
-                ChunkStyle.d_value,
-                ChunkStyle.pause_density,
-                ChunkStyle.fight_density,
-                ChunkStyle.dialogue_ratio,
-                ChunkStyle.sensory_density,
-                ChunkStyle.metaphor_density,
-                ChunkStyle.cultural_density,
-            )
-            .where(or_(ChunkStyle.run_id == run_id, ChunkStyle.run_id.is_(None)))
-            .order_by(ChunkStyle.chunk_id)
-        )
+        stmt = select(
+            ChunkStyle.chunk_id,
+            ChunkStyle.mtld,
+            ChunkStyle.ttr,
+            ChunkStyle.avg_sent_len,
+            ChunkStyle.sent_len_std,
+            ChunkStyle.d_value,
+            ChunkStyle.pause_density,
+            ChunkStyle.fight_density,
+            ChunkStyle.exclaim_density,
+            ChunkStyle.dialogue_ratio,
+            ChunkStyle.question_density,
+            ChunkStyle.sensory_density,
+            ChunkStyle.metaphor_density,
+            ChunkStyle.cultural_density,
+            ChunkStyle.function_word_vector,
+        ).where(ChunkStyle.run_id == run_id)
         result = self.session.execute(stmt)
-        return [cast(Tuple[int, float, float, float, float, float, float, float, float, float, float, float], row) for row in result.fetchall()]
+        return [tuple(row) for row in result.fetchall()]
 
     def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float]]:
         """
@@ -402,42 +240,36 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             run_id: 运行ID
 
         Returns:
-            (chunk_id, confucian_density, taoist_density, buddhist_density,
-             folk_density, allusion_density) 元组列表
+            (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density) 元组列表
         """
-        stmt = (
-            select(
-                ChunkCulture.chunk_id,
-                ChunkCulture.confucian_density,
-                ChunkCulture.taoist_density,
-                ChunkCulture.buddhist_density,
-                ChunkCulture.folk_density,
-                ChunkCulture.allusion_density,
-            )
-            .where(or_(ChunkCulture.run_id == run_id, ChunkCulture.run_id.is_(None)))
-            .order_by(ChunkCulture.chunk_id)
-        )
+        stmt = select(
+            ChunkCulture.chunk_id,
+            ChunkCulture.confucian_density,
+            ChunkCulture.taoist_density,
+            ChunkCulture.buddhist_density,
+            ChunkCulture.folk_density,
+            ChunkCulture.allusion_density,
+        ).where(ChunkCulture.run_id == run_id)
         result = self.session.execute(stmt)
-        return [cast(Tuple[int, float, float, float, float, float], row) for row in result.fetchall()]
+        return [tuple(row) for row in result.fetchall()]
 
     def fetch_chunk_topics_agg(self, run_id: str) -> List[Tuple[int, float]]:
         """
-        获取分块主题聚合数据
+        获取聚合后的分块主题数据（每个分块的平均主题权重）
 
         Args:
             run_id: 运行ID
 
         Returns:
-            (topic_id, total_weight) 元组列表，按权重降序排列
+            (chunk_id, avg_topic_weight) 元组列表
         """
         stmt = (
-            select(ChunkTopic.topic_id, func.sum(ChunkTopic.topic_weight).label("total_weight"))
-            .where(or_(ChunkTopic.run_id == run_id, ChunkTopic.run_id.is_(None)))
-            .group_by(ChunkTopic.topic_id)
-            .order_by(func.sum(ChunkTopic.topic_weight).desc())
+            select(ChunkTopic.chunk_id, func.avg(ChunkTopic.topic_weight).label("avg_weight"))
+            .where(ChunkTopic.run_id == run_id)
+            .group_by(ChunkTopic.chunk_id)
         )
         result = self.session.execute(stmt)
-        return [cast(Tuple[int, float], row) for row in result.fetchall()]
+        return [(row[0], row[1]) for row in result.fetchall()]
 
     def fetch_chunk_counts(self, run_id: str) -> Tuple[int, int]:
         """
