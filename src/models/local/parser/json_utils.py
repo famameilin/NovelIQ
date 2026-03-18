@@ -1,0 +1,103 @@
+"""
+JSON解析工具模块
+
+创建时间: 2026-03-18
+创建者: TraeAI
+任务: code-quality-refactor - Task 9 拆分parser.py
+说明: 提取JSON解析相关逻辑
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Dict
+
+from loguru import logger
+
+
+def try_parse_json(content: str) -> Dict[str, Any] | None:
+    """
+    尝试解析 JSON，支持不完整的 JSON
+
+    修改时间: 2026-03-17
+    修改者: TraeAI
+    任务: 添加 streamingjson 支持，处理 LLM 流式输出的不完整 JSON
+    """
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试使用 streamingjson 修复不完整的 JSON
+    try:
+        import streamingjson
+
+        lexer = streamingjson.Lexer()
+        lexer.append_string(content)
+        fixed = lexer.complete_json()
+        data = json.loads(fixed)
+        if isinstance(data, dict):
+            logger.debug("json repaired by streamingjson")
+            return data
+    except Exception:
+        pass
+
+    # 尝试使用 fix_json 作为后备
+    fixed = fix_json(content)
+    if fixed is not None:
+        try:
+            data = json.loads(fixed)
+            if isinstance(data, dict):
+                logger.debug("json repaired successfully")
+                return data
+        except json.JSONDecodeError:
+            pass
+    logger.warning("json parse failed, content preview: {}", content[:200])
+    return None
+
+
+def fix_json(content: str) -> str | None:
+    """
+    修复不完整的或格式错误的 JSON
+
+    创建时间: 2026-03-12
+    创建者: TraeAI
+    """
+    # 移除 think 块，避免提取到思考内容中的 JSON
+    content = re.sub(r"<think>[\s\S]*?</think>\s*", "", content)
+
+    json_match = re.search(r"\{[\s\S]*\}", content)
+    if json_match:
+        extracted = json_match.group(0)
+        try:
+            json.loads(extracted)
+            logger.debug("json extracted from mixed content")
+            return extracted
+        except json.JSONDecodeError:
+            pass
+    fixed = content.strip()
+    if fixed.startswith("```json"):
+        fixed = fixed[7:]
+    elif fixed.startswith("```"):
+        fixed = fixed[3:]
+    if fixed.endswith("```"):
+        fixed = fixed[:-3]
+    fixed = fixed.strip()
+    if not fixed.startswith("{"):
+        start = fixed.find("{")
+        if start != -1:
+            fixed = fixed[start:]
+    if not fixed.endswith("}"):
+        end = fixed.rfind("}")
+        if end != -1:
+            fixed = fixed[: end + 1]
+    fixed = re.sub(r",\s*}", "}", fixed)
+    fixed = re.sub(r",\s*]", "]", fixed)
+    fixed = re.sub(r'(?<!\\)"(?![\s:,\}\]])', '\\"', fixed)
+    if fixed and fixed.startswith("{") and fixed.endswith("}"):
+        logger.debug("json fix applied: removed markdown/code blocks, trailing commas")
+        return fixed
+    return None
