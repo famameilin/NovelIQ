@@ -5,6 +5,11 @@ JSON解析工具模块
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 提取JSON解析相关逻辑
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: 添加 json5 支持处理尾随逗号
+修改内容: 使用 json5 库解析带尾随逗号的 JSON
 """
 
 from __future__ import annotations
@@ -18,17 +23,37 @@ from loguru import logger
 
 def try_parse_json(content: str) -> Dict[str, Any] | None:
     """
-    尝试解析 JSON，支持不完整的 JSON
+    尝试解析 JSON，支持不完整的 JSON 和带尾随逗号的 JSON
 
     修改时间: 2026-03-17
     修改者: TraeAI
     任务: 添加 streamingjson 支持，处理 LLM 流式输出的不完整 JSON
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: 添加 json5 支持处理尾随逗号
+    修改内容:
+    - 优先使用 json5 解析（支持尾随逗号）
+    - 然后使用 streamingjson 处理不完整 JSON
+    - 最后使用 fix_json 作为后备
     """
+    # 首先尝试标准 json 解析
     try:
         data = json.loads(content)
         if isinstance(data, dict):
             return data
     except json.JSONDecodeError:
+        pass
+
+    # 尝试使用 json5 解析（支持尾随逗号、注释等）
+    try:
+        import json5
+
+        data = json5.loads(content)
+        if isinstance(data, dict):
+            logger.debug("json parsed by json5 (trailing comma supported)")
+            return data
+    except Exception:
         pass
 
     # 尝试使用 streamingjson 修复不完整的 JSON
@@ -65,6 +90,11 @@ def fix_json(content: str) -> str | None:
 
     创建时间: 2026-03-12
     创建者: TraeAI
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: 移除有问题的正则表达式
+    修改内容: 移除第99行错误转义引号的正则表达式
     """
     # 移除 think 块，避免提取到思考内容中的 JSON
     content = re.sub(r"<think>[\s\S]*?</think>\s*", "", content)
@@ -94,9 +124,12 @@ def fix_json(content: str) -> str | None:
         end = fixed.rfind("}")
         if end != -1:
             fixed = fixed[: end + 1]
+    # 移除尾随逗号（json5 已经处理，这里保留作为后备）
     fixed = re.sub(r",\s*}", "}", fixed)
     fixed = re.sub(r",\s*]", "]", fixed)
-    fixed = re.sub(r'(?<!\\)"(?![\s:,\}\]])', '\\"', fixed)
+    # 注意：移除了有问题的引号转义正则表达式
+    # 原代码：fixed = re.sub(r'(?<!\\)"(?![\s:,\}\]])', '\\"', fixed)
+    # 这个正则表达式会错误地转义所有 JSON 引号
     if fixed and fixed.startswith("{") and fixed.endswith("}"):
         logger.debug("json fix applied: removed markdown/code blocks, trailing commas")
         return fixed
