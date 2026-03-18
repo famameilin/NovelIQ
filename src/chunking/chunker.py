@@ -428,3 +428,7 @@ def chunk_documents(
         offset += len(chunks)
 
     return _reindex(all_chunks)
+
+
+# 向后兼容别名
+detect_chapters = split_by_chapters
