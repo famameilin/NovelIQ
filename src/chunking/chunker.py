@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import re
+import warnings as _warnings
 from dataclasses import dataclass
 from typing import Iterable, List, Set, Tuple
 
@@ -431,8 +432,6 @@ def chunk_documents(
 
 
 # 向后兼容别名（已废弃，请使用 split_by_chapters）
-import warnings as _warnings
-
 def _detect_chapters_wrapper(text: str):
     """向后兼容包装器（已废弃）"""
     _warnings.warn(
