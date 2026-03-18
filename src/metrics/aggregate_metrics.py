@@ -1,38 +1,24 @@
 """
+Aggregate Metrics 兼容性转发模块
+
 创建时间: 2025-03-11
 创建者: TraeAI
 任务: 聚合所有指标
 
-修改时间: 2026-03-12
-修改者: TraeAI
-修改内容: 添加从 chunk_culture 表读取文化密度指标并计算平均值
-- 添加 confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density
+修改历史:
+- 2026-03-12: 添加文化密度指标 (confucian, taoist, buddhist, folk, allusion, imagery)
+- 2026-03-13: 重构函数拆解，解决 Long Method 和 God Method 代码异味
+- 2026-03-14: 重构为使用 Repository 模式
+- 2026-03-18: 拆分为子包 src.metrics.aggregate，此文件作为兼容性转发
 
-修改时间: 2026-03-13
-修改者: TraeAI
-修改内容: 重构函数拆解，解决 Long Method 和 God Method 代码异味
-- 创建数据提取辅助函数 _fetch_*_data
-- 创建指标计算私有函数 _compute_*_metrics
-- 重构 aggregate_all_metrics 调用拆解后的私有函数
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: metrics-repository-refactor
-修改内容: 重构为使用 Repository 模式
-- 所有数据访问通过 Repository 接口
-- 函数签名添加 run_id 参数
-- 保持向后兼容（conn 参数可选）
-
-修改时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-修改内容:
-- 将模块拆分为子包 src.metrics.aggregate
-- 保留此文件作为兼容性转发，所有导出从子包导入
-- 保持向后兼容，现有导入路径不变
+说明:
+- 此文件保留向后兼容，所有功能已移至 src.metrics.aggregate 子包
+- 下划线前缀的函数名（如 _fetch_*）已弃用，请使用新函数名（如 fetch_*）
 """
 
 from __future__ import annotations
+
+import warnings
 
 # 从子包导入所有公共API，保持向后兼容
 from src.metrics.aggregate import (
@@ -59,20 +45,46 @@ from src.metrics.aggregate import (
 )
 from src.metrics.aggregate.types import map_emotion_score
 
-# 保留旧函数名（下划线前缀）的兼容性
-_fetch_annotation_data = fetch_annotation_data
-_fetch_emotion_data = fetch_emotion_data
-_fetch_character_data = fetch_character_data
-_fetch_relation_data = fetch_relation_data
-_fetch_text_data = fetch_text_data
-_fetch_culture_data = fetch_culture_data
-_fetch_tension_data = fetch_tension_data
-_compute_narrative_structure_metrics = compute_narrative_structure_metrics
-_compute_emotion_curve_metrics = compute_emotion_curve_metrics
-_compute_character_relation_metrics = compute_character_relation_metrics
-_compute_language_style_metrics = compute_language_style_metrics
-_compute_traditional_culture_metrics = compute_traditional_culture_metrics
-_map_emotion_score = map_emotion_score
+
+# 弃用的兼容函数（下划线前缀）
+def _deprecated_alias(old_name: str, new_func):
+    """创建弃用的函数别名"""
+    def wrapper(*args, **kwargs):
+        warnings.warn(
+            f"{old_name} is deprecated. Use {new_func.__name__} instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return new_func(*args, **kwargs)
+    wrapper.__name__ = old_name
+    wrapper.__doc__ = f"Deprecated. Use {new_func.__name__} instead."
+    return wrapper
+
+
+# 弃用的函数别名
+_fetch_annotation_data = _deprecated_alias("_fetch_annotation_data", fetch_annotation_data)
+_fetch_emotion_data = _deprecated_alias("_fetch_emotion_data", fetch_emotion_data)
+_fetch_character_data = _deprecated_alias("_fetch_character_data", fetch_character_data)
+_fetch_relation_data = _deprecated_alias("_fetch_relation_data", fetch_relation_data)
+_fetch_text_data = _deprecated_alias("_fetch_text_data", fetch_text_data)
+_fetch_culture_data = _deprecated_alias("_fetch_culture_data", fetch_culture_data)
+_fetch_tension_data = _deprecated_alias("_fetch_tension_data", fetch_tension_data)
+_compute_narrative_structure_metrics = _deprecated_alias(
+    "_compute_narrative_structure_metrics", compute_narrative_structure_metrics
+)
+_compute_emotion_curve_metrics = _deprecated_alias(
+    "_compute_emotion_curve_metrics", compute_emotion_curve_metrics
+)
+_compute_character_relation_metrics = _deprecated_alias(
+    "_compute_character_relation_metrics", compute_character_relation_metrics
+)
+_compute_language_style_metrics = _deprecated_alias(
+    "_compute_language_style_metrics", compute_language_style_metrics
+)
+_compute_traditional_culture_metrics = _deprecated_alias(
+    "_compute_traditional_culture_metrics", compute_traditional_culture_metrics
+)
+_map_emotion_score = _deprecated_alias("_map_emotion_score", map_emotion_score)
 
 __all__ = [
     # 数据类
@@ -92,7 +104,15 @@ __all__ = [
     "fetch_text_data",
     "fetch_culture_data",
     "fetch_tension_data",
-    # 旧函数名（兼容性）
+    # 指标计算函数
+    "compute_narrative_structure_metrics",
+    "compute_emotion_curve_metrics",
+    "compute_character_relation_metrics",
+    "compute_language_style_metrics",
+    "compute_traditional_culture_metrics",
+    # 工具函数
+    "map_emotion_score",
+    # 弃用的函数（保留向后兼容）
     "_fetch_annotation_data",
     "_fetch_emotion_data",
     "_fetch_character_data",
@@ -100,52 +120,32 @@ __all__ = [
     "_fetch_text_data",
     "_fetch_culture_data",
     "_fetch_tension_data",
-    # 指标计算函数
-    "compute_narrative_structure_metrics",
-    "compute_emotion_curve_metrics",
-    "compute_character_relation_metrics",
-    "compute_language_style_metrics",
-    "compute_traditional_culture_metrics",
-    # 旧函数名（兼容性）
     "_compute_narrative_structure_metrics",
     "_compute_emotion_curve_metrics",
     "_compute_character_relation_metrics",
     "_compute_language_style_metrics",
     "_compute_traditional_culture_metrics",
-    # 工具函数
-    "map_emotion_score",
     "_map_emotion_score",
 ]
 
 
-# 主入口函数保留在此文件中
 def aggregate_all_metrics(
     run_id: str,
     annotation_repo,
     chunk_repo,
     stats_repo,
-):
+) -> AggregateResult:
     """
     聚合所有指标的主入口函数。
 
-    创建时间: 2026-03-11
-    创建者: TraeAI
-    修改: 修复 degree_centrality 未存储问题
+    Args:
+        run_id: 运行ID
+        annotation_repo: 标注数据仓库
+        chunk_repo: 分块数据仓库
+        stats_repo: 统计数据仓库
 
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: refactor-metrics-layer-functions
-    修改内容: 将函数拆解为多个职责单一的私有函数
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 Repository 接口，添加 run_id 参数
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 委托给子模块函数
+    Returns:
+        AggregateResult: 聚合结果
     """
     result = AggregateResult()
 
