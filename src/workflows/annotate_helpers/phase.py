@@ -1,20 +1,16 @@
 """
+标注辅助函数模块 - 阶段管理
+
 创建时间: 2026-03-13
 创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 标注辅助函数模块
-修改时间: 2026-03-14
-修改者: TraeAI
-修改内容: 从 cli.annotate_helpers 迁移到 workflows.annotate_helpers，解决循环依赖
+任务: 项目文件结构整理与拆解
 
-说明: 本模块从 src.cli.annotate_helpers 迁移而来，用于解决 workflows 与 cli 之间的循环依赖问题。
-      导入路径已更新: from src.cli.annotate import -> from src.workflows.annotate import
+修改历史:
+- 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
+- 2026-03-14: 添加 run_id 参数支持 (workflows-repository-refactor)
+- 2026-03-17: 使用 AnnotationPhaseConfig 简化多参数函数
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id 参数支持，传递给下游函数
-
-本模块包含阶段管理相关的数据类和函数。
+说明: 本模块包含阶段管理相关的数据类和函数。
 """
 
 from __future__ import annotations
@@ -35,14 +31,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class AnnotationPhaseConfig:
-    """
-    标注阶段配置
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 简化多参数函数
-    说明: 封装_init_annotation_phase的多参数
-    """
+    """标注阶段配置"""
 
     conn: Any
     all_chunks: list
@@ -59,15 +48,7 @@ class AnnotationPhaseConfig:
 
 
 class ChunkAnnotationMaxRetriesExceededError(Exception):
-    """
-    Chunk标注重试次数耗尽异常
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: 简化重试逻辑
-    修改内容: 移除外层重试，只保留内层重试机制
-    """
-
+    """Chunk标注重试次数耗尽异常"""
     pass
 
 
@@ -88,20 +69,10 @@ def _annotate_chunk(
     """
     Chunk 标注函数
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: 简化重试逻辑
-    说明: 直接调用 annotate_chunk，内层已有完整的 3次本地 + 1次云端 重试机制
-
     重试策略:
     - 内层: 本地模型最多3次（任何错误类型）
     - 内层: 本地失败后云端1次
     - 云端失败直接终止整个任务
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 修复foreshadowing数据丢失问题
-    修改内容: 返回TwoPhaseAnnotationResult，包含foreshadowing数据
     """
     try:
         return client.annotate_chunk(
@@ -123,13 +94,7 @@ def _annotate_chunk(
 
 
 class AnnotationPhaseResult:
-    """
-    标注阶段结果数据类
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    """
+    """标注阶段结果数据类"""
 
     def __init__(
         self,
@@ -157,14 +122,7 @@ class AnnotationPhaseResult:
 def _init_annotation_phase_with_config(
     config: AnnotationPhaseConfig,
 ) -> AnnotationPhaseResult:
-    """
-    初始化标注阶段（使用配置对象）
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 简化多参数函数
-    说明: 使用 AnnotationPhaseConfig 替代多个参数
-    """
+    """初始化标注阶段（使用配置对象）"""
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
     from .context import _init_rag_retriever
     from .sentence import _load_alias_keywords, _extract_and_save_global_context
@@ -240,22 +198,7 @@ def _init_annotation_phase(
     run_id: str = "",
 ) -> AnnotationPhaseResult:
     """
-    初始化标注阶段
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 从 run_annotate 中提取，负责初始化所有标注相关资源和客户端
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 添加 incremental_disambig_client 和 full_disambig_client 参数，支持测试注入 mock
+    初始化标注阶段（向后兼容）
 
     修改时间: 2026-03-17
     修改者: TraeAI
@@ -294,22 +237,7 @@ def _process_single_chunk(
     incremental_interval: int,
     run_id: str = "",
 ) -> dict[str, str]:
-    """
-    处理单个chunk
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 从 run_annotate 中提取，负责处理单个chunk的标注和增量消歧
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数
-
-    Returns:
-        dict[str, str]: 更新后的 alias_map
-    """
+    """处理单个chunk"""
     from .context import _prepare_chunk_context
     from .disambiguation import _run_incremental_disambiguation
     from .storage import _store_annotation_results
@@ -362,22 +290,7 @@ def _process_chunks_phase(
     incremental_interval: int,
     run_id: str = "",
 ) -> Tuple[int, dict[str, str]]:
-    """
-    处理所有chunks阶段
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 从 run_annotate 中提取，负责循环处理所有chunks
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数
-
-    Returns:
-        Tuple[int, dict[str, str]]: (成功数量, alias_map)
-    """
+    """处理所有chunks阶段"""
     from .disambiguation import DisambiguationMaxRetriesExceededError
 
     success_count = 0
@@ -421,22 +334,7 @@ def _run_disambiguation_phase(
     use_rag: bool,
     run_id: str = "",
 ) -> dict[str, str]:
-    """
-    执行消歧阶段
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 从 run_annotate 中提取，负责执行最终消歧、匿名消歧和知识图谱构建
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数
-
-    Returns:
-        dict[str, str]: 最终的 alias_map
-    """
+    """执行消歧阶段"""
     from .disambiguation import (
         _run_anonymous_disambiguation,
         _run_final_disambiguation,
