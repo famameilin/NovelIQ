@@ -61,6 +61,7 @@ from .annotation import (
 from .annotation.two_phase import annotate_chunk_two_phase as _annotate_chunk_two_phase_impl
 from .base import BaseModelClient, TokenUsageCallback
 from .litellm_utils import get_model_with_provider
+from .retry_handler import AnnotationRetryHandler, RetryConfig
 from .schema import ChunkAnnotation, ForeshadowingResult
 from .validator import validate_names_in_sources
 
@@ -261,6 +262,11 @@ class AnnotationClient(BaseModelClient):
         创建时间: 2026-03-17
         创建者: TraeAI
         任务: code-quality-refactor - 提取单次调用逻辑
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: code-quality-refactor - Task 3 统一重试机制
+        修改内容: 使用 AnnotationRetryHandler 替代自定义重试逻辑
         """
         messages = _build_messages(
             ctx.text,
@@ -278,30 +284,27 @@ class AnnotationClient(BaseModelClient):
         is_cloud = self._is_cloud_api()
         self._log_annotation_start(is_cloud, ctx.text, ctx.prev_summary, ctx.chunk_id, "single_call")
 
-        last_error: Exception | None = None
-        for attempt in range(PHASE_MAX_RETRIES):
-            try:
-                annotation, _ = self._execute_single_call(ctx, messages)
-                foreshadowing = self._build_foreshadowing_from_annotation(annotation)
-                return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
-            except Exception as e:
-                last_error = e
-                logger.error(
-                    "single_call attempt {}/{} failed: {} chunk_id={}",
-                    attempt + 1, PHASE_MAX_RETRIES, str(e), ctx.chunk_id
-                )
-
-        if ctx.cloud_client is not None:
-            try:
-                annotation, _ = ctx.cloud_client._execute_single_call(ctx, messages)
-                foreshadowing = self._build_foreshadowing_from_annotation(annotation)
-                return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
-            except Exception as e:
-                last_error = e
-
-        raise Phase1MaxRetriesExceededError(
-            f"single_call failed after {PHASE_MAX_RETRIES} retries: {str(last_error)}"
+        config = RetryConfig(
+            max_retries=PHASE_MAX_RETRIES,
+            operation_name="single_call",
+            chunk_id=ctx.chunk_id,
         )
+        handler = AnnotationRetryHandler[ChunkAnnotation](
+            config=config,
+            local_client=self,
+            cloud_client=ctx.cloud_client,
+            exception_type=Phase1MaxRetriesExceededError,
+        )
+
+        def operation(client: "AnnotationClient", retry_messages: list[dict] | None = None) -> ChunkAnnotation:
+            """执行单次调用"""
+            msgs = retry_messages if retry_messages else messages
+            annotation, _ = client._execute_single_call(ctx, msgs)
+            return annotation
+
+        annotation = handler.execute(operation)
+        foreshadowing = self._build_foreshadowing_from_annotation(annotation)
+        return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
 
     def _annotate_chunk_two_phase_from_context(
         self,

@@ -5,12 +5,17 @@
 创建者: TraeAI
 任务: code-quality-refactor - 统一重试机制
 说明: 提供AnnotationClient专用的重试逻辑，支持本地重试和云端fallback
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - Task 3 统一重试机制
+修改内容: 修复循环导入问题，异常类型通过参数传入
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, Type, TypeVar
 
 from loguru import logger
 
@@ -44,6 +49,11 @@ class AnnotationRetryHandler(Generic[T]):
     创建者: TraeAI
     任务: code-quality-refactor - 统一重试机制
     说明: 处理标注客户端的复杂重试逻辑，包括本地重试和云端fallback
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: code-quality-refactor - Task 3 统一重试机制
+    修改内容: 添加异常类型参数避免循环导入
     """
 
     def __init__(
@@ -51,10 +61,12 @@ class AnnotationRetryHandler(Generic[T]):
         config: RetryConfig,
         local_client: Any,
         cloud_client: Any | None = None,
+        exception_type: Type[Exception] | None = None,
     ) -> None:
         self.config = config
         self.local_client = local_client
         self.cloud_client = cloud_client
+        self.exception_type = exception_type
         self.state = RetryState()
 
     def execute(
@@ -169,11 +181,6 @@ class AnnotationRetryHandler(Generic[T]):
 
     def _raise_max_retries_error(self) -> None:
         """抛出最大重试次数 exceeded 错误"""
-        from src.models.local.annotation import (
-            Phase1MaxRetriesExceededError,
-            Phase2MaxRetriesExceededError,
-        )
-
         error_msg = f"{self.config.operation_name} failed after {self.config.max_retries} local + 1 cloud retries: {str(self.state.last_error)}"
         logger.error(
             "{} failed after all retries chunk_id={}: {}",
@@ -182,8 +189,14 @@ class AnnotationRetryHandler(Generic[T]):
             str(self.state.last_error),
         )
 
-        # 根据操作名选择异常类型
-        if "phase2" in self.config.operation_name.lower():
-            raise Phase2MaxRetriesExceededError(error_msg)
+        # 使用传入的异常类型或默认异常
+        if self.exception_type is not None:
+            raise self.exception_type(error_msg)
         else:
-            raise Phase1MaxRetriesExceededError(error_msg)
+            # 根据操作名选择异常类型
+            if "phase2" in self.config.operation_name.lower():
+                from src.models.local.annotation import Phase2MaxRetriesExceededError
+                raise Phase2MaxRetriesExceededError(error_msg)
+            else:
+                from src.models.local.annotation import Phase1MaxRetriesExceededError
+                raise Phase1MaxRetriesExceededError(error_msg)

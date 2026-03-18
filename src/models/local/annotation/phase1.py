@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: Phase1 基础标注逻辑
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - Task 3 统一重试机制
+修改内容: 使用 AnnotationRetryHandler 统一重试逻辑
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from loguru import logger
 
 from src.models.local.parser import parse_active_entities
 from src.models.local.prompts import build_retry_prompt
+from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 
 from .context import (
     PHASE_MAX_RETRIES,
@@ -95,95 +101,47 @@ def execute_phase1_with_retry(
     创建时间: 2026-03-17
     创建者: TraeAI
     任务: code-quality-refactor - 提取重试逻辑
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: code-quality-refactor - Task 3 统一重试机制
+    修改内容: 使用 AnnotationRetryHandler 替代自定义重试逻辑
     """
-    last_error: Exception | None = None
-    last_invalid_names: list[str] | None = None
-    last_bad_output: str = ""
-    content_clean: str = ""
+    from src.models.local.schema import ChunkAnnotation
 
-    for attempt in range(PHASE_MAX_RETRIES):
-        try:
-            logger.debug("phase1 attempt {}/{} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, chunk_id)
+    config = RetryConfig(
+        max_retries=PHASE_MAX_RETRIES,
+        operation_name="phase1",
+        chunk_id=chunk_id,
+    )
+    handler = AnnotationRetryHandler[ChunkAnnotation](
+        config=config,
+        local_client=client,
+        cloud_client=cloud_client,
+        exception_type=Phase1MaxRetriesExceededError,
+    )
 
-            retry_messages = None
-            if last_bad_output and last_invalid_names:
-                original_user_prompt = messages[-1]["content"]
-                retry_prompt = build_retry_prompt(original_user_prompt, last_bad_output, last_invalid_names)
-                retry_messages = messages[:-1] + [{"role": "user", "content": retry_prompt}]
-
-            result, content_clean = execute_phase1_call(
-                client, text, messages, alias_map, active_entities,
-                prev_chunk_text, next_chunk_text, chunk_id, retry_messages
-            )
-
-            if attempt > 0:
-                logger.info("phase1 succeeded on attempt {} chunk_id={}", attempt + 1, chunk_id)
-            return result
-
-        except NameValidationMaxRetriesExceededError as e:
-            last_error = e
-            last_invalid_names = e.invalid_names
-            last_bad_output = e.bad_output or content_clean
-            logger.error("phase1 attempt {}/{} failed: {} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, str(e), chunk_id)
-        except Exception as e:
-            last_error = e
-            last_invalid_names = None
-            last_bad_output = content_clean
-            logger.error("phase1 attempt {}/{} failed: {} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, str(e), chunk_id)
-
-    if cloud_client is not None:
-        return execute_phase1_cloud_fallback(
-            client, text, messages, alias_map, active_entities,
-            prev_chunk_text, next_chunk_text, chunk_id, cloud_client,
-            last_invalid_names, last_bad_output
-        )
-
-    logger.error("phase1 failed after all retries chunk_id={}: {}", chunk_id, str(last_error))
-    raise Phase1MaxRetriesExceededError(f"phase1 failed after {PHASE_MAX_RETRIES} retries: {str(last_error)}")
-
-
-def execute_phase1_cloud_fallback(
-    client: "AnnotationClient",
-    text: str,
-    messages: list[dict],
-    alias_map: Dict[str, str] | None,
-    active_entities: str | None,
-    prev_chunk_text: str | None,
-    next_chunk_text: str | None,
-    chunk_id: int | None,
-    cloud_client: "AnnotationClient",
-    last_invalid_names: list[str] | None,
-    last_bad_output: str,
-) -> "ChunkAnnotation":
-    """
-    执行Phase1云端fallback
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取云端fallback逻辑
-    """
-    logger.warning("phase1 local model failed after {} attempts, falling back to cloud model chunk_id={}", PHASE_MAX_RETRIES, chunk_id)
-
-    try:
-        logger.debug("phase1 cloud attempt chunk_id={}", chunk_id)
-
-        retry_messages = None
-        if last_bad_output and last_invalid_names:
-            original_user_prompt = messages[-1]["content"]
-            retry_prompt = build_retry_prompt(original_user_prompt, last_bad_output, last_invalid_names)
-            retry_messages = messages[:-1] + [{"role": "user", "content": retry_prompt}]
-
+    def operation(local_client: "AnnotationClient", retry_messages: list[dict] | None = None) -> "ChunkAnnotation":
+        """执行单次Phase1调用"""
         result, _ = execute_phase1_call(
-            cloud_client, text, messages, alias_map, active_entities,
+            local_client, text, messages, alias_map, active_entities,
             prev_chunk_text, next_chunk_text, chunk_id, retry_messages
         )
-
-        logger.info("phase1 cloud succeeded chunk_id={}", chunk_id)
         return result
 
-    except Exception as e:
-        logger.error("phase1 cloud failed: {} chunk_id={}", str(e), chunk_id)
-        raise Phase1MaxRetriesExceededError(f"phase1 failed after {PHASE_MAX_RETRIES} local + 1 cloud retries: {str(e)}")
+    def build_retry_messages() -> list[dict]:
+        """构建重试消息"""
+        if handler.state.last_bad_output and handler.state.last_invalid_names:
+            original_user_prompt = messages[-1]["content"]
+            retry_prompt = build_retry_prompt(
+                original_user_prompt,
+                handler.state.last_bad_output,
+                handler.state.last_invalid_names
+            )
+            return messages[:-1] + [{"role": "user", "content": retry_prompt}]
+        return messages
+
+    return handler.execute(operation, build_retry_messages)
 
 
 def annotate_chunk_phase1(

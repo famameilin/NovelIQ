@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: Phase2 伏笔分析逻辑
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - Task 3 统一重试机制
+修改内容: 使用 AnnotationRetryHandler 统一重试逻辑
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import ForeshadowingResult
 
 from .context import PHASE_MAX_RETRIES, Phase2MaxRetriesExceededError
@@ -86,6 +92,11 @@ def annotate_chunk_phase2(
     修改者: TraeAI
     任务: 重构本地标注客户端集成 Instructor
     修改内容: 使用 Instructor 结构化输出，直接返回 ForeshadowingResult
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: code-quality-refactor - Task 3 统一重试机制
+    修改内容: 使用 AnnotationRetryHandler 替代自定义重试逻辑
     """
     messages = _build_foreshadowing_messages(
         text=text,
@@ -99,28 +110,23 @@ def annotate_chunk_phase2(
         chapter_id=chapter_id,
     )
 
-    last_error: Exception | None = None
-    for attempt in range(PHASE_MAX_RETRIES):
-        try:
-            logger.debug("phase2 attempt {}/{} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, chunk_id)
-            result = _do_phase2(client, messages, text, prev_chunk_summary, chunk_id)
-            if attempt > 0:
-                logger.info("phase2 succeeded on attempt {} chunk_id={}", attempt + 1, chunk_id)
-            return result
-        except Exception as e:
-            last_error = e
-            logger.error("phase2 attempt {}/{} failed: {} chunk_id={}", attempt + 1, PHASE_MAX_RETRIES, str(e), chunk_id)
+    from src.models.local.schema import ForeshadowingResult
 
-    if cloud_client is not None:
-        logger.warning("phase2 local model failed after {} attempts, falling back to cloud model chunk_id={}", PHASE_MAX_RETRIES, chunk_id)
-        try:
-            logger.debug("phase2 cloud attempt chunk_id={}", chunk_id)
-            result = _do_phase2(cloud_client, messages, text, prev_chunk_summary, chunk_id)
-            logger.info("phase2 cloud succeeded chunk_id={}", chunk_id)
-            return result
-        except Exception as e:
-            last_error = e
-            logger.error("phase2 cloud failed: {} chunk_id={}", str(e), chunk_id)
+    config = RetryConfig(
+        max_retries=PHASE_MAX_RETRIES,
+        operation_name="phase2",
+        chunk_id=chunk_id,
+    )
+    handler = AnnotationRetryHandler[ForeshadowingResult](
+        config=config,
+        local_client=client,
+        cloud_client=cloud_client,
+        exception_type=Phase2MaxRetriesExceededError,
+    )
 
-    logger.error("phase2 failed after all retries chunk_id={}: {}", chunk_id, str(last_error))
-    raise Phase2MaxRetriesExceededError(f"phase2 failed after {PHASE_MAX_RETRIES} local + 1 cloud retries: {str(last_error)}")
+    def operation(local_client: "AnnotationClient", retry_messages: list[dict] | None = None) -> "ForeshadowingResult":
+        """执行单次Phase2调用"""
+        msgs = retry_messages if retry_messages else messages
+        return _do_phase2(local_client, msgs, text, prev_chunk_summary, chunk_id)
+
+    return handler.execute(operation)
