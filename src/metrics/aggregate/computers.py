@@ -5,6 +5,11 @@ Aggregate Metrics 指标计算模块
 创建者: TraeAI
 任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
 说明: 提取所有指标计算函数
+
+修改历史:
+- 2026-03-13: 创建指标计算函数 (refactor-metrics-layer-functions)
+- 2026-03-13: 使用 tension_composite 计算三幕比例 (chunk-annotation-schema-refactor)
+- 2026-03-18: 提取为独立模块函数 (code-quality-refactor Task 11)
 """
 
 from __future__ import annotations
@@ -64,23 +69,7 @@ def compute_narrative_structure_metrics(
     annotation_data: AnnotationData,
     tension_data: TensionData,
 ) -> Dict[str, Any]:
-    """
-    计算叙事结构聚合指标
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: chunk-annotation-schema-refactor
-    修改内容: 使用 tension_composite 计算三幕比例、高潮定位、中间塌陷指数
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """计算叙事结构聚合指标"""
     return {
         **compute_three_act_ratio_by_tension(tension_data.tension_composite_scores),
         "climax_spacing": compute_climax_spacing(annotation_data.chunk_ids, tension_data.tension_composite_scores),
@@ -97,18 +86,7 @@ def compute_emotion_curve_metrics(
     annotation_data: AnnotationData,
     char_data: CharacterData,
 ) -> Dict[str, Any]:
-    """
-    计算情感曲线聚合指标
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """计算情感曲线聚合指标"""
     return {
         "emotion_recovery_speed": compute_emotion_recovery_speed(emotion_data.emotion_values),
         "pivot_moment_density": compute_pivot_moment_density(annotation_data.pivot_moments),
@@ -124,18 +102,7 @@ def compute_character_relation_metrics(
     char_data: CharacterData,
     total_chunks: int,
 ) -> Dict[str, Any]:
-    """
-    计算人物关系聚合指标
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """计算人物关系聚合指标"""
     result: Dict[str, Any] = {
         "network_density": compute_relation_network_density(relation_data.relations),
         "antagonist_strength_gap": compute_antagonist_strength_gap(char_data.characters),
@@ -165,23 +132,7 @@ def compute_character_relation_metrics(
 
 
 def compute_language_style_metrics(text_data: TextData) -> Dict[str, Any]:
-    """
-    计算语言风格聚合指标
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: chunk-annotation-schema-refactor
-    修改内容: 删除 tone_distribution 计算（tone 字段已移除）
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """计算语言风格聚合指标"""
     return {
         "vocab_breadth": compute_vocab_breadth(text_data.all_tokens),
         "avg_word_len": compute_avg_word_len(text_data.texts),
@@ -195,18 +146,7 @@ def compute_traditional_culture_metrics(
     culture_data: CultureData,
     texts: list[str],
 ) -> Dict[str, float | None]:
-    """
-    计算传统文化聚合指标
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """计算传统文化聚合指标"""
     return {
         "idiom_density": compute_idiom_density(texts),
         "classical_sentence_ratio": compute_classical_sentence_ratio(texts),

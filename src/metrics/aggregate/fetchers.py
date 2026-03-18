@@ -5,6 +5,12 @@ Aggregate Metrics 数据提取模块
 创建者: TraeAI
 任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
 说明: 提取所有数据提取函数
+
+修改历史:
+- 2026-03-13: 创建数据提取函数 (refactor-metrics-layer-functions)
+- 2026-03-13: event_type 默认值改为"铺垫" (chunk-annotation-schema-refactor)
+- 2026-03-14: 使用 Repository 接口 (metrics-repository-refactor)
+- 2026-03-18: 提取为独立模块函数 (code-quality-refactor Task 11)
 """
 
 from __future__ import annotations
@@ -35,28 +41,7 @@ def fetch_annotation_data(
     annotation_repo: "AnnotationRepository",
     run_id: str,
 ) -> AnnotationData:
-    """
-    提取 chunk_annotation 表数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: chunk-annotation-schema-refactor
-    修改内容: event_type 默认值改为"铺垫"
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 AnnotationRepository 接口
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """提取 chunk_annotation 表数据"""
     rows = annotation_repo.fetch_full_annotations(run_id)
 
     return AnnotationData(
@@ -72,23 +57,7 @@ def fetch_emotion_data(
     stats_repo: "StatsRepository",
     run_id: str,
 ) -> EmotionData:
-    """
-    提取 emotion_curve 表数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 StatsRepository 接口
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """提取 emotion_curve 表数据"""
     rows = stats_repo.fetch_emotion_curve(run_id)
     emotion_values = [row[2] for row in rows]
 
@@ -107,28 +76,7 @@ def fetch_character_data(
     annotation_repo: "AnnotationRepository",
     run_id: str,
 ) -> CharacterData:
-    """
-    提取 chunk_characters 表数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: chunk-annotation-schema-refactor
-    修改内容: emotion_score 改为字符串枚举，需要映射为数值
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 AnnotationRepository 接口
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """提取 chunk_characters 表数据"""
     rows = annotation_repo.fetch_characters_with_scores(run_id)
 
     characters = []
@@ -163,23 +111,7 @@ def fetch_relation_data(
     annotation_repo: "AnnotationRepository",
     run_id: str,
 ) -> RelationData:
-    """
-    提取 chunk_relations 表数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 AnnotationRepository 接口
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """提取 chunk_relations 表数据"""
     relations = annotation_repo.fetch_relations(run_id)
     full_relations = annotation_repo.fetch_full_relations(run_id)
 
@@ -193,28 +125,7 @@ def fetch_text_data(
     chunk_repo: "ChunkRepository",
     run_id: str,
 ) -> TextData:
-    """
-    提取 chunks 表文本数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: chunk-annotation-schema-refactor
-    修改内容: 删除 tone 字段获取（已从 schema 中移除）
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 ChunkRepository 接口
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """提取 chunks 表文本数据"""
     texts = chunk_repo.fetch_all_chunk_texts(run_id)
 
     all_tokens: List[str] = []
@@ -229,23 +140,7 @@ def fetch_culture_data(
     stats_repo: "StatsRepository",
     run_id: str,
 ) -> CultureData:
-    """
-    提取 chunk_culture 表数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-metrics-layer-functions
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 StatsRepository 接口
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """提取 chunk_culture 表数据"""
     culture_rows = stats_repo.fetch_chunk_culture(run_id)
 
     return CultureData(
@@ -262,23 +157,7 @@ def fetch_tension_data(
     stats_repo: "StatsRepository",
     run_id: str,
 ) -> TensionData:
-    """
-    提取 rhythm_curve 表的 tension_composite 数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: chunk-annotation-schema-refactor
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: metrics-repository-refactor
-    修改内容: 使用 StatsRepository 接口
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-    修改内容: 提取为独立模块函数
-    """
+    """提取 rhythm_curve 表的 tension_composite 数据"""
     rows = stats_repo.fetch_rhythm_curve(run_id)
     tension_composite_scores = [row[0] for row in rows if row[0] is not None]
     return TensionData(tension_composite_scores=tension_composite_scores)

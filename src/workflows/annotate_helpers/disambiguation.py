@@ -1,22 +1,10 @@
 """
 Disambiguation helpers for the annotate workflow.
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id 参数支持，使用 AnnotationRepository 替代直接调用 operations 函数
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 包装 SQL 语句，替换 ? 占位符为命名参数
-
-修改时间: 2026-03-16
-修改者: TraeAI
-任务: fix-disambiguation-three-phase
-修改内容: 
-- 增量消歧只维护内存 alias_map，不写数据库
-- 添加 checkpoint 保存/加载机制
+修改历史:
+- 2026-03-14: 添加 run_id 参数支持，使用 Repository 模式
+- 2026-03-15: 使用 SQLAlchemy text() 包装 SQL 语句
+- 2026-03-16: 增量消歧只维护内存 alias_map，添加 checkpoint 机制
 """
 
 from __future__ import annotations
@@ -45,14 +33,7 @@ DISAMBIG_MAX_RETRIES = ANNOTATION_CONFIG.disambig_max_retries
 
 
 def _save_disambig_checkpoint(conn, run_id: str, alias_map: dict[str, str]) -> None:
-    """
-    保存消歧 checkpoint 到数据库
-
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: fix-disambiguation-three-phase
-    说明: 将当前 alias_map 保存到数据库，支持断点续传
-    """
+    """保存消歧 checkpoint 到数据库"""
     conn.execute(
         text("""
             INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at)
@@ -68,17 +49,7 @@ def _save_disambig_checkpoint(conn, run_id: str, alias_map: dict[str, str]) -> N
 
 
 def _load_disambig_checkpoint(conn, run_id: str) -> dict[str, str] | None:
-    """
-    从数据库加载消歧 checkpoint
-
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: fix-disambiguation-three-phase
-    说明: 从数据库加载之前保存的 alias_map，用于断点续传
-
-    Returns:
-        之前保存的 alias_map，如果不存在则返回 None
-    """
+    """从数据库加载消歧 checkpoint"""
     row = conn.execute(
         text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
         {"run_id": run_id},
@@ -91,10 +62,7 @@ def _load_disambig_checkpoint(conn, run_id: str) -> dict[str, str] | None:
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
-    """
-    消歧重试次数耗尽异常
-    """
-
+    """消歧重试次数耗尽异常"""
     pass
 
 
@@ -157,14 +125,7 @@ def _retry_disambig_anonymous(
 
 
 def build_anonymous_contexts(conn, anonymous_names: list[str]) -> dict[str, str]:
-    """
-    为匿名占位名构建完整上下文（前一段 + 当前段 + 后一段）
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符
-    """
+    """为匿名占位名构建完整上下文（前一段 + 当前段 + 后一段）"""
     contexts = {}
     for name in anonymous_names:
         match = re.match(r"^匿名_C(\d+)_\d+$", name)
@@ -211,26 +172,7 @@ def _run_incremental_disambiguation(
     run_id: str,
     checkpoint_interval: int = ANNOTATION_CONFIG.checkpoint_interval,
 ) -> dict[str, str]:
-    """
-    执行增量消歧
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数，支持 Repository 模式
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 移除向后兼容代码，只使用 Repository 模式
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: fix-disambiguation-three-phase
-    修改内容: 
-    - 增量消歧只维护内存 alias_map，不写数据库
-    - 添加 checkpoint 保存机制
-    """
+    """执行增量消歧"""
     from src.knowledge.graph import get_active_nodes_in_range
 
     if (current_idx + 1) % incremental_interval != 0:
@@ -282,24 +224,7 @@ def _run_final_disambiguation(
     novel_id: str,
     run_id: str,
 ) -> dict[str, str]:
-    """
-    执行最终消歧
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数，支持 Repository 模式
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 移除向后兼容代码，只使用 Repository 模式
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: fix-disambiguation-three-phase
-    修改内容: 最终消歧后调用 apply_alias_corrections 批量修正数据
-    """
+    """执行最终消歧"""
     from src.storage.repositories import AnnotationRepository
 
     logger.info("collecting all character names for final disambiguation")
@@ -340,19 +265,7 @@ def _run_anonymous_disambiguation(
     novel_id: str,
     run_id: str,
 ) -> dict[str, str]:
-    """
-    执行匿名消歧
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数，支持 Repository 模式
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 移除向后兼容代码，只使用 Repository 模式
-    """
+    """执行匿名消歧"""
     from src.storage.repositories import AnnotationRepository
 
     anonymous_names = [name for name in alias_map.values() if re.match(r"^匿名_C\d+_\d+$", name)]
@@ -401,11 +314,6 @@ def _build_character_knowledge_graph(
     构建角色知识图谱
     Returns:
         bool: 是否成功构建图谱
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 移除向后兼容代码，run_id 改为必需参数
     """
     if not use_rag or not settings.rag.enabled:
         return False
