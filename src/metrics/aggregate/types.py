@@ -10,14 +10,7 @@ Aggregate Metrics 数据类型定义
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
-
-if TYPE_CHECKING:
-    from src.storage.repositories import (
-        AnnotationRepository,
-        ChunkRepository,
-        StatsRepository,
-    )
+from typing import Any, Dict, List, Tuple
 
 
 @dataclass
