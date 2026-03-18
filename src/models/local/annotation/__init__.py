@@ -8,6 +8,11 @@
 修改者: TraeAI
 任务: code-quality-refactor - Task 9 继续拆分annotation_client
 修改内容: 添加新模块导出
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - Task 8 拆分annotation_client
+修改内容: 添加 single_call 和 foreshadowing 模块导出
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from src.models.local.annotation.context import (
     Phase2MaxRetriesExceededError,
     TwoPhaseAnnotationResult,
 )
+from src.models.local.annotation.foreshadowing import build_foreshadowing_from_annotation
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
     _build_foreshadowing_messages,
@@ -42,6 +48,10 @@ from src.models.local.annotation.response import (
     log_annotation_result,
     log_prompt_response,
     process_annotation_response,
+)
+from src.models.local.annotation.single_call import (
+    annotate_single_call_with_retry,
+    execute_single_call,
 )
 from src.models.local.annotation.validation import (
     retry_with_validation,
@@ -72,4 +82,7 @@ __all__ = [
     "validate_annotation",
     "log_annotation_start",
     "should_use_stream",
+    "execute_single_call",
+    "annotate_single_call_with_retry",
+    "build_foreshadowing_from_annotation",
 ]
