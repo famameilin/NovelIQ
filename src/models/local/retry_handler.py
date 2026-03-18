@@ -169,7 +169,7 @@ class AnnotationRetryHandler(Generic[T]):
 
     def _raise_max_retries_error(self) -> None:
         """抛出最大重试次数 exceeded 错误"""
-        from src.models.local.annotation_client import (
+        from src.models.local.annotation import (
             Phase1MaxRetriesExceededError,
             Phase2MaxRetriesExceededError,
         )
