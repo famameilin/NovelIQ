@@ -13,8 +13,13 @@ class TestErrorHandling:
         修改者: TraeAI
         任务: refactor-core-data-layer-functions
         修改原因: NovelNotFoundError 应返回 404（资源不存在），而非 400
+        
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: 修复API参数问题
+        修改内容: 将task_id改为run_id，使用完整UUID查询
         """
-        response = client.get("/api/novels/nonexistent/results?task_id=nonexistent")
+        response = client.get("/api/novels/nonexistent/results?run_id=nonexistent")
         assert response.status_code == 404
         data = response.json()
         assert "detail" in data
