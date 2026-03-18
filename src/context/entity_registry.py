@@ -116,7 +116,7 @@ def get_active_entities(
     lookback: int = 10,
 ) -> List[Dict[str, Any]]:
     """获取活跃实体列表（按名称去重，保留最新）"""
-    rows = entity_repo.fetch_active_entities(run_id, current_chunk_id, lookback)
+    rows = entity_repo.fetch_active_entities(current_chunk_id, lookback, run_id)
 
     # 使用字典去重，保留每个名称的最新记录
     seen = {}
