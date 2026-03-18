@@ -165,3 +165,6 @@ deprecated/
 
 # Tests 根目录文件不上传（子目录保留）
 /tests/*.py
+
+# LDA Topic Models - 训练好的模型文件
+models/
