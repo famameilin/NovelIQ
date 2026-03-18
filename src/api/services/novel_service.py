@@ -5,21 +5,11 @@
 创建者: TraeAI
 任务: 小说服务
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: services 使用 Repository 模式重构
-修改内容:
-- 移除 .db 路径相关逻辑，改用 RunRepository 管理任务元数据
-- 任务元数据存储到数据库 analysis_runs 表
-- get_db_path_by_task_id 改为 get_run_by_task_id
+修改历史:
+- 2026-03-14: 使用 Repository 模式重构，移除 .db 路径相关逻辑
+- 2026-03-15: PostgreSQL 迁移，完全移除 .db 文件扫描逻辑
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容:
-- 完全移除 .db 文件扫描逻辑，改为从 PostgreSQL 恢复任务元数据
-- 移除 _get_runs_from_db 和 _get_novel_id_from_db 方法
-- 使用 RunRepository 从 PostgreSQL 查询任务状态
+说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储任务元数据。
 """
 
 from __future__ import annotations
@@ -36,17 +26,7 @@ from src.storage.repositories import RunRepository
 
 
 class NovelService:
-    """
-    小说服务类
-
-    管理小说文件上传、任务创建和状态查询。
-    使用 PostgreSQL 数据库存储任务元数据。
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 完全移除 .db 文件依赖，使用 PostgreSQL
-    """
+    """小说服务类 - 管理小说文件上传、任务创建和状态查询"""
 
     def __init__(self, upload_dir: Path):
         self.upload_dir = upload_dir
@@ -56,18 +36,7 @@ class NovelService:
         self._scan_existing_novels()
 
     def _scan_existing_novels(self) -> None:
-        """
-        扫描已存在的小说文件和任务元数据
-
-        创建时间: 2025-03-11
-        创建者: TraeAI
-        任务: 小说服务初始化
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 从 PostgreSQL 数据库恢复任务元数据，移除 .db 文件扫描
-        """
+        """扫描已存在的小说文件和任务元数据"""
         for file_path in self.upload_dir.glob("*.txt"):
             filename = file_path.name
             if "_" in filename:
@@ -84,14 +53,7 @@ class NovelService:
         self._restore_tasks_from_database()
 
     def _restore_tasks_from_database(self) -> None:
-        """
-        从 PostgreSQL 数据库恢复任务元数据
-
-        创建时间: 2026-03-15
-        创建者: TraeAI
-        任务: postgresql-migration
-        说明: 从 analysis_runs 表恢复所有任务元数据
-        """
+        """从 PostgreSQL 数据库恢复任务元数据"""
         try:
             session_factory = get_session_factory()
             with session_factory() as session:
@@ -112,6 +74,7 @@ class NovelService:
             logger.warning(f"Failed to restore tasks from database: {e}")
 
     async def save_upload(self, file_content: bytes, filename: str) -> str:
+        """保存上传的文件"""
         if not filename.endswith(".txt"):
             raise InvalidFileError("只支持 .txt 文件")
 
@@ -135,20 +98,14 @@ class NovelService:
         return novel_id
 
     def get_novel(self, novel_id: str) -> dict:
+        """获取小说信息"""
         if novel_id not in self._novels:
             raise NovelNotFoundError(f"小说不存在: {novel_id}")
         return self._novels[novel_id]
 
     def get_db_path(self, novel_id: str) -> Path:
         """
-        创建时间: 2025-03-11
-        创建者: TraeAI
-        任务: 获取数据库路径
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 标记为废弃，PostgreSQL 不需要文件路径
+        获取数据库路径（已废弃）
 
         .. deprecated::
             此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
@@ -158,14 +115,7 @@ class NovelService:
 
     def get_db_path_by_task_id(self, task_id: str) -> Path:
         """
-        创建时间: 2025-03-11
-        创建者: TraeAI
-        任务: 获取任务对应的数据库路径
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 标记为废弃，PostgreSQL 不需要文件路径
+        获取任务对应的数据库路径（已废弃）
 
         .. deprecated::
             此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
@@ -173,24 +123,7 @@ class NovelService:
         return self.upload_dir / f"{task_id}.db"
 
     def get_run_by_task_id(self, task_id: str) -> dict | None:
-        """
-        获取任务对应的运行记录
-
-        创建时间: 2026-03-14
-        创建者: TraeAI
-        任务: services 使用 Repository 模式重构
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 从 PostgreSQL 数据库查询运行记录
-
-        Args:
-            task_id: 任务ID
-
-        Returns:
-            运行记录字典，不存在则返回 None
-        """
+        """获取任务对应的运行记录"""
         if task_id not in self._tasks:
             return None
 
@@ -198,28 +131,7 @@ class NovelService:
         return task
 
     def create_task(self, novel_id: str) -> str:
-        """
-        创建分析任务
-
-        创建时间: 2025-03-11
-        创建者: TraeAI
-        任务: 创建分析任务
-
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        任务: services 使用 Repository 模式重构
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 任务元数据存储到 PostgreSQL analysis_runs 表
-
-        Args:
-            novel_id: 小说ID
-
-        Returns:
-            任务ID
-        """
+        """创建分析任务"""
         self.get_novel(novel_id)
         task_id = str(uuid.uuid4())[:8]
 
@@ -233,6 +145,7 @@ class NovelService:
         return task_id
 
     def get_task(self, task_id: str) -> dict:
+        """获取任务信息"""
         if task_id not in self._tasks:
             # 尝试从数据库加载
             task = self._load_task_from_db(task_id)
@@ -243,14 +156,7 @@ class NovelService:
         return self._tasks[task_id]
 
     def _load_task_from_db(self, task_id: str) -> dict | None:
-        """
-        从数据库加载任务元数据
-
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: 修复服务重启后任务丢失问题
-        说明: 当内存中不存在任务时，从PostgreSQL查询
-        """
+        """从数据库加载任务元数据"""
         try:
             session_factory = get_session_factory()
             with session_factory() as session:
@@ -269,32 +175,16 @@ class NovelService:
         return None
 
     def update_task_status(self, task_id: str, status: str) -> None:
-        """
-        更新任务状态
-
-        创建时间: 2025-03-11
-        创建者: TraeAI
-        任务: 更新任务状态
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 更新内存缓存中的状态，数据库状态由 AnalysisService 更新
-        """
+        """更新任务状态"""
         if task_id in self._tasks:
             self._tasks[task_id]["status"] = status
 
     def get_tasks_by_novel(self, novel_id: str) -> list[dict]:
+        """获取小说的所有任务"""
         return [t for t in self._tasks.values() if t.get("novel_id") == novel_id]
 
     def get_latest_completed_task(self, novel_id: str) -> dict | None:
-        """
-        获取小说的最新已完成任务
-
-        创建时间: 2026-03-11
-        创建者: Claude
-        任务: 修复analyze接口重复创建任务的问题
-        """
+        """获取小说的最新已完成任务"""
         tasks = self.get_tasks_by_novel(novel_id)
         completed_tasks = [t for t in tasks if t.get("status") == "completed"]
         if not completed_tasks:
@@ -304,10 +194,6 @@ class NovelService:
     def get_latest_task(self, novel_id: str) -> dict | None:
         """
         获取小说的最新任务
-
-        创建时间: 2026-03-11
-        创建者: Claude
-        任务: 修复analyze接口在中断后应返回已有任务的问题
 
         优先级：completed > running > pending > failed
         """
@@ -322,13 +208,7 @@ class NovelService:
         return sorted_tasks[0] if sorted_tasks else None
 
     def get_task_counts_by_status(self, novel_id: str) -> dict[str, int]:
-        """
-        获取各状态的任务数量
-
-        创建时间: 2026-03-11
-        创建者: Claude
-        任务: 用于analyze接口判断多任务情况
-        """
+        """获取各状态的任务数量"""
         tasks = self.get_tasks_by_novel(novel_id)
         counts: dict[str, int] = {"completed": 0, "running": 0, "pending": 0, "failed": 0}
         for task in tasks:
@@ -340,10 +220,6 @@ class NovelService:
     def get_single_valid_task(self, novel_id: str) -> tuple[dict | None, str | None]:
         """
         获取唯一的合法任务
-
-        创建时间: 2026-03-11
-        创建者: Claude
-        任务: 获取唯一的合法任务
 
         返回: (task, error_message)
         - 如果只有一个任务，返回它
@@ -382,17 +258,11 @@ class NovelService:
         return sorted_tasks[0], None
 
     def list_novels(self) -> list[dict]:
+        """列出所有小说"""
         return list(self._novels.values())
 
     def delete_novel(self, novel_id: str) -> bool:
-        """
-        删除小说及其相关数据
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 移除 .db 文件删除逻辑，数据由数据库级联删除
-        """
+        """删除小说及其相关数据"""
         if novel_id not in self._novels:
             raise NovelNotFoundError(f"小说不存在: {novel_id}")
 
@@ -411,14 +281,7 @@ class NovelService:
         return True
 
     def delete_task(self, task_id: str) -> bool:
-        """
-        删除任务
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 移除 .db 文件删除逻辑
-        """
+        """删除任务"""
         if task_id not in self._tasks:
             raise NovelNotFoundError(f"任务不存在: {task_id}")
 
