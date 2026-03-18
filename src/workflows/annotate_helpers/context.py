@@ -121,7 +121,7 @@ def _prepare_chunk_context(
         context.next_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
         active_entities = get_active_entities(entity_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
         if active_entities:
-            context.active_entities_str = format_entities_for_prompt(active_entities, alias_map=alias_map)
+            context.active_entities_str = format_entities_for_prompt(active_entities)
 
     if rag_retriever:
         context.known_aliases_str = rag_retriever.format_known_aliases_for_prompt()
