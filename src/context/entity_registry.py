@@ -73,3 +73,63 @@ def update_entity_registry(
             emotion_score=_convert_emotion_score(score),
             run_id=run_id,
         )
+
+
+def format_entities_for_prompt(entities: List[Dict[str, Any]]) -> str:
+    """将实体列表格式化为提示词字符串"""
+    if not entities:
+        return ""
+
+    lines = ["【近期活跃角色】"]
+    for entity in entities:
+        name = entity.get("name", "")
+        role = entity.get("role", "")
+        action = entity.get("last_action", "")
+        emotion = entity.get("last_emotion", "")
+        score = entity.get("emotion_score", 0)
+
+        if role:
+            line = f"{name}（{role}）"
+        else:
+            line = name
+
+        if action or emotion:
+            parts = []
+            if action:
+                parts.append(action)
+            if emotion:
+                if isinstance(score, int) and score != 0:
+                    parts.append(f"{emotion}（{score}）")
+                else:
+                    parts.append(emotion)
+            line += "：" + "；".join(parts)
+
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def get_active_entities(
+    entity_repo: "EntityRepository",
+    run_id: str,
+    current_chunk_id: int,
+    lookback: int = 10,
+) -> List[Dict[str, Any]]:
+    """获取活跃实体列表（按名称去重，保留最新）"""
+    rows = entity_repo.fetch_active_entities(run_id, current_chunk_id, lookback)
+
+    # 使用字典去重，保留每个名称的最新记录
+    seen = {}
+    for row in rows:
+        name = row[1]
+        if name not in seen:
+            seen[name] = {
+                "chunk_id": row[0],
+                "name": name,
+                "role": row[2],
+                "last_action": row[3],
+                "last_emotion": row[4],
+                "emotion_score": row[5],
+            }
+
+    return list(seen.values())
