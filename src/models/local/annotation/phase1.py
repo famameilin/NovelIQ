@@ -14,15 +14,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict
 
-from loguru import logger
-
 from src.models.local.parser import parse_active_entities
 from src.models.local.prompts import build_retry_prompt
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 
 from .context import (
     PHASE_MAX_RETRIES,
-    NameValidationMaxRetriesExceededError,
     Phase1MaxRetriesExceededError,
 )
 from .messages import _build_annotation_messages_v2
