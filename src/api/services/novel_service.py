@@ -110,6 +110,13 @@ class NovelService:
         .. deprecated::
             此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
         """
+        import warnings
+
+        warnings.warn(
+            "get_db_path is deprecated. PostgreSQL uses a single database, file path is no longer needed.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         novel = self.get_novel(novel_id)
         return Path(novel["file_path"]).with_suffix(".db")
 
@@ -120,6 +127,13 @@ class NovelService:
         .. deprecated::
             此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
         """
+        import warnings
+
+        warnings.warn(
+            "get_db_path_by_task_id is deprecated. PostgreSQL uses a single database, file path is no longer needed.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.upload_dir / f"{task_id}.db"
 
     def get_run_by_task_id(self, task_id: str) -> dict | None:
