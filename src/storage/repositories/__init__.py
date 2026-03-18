@@ -33,6 +33,11 @@
 修改者: TraeAI
 任务: refactor-routes-use-repository
 修改内容: 新增 ChunkRepository 导出
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: code-quality-refactor - 拆分protocols.py
+修改内容: 更新导入路径
 """
 
 from .annotation_repository import AnnotationRepository

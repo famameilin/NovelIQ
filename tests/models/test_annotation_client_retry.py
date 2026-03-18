@@ -19,9 +19,11 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.annotation_client import (
     AnnotationClient,
+    PHASE_MAX_RETRIES,
+)
+from src.models.local.annotation import (
     Phase1MaxRetriesExceededError,
     Phase2MaxRetriesExceededError,
-    PHASE_MAX_RETRIES,
 )
 from src.models.local.annotation.phase1 import annotate_chunk_phase1
 from src.models.local.annotation.phase2 import annotate_chunk_phase2

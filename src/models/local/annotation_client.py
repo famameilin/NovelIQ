@@ -46,9 +46,7 @@ from src.config.analysis_logger import AnalysisLogger
 from .annotation import (
     PHASE_MAX_RETRIES,
     AnnotationContext,
-    NameValidationMaxRetriesExceededError,
     Phase1MaxRetriesExceededError,
-    Phase2MaxRetriesExceededError,
     TwoPhaseAnnotationResult,
     _build_messages,
     execute_validation_retry_call,
@@ -105,11 +103,13 @@ class AnnotationClient(BaseModelClient):
 
     def __init__(
         self,
+        task_type: TaskType = "annotation",
         config: TaskModelConfig | None = None,
         client: Any | None = None,
         analysis_logger: AnalysisLogger | None = None,
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
+        instructor_client_factory: Any | None = None,
     ) -> None:
         """
         初始化标注客户端
@@ -117,15 +117,21 @@ class AnnotationClient(BaseModelClient):
         创建时间: 2026-03-12
         创建者: TraeAI
         任务: 项目文件结构整理与拆解 - 从 unified_client.py 拆分标注专用客户端
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: code-quality-refactor - 修复与 UnifiedModelClient 的兼容性
+        修改内容: 添加 task_type 和 instructor_client_factory 参数
         """
         super().__init__(
-            task_type=TaskType.ANNOTATE,
+            task_type=task_type,
             config=config,
             client=client,
             analysis_logger=analysis_logger,
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
         )
+        self._instructor_client_factory = instructor_client_factory
 
     def _execute_single_call(
         self,
@@ -687,4 +693,42 @@ class AnnotationClient(BaseModelClient):
             content_clean=content_clean,
             thinking_content=thinking_content,
             extraction=extraction,
+        )
+
+    @_deprecated("use src.models.local.annotation.messages._build_messages instead")
+    def _build_messages(
+        self,
+        text: str,
+        prev_summary: str | None = None,
+        alias_map: Dict[str, str] | None = None,
+        global_context: str | None = None,
+        prev_tail_text: str | None = None,
+        active_entities: str | None = None,
+        rag_evidence: str | None = None,
+        known_aliases: str | None = None,
+        next_preview: str | None = None,
+        chunk_id: int | None = None,
+    ) -> List[dict]:
+        """
+        构建标注消息
+
+        .. deprecated::
+            使用 src.models.local.annotation.messages._build_messages 代替
+
+        创建时间: 2026-03-18
+        创建者: TraeAI
+        任务: code-quality-refactor - Task 9 拆分annotation_client
+        修改内容: 委托给 annotation/messages.py
+        """
+        return _build_messages(
+            text=text,
+            prev_summary=prev_summary,
+            alias_map=alias_map,
+            global_context=global_context,
+            prev_tail_text=prev_tail_text,
+            active_entities=active_entities,
+            rag_evidence=rag_evidence,
+            known_aliases=known_aliases,
+            next_preview=next_preview,
+            chunk_id=chunk_id,
         )
