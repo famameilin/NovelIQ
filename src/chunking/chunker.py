@@ -28,8 +28,6 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, List, Set, Tuple
 
-from loguru import logger
-
 from src.config import CHAPTER_PATTERN, PARAGRAPH_SPLIT, settings
 from src.models.local.embedding import EmbeddingClient
 
