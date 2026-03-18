@@ -35,37 +35,48 @@ from src.workflows.annotate import run_annotate
 from src.chunking.chunker import Chunk
 from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.schema import ChunkAnnotation, CharacterSnapshot, RelationChangeSnapshot, DialogueSnapshot
+from src.models.local.annotation import TwoPhaseAnnotationResult
 
 
-def create_mock_annotation() -> ChunkAnnotation:
-    return ChunkAnnotation(
-        emotional_valence="neutral",
-        event_type="铺垫",
-        pivot_moment=False,
-        cliffhanger=False,
-        has_foreshadowing=False,
-        foreshadowing_type=None,
-        foreshadowing_desc="",
-        characters=[
-            CharacterSnapshot(
-                name="张三",
-                role_function="主体",
-                action="测试行为",
-                action_type="其他",
-                emotion_score="neutral",
-            )
-        ],
-        relations=[
-            RelationChangeSnapshot(
-                from_name="张三",
-                to_name="李四",
-                type="盟友",
-                change="新建",
-            )
-        ],
-        dialogues=[
-            DialogueSnapshot(speaker="张三"),
-        ],
+def create_mock_annotation() -> TwoPhaseAnnotationResult:
+    """
+    创建模拟的 TwoPhaseAnnotationResult
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: code-quality-refactor - 修复测试以适应 TwoPhaseAnnotationResult 返回类型
+    """
+    return TwoPhaseAnnotationResult(
+        annotation=ChunkAnnotation(
+            emotional_valence="neutral",
+            event_type="铺垫",
+            pivot_moment=False,
+            cliffhanger=False,
+            has_foreshadowing=False,
+            foreshadowing_type=None,
+            foreshadowing_desc="",
+            characters=[
+                CharacterSnapshot(
+                    name="张三",
+                    role_function="主体",
+                    action="测试行为",
+                    action_type="其他",
+                    emotion_score="neutral",
+                )
+            ],
+            relations=[
+                RelationChangeSnapshot(
+                    from_name="张三",
+                    to_name="李四",
+                    type="盟友",
+                    change="新建",
+                )
+            ],
+            dialogues=[
+                DialogueSnapshot(speaker="张三"),
+            ],
+        ),
+        foreshadowing=None,
     )
 
 

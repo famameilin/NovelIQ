@@ -10,6 +10,7 @@ from src.config import TaskModelConfig
 from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.parser import make_empty_annotation, try_parse_json
 from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
+from src.models.local.annotation import TwoPhaseAnnotationResult
 
 
 def create_mock_stream_response(content: str):
@@ -54,10 +55,14 @@ class TestAnnotateChunk(unittest.TestCase):
         修改时间: 2026-03-17
         修改者: TraeAI
         任务: 移除 Instructor 依赖，适配新的响应格式
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: code-quality-refactor - 修复测试以适应 TwoPhaseAnnotationResult 返回类型
         """
         # 禁用 two-phase annotation
         mock_settings.analysis.two_phase_annotation.enabled = False
-        
+
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
@@ -79,12 +84,13 @@ class TestAnnotateChunk(unittest.TestCase):
         mock_client.chat.completions.create.return_value = create_mock_stream_response(content)
 
         client = UnifiedModelClient(task_type="annotation", config=config, client=mock_client)
-        annotation = client.annotate_chunk("张三走在路上")
-        self.assertIsInstance(annotation, ChunkAnnotation)
-        self.assertEqual(annotation.emotional_valence, "negative")
-        self.assertEqual(annotation.event_type, "冲突")
-        self.assertFalse(annotation.pivot_moment)
-        self.assertFalse(annotation.cliffhanger)
+        result = client.annotate_chunk("张三走在路上")
+        self.assertIsInstance(result, TwoPhaseAnnotationResult)
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertEqual(result.annotation.emotional_valence, "negative")
+        self.assertEqual(result.annotation.event_type, "冲突")
+        self.assertFalse(result.annotation.pivot_moment)
+        self.assertFalse(result.annotation.cliffhanger)
 
     @patch("src.models.local.annotation_client.settings")
     def test_annotate_chunk_with_full_schema(self, mock_settings: MagicMock) -> None:
@@ -92,10 +98,14 @@ class TestAnnotateChunk(unittest.TestCase):
         修改时间: 2026-03-17
         修改者: TraeAI
         任务: 移除 Instructor 依赖，适配新的响应格式
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: code-quality-refactor - 修复测试以适应 TwoPhaseAnnotationResult 返回类型
         """
         # 禁用 two-phase annotation
         mock_settings.analysis.two_phase_annotation.enabled = False
-        
+
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
@@ -120,14 +130,15 @@ class TestAnnotateChunk(unittest.TestCase):
         mock_client.chat.completions.create.return_value = create_mock_stream_response(content)
 
         client = UnifiedModelClient(task_type="annotation", config=config, client=mock_client)
-        annotation = client.annotate_chunk("张三与李四展开激战")
-        self.assertEqual(len(annotation.characters), 2)
-        self.assertEqual(annotation.characters[0].name, "张三")
-        self.assertEqual(annotation.characters[0].emotion_score, "strong_positive")
-        self.assertEqual(len(annotation.relations), 1)
-        self.assertEqual(annotation.relations[0].from_name, "张三")
-        self.assertEqual(len(annotation.dialogues), 1)
-        self.assertEqual(annotation.dialogues[0].speaker, "张三")
+        result = client.annotate_chunk("张三与李四展开激战")
+        self.assertIsInstance(result, TwoPhaseAnnotationResult)
+        self.assertEqual(len(result.annotation.characters), 2)
+        self.assertEqual(result.annotation.characters[0].name, "张三")
+        self.assertEqual(result.annotation.characters[0].emotion_score, "strong_positive")
+        self.assertEqual(len(result.annotation.relations), 1)
+        self.assertEqual(result.annotation.relations[0].from_name, "张三")
+        self.assertEqual(len(result.annotation.dialogues), 1)
+        self.assertEqual(result.annotation.dialogues[0].speaker, "张三")
 
 
 class TestJsonParsing(unittest.TestCase):
