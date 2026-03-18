@@ -29,6 +29,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from src.config import settings
+from src.config.schemas import ANNOTATION_CONFIG
 from src.lexicons.loader import load_lexicon
 from src.models.local.unified_client import UnifiedModelClient
 
@@ -87,10 +88,6 @@ def compute_dialogue_lengths(text: str, speakers: list[str]) -> list[int]:
                     speaker_lengths[speaker] += len(match)
 
     return [speaker_lengths.get(speaker, 0) for speaker in speakers]
-
-
-# 使用配置类替代魔法数字
-from src.config.schemas import ANNOTATION_CONFIG
 
 
 def build_context_sentences(
