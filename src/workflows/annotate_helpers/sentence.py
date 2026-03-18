@@ -1,27 +1,23 @@
 """
+标注辅助函数模块 - 例句构建和全局上下文
+
 创建时间: 2026-03-13
 创建者: TraeAI
-任务: 项目文件结构整理与拆分 - 标注辅助函数模块
-修改时间: 2026-03-14
-修改者: TraeAI
-修改内容: 从 cli.annotate_helpers 迁移到 workflows.annotate_helpers，解决循环依赖
-说明: 本模块从 src.cli.annotate_helpers 迁移而来，用于解决 workflows 与 cli 之间的循环依赖问题。
-本模块包含例句构建、全局上下文抽取等辅助函数。
+任务: 项目文件结构整理与拆分
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id 参数支持，使用 StatsRepository 替代直接调用 operations 函数
+修改历史:
+- 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
+- 2026-03-14: 添加 run_id 参数支持，使用 Repository 模式
+- 2026-03-15: 使用 SQLAlchemy text() 包装 SQL 语句
+- 2026-03-16: 添加变体反查表实现变体匹配
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 包装 SQL 语句，替换 ? 占位符为命名参数
+说明: 本模块包含例句构建、全局上下文抽取等辅助函数。
 """
 
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,6 +34,7 @@ if TYPE_CHECKING:
 
 
 def extract_speaker_from_sentence(sentence: str) -> str | None:
+    """从句子中提取说话者"""
     patterns = [
         r'^([^，。！？「」『』""\s]{2,4})[说道问道答道笑道冷笑道怒道喝道叫道喊道]',
         r'[说道问道答道笑道冷笑道怒道喝道叫道喊道]([^，。！？「」『』""\s]{2,4})',
@@ -53,6 +50,7 @@ def extract_speaker_from_sentence(sentence: str) -> str | None:
 
 
 def annotate_dialogue_structure(sentence: str) -> str:
+    """标注对话结构"""
     if '"' not in sentence and "「" not in sentence and "『" not in sentence:
         return sentence
     speaker = extract_speaker_from_sentence(sentence)
@@ -62,9 +60,7 @@ def annotate_dialogue_structure(sentence: str) -> str:
 
 
 def compute_dialogue_lengths(text: str, speakers: list[str]) -> list[int]:
-    """
-    Compute per-speaker dialogue lengths.
-    """
+    """计算每个说话者的对话长度"""
     if not text or not speakers:
         return [0] * len(speakers)
 
@@ -96,9 +92,7 @@ def build_context_sentences(
     alias_keywords: list[str] | None = None,
     prev_chunks: int = ANNOTATION_CONFIG.prev_chunks,
 ) -> dict[str, str]:
-    """
-    Build context sentences for candidate names.
-    """
+    """为候选名构建上下文句子"""
     if alias_keywords is None:
         alias_keywords = ["某", "名", "号", "就是", "称号", "全名"]
 
@@ -117,20 +111,7 @@ def build_context_sentences(
 def extract_new_names_from_db(
     conn, alias_map: dict, last_n_chunks: int = ANNOTATION_CONFIG.last_n_chunks, current_chunk_id: int | None = None
 ) -> list[dict]:
-    """
-    Extract new names and count frequency.
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: fix-extract-new-names
-    修改内容: 添加 current_chunk_id 参数，查询当前 chunk 之前最近 N 个 chunk，
-             而不是数据库中最后 N 个 chunk
-    """
+    """从数据库提取新名字"""
     known = set(alias_map.keys()) | set(alias_map.values())
 
     # 如果没有提供 current_chunk_id，使用数据库中的最大 chunk_id（向后兼容）
@@ -156,6 +137,7 @@ def extract_new_names_from_db(
 
 
 def build_prev_summary(annotation) -> str:
+    """构建前文摘要"""
     if annotation is None:
         return ""
     parts = []
@@ -168,13 +150,7 @@ def build_prev_summary(annotation) -> str:
 
 
 def _load_alias_keywords() -> list[str]:
-    """
-    加载别名关键词词典
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    修改内容: 使用相对路径
-    """
+    """加载别名关键词词典"""
     lexicon_dir = Path("data/lexicons")
     try:
         return load_lexicon("alias_keywords", lexicon_dir)
@@ -193,14 +169,7 @@ def _extract_and_save_global_context(
     annotation_client: UnifiedModelClient,
     run_id: str | None = None,
 ) -> str | None:
-    """
-    提取并保存全局上下文
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id 参数，支持 Repository 模式
-    """
+    """提取并保存全局上下文"""
     if not use_context_enhancement or resume:
         return None
 
@@ -243,11 +212,8 @@ def _get_name_variants(name: str, name_set: set[str]) -> list[str]:
     """
     生成候选名的字符串变体。
 
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: fix-disambiguation-three-phase
-    说明: 三字及以上的名字，额外加一个去掉第一个字（通常是姓）的版本。
-          短形式已作为独立候选名存在时，不展开，避免污染两个不同人物的参考池。
+    三字及以上的名字，额外加一个去掉第一个字（通常是姓）的版本。
+    短形式已作为独立候选名存在时，不展开，避免污染两个不同人物的参考池。
 
     示例：
       贺重明, {"贺重明", "伯安"}     → ["贺重明", "重明"]
@@ -267,17 +233,7 @@ def _build_sentence_pool(
     name_list: list[str],
     alias_keywords: list[str],
 ) -> dict[str, str]:
-    """
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 使用 SQLAlchemy text() 包装 SQL 语句
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: fix-disambiguation-three-phase
-    修改内容: 使用变体反查表实现变体匹配，让揭示句能匹配到候选名
-    """
+    """构建句子池"""
     from src.metrics.text_utils import split_sentences
 
     name_set = set(name_list)
@@ -313,6 +269,7 @@ def _build_sentence_pool(
 
 
 def _annotate_dialogue_structure(sentence: str) -> str:
+    """标注对话结构（内部实现）"""
     return annotate_dialogue_structure(sentence)
 
 
@@ -322,12 +279,7 @@ def _add_prev_summaries(
     name_list: list[str],
     prev_chunks: int,
 ) -> None:
-    """
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符
-    """
+    """添加前文摘要"""
     for name in name_list:
         chunk_rows = conn.execute(
             text("""
@@ -362,12 +314,7 @@ def _add_identity_clues(
     result: dict[str, str],
     name_list: list[str],
 ) -> None:
-    """
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 使用 SQLAlchemy text() 和命名参数替换 ? 占位符，使用 unnest 替代 IN 子句
-    """
+    """添加身份线索"""
     if not name_list:
         return
 
