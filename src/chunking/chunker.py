@@ -430,5 +430,16 @@ def chunk_documents(
     return _reindex(all_chunks)
 
 
-# 向后兼容别名
-detect_chapters = split_by_chapters
+# 向后兼容别名（已废弃，请使用 split_by_chapters）
+import warnings as _warnings
+
+def _detect_chapters_wrapper(text: str):
+    """向后兼容包装器（已废弃）"""
+    _warnings.warn(
+        "detect_chapters is deprecated. Use split_by_chapters instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return split_by_chapters(text)
+
+detect_chapters = _detect_chapters_wrapper
