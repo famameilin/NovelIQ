@@ -49,9 +49,7 @@ from src.config import TaskModelConfig, TaskType, settings
 from src.config.analysis_logger import AnalysisLogger
 
 from .annotation import (
-    PHASE_MAX_RETRIES,
     AnnotationContext,
-    Phase1MaxRetriesExceededError,
     TwoPhaseAnnotationResult,
     annotate_single_call_with_retry,
     build_foreshadowing_from_annotation,
@@ -64,7 +62,7 @@ from .annotation import (
 from .annotation.two_phase import annotate_chunk_two_phase as _annotate_chunk_two_phase_impl
 from .base import BaseModelClient, TokenUsageCallback
 from .litellm_utils import get_model_with_provider
-from .schema import ChunkAnnotation, ForeshadowingResult
+from .schema import ChunkAnnotation
 
 T = TypeVar("T")
 
