@@ -43,14 +43,18 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
     """
     验证人名是否在合法来源中出现
 
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
+
     Args:
         names: 需要验证的人名列表
         sources: 包含以下键的字典
             - text: 待分析文本
-            - prev_tail_text: 前文尾部文本（可选）
+            - prev_chunk_text: 前文chunk文本（可选）
             - active_entities: 活跃实体列表（可选，list[str]）
             - alias_map: 别名映射表（可选，dict[str, str]）
-            - next_preview: 后续内容预览（可选）
+            - next_chunk_text: 后文chunk文本（可选）
 
     Returns:
         不在任何合法来源中出现的无效人名列表
@@ -58,19 +62,19 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
     invalid_names: list[str] = []
 
     text = sources.get("text", "")
-    prev_tail_text = sources.get("prev_tail_text") or ""
+    prev_chunk_text = sources.get("prev_chunk_text") or ""
     active_entities = sources.get("active_entities") or []
     alias_map = sources.get("alias_map") or {}
-    next_preview = sources.get("next_preview") or ""
+    next_chunk_text = sources.get("next_chunk_text") or ""
 
     logger.debug(
-        "validate_names_in_sources: names={} text_len={} prev_tail_len={} active_entities={} alias_map_keys={} next_preview_len={}",
+        "validate_names_in_sources: names={} text_len={} prev_chunk_len={} active_entities={} alias_map_keys={} next_chunk_len={}",
         names,
         len(text),
-        len(prev_tail_text),
+        len(prev_chunk_text),
         active_entities,
         list(alias_map.keys()) if alias_map else [],
-        len(next_preview),
+        len(next_chunk_text),
     )
 
     for name in names:
@@ -84,9 +88,9 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
             is_valid = True
             logger.debug("validate_names_in_sources: name='{}' found in text", name)
 
-        if not is_valid and prev_tail_text and name in prev_tail_text:
+        if not is_valid and prev_chunk_text and name in prev_chunk_text:
             is_valid = True
-            logger.debug("validate_names_in_sources: name='{}' found in prev_tail_text", name)
+            logger.debug("validate_names_in_sources: name='{}' found in prev_chunk_text", name)
 
         if not is_valid and active_entities and name in active_entities:
             is_valid = True
@@ -103,9 +107,9 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
                         logger.debug("validate_names_in_sources: name='{}' found as substring in alias_map", name)
                         break
 
-        if not is_valid and next_preview and name in next_preview:
+        if not is_valid and next_chunk_text and name in next_chunk_text:
             is_valid = True
-            logger.debug("validate_names_in_sources: name='{}' found in next_preview", name)
+            logger.debug("validate_names_in_sources: name='{}' found in next_chunk_text", name)
 
         if not is_valid:
             logger.warning(

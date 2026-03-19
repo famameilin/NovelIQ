@@ -58,6 +58,7 @@ class RetryableOperation:
         self,
         func: Callable[..., Any],
         *args: Any,
+        pass_attempt_number: bool = False,
         **kwargs: Any,
     ) -> Any:
         """
@@ -66,11 +67,18 @@ class RetryableOperation:
         创建时间: 2026-03-13
         创建者: TraeAI
         任务: refactor-analysis-layer-functions
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 添加模型交互记录保存
+        修改内容: 添加 pass_attempt_number 参数，支持传递尝试次数
         """
         last_error: Exception | None = None
 
         for attempt in range(self.max_retries):
             try:
+                if pass_attempt_number:
+                    kwargs["attempt_number"] = attempt + 1
                 result = func(*args, **kwargs)
                 if attempt > 0:
                     logger.info(f"{self.operation_name} succeeded on attempt {attempt + 1}/{self.max_retries}")

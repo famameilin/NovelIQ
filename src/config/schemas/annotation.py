@@ -5,6 +5,14 @@
 创建者: TraeAI
 任务: code-quality-refactor - 消除魔法数字/字符串
 说明: 集中管理标注客户端的常量配置
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: entity-type-relation-extraction
+修改内容:
+- 重命名 valid_relation_types 为 valid_interpersonal_relation_types
+- 新增 valid_hierarchical_relation_types（层级关系类型）
+- 新增 valid_entity_types（实体类型）
 """
 
 from dataclasses import dataclass
@@ -19,6 +27,11 @@ class AnnotationConfig:
     创建时间: 2026-03-17
     创建者: TraeAI
     任务: code-quality-refactor - 消除魔法数字
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: entity-type-relation-extraction
+    修改内容: 新增层级关系类型和实体类型配置
     """
 
     # 重试配置
@@ -38,7 +51,9 @@ class AnnotationConfig:
     valid_role_functions: List[str] = None
     valid_action_types: List[str] = None
     valid_emotion_scores: List[str] = None
-    valid_relation_types: List[str] = None
+    valid_interpersonal_relation_types: List[str] = None
+    valid_hierarchical_relation_types: List[str] = None
+    valid_entity_types: List[str] = None
     valid_clue_types: List[str] = None
     valid_event_types: List[str] = None
     valid_foreshadowing_types: List[str] = None
@@ -63,11 +78,23 @@ class AnnotationConfig:
                 "valid_emotion_scores",
                 ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
             )
-        if self.valid_relation_types is None:
+        if self.valid_interpersonal_relation_types is None:
             object.__setattr__(
                 self,
-                "valid_relation_types",
+                "valid_interpersonal_relation_types",
                 ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
+            )
+        if self.valid_hierarchical_relation_types is None:
+            object.__setattr__(
+                self,
+                "valid_hierarchical_relation_types",
+                ["belongs_to", "member_of", "leader_of", "affiliated_with"]
+            )
+        if self.valid_entity_types is None:
+            object.__setattr__(
+                self,
+                "valid_entity_types",
+                ["character", "group", "organization"]
             )
         if self.valid_clue_types is None:
             object.__setattr__(

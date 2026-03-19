@@ -91,26 +91,25 @@ class AnnotationClient(BaseModelClient):
         alias_map: Dict[str, str] | None = None,
         chunk_id: int | None = None,
         global_context: str | None = None,
-        prev_tail_text: str | None = None,
+        prev_chunk_text: str | None = None,
         active_entities: str | None = None,
         rag_evidence: str | None = None,
         known_aliases: str | None = None,
-        next_preview: str | None = None,
-        prev_chunk_text: str | None = None,
         next_chunk_text: str | None = None,
         novel_title: str | None = None,
         main_characters: str | None = None,
         position_pct: float | None = None,
         chapter_id: int | None = None,
         cloud_client: "AnnotationClient | None" = None,
+        run_id: str | None = None,
     ) -> TwoPhaseAnnotationResult:
         """
         对文本块进行语义标注
 
-        修改时间: 2026-03-18
+        修改时间: 2026-03-19
         创建者: TraeAI
-        任务: code-quality-refactor - Task 8 拆分annotation_client
-        修改内容: 委托给子模块函数
+        任务: 统一字段命名，添加 run_id 支持
+        修改内容: 移除 prev_tail_text 和 next_preview，统一使用 prev_chunk_text 和 next_chunk_text，添加 run_id
         """
         ctx = AnnotationContext(
             text=text,
@@ -118,18 +117,17 @@ class AnnotationClient(BaseModelClient):
             alias_map=alias_map,
             chunk_id=chunk_id,
             global_context=global_context,
-            prev_tail_text=prev_tail_text,
+            prev_chunk_text=prev_chunk_text,
             active_entities=active_entities,
             rag_evidence=rag_evidence,
             known_aliases=known_aliases,
-            next_preview=next_preview,
-            prev_chunk_text=prev_chunk_text,
             next_chunk_text=next_chunk_text,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
             cloud_client=cloud_client,
+            run_id=run_id,
         )
 
         if settings.analysis.two_phase_annotation.enabled:
@@ -140,18 +138,17 @@ class AnnotationClient(BaseModelClient):
                 alias_map=ctx.alias_map,
                 chunk_id=ctx.chunk_id,
                 global_context=ctx.global_context,
-                prev_tail_text=ctx.prev_tail_text,
+                prev_chunk_text=ctx.prev_chunk_text,
                 active_entities=ctx.active_entities,
                 rag_evidence=ctx.rag_evidence,
                 known_aliases=ctx.known_aliases,
-                next_preview=ctx.next_preview,
-                prev_chunk_text=ctx.prev_chunk_text,
                 next_chunk_text=ctx.next_chunk_text,
                 novel_title=ctx.novel_title,
                 main_characters=ctx.main_characters,
                 position_pct=ctx.position_pct,
                 chapter_id=ctx.chapter_id,
                 cloud_client=ctx.cloud_client,
+                run_id=ctx.run_id,
             )
 
         annotation = annotate_single_call_with_retry(self, ctx)

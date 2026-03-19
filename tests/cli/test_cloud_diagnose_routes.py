@@ -141,9 +141,15 @@ class TestCloudDiagnose:
         self.db_session.commit()
 
     def test_build_diagnosis_payload(self) -> None:
+        """
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复run_id过滤BUG
+        修改内容: 添加run_id参数
+        """
         self._create_full_data(5)
 
-        payload = build_diagnosis_payload(self.db_session, self.novel_id)
+        payload = build_diagnosis_payload(self.db_session, self.novel_id, self.run_id)
 
         assert payload["novel_id"] == self.novel_id
         assert "pivot_blocks" in payload

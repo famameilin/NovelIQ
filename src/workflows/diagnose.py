@@ -149,6 +149,7 @@ def run_cloud_diagnose(
     docs = ingest_path(source_path, metadata_path)
     logger.debug(f"ingest docs={len(docs)} source={source_path}")
     payload = build_cloud_payload(docs)
+    payload["run_id"] = run_id  # 添加 run_id 到 payload
     cache_key_base = f"{source_path}:{source_path.stat().st_mtime_ns}"
     cache = FileCache(cache_path) if cache_path else MemoryCache()
     cloud_client = client or ConfiguredCloudModelClient()
@@ -219,7 +220,7 @@ def run_diagnose(
     cloud_analysis = stats_repo.fetch_cloud_analysis("", run_id)
     novel_id = cloud_analysis.get("novel_id", "unknown") if cloud_analysis else "unknown"
 
-    payload = build_diagnosis_payload(session, novel_id)
+    payload = build_diagnosis_payload(session, novel_id, run_id)
 
     logger.debug(f"built diagnosis payload with keys={sorted(payload.keys())}")
 

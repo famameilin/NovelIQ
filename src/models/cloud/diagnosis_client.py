@@ -91,7 +91,7 @@ class DiagnosisClient(BaseCloudModelClient):
             operation_name="cloud_diagnose",
         )
 
-        return operation.execute(self._diagnose_once, payload, messages, novel_id)
+        return operation.execute(self._diagnose_once, payload, messages, novel_id, run_id=payload.get("run_id"), pass_attempt_number=True)
 
     def _build_json_schema(self, response_model: Type[T]) -> dict[str, Any]:
         """
@@ -195,7 +195,7 @@ class DiagnosisClient(BaseCloudModelClient):
         )
         return response
 
-    def _diagnose_once(self, payload: dict, messages: List[Dict[str, str]], novel_id: Any) -> CloudAnalysis:
+    def _diagnose_once(self, payload: dict, messages: List[Dict[str, str]], novel_id: Any, run_id: str | None = None, attempt_number: int = 1) -> CloudAnalysis:
         """
         单次诊断尝试
 
@@ -207,7 +207,15 @@ class DiagnosisClient(BaseCloudModelClient):
         修改者: TraeAI
         任务: 移除 Instructor 依赖
         修改内容: 使用 LiteLLM 的 JSON Schema 模式替代 Instructor
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 添加模型交互记录保存
+        修改内容: 添加 run_id 和 attempt_number 参数，保存交互记录
         """
+        import time
+
+        start_time = time.time()
         request_params = self._build_request_params(messages)
         request_params["response_format"] = self._build_json_schema(CloudAnalysis)
 
@@ -217,6 +225,44 @@ class DiagnosisClient(BaseCloudModelClient):
         # 使用流式模式并实时输出到控制台
         response = self._call_api_stream(request_params)
         result = self._parse_structured_response(response, CloudAnalysis)
+
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # 保存交互记录到数据库
+        if run_id and response:
+            try:
+                from src.storage.db import get_session_factory
+                from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
+
+                Session = get_session_factory()
+                session = Session()
+                try:
+                    repo = ModelInteractionRepository(session)
+                    message = response.choices[0].message
+                    content_clean, thinking_content = self._extract_response_content(message)
+                    prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+
+                    repo.save_interaction(
+                        run_id=run_id,
+                        chunk_id=None,  # diagnose 阶段没有 chunk_id
+                        interaction_type="diagnose",
+                        phase="diagnose",
+                        attempt_number=attempt_number,
+                        model_name=self._config.model,
+                        model_provider="cloud",
+                        prompt=prompt_text,
+                        response=content_clean,
+                        thinking=thinking_content,
+                        response_chars=len(content_clean),
+                        thinking_chars=len(thinking_content) if thinking_content else 0,
+                        has_thinking=bool(thinking_content and thinking_content.strip()),
+                        status="success",
+                        duration_ms=duration_ms,
+                    )
+                finally:
+                    session.close()
+            except Exception as e:
+                logger.warning(f"Failed to save diagnose interaction: {e}")
 
         if self._analysis_logger and response:
             message = response.choices[0].message

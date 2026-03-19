@@ -43,8 +43,10 @@ from src.config.analysis_logger import AnalysisLogger
 
 from .base import BaseModelClient, TokenUsageCallback
 from .disambiguation import (
+    ExtendedDisambigResult,
     build_anonymous_disambig_messages,
     build_disambiguate_messages,
+    build_extended_result_from_response,
     build_result_from_response,
     call_disambiguate_api,
     log_disambiguate_response,
@@ -98,7 +100,7 @@ class DisambiguationClient(BaseModelClient):
         context_sentences: Dict[str, str] | None = None,
         existing_names: List[str] | None = None,
         rag_hint: str | None = None,
-    ) -> Dict[str, str]:
+    ) -> ExtendedDisambigResult:
         """
         人名消歧
 
@@ -115,9 +117,14 @@ class DisambiguationClient(BaseModelClient):
         修改者: TraeAI
         任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
         修改内容: 委托给子模块函数
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: entity-type-relation-extraction
+        修改内容: 返回 ExtendedDisambigResult 类型，包含 entity_types 和 entity_relations
         """
         if not candidates:
-            return {}
+            return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
 
         messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
         is_cloud = self._is_cloud_api()
@@ -155,7 +162,7 @@ class DisambiguationClient(BaseModelClient):
             }
             log_disambiguate_result(self._analysis_logger, messages, response, metadata)
 
-            result = build_result_from_response(response, candidates)
+            result = build_extended_result_from_response(response, candidates)
 
             logger.debug("disambiguate_characters complete")
             return result

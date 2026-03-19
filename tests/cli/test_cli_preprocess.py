@@ -37,6 +37,10 @@ class MockEmbeddingClient:
         import random
         return [random.random() for _ in range(768)]
 
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        import random
+        return [[random.random() for _ in range(768)] for _ in texts]
+
     @staticmethod
     def compute_similarity(vec1, vec2):
         return 0.5
@@ -94,7 +98,7 @@ class TestPreprocess:
         assert chunks_inserted == 0
         assert total_chars == 0
 
-    @patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient)
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClient)
     def test_preprocess_chapter_split(self, db_session, tmp_path) -> None:
         content = "第一章 测试\n" + "内容" * 200 + "\n\n第二章 测试\n" + "内容" * 200
         source_path = self._create_source_file(str(tmp_path), content)

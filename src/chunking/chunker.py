@@ -147,7 +147,9 @@ def chunk_text(
         return []
 
     if use_semantic:
-        chunker = SemanticChunker()
+        from src.models.local.embedding import EmbeddingClient
+        embedding_client = EmbeddingClient()
+        chunker = SemanticChunker(embedding_client=embedding_client)
         return chunker.chunk_text_semantic(text)
 
     if split_by_chapter:
@@ -362,7 +364,12 @@ class SemanticChunker:
         paragraphs: List[Tuple[int, int, str]],
         boundaries: List[int],
     ) -> List[Chunk]:
-        """根据边界创建 chunks"""
+        """根据边界创建 chunks
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: 添加小块合并逻辑，将小于 semantic_min_chars 的块合并到相邻块
+        """
         chunks = []
 
         for i in range(len(boundaries) - 1):
@@ -373,10 +380,26 @@ class SemanticChunker:
             end_pos = paragraphs[end_idx - 1][1]
             chunk_text = text[start_pos:end_pos].strip()
 
-            if chunk_text:
+            if not chunk_text:
+                continue
+
+            chunk_len = len(chunk_text)
+
+            # 如果块太小，尝试合并到前一个或后一个块
+            if chunk_len < self._min_chars and chunks:
+                # 合并到前一个块
+                prev_chunk = chunks[-1]
+                merged_text = text[prev_chunk.start:end_pos].strip()
+                chunks[-1] = Chunk(
+                    index=prev_chunk.index,
+                    text=merged_text,
+                    start=prev_chunk.start,
+                    end=end_pos,
+                )
+            else:
                 chunks.append(
                     Chunk(
-                        index=i,
+                        index=len(chunks),
                         text=chunk_text,
                         start=start_pos,
                         end=end_pos,

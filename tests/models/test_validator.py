@@ -39,10 +39,10 @@ class TestValidateNamesInSources(unittest.TestCase):
         invalid = validate_names_in_sources(["张三", "王五"], sources)
         self.assertEqual(invalid, ["王五"])
 
-    def test_valid_name_in_prev_tail_text(self) -> None:
+    def test_valid_name_in_prev_chunk_text(self) -> None:
         sources = {
             "text": "他继续往前走。",
-            "prev_tail_text": "李四站在门口等待。",
+            "prev_chunk_text": "李四站在门口等待。",
             "active_entities": None,
             "alias_map": None,
         }
@@ -72,7 +72,7 @@ class TestValidateNamesInSources(unittest.TestCase):
     def test_all_sources_combined(self) -> None:
         sources = {
             "text": "「张三」看着远方。",
-            "prev_tail_text": "李四已经离开。",
+            "prev_chunk_text": "李四已经离开。",
             "active_entities": ["王五"],
             "alias_map": {"猴子": "侯飞白"},
         }
@@ -89,13 +89,13 @@ class TestValidateNamesInSources(unittest.TestCase):
         invalid = validate_names_in_sources(["张三"], sources)
         self.assertEqual(invalid, ["张三"])
 
-    def test_valid_name_in_next_preview(self) -> None:
+    def test_valid_name_in_next_chunk_text(self) -> None:
         sources = {
             "text": "他继续往前走。",
-            "prev_tail_text": None,
+            "prev_chunk_text": None,
             "active_entities": None,
             "alias_map": None,
-            "next_preview": "张三站在门口等待。",
+            "next_chunk_text": "张三站在门口等待。",
         }
         invalid = validate_names_in_sources(["张三"], sources)
         self.assertEqual(invalid, [])

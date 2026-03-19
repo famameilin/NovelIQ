@@ -30,18 +30,17 @@ def annotate_chunk_two_phase(
     alias_map: Dict[str, str] | None = None,
     chunk_id: int | None = None,
     global_context: str | None = None,
-    prev_tail_text: str | None = None,
+    prev_chunk_text: str | None = None,
     active_entities: str | None = None,
     rag_evidence: str | None = None,
     known_aliases: str | None = None,
-    next_preview: str | None = None,
-    prev_chunk_text: str | None = None,
     next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
     cloud_client: "AnnotationClient | None" = None,
+    run_id: str | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
     双次调用标注模式
@@ -50,10 +49,9 @@ def annotate_chunk_two_phase(
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
 
-    修改时间: 2026-03-14
+    修改时间: 2026-03-19
     修改者: TraeAI
-    任务: Phase1/Phase2独立重试机制
-    修改内容: 添加 cloud_client 参数传递给 Phase1/Phase2
+    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text，添加 run_id 支持
     """
     parallel = settings.analysis.two_phase_annotation.parallel
 
@@ -71,6 +69,7 @@ def annotate_chunk_two_phase(
             chapter_id=chapter_id,
             active_entities=active_entities,
             cloud_client=cloud_client,
+            run_id=run_id,
         )
     else:
         return annotate_chunk_two_phase_serial(
@@ -86,6 +85,7 @@ def annotate_chunk_two_phase(
             chapter_id=chapter_id,
             active_entities=active_entities,
             cloud_client=cloud_client,
+            run_id=run_id,
         )
 
 
@@ -102,6 +102,7 @@ def annotate_chunk_two_phase_parallel(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     cloud_client: "AnnotationClient | None" = None,
+    run_id: str | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
     并行双次调用模式
@@ -114,6 +115,11 @@ def annotate_chunk_two_phase_parallel(
     修改者: TraeAI
     任务: Phase1/Phase2独立重试机制
     修改内容: 添加 cloud_client 参数传递
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 添加 run_id 支持
+    修改内容: 添加 run_id 参数传递
     """
     logger.debug("annotate_chunk_two_phase_parallel start chunk_id={}", chunk_id)
 
@@ -132,6 +138,7 @@ def annotate_chunk_two_phase_parallel(
             chapter_id=chapter_id,
             active_entities=active_entities,
             cloud_client=cloud_client,
+            run_id=run_id,
         )
         phase2_future = executor.submit(
             annotate_chunk_phase2,
@@ -146,6 +153,7 @@ def annotate_chunk_two_phase_parallel(
             position_pct=position_pct,
             chapter_id=chapter_id,
             cloud_client=cloud_client,
+            run_id=run_id,
         )
 
         annotation = phase1_future.result()
@@ -177,6 +185,7 @@ def annotate_chunk_two_phase_serial(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     cloud_client: "AnnotationClient | None" = None,
+    run_id: str | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
     串行双次调用模式
@@ -189,6 +198,11 @@ def annotate_chunk_two_phase_serial(
     修改者: TraeAI
     任务: Phase1/Phase2独立重试机制
     修改内容: 添加 cloud_client 参数传递
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 添加 run_id 支持
+    修改内容: 添加 run_id 参数传递
     """
     logger.debug("annotate_chunk_two_phase_serial start chunk_id={}", chunk_id)
 
@@ -205,6 +219,7 @@ def annotate_chunk_two_phase_serial(
         chapter_id=chapter_id,
         active_entities=active_entities,
         cloud_client=cloud_client,
+        run_id=run_id,
     )
 
     foreshadowing = annotate_chunk_phase2(
@@ -219,6 +234,7 @@ def annotate_chunk_two_phase_serial(
         position_pct=position_pct,
         chapter_id=chapter_id,
         cloud_client=cloud_client,
+        run_id=run_id,
     )
 
     if foreshadowing and validate_foreshadowing_result(foreshadowing, text):

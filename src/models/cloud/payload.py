@@ -24,14 +24,26 @@ from src.config import settings
 修改内容: 使用 SQLAlchemy text() 包装 SQL 语句，"""
 
 
-def build_diagnosis_payload(conn: Session, novel_id: str | None = None) -> dict:
+def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
+    """
+    构建诊断payload
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id参数，确保只获取当前运行的数据
+    """
     logger.info(
-        "[云端模型] 构建诊断payload开始: novel_id=%s",
+        "[云端模型] 构建诊断payload开始: novel_id=%s run_id=%s",
         novel_id,
+        run_id,
     )
 
+    # 如果没有run_id，使用空字符串（保持向后兼容，但会返回空结果）
+    effective_run_id = run_id or ""
+
     pivot_blocks = []
-    for row in _fetch_pivot_blocks(conn, limit=settings.diagnosis.pivot_blocks_limit):
+    for row in _fetch_pivot_blocks(conn, effective_run_id, limit=settings.diagnosis.pivot_blocks_limit):
         chunk_id, chunk_text, event_type = row
         pivot_blocks.append(
             {
@@ -43,7 +55,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None) -> dict:
     logger.info("[云端模型] 获取pivot_blocks: count=%d", len(pivot_blocks))
 
     pivot_moments = []
-    for row in _fetch_pivot_moments(conn, limit=settings.diagnosis.pivot_moments_limit):
+    for row in _fetch_pivot_moments(conn, effective_run_id, limit=settings.diagnosis.pivot_moments_limit):
         chunk_id, chunk_text = row
         pivot_moments.append(
             {
@@ -54,7 +66,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None) -> dict:
     logger.info("[云端模型] 获取pivot_moments: count=%d", len(pivot_moments))
 
     high_tension = []
-    for row in _fetch_high_tension_chunks(conn, limit=settings.diagnosis.high_tension_limit):
+    for row in _fetch_high_tension_chunks(conn, effective_run_id, limit=settings.diagnosis.high_tension_limit):
         chunk_id, chunk_text, tension = row
         high_tension.append(
             {
@@ -66,7 +78,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None) -> dict:
     logger.info("[云端模型] 获取high_tension: count=%d", len(high_tension))
 
     relations = []
-    for row in _fetch_relation_changes(conn, limit=settings.diagnosis.relation_changes_limit):
+    for row in _fetch_relation_changes(conn, effective_run_id, limit=settings.diagnosis.relation_changes_limit):
         chunk_id, from_char, to_char, rel_type, change = row
         relations.append(
             {
@@ -80,7 +92,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None) -> dict:
     logger.info("[云端模型] 获取relation_changes: count=%d", len(relations))
 
     foreshadowing = []
-    for row in _fetch_foreshadowing_chunks(conn, limit=settings.diagnosis.foreshadowing_limit):
+    for row in _fetch_foreshadowing_chunks(conn, effective_run_id, limit=settings.diagnosis.foreshadowing_limit):
         chunk_id, chunk_text, fs_type, fs_desc = row
         foreshadowing.append(
             {
@@ -93,11 +105,11 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None) -> dict:
     logger.info("[云端模型] 获取foreshadowing: count=%d", len(foreshadowing))
 
     first_summary, last_summary = _fetch_first_last_chunk_summary(
-        conn, max_chars=settings.diagnosis.first_last_max_chars
+        conn, effective_run_id, max_chars=settings.diagnosis.first_last_max_chars
     )
     logger.info("[云端模型] 获取首尾摘要: first_len=%d last_len=%d", len(first_summary), len(last_summary))
 
-    topic_words = _fetch_topic_words(conn, top_n=settings.diagnosis.topic_words_top_n)
+    topic_words = _fetch_topic_words(conn, effective_run_id, top_n=settings.diagnosis.topic_words_top_n)
     logger.info("[云端模型] 获取topic_words: count=%d", len(topic_words))
 
     payload = {
@@ -125,91 +137,151 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None) -> dict:
     return payload
 
 
-def _fetch_pivot_blocks(conn: Session, limit: int = 20) -> List[Any]:
+def _fetch_pivot_blocks(conn: Session, run_id: str, limit: int = 20) -> List[Any]:
+    """
+    获取转折点块
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id过滤条件
+    """
     result = conn.execute(
         text(
             """
             SELECT c.chunk_id, c.text, a.event_type
             FROM chunks c
-            JOIN chunk_annotation a ON c.chunk_id = a.chunk_id
+            JOIN chunk_annotation a ON c.chunk_id = a.chunk_id AND c.run_id = a.run_id
             WHERE a.pivot_moment = 1
+              AND c.run_id = :run_id
+              AND a.run_id = :run_id
             ORDER BY c.chunk_id
             LIMIT :limit
             """
         ),
-        {"limit": limit},
+        {"run_id": run_id, "limit": limit},
     )
     return list(result.fetchall())
 
 
-def _fetch_pivot_moments(conn: Session, limit: int = 10) -> List[Any]:
+def _fetch_pivot_moments(conn: Session, run_id: str, limit: int = 10) -> List[Any]:
+    """
+    获取高潮时刻
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id过滤条件
+    """
     result = conn.execute(
         text(
             """
             SELECT c.chunk_id, c.text
             FROM chunks c
-            JOIN chunk_annotation a ON c.chunk_id = a.chunk_id
+            JOIN chunk_annotation a ON c.chunk_id = a.chunk_id AND c.run_id = a.run_id
             WHERE a.event_type = '高潮'
+              AND c.run_id = :run_id
+              AND a.run_id = :run_id
             ORDER BY c.chunk_id
             LIMIT :limit
             """
         ),
-        {"limit": limit},
+        {"run_id": run_id, "limit": limit},
     )
     return list(result.fetchall())
 
 
-def _fetch_high_tension_chunks(conn: Session, limit: int = 10) -> List[Any]:
+def _fetch_high_tension_chunks(conn: Session, run_id: str, limit: int = 10) -> List[Any]:
+    """
+    获取高张力块
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id过滤条件
+    """
     result = conn.execute(
         text(
             """
             SELECT c.chunk_id, c.text, ABS(e.net_density) as tension
             FROM chunks c
-            JOIN emotion_curve e ON c.chunk_id = e.chunk_id
+            JOIN emotion_curve e ON c.chunk_id = e.chunk_id AND c.run_id = e.run_id
             WHERE ABS(e.net_density) > 0.01
+              AND c.run_id = :run_id
+              AND e.run_id = :run_id
             ORDER BY tension DESC
             LIMIT :limit
             """
         ),
-        {"limit": limit},
+        {"run_id": run_id, "limit": limit},
     )
     return list(result.fetchall())
 
 
-def _fetch_relation_changes(conn: Session, limit: int = 50) -> List[Any]:
+def _fetch_relation_changes(conn: Session, run_id: str, limit: int = 50) -> List[Any]:
+    """
+    获取关系变化
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id过滤条件
+    """
     result = conn.execute(
         text(
             """
             SELECT chunk_id, from_char, to_char, type, change
             FROM chunk_relations
+            WHERE run_id = :run_id
             ORDER BY chunk_id
             LIMIT :limit
             """
         ),
-        {"limit": limit},
+        {"run_id": run_id, "limit": limit},
     )
     return list(result.fetchall())
 
 
-def _fetch_foreshadowing_chunks(conn: Session, limit: int = 30) -> List[Any]:
+def _fetch_foreshadowing_chunks(conn: Session, run_id: str, limit: int = 30) -> List[Any]:
+    """
+    获取伏笔块
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id过滤条件
+    """
     result = conn.execute(
         text(
             """
             SELECT c.chunk_id, c.text, a.foreshadowing_type, a.foreshadowing_desc
             FROM chunks c
-            JOIN chunk_annotation a ON c.chunk_id = a.chunk_id
+            JOIN chunk_annotation a ON c.chunk_id = a.chunk_id AND c.run_id = a.run_id
             WHERE a.has_foreshadowing = 1
+              AND c.run_id = :run_id
+              AND a.run_id = :run_id
             ORDER BY c.chunk_id
             LIMIT :limit
             """
         ),
-        {"limit": limit},
+        {"run_id": run_id, "limit": limit},
     )
     return list(result.fetchall())
 
 
-def _fetch_first_last_chunk_summary(conn: Session, max_chars: int = 500) -> tuple:
-    result = conn.execute(text("SELECT chunk_id, text FROM chunks ORDER BY chunk_id"))
+def _fetch_first_last_chunk_summary(conn: Session, run_id: str, max_chars: int = 500) -> tuple:
+    """
+    获取首尾块摘要
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id过滤条件
+    """
+    result = conn.execute(
+        text("SELECT chunk_id, text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"),
+        {"run_id": run_id}
+    )
     chunks = result.fetchall()
     if not chunks:
         return "", ""
@@ -218,16 +290,26 @@ def _fetch_first_last_chunk_summary(conn: Session, max_chars: int = 500) -> tupl
     return first_text, last_text
 
 
-def _fetch_topic_words(conn: Session, top_n: int = 10) -> List[dict]:
+def _fetch_topic_words(conn: Session, run_id: str, top_n: int = 10) -> List[dict]:
+    """
+    获取主题词
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复run_id过滤BUG
+    修改内容: 添加run_id过滤条件
+    """
     result = conn.execute(
         text(
             """
             SELECT topic_id, SUM(topic_weight) as total_weight
             FROM chunk_topics
+            WHERE run_id = :run_id
             GROUP BY topic_id
             ORDER BY total_weight DESC
             """
-        )
+        ),
+        {"run_id": run_id}
     )
     topic_weights = result.fetchall()
     if not topic_weights:

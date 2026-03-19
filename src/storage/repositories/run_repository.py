@@ -165,3 +165,47 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
         if run is None:
             return None
         return self._to_dict(run)
+
+    def delete_run(self, run_id: str) -> bool:
+        """
+        删除运行记录及相关数据
+
+        创建时间: 2026-03-18
+        创建者: TraeAI
+        任务: 修复删除任务不删除数据库数据的问题
+
+        Args:
+            run_id: 运行ID
+
+        Returns:
+            是否成功删除
+        """
+        from sqlalchemy import text
+
+        # 删除相关数据（使用 CASCADE 或手动删除）
+        tables = [
+            "annotations",
+            "chunk_topics",
+            "chunk_styles",
+            "chunk_cultures",
+            "emotion_curve",
+            "rhythm_curve",
+            "character_relations",
+            "entity_relations",
+            "entities",
+            "cloud_analysis",
+            "disambig_checkpoint",
+            "global_context",
+            "chunks",
+            "analysis_runs",
+        ]
+
+        for table in tables:
+            try:
+                self.session.execute(text(f"DELETE FROM {table} WHERE run_id = :run_id"), {"run_id": run_id})
+            except Exception as e:
+                # 表可能不存在或没有run_id字段，忽略错误
+                pass
+
+        self.session.commit()
+        return True

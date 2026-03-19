@@ -28,14 +28,19 @@ def _build_messages(
     prev_summary: str | None = None,
     alias_map: Dict[str, str] | None = None,
     global_context: str | None = None,
-    prev_tail_text: str | None = None,
+    prev_chunk_text: str | None = None,
     active_entities: str | None = None,
     rag_evidence: str | None = None,
     known_aliases: str | None = None,
-    next_preview: str | None = None,
+    next_chunk_text: str | None = None,
     chunk_id: int | None = None,
 ) -> List[dict]:
-    """构建标注消息"""
+    """构建标注消息
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
+    """
     system_content = SYSTEM_PROMPT
     if global_context:
         system_content = f"{SYSTEM_PROMPT}\n\n{global_context}"
@@ -46,8 +51,8 @@ def _build_messages(
     user_parts = []
     if prev_summary:
         user_parts.append(f"【前文摘要】\n{prev_summary}")
-    if prev_tail_text:
-        user_parts.append(f"<Previous_Context>\n{prev_tail_text}\n</Previous_Context>")
+    if prev_chunk_text:
+        user_parts.append(f"<Previous_Chunk>\n{prev_chunk_text}\n</Previous_Chunk>")
     if active_entities:
         user_parts.append(f"<Active_Entities>\n{active_entities}\n</Active_Entities>")
     if known_aliases:
@@ -67,8 +72,8 @@ def _build_messages(
         alias_section = "【人物别名对照表】\n" + "\n".join(lines)
         alias_section += "\n请在输出 characters[].name 时，统一使用正式名（箭头右侧的名字）。"
         user_parts.append(alias_section)
-    if next_preview:
-        user_parts.append(f"<Next_Preview>\n{next_preview}\n</Next_Preview>")
+    if next_chunk_text:
+        user_parts.append(f"<Next_Chunk>\n{next_chunk_text}\n</Next_Chunk>")
     user_parts.append(f"【待分析文本】\n{text}")
     user_parts.append(FORMAT_REQUIREMENTS)
     if chunk_id is not None:

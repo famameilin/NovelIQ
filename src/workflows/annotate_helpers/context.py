@@ -28,21 +28,26 @@ if TYPE_CHECKING:
 
 
 class ChunkContext:
-    """Chunk上下文数据类"""
+    """Chunk上下文数据类
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
+    """
 
     def __init__(
         self,
-        prev_tail_text: str | None = None,
+        prev_chunk_text: str | None = None,
         active_entities_str: str | None = None,
         rag_evidence_str: str | None = None,
         known_aliases_str: str | None = None,
-        next_text: str | None = None,
+        next_chunk_text: str | None = None,
     ) -> None:
-        self.prev_tail_text = prev_tail_text
+        self.prev_chunk_text = prev_chunk_text
         self.active_entities_str = active_entities_str
         self.rag_evidence_str = rag_evidence_str
         self.known_aliases_str = known_aliases_str
-        self.next_text = next_text
+        self.next_chunk_text = next_chunk_text
 
 
 def _init_rag_retriever(
@@ -117,8 +122,8 @@ def _prepare_chunk_context(
         chunk_repo = ChunkRepository(conn)
         entity_repo = EntityRepository(conn)
         # 获取完整的 prev_chunk_text 和 next_chunk_text
-        context.prev_tail_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
-        context.next_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
+        context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
+        context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
         active_entities = get_active_entities(entity_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
         if active_entities:
             context.active_entities_str = format_entities_for_prompt(active_entities)

@@ -59,15 +59,20 @@ def _annotate_chunk(
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     global_context: str | None = None,
-    prev_tail_text: str | None = None,
+    prev_chunk_text: str | None = None,
     active_entities: str | None = None,
     rag_evidence: str | None = None,
     known_aliases: str | None = None,
-    next_preview: str | None = None,
+    next_chunk_text: str | None = None,
     cloud_client: UnifiedModelClient | None = None,
+    run_id: str | None = None,
 ) -> "TwoPhaseAnnotationResult":
     """
     Chunk 标注函数
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 统一字段命名，添加 run_id 支持
 
     重试策略:
     - 内层: 本地模型最多3次（任何错误类型）
@@ -81,12 +86,13 @@ def _annotate_chunk(
             alias_map=alias_map,
             chunk_id=chunk_id,
             global_context=global_context,
-            prev_tail_text=prev_tail_text,
+            prev_chunk_text=prev_chunk_text,
             active_entities=active_entities,
             rag_evidence=rag_evidence,
             known_aliases=known_aliases,
-            next_preview=next_preview,
+            next_chunk_text=next_chunk_text,
             cloud_client=cloud_client,
+            run_id=run_id,
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
@@ -236,8 +242,15 @@ def _process_single_chunk(
     use_context_enhancement: bool,
     incremental_interval: int,
     run_id: str = "",
+    novel_id: str = "",
 ) -> dict[str, str]:
-    """处理单个chunk"""
+    """处理单个chunk
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: 修复 _run_incremental_disambiguation 缺少 novel_id 参数的错误
+    修改内容: 添加 novel_id 参数并传递给 _run_incremental_disambiguation
+    """
     from .context import _prepare_chunk_context
     from .disambiguation import _run_incremental_disambiguation
     from .storage import _store_annotation_results
@@ -255,12 +268,13 @@ def _process_single_chunk(
         alias_map=alias_map if alias_map else None,
         chunk_id=chunk_id,
         global_context=phase_result.global_context_str,
-        prev_tail_text=ctx.prev_tail_text,
+        prev_chunk_text=ctx.prev_chunk_text,
         active_entities=ctx.active_entities_str,
         rag_evidence=ctx.rag_evidence_str,
         known_aliases=ctx.known_aliases_str,
-        next_preview=ctx.next_text,
+        next_chunk_text=ctx.next_chunk_text,
         cloud_client=phase_result.cloud_annotation_client,
+        run_id=run_id,
     )
     _store_annotation_results(conn, chunk_id, annotation_result.annotation, chunk_text, use_context_enhancement, run_id=run_id, foreshadowing=annotation_result.foreshadowing)
     logger.debug(f"annotated chunk_id={chunk_id}")
@@ -276,6 +290,7 @@ def _process_single_chunk(
         incremental_interval,
         idx,
         run_id=run_id,
+        novel_id=novel_id,
     )
 
     return alias_map
@@ -289,8 +304,15 @@ def _process_chunks_phase(
     use_context_enhancement: bool,
     incremental_interval: int,
     run_id: str = "",
+    novel_id: str = "",
 ) -> Tuple[int, dict[str, str]]:
-    """处理所有chunks阶段"""
+    """处理所有chunks阶段
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: 修复 _process_single_chunk 缺少 novel_id 参数的错误
+    修改内容: 添加 novel_id 参数并传递给 _process_single_chunk
+    """
     from .disambiguation import DisambiguationMaxRetriesExceededError
 
     success_count = 0
@@ -314,6 +336,7 @@ def _process_chunks_phase(
                 use_context_enhancement,
                 incremental_interval,
                 run_id=run_id,
+                novel_id=novel_id,
             )
             success_count += 1
         except ChunkAnnotationMaxRetriesExceededError as e:
