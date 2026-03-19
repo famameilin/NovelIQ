@@ -5,6 +5,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分entity_repository
 说明: 实体关系查询、插入、更新等操作
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: entity-type-relation-extraction
+修改内容: insert_entity_relation 添加 rel_category 参数
 """
 
 from __future__ import annotations
@@ -28,12 +33,18 @@ def insert_entity_relation(
     rel_type: str,
     first_chunk: int | None = None,
     tension: float = 0.0,
+    rel_category: str = "interpersonal",
     run_id: str | None = None,
 ) -> int | None:
     """
     插入实体关系
 
     使用 PostgreSQL 的 INSERT ... ON CONFLICT DO NOTHING 替代 SQLite 的 INSERT OR IGNORE
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: entity-type-relation-extraction
+    修改内容: 添加 rel_category 参数，默认值为 "interpersonal"
     """
     stmt = (
         insert(EntityRelation)
@@ -42,6 +53,7 @@ def insert_entity_relation(
             from_entity=from_entity,
             to_entity=to_entity,
             rel_type=rel_type,
+            rel_category=rel_category,
             first_chunk=first_chunk,
             last_chunk=first_chunk,
             tension=tension,

@@ -8,11 +8,19 @@
 修改者: TraeAI
 任务: code-quality-refactor - Task 3 统一重试机制
 修改内容: 使用 AnnotationRetryHandler 统一重试逻辑
+
+修改时间: 2026-03-19
+修改者: TraeAI
+任务: 添加模型交互记录保存
+修改内容: 添加 save_model_interaction 工具函数
 """
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Dict
+
+from loguru import logger
 
 from src.models.local.parser import parse_active_entities
 from src.models.local.prompts import build_retry_prompt
@@ -29,6 +37,60 @@ if TYPE_CHECKING:
     from src.models.local.schema import ChunkAnnotation
 
 
+def _save_interaction(
+    client: "AnnotationClient",
+    run_id: str | None,
+    chunk_id: int | None,
+    phase: str,
+    attempt_number: int,
+    messages: list[dict],
+    content_clean: str,
+    thinking_content: str | None,
+    duration_ms: int,
+    is_cloud: bool,
+) -> None:
+    """
+    保存模型交互记录
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 添加模型交互记录保存
+    """
+    if not run_id:
+        return
+
+    try:
+        from src.storage.db import get_session_factory
+        from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
+
+        Session = get_session_factory()
+        session = Session()
+        try:
+            repo = ModelInteractionRepository(session)
+            prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            repo.save_interaction(
+                run_id=run_id,
+                chunk_id=chunk_id,
+                interaction_type="annotate",
+                phase=phase,
+                attempt_number=attempt_number,
+                model_name=client._config.model if hasattr(client._config, 'model') else None,
+                model_provider="cloud" if is_cloud else "local",
+                prompt=prompt_text,
+                response=content_clean,
+                thinking=thinking_content,
+                response_chars=len(content_clean),
+                thinking_chars=len(thinking_content) if thinking_content else 0,
+                has_thinking=bool(thinking_content and thinking_content.strip()),
+                status="success",
+                duration_ms=duration_ms,
+            )
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning(f"Failed to save model interaction: {e}")
+
+
 def execute_phase1_call(
     client: "AnnotationClient",
     text: str,
@@ -39,6 +101,8 @@ def execute_phase1_call(
     next_chunk_text: str | None,
     chunk_id: int | None,
     retry_messages: list[dict] | None = None,
+    run_id: str | None = None,
+    attempt_number: int = 1,
 ) -> tuple["ChunkAnnotation", str]:
     """
     执行Phase1单次调用
@@ -47,7 +111,13 @@ def execute_phase1_call(
     创建者: TraeAI
     任务: code-quality-refactor - 提取_do_phase1方法
     说明: 从_annotate_chunk_phase1中提取的内嵌函数
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 添加模型交互记录保存
+    修改内容: 添加 run_id 和 attempt_number 参数，保存交互记录
     """
+    start_time = time.time()
     is_cloud = client._is_cloud_api()
     client._log_annotation_start(is_cloud, text, None, chunk_id, "phase1")
 
@@ -60,6 +130,22 @@ def execute_phase1_call(
         response, is_cloud, chunk_id, "phase1"
     )
 
+    duration_ms = int((time.time() - start_time) * 1000)
+
+    # 保存交互记录
+    _save_interaction(
+        client=client,
+        run_id=run_id,
+        chunk_id=chunk_id,
+        phase="phase1",
+        attempt_number=attempt_number,
+        messages=current_messages,
+        content_clean=content_clean,
+        thinking_content=thinking_content,
+        duration_ms=duration_ms,
+        is_cloud=is_cloud,
+    )
+
     client._log_prompt_response(
         chunk_id, content_clean, thinking_content, extraction, current_messages, text, None
     )
@@ -68,10 +154,10 @@ def execute_phase1_call(
 
     sources = {
         "text": text,
-        "prev_tail_text": prev_chunk_text or "",
+        "prev_chunk_text": prev_chunk_text or "",
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
-        "next_preview": next_chunk_text or "",
+        "next_chunk_text": next_chunk_text or "",
     }
 
     result = client._validate_annotation(result, sources, chunk_id, content_clean)
@@ -91,6 +177,7 @@ def execute_phase1_with_retry(
     next_chunk_text: str | None,
     chunk_id: int | None,
     cloud_client: "AnnotationClient | None",
+    run_id: str | None = None,
 ) -> "ChunkAnnotation":
     """
     执行Phase1带重试的调用
@@ -103,6 +190,11 @@ def execute_phase1_with_retry(
     修改者: TraeAI
     任务: code-quality-refactor - Task 3 统一重试机制
     修改内容: 使用 AnnotationRetryHandler 替代自定义重试逻辑
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 添加模型交互记录保存
+    修改内容: 添加 run_id 参数，传递 attempt_number
     """
     from src.models.local.schema import ChunkAnnotation
 
@@ -122,7 +214,8 @@ def execute_phase1_with_retry(
         """执行单次Phase1调用"""
         result, _ = execute_phase1_call(
             local_client, text, messages, alias_map, active_entities,
-            prev_chunk_text, next_chunk_text, chunk_id, retry_messages
+            prev_chunk_text, next_chunk_text, chunk_id, retry_messages,
+            run_id=run_id, attempt_number=handler.state.attempt
         )
         return result
 
@@ -154,6 +247,7 @@ def annotate_chunk_phase1(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     cloud_client: "AnnotationClient | None" = None,
+    run_id: str | None = None,
 ) -> "ChunkAnnotation":
     """
     第一次调用：基础标注（带独立重试机制）
@@ -168,6 +262,11 @@ def annotate_chunk_phase1(
     修改内容:
     - 提取_execute_phase1_call方法
     - 简化重试逻辑
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 添加模型交互记录保存
+    修改内容: 添加 run_id 参数传递
     """
     messages = _build_annotation_messages_v2(
         text=text,
@@ -192,4 +291,5 @@ def annotate_chunk_phase1(
         next_chunk_text=next_chunk_text,
         chunk_id=chunk_id,
         cloud_client=cloud_client,
+        run_id=run_id,
     )

@@ -24,6 +24,11 @@ class AnnotationContext:
     创建者: TraeAI
     任务: code-quality-refactor - 简化annotate_chunk参数
     说明: 封装annotate_chunk的多参数，减少函数签名复杂度
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 统一字段命名，添加 run_id 支持
+    修改内容: 移除 prev_tail_text 和 next_preview，统一使用 prev_chunk_text 和 next_chunk_text，添加 run_id
     """
 
     text: str
@@ -31,18 +36,17 @@ class AnnotationContext:
     alias_map: Dict[str, str] | None = None
     chunk_id: int | None = None
     global_context: str | None = None
-    prev_tail_text: str | None = None
+    prev_chunk_text: str | None = None
     active_entities: str | None = None
     rag_evidence: str | None = None
     known_aliases: str | None = None
-    next_preview: str | None = None
-    prev_chunk_text: str | None = None
     next_chunk_text: str | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None
     chapter_id: int | None = None
     cloud_client: "AnnotationClient | None" = None
+    run_id: str | None = None  # 添加 run_id 用于保存交互记录
 
 
 class Phase1MaxRetriesExceededError(Exception):

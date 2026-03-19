@@ -93,11 +93,15 @@ def build_validation_sources(
     创建时间: 2026-03-18
     创建者: TraeAI
     任务: code-quality-refactor - Task 8 拆分annotation_client
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
     """
     return {
         "text": text,
-        "prev_tail_text": prev_chunk_text or "",
+        "prev_chunk_text": prev_chunk_text or "",
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
-        "next_preview": next_chunk_text or "",
+        "next_chunk_text": next_chunk_text or "",
     }

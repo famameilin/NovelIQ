@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.config import TaskModelConfig
 from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.schema import DisambiguateResponseModel
+from src.models.local.disambiguation import ExtendedDisambigResult
 
 
 def create_mock_stream_response(content: str):
@@ -42,6 +43,10 @@ class TestLocalDisambiguate(unittest.TestCase):
         修改时间: 2026-03-17
         修改者: TraeAI
         任务: 移除 Instructor 依赖，适配新的响应格式
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复测试 - 适配 ExtendedDisambigResult 返回类型
         """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
@@ -59,16 +64,22 @@ class TestLocalDisambiguate(unittest.TestCase):
         )
         candidates = ["张三", "三哥", "张公子"]
         result = client.disambiguate_characters(candidates)
-        self.assertIn("三哥", result)
-        self.assertEqual(result["三哥"], "张三")
-        self.assertIn("张公子", result)
-        self.assertEqual(result["张公子"], "张三")
+        # 现在返回 ExtendedDisambigResult，需要访问 alias_map 属性
+        self.assertIsInstance(result, ExtendedDisambigResult)
+        self.assertIn("三哥", result.alias_map)
+        self.assertEqual(result.alias_map["三哥"], "张三")
+        self.assertIn("张公子", result.alias_map)
+        self.assertEqual(result.alias_map["张公子"], "张三")
 
     def test_disambiguate_characters_with_context_sentences(self) -> None:
         """
         修改时间: 2026-03-17
         修改者: TraeAI
         任务: 移除 Instructor 依赖，适配新的响应格式
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复测试 - 适配 ExtendedDisambigResult 返回类型
         """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
@@ -87,9 +98,16 @@ class TestLocalDisambiguate(unittest.TestCase):
         candidates = ["侯飞白", "猴子"]
         context_sentences = {"猴子": "猴子笑道：我便是侯飞白。"}
         result = client.disambiguate_characters(candidates, context_sentences=context_sentences)
-        self.assertEqual(result["猴子"], "侯飞白")
+        # 现在返回 ExtendedDisambigResult，需要访问 alias_map 属性
+        self.assertIsInstance(result, ExtendedDisambigResult)
+        self.assertEqual(result.alias_map["猴子"], "侯飞白")
 
     def test_disambiguate_characters_empty_candidates_returns_empty(self) -> None:
+        """
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复测试 - 适配 ExtendedDisambigResult 返回类型
+        """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
@@ -98,7 +116,9 @@ class TestLocalDisambiguate(unittest.TestCase):
         mock_client = MagicMock()
         client = UnifiedModelClient(task_type="incremental_disambig", config=config, client=mock_client)
         result = client.disambiguate_characters([])
-        self.assertEqual(result, {})
+        # 现在返回 ExtendedDisambigResult，空候选人时返回空对象
+        self.assertIsInstance(result, ExtendedDisambigResult)
+        self.assertEqual(result.alias_map, {})
 
     def test_disambiguate_characters_with_existing_names(self) -> None:
         """

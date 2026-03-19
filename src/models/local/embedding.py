@@ -211,6 +211,26 @@ class EmbeddingClient:
             )
             raise
 
+    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        """
+        批量获取文本的embedding向量
+
+        创建时间: 2026-03-18
+        创建者: TraeAI
+        任务: 支持语义分块的批量embedding
+
+        Args:
+            texts: 文本列表
+
+        Returns:
+            embedding向量列表
+        """
+        embeddings = []
+        for text in texts:
+            embedding = self.get_embedding(text)
+            embeddings.append(embedding)
+        return embeddings
+
     @staticmethod
     def compute_similarity(vec1: List[float], vec2: List[float]) -> float:
         if not vec1 or not vec2:

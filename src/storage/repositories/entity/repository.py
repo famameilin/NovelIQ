@@ -110,6 +110,22 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         """获取实体及其嵌入向量"""
         return queries.fetch_entities_with_embeddings(self.session, novel_id, run_id)
 
+    def get_entity_id_by_name(
+        self,
+        novel_id: str,
+        name: str,
+        run_id: str | None = None,
+    ) -> int | None:
+        """
+        根据实体名称获取实体ID的便捷方法
+
+        创建时间: 2026-03-18
+        创建者: TraeAI
+        任务: entity-type-relation-extraction
+        说明: 先尝试按规范名查询，再尝试按别名查询
+        """
+        return queries.get_entity_id_by_name(self.session, novel_id, name, run_id)
+
     # ==================== relations 模块方法 ====================
 
     def insert_entity_relation(
@@ -120,11 +136,12 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         rel_type: str,
         first_chunk: int | None = None,
         tension: float = 0.0,
+        rel_category: str = "interpersonal",
         run_id: str | None = None,
     ) -> int | None:
         """插入实体关系"""
         return relations.insert_entity_relation(
-            self.session, novel_id, from_entity, to_entity, rel_type, first_chunk, tension, run_id
+            self.session, novel_id, from_entity, to_entity, rel_type, first_chunk, tension, rel_category, run_id
         )
 
     def fetch_relations_for_entity(

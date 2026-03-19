@@ -129,7 +129,7 @@ def run_annotate(
 
     incremental_interval = settings.analysis.incremental_disambig_interval
     success_count, alias_map = _process_chunks_phase(
-        session, all_chunks, annotated_ids, phase_result, use_context_enhancement, incremental_interval, run_id=run_id
+        session, all_chunks, annotated_ids, phase_result, use_context_enhancement, incremental_interval, run_id=run_id, novel_id=novel_id
     )
 
     _run_disambiguation_phase(session, alias_map, phase_result, novel_id, use_rag, run_id=run_id)

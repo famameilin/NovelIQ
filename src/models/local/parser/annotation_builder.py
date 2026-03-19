@@ -27,7 +27,7 @@ from ..schema import (
 _VALID_ROLE_FUNCTIONS = ANNOTATION_CONFIG.valid_role_functions
 _VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types
 _VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores
-_VALID_RELATION_TYPES = ANNOTATION_CONFIG.valid_relation_types
+_VALID_RELATION_TYPES = ANNOTATION_CONFIG.valid_interpersonal_relation_types
 _VALID_CLUE_TYPES = ANNOTATION_CONFIG.valid_clue_types
 _VALID_EMOTIONAL_VALENCES_V2 = ["positive", "negative", "neutral"]
 _VALID_EMOTIONAL_VALENCES_V1 = ANNOTATION_CONFIG.valid_emotion_scores

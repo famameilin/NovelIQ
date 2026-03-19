@@ -111,6 +111,11 @@ class EntityRelation(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储实体之间的关系
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: entity-type-relation-extraction
+    修改内容: 新增 rel_category 字段区分人际关系和层级关系
     """
 
     __tablename__ = "entity_relations"
@@ -124,6 +129,7 @@ class EntityRelation(Base):
         Integer, ForeignKey("entities.entity_id", ondelete="CASCADE"), nullable=False
     )
     rel_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    rel_category: Mapped[str] = mapped_column(String(20), nullable=False, default="interpersonal")
     first_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tension: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

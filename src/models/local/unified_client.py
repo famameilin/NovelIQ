@@ -43,6 +43,11 @@
 修改内容: 修复导入错误
 - 问题原因: TwoPhaseAnnotationResult 定义在 annotation_client.py，但从 schema.py 导入
 - 解决方案: 从 annotation_client 导入 TwoPhaseAnnotationResult
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: entity-type-relation-extraction
+修改内容: disambiguate_characters 方法返回 ExtendedDisambigResult 类型
 """
 
 from __future__ import annotations
@@ -54,6 +59,7 @@ from src.config.analysis_logger import AnalysisLogger
 
 from .annotation_client import AnnotationClient, TwoPhaseAnnotationResult
 from .base import TokenUsageCallback
+from .disambiguation import ExtendedDisambigResult
 from .disambiguation_client import DisambiguationClient
 from .schema import ChunkAnnotation
 
@@ -139,25 +145,20 @@ class UnifiedModelClient:
         alias_map: Dict[str, str] | None = None,
         chunk_id: int | None = None,
         global_context: str | None = None,
-        prev_tail_text: str | None = None,
+        prev_chunk_text: str | None = None,
         active_entities: str | None = None,
         rag_evidence: str | None = None,
         known_aliases: str | None = None,
-        next_preview: str | None = None,
+        next_chunk_text: str | None = None,
         cloud_client: "UnifiedModelClient | None" = None,
+        run_id: str | None = None,
     ) -> "TwoPhaseAnnotationResult":
         """
         对文本块进行语义标注
 
-        修改时间: 2026-03-14
+        修改时间: 2026-03-19
         修改者: TraeAI
-        任务: 修复云端fallback未触发问题
-        修改内容: 添加 cloud_client 参数，透传到 AnnotationClient
-
-        修改时间: 2026-03-17
-        修改者: TraeAI
-        任务: 修复foreshadowing数据丢失问题
-        修改内容: 返回TwoPhaseAnnotationResult，包含foreshadowing数据
+        任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text，添加 run_id 支持
         """
         internal_cloud_client: AnnotationClientType | None = None
         if cloud_client is not None:
@@ -168,12 +169,13 @@ class UnifiedModelClient:
             alias_map=alias_map,
             chunk_id=chunk_id,
             global_context=global_context,
-            prev_tail_text=prev_tail_text,
+            prev_chunk_text=prev_chunk_text,
             active_entities=active_entities,
             rag_evidence=rag_evidence,
             known_aliases=known_aliases,
-            next_preview=next_preview,
+            next_chunk_text=next_chunk_text,
             cloud_client=internal_cloud_client,
+            run_id=run_id,
         )
 
     def disambiguate_characters(
@@ -182,7 +184,15 @@ class UnifiedModelClient:
         context_sentences: Dict[str, str] | None = None,
         existing_names: List[str] | None = None,
         rag_hint: str | None = None,
-    ) -> Dict[str, str]:
+    ) -> ExtendedDisambigResult:
+        """
+        人名消歧
+
+        修改时间: 2026-03-18
+        修改者: TraeAI
+        任务: entity-type-relation-extraction
+        修改内容: 返回 ExtendedDisambigResult 类型，包含 entity_types 和 entity_relations
+        """
         return self._disambiguation_client.disambiguate_characters(
             candidates=candidates,
             context_sentences=context_sentences,

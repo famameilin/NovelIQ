@@ -85,6 +85,11 @@ class AnalysisSettings:
     修改者: TraeAI
     修改内容: 添加云端标注fallback开关配置
     - cloud_annotation_fallback_enabled: 是否启用云端chunk兜底，默认true
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    修改内容: 添加有效层级关系类型配置
+    - valid_hierarchical_relation_types: 消歧阶段允许的层级关系类型列表
     """
 
     incremental_disambig_interval: int = 10
@@ -95,6 +100,9 @@ class AnalysisSettings:
     cloud_annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     two_phase_annotation: TwoPhaseAnnotationSettings = field(default_factory=TwoPhaseAnnotationSettings)
+    valid_hierarchical_relation_types: List[str] = field(default_factory=lambda: [
+        "belongs_to", "member_of", "leader_of", "affiliated_with"
+    ])
 
 
 @dataclass
@@ -266,6 +274,10 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
     修改时间: 2026-03-12
     修改者: TraeAI
     修改内容: 添加云端标注fallback开关配置解析
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    修改内容: 添加有效层级关系类型配置解析
     """
     if not data:
         return AnalysisSettings()
@@ -278,6 +290,9 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         cloud_annotation_fallback_enabled=data.get("cloud_annotation_fallback_enabled", True),
         progress=_parse_progress_settings(data.get("progress")),
         two_phase_annotation=_parse_two_phase_annotation_settings(data.get("two_phase_annotation")),
+        valid_hierarchical_relation_types=data.get("valid_hierarchical_relation_types", [
+            "belongs_to", "member_of", "leader_of", "affiliated_with"
+        ]),
     )
 
 

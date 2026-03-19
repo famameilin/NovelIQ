@@ -95,7 +95,13 @@ def run_preprocess(
     for doc in docs:
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
-    all_chunks = chunk_documents(normalized_texts, max_chars=max_chars, overlap=overlap)
+
+    # 从配置读取是否启用语义分块
+    from src.config import settings
+    use_semantic = settings.chunking.use_semantic_chunking
+    if use_semantic:
+        logger.info("启用语义分块")
+    all_chunks = chunk_documents(normalized_texts, max_chars=max_chars, overlap=overlap, use_semantic=use_semantic)
 
     total_chunks = len(all_chunks)
     total_chars = sum(len(chunk.text) for chunk in all_chunks)

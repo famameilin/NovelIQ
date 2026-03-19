@@ -129,6 +129,23 @@ class ForeshadowingResult(BaseModel):
         }
 
 
+class HierarchicalRelation(BaseModel):
+    """
+    层级关系数据结构
+
+    创建时间: 2026-03-18
+    创建者: TraeAI
+    任务: entity-type-relation-extraction
+    说明: 用于存储实体间的层级关系（belongs_to, member_of等）
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    from_entity: str = Field(alias="from", description="源实体名称")
+    to_entity: str = Field(alias="to", description="目标实体名称")
+    type: str = Field(description="关系类型：belongs_to, member_of, leader_of, affiliated_with")
+
+
 class DisambiguateResponseModel(BaseModel):
     """
     消歧响应数据结构
@@ -137,13 +154,26 @@ class DisambiguateResponseModel(BaseModel):
     创建者: TraeAI
     任务: 重构本地消歧客户端集成 Instructor
     说明: 用于 Instructor 结构化输出的消歧结果模型
+
+    修改时间: 2026-03-18
+    修改者: TraeAI
+    任务: entity-type-relation-extraction
+    修改内容: 新增 entity_types 和 entity_relations 字段
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     alias_map: dict[str, str] = Field(
         default_factory=dict,
         description="人名到标准名的映射，key为原名，value为标准名",
+    )
+    entity_types: dict[str, str] = Field(
+        default_factory=dict,
+        description="实体类型映射，key为实体名称，value为类型（character/group/organization）",
+    )
+    entity_relations: List[HierarchicalRelation] = Field(
+        default_factory=list,
+        description="实体间的层级关系列表",
     )
 
 

@@ -295,10 +295,37 @@ class NovelService:
         return True
 
     def delete_task(self, task_id: str) -> bool:
-        """删除任务"""
-        if task_id not in self._tasks:
-            raise NovelNotFoundError(f"任务不存在: {task_id}")
+        """删除任务
 
-        del self._tasks[task_id]
-        logger.info(f"Task deleted: {task_id}")
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复删除任务不删除数据库数据的问题
+        修改内容: 使用正确的 session 获取方式
+        """
+        # 从数据库中查找对应的 run_id（task_id 是 run_id 的前8位）
+        from src.storage.db import get_engine
+        from sqlalchemy.orm import sessionmaker
+
+        engine = get_engine()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        try:
+            run_repo = RunRepository(session)
+            run = run_repo.get_run_by_task_id(task_id)
+
+            if run:
+                run_id = run["run_id"]
+                # 删除数据库中的记录
+                run_repo.delete_run(run_id)
+                logger.info(f"Run deleted from database: {run_id}")
+        except Exception as e:
+            logger.warning(f"Failed to delete run from database: {e}")
+        finally:
+            session.close()
+
+        # 删除内存中的任务
+        if task_id in self._tasks:
+            del self._tasks[task_id]
+            logger.info(f"Task deleted from memory: {task_id}")
+
         return True

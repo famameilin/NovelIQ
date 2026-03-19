@@ -44,6 +44,7 @@ from src.storage.models.analysis import (
     ChunkSummary,
 )
 from src.storage.models.rag import TokenUsage, GraphStorage
+from src.storage.models.model_interaction import ModelInteraction
 
 EMBEDDING_DIM = 1536
 
@@ -75,5 +76,6 @@ __all__ = [
     "ChunkSummary",
     "TokenUsage",
     "GraphStorage",
+    "ModelInteraction",
     "EMBEDDING_DIM",
 ]

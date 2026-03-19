@@ -5,6 +5,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分entity_repository
 说明: 实体查询、别名查询等操作
+
+修改时间: 2026-03-18
+修改者: TraeAI
+任务: entity-type-relation-extraction
+修改内容: 新增 get_entity_id_by_name 便捷方法
 """
 
 from __future__ import annotations
@@ -236,3 +241,37 @@ def fetch_entities_with_embeddings(
     ).where(and_(*conditions))
     result = session.execute(stmt)
     return [tuple(row) for row in result.fetchall()]
+
+
+def get_entity_id_by_name(
+    session: Session,
+    novel_id: str,
+    name: str,
+    run_id: str | None = None,
+) -> int | None:
+    """
+    根据实体名称获取实体ID的便捷方法
+
+    创建时间: 2026-03-18
+    创建者: TraeAI
+    任务: entity-type-relation-extraction
+    说明: 先尝试按规范名查询，再尝试按别名查询
+
+    Args:
+        session: 数据库会话
+        novel_id: 小说ID
+        name: 实体名称（规范名或别名）
+        run_id: 运行ID（可选）
+
+    Returns:
+        实体ID，如果不存在返回 None
+    """
+    entity = fetch_entity_by_canonical(session, novel_id, name, run_id)
+    if entity is not None:
+        return entity["entity_id"]
+
+    entity = fetch_entity_by_alias(session, novel_id, name, run_id)
+    if entity is not None:
+        return entity["entity_id"]
+
+    return None

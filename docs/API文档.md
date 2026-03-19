@@ -585,6 +585,25 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 | cultural_depth_score | int | 文化内涵真实性评分（0-5分），判断传统文化词汇是核心叙事逻辑还是背景装饰 |
 | cultural_depth_reason | str | 评分说明，引用具体段落或情节 |
 
+**实体关系数据**:
+
+分析结果中包含实体层级关系数据，存储在 `entity_relations` 表中：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| from_entity | int | 源实体ID |
+| to_entity | int | 目标实体ID |
+| rel_type | str | 关系类型：belongs_to/member_of/leader_of/affiliated_with |
+| rel_category | str | 关系类别：hierarchical（层级关系）|
+
+**实体类型**：
+
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| character | 具体人物角色 | 伯安、贺重明 |
+| group | 群体/队伍统称 | 赤甲卫、禁军 |
+| organization | 组织/门派/家族 | 贺家、玄天道宗 |
+
 ---
 
 ### 3.4 聚合指标
