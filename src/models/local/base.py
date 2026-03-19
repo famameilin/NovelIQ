@@ -29,12 +29,13 @@ from typing import Any, Callable, List, Optional, Type, TypeVar
 import litellm
 from litellm.exceptions import APIConnectionError, Timeout, BadRequestError
 from loguru import logger
+from pydantic import BaseModel
 
 from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.litellm_utils import get_model_with_provider
 
-T = TypeVar("T")
+T = TypeVar("T", bound=BaseModel)
 
 TokenUsageCallback = Callable[[str, str, str, int, int, Optional[int], Optional[int]], None]
 

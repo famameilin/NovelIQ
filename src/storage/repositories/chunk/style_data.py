@@ -56,32 +56,31 @@ class ChunkStyleData:
     def to_tuple(
         self,
     ) -> Tuple[
-        int,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        str,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
+        int,  # chunk_id
+        float,  # mtld
+        float,  # ttr
+        float,  # avg_sent_len
+        float,  # sent_len_std
+        float,  # d_value
+        float,  # pause_density
+        float,  # fight_density
+        float,  # exclaim_density
+        float,  # dialogue_ratio
+        float,  # question_density
+        float,  # sensory_density
+        float,  # metaphor_density
+        float,  # cultural_density
+        str,  # function_word_vector
+        float,  # category_density_combat
+        float,  # category_density_body
+        float,  # category_density_relation
+        float,  # category_density_faction
+        float,  # category_density_command
+        float,  # category_density_action
+        float,  # category_density_psychology
+        float,  # category_density_measure
+        float,  # category_density_emotion
+        float,  # category_density_color
     ]:
         return (
             self.chunk_id,

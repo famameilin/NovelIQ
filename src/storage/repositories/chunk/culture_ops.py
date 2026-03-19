@@ -43,7 +43,7 @@ def insert_chunk_culture(
         for row in rows
     ]
     if culture_rows:
-        session.bulk_insert_mappings(ChunkCulture, culture_rows)
+        session.bulk_insert_mappings(ChunkCulture, culture_rows)  # type: ignore[arg-type]
 
 
 def fetch_chunk_cultures_full(

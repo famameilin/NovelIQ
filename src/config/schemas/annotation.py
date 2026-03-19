@@ -16,7 +16,7 @@
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,11 @@ class AnnotationConfig:
     修改者: TraeAI
     任务: entity-type-relation-extraction
     修改内容: 新增层级关系类型和实体类型配置
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复mypy类型错误
+    修改内容: 将List[str]改为Optional[List[str]]以兼容None默认值
     """
 
     # 重试配置
@@ -48,15 +53,15 @@ class AnnotationConfig:
     lookback: int = 10
 
     # 验证配置
-    valid_role_functions: List[str] = None
-    valid_action_types: List[str] = None
-    valid_emotion_scores: List[str] = None
-    valid_interpersonal_relation_types: List[str] = None
-    valid_hierarchical_relation_types: List[str] = None
-    valid_entity_types: List[str] = None
-    valid_clue_types: List[str] = None
-    valid_event_types: List[str] = None
-    valid_foreshadowing_types: List[str] = None
+    valid_role_functions: Optional[List[str]] = None
+    valid_action_types: Optional[List[str]] = None
+    valid_emotion_scores: Optional[List[str]] = None
+    valid_interpersonal_relation_types: Optional[List[str]] = None
+    valid_hierarchical_relation_types: Optional[List[str]] = None
+    valid_entity_types: Optional[List[str]] = None
+    valid_clue_types: Optional[List[str]] = None
+    valid_event_types: Optional[List[str]] = None
+    valid_foreshadowing_types: Optional[List[str]] = None
 
     def __post_init__(self):
         # 由于frozen=True，使用object.__setattr__来设置默认值

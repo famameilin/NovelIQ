@@ -17,6 +17,10 @@ FastAPI 应用入口模块
 修改时间: 2026-03-16
 修改者: TraeAI
 修改内容: 添加 .env 文件加载，确保环境变量正确设置
+
+修改时间: 2026-03-19
+修改者: TraeAI
+修改内容: 移除 load_dotenv，改为在 config 模块中统一加载
 """
 
 from __future__ import annotations
@@ -24,12 +28,9 @@ from __future__ import annotations
 import socket
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-env_path = Path(__file__).parent.parent.parent / ".env"
-load_dotenv(env_path)
+# 导入 config 模块会先加载 .env 文件
+from src.config import settings  # noqa: F401
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,8 +40,9 @@ from src.config.logging_config import setup_logging
 
 setup_logging(verbose=True, debug=False)
 
-from src.api.routes import novels_router, analysis_router, results_router  # noqa: E402
-from src.api.middleware import register_exception_handlers  # noqa: E402
+# ruff: noqa: E402
+from src.api.routes import novels_router, analysis_router, results_router
+from src.api.middleware import register_exception_handlers
 
 
 @asynccontextmanager

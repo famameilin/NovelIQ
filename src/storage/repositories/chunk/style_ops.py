@@ -58,7 +58,7 @@ def insert_chunk_style(
         else:
             style_rows.append(cast(dict, row))
     if style_rows:
-        session.bulk_insert_mappings(ChunkStyle, style_rows)
+        session.bulk_insert_mappings(ChunkStyle, style_rows)  # type: ignore[arg-type]
 
 
 def fetch_chunk_styles_full(

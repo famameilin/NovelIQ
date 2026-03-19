@@ -88,7 +88,7 @@ def call_disambiguate_api(
 
     # 将 thinking_content 附加到响应对象以便日志记录
     if thinking_content:
-        parsed_response._thinking_content = thinking_content
+        parsed_response._thinking_content = thinking_content  # type: ignore[attr-defined]
 
     # 估算completion token并记录token使用
     response_content = (

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-def parse_annotation(content: str, build_annotation_func: Any) -> "ChunkAnnotation":
+def parse_annotation(content: str) -> "ChunkAnnotation":
     """
     解析标注结果
 

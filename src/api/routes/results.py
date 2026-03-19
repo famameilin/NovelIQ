@@ -36,6 +36,7 @@ from src.api.routes.results_fetchers import (
     _fetch_chunk_styles,
     _fetch_chunk_annotations,
     _fetch_character_relations,
+    _fetch_hierarchical_relations,
     _fetch_global_stats,
     _fetch_chunk_cultures,
     _fetch_novel_name,
@@ -49,6 +50,7 @@ from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
     StatsRepository,
+    EntityRepository,
 )
 from src.storage.session import SessionFactory
 from src.api.routes.novels import get_novel_service
@@ -157,9 +159,10 @@ async def get_results(
         stats_repo = StatsRepository(session)
         annotation_repo = AnnotationRepository(session)
         chunk_repo = ChunkRepository(session)
+        entity_repo = EntityRepository(session)
 
         results_data, missing_fields, novel_name = _fetch_all_results_data(
-            novel_id, run_id, run_id, stats_repo, annotation_repo, chunk_repo
+            novel_id, run_id, run_id, stats_repo, annotation_repo, chunk_repo, entity_repo
         )
 
         file_path = _write_results_to_file(run_id, results_data)
@@ -177,6 +180,7 @@ def _fetch_all_results_data(
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
+    entity_repo: EntityRepository,
 ) -> Tuple[Dict[str, Any], List[str], Optional[str]]:
     """
     2026-03-13: TraeAI创建，任务refactor-api-layer-functions
@@ -189,6 +193,11 @@ def _fetch_all_results_data(
     修改者: TraeAI
     任务: postgresql-migration
     修改内容: 移除 db_path 参数
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 添加层级关系导出到JSON功能
+    修改内容: 添加 entity_repo 参数，导出层级关系
     """
     missing_fields: List[str] = []
 
@@ -219,6 +228,7 @@ def _fetch_all_results_data(
         missing_fields.append("chunk_annotations")
 
     character_relations = _fetch_character_relations(run_id, annotation_repo)
+    hierarchical_relations = _fetch_hierarchical_relations(novel_id, run_id, entity_repo)
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
 
     result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
@@ -243,6 +253,7 @@ def _fetch_all_results_data(
         "chunk_styles": [s.model_dump() for s in chunk_styles],
         "chunk_annotations": [a.model_dump() for a in chunk_annotations],
         "character_relations": [r.model_dump() for r in character_relations],
+        "hierarchical_relations": [r.model_dump() for r in hierarchical_relations],
         "global_stats": global_stats.model_dump() if global_stats else None,
         "chunk_cultures": [c.model_dump() for c in chunk_cultures],
         "aggregate_metrics": {

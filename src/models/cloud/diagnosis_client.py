@@ -30,6 +30,7 @@ import json
 from typing import Any, Dict, List, Optional, Type, TypeVar
 
 from loguru import logger
+from pydantic import BaseModel
 
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
@@ -37,7 +38,7 @@ from src.config.analysis_logger import AnalysisLogger
 from .base import BaseCloudModelClient, TokenUsageCallback
 from .schema import CloudAnalysis
 
-T = TypeVar("T")
+T = TypeVar("T", bound=BaseModel)
 
 
 class DiagnosisClient(BaseCloudModelClient):
