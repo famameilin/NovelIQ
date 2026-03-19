@@ -203,7 +203,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
         for table in tables:
             try:
                 self.session.execute(text(f"DELETE FROM {table} WHERE run_id = :run_id"), {"run_id": run_id})
-            except Exception as e:
+            except Exception:
                 # 表可能不存在或没有run_id字段，忽略错误
                 pass
 

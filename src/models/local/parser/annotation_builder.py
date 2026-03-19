@@ -24,15 +24,15 @@ from ..schema import (
 )
 
 # 使用配置类替代魔法字符串
-_VALID_ROLE_FUNCTIONS = ANNOTATION_CONFIG.valid_role_functions
-_VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types
-_VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores
-_VALID_RELATION_TYPES = ANNOTATION_CONFIG.valid_interpersonal_relation_types
-_VALID_CLUE_TYPES = ANNOTATION_CONFIG.valid_clue_types
+_VALID_ROLE_FUNCTIONS = ANNOTATION_CONFIG.valid_role_functions or []
+_VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types or []
+_VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores or []
+_VALID_RELATION_TYPES = ANNOTATION_CONFIG.valid_interpersonal_relation_types or []
+_VALID_CLUE_TYPES = ANNOTATION_CONFIG.valid_clue_types or []
 _VALID_EMOTIONAL_VALENCES_V2 = ["positive", "negative", "neutral"]
-_VALID_EMOTIONAL_VALENCES_V1 = ANNOTATION_CONFIG.valid_emotion_scores
-_VALID_EVENT_TYPES = ANNOTATION_CONFIG.valid_event_types
-_VALID_FORESHADOWING_TYPES = ANNOTATION_CONFIG.valid_foreshadowing_types
+_VALID_EMOTIONAL_VALENCES_V1 = ANNOTATION_CONFIG.valid_emotion_scores or []
+_VALID_EVENT_TYPES = ANNOTATION_CONFIG.valid_event_types or []
+_VALID_FORESHADOWING_TYPES = ANNOTATION_CONFIG.valid_foreshadowing_types or []
 
 
 def make_empty_annotation() -> ChunkAnnotation:

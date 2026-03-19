@@ -14,8 +14,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Generic, Type, TypeVar
+from dataclasses import dataclass, field
+from typing import Any, Callable, Generic, NoReturn, Type, TypeVar
 
 from loguru import logger
 
@@ -71,7 +71,7 @@ class AnnotationRetryHandler(Generic[T]):
 
     def execute(
         self,
-        operation: Callable[[Any], T],
+        operation: Callable[..., T],
         build_retry_messages: Callable[[], Any] | None = None,
     ) -> T:
         """
@@ -138,7 +138,7 @@ class AnnotationRetryHandler(Generic[T]):
 
     def _try_cloud_fallback(
         self,
-        operation: Callable[[Any], T],
+        operation: Callable[..., T],
         build_retry_messages: Callable[[], Any] | None = None,
     ) -> T:
         """尝试云端fallback"""
@@ -179,7 +179,7 @@ class AnnotationRetryHandler(Generic[T]):
             )
             self._raise_max_retries_error()
 
-    def _raise_max_retries_error(self) -> None:
+    def _raise_max_retries_error(self) -> NoReturn:
         """抛出最大重试次数 exceeded 错误"""
         error_msg = f"{self.config.operation_name} failed after {self.config.max_retries} local + 1 cloud retries: {str(self.state.last_error)}"
         logger.error(

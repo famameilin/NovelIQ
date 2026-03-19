@@ -8,6 +8,10 @@
 修改内容: 项目文件结构整理与拆解 - 重构为使用配置数据类模块
 - 将配置数据类拆分到 schemas 子模块
 - 保持原有接口不变，确保向后兼容
+
+修改时间: 2026-03-19
+修改者: TraeAI
+修改内容: 移除 load_dotenv，改为在 config/__init__.py 中统一加载
 """
 
 from __future__ import annotations
@@ -17,12 +21,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-from dotenv import load_dotenv
-
-# Load .env file
-env_path = Path(__file__).parent.parent.parent / ".env"
-load_dotenv(env_path)
 
 from .schemas import (
     AnalysisSettings,

@@ -10,6 +10,11 @@
 修改者: TraeAI
 任务: entity-type-relation-extraction
 修改内容: insert_entity_relation 添加 rel_category 参数
+
+修改时间: 2026-03-19
+修改者: TraeAI
+任务: 添加层级关系导出到JSON功能
+修改内容: 添加 fetch_hierarchical_relations_with_names 函数
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
-from src.storage.models import EntityRelation
+from src.storage.models import Entity, EntityRelation
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -160,3 +165,65 @@ def update_relation_last_chunk(session: Session, rel_id: int, last_chunk: int) -
     stmt = update(EntityRelation).where(EntityRelation.rel_id == rel_id).values(last_chunk=last_chunk)
     session.execute(stmt)
     session.commit()
+
+
+def fetch_hierarchical_relations_with_names(
+    session: Session,
+    novel_id: str,
+    run_id: str | None = None,
+) -> List[Dict[str, Any]]:
+    """
+    获取层级关系（带实体名称）
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 添加层级关系导出到JSON功能
+    说明: 查询entity_relations表中rel_category='hierarchical'的关系，并关联实体名称
+
+    Args:
+        session: 数据库会话
+        novel_id: 小说ID
+        run_id: 运行ID（可选）
+
+    Returns:
+        层级关系列表，每个关系包含实体名称和关系类型
+    """
+    from_entity = Entity.__table__.alias("from_entity")
+    to_entity = Entity.__table__.alias("to_entity")
+
+    conditions = [
+        EntityRelation.novel_id == novel_id,
+        EntityRelation.rel_category == "hierarchical",
+    ]
+    if run_id is not None:
+        conditions.append(EntityRelation.run_id == run_id)
+
+    stmt = (
+        select(
+            EntityRelation.rel_id,
+            EntityRelation.rel_type,
+            EntityRelation.first_chunk,
+            EntityRelation.last_chunk,
+            from_entity.c.canonical.label("from_name"),
+            to_entity.c.canonical.label("to_name"),
+        )
+        .join(from_entity, EntityRelation.from_entity == from_entity.c.entity_id)
+        .join(to_entity, EntityRelation.to_entity == to_entity.c.entity_id)
+        .where(and_(*conditions))
+        .order_by(EntityRelation.first_chunk)
+    )
+
+    result = session.execute(stmt)
+    rows = result.fetchall()
+
+    return [
+        {
+            "rel_id": row[0],
+            "rel_type": row[1],
+            "first_chunk": row[2],
+            "last_chunk": row[3],
+            "from_entity": row[4],
+            "to_entity": row[5],
+        }
+        for row in rows
+    ]

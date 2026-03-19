@@ -6,8 +6,21 @@
 修改时间: 2026-03-12
 修改者: TraeAI
 修改内容: 项目文件结构整理与拆解 - 添加 schemas 子模块导出
+
+修改时间: 2026-03-19
+修改者: TraeAI
+修改内容: 在模块导入时优先加载 .env 文件，确保环境变量在其他导入之前设置
 """
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 在导入其他模块之前加载 .env 文件，确保环境变量正确设置
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(env_path)
+
+# ruff: noqa: E402
 from .constants import (
     CHAPTER_PATTERN,
     CLASSICAL_PATTERNS,

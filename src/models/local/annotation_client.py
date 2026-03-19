@@ -32,12 +32,14 @@ from .annotation import (
     process_annotation_response,
     validate_annotation as _validate_annotation_impl,
 )
+from pydantic import BaseModel
+
 from .annotation.two_phase import annotate_chunk_two_phase as _annotate_chunk_two_phase_impl
 from .base import BaseModelClient, TokenUsageCallback
 from .litellm_utils import get_model_with_provider
 from .schema import ChunkAnnotation
 
-T = TypeVar("T")
+T = TypeVar("T", bound=BaseModel)
 
 
 class AnnotationClient(BaseModelClient):
@@ -228,7 +230,7 @@ class AnnotationClient(BaseModelClient):
 
     def _parse_annotation(self, content: str) -> ChunkAnnotation:
         """解析标注结果（委托给子模块）"""
-        return _parse_annotation_impl(content, None)
+        return _parse_annotation_impl(content)
 
     def _validate_annotation(
         self,

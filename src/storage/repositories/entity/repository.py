@@ -166,6 +166,14 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         """更新关系最后出现的分块"""
         return relations.update_relation_last_chunk(self.session, rel_id, last_chunk)
 
+    def fetch_hierarchical_relations_with_names(
+        self,
+        novel_id: str,
+        run_id: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        """获取层级关系（带实体名称）"""
+        return relations.fetch_hierarchical_relations_with_names(self.session, novel_id, run_id)
+
     # ==================== metadata 模块方法 ====================
 
     def insert_entity_registry(

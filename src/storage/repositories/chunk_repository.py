@@ -133,7 +133,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         Returns:
             嵌入向量字节，不存在则返回 None
         """
-        stmt = select(ChunkEmbedding.embedding).where(
+        stmt = select(ChunkEmbedding.embedding).where(  # type: ignore[attr-defined]
             ChunkEmbedding.run_id == run_id, ChunkEmbedding.chunk_id == chunk_id
         )
         result = self.session.execute(stmt)
@@ -142,7 +142,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
     def fetch_chunk_styles_full(
         self, run_id: str
-    ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
+    ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
         return fetch_chunk_styles_full(self.session, run_id)
 
     def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float]]:

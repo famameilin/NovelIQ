@@ -231,8 +231,10 @@ class UnifiedModelClient:
         existing_names: List[str] | None = None,
         existing_contexts: Dict[str, str] | None = None,
     ) -> List[Dict[str, str]]:
-        """代理到 DisambiguationClient._build_anonymous_disambig_messages"""
-        return self._disambiguation_client._build_anonymous_disambig_messages(
+        """构建匿名消歧消息"""
+        from src.models.local.disambiguation import build_anonymous_disambig_messages
+
+        return build_anonymous_disambig_messages(
             anonymous_names=anonymous_names,
             anonymous_contexts=anonymous_contexts,
             existing_names=existing_names,

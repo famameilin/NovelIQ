@@ -103,9 +103,9 @@ def _detect_onomatopoeia(paragraphs: List[Tuple[int, int, str]]) -> Set[int]:
 
 def split_by_chapters(text: str) -> List[Tuple[str | None, str]]:
     """按章节分割文本"""
-    chapters = []
+    chapters: List[Tuple[str | None, str]] = []
     last_end = 0
-    last_title = None
+    last_title: str | None = None
 
     for match in CHAPTER_PATTERN.finditer(text):
         if last_end < match.start():
@@ -282,6 +282,8 @@ class SemanticChunker:
         self, paragraphs: List[Tuple[int, int, str]]
     ) -> List[List[float]]:
         """计算段落的嵌入向量"""
+        if self._embedding_client is None:
+            return []
         texts = [text for _, _, text in paragraphs]
         return self._embedding_client.embed_texts(texts)
 
@@ -370,7 +372,7 @@ class SemanticChunker:
         修改者: TraeAI
         任务: 添加小块合并逻辑，将小于 semantic_min_chars 的块合并到相邻块
         """
-        chunks = []
+        chunks: List[Chunk] = []
 
         for i in range(len(boundaries) - 1):
             start_idx = boundaries[i]

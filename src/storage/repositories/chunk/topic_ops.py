@@ -36,7 +36,7 @@ def insert_chunk_topics(
         for row in rows
     ]
     if topic_rows:
-        session.bulk_insert_mappings(ChunkTopic, topic_rows)
+        session.bulk_insert_mappings(ChunkTopic, topic_rows)  # type: ignore[arg-type]
 
 
 def clear_chunk_topics(session: Session, run_id: str) -> None:

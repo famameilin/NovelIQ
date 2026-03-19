@@ -21,7 +21,7 @@ import json
 import re
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy import text
@@ -117,7 +117,7 @@ def _save_disambig_interaction(
                 response_dict = {
                     "alias_map": result.alias_map,
                     "entity_types": result.entity_types,
-                    "entity_relations": [rel.model_dump() for rel in result.entity_relations] if result.entity_relations else [],
+                    "entity_relations": result.entity_relations if result.entity_relations else [],
                 }
             elif isinstance(result, dict):
                 response_dict = {"alias_map": result, "entity_types": {}, "entity_relations": []}
@@ -651,7 +651,7 @@ def _process_entity_relations(
     entity_relations: list[dict[str, str]],
     entity_types: dict[str, str],
     alias_map: dict[str, str],
-) -> tuple[int, list[dict[str, str]]]:
+) -> tuple[int, list[dict[str, Any]]]:
     """
     处理实体间的层级关系
 
@@ -688,7 +688,7 @@ def _process_entity_relations(
         )
 
     success_count = 0
-    skipped_relations: list[dict[str, str]] = list(cycle_skipped)
+    skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
 
     for rel in valid_relations:
         from_name = rel.get("from")

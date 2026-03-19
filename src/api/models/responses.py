@@ -116,6 +116,22 @@ class CharacterRelation(BaseModel):
     change: str
 
 
+class HierarchicalRelation(BaseModel):
+    """
+    层级关系模型
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 添加层级关系导出到JSON功能
+    """
+    rel_id: int
+    rel_type: str
+    first_chunk: Optional[int] = None
+    last_chunk: Optional[int] = None
+    from_entity: str
+    to_entity: str
+
+
 class GlobalStats(BaseModel):
     total_chunks: Optional[int] = None
     total_chars: Optional[int] = None

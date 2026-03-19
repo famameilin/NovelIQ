@@ -8,6 +8,11 @@
 修改者: TraeAI
 任务: refactor-routes-use-repository
 修改内容: 重构为使用 Repository 模式，所有函数添加 run_id 参数支持
+
+修改时间: 2026-03-19
+修改者: TraeAI
+任务: 添加层级关系导出到JSON功能
+修改内容: 添加 _fetch_hierarchical_relations 函数和 HierarchicalRelation 导入
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from src.api.models.responses import (
     ChunkRelation,
     ChunkDialogue,
     CharacterRelation,
+    HierarchicalRelation,
     GlobalStats,
     ChunkCulture,
     TokenUsageStats,
@@ -43,6 +49,7 @@ from src.storage.repositories import (
     StatsRepository,
     AnnotationRepository,
     ChunkRepository,
+    EntityRepository,
 )
 
 
@@ -346,6 +353,31 @@ def _fetch_character_relations(run_id: str, annotation_repo: AnnotationRepositor
             change=str(row[4]) if row[4] else "",
         )
         for row in rows
+    ]
+
+
+def _fetch_hierarchical_relations(
+    novel_id: str, run_id: str, entity_repo: EntityRepository
+) -> list:
+    """
+    获取层级关系数据（father_of, son_of等）
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 添加层级关系导出到JSON功能
+    说明: 从entity_relations表中获取层级关系类型
+    """
+    relations = entity_repo.fetch_hierarchical_relations_with_names(novel_id, run_id)
+    return [
+        HierarchicalRelation(
+            rel_id=rel["rel_id"],
+            rel_type=rel["rel_type"],
+            first_chunk=rel["first_chunk"],
+            last_chunk=rel["last_chunk"],
+            from_entity=rel["from_entity"],
+            to_entity=rel["to_entity"],
+        )
+        for rel in relations
     ]
 
 
