@@ -66,6 +66,7 @@ def _annotate_chunk(
     next_chunk_text: str | None = None,
     cloud_client: UnifiedModelClient | None = None,
     run_id: str | None = None,
+    character_appearances: list[dict] | None = None,
 ) -> "TwoPhaseAnnotationResult":
     """
     Chunk 标注函数
@@ -73,6 +74,11 @@ def _annotate_chunk(
     修改时间: 2026-03-19
     修改者: TraeAI
     任务: 统一字段命名，添加 run_id 支持
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 增加 character_appearances 参数支持
 
     重试策略:
     - 内层: 本地模型最多3次（任何错误类型）
@@ -93,6 +99,7 @@ def _annotate_chunk(
             next_chunk_text=next_chunk_text,
             cloud_client=cloud_client,
             run_id=run_id,
+            character_appearances=character_appearances,
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
@@ -263,6 +270,11 @@ def _process_single_chunk(
     修改者: TraeAI
     任务: analyze-dialogue-length-zero
     修改内容: 传递 client 参数到 _store_annotation_results 以支持 LLM 对话归属判断
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-phase3-not-called
+    修改内容: 在 _process_single_chunk 中调用 phase3 计算对话长度，而不是在 storage 中
     """
     from .context import _prepare_chunk_context
     from .disambiguation import _run_incremental_disambiguation
@@ -288,7 +300,23 @@ def _process_single_chunk(
         next_chunk_text=ctx.next_chunk_text,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
+        character_appearances=ctx.character_appearances,
     )
+    
+    dialogue_lengths = None
+    if annotation_result.annotation.dialogues:
+        from src.models.local.annotation import compute_dialogue_lengths_with_llm
+        speakers = [d.speaker for d in annotation_result.annotation.dialogues]
+        logger.info(f"phase3: chunk_id={chunk_id} speakers={speakers}")
+        dialogue_lengths = compute_dialogue_lengths_with_llm(
+            phase_result.annotation_client,
+            chunk_text,
+            speakers,
+            chunk_id=chunk_id,
+            run_id=run_id,
+        )
+        logger.info(f"phase3: chunk_id={chunk_id} dialogue_lengths={dialogue_lengths}")
+    
     _store_annotation_results(
         conn,
         chunk_id,
@@ -298,7 +326,7 @@ def _process_single_chunk(
         run_id=run_id,
         foreshadowing=annotation_result.foreshadowing,
         alias_map=alias_map if alias_map else None,
-        client=phase_result.annotation_client,
+        dialogue_lengths=dialogue_lengths,
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 

@@ -18,14 +18,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Type, TypeVar
 
-from src.config import TaskModelConfig, TaskType, settings
+from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 
 from .annotation import (
     AnnotationContext,
     TwoPhaseAnnotationResult,
-    annotate_single_call_with_retry,
-    build_foreshadowing_from_annotation,
     log_annotation_start as _log_annotation_start_impl,
     log_prompt_response,
     parse_annotation as _parse_annotation_impl,
@@ -36,7 +34,6 @@ from pydantic import BaseModel
 
 from .annotation.two_phase import annotate_chunk_two_phase as _annotate_chunk_two_phase_impl
 from .base import BaseModelClient, TokenUsageCallback
-from .litellm_utils import get_model_with_provider
 from .schema import ChunkAnnotation
 
 T = TypeVar("T", bound=BaseModel)
@@ -111,6 +108,7 @@ class AnnotationClient(BaseModelClient):
         chapter_id: int | None = None,
         cloud_client: "AnnotationClient | None" = None,
         run_id: str | None = None,
+        character_appearances: List[dict] | None = None,
     ) -> TwoPhaseAnnotationResult:
         """
         对文本块进行语义标注
@@ -119,6 +117,11 @@ class AnnotationClient(BaseModelClient):
         创建者: TraeAI
         任务: 统一字段命名，添加 run_id 支持
         修改内容: 移除 prev_tail_text 和 next_preview，统一使用 prev_chunk_text 和 next_chunk_text，添加 run_id
+
+        修改时间: 2026-03-21
+        创建者: TraeAI
+        任务: fix-validate-names-from-character-appearances
+        修改内容: 添加 character_appearances 参数支持
         """
         ctx = AnnotationContext(
             text=text,
@@ -137,10 +140,10 @@ class AnnotationClient(BaseModelClient):
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
+            character_appearances=character_appearances,
         )
 
-        if settings.analysis.two_phase_annotation.enabled:
-            return _annotate_chunk_two_phase_impl(
+        return _annotate_chunk_two_phase_impl(
                 client=self,
                 text=ctx.text,
                 prev_summary=ctx.prev_summary,
@@ -158,11 +161,8 @@ class AnnotationClient(BaseModelClient):
                 chapter_id=ctx.chapter_id,
                 cloud_client=ctx.cloud_client,
                 run_id=ctx.run_id,
+                character_appearances=ctx.character_appearances,
             )
-
-        annotation = annotate_single_call_with_retry(self, ctx)
-        foreshadowing = build_foreshadowing_from_annotation(annotation)
-        return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
 
     def _call_annotation_api(
         self,
@@ -204,26 +204,31 @@ class AnnotationClient(BaseModelClient):
 
         修改时间: 2026-03-21
         修改者: TraeAI
-        任务: 统一参数处理
-        修改内容: 移除 _get_thinking_params 调用，所有参数通过 _build_extra_body 处理
+        任务: migrate-litellm-to-openai-sdk
+        修改内容: 使用 OpenAI SDK，移除 extra_body，添加 reasoning_effort 支持
+
+        修改时间: 2026-03-21
+        修改者: TraeAI
+        任务: 修复 Ollama thinking 模式控制
+        修改内容: 当 enable_thinking=False 时，传递 reasoning_effort="none" 禁用 thinking
         """
         if not self._config.model:
             raise ValueError("model is required")
-
-        model_name = get_model_with_provider(self._config.model, self._config)
-        extra_body = self._build_extra_body(enable_thinking)
 
         if self._client is None:
             raise ValueError("client is required")
 
         request_params: dict[str, Any] = {
-            "model": model_name,
+            "model": self._config.model,
             "messages": messages,
             "temperature": self._config.temperature,
             "top_p": self._config.top_p,
-            "presence_penalty": self._config.presence_penalty,
-            "extra_body": extra_body,
         }
+
+        if enable_thinking:
+            request_params["reasoning_effort"] = "medium"
+        else:
+            request_params["reasoning_effort"] = "none"
 
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)

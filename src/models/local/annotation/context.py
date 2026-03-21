@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, List
 
 if TYPE_CHECKING:
     from src.models.local.annotation_client import AnnotationClient
@@ -29,6 +29,11 @@ class AnnotationContext:
     修改者: TraeAI
     任务: 统一字段命名，添加 run_id 支持
     修改内容: 移除 prev_tail_text 和 next_preview，统一使用 prev_chunk_text 和 next_chunk_text，添加 run_id
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 添加 character_appearances 字段
     """
 
     text: str
@@ -46,7 +51,8 @@ class AnnotationContext:
     position_pct: float | None = None
     chapter_id: int | None = None
     cloud_client: "AnnotationClient | None" = None
-    run_id: str | None = None  # 添加 run_id 用于保存交互记录
+    run_id: str | None = None
+    character_appearances: List[dict] | None = None
 
 
 class Phase1MaxRetriesExceededError(Exception):

@@ -230,3 +230,33 @@ def apply_alias_corrections(session: Session, run_id: str, alias_map: Dict[str, 
 
     session.commit()
     logger.info(f"applied alias corrections: {correction_count} names updated")
+
+
+def fetch_character_appearances_for_chunks(
+    session: Session, run_id: str, min_chunk_id: int, max_chunk_id: int
+) -> List[dict]:
+    """
+    获取指定chunk_id范围内的所有角色出现记录
+
+    创建时间: 2026-03-21
+    创建者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 新增函数，用于验证时获取 character_appearances 数据
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        min_chunk_id: 最小chunk_id（不包含）
+        max_chunk_id: 最大chunk_id（包含）
+
+    Returns:
+        [{"raw_name": "名字", ...}, ...] 列表
+    """
+    stmt = (
+        select(CharacterAppearance.raw_name)
+        .where(CharacterAppearance.run_id == run_id)
+        .where(CharacterAppearance.chunk_id > min_chunk_id)
+        .where(CharacterAppearance.chunk_id <= max_chunk_id)
+    )
+    result = session.execute(stmt)
+    return [{"raw_name": row[0]} for row in result.fetchall() if row[0]]

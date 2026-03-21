@@ -160,6 +160,7 @@ class UnifiedModelClient:
         next_chunk_text: str | None = None,
         cloud_client: "UnifiedModelClient | None" = None,
         run_id: str | None = None,
+        character_appearances: List[dict] | None = None,
     ) -> "TwoPhaseAnnotationResult":
         """
         对文本块进行语义标注
@@ -167,6 +168,11 @@ class UnifiedModelClient:
         修改时间: 2026-03-19
         修改者: TraeAI
         任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text，添加 run_id 支持
+
+        修改时间: 2026-03-21
+        修改者: TraeAI
+        任务: fix-validate-names-from-character-appearances
+        修改内容: 添加 character_appearances 参数支持
         """
         internal_cloud_client: AnnotationClientType | None = None
         if cloud_client is not None:
@@ -184,6 +190,7 @@ class UnifiedModelClient:
             next_chunk_text=next_chunk_text,
             cloud_client=internal_cloud_client,
             run_id=run_id,
+            character_appearances=character_appearances,
         )
 
     def disambiguate_characters(

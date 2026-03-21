@@ -9,6 +9,11 @@
 1. 添加 is_anonymous_name 函数判断匿名占位名
 2. 验证时跳过匿名占位符（匿名_C{id}_{index} 格式）
 3. 添加详细的调试日志，便于排查验证问题
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: fix-validate-names-from-character-appearances
+修改内容: 增加 character_appearances 检查，支持名字变体验证
 """
 
 from __future__ import annotations
@@ -47,6 +52,11 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
     修改者: TraeAI
     任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
 
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 增加 character_appearances 检查，支持名字变体验证
+
     Args:
         names: 需要验证的人名列表
         sources: 包含以下键的字典
@@ -55,6 +65,7 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
             - active_entities: 活跃实体列表（可选，list[str]）
             - alias_map: 别名映射表（可选，dict[str, str]）
             - next_chunk_text: 后文chunk文本（可选）
+            - character_appearances: 角色出现记录列表（可选，list[dict]）
 
     Returns:
         不在任何合法来源中出现的无效人名列表
@@ -66,15 +77,19 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
     active_entities = sources.get("active_entities") or []
     alias_map = sources.get("alias_map") or {}
     next_chunk_text = sources.get("next_chunk_text") or ""
+    character_appearances = sources.get("character_appearances") or []
+
+    appearance_names = [ca.get("raw_name") for ca in character_appearances if ca.get("raw_name")]
 
     logger.debug(
-        "validate_names_in_sources: names={} text_len={} prev_chunk_len={} active_entities={} alias_map_keys={} next_chunk_len={}",
+        "validate_names_in_sources: names={} text_len={} prev_chunk_len={} active_entities={} alias_map_keys={} next_chunk_len={} appearance_names={}",
         names,
         len(text),
         len(prev_chunk_text),
         active_entities,
         list(alias_map.keys()) if alias_map else [],
         len(next_chunk_text),
+        appearance_names,
     )
 
     for name in names:
@@ -110,6 +125,21 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
         if not is_valid and next_chunk_text and name in next_chunk_text:
             is_valid = True
             logger.debug("validate_names_in_sources: name='{}' found in next_chunk_text", name)
+
+        if not is_valid and appearance_names:
+            if name in appearance_names:
+                is_valid = True
+                logger.debug("validate_names_in_sources: name='{}' found in character_appearances", name)
+            else:
+                for appearance_name in appearance_names:
+                    if appearance_name in name and appearance_name != name:
+                        is_valid = True
+                        logger.debug(
+                            "validate_names_in_sources: name='{}' contains appearance_name='{}'",
+                            name,
+                            appearance_name,
+                        )
+                        break
 
         if not is_valid:
             logger.warning(
