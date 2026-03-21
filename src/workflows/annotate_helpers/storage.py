@@ -10,11 +10,23 @@
 - 2026-03-14: 添加 run_id 参数，使用 Repository 模式
 - 2026-03-15: 移除向后兼容代码，只使用 Repository 模式
 - 2026-03-17: 添加 foreshadowing 参数，存储独立的 foreshadowing 分析结果
+- 2026-03-20: 修复伏笔字段空值问题，在存储前合并 Phase2 伏笔结果到 ChunkAnnotation
+- 2026-03-20: 修复对话长度全为0问题，使用 LLM 判断说话者
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: refactor-phase3-to-annotation-layer
+修改内容: 将对话归属判断导入路径从 sentence.py 改为 models/local/annotation/phase3.py
 
 说明: 本模块包含结果存储相关的函数。
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.models.local.unified_client import UnifiedModelClient
 
 
 def _store_annotation_results(
@@ -25,12 +37,46 @@ def _store_annotation_results(
     use_context_enhancement: bool,
     run_id: str,
     foreshadowing=None,
+    alias_map: dict[str, str] | None = None,
+    client: "UnifiedModelClient | None" = None,
 ) -> None:
-    """存储标注结果"""
+    """存储标注结果
+
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: fix-entity-registry-alias-map
+    修改内容: 添加 alias_map 参数，传递给 update_entity_registry 以正确映射别名
+
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: analyze-dialogue-length-zero
+    修改内容: 添加 client 参数，使用 compute_dialogue_lengths_v2 替代 compute_dialogue_lengths
+    """
     from src.storage.repositories import AnnotationRepository, StatsRepository
 
     ann_repo = AnnotationRepository(conn)
     stats_repo = StatsRepository(conn)
+
+    if foreshadowing is not None:
+        from src.models.local.schema import ChunkAnnotation
+
+        annotation = ChunkAnnotation(
+            emotional_valence=annotation.emotional_valence,
+            event_type=annotation.event_type,
+            pivot_moment=annotation.pivot_moment,
+            cliffhanger=annotation.cliffhanger,
+            has_foreshadowing=foreshadowing.has_foreshadowing,
+            foreshadowing_type=foreshadowing.foreshadowing_type,
+            foreshadowing_desc=(
+                f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}"
+                if foreshadowing.has_foreshadowing else ""
+            ),
+            characters=annotation.characters,
+            relations=annotation.relations,
+            dialogues=annotation.dialogues,
+            character_appearances=annotation.character_appearances,
+            chunk_summary=annotation.chunk_summary,
+        )
 
     ann_repo.insert_chunk_annotation(run_id, chunk_id, annotation)
 
@@ -41,19 +87,22 @@ def _store_annotation_results(
             from src.storage.repositories import EntityRepository
 
             entity_repo = EntityRepository(conn)
-            update_entity_registry(entity_repo, run_id, chunk_id, annotation.characters)
+            update_entity_registry(entity_repo, run_id, chunk_id, annotation.characters, alias_map=alias_map)
 
     if annotation.relations:
         ann_repo.insert_chunk_relations(run_id, chunk_id, annotation.relations)
 
     if annotation.dialogues:
-        # 使用标注结果中的content字段计算对话长度
-        # 创建(说话人, 长度)的列表
-        dialogue_lengths = []
-        for dialogue in annotation.dialogues:
-            # 如果content字段存在，使用其长度；否则为0
-            content_length = len(dialogue.content) if hasattr(dialogue, "content") and dialogue.content else 0
-            dialogue_lengths.append(content_length)
+        from src.models.local.annotation import compute_dialogue_lengths_with_llm
+        from .sentence import compute_dialogue_lengths
+
+        speakers = [d.speaker for d in annotation.dialogues]
+        if client is not None:
+            dialogue_lengths = compute_dialogue_lengths_with_llm(
+                client, chunk_text, speakers, chunk_id=chunk_id, run_id=run_id
+            )
+        else:
+            dialogue_lengths = compute_dialogue_lengths(chunk_text, speakers)
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, annotation.dialogues, dialogue_lengths)
 
     if annotation.chunk_summary:
@@ -62,6 +111,5 @@ def _store_annotation_results(
     if annotation.character_appearances:
         stats_repo.insert_character_appearances(run_id, chunk_id, annotation.character_appearances)
 
-    # 存储独立的foreshadowing分析结果
     if foreshadowing is not None:
         ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)
