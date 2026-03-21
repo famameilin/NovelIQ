@@ -50,19 +50,23 @@ def _save_interaction(
     创建时间: 2026-03-19
     创建者: TraeAI
     任务: 添加模型交互记录保存
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 使用 client 的 _session 属性保存交互记录
+    修改内容: 优先使用 client._session，如果没有则创建新 session
     """
     if not run_id:
         return
 
     try:
-        from src.storage.db import get_session_factory
         from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
 
-        Session = get_session_factory()
-        session = Session()
-        try:
-            repo = ModelInteractionRepository(session)
-            prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+
+        # 优先使用 client 的 _session
+        if hasattr(client, '_session') and client._session is not None:
+            repo = ModelInteractionRepository(client._session)
             repo.save_interaction(
                 run_id=run_id,
                 chunk_id=chunk_id,
@@ -80,8 +84,32 @@ def _save_interaction(
                 status="success",
                 duration_ms=duration_ms,
             )
-        finally:
-            session.close()
+        else:
+            # 没有 _session，创建新 session
+            from src.storage.db import get_session_factory
+            Session = get_session_factory()
+            session = Session()
+            try:
+                repo = ModelInteractionRepository(session)
+                repo.save_interaction(
+                    run_id=run_id,
+                    chunk_id=chunk_id,
+                    interaction_type="annotate",
+                    phase=phase,
+                    attempt_number=attempt_number,
+                    model_name=client._config.model if hasattr(client._config, 'model') else None,
+                    model_provider="cloud" if is_cloud else "local",
+                    prompt=prompt_text,
+                    response=content_clean,
+                    thinking=thinking_content,
+                    response_chars=len(content_clean),
+                    thinking_chars=len(thinking_content) if thinking_content else 0,
+                    has_thinking=bool(thinking_content and thinking_content.strip()),
+                    status="success",
+                    duration_ms=duration_ms,
+                )
+            finally:
+                session.close()
     except Exception as e:
         logger.warning(f"Failed to save model interaction: {e}")
 

@@ -249,3 +249,57 @@ def is_annotate_complete(session: Session, run_id: str) -> bool:
         )
     ).scalar() or 0
     return chunks_count > 0 and annotations_count >= chunks_count
+
+
+def get_annotation_by_chunk(session: Session, run_id: str, chunk_id: int) -> dict[str, Any] | None:
+    """
+    获取指定 chunk 的标注结果
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 修复缺失的 get_annotation_by_chunk 方法
+    说明: 用于增量消歧时提取新出现的人名
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        chunk_id: 分块ID
+
+    Returns:
+        标注结果字典，包含 characters 等字段
+    """
+    stmt = (
+        select(ChunkAnnotation)
+        .where(ChunkAnnotation.run_id == run_id)
+        .where(ChunkAnnotation.chunk_id == chunk_id)
+    )
+    result = session.execute(stmt).scalar_one_or_none()
+
+    if result is None:
+        return None
+
+    annotation_dict: dict[str, Any] = {
+        "chunk_id": result.chunk_id,
+        "event_type": result.event_type,
+        "cliffhanger": result.cliffhanger,
+        "pivot_moment": result.pivot_moment,
+        "emotional_valence": result.emotional_valence,
+        "characters": [],
+    }
+
+    char_stmt = (
+        select(ChunkCharacter)
+        .where(ChunkCharacter.run_id == run_id)
+        .where(ChunkCharacter.chunk_id == chunk_id)
+    )
+    characters = session.execute(char_stmt).scalars().all()
+
+    for char in characters:
+        annotation_dict["characters"].append({
+            "name": char.name,
+            "role_function": char.role_function,
+            "action": char.action,
+            "emotion_score": char.emotion_score,
+        })
+
+    return annotation_dict

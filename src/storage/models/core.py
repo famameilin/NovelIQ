@@ -65,6 +65,11 @@ class DisambigCheckpoint(Base):
     创建者: TraeAI
     任务: fix-disambiguation-three-phase
     说明: 保存增量消歧过程中的 alias_map 检查点，支持断点续传
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: fix-entity-relations-not-saved
+    修改内容: 添加 entity_relations 字段用于保存关系数据
     """
 
     __tablename__ = "disambig_checkpoint"
@@ -72,6 +77,7 @@ class DisambigCheckpoint(Base):
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     alias_map: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+    entity_relations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<DisambigCheckpoint(run_id={self.run_id}, updated_at={self.updated_at})>"

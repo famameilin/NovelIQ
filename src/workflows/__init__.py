@@ -7,7 +7,6 @@
 
 from src.workflows.aggregate import run_aggregate
 from src.workflows.annotate import run_annotate
-from src.workflows.annotate_helpers.disambiguation import build_anonymous_contexts
 from src.workflows.annotate_helpers.sentence import (
     build_context_sentences,
     build_prev_summary,
@@ -32,7 +31,6 @@ from src.workflows.topic import run_topic_model
 
 __all__ = [
     "EVENT_TYPE_SCORES",
-    "build_anonymous_contexts",
     "build_cloud_payload",
     "build_context_sentences",
     "build_prev_summary",

@@ -102,6 +102,11 @@ class BaseModelClient:
     模型客户端基类
 
     提供公共的配置管理、客户端初始化、API调用等功能。
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 支持传入 session 用于保存模型交互记录
+    修改内容: 添加 _session 属性，用于在同一个 session 中保存模型交互记录
     """
 
     def __init__(
@@ -112,6 +117,7 @@ class BaseModelClient:
         analysis_logger: AnalysisLogger | None = None,
         token_usage_callback: Optional[TokenUsageCallback] = None,
         novel_id: Optional[str] = None,
+        session: Optional[Any] = None,
     ) -> None:
         self._task_type = task_type
         loaded_config = config or load_task_config(task_type)
@@ -128,6 +134,7 @@ class BaseModelClient:
         self._analysis_logger = analysis_logger
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
+        self._session = session  # 用于保存模型交互记录的 session
         logger.debug(
             "model client initialized: task_type={} base_url={} model={} timeout={}s",
             task_type,
@@ -136,8 +143,15 @@ class BaseModelClient:
             self._config.timeout_s,
         )
 
-    def _is_cloud_api(self) -> bool:
-        """判断是否为云端API（云端API不支持top_k参数）"""
+    def is_cloud_api(self) -> bool:
+        """
+        判断是否为云端API（云端API不支持top_k参数）
+
+        创建时间: 2026-03-20
+        创建者: TraeAI
+        任务: 修复 incremental_disambiguation 被错误标记为 local 的问题
+        修改内容: 将 _is_cloud_api 改为公共方法 is_cloud_api
+        """
         base_url = self._config.base_url or ""
         # 空字符串或未配置视为本地API
         if not base_url:
@@ -150,46 +164,48 @@ class BaseModelClient:
             )
         return is_cloud
 
+    def _is_cloud_api(self) -> bool:
+        """向后兼容的内部方法，委托给 is_cloud_api"""
+        return self.is_cloud_api()
+
     def _build_extra_body(self, enable_thinking: bool) -> dict[str, Any]:
         """
-        构建extra_body参数，仅包含本地模型需要的参数
+        构建 extra_body 参数，统一处理所有参数（包括 thinking）
 
-        修改时间: 2026-03-16
+        修改时间: 2026-03-21
         修改者: TraeAI
-        任务: 修复thinking参数传递方式
-        修改内容: 将thinking参数移到顶级参数，extra_body仅包含本地模型参数
+        任务: 重写 _build_extra_body，依据 provider 判断该添加什么参数
+        修改内容:
+        1. 所有参数统一通过 extra_body 传递
+        2. 删除 _get_thinking_params 方法
+        3. 未识别的 provider 使用 reasoning_effort 参数
         """
         extra_body: dict[str, Any] = {}
-        if not self._is_cloud_api():
+        provider = (self._config.provider or "").lower()
+
+        if provider in ("llamacpp", "ollama"):
             extra_body["top_k"] = self._config.top_k
+
+        if provider == "llamacpp":
             extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
-        return extra_body
-
-    def _get_thinking_params(self, enable_thinking: bool) -> dict[str, Any]:
-        """
-        获取thinking相关参数（顶级参数）
-
-        创建时间: 2026-03-16
-        创建者: TraeAI
-        任务: 修复thinking参数传递方式
-        说明: 根据LiteLLM文档，thinking应作为顶级参数传递，而非放在extra_body中
-
-        返回: 包含thinking或reasoning_effort参数的字典
-        """
-        if not enable_thinking:
-            return {}
-
-        model_name = (self._config.model or "").lower()
-
-        if "claude" in model_name or "anthropic" in model_name:
-            budget = self._config.thinking_budget_tokens
-            if budget:
-                return {"thinking": {"type": "enabled", "budget_tokens": budget}}
-            return {"thinking": {"type": "enabled"}}
-        elif "deepseek" in model_name:
-            return {"thinking": {"type": "enabled"}}
+        elif provider == "ollama":
+            extra_body["think"] = enable_thinking
+        elif provider == "deepseek":
+            extra_body["enable_thinking"] = enable_thinking
+        elif provider == "claude":
+            if enable_thinking:
+                budget = self._config.thinking_budget_tokens
+                if budget:
+                    extra_body["thinking"] = {"type": "enabled", "budget_tokens": budget}
+                else:
+                    extra_body["thinking"] = {"type": "enabled"}
+            else:
+                extra_body["thinking"] = {"type": "disabled"}
         else:
-            return {"reasoning_effort": "medium"}
+            if enable_thinking:
+                extra_body["reasoning_effort"] = "medium"
+
+        return extra_body
 
     def _handle_api_timeout(self, error: Timeout) -> None:
         """处理API超时错误"""
@@ -297,12 +313,16 @@ class BaseModelClient:
         创建者: TraeAI
         任务: code-quality-refactor - 提取API调用基类
         说明: 统一的非流式API调用方法
+
+        修改时间: 2026-03-21
+        修改者: TraeAI
+        任务: 统一参数处理
+        修改内容: 移除 _get_thinking_params 调用，所有参数通过 _build_extra_body 处理
         """
         if not self._config.model:
             raise ValueError("model is required")
 
         model_name = get_model_with_provider(self._config.model, self._config)
-        thinking_params = self._get_thinking_params(enable_thinking)
         extra_body = self._build_extra_body(enable_thinking)
 
         if self._client is None:
@@ -319,8 +339,6 @@ class BaseModelClient:
 
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
-
-        request_params.update(thinking_params)
 
         return self._client.chat.completions.create(**request_params)
 

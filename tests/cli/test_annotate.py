@@ -36,6 +36,7 @@ from src.chunking.chunker import Chunk
 from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.schema import ChunkAnnotation, CharacterSnapshot, RelationChangeSnapshot, DialogueSnapshot
 from src.models.local.annotation import TwoPhaseAnnotationResult
+from src.models.local.disambiguation import ExtendedDisambigResult
 
 
 def create_mock_annotation() -> TwoPhaseAnnotationResult:
@@ -98,7 +99,13 @@ class TestAnnotate:
     def test_annotate_basic(self, mock_client_class: MagicMock) -> None:
         mock_client = MagicMock(spec=UnifiedModelClient)
         mock_client.annotate_chunk.return_value = create_mock_annotation()
-        mock_client.disambiguate_characters.return_value = {}
+        mock_client.disambiguate_characters.return_value = ExtendedDisambigResult(
+            alias_map={},
+            entity_types={},
+            entity_relations=[]
+        )
+        # 设置 _annotation_client 嵌套属性，用于 session 设置
+        mock_client._annotation_client = MagicMock()
         mock_client_class.return_value = mock_client
 
         self._create_chunks(3)
@@ -137,7 +144,13 @@ class TestAnnotate:
     def test_annotate_resume(self, mock_client_class: MagicMock) -> None:
         mock_client = MagicMock(spec=UnifiedModelClient)
         mock_client.annotate_chunk.return_value = create_mock_annotation()
-        mock_client.disambiguate_characters.return_value = {}
+        mock_client.disambiguate_characters.return_value = ExtendedDisambigResult(
+            alias_map={},
+            entity_types={},
+            entity_relations=[]
+        )
+        # 设置 _annotation_client 嵌套属性，用于 session 设置
+        mock_client._annotation_client = MagicMock()
         mock_client_class.return_value = mock_client
 
         self._create_chunks(5)
@@ -185,7 +198,13 @@ class TestAnnotate:
     def test_annotate_disambiguation(self, mock_client_class: MagicMock) -> None:
         mock_client = MagicMock(spec=UnifiedModelClient)
         mock_client.annotate_chunk.return_value = create_mock_annotation()
-        mock_client.disambiguate_characters.return_value = {"张三丰": "张三"}
+        mock_client.disambiguate_characters.return_value = ExtendedDisambigResult(
+            alias_map={"张三丰": "张三"},
+            entity_types={},
+            entity_relations=[]
+        )
+        # 设置 _annotation_client 嵌套属性，用于 session 设置
+        mock_client._annotation_client = MagicMock()
         mock_client_class.return_value = mock_client
 
         self._create_chunks(2)

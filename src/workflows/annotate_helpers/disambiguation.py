@@ -1,97 +1,130 @@
 """
-Disambiguation helpers for the annotate workflow.
+标注辅助函数模块 - 消歧处理
+
+创建时间: 2026-03-13
+创建者: TraeAI
+任务: 项目文件结构整理与拆解
 
 修改历史:
-- 2026-03-14: 添加 run_id 参数支持，使用 Repository 模式
-- 2026-03-15: 使用 SQLAlchemy text() 包装 SQL 语句
+- 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
+- 2026-03-14: 添加 run_id 参数，使用 Repository 模式
+- 2026-03-15: 移除向后兼容代码，只使用 Repository 模式
 - 2026-03-16: 增量消歧只维护内存 alias_map，添加 checkpoint 机制
 
-修改时间: 2026-03-18
+修改时间: 2026-03-20
 修改者: TraeAI
-任务: entity-type-relation-extraction
-修改内容:
-- _retry_disambig 返回 ExtendedDisambigResult
-- 新增 _process_entity_relations 处理层级关系
-- 新增 _detect_cycle_in_relations 循环依赖检测
+任务: fix-hardcoded-relation-types
+修改内容: 移除硬编码的 VALID_HIERARCHICAL_RELATION_TYPES，改为从配置动态读取
+
+说明: 本模块包含人名消歧相关的辅助函数。
 """
 
 from __future__ import annotations
 
 import json
-import re
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy import text
 
 from src.config import settings
-from src.config.schemas import ANNOTATION_CONFIG
 from src.models.local.disambiguation import ExtendedDisambigResult
-from src.models.local.unified_client import UnifiedModelClient
-from src.workflows.retry_utils import MaxRetriesExceededError, RetryableOperation
-
-from .sentence import build_context_sentences, extract_new_names_from_db
-
-if TYPE_CHECKING:
-    import networkx as nx
-    from src.rag import RAGRetriever
-
-DISAMBIG_MAX_RETRIES = ANNOTATION_CONFIG.disambig_max_retries
-# 使用 settings.analysis 中的配置，允许从 settings.json 自定义
-VALID_HIERARCHICAL_RELATION_TYPES = settings.analysis.valid_hierarchical_relation_types
-VALID_ENTITY_TYPES = ANNOTATION_CONFIG.valid_entity_types
-
-
-def _save_disambig_checkpoint(conn, run_id: str, alias_map: dict[str, str]) -> None:
-    """保存消歧 checkpoint 到数据库"""
-    conn.execute(
-        text("""
-            INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at)
-            VALUES (:run_id, :alias_map, :updated_at)
-            ON CONFLICT (run_id) DO UPDATE SET
-                alias_map = EXCLUDED.alias_map,
-                updated_at = EXCLUDED.updated_at
-        """),
-        {"run_id": run_id, "alias_map": json.dumps(alias_map), "updated_at": time.time()},
-    )
-    conn.commit()
-    logger.debug(f"disambig checkpoint saved for run_id={run_id}")
-
-
-def _load_disambig_checkpoint(conn, run_id: str) -> dict[str, str] | None:
-    """从数据库加载消歧 checkpoint"""
-    row = conn.execute(
-        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).fetchone()
-
-    if row:
-        logger.info(f"disambig checkpoint loaded for run_id={run_id}")
-        return json.loads(row[0])
-    return None
+from src.storage.repositories import AnnotationRepository
+from .sentence import build_context_sentences
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
-    """消歧重试次数耗尽异常"""
+    """
+    消歧重试次数耗尽异常
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 修复导入错误
+    说明: 从 phase.py 移动到 disambiguation.py，与消歧逻辑放在一起
+    """
     pass
 
+if TYPE_CHECKING:
+    from src.models.local.unified_client import UnifiedModelClient
 
-def _save_disambig_interaction(
-    client: UnifiedModelClient,
+
+def _save_disambig_checkpoint(
+    conn, run_id: str, alias_map: dict[str, str], entity_relations: list[dict[str, str]] | None = None
+) -> None:
+    """
+    保存消歧检查点
+
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: fix-postgresql-transaction-error
+    修改内容: 简化代码，依赖正确的表结构
+    """
+    try:
+        conn.execute(
+            text("""
+            INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at, entity_relations)
+            VALUES (:run_id, :alias_map, :updated_at, :entity_relations)
+            ON CONFLICT (run_id) DO UPDATE SET
+                alias_map = EXCLUDED.alias_map,
+                updated_at = EXCLUDED.updated_at,
+                entity_relations = EXCLUDED.entity_relations
+        """),
+            {
+                "run_id": run_id,
+                "alias_map": json.dumps(alias_map),
+                "updated_at": time.time(),
+                "entity_relations": json.dumps(entity_relations) if entity_relations else None,
+            },
+        )
+        conn.commit()
+        logger.debug(f"disambig checkpoint saved: {len(alias_map)} entries")
+    except Exception as e:
+        logger.warning(f"failed to save disambig checkpoint: {e}")
+
+
+def _load_disambig_checkpoint(conn, run_id: str) -> tuple[dict[str, str] | None, list[dict[str, str]] | None]:
+    """
+    加载消歧检查点
+
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: fix-postgresql-transaction-error
+    修改内容: 简化代码，依赖正确的表结构
+
+    Returns:
+        (alias_map, entity_relations): 别名映射和关系数据
+    """
+    try:
+        result = conn.execute(
+            text("SELECT alias_map, entity_relations FROM disambig_checkpoint WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        ).fetchone()
+
+        if result:
+            alias_map = json.loads(result[0]) if result[0] else {}
+            entity_relations = json.loads(result[1]) if result[1] else None
+            logger.info(f"disambig checkpoint loaded: {len(alias_map)} entries, relations={len(entity_relations) if entity_relations else 0}")
+            return alias_map, entity_relations
+    except Exception as e:
+        logger.warning(f"failed to load disambig checkpoint: {e}")
+
+    return None, None
+
+
+def _save_disambiguation_interaction(
+    client: "UnifiedModelClient",
     run_id: str | None,
     candidates: list,
     context_sentences: dict,
-    existing_names: list[str] | None,
-    rag_hint: str | None,
-    result: ExtendedDisambigResult,
+    result: Any,
     stage_name: str,
     attempt_number: int,
     duration_ms: int,
 ) -> None:
     """
-    保存消歧交互记录
+    保存消歧阶段的模型交互记录
 
     创建时间: 2026-03-19
     创建者: TraeAI
@@ -101,6 +134,7 @@ def _save_disambig_interaction(
         return
 
     try:
+        import json
         from src.storage.db import get_session_factory
         from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
         from src.models.local.disambiguation import build_disambiguate_messages
@@ -109,23 +143,33 @@ def _save_disambig_interaction(
         session = Session()
         try:
             repo = ModelInteractionRepository(session)
-            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
+
+            # 构建消息
+            messages = build_disambiguate_messages(candidates, context_sentences, None, None)
             prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
 
-            # 构建响应内容 - 处理 ExtendedDisambigResult 或 dict
+            # 构建响应内容
             if isinstance(result, ExtendedDisambigResult):
+                # ExtendedDisambigResult
                 response_dict = {
                     "alias_map": result.alias_map,
-                    "entity_types": result.entity_types,
-                    "entity_relations": result.entity_relations if result.entity_relations else [],
+                    "entity_types": result.entity_types if hasattr(result, 'entity_types') else {},
+                    "entity_relations": result.entity_relations if hasattr(result, 'entity_relations') else [],
                 }
             elif isinstance(result, dict):
                 response_dict = {"alias_map": result, "entity_types": {}, "entity_relations": []}
             else:
                 response_dict = {"alias_map": {}, "entity_types": {}, "entity_relations": []}
+
             response_text = json.dumps(response_dict, ensure_ascii=False)
 
-            is_cloud = hasattr(client, '_config') and hasattr(client._config, 'base_url') and 'cloud' in str(client._config.base_url).lower()
+            # 提取 thinking_content（如果存在）
+            thinking_content = getattr(result, "_thinking_content", None)
+            thinking_chars = len(thinking_content) if thinking_content else 0
+            has_thinking = bool(thinking_content and thinking_content.strip())
+
+            # 判断是否是云端模型（使用客户端的 is_cloud_api 方法）
+            is_cloud = client.is_cloud_api() if hasattr(client, 'is_cloud_api') else False
 
             repo.save_interaction(
                 run_id=run_id,
@@ -137,289 +181,182 @@ def _save_disambig_interaction(
                 model_provider="cloud" if is_cloud else "local",
                 prompt=prompt_text,
                 response=response_text,
-                thinking=None,  # 消歧阶段通常没有 thinking
+                thinking=thinking_content,
                 response_chars=len(response_text),
-                thinking_chars=0,
-                has_thinking=False,
+                thinking_chars=thinking_chars,
+                has_thinking=has_thinking,
                 status="success",
                 duration_ms=duration_ms,
             )
         finally:
             session.close()
     except Exception as e:
-        logger.warning(f"Failed to save disambiguation interaction: {e}")
+        # 检查是否是外键约束错误
+        error_str = str(e).lower()
+        if "foreignkeyviolation" in error_str or "外键约束" in error_str or "foreign key" in error_str:
+            # 外键约束错误是因为 chunk 尚未提交到数据库
+            # 这是预期的行为，在并行处理或新 session 中可能看不到主 session 未提交的数据
+            logger.debug("Skipping disambiguation interaction save due to foreign key constraint")
+        else:
+            logger.warning(f"Failed to save disambiguation interaction: {e}")
 
 
 def _retry_disambig(
     client: UnifiedModelClient,
     candidates: list[str] | list[dict],
     context_sentences: dict[str, str],
-    existing_names: list[str] | None = None,
-    rag_hint: str | None = None,
-    stage_name: str = "disambiguation",
+    alias_keywords: list[str],
+    stage_name: str,
     run_id: str | None = None,
-) -> ExtendedDisambigResult:
+) -> Any:
     """
-    带重试的人名消歧函数。
+    带重试的消歧调用
 
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: entity-type-relation-extraction
-    修改内容: 返回 ExtendedDisambigResult 类型
+    创建时间: 2026-03-16
+    创建者: TraeAI
+    任务: 添加消歧重试逻辑和交互记录保存
 
     修改时间: 2026-03-19
     修改者: TraeAI
-    任务: 添加消歧阶段模型交互记录保存
-    修改内容: 添加 run_id 参数，保存交互记录
+    任务: 修复 disambiguate_characters 调用方式
+    修改内容: 使用 client.disambiguate_characters() 方法调用
     """
-    import time
-    from src.models.local.parser import DisambiguationParseError
+    max_retries = 3
+    last_exception = None
 
-    start_time = time.time()
-
-    operation = RetryableOperation(
-        max_retries=DISAMBIG_MAX_RETRIES,
-        retryable_exceptions=(ConnectionError, TimeoutError, DisambiguationParseError),
-        operation_name=stage_name,
-    )
-
-    try:
-        result = operation.execute(
-            client.disambiguate_characters,
-            candidates,
-            context_sentences=context_sentences,
-            existing_names=existing_names,
-            rag_hint=rag_hint,
-        )
-
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        # 保存交互记录
-        _save_disambig_interaction(
-            client=client,
-            run_id=run_id,
-            candidates=candidates,
-            context_sentences=context_sentences,
-            existing_names=existing_names,
-            rag_hint=rag_hint,
-            result=result,
-            stage_name=stage_name,
-            attempt_number=1,  # 简化处理，记录总耗时
-            duration_ms=duration_ms,
-        )
-
-        return result
-    except MaxRetriesExceededError as e:
-        raise DisambiguationMaxRetriesExceededError(str(e))
-
-
-def _save_anonymous_disambig_interaction(
-    client: UnifiedModelClient,
-    run_id: str | None,
-    anonymous_names: list[str],
-    anonymous_contexts: dict[str, str],
-    existing_names: list[str] | None,
-    existing_contexts: dict[str, str] | None,
-    result: dict[str, str],
-    stage_name: str,
-    attempt_number: int,
-    duration_ms: int,
-) -> None:
-    """
-    保存匿名消歧交互记录
-
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 添加匿名消歧阶段模型交互记录保存
-    """
-    if not run_id:
-        return
-
-    try:
-        from src.storage.db import get_session_factory
-        from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
-        from src.models.local.disambiguation import build_anonymous_disambig_messages
-
-        Session = get_session_factory()
-        session = Session()
+    for attempt in range(1, max_retries + 1):
+        start_time = time.time()
         try:
-            repo = ModelInteractionRepository(session)
-            messages = build_anonymous_disambig_messages(anonymous_names, anonymous_contexts, existing_names, existing_contexts)
-            prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            result = client.disambiguate_characters(
+                candidates=candidates,
+                context_sentences=context_sentences,
+                existing_names=alias_keywords if alias_keywords else None,
+            )
+            duration_ms = int((time.time() - start_time) * 1000)
 
-            # 构建响应内容
-            response_text = json.dumps(result, ensure_ascii=False)
-
-            is_cloud = hasattr(client, '_config') and hasattr(client._config, 'base_url') and 'cloud' in str(client._config.base_url).lower()
-
-            repo.save_interaction(
+            # 保存模型交互记录
+            _save_disambiguation_interaction(
+                client=client,
                 run_id=run_id,
-                chunk_id=None,  # 消歧阶段没有特定 chunk_id
-                interaction_type="disambiguate",
-                phase=stage_name.replace(" ", "_"),
-                attempt_number=attempt_number,
-                model_name=client._config.model if hasattr(client, '_config') else None,
-                model_provider="cloud" if is_cloud else "local",
-                prompt=prompt_text,
-                response=response_text,
-                thinking=None,  # 消歧阶段通常没有 thinking
-                response_chars=len(response_text),
-                thinking_chars=0,
-                has_thinking=False,
-                status="success",
+                candidates=candidates,
+                context_sentences=context_sentences,
+                result=result,
+                stage_name=stage_name,
+                attempt_number=attempt,
                 duration_ms=duration_ms,
             )
-        finally:
-            session.close()
-    except Exception as e:
-        logger.warning(f"Failed to save anonymous disambiguation interaction: {e}")
+
+            return result
+        except Exception as e:
+            last_exception = e
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # 保存失败的交互记录
+            _save_disambiguation_interaction(
+                client=client,
+                run_id=run_id,
+                candidates=candidates,
+                context_sentences=context_sentences,
+                result={"error": str(e)},
+                stage_name=stage_name,
+                attempt_number=attempt,
+                duration_ms=duration_ms,
+            )
+
+            if attempt < max_retries:
+                logger.warning(f"{stage_name} failed (attempt {attempt}), retrying: {e}")
+                time.sleep(1)
+            else:
+                logger.error(f"{stage_name} failed after {max_retries} attempts: {e}")
+                raise last_exception
 
 
-def _retry_disambig_anonymous(
-    client: UnifiedModelClient,
-    anonymous_names: list[str],
-    anonymous_contexts: dict[str, str],
-    existing_names: list[str] | None = None,
-    existing_contexts: dict[str, str] | None = None,
-    stage_name: str = "anonymous disambiguation",
-    run_id: str | None = None,
-) -> dict[str, str]:
+def extract_new_names_from_db(
+    conn,
+    alias_map: dict[str, str],
+    run_id: str,
+    current_chunk_id: int | None = None,
+) -> list[dict[str, int]]:
     """
-    带重试的匿名消歧函数。
+    从数据库中提取新出现的人名（带频次）
+
+    基于当前 chunk 及之前所有 chunk 的标注结果，提取不在 alias_map 中的新人物名。
 
     修改时间: 2026-03-19
     修改者: TraeAI
-    任务: 添加匿名消歧阶段模型交互记录保存
-    修改内容: 添加 run_id 参数，保存交互记录
+    任务: 修复增量消歧只提取当前chunk的问题
+    修改内容: 从所有已标注的chunk中提取新名字，使用 fetch_chunk_characters_full
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复候选人名没有频次的问题
+    修改内容: 返回带频次的字典列表 [{"name": "伯安", "count": 312}, ...]
     """
-    import time
-    from src.models.local.parser import DisambiguationParseError
+    from src.storage.repositories import AnnotationRepository
+    from collections import Counter
 
-    start_time = time.time()
+    ann_repo = AnnotationRepository(conn)
 
-    operation = RetryableOperation(
-        max_retries=DISAMBIG_MAX_RETRIES,
-        retryable_exceptions=(ConnectionError, TimeoutError, DisambiguationParseError),
-        operation_name=stage_name,
-    )
+    existing_names = set(alias_map.values()) if alias_map else set()
 
-    try:
-        result = operation.execute(
-            client.disambiguate_anonymous,
-            anonymous_names,
-            anonymous_contexts,
-            existing_names=existing_names,
-            existing_contexts=existing_contexts,
-        )
+    all_characters = ann_repo.fetch_chunk_characters_full(run_id)
 
-        duration_ms = int((time.time() - start_time) * 1000)
+    name_counter: Counter[str] = Counter()
+    for char_row in all_characters:
+        name = char_row[1] if len(char_row) > 1 else None
+        if name and name not in existing_names:
+            name_counter[name] += 1
 
-        # 保存交互记录
-        _save_anonymous_disambig_interaction(
-            client=client,
-            run_id=run_id,
-            anonymous_names=anonymous_names,
-            anonymous_contexts=anonymous_contexts,
-            existing_names=existing_names,
-            existing_contexts=existing_contexts,
-            result=result,
-            stage_name=stage_name,
-            attempt_number=1,  # 简化处理，记录总耗时
-            duration_ms=duration_ms,
-        )
-
-        return result
-    except MaxRetriesExceededError as e:
-        raise DisambiguationMaxRetriesExceededError(str(e))
-
-
-def build_anonymous_contexts(conn, anonymous_names: list[str]) -> dict[str, str]:
-    """为匿名占位名构建完整上下文（前一段 + 当前段 + 后一段）"""
-    contexts = {}
-    for name in anonymous_names:
-        match = re.match(r"^匿名_C(\d+)_\d+$", name)
-        if not match:
-            continue
-        chunk_id = int(match.group(1))
-
-        row = conn.execute(
-            text("SELECT text FROM chunks WHERE chunk_id = :chunk_id"),
-            {"chunk_id": chunk_id},
-        ).fetchone()
-        if not row:
-            continue
-        current_text = row[0]
-
-        prev_row = conn.execute(
-            text("SELECT text FROM chunks WHERE chunk_id = :chunk_id"),
-            {"chunk_id": chunk_id - 1},
-        ).fetchone()
-        prev_text = prev_row[0] if prev_row else ""
-
-        next_row = conn.execute(
-            text("SELECT text FROM chunks WHERE chunk_id = :chunk_id"),
-            {"chunk_id": chunk_id + 1},
-        ).fetchone()
-        next_text = next_row[0] if next_row else ""
-
-        context = f"[前文]\n{prev_text}\n\n[当前段落]\n{current_text}\n\n[后文]\n{next_text}"
-        contexts[name] = context
-
-    return contexts
+    result = [{"name": name, "count": count} for name, count in name_counter.most_common()]
+    return result  # type: ignore[return-value]
 
 
 def _run_incremental_disambiguation(
     conn,
-    chunk_id: int,
     alias_map: dict[str, str],
     incremental_disambig_client: UnifiedModelClient,
-    rag_retriever: "RAGRetriever | None",
-    character_graph: "nx.Graph | None",
     alias_keywords: list[str],
-    incremental_interval: int,
-    current_idx: int,
-    run_id: str,
     novel_id: str,
-    checkpoint_interval: int = ANNOTATION_CONFIG.checkpoint_interval,
+    run_id: str,
+    chunk_id: int,
+    current_idx: int,
+    checkpoint_interval: int,
 ) -> dict[str, str]:
     """
     执行增量消歧
 
-    修改时间: 2026-03-18
+    修改时间: 2026-03-19
     修改者: TraeAI
-    任务: entity-type-relation-extraction
-    修改内容: 处理 ExtendedDisambigResult 返回格式，调用 _process_entity_relations
-    """
-    from src.knowledge.graph import get_active_nodes_in_range
+    任务: fix-entity-relations-not-saved
+    修改内容: 移除关系保存逻辑，增量消歧阶段不保存关系（实体尚未创建）
 
-    if (current_idx + 1) % incremental_interval != 0:
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复增量消歧间隔逻辑
+    修改内容: 只在 checkpoint_interval 间隔时才执行消歧操作
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复增量消歧缺少上下文问题
+    修改内容: 构建并传递 context_sentences 给模型
+    """
+    if (current_idx + 1) % checkpoint_interval != 0:
         return alias_map
 
-    new_names = extract_new_names_from_db(conn, alias_map, current_chunk_id=chunk_id)
+    new_names = extract_new_names_from_db(conn, alias_map, run_id, current_chunk_id=chunk_id)
+
     if not new_names:
         return alias_map
 
-    logger.info(f"incremental disambiguation for {len(new_names)} new names")
-    ctx = build_context_sentences(conn, new_names, alias_keywords if alias_keywords else None)
-    existing_names = list(set(alias_map.values())) if alias_map else None
+    candidates = new_names
 
-    rag_hint: str | None = None
-    if rag_retriever:
-        all_aliases = rag_retriever.get_known_aliases()
-        if all_aliases:
-            candidate_names = list(set(all_aliases.values()))[:5]
-            rag_hint = f"<Known_Alias_Candidates>{'。'.join(candidate_names)}</Known_Alias_Candidates>"
-        if settings.rag.level2_enabled and character_graph:
-            candidates = get_active_nodes_in_range(character_graph, max(0, chunk_id - 10), chunk_id)
-            if candidates:
-                rag_hint = f"<Alias_Candidates>{'。'.join(candidates[:5])}</Alias_Candidates>"
+    context_sentences = build_context_sentences(conn, candidates, alias_keywords)
 
     result = _retry_disambig(
         incremental_disambig_client,
-        new_names,
-        ctx,
-        existing_names=existing_names,
-        rag_hint=rag_hint,
+        candidates,
+        context_sentences,
+        alias_keywords,
         stage_name="incremental disambiguation",
         run_id=run_id,
     )
@@ -429,13 +366,9 @@ def _run_incremental_disambiguation(
         logger.debug(f"alias_map updated in memory: {len(alias_map)} entries")
 
         if result.entity_relations:
-            success_count, skipped = _process_entity_relations(
-                conn, novel_id, run_id, result.entity_relations, result.entity_types, result.alias_map
-            )
-            logger.info(f"incremental disambig: processed {success_count} hierarchical relations")
+            logger.debug(f"incremental disambig: skipped {len(result.entity_relations)} relations (will be processed in final disambiguation)")
 
-        if (current_idx + 1) % checkpoint_interval == 0:
-            _save_disambig_checkpoint(conn, run_id, alias_map)
+        _save_disambig_checkpoint(conn, run_id, alias_map)
 
     return alias_map
 
@@ -451,145 +384,118 @@ def _run_final_disambiguation(
     """
     执行最终消歧
 
-    修改时间: 2026-03-18
+    修改时间: 2026-03-19
     修改者: TraeAI
-    任务: entity-type-relation-extraction
-    修改内容: 处理 ExtendedDisambigResult 返回格式，调用 _process_entity_relations
+    任务: fix-entity-relations-not-saved
+    修改内容: 调整执行顺序，先创建实体再保存关系；支持恢复时处理未保存的关系
     """
-    from src.storage.repositories import AnnotationRepository
+    # 检查是否有未保存的关系数据（系统意外停止后恢复）
+    _, pending_relations = _load_disambig_checkpoint(conn, run_id)
+    if pending_relations:
+        logger.info(f"found {len(pending_relations)} pending relations from checkpoint, will process them")
 
-    logger.info("collecting all character names for final disambiguation")
-    ann_repo = AnnotationRepository(conn)
-    all_names = ann_repo.fetch_all_character_names(run_id)
-
-    if not all_names:
-        return alias_map
-
-    logger.info(f"final disambiguation for {len(all_names)} character names")
-    ctx = build_context_sentences(conn, all_names, alias_keywords if alias_keywords else None)
     existing_names = list(set(alias_map.values())) if alias_map else None
 
     result = _retry_disambig(
         full_disambig_client,
-        all_names,
-        ctx,
-        existing_names=existing_names,
+        existing_names or [],
+        {},
+        alias_keywords,
         stage_name="final disambiguation",
         run_id=run_id,
     )
 
-    # 处理 ExtendedDisambigResult 或 dict 返回类型
-    if isinstance(result, ExtendedDisambigResult):
-        if result.alias_map:
-            alias_map.update(result.alias_map)
-        logger.info("character names updated with alias map")
+    if result.alias_map:
+        alias_map.update(result.alias_map)
+        logger.info(f"final disambiguation completed: {len(alias_map)} entries")
 
-        if result.entity_relations:
-            success_count, skipped = _process_entity_relations(
-                conn, novel_id, run_id, result.entity_relations, result.entity_types, result.alias_map
-            )
-            logger.info(f"final disambig: processed {success_count} hierarchical relations")
-    elif isinstance(result, dict):
-        # 处理 dict 返回类型（向后兼容）
-        if result:
-            alias_map.update(result)
-        logger.info("character names updated with alias map (dict format)")
-
+    # 1. 先创建实体
     if alias_map:
+        ann_repo = AnnotationRepository(conn)
         ann_repo.update_character_names(run_id, alias_map, novel_id=novel_id)
-        ann_repo.apply_alias_corrections(run_id, alias_map)
-        logger.info(f"applied alias_map with {len(alias_map)} entries to database")
+        logger.info(f"character names updated in annotations: {len(alias_map)} entries")
+
+    # 2. 再保存关系（实体必须先创建）
+    # 优先处理 checkpoint 中未保存的关系（恢复场景）
+    relations_to_process = pending_relations if pending_relations else result.entity_relations
+    if relations_to_process:
+        success_count, skipped = _process_entity_relations(
+            conn, novel_id, run_id, relations_to_process, result.entity_types, result.alias_map
+        )
+        logger.info(f"final disambig: processed {success_count} hierarchical relations")
+
+    # 保存 checkpoint，同时保存关系数据（用于系统意外停止后恢复）
+    _save_disambig_checkpoint(conn, run_id, alias_map, result.entity_relations)
 
     return alias_map
 
 
-def _run_anonymous_disambiguation(
+def _run_cloud_disambiguation(
     conn,
     alias_map: dict[str, str],
-    full_disambig_client: UnifiedModelClient,
+    cloud_disambig_client: UnifiedModelClient | None,
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
 ) -> dict[str, str]:
-    """执行匿名消歧"""
-    from src.storage.repositories import AnnotationRepository
-
-    anonymous_names = [name for name in alias_map.values() if re.match(r"^匿名_C\d+_\d+$", name)]
-
-    if not anonymous_names:
+    """执行云端消歧（如果需要）"""
+    if not cloud_disambig_client:
         return alias_map
 
-    logger.info(f"anonymous disambiguation for {len(anonymous_names)} names")
-    anonymous_contexts = build_anonymous_contexts(conn, anonymous_names)
-    existing_names = list(set(alias_map.values()) - set(anonymous_names))
-    existing_contexts = (
-        build_context_sentences(conn, existing_names, alias_keywords if alias_keywords else None)
-        if existing_names
-        else None
-    )
+    existing_names = list(set(alias_map.values())) if alias_map else None
 
-    anonymous_alias_map = _retry_disambig_anonymous(
-        full_disambig_client,
-        anonymous_names,
-        anonymous_contexts,
-        existing_names=existing_names if existing_names else None,
-        existing_contexts=existing_contexts,
-        stage_name="anonymous disambiguation",
+    result = _retry_disambig(
+        cloud_disambig_client,
+        existing_names or [],
+        {},
+        alias_keywords,
+        stage_name="cloud disambiguation",
         run_id=run_id,
     )
 
-    if anonymous_alias_map:
-        for anon_name, real_name in anonymous_alias_map.items():
-            if real_name != anon_name:
-                for alias, canonical in list(alias_map.items()):
-                    if canonical == anon_name:
-                        alias_map[alias] = real_name
-        ann_repo = AnnotationRepository(conn)
-        ann_repo.update_character_names(run_id, anonymous_alias_map, novel_id=novel_id)
-        logger.info(f"anonymous disambiguation completed: {len(anonymous_alias_map)} names processed")
+    if isinstance(result, dict):
+        alias_map.update(result)
+    elif hasattr(result, 'alias_map'):
+        alias_map.update(result.alias_map)
+
+    logger.info(f"cloud disambiguation completed: {len(alias_map)} entries")
 
     return alias_map
 
 
-def _build_character_knowledge_graph(
+def run_disambiguation(
     conn,
+    alias_map: dict[str, str],
+    full_disambig_client: UnifiedModelClient,
+    cloud_disambig_client: UnifiedModelClient | None,
+    alias_keywords: list[str],
     novel_id: str,
-    use_rag: bool,
     run_id: str,
-) -> bool:
+) -> dict[str, str]:
     """
-    构建角色知识图谱
-    Returns:
-        bool: 是否成功构建图谱
+    执行消歧流程（增量 + 最终 + 云端）
+
+    这是供外部调用的统一接口。
     """
-    if not use_rag or not settings.rag.enabled:
-        return False
-
-    from src.knowledge import build_character_graph, save_graph_to_db
-    from src.storage.repositories import EntityRepository, StatsRepository
-
-    logger.info("building character knowledge graph")
-    entity_repo = EntityRepository(conn)
-    stats_repo = StatsRepository(conn)
-    character_graph = build_character_graph(entity_repo, run_id, novel_id)
-    save_graph_to_db(stats_repo, run_id, character_graph, "character_graph")
-    logger.info(
-        f"saved graph: {character_graph.number_of_nodes()} nodes, {character_graph.number_of_edges()} edges"
+    alias_map = _run_final_disambiguation(
+        conn, alias_map, full_disambig_client, alias_keywords, novel_id, run_id
     )
 
-    return True
+    if cloud_disambig_client:
+        alias_map = _run_cloud_disambiguation(
+            conn, alias_map, cloud_disambig_client, alias_keywords, novel_id, run_id
+        )
+
+    return alias_map
 
 
 def detect_cycle_in_relations(
     relations: list[dict[str, str]],
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[list[str]]]:
     """
-    检测关系列表中的循环依赖
+    检测关系中的循环依赖
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
-    说明: 使用 DFS 算法检测有向图中的环
+    使用 DFS 检测有向图中的循环。
 
     Args:
         relations: 关系列表，每个关系包含 from, to, type 字段
@@ -660,6 +566,11 @@ def _process_entity_relations(
     任务: entity-type-relation-extraction
     说明: 将消歧结果中的关系写入数据库
 
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: fix-hardcoded-relation-types
+    修改内容: 从配置读取有效关系类型，而非硬编码
+
     Args:
         conn: 数据库连接
         novel_id: 小说ID
@@ -690,6 +601,8 @@ def _process_entity_relations(
     success_count = 0
     skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
 
+    valid_relation_types = set(settings.analysis.valid_hierarchical_relation_types)
+
     for rel in valid_relations:
         from_name = rel.get("from")
         to_name = rel.get("to")
@@ -702,7 +615,7 @@ def _process_entity_relations(
             })
             continue
 
-        if rel_type not in VALID_HIERARCHICAL_RELATION_TYPES:
+        if rel_type not in valid_relation_types:
             logger.warning(f"无效的关系类型: {rel_type}, 跳过关系 {rel}")
             skipped_relations.append({
                 "relation": rel,

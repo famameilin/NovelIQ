@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from typing import Optional
+from typing import Optional, List, Dict
+from loguru import logger
 
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import (
@@ -11,6 +12,8 @@ from src.api.models.responses import (
     ReanalyzeResponse,
     TaskListResponse,
     TaskInfoResponse,
+    BatchDeleteTasksRequest,
+    BatchDeleteTasksResponse,
 )
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
@@ -59,6 +62,11 @@ async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_no
     修改者: TraeAI
     任务: postgresql-migration-cleanup
     修改内容: 移除 db_path 字段，使用 run_id
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: API接口参数统一优化
+    修改内容: 移除 run_id 字段，统一使用 task_id
     """
     tasks = novel_service.get_tasks_by_novel(novel_id)
     return TaskListResponse(
@@ -68,7 +76,6 @@ async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_no
                 task_id=t["task_id"],
                 novel_id=t["novel_id"],
                 status=t["status"],
-                run_id=t.get("run_id"),
             )
             for t in tasks
         ],
@@ -79,6 +86,74 @@ async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_no
 async def delete_task(novel_id: str, task_id: str, novel_service: NovelService = Depends(get_novel_service)):
     novel_service.delete_task(task_id)
     return {"message": "任务删除成功", "novel_id": novel_id, "task_id": task_id}
+
+
+@router.post("/{novel_id}/tasks/batch-delete", response_model=BatchDeleteTasksResponse)
+async def batch_delete_tasks(
+    novel_id: str,
+    request: BatchDeleteTasksRequest,
+    novel_service: NovelService = Depends(get_novel_service)
+) -> BatchDeleteTasksResponse:
+    """
+    批量删除任务
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 新增批量删除功能
+
+    批量删除指定的分析任务。
+    即使部分删除失败，也会继续处理其他任务。
+    """
+    deleted_ids: List[str] = []
+    failed_ids: List[Dict[str, str]] = []
+
+    for task_id in request.task_ids:
+        try:
+            # 验证任务是否属于该小说
+            task = novel_service.get_run_by_task_id(task_id)
+            if task is None:
+                # 尝试从数据库加载
+                task = novel_service._load_task_from_db(task_id)
+
+            if task is None:
+                failed_ids.append({"task_id": task_id, "reason": "任务不存在"})
+                logger.warning(f"Batch delete task: task {task_id} not found")
+                continue
+
+            if task.get("novel_id") != novel_id:
+                failed_ids.append({"task_id": task_id, "reason": f"任务不属于小说 {novel_id}"})
+                logger.warning(f"Batch delete task: task {task_id} does not belong to novel {novel_id}")
+                continue
+
+            novel_service.delete_task(task_id)
+            deleted_ids.append(task_id)
+            logger.info(f"Batch delete: task {task_id} deleted successfully")
+        except Exception as e:
+            failed_ids.append({"task_id": task_id, "reason": f"删除失败: {e}"})
+            logger.error(f"Batch delete: failed to delete task {task_id}: {e}")
+
+    total_count = len(request.task_ids)
+    deleted_count = len(deleted_ids)
+    failed_count = len(failed_ids)
+
+    if deleted_count == total_count:
+        message = f"成功删除 {deleted_count} 个任务"
+        success = True
+    elif deleted_count > 0:
+        message = f"部分删除成功: {deleted_count} 个成功, {failed_count} 个失败"
+        success = True
+    else:
+        message = f"删除失败: {failed_count} 个任务无法删除"
+        success = False
+
+    return BatchDeleteTasksResponse(
+        success=success,
+        message=message,
+        deleted_count=deleted_count,
+        failed_count=failed_count,
+        deleted_ids=deleted_ids,
+        failed_ids=failed_ids,
+    )
 
 
 @router.get("/{novel_id}/status", response_model=StatusResponse)

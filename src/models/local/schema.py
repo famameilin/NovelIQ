@@ -129,6 +129,37 @@ class ForeshadowingResult(BaseModel):
         }
 
 
+class DialogueAttribution(BaseModel):
+    """
+    单条对话归属数据结构
+
+    创建时间: 2026-03-20
+    创建者: TraeAI
+    任务: analyze-dialogue-length-zero
+    说明: 用于存储单条对话的说话者归属判断结果
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int = Field(description="对话序号（1开始）")
+    speaker: str = Field(description="说话者名称")
+
+
+class DialogueAttributionResult(BaseModel):
+    """
+    对话归属判断结果数据结构
+
+    创建时间: 2026-03-20
+    创建者: TraeAI
+    任务: analyze-dialogue-length-zero
+    说明: 用于 LLM 结构化输出的对话归属判断结果模型
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    dialogues: List[DialogueAttribution] = Field(default_factory=list, description="对话归属列表")
+
+
 class HierarchicalRelation(BaseModel):
     """
     层级关系数据结构
