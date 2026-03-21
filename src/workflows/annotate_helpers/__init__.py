@@ -29,8 +29,6 @@ from .context import (
     _prepare_chunk_context,
 )
 from .disambiguation import (
-    _build_character_knowledge_graph,
-    _run_anonymous_disambiguation,
     _run_final_disambiguation,
     _run_incremental_disambiguation,
 )
@@ -62,8 +60,6 @@ __all__ = [
     "_store_annotation_results",
     "_run_incremental_disambiguation",
     "_run_final_disambiguation",
-    "_run_anonymous_disambiguation",
-    "_build_character_knowledge_graph",
     "_init_annotation_phase",
     "_process_single_chunk",
     "_process_chunks_phase",

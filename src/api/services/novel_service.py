@@ -23,6 +23,7 @@ from loguru import logger
 from src.api.exceptions import InvalidFileError, FileStorageError, NovelNotFoundError
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
+from src.storage.id_mapping import generate_task_id
 
 
 class NovelService:
@@ -144,10 +145,26 @@ class NovelService:
         task = self._tasks[task_id]
         return task
 
-    def create_task(self, novel_id: str) -> str:
-        """创建分析任务"""
+    def create_task(self, novel_id: str, task_id: str | None = None) -> str:
+        """创建分析任务
+
+        创建时间: 2025-03-11
+        创建者: TraeAI
+        任务: 小说服务
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: ID系统统一优化
+        修改内容: 使用generate_task_id()生成task_id
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复task_id和run_id不关联的问题
+        修改内容: 添加task_id参数，支持外部传入task_id
+        """
         self.get_novel(novel_id)
-        task_id = str(uuid.uuid4())[:8]
+        if task_id is None:
+            task_id = generate_task_id()
 
         self._tasks[task_id] = {
             "task_id": task_id,
@@ -170,13 +187,19 @@ class NovelService:
         return self._tasks[task_id]
 
     def _load_task_from_db(self, task_id: str) -> dict | None:
-        """从数据库加载任务元数据"""
+        """从数据库加载任务元数据
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: Repository层ID统一优化
+        修改内容: 使用get_run_by_run_id_prefix替代get_run_by_task_id
+        """
         try:
             session_factory = get_session_factory()
             with session_factory() as session:
                 run_repo = RunRepository(session)
-                # 尝试通过task_id（run_id的前8位）查找
-                run = run_repo.get_run_by_task_id(task_id)
+                # task_id是run_id的前8位，使用前缀匹配查询
+                run = run_repo.get_run_by_run_id_prefix(task_id)
                 if run:
                     return {
                         "task_id": task_id,
@@ -301,6 +324,11 @@ class NovelService:
         修改者: TraeAI
         任务: 修复删除任务不删除数据库数据的问题
         修改内容: 使用正确的 session 获取方式
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: Repository层ID统一优化
+        修改内容: 使用get_run_by_run_id_prefix替代get_run_by_task_id
         """
         # 从数据库中查找对应的 run_id（task_id 是 run_id 的前8位）
         from src.storage.db import get_engine
@@ -311,7 +339,8 @@ class NovelService:
         session = Session()
         try:
             run_repo = RunRepository(session)
-            run = run_repo.get_run_by_task_id(task_id)
+            # task_id是run_id的前8位，使用前缀匹配查询
+            run = run_repo.get_run_by_run_id_prefix(task_id)
 
             if run:
                 run_id = run["run_id"]

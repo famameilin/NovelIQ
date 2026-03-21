@@ -83,7 +83,14 @@ class DisambiguationClient(BaseModelClient):
         token_usage_callback: Optional[TokenUsageCallback] = None,
         novel_id: Optional[str] = None,
         instructor_client_factory: Optional[Any] = None,
+        session: Optional[Any] = None,
     ) -> None:
+        """
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 支持传入 session 用于保存模型交互记录
+        修改内容: 添加 session 参数
+        """
         super().__init__(
             task_type=task_type,
             config=config,
@@ -91,6 +98,7 @@ class DisambiguationClient(BaseModelClient):
             analysis_logger=analysis_logger,
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
+            session=session,
         )
         self._instructor_client_factory = instructor_client_factory
 

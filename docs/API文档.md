@@ -47,6 +47,7 @@ python -m src.api.main --port 8001
 | POST | `/api/novels/upload` | 上传小说文件 |
 | GET | `/api/novels/` | 列出所有小说 |
 | DELETE | `/api/novels/{id}` | 删除小说 |
+| POST | `/api/novels/batch-delete` | 批量删除小说 |
 
 ### 2.2 分析任务接口
 
@@ -57,20 +58,28 @@ python -m src.api.main --port 8001
 | GET | `/api/novels/{id}/status` | 查询分析进度 |
 | GET | `/api/novels/{id}/tasks` | 获取所有分析任务 |
 | DELETE | `/api/novels/{id}/tasks/{task_id}` | 删除特定分析任务 |
+| POST | `/api/novels/{id}/tasks/batch-delete` | 批量删除分析任务 |
 
 ### ID 体系说明
 
 系统使用两种 ID：
 
-| ID 类型 | 格式 | 示例 | 用途 |
-|---------|------|------|------|
-| novel_id | UUID前8位 | `10960c77` | 小说唯一标识 |
-| run_id | UUID前8位 | `a1b2c3d4` | 分析任务标识 |
+| ID 类型 | 格式 | 示例 | 用途 | 使用场景 |
+|---------|------|------|------|----------|
+| novel_id | UUID前8位 | `10960c77` | 小说唯一标识 | API内外通用 |
+| task_id | UUID前8位 | `a1b2c3d4` | 分析任务标识（外部使用） | 仅API层使用 |
+| run_id | 完整UUID(36位) | `a1b2c3d4-1a72-4444-a772-2ddc64334cd2` | 分析运行标识（内部使用） | 仅内部实现使用 |
+
+**ID映射关系：**
+- `task_id` 是 `run_id` 的前8位字符
+- 外部API只暴露 `task_id`，完全隐藏 `run_id`
+- 内部实现（Repository、Workflow）只使用 `run_id`
+- ID转换由API层和Service层负责
 
 **数据隔离规则：**
 - 数据通过 `run_id` 字段在 PostgreSQL 数据库中隔离
-- 日志目录：`logs/{run_id}/`
-- 结果文件：`outputs/{run_id}.json`
+- 日志目录：`logs/{run_id}/`（内部使用完整run_id）
+- 结果文件：`outputs/{task_id}.json`（外部使用task_id）
 
 ### 2.3 结果查询接口
 
@@ -160,6 +169,53 @@ python -m src.api.main --port 8001
 
 ---
 
+#### POST /api/novels/batch-delete
+
+批量删除小说及其分析数据。
+
+**请求体** (JSON):
+```json
+{
+  "novel_ids": ["10960c77", "a1b2c3d4", "e5f6g7h8"]
+}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| novel_ids | List[str] | 是 | 要删除的小说ID列表 |
+
+**响应示例（全部成功）**:
+```json
+{
+  "success": true,
+  "message": "成功删除 3 本小说",
+  "deleted_count": 3,
+  "failed_count": 0,
+  "deleted_ids": ["10960c77", "a1b2c3d4", "e5f6g7h8"],
+  "failed_ids": []
+}
+```
+
+**响应示例（部分成功）**:
+```json
+{
+  "success": true,
+  "message": "部分删除成功: 2 本成功, 1 本失败",
+  "deleted_count": 2,
+  "failed_count": 1,
+  "deleted_ids": ["10960c77", "a1b2c3d4"],
+  "failed_ids": [
+    {"novel_id": "e5f6g7h8", "reason": "小说不存在: e5f6g7h8"}
+  ]
+}
+```
+
+**说明**:
+- 即使部分删除失败，也会继续处理其他小说
+- 删除小说时会同时删除其关联的所有任务数据
+
+---
+
 ### 3.2 分析任务
 
 #### POST /api/novels/{id}/analyze
@@ -237,9 +293,11 @@ python -m src.api.main --port 8001
 - `diagnose`：cloud_analysis表有数据
 
 **说明**：
-- 每次分析生成唯一的 `task_id`（即 `run_id`）
+- 每次分析生成唯一的 `task_id`（8位短UUID）和对应的 `run_id`（36位完整UUID）
+- `task_id` 是 `run_id` 的前8位字符
+- 外部API使用 `task_id`，内部实现使用 `run_id`
 - 数据通过 `run_id` 字段在 PostgreSQL 数据库中隔离
-- 日志目录为 `logs/{run_id}/`
+- 日志目录为 `logs/{run_id}/`（内部使用）
 
 ---
 
@@ -281,7 +339,8 @@ python -m src.api.main --port 8001
 ```
 
 **说明**：
-- 每次重新分析生成新的 `task_id`（即 `run_id`）
+- 每次重新分析生成新的 `task_id`（8位短UUID）和对应的 `run_id`（36位完整UUID）
+- `task_id` 是 `run_id` 的前8位字符
 - 新的分析结果通过 `run_id` 在数据库中隔离
 - 与analyze不同，reanalyze总是会创建新任务
 
@@ -325,7 +384,55 @@ python -m src.api.main --port 8001
 }
 ```
 
-**注意**: 删除任务会删除数据库中该 `run_id` 对应的所有数据，此操作不可恢复。
+**注意**: 删除任务会删除数据库中该 `run_id`（通过 `task_id` 映射）对应的所有数据，此操作不可恢复。
+
+---
+
+#### POST /api/novels/{id}/tasks/batch-delete
+
+批量删除分析任务。
+
+**请求体** (JSON):
+```json
+{
+  "task_ids": ["a1b2c3d4", "b2c3d4e5", "c3d4e5f6"]
+}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| task_ids | List[str] | 是 | 要删除的任务ID列表 |
+
+**响应示例（全部成功）**:
+```json
+{
+  "success": true,
+  "message": "成功删除 3 个任务",
+  "deleted_count": 3,
+  "failed_count": 0,
+  "deleted_ids": ["a1b2c3d4", "b2c3d4e5", "c3d4e5f6"],
+  "failed_ids": []
+}
+```
+
+**响应示例（部分成功）**:
+```json
+{
+  "success": true,
+  "message": "部分删除成功: 2 个成功, 1 个失败",
+  "deleted_count": 2,
+  "failed_count": 1,
+  "deleted_ids": ["a1b2c3d4", "b2c3d4e5"],
+  "failed_ids": [
+    {"task_id": "c3d4e5f6", "reason": "任务不存在"}
+  ]
+}
+```
+
+**说明**:
+- 只能删除属于指定小说的任务
+- 即使部分删除失败，也会继续处理其他任务
+- 删除任务会删除数据库中对应 `run_id`（通过 `task_id` 映射）的所有数据，此操作不可恢复
 
 ---
 

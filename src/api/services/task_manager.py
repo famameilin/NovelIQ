@@ -1,3 +1,19 @@
+"""
+任务管理器模块
+
+创建时间: 2025-03-11
+创建者: TraeAI
+任务: 任务管理
+
+修改时间: 2026-03-19
+修改者: TraeAI
+任务: ID系统统一优化
+修改内容: 确认统一使用task_id作为对外接口和内部存储标识
+
+说明: TaskManager统一使用task_id（8位短ID）作为任务标识，
+      不涉及run_id（36位UUID）的转换，转换逻辑由调用方处理。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

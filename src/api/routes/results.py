@@ -71,7 +71,7 @@ router = APIRouter(prefix="/novels", tags=["results"])
 - 分析结果归档备份
 
 **参数：**
-- task_id: 分析任务ID（必需）
+- task_id: 分析任务ID（8位短UUID，必需）
 
 **返回内容：**
 - 写入状态（成功/失败）
@@ -123,7 +123,7 @@ router = APIRouter(prefix="/novels", tags=["results"])
 )
 async def get_results(
     novel_id: str,
-    run_id: str = Query(..., description="分析运行ID（完整UUID）"),
+    task_id: str = Query(..., description="分析任务ID"),
     novel_service: NovelService = Depends(get_novel_service),
 ) -> ResultsWriteResponse:
     """
@@ -140,13 +140,21 @@ async def get_results(
     修改者: TraeAI
     任务: 修复API参数问题
     修改内容: 将task_id改为run_id，使用完整UUID查询
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: API接口参数统一优化
+    修改内容: 将run_id参数改为task_id，内部转换为run_id
     """
     # 从数据库查询运行记录
     from src.storage.db import get_session_factory
     from src.storage.repositories import RunRepository
+    from src.storage.id_mapping import task_id_to_run_id
 
     session_factory = get_session_factory()
     with session_factory() as session:
+        # 将task_id转换为run_id
+        run_id = task_id_to_run_id(task_id, session.connection())
         run_repo = RunRepository(session)
         run = run_repo.get_run(run_id)
         if not run:
@@ -162,13 +170,13 @@ async def get_results(
         entity_repo = EntityRepository(session)
 
         results_data, missing_fields, novel_name = _fetch_all_results_data(
-            novel_id, run_id, run_id, stats_repo, annotation_repo, chunk_repo, entity_repo
+            novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo, entity_repo
         )
 
-        file_path = _write_results_to_file(run_id, results_data)
+        file_path = _write_results_to_file(task_id, results_data)
 
         if missing_fields:
-            logger.warning(f"Task {run_id} has missing fields: {missing_fields}")
+            logger.warning(f"Task {task_id} has missing fields: {missing_fields}")
 
         return _build_results_response(file_path, novel_id, novel_name, missing_fields)
 
@@ -198,8 +206,16 @@ def _fetch_all_results_data(
     修改者: TraeAI
     任务: 添加层级关系导出到JSON功能
     修改内容: 添加 entity_repo 参数，导出层级关系
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: fix-character-alias-inconsistency
+    修改内容: 获取 alias_map 并传递给子函数，实现人物外号归一化
     """
     missing_fields: List[str] = []
+
+    # 获取别名映射表，用于人物外号归一化
+    alias_map = annotation_repo.fetch_alias_map(run_id)
 
     emotion_curve = _fetch_emotion_curve(run_id, stats_repo)
     if not emotion_curve:
@@ -223,11 +239,11 @@ def _fetch_all_results_data(
     if not chunk_styles:
         missing_fields.append("chunk_styles")
 
-    chunk_annotations = _fetch_chunk_annotations(run_id, annotation_repo)
+    chunk_annotations = _fetch_chunk_annotations(run_id, annotation_repo, alias_map)
     if not chunk_annotations:
         missing_fields.append("chunk_annotations")
 
-    character_relations = _fetch_character_relations(run_id, annotation_repo)
+    character_relations = _fetch_character_relations(run_id, annotation_repo, alias_map)
     hierarchical_relations = _fetch_hierarchical_relations(novel_id, run_id, entity_repo)
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
 
@@ -300,7 +316,7 @@ def _write_results_to_file(task_id: str, data: Dict[str, Any]) -> str:
     return str(file_path)
 
 
-def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> Tuple[Session, str]:
+def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> Tuple[Optional[Session], Optional[str]]:
     """
     2026-03-14: TraeAI创建，任务refactor-routes-use-repository
     从 task_id 获取数据库连接和 run_id
@@ -309,10 +325,24 @@ def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> Tuple[
     修改者: TraeAI
     任务: postgresql-migration
     修改内容: 移除 has_db 检查，使用单一 PostgreSQL 数据库
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: API接口参数统一优化
+    修改内容: 将task_id转换为run_id返回，处理无效task_id情况
     """
+    from src.storage.id_mapping import task_id_to_run_id, TaskIDNotFoundError
+
     session_factory = SessionFactory(novel_service.upload_dir)
     db_session = session_factory.get_session(task_id)
-    return db_session.connection, task_id
+    try:
+        # 将task_id转换为run_id
+        run_id = task_id_to_run_id(task_id, db_session.connection)
+        return db_session.connection, run_id
+    except (ValueError, TaskIDNotFoundError):
+        # task_id格式无效或找不到对应的run_id
+        db_session.connection.close()
+        return None, None
 
 
 @router.get("/{novel_id}/emotion-curve")
@@ -322,6 +352,8 @@ async def get_emotion_curve(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return []
     try:
         stats_repo = StatsRepository(conn)
         return _fetch_emotion_curve(run_id, stats_repo)
@@ -336,6 +368,8 @@ async def get_rhythm_curve(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return []
     try:
         stats_repo = StatsRepository(conn)
         return _fetch_rhythm_curve(run_id, stats_repo)
@@ -350,6 +384,8 @@ async def get_characters(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return []
     try:
         annotation_repo = AnnotationRepository(conn)
         return _fetch_characters(run_id, annotation_repo)
@@ -364,6 +400,8 @@ async def get_topics(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return []
     try:
         chunk_repo = ChunkRepository(conn)
         return _fetch_topics(run_id, chunk_repo)
@@ -378,6 +416,8 @@ async def get_diagnosis(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return None
     try:
         stats_repo = StatsRepository(conn)
         return _fetch_diagnosis(run_id, novel_id, stats_repo)
@@ -392,6 +432,8 @@ async def get_narrative_structure(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -410,6 +452,8 @@ async def get_emotion_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -428,6 +472,8 @@ async def get_character_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -446,6 +492,8 @@ async def get_style_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -464,6 +512,8 @@ async def get_culture_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)

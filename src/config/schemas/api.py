@@ -76,6 +76,8 @@ class PromptSettings:
     foreshadowing_system: str = ""
     foreshadowing_user_template: str = ""
     foreshadowing_examples: str = ""
+    dialogue_attribution_system: str = ""
+    dialogue_attribution_user_template: str = ""
 
 
 def _parse_path_settings(data: dict[str, Any] | None) -> PathSettings:
@@ -134,4 +136,6 @@ def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
         foreshadowing_system=data.get("foreshadowing_system", ""),
         foreshadowing_user_template=data.get("foreshadowing_user_template", ""),
         foreshadowing_examples=data.get("foreshadowing_examples", ""),
+        dialogue_attribution_system=data.get("dialogue_attribution_system", ""),
+        dialogue_attribution_user_template=data.get("dialogue_attribution_user_template", ""),
     )

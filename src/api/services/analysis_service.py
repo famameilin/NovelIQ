@@ -22,6 +22,13 @@
 修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 移除 operations 导入，使用 Repository 替代
+
+修改时间: 2026-03-19
+修改者: TraeAI
+任务: ID系统统一优化
+修改内容:
+- 对外接口使用task_id，内部方法使用run_id
+- 导入id_mapping模块进行ID转换
 """
 
 from __future__ import annotations
@@ -122,6 +129,11 @@ class AnalysisService:
         修改者: TraeAI
         任务: postgresql-migration
         修改内容: 移除 INSERT OR REPLACE SQLite 方言，改用 StatsRepository
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复task_id和run_id不关联的问题
+        修改内容: run_id以task_id为前缀生成，确保task_id = run_id[:8]
         """
         novel_id = novel["novel_id"]
         source_path = Path(novel["file_path"])
@@ -136,10 +148,14 @@ class AnalysisService:
         conn = db_session.connection
 
         run_repo = RunRepository(conn)
-        run_id = run_repo.create_run(
+        import uuid
+        run_id = f"{task_id}{str(uuid.uuid4())[8:]}"
+        
+        run_repo.create_run(
             novel_id=novel_id,
             source_path=str(source_path),
             title=novel_title,
+            run_id=run_id,
         )
         logger.info(f"Created analysis run: run_id={run_id} for novel_id={novel_id}")
 

@@ -135,6 +135,11 @@ def execute_validation_retry_call(
     创建者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 从 AnnotationClient 类方法提取为独立函数
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: 统一参数处理
+    修改内容: 移除 _get_thinking_params 调用，所有参数通过 _build_extra_body 处理
     """
     model_name = get_model_with_provider(config.model, config)
     if not model_name:
@@ -145,7 +150,6 @@ def execute_validation_retry_call(
         raise ValueError("client is required")
 
     enable_thinking = config.thinking_enabled
-    thinking_params = client._get_thinking_params(enable_thinking)
     extra_body = client._build_extra_body(enable_thinking)
 
     request_params = {
@@ -156,7 +160,6 @@ def execute_validation_retry_call(
         "presence_penalty": config.presence_penalty,
         "extra_body": extra_body,
     }
-    request_params.update(thinking_params)
 
     response = client_obj.chat.completions.create(**request_params)
     message = response.choices[0].message
