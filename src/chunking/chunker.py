@@ -235,13 +235,19 @@ def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> List[Chunk]:
 
 
 class SemanticChunker:
-    """语义分块器"""
+    """语义分块器
+    
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: 添加长度限制，当累计长度超过 max_chars 时强制分割
+    """
 
     def __init__(self, embedding_client: EmbeddingClient | None = None):
         self._embedding_client = embedding_client
         self._window_size = settings.chunking.semantic_window_size
         self._percentile = settings.chunking.semantic_percentile
         self._min_chars = settings.chunking.semantic_min_chars
+        self._max_chars = settings.chunking.semantic_max_chars
         self._use_dynamic_threshold = settings.chunking.semantic_use_dynamic_threshold
 
     def chunk_text_semantic(self, text: str) -> List[Chunk]:
@@ -292,7 +298,17 @@ class SemanticChunker:
         paragraphs: List[Tuple[int, int, str]],
         embeddings: List[List[float]],
     ) -> List[int]:
-        """找到语义边界"""
+        """找到语义边界
+        
+        修改时间: 2026-03-20
+        修改者: TraeAI
+        任务: 添加长度限制，当累计长度超过 max_chars 时强制分割
+        
+        说明:
+        - 优先使用语义边界（模型判断）
+        - 当累计长度超过 max_chars 时强制分割（工程约束）
+        - 在段落边界分割，保持段落完整性
+        """
         if len(paragraphs) <= 1:
             return [0, len(paragraphs)]
 
@@ -304,10 +320,19 @@ class SemanticChunker:
         else:
             threshold = settings.chunking.semantic_threshold
 
+        paragraph_lengths = [len(text) for _, _, text in paragraphs]
+
         boundaries = [0]
+        current_len = 0
+
         for i, sim in enumerate(similarities):
-            if sim < threshold or i in onomatopoeia_indices:
+            current_len += paragraph_lengths[i]
+
+            # 语义边界 OR 拟声词边界 OR 长度超限
+            if sim < threshold or i in onomatopoeia_indices or current_len > self._max_chars:
                 boundaries.append(i + 1)
+                current_len = 0
+
         boundaries.append(len(paragraphs))
 
         return boundaries
@@ -368,9 +393,9 @@ class SemanticChunker:
     ) -> List[Chunk]:
         """根据边界创建 chunks
 
-        修改时间: 2026-03-18
+        修改时间: 2026-03-20
         修改者: TraeAI
-        任务: 添加小块合并逻辑，将小于 semantic_min_chars 的块合并到相邻块
+        任务: 添加超长 chunk 拆分逻辑，当 chunk 超过 max_chars 时按句子边界拆分
         """
         chunks: List[Chunk] = []
 
@@ -387,17 +412,32 @@ class SemanticChunker:
 
             chunk_len = len(chunk_text)
 
-            # 如果块太小，尝试合并到前一个或后一个块
-            if chunk_len < self._min_chars and chunks:
-                # 合并到前一个块
+            # 如果块超长，按句子边界拆分
+            if chunk_len > self._max_chars:
+                sub_chunks = self._split_long_chunk(chunk_text, start_pos)
+                chunks.extend(sub_chunks)
+            # 如果块太小，尝试合并到前一个块
+            elif chunk_len < self._min_chars and chunks:
                 prev_chunk = chunks[-1]
                 merged_text = text[prev_chunk.start:end_pos].strip()
-                chunks[-1] = Chunk(
-                    index=prev_chunk.index,
-                    text=merged_text,
-                    start=prev_chunk.start,
-                    end=end_pos,
-                )
+                # 检查合并后是否超长
+                if len(merged_text) > self._max_chars:
+                    # 不合并，保持原样
+                    chunks.append(
+                        Chunk(
+                            index=len(chunks),
+                            text=chunk_text,
+                            start=start_pos,
+                            end=end_pos,
+                        )
+                    )
+                else:
+                    chunks[-1] = Chunk(
+                        index=prev_chunk.index,
+                        text=merged_text,
+                        start=prev_chunk.start,
+                        end=end_pos,
+                    )
             else:
                 chunks.append(
                     Chunk(
@@ -407,6 +447,51 @@ class SemanticChunker:
                         end=end_pos,
                     )
                 )
+
+        return chunks
+
+    def _split_long_chunk(self, text: str, start_pos: int) -> List[Chunk]:
+        """拆分超长块
+
+        创建时间: 2026-03-20
+        创建者: TraeAI
+        任务: 按句子边界拆分超长 chunk
+
+        说明:
+        - 优先在句子边界（句号）分割
+        - 保证每个子块不超过 max_chars
+        - 如果无法找到合适的句子边界，则强制按字符分割
+        """
+        chunks: List[Chunk] = []
+        offset = 0
+
+        while offset < len(text):
+            end = min(offset + self._max_chars, len(text))
+
+            if end < len(text):
+                last_period = text.rfind("。", offset, end)
+                if last_period > offset + self._max_chars * 0.5:
+                    end = last_period + 1
+                else:
+                    last_exclamation = text.rfind("！", offset, end)
+                    if last_exclamation > offset + self._max_chars * 0.5:
+                        end = last_exclamation + 1
+                    else:
+                        last_question = text.rfind("？", offset, end)
+                        if last_question > offset + self._max_chars * 0.5:
+                            end = last_question + 1
+
+            chunk_text = text[offset:end].strip()
+            if chunk_text:
+                chunks.append(
+                    Chunk(
+                        index=len(chunks),
+                        text=chunk_text,
+                        start=start_pos + offset,
+                        end=start_pos + end,
+                    )
+                )
+            offset = end
 
         return chunks
 

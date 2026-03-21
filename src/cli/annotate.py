@@ -13,8 +13,6 @@ from src.workflows.annotate import run_annotate
 from src.workflows.annotate_helpers.disambiguation import (
     DisambiguationMaxRetriesExceededError,
     _retry_disambig,
-    _retry_disambig_anonymous,
-    build_anonymous_contexts,
 )
 from src.workflows.annotate_helpers.phase import (
     ChunkAnnotationMaxRetriesExceededError,
@@ -37,9 +35,7 @@ __all__ = [
     "RetryableOperation",
     "_annotate_chunk",
     "_retry_disambig",
-    "_retry_disambig_anonymous",
     "annotate_dialogue_structure",
-    "build_anonymous_contexts",
     "build_context_sentences",
     "build_prev_summary",
     "compute_dialogue_lengths",

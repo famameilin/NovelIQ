@@ -1,5 +1,16 @@
+"""
+创建时间: 2026-03-19
+创建者: TraeAI
+任务: ID系统统一优化 - API中间件模块
+说明: 提供错误处理和ID转换等中间件功能
+
+修改记录:
+- 2026-03-19 TraeAI 添加ID转换相关异常处理
+"""
+
 from __future__ import annotations
 
+from typing import Any
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
@@ -11,6 +22,13 @@ from src.api.exceptions import (
     FileStorageError,
     InvalidFileError,
     NovelNotFoundError,
+)
+from src.storage.id_mapping import (
+    IDMappingError,
+    TaskIDNotFoundError,
+    task_id_to_run_id,
+    run_id_to_task_id,
+    convert_response_run_ids_to_task_ids,
 )
 
 
@@ -98,10 +116,92 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
     return error_response.to_json_response()
 
 
+# ID转换相关异常处理器
+
+
+async def task_id_not_found_handler(request: Request, exc: TaskIDNotFoundError) -> JSONResponse:
+    """处理TaskIDNotFoundError异常"""
+    logger.error(f"TaskIDNotFoundError: {str(exc)}")
+    error_response = create_error_response(
+        detail=str(exc),
+        error_type="TaskIDNotFoundError",
+        status_code=status.HTTP_404_NOT_FOUND,
+    )
+    return error_response.to_json_response()
+
+
+async def id_mapping_error_handler(request: Request, exc: IDMappingError) -> JSONResponse:
+    """处理IDMappingError异常"""
+    logger.error(f"IDMappingError: {str(exc)}")
+    error_response = create_error_response(
+        detail=str(exc),
+        error_type="IDMappingError",
+        status_code=status.HTTP_400_BAD_REQUEST,
+    )
+    return error_response.to_json_response()
+
+
+# ID转换工具函数
+
+
+def convert_task_id_to_run_id(task_id: str, conn: Any) -> str:
+    """
+    将task_id转换为run_id
+
+    Args:
+        task_id: 8位task_id
+        conn: 数据库连接
+
+    Returns:
+        36位run_id
+
+    Raises:
+        TaskIDNotFoundError: 如果找不到对应的run_id
+    """
+    return task_id_to_run_id(task_id, conn)
+
+
+def convert_run_id_to_task_id(run_id: str) -> str:
+    """
+    将run_id转换为task_id
+
+    Args:
+        run_id: 36位run_id
+
+    Returns:
+        8位task_id
+    """
+    return run_id_to_task_id(run_id)
+
+
+def convert_response_data(data: dict | list) -> dict | list:
+    """
+    将响应数据中的run_id转换为task_id
+
+    Args:
+        data: 包含run_id字段的字典或列表
+
+    Returns:
+        转换后的数据
+    """
+    return convert_response_run_ids_to_task_ids(data)
+
+
+# 异常处理器注册
+
+
 def register_exception_handlers(app) -> None:
+    """注册所有异常处理器"""
+    # 原有的异常处理器
     app.add_exception_handler(NovelNotFoundError, novel_not_found_handler)
     app.add_exception_handler(InvalidFileError, invalid_file_handler)
     app.add_exception_handler(AnalysisNotCompleteError, analysis_not_complete_handler)
     app.add_exception_handler(AnalysisError, analysis_error_handler)
     app.add_exception_handler(FileStorageError, file_storage_error_handler)
+
+    # ID转换相关异常处理器
+    app.add_exception_handler(TaskIDNotFoundError, task_id_not_found_handler)
+    app.add_exception_handler(IDMappingError, id_mapping_error_handler)
+
+    # 通用异常处理器（最后注册）
     app.add_exception_handler(Exception, generic_exception_handler)

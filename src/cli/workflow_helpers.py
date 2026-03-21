@@ -20,12 +20,16 @@
 修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 移除 db_path 参数，使用 PostgreSQL 单一数据库
+
+修改时间: 2026-03-19
+修改者: TraeAI
+任务: unify-id-generation-cli
+修改内容: 使用统一的ID生成工具 generate_task_id 替代 uuid.uuid4()
 """
 
 from __future__ import annotations
 
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List
@@ -42,6 +46,7 @@ from src.ingest.reader import ingest_path
 from src.models.cloud import ConfiguredCloudModelClient
 from src.storage.db import get_session
 from src.storage.repositories import RunRepository, ChunkRepository, AnnotationRepository, StatsRepository
+from src.storage.id_mapping import generate_task_id
 
 if TYPE_CHECKING:
     pass
@@ -319,7 +324,7 @@ def _init_workflow(
         logger.info(f"Created analysis run: run_id={run_id}")
 
     log_base_dir = Path("logs") / "analysis"
-    task_id = analysis_id or str(uuid.uuid4())[:8]
+    task_id = analysis_id or generate_task_id()
     analysis_logger = AnalysisLogger(log_base_dir, task_id)
     logger.info(f"Analysis ID: {analysis_logger.task_id}")
     logger.info(f"Log directory: {analysis_logger.log_dir}")

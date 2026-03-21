@@ -278,18 +278,76 @@ class TaskInfoResponse(BaseModel):
     修改者: TraeAI
     任务: postgresql-migration-cleanup
     修改内容: 移除 db_path 字段，添加 run_id 字段
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: API接口参数统一优化
+    修改内容: 移除 run_id 字段，统一使用 task_id
     """
 
     task_id: str
     novel_id: str
     status: str
-    run_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
 
 class TaskListResponse(BaseModel):
     novel_id: str
     tasks: List[TaskInfoResponse]
+
+
+class BatchDeleteNovelsRequest(BaseModel):
+    """
+    批量删除小说请求模型
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 新增批量删除功能
+    """
+    novel_ids: List[str] = Field(..., description="要删除的小说ID列表")
+
+
+class BatchDeleteNovelsResponse(BaseModel):
+    """
+    批量删除小说响应模型
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 新增批量删除功能
+    """
+    success: bool
+    message: str
+    deleted_count: int
+    failed_count: int
+    deleted_ids: List[str]
+    failed_ids: List[Dict[str, str]]  # [{"novel_id": "xxx", "reason": "错误原因"}]
+
+
+class BatchDeleteTasksRequest(BaseModel):
+    """
+    批量删除任务请求模型
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 新增批量删除功能
+    """
+    task_ids: List[str] = Field(..., description="要删除的任务ID列表")
+
+
+class BatchDeleteTasksResponse(BaseModel):
+    """
+    批量删除任务响应模型
+
+    创建时间: 2026-03-19
+    创建者: TraeAI
+    任务: 新增批量删除功能
+    """
+    success: bool
+    message: str
+    deleted_count: int
+    failed_count: int
+    deleted_ids: List[str]
+    failed_ids: List[Dict[str, str]]  # [{"task_id": "xxx", "reason": "错误原因"}]
 
 
 class TokenUsageRecord(BaseModel):

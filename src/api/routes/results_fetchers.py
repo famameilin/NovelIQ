@@ -87,6 +87,30 @@ def _parse_int_field(value: Any) -> Optional[int]:
         return None
 
 
+def _normalize_name(name: str, alias_map: dict[str, str] | None) -> str:
+    """
+    别名归一化函数
+
+    如果提供了 alias_map 且 name 存在于映射中，则返回规范名；
+    否则返回原始名称。
+
+    创建时间: 2026-03-21
+    创建者: TraeAI
+    任务: refactor-duplicate-normalize-name
+    修改内容: 提取重复的 normalize_name 函数为模块级函数
+
+    Args:
+        name: 待归一化的名称
+        alias_map: 别名到规范名的映射字典
+
+    Returns:
+        归一化后的名称
+    """
+    if alias_map and name in alias_map:
+        return alias_map[name]
+    return name
+
+
 def _fetch_emotion_curve(run_id: str, stats_repo: StatsRepository) -> list:
     """
     获取情绪曲线数据
@@ -186,6 +210,11 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
     修改者: TraeAI
     任务: postgresql-migration
     修改内容: 移除 db_path 参数，使用 run_id 作为模型目录标识
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: fix-json-output-issues-v3
+    修改内容: 添加空主题过滤逻辑，过滤掉主题词列表为空的主题
     """
     rows = chunk_repo.fetch_chunk_topics_agg(run_id)
 
@@ -199,12 +228,20 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
             trainer = LDATrainer(LDAConfig())
             topic_model = trainer.load_model(model_dir)
             for topic_id in range(topic_model.num_topics):
-                words = topic_model.get_topic_words(topic_id, top_n=10)
-                topic_words_map[topic_id] = [w.word for w in words]
+                topic_words = topic_model.get_topic_words(topic_id, top_n=10)
+                topic_words_map[topic_id] = [w.word for w in topic_words]
         except Exception as e:
             logger.warning(f"Failed to load topic model: {e}")
 
-    return [TopicInfo(topic_id=row[0], words=topic_words_map.get(row[0], []), weight=row[1]) for row in rows]
+    # 过滤掉主题词列表为空的主题
+    result: list[TopicInfo] = []
+    for row in rows:
+        topic_id = row[0]
+        words: list[str] = topic_words_map.get(topic_id, [])
+        if words:  # 只保留非空主题
+            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row[1]))
+
+    return result
 
 
 def _fetch_diagnosis(run_id: str, novel_id: str, stats_repo: StatsRepository) -> DiagnosisResult | None:
@@ -267,7 +304,7 @@ def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
     ]
 
 
-def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository) -> list:
+def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None) -> list:
     """
     获取分块标注数据
 
@@ -275,6 +312,16 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
     修改者: TraeAI
     任务: refactor-routes-use-repository
     修改内容: 重构为使用 AnnotationRepository
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: fix-character-alias-inconsistency
+    修改内容: 添加 alias_map 参数，应用别名归一化，将外号替换为正式姓名
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: refactor-duplicate-normalize-name
+    修改内容: 使用模块级 _normalize_name 函数替代内部定义
     """
     annotations_raw = annotation_repo.fetch_chunk_annotations_full(run_id)
     characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)
@@ -286,7 +333,7 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
         cid = row[0]
         characters_by_chunk[cid].append(
             ChunkCharacter(
-                name=str(row[1]),
+                name=_normalize_name(str(row[1]), alias_map),
                 role_function=str(row[2]) if row[2] else None,
                 action=str(row[3]) if row[3] else None,
                 emotion_score=str(row[4]) if row[4] else None,
@@ -298,8 +345,8 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
         cid = row[0]
         relations_by_chunk[cid].append(
             ChunkRelation(
-                from_char=str(row[1]),
-                to_char=str(row[2]),
+                from_char=_normalize_name(str(row[1]), alias_map),
+                to_char=_normalize_name(str(row[2]), alias_map),
                 type=str(row[3]) if row[3] else "",
                 change=str(row[4]) if row[4] else "",
             )
@@ -309,7 +356,7 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
     for row in dialogues_raw:
         cid = row[0]
         dialogues_by_chunk[cid].append(
-            ChunkDialogue(speaker=str(row[1]), length=int(row[2]) if row[2] is not None else None)
+            ChunkDialogue(speaker=_normalize_name(str(row[1]), alias_map), length=int(row[2]) if row[2] is not None else None)
         )
 
     result: List[ChunkAnnotation] = []
@@ -334,26 +381,52 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository)
     return result
 
 
-def _fetch_character_relations(run_id: str, annotation_repo: AnnotationRepository) -> list:
+def _fetch_character_relations(run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None) -> list:
     """
     获取角色关系数据
 
     修改时间: 2026-03-14
-    修改者: TraeAI
+    创建者: TraeAI
     任务: refactor-routes-use-repository
     修改内容: 重构为使用 AnnotationRepository
+
+    修改时间: 2026-03-19
+    创建者: TraeAI
+    任务: fix-json-output-issues-v3
+    修改内容: 添加去重逻辑，避免同一对人物在同一chunk中出现重复关系
+
+    修改时间: 2026-03-19
+    创建者: TraeAI
+    任务: fix-character-alias-inconsistency
+    修改内容: 添加 alias_map 参数，应用别名归一化，将外号替换为正式姓名
+
+    修改时间: 2026-03-21
+    创建者: TraeAI
+    任务: refactor-duplicate-normalize-name
+    修改内容: 使用模块级 _normalize_name 函数替代内部定义
     """
     rows = annotation_repo.fetch_chunk_relations_full(run_id)
-    return [
-        CharacterRelation(
-            chunk_id=int(row[0]),
-            from_char=str(row[1]),
-            to_char=str(row[2]),
-            type=str(row[3]) if row[3] else "",
-            change=str(row[4]) if row[4] else "",
+
+    # 去重：基于 chunk_id + from_char + to_char + type 去重，保留最后出现的记录
+    seen: Dict[tuple, CharacterRelation] = {}
+    for row in rows:
+        chunk_id = int(row[0])
+        from_char = _normalize_name(str(row[1]), alias_map)
+        to_char = _normalize_name(str(row[2]), alias_map)
+        rel_type = str(row[3]) if row[3] else ""
+        change = str(row[4]) if row[4] else ""
+
+        # 使用 (chunk_id, from_char, to_char, type) 作为去重键
+        key = (chunk_id, from_char, to_char, rel_type)
+        seen[key] = CharacterRelation(
+            chunk_id=chunk_id,
+            from_char=from_char,
+            to_char=to_char,
+            type=rel_type,
+            change=change,
         )
-        for row in rows
-    ]
+
+    return list(seen.values())
 
 
 def _fetch_hierarchical_relations(

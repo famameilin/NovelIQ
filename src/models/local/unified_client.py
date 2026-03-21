@@ -83,11 +83,17 @@ class UnifiedModelClient:
         token_usage_callback: Optional[TokenUsageCallback] = None,
         novel_id: Optional[str] = None,
         instructor_client_factory: Optional[Any] = None,
+        session: Optional[Any] = None,
     ) -> None:
         """
         修改时间: 2026-03-16
         修改者: TraeAI
         任务: 支持依赖注入 instructor_client_factory，便于测试
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 支持传入 session 用于保存模型交互记录
+        修改内容: 添加 session 参数，传递给 AnnotationClient 和 DisambiguationClient
         """
         self._task_type = task_type
         self._annotation_client = AnnotationClient(
@@ -98,6 +104,7 @@ class UnifiedModelClient:
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
             instructor_client_factory=instructor_client_factory,
+            session=session,
         )
         self._disambiguation_client = DisambiguationClient(
             task_type=task_type if task_type in ("incremental_disambig", "full_disambig") else "incremental_disambig",
@@ -107,6 +114,7 @@ class UnifiedModelClient:
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
             instructor_client_factory=instructor_client_factory,
+            session=session,
         )
 
         self._config = self._annotation_client._config

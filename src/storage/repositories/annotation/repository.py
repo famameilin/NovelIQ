@@ -122,6 +122,16 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
         """检查标注阶段是否完成"""
         return queries.is_annotate_complete(self.session, run_id)
 
+    def get_annotation_by_chunk(self, run_id: str, chunk_id: int) -> dict[str, Any] | None:
+        """
+        获取指定 chunk 的标注结果
+
+        创建时间: 2026-03-19
+        创建者: TraeAI
+        任务: 修复缺失的 get_annotation_by_chunk 方法
+        """
+        return queries.get_annotation_by_chunk(self.session, run_id, chunk_id)
+
     # ==================== characters 模块方法 ====================
 
     def fetch_alias_map(self, run_id: str) -> Dict[str, str]:

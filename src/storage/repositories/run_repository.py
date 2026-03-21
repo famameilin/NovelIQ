@@ -52,6 +52,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
         novel_id: str,
         source_path: str | None = None,
         title: str | None = None,
+        run_id: str | None = None,
     ) -> str:
         """
         创建新的分析运行记录
@@ -60,11 +61,18 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
             novel_id: 小说ID
             source_path: 源文件路径
             title: 小说标题
+            run_id: 可选的运行ID，如果不提供则自动生成
 
         Returns:
             运行ID
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 修复task_id和run_id不关联的问题
+        修改内容: 添加run_id参数，支持外部传入run_id
         """
-        run_id = str(uuid.uuid4())
+        if run_id is None:
+            run_id = str(uuid.uuid4())
         now = datetime.now()
 
         run = AnalysisRun(
@@ -126,23 +134,22 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict(run) for run in runs]
 
-    def get_run_by_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get_run_by_run_id_prefix(self, run_id_prefix: str) -> Optional[Dict[str, Any]]:
         """
-        通过task_id获取运行记录
+        通过run_id前缀获取运行记录
 
-        创建时间: 2026-03-17
+        创建时间: 2026-03-19
         创建者: TraeAI
-        任务: 修复服务重启后任务丢失问题
-        说明: task_id是run_id的前8位，用于API查询
+        任务: Repository层ID统一优化
+        说明: 使用run_id前缀匹配查询运行记录
 
         Args:
-            task_id: 任务ID（run_id的前8位）
+            run_id_prefix: run_id前缀（如前8位）
 
         Returns:
             运行记录字典，不存在则返回 None
         """
-        # 使用LIKE匹配run_id的前8位
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id.like(f"{task_id}%"))
+        stmt = select(AnalysisRun).where(AnalysisRun.run_id.like(f"{run_id_prefix}%"))
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None

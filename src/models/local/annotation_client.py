@@ -63,6 +63,7 @@ class AnnotationClient(BaseModelClient):
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
         instructor_client_factory: Any | None = None,
+        session: Any | None = None,
     ) -> None:
         """
         初始化标注客户端
@@ -75,6 +76,11 @@ class AnnotationClient(BaseModelClient):
         修改者: TraeAI
         任务: code-quality-refactor - 修复与 UnifiedModelClient 的兼容性
         修改内容: 添加 task_type 和 instructor_client_factory 参数
+
+        修改时间: 2026-03-19
+        修改者: TraeAI
+        任务: 支持传入 session 用于保存模型交互记录
+        修改内容: 添加 session 参数
         """
         super().__init__(
             task_type=task_type,
@@ -83,6 +89,7 @@ class AnnotationClient(BaseModelClient):
             analysis_logger=analysis_logger,
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
+            session=session,
         )
         self._instructor_client_factory = instructor_client_factory
 
@@ -194,12 +201,16 @@ class AnnotationClient(BaseModelClient):
         修改者: TraeAI
         任务: 移除 Instructor 依赖
         修改内容: 使用 LiteLLM 的 JSON Schema 模式替代 Instructor
+
+        修改时间: 2026-03-21
+        修改者: TraeAI
+        任务: 统一参数处理
+        修改内容: 移除 _get_thinking_params 调用，所有参数通过 _build_extra_body 处理
         """
         if not self._config.model:
             raise ValueError("model is required")
 
         model_name = get_model_with_provider(self._config.model, self._config)
-        thinking_params = self._get_thinking_params(enable_thinking)
         extra_body = self._build_extra_body(enable_thinking)
 
         if self._client is None:
@@ -216,8 +227,6 @@ class AnnotationClient(BaseModelClient):
 
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
-
-        request_params.update(thinking_params)
 
         is_cloud = self._is_cloud_api()
         response = self._call_api_stream(request_params, is_cloud=is_cloud)
