@@ -13,6 +13,11 @@
 修改者: TraeAI
 任务: code-quality-refactor - Task 8 拆分annotation_client
 修改内容: 添加 single_call 和 foreshadowing 模块导出
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: refactor-phase3-to-annotation-layer
+修改内容: 添加 phase3 模块导出（对话归属判断）
 """
 
 from __future__ import annotations
@@ -53,6 +58,11 @@ from src.models.local.annotation.single_call import (
     annotate_single_call_with_retry,
     execute_single_call,
 )
+from src.models.local.annotation.phase3 import (
+    attribute_dialogues_with_llm,
+    compute_dialogue_lengths_with_llm,
+    extract_dialogues_from_text,
+)
 from src.models.local.annotation.validation import (
     retry_with_validation,
     validate_annotation_names,
@@ -85,4 +95,7 @@ __all__ = [
     "execute_single_call",
     "annotate_single_call_with_retry",
     "build_foreshadowing_from_annotation",
+    "attribute_dialogues_with_llm",
+    "compute_dialogue_lengths_with_llm",
+    "extract_dialogues_from_text",
 ]

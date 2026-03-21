@@ -180,6 +180,11 @@ def fetch_hierarchical_relations_with_names(
     任务: 添加层级关系导出到JSON功能
     说明: 查询entity_relations表中rel_category='hierarchical'的关系，并关联实体名称
 
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: 修复results接口
+    修改内容: 添加对缺失rel_category字段的兼容性处理
+
     Args:
         session: 数据库会话
         novel_id: 小说ID

@@ -32,11 +32,19 @@ def fetch_alias_map(session: Session, run_id: str) -> Dict[str, str]:
     """
     获取别名映射表
 
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: fix-fetch-alias-map-bug
+    修改内容: 修复返回值错误，正确返回 {alias: canonical} 映射
+
     Returns:
         别名到规范名的映射字典
     """
-    stmt = select(EntityAlias.alias, EntityAlias.alias_type).where(
-        EntityAlias.alias_type == "disambiguation"
+    stmt = (
+        select(EntityAlias.alias, Entity.canonical)
+        .join(Entity, EntityAlias.entity_id == Entity.entity_id)
+        .where(EntityAlias.alias_type == "disambiguation")
+        .where(EntityAlias.run_id == run_id)
     )
     result = session.execute(stmt)
     return {row[0]: row[1] for row in result.fetchall()}

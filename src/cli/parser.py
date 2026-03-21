@@ -14,6 +14,11 @@ CLI 命令解析器
 修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 移除 --db 参数，使用 PostgreSQL 单一数据库
+
+修改时间: 2026-03-19
+修改者: TraeAI
+任务: unify-id-generation-cli
+修改内容: 使用统一的ID生成工具 generate_task_id 替代 uuid.uuid4()
 """
 
 from __future__ import annotations
@@ -22,7 +27,6 @@ import argparse
 import json
 from pathlib import Path
 from typing import List
-import uuid
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -30,6 +34,7 @@ from sqlalchemy.orm import Session
 from src.config import setup_logging
 from src.storage.db import get_session
 from src.storage.repositories import RunRepository
+from src.storage.id_mapping import generate_task_id
 from src.workflows.diagnose import run_cloud_diagnose
 from src.workflows.preprocess import run_preprocess
 from src.workflows.annotate import run_annotate
@@ -107,7 +112,7 @@ def main(argv: List[str] | None = None) -> int:
 
     if args.command == "cloud-diagnose":
         with get_session() as conn:
-            run_id = str(uuid.uuid4())[:8]
+            run_id = generate_task_id()
             analysis = run_cloud_diagnose(
                 source_path=args.source,
                 run_id=run_id,

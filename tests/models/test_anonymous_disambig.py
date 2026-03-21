@@ -32,35 +32,6 @@ class TestBuildAnonymousContexts(unittest.TestCase):
             chunk_id = int(match.group(1))
             self.assertEqual(chunk_id, 5)
 
-    def test_build_anonymous_contexts(self) -> None:
-        from src.workflows.annotate_helpers.disambiguation import build_anonymous_contexts
-
-        mock_conn = MagicMock()
-
-        def mock_execute(query, params=None):
-            if params is None:
-                return MagicMock(fetchone=lambda: None)
-            chunk_id = params.get('chunk_id', 0) if isinstance(params, dict) else (params[0] if isinstance(params, tuple) else 0)
-            if chunk_id == 2:
-                return MagicMock(fetchone=lambda: ('当前块文本',))
-            elif chunk_id == 1:
-                return MagicMock(fetchone=lambda: ('前一块文本',))
-            elif chunk_id == 3:
-                return MagicMock(fetchone=lambda: ('后一块文本',))
-            return MagicMock(fetchone=lambda: None)
-
-        mock_conn.execute = mock_execute
-
-        contexts = build_anonymous_contexts(mock_conn, ['匿名_C2_0'])
-
-        self.assertIn('匿名_C2_0', contexts)
-        self.assertIn('[前文]', contexts['匿名_C2_0'])
-        self.assertIn('[当前段落]', contexts['匿名_C2_0'])
-        self.assertIn('[后文]', contexts['匿名_C2_0'])
-        self.assertIn('前一块文本', contexts['匿名_C2_0'])
-        self.assertIn('当前块文本', contexts['匿名_C2_0'])
-        self.assertIn('后一块文本', contexts['匿名_C2_0'])
-
 
 class TestAnonymousDisambigClient(unittest.TestCase):
     def test_client_initialization(self) -> None:

@@ -145,6 +145,14 @@ def _init_annotation_phase_with_config(
         )
     )
 
+    # 设置 session 用于保存模型交互记录
+    if config.conn is not None:
+        annotation_client._annotation_client._session = config.conn
+        if cloud_annotation_client:
+            cloud_annotation_client._annotation_client._session = config.conn
+        incremental_client._annotation_client._session = config.conn
+        full_client._annotation_client._session = config.conn
+
     clients = [
         annotation_client,
         cloud_annotation_client,
@@ -250,6 +258,11 @@ def _process_single_chunk(
     修改者: TraeAI
     任务: 修复 _run_incremental_disambiguation 缺少 novel_id 参数的错误
     修改内容: 添加 novel_id 参数并传递给 _run_incremental_disambiguation
+
+    修改时间: 2026-03-20
+    修改者: TraeAI
+    任务: analyze-dialogue-length-zero
+    修改内容: 传递 client 参数到 _store_annotation_results 以支持 LLM 对话归属判断
     """
     from .context import _prepare_chunk_context
     from .disambiguation import _run_incremental_disambiguation
@@ -276,21 +289,29 @@ def _process_single_chunk(
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
     )
-    _store_annotation_results(conn, chunk_id, annotation_result.annotation, chunk_text, use_context_enhancement, run_id=run_id, foreshadowing=annotation_result.foreshadowing)
+    _store_annotation_results(
+        conn,
+        chunk_id,
+        annotation_result.annotation,
+        chunk_text,
+        use_context_enhancement,
+        run_id=run_id,
+        foreshadowing=annotation_result.foreshadowing,
+        alias_map=alias_map if alias_map else None,
+        client=phase_result.annotation_client,
+    )
     logger.debug(f"annotated chunk_id={chunk_id}")
 
     alias_map = _run_incremental_disambiguation(
         conn,
-        chunk_id,
         alias_map,
         phase_result.incremental_disambig_client,
-        phase_result.rag_retriever,
-        phase_result.character_graph,
         phase_result.alias_keywords,
-        incremental_interval,
+        novel_id,
+        run_id,
+        chunk_id,
         idx,
-        run_id=run_id,
-        novel_id=novel_id,
+        incremental_interval,
     )
 
     return alias_map
@@ -305,18 +326,27 @@ def _process_chunks_phase(
     incremental_interval: int,
     run_id: str = "",
     novel_id: str = "",
+    resume: bool = False,
 ) -> Tuple[int, dict[str, str]]:
     """处理所有chunks阶段
 
-    修改时间: 2026-03-18
+    修改时间: 2026-03-19
     修改者: TraeAI
-    任务: 修复 _process_single_chunk 缺少 novel_id 参数的错误
-    修改内容: 添加 novel_id 参数并传递给 _process_single_chunk
+    任务: fix-entity-relations-not-saved
+    修改内容: 添加 resume 参数，支持从 checkpoint 恢复 alias_map
     """
-    from .disambiguation import DisambiguationMaxRetriesExceededError
+    from .disambiguation import DisambiguationMaxRetriesExceededError, _load_disambig_checkpoint
 
     success_count = 0
+
+    # 如果是恢复模式，尝试从 checkpoint 加载 alias_map
     alias_map: dict[str, str] = {}
+    if resume and run_id:
+        loaded_alias_map, _ = _load_disambig_checkpoint(conn, run_id)
+        if loaded_alias_map:
+            alias_map = loaded_alias_map
+            logger.info(f"resumed from checkpoint: {len(alias_map)} alias entries")
+
     total_chunks = len(all_chunks)
 
     for idx, (chunk_id, chunk_text) in enumerate(all_chunks):
@@ -358,20 +388,10 @@ def _run_disambiguation_phase(
     run_id: str = "",
 ) -> dict[str, str]:
     """执行消歧阶段"""
-    from .disambiguation import (
-        _run_anonymous_disambiguation,
-        _run_final_disambiguation,
-        _build_character_knowledge_graph,
-    )
+    from .disambiguation import _run_final_disambiguation
 
     alias_map = _run_final_disambiguation(
         conn, alias_map, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id
     )
-
-    alias_map = _run_anonymous_disambiguation(
-        conn, alias_map, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id
-    )
-
-    _build_character_knowledge_graph(conn, novel_id, use_rag, run_id=run_id)
 
     return alias_map
