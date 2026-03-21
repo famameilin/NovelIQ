@@ -11,6 +11,12 @@
 - 2026-03-15: 使用 SQLAlchemy text() 包装 SQL 语句
 - 2026-03-16: 添加变体反查表实现变体匹配
 
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: refactor-phase3-to-annotation-layer
+修改内容: 将对话归属判断相关函数迁移到 models/local/annotation/phase3.py，
+         保留向后兼容的导入
+
 说明: 本模块包含例句构建、全局上下文抽取等辅助函数。
 """
 
@@ -110,7 +116,15 @@ def build_context_sentences(
 def extract_new_names_from_db(
     conn, alias_map: dict, last_n_chunks: int = ANNOTATION_CONFIG.last_n_chunks, current_chunk_id: int | None = None
 ) -> list[dict]:
-    """从数据库提取新名字"""
+    """
+    从数据库提取新名字
+
+    修改时间: 2026-03-19
+    修改者: TraeAI
+    任务: fix-character-alias-inconsistency
+    修改内容: 同时从 chunk_characters 和 character_appearances 提取名字，
+              确保外号（如"猴子"）也能被识别为候选名参与消歧
+    """
     known = set(alias_map.keys()) | set(alias_map.values())
 
     # 如果没有提供 current_chunk_id，使用数据库中的最大 chunk_id（向后兼容）
@@ -121,7 +135,8 @@ def extract_new_names_from_db(
     # 查询当前 chunk 之前最近 N 个 chunk 的名字
     min_chunk_id = max(0, current_chunk_id - last_n_chunks)
 
-    rows = conn.execute(
+    # 从 chunk_characters 提取名字
+    rows_characters = conn.execute(
         text("""
             SELECT name, COUNT(*) as count
             FROM chunk_characters
@@ -132,7 +147,35 @@ def extract_new_names_from_db(
         {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id},
     ).fetchall()
 
-    return [{"name": r[0], "count": r[1]} for r in rows if r[0] not in known]
+    # 从 character_appearances 提取 raw_name（包含外号、别名等）
+    rows_appearances = conn.execute(
+        text("""
+            SELECT raw_name, COUNT(*) as count
+            FROM character_appearances
+            WHERE chunk_id > :min_chunk_id AND chunk_id <= :current_chunk_id
+            GROUP BY raw_name
+            ORDER BY count DESC
+        """),
+        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id},
+    ).fetchall()
+
+    # 合并两个来源的名字，累加频次
+    name_counts: dict[str, int] = {}
+    for row in rows_characters:
+        name = row[0]
+        count = row[1]
+        if name and name not in known:
+            name_counts[name] = name_counts.get(name, 0) + count
+
+    for row in rows_appearances:
+        name = row[0]
+        count = row[1]
+        if name and name not in known:
+            name_counts[name] = name_counts.get(name, 0) + count
+
+    # 按频次降序排序
+    sorted_names = sorted(name_counts.items(), key=lambda x: -x[1])
+    return [{"name": name, "count": count} for name, count in sorted_names]
 
 
 def build_prev_summary(annotation) -> str:
