@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: Phase1/Phase2标注逻辑
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: fix-validate-names-from-character-appearances
+修改内容: build_validation_sources 增加 character_appearances 参数
 """
 
 from __future__ import annotations
@@ -86,6 +91,7 @@ def build_validation_sources(
     active_entities: str | None = None,
     alias_map: Dict[str, str] | None = None,
     next_chunk_text: str | None = None,
+    character_appearances: List[dict] | None = None,
 ) -> dict:
     """
     构建验证来源字典
@@ -97,6 +103,11 @@ def build_validation_sources(
     修改时间: 2026-03-19
     修改者: TraeAI
     任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 增加 character_appearances 参数
     """
     return {
         "text": text,
@@ -104,4 +115,5 @@ def build_validation_sources(
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
         "next_chunk_text": next_chunk_text or "",
+        "character_appearances": character_appearances or [],
     }

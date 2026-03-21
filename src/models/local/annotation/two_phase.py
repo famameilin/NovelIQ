@@ -3,12 +3,17 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: 双阶段标注逻辑（并行和串行模式）
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: fix-validate-names-from-character-appearances
+修改内容: 添加 character_appearances 参数支持
 """
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, List
 
 from loguru import logger
 
@@ -41,6 +46,7 @@ def annotate_chunk_two_phase(
     chapter_id: int | None = None,
     cloud_client: "AnnotationClient | None" = None,
     run_id: str | None = None,
+    character_appearances: List[dict] | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
     双次调用标注模式
@@ -52,6 +58,11 @@ def annotate_chunk_two_phase(
     修改时间: 2026-03-19
     修改者: TraeAI
     任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text，添加 run_id 支持
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 添加 character_appearances 参数支持
     """
     parallel = settings.analysis.two_phase_annotation.parallel
 
@@ -70,6 +81,7 @@ def annotate_chunk_two_phase(
             active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
+            character_appearances=character_appearances,
         )
     else:
         return annotate_chunk_two_phase_serial(
@@ -86,6 +98,7 @@ def annotate_chunk_two_phase(
             active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
+            character_appearances=character_appearances,
         )
 
 
@@ -103,6 +116,7 @@ def annotate_chunk_two_phase_parallel(
     active_entities: str | None = None,
     cloud_client: "AnnotationClient | None" = None,
     run_id: str | None = None,
+    character_appearances: List[dict] | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
     并行双次调用模式
@@ -120,6 +134,11 @@ def annotate_chunk_two_phase_parallel(
     修改者: TraeAI
     任务: 添加 run_id 支持
     修改内容: 添加 run_id 参数传递
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 添加 character_appearances 参数传递
     """
     logger.debug("annotate_chunk_two_phase_parallel start chunk_id={}", chunk_id)
 
@@ -139,6 +158,7 @@ def annotate_chunk_two_phase_parallel(
             active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
+            character_appearances=character_appearances,
         )
         phase2_future = executor.submit(
             annotate_chunk_phase2,
@@ -186,6 +206,7 @@ def annotate_chunk_two_phase_serial(
     active_entities: str | None = None,
     cloud_client: "AnnotationClient | None" = None,
     run_id: str | None = None,
+    character_appearances: List[dict] | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
     串行双次调用模式
@@ -203,6 +224,11 @@ def annotate_chunk_two_phase_serial(
     修改者: TraeAI
     任务: 添加 run_id 支持
     修改内容: 添加 run_id 参数传递
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-validate-names-from-character-appearances
+    修改内容: 添加 character_appearances 参数传递
     """
     logger.debug("annotate_chunk_two_phase_serial start chunk_id={}", chunk_id)
 
@@ -220,6 +246,7 @@ def annotate_chunk_two_phase_serial(
         active_entities=active_entities,
         cloud_client=cloud_client,
         run_id=run_id,
+        character_appearances=character_appearances,
     )
 
     foreshadowing = annotate_chunk_phase2(
