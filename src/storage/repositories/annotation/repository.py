@@ -60,9 +60,10 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
         chunk_id: int,
         dialogues: Sequence[DialogueSnapshot],
         lengths: Sequence[int] | None = None,
+        speakers: Sequence[str] | None = None,
     ) -> None:
         """插入分块对话数据"""
-        return inserts.insert_chunk_dialogues(self.session, run_id, chunk_id, dialogues, lengths)
+        return inserts.insert_chunk_dialogues(self.session, run_id, chunk_id, dialogues, lengths, speakers)
 
     def insert_foreshadowing(self, run_id: str, chunk_id: int, result: ForeshadowingResult) -> None:
         """插入伏笔分析结果"""

@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -188,6 +188,7 @@ def annotate_chunk_phase2(
     chapter_id: int | None = None,
     cloud_client: "AnnotationClient | None" = None,
     run_id: str | None = None,
+    rag_retriever: Any | None = None,
 ) -> "ForeshadowingResult | None":
     """
     第二次调用：伏笔分析（带独立重试机制）
