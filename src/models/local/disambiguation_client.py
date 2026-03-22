@@ -176,10 +176,6 @@ class DisambiguationClient(BaseModelClient):
             return result
         except Exception as e:
             logger.error("disambiguate_characters unexpected error: {}", str(e))
-            from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
-
-            if isinstance(e, LiteLLMAPIConnectionError):
-                raise ConnectionError(str(e)) from e
             raise
 
     def disambiguate_anonymous(

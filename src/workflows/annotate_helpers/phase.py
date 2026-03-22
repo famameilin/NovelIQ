@@ -140,7 +140,7 @@ def _init_annotation_phase_with_config(
     from .context import _init_rag_retriever
     from .sentence import _load_alias_keywords, _extract_and_save_global_context
 
-    if config.run_id is None:
+    if not config.run_id:
         raise ValueError("run_id is required for annotation phase")
 
     (annotation_client, cloud_annotation_client, incremental_client, full_client) = (

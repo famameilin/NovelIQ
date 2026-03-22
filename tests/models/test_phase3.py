@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: refactor-phase3-to-annotation-layer
 说明: 测试 Phase3 对话归属判断功能
+
+修改时间: 2026-03-22
+修改者: TraeAI
+任务: code-quality-review
+修改内容: 更新测试用例，适配对话归属失败时抛出异常而非返回空字典
 """
 
 import sys
@@ -106,8 +111,8 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         self.assertEqual(result, {1: "张三", 2: "李四"})
 
     @patch("src.models.local.annotation.phase3.settings")
-    def test_exception_returns_empty_dict(self, mock_settings: MagicMock) -> None:
-        """异常时返回空字典"""
+    def test_exception_raises_dialogue_attribution_error(self, mock_settings: MagicMock) -> None:
+        """异常时抛出 DialogueAttributionError"""
         mock_settings.prompts.dialogue_attribution_system = "system"
         mock_settings.prompts.dialogue_attribution_user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
 
@@ -117,9 +122,10 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_client._annotation_client = mock_annotation_client
 
         dialogues = [(1, "你好")]
-        result = attribute_dialogues_with_llm(mock_client, "对话文本", dialogues, ["张三"])
 
-        self.assertEqual(result, {})
+        from src.models.local.annotation.context import DialogueAttributionError
+        with self.assertRaises(DialogueAttributionError):
+            attribute_dialogues_with_llm(mock_client, "对话文本", dialogues, ["张三"])
 
 
 class TestComputeDialogueLengthsWithLLM(unittest.TestCase):

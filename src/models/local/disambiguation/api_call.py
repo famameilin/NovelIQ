@@ -5,6 +5,16 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
 说明: 提取消歧API调用相关逻辑
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: migrate-litellm-to-openai-sdk
+修改内容: 使用 OpenAI SDK，移除 get_model_with_provider 调用
+
+修改时间: 2026-03-22
+修改者: TraeAI
+任务: code-quality-review
+修改内容: 移除硬编码的 "gpt-4" 默认值，改用 config.model（已通过 validate 确保存在）
 """
 
 from __future__ import annotations
@@ -15,7 +25,6 @@ from loguru import logger
 
 from src.utils.token_counter import count_messages_tokens, count_tokens
 
-from ..litellm_utils import get_model_with_provider
 from ..schema import DisambiguateResponseModel
 
 if TYPE_CHECKING:
@@ -51,6 +60,11 @@ def call_disambiguate_api(
     修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
     修改内容: 提取为独立模块函数
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 使用 OpenAI SDK，移除 get_model_with_provider 调用
     """
     if not config.model:
         raise ValueError("model is required")
@@ -58,25 +72,19 @@ def call_disambiguate_api(
     if client._client is None:
         raise ValueError("client is required")
 
-    model_name = get_model_with_provider(config.model, config)
-
     request_params: dict[str, Any] = {
-        "model": model_name,
+        "model": config.model,
         "messages": cast(Any, messages),
         "temperature": config.temperature,
         "top_p": config.top_p,
-        "presence_penalty": config.presence_penalty,
         "response_format": client._build_json_schema(DisambiguateResponseModel),
     }
 
-    # 使用tiktoken估算prompt token数量
-    model_for_token_count = config.model or "gpt-4"
+    model_for_token_count = config.model
     prompt_tokens = count_messages_tokens(messages, model_for_token_count)
 
-    # 使用流式模式并实时输出到控制台（仅云端API）
     response = client._call_api_stream(request_params, is_cloud=is_cloud)
 
-    # 提取 thinking_content（如果存在）
     thinking_content = None
     if hasattr(response, "choices") and response.choices:
         message = response.choices[0].message
@@ -86,14 +94,10 @@ def call_disambiguate_api(
 
     parsed_response = client._parse_structured_response(response, DisambiguateResponseModel)
 
-    # 将 thinking_content 附加到响应对象以便日志记录
     if thinking_content:
         parsed_response._thinking_content = thinking_content  # type: ignore[attr-defined]
 
-    # 估算completion token并记录token使用
-    response_content = (
-        response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
-    )
+    response_content = response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
     completion_tokens = count_tokens(response_content, model_for_token_count)
     total_tokens = prompt_tokens + completion_tokens
 

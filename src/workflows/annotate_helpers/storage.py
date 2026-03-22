@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.models.local.unified_client import UnifiedModelClient
+    pass
 
 
 def _store_annotation_results(
@@ -38,7 +38,7 @@ def _store_annotation_results(
     run_id: str,
     foreshadowing=None,
     alias_map: dict[str, str] | None = None,
-    client: "UnifiedModelClient | None" = None,
+    dialogue_lengths: list[int] | None = None,
 ) -> None:
     """存储标注结果
 
@@ -51,6 +51,11 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: analyze-dialogue-length-zero
     修改内容: 添加 client 参数，使用 compute_dialogue_lengths_v2 替代 compute_dialogue_lengths
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-phase3-not-called
+    修改内容: 添加 dialogue_lengths 参数，由调用方（phase.py）计算后传入
     """
     from src.storage.repositories import AnnotationRepository, StatsRepository
 
@@ -93,15 +98,10 @@ def _store_annotation_results(
         ann_repo.insert_chunk_relations(run_id, chunk_id, annotation.relations)
 
     if annotation.dialogues:
-        from src.models.local.annotation import compute_dialogue_lengths_with_llm
         from .sentence import compute_dialogue_lengths
 
         speakers = [d.speaker for d in annotation.dialogues]
-        if client is not None:
-            dialogue_lengths = compute_dialogue_lengths_with_llm(
-                client, chunk_text, speakers, chunk_id=chunk_id, run_id=run_id
-            )
-        else:
+        if dialogue_lengths is None:
             dialogue_lengths = compute_dialogue_lengths(chunk_text, speakers)
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, annotation.dialogues, dialogue_lengths)
 

@@ -8,6 +8,11 @@
 修改者: TraeAI
 任务: fix-validate-names-from-character-appearances
 修改内容: 添加 character_appearances 参数支持
+
+修改时间: 2026-03-22
+修改者: TraeAI
+任务: parallel-three-phase
+修改内容: 并行模式扩展为三阶段并行（Phase1+Phase2并行，Phase3在Phase1后执行）
 """
 
 from __future__ import annotations
@@ -23,13 +28,27 @@ from src.models.local.parser import validate_foreshadowing_result
 from .context import TwoPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
 from .phase2 import annotate_chunk_phase2
+from .phase3 import compute_dialogue_lengths_with_llm
 
 if TYPE_CHECKING:
     from src.models.local.annotation_client import AnnotationClient
+    from src.models.local.unified_client import UnifiedModelClient
+
+
+def _get_annotation_client(client: "AnnotationClient | UnifiedModelClient") -> "AnnotationClient":
+    """从 UnifiedModelClient 或直接返回 AnnotationClient"""
+    if hasattr(client, "_annotation_client"):
+        return client._annotation_client
+    return client
+
+
+def _get_unified_client(client: "AnnotationClient | UnifiedModelClient") -> "UnifiedModelClient | AnnotationClient":
+    """如果输入是 AnnotationClient，直接返回；如果是 UnifiedModelClient 也返回自身"""
+    return client
 
 
 def annotate_chunk_two_phase(
-    client: "AnnotationClient",
+    client: "AnnotationClient | UnifiedModelClient",
     text: str,
     prev_summary: str | None = None,
     alias_map: Dict[str, str] | None = None,
@@ -44,12 +63,12 @@ def annotate_chunk_two_phase(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
-    cloud_client: "AnnotationClient | None" = None,
+    cloud_client: "AnnotationClient | UnifiedModelClient | None" = None,
     run_id: str | None = None,
     character_appearances: List[dict] | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
-    双次调用标注模式
+    双次调用标注模式（现在为三阶段）
 
     创建时间: 2026-03-14
     创建者: TraeAI
@@ -67,7 +86,7 @@ def annotate_chunk_two_phase(
     parallel = settings.analysis.two_phase_annotation.parallel
 
     if parallel:
-        return annotate_chunk_two_phase_parallel(
+        return annotate_chunk_parallel(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -84,7 +103,7 @@ def annotate_chunk_two_phase(
             character_appearances=character_appearances,
         )
     else:
-        return annotate_chunk_two_phase_serial(
+        return annotate_chunk_serial(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -102,8 +121,8 @@ def annotate_chunk_two_phase(
         )
 
 
-def annotate_chunk_two_phase_parallel(
-    client: "AnnotationClient",
+def annotate_chunk_parallel(
+    client: "AnnotationClient | UnifiedModelClient",
     text: str,
     alias_map: Dict[str, str] | None = None,
     chunk_id: int | None = None,
@@ -114,12 +133,12 @@ def annotate_chunk_two_phase_parallel(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    cloud_client: "AnnotationClient | None" = None,
+    cloud_client: "AnnotationClient | UnifiedModelClient | None" = None,
     run_id: str | None = None,
     character_appearances: List[dict] | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
-    并行双次调用模式
+    并行模式：Phase1 和 Phase2 并行执行，Phase3 在 Phase1 完成后执行
 
     创建时间: 2026-03-14
     创建者: TraeAI
@@ -139,13 +158,22 @@ def annotate_chunk_two_phase_parallel(
     修改者: TraeAI
     任务: fix-validate-names-from-character-appearances
     修改内容: 添加 character_appearances 参数传递
-    """
-    logger.debug("annotate_chunk_two_phase_parallel start chunk_id={}", chunk_id)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: parallel-three-phase
+    修改内容: 扩展为三阶段并行：Phase1+Phase2 并行，Phase3 在 Phase1 完成后执行
+    """
+    logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
+
+    annotation_client = _get_annotation_client(client)
+    cloud_annotation_client = _get_annotation_client(cloud_client) if cloud_client else None
+    unified_client = _get_unified_client(client)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
         phase1_future = executor.submit(
             annotate_chunk_phase1,
-            client=client,
+            client=annotation_client,
             text=text,
             alias_map=alias_map,
             chunk_id=chunk_id,
@@ -156,13 +184,13 @@ def annotate_chunk_two_phase_parallel(
             position_pct=position_pct,
             chapter_id=chapter_id,
             active_entities=active_entities,
-            cloud_client=cloud_client,
+            cloud_client=cloud_annotation_client,
             run_id=run_id,
             character_appearances=character_appearances,
         )
         phase2_future = executor.submit(
             annotate_chunk_phase2,
-            client=client,
+            client=annotation_client,
             text=text,
             prev_chunk_summary=None,
             chunk_id=chunk_id,
@@ -172,28 +200,42 @@ def annotate_chunk_two_phase_parallel(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
-            cloud_client=cloud_client,
+            cloud_client=cloud_annotation_client,
             run_id=run_id,
         )
 
         annotation = phase1_future.result()
         foreshadowing = phase2_future.result()
 
+        dialogue_lengths = None
+        if annotation.dialogues:
+            speakers = [d.speaker for d in annotation.dialogues]
+            logger.debug("annotate_chunk_parallel: phase3 speakers={} chunk_id={}", speakers, chunk_id)
+            dialogue_lengths = compute_dialogue_lengths_with_llm(
+                client=unified_client,
+                text=text,
+                speakers=speakers,
+                chunk_id=chunk_id,
+                run_id=run_id,
+            )
+            logger.debug("annotate_chunk_parallel: phase3 dialogue_lengths={} chunk_id={}", dialogue_lengths, chunk_id)
+            annotation.dialogue_lengths = dialogue_lengths
+
     if foreshadowing and validate_foreshadowing_result(foreshadowing, text):
         logger.debug(
-            "annotate_chunk_two_phase_parallel found foreshadowing chunk_id={} type={}",
+            "annotate_chunk_parallel found foreshadowing chunk_id={} type={}",
             chunk_id,
             foreshadowing.foreshadowing_type,
         )
     else:
         foreshadowing = None
 
-    logger.debug("annotate_chunk_two_phase_parallel complete chunk_id={}", chunk_id)
+    logger.debug("annotate_chunk_parallel complete chunk_id={}", chunk_id)
     return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)
 
 
-def annotate_chunk_two_phase_serial(
-    client: "AnnotationClient",
+def annotate_chunk_serial(
+    client: "AnnotationClient | UnifiedModelClient",
     text: str,
     alias_map: Dict[str, str] | None = None,
     chunk_id: int | None = None,
@@ -204,12 +246,12 @@ def annotate_chunk_two_phase_serial(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    cloud_client: "AnnotationClient | None" = None,
+    cloud_client: "AnnotationClient | UnifiedModelClient | None" = None,
     run_id: str | None = None,
     character_appearances: List[dict] | None = None,
 ) -> TwoPhaseAnnotationResult:
     """
-    串行双次调用模式
+    串行模式
 
     创建时间: 2026-03-14
     创建者: TraeAI
@@ -230,10 +272,13 @@ def annotate_chunk_two_phase_serial(
     任务: fix-validate-names-from-character-appearances
     修改内容: 添加 character_appearances 参数传递
     """
-    logger.debug("annotate_chunk_two_phase_serial start chunk_id={}", chunk_id)
+    logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
+
+    annotation_client = _get_annotation_client(client)
+    cloud_annotation_client = _get_annotation_client(cloud_client) if cloud_client else None
 
     annotation = annotate_chunk_phase1(
-        client=client,
+        client=annotation_client,
         text=text,
         alias_map=alias_map,
         chunk_id=chunk_id,
@@ -244,13 +289,13 @@ def annotate_chunk_two_phase_serial(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
-        cloud_client=cloud_client,
+        cloud_client=cloud_annotation_client,
         run_id=run_id,
         character_appearances=character_appearances,
     )
 
     foreshadowing = annotate_chunk_phase2(
-        client=client,
+        client=annotation_client,
         text=text,
         prev_chunk_summary=annotation.chunk_summary,
         chunk_id=chunk_id,
@@ -260,18 +305,18 @@ def annotate_chunk_two_phase_serial(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
-        cloud_client=cloud_client,
+        cloud_client=cloud_annotation_client,
         run_id=run_id,
     )
 
     if foreshadowing and validate_foreshadowing_result(foreshadowing, text):
         logger.debug(
-            "annotate_chunk_two_phase_serial found foreshadowing chunk_id={} type={}",
+            "annotate_chunk_serial found foreshadowing chunk_id={} type={}",
             chunk_id,
             foreshadowing.foreshadowing_type,
         )
     else:
         foreshadowing = None
 
-    logger.debug("annotate_chunk_two_phase_serial complete chunk_id={}", chunk_id)
+    logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)
     return TwoPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing)

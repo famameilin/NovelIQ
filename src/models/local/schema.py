@@ -216,9 +216,14 @@ class ChunkAnnotation(BaseModel):
     修改者: TraeAI
     任务: 迁移数据模型至 Pydantic
     修改内容: 从 dataclass 迁移至 Pydantic BaseModel
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: parallel-three-phase
+    修改内容: 添加 dialogue_lengths 字段支持三阶段并行模式
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=False)
 
     emotional_valence: str
     event_type: str
@@ -232,6 +237,7 @@ class ChunkAnnotation(BaseModel):
     dialogues: List[DialogueSnapshot] = Field(default_factory=list)
     character_appearances: List[CharacterAppearance] = Field(default_factory=list)
     chunk_summary: str = ""
+    dialogue_lengths: Optional[List[int]] = Field(default=None)
 
     def to_dict(self) -> dict:
         return {
@@ -276,4 +282,5 @@ class ChunkAnnotation(BaseModel):
                 for ca in self.character_appearances
             ],
             "chunk_summary": self.chunk_summary,
+            "dialogue_lengths": self.dialogue_lengths,
         }

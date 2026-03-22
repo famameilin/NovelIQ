@@ -132,7 +132,17 @@ def _prepare_chunk_context(
 
     context = ChunkContext()
 
-    if use_context_enhancement and run_id is not None:
+    if not use_context_enhancement:
+        logger.debug(
+            "context enhancement disabled; skipping context for chunk_id={}",
+            chunk_id,
+        )
+    elif not run_id:
+        logger.warning(
+            "context enhancement skipped due to empty run_id for chunk_id={}",
+            chunk_id,
+        )
+    else:
         chunk_repo = ChunkRepository(conn)
         entity_repo = EntityRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)

@@ -50,6 +50,13 @@ class TestParseActiveEntities(unittest.TestCase):
         result = self.parse_func(active_entities)
         self.assertEqual(result, ["贺伯安", "林清婉"])
 
+    def test_parse_plain_line_format(self):
+        active_entities = """【近期活跃角色】
+赵兰英（母亲）：焦虑（1）
+贺铮：受伤；愤怒（2）"""
+        result = self.parse_func(active_entities)
+        self.assertEqual(result, ["赵兰英", "贺铮"])
+
     def test_parse_multiline_with_chinese_colon(self):
         active_entities = """【近期活跃角色】
 - 张三（主角）：行走；平静（0）"""

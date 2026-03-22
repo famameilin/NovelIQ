@@ -332,6 +332,7 @@ def annotate_chunk_phase1(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
+        character_appearances=character_appearances,
     )
 
     return execute_phase1_with_retry(

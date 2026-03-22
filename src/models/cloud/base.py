@@ -8,6 +8,15 @@
 修改时间: 2026-03-16
 修改者: TraeAI
 修改内容: 将 OpenAI SDK 替换为 LiteLLM
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: migrate-litellm-to-openai-sdk
+修改内容:
+1. 移除 LiteLLM 依赖，改用 OpenAI SDK
+2. 移除 extra_body 参数，改用顶级参数
+3. 添加 reasoning_effort 参数支持
+4. 移除 API 密钥硬编码默认值
 """
 
 from __future__ import annotations
@@ -15,54 +24,16 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional, cast
 
-import litellm
 from loguru import logger
+from openai import OpenAI
 
 from src.config import TaskModelConfig, load_task_config
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.parser import extract_thinking_unified
-from src.models.local.litellm_utils import get_model_with_provider
 
 from .schema import CloudAnalysis
 
 TokenUsageCallback = Callable[[str, str, str, int, int, Optional[int], Optional[int]], None]
-
-
-class _LiteLLMCompletionsWrapper:
-    """
-    LiteLLM Completions 包装器
-    兼容 OpenAI SDK 的 chat.completions.create() 接口
-    """
-
-    def __init__(self, config: "TaskModelConfig") -> None:
-        self._config = config
-
-    def create(self, **kwargs) -> Any:
-        """
-        调用 LiteLLM completion API
-
-        LiteLLM 会根据 model 参数自动路由到正确的提供商
-        """
-        return litellm.completion(**kwargs)
-
-
-class _LiteLLMChatWrapper:
-    """LiteLLM Chat API 包装器"""
-
-    def __init__(self, config: "TaskModelConfig") -> None:
-        self._config = config
-        self.completions = _LiteLLMCompletionsWrapper(config)
-
-
-class _LiteLLMClientWrapper:
-    """
-    LiteLLM 客户端包装器
-    兼容 OpenAI SDK 的 client.chat.completions.create() 接口
-    """
-
-    def __init__(self, config: "TaskModelConfig") -> None:
-        self._config = config
-        self.chat = _LiteLLMChatWrapper(config)
 
 
 class CloudModelClient:
@@ -100,6 +71,11 @@ class BaseCloudModelClient(CloudModelClient):
     云端模型客户端基类
 
     提供公共的配置管理、客户端初始化、API调用等功能。
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 使用 OpenAI SDK 替代 LiteLLM
     """
 
     def __init__(
@@ -116,11 +92,11 @@ class BaseCloudModelClient(CloudModelClient):
         if client is not None:
             self._client = client
         else:
-            self._client = _LiteLLMClientWrapper(self._config)
-            if self._config.api_key:
-                litellm.api_key = self._config.api_key
-            if self._config.base_url:
-                litellm.api_base = self._config.base_url
+            self._client = OpenAI(
+                base_url=self._config.base_url,
+                api_key=self._config.api_key,
+                timeout=self._config.timeout_s,
+            )
         self._analysis_logger = analysis_logger
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
@@ -134,34 +110,19 @@ class BaseCloudModelClient(CloudModelClient):
         """
         构建请求参数
 
-        修改时间: 2026-03-16
+        修改时间: 2026-03-21
         修改者: TraeAI
-        任务: 修复thinking参数传递方式
-        修改内容: 将thinking参数作为顶级参数传递，而非放在extra_body中
-
-        修改时间: 2026-03-17
-        修改者: TraeAI
-        任务: 修复 LiteLLM 模型名称格式
-        修改内容: 使用 get_model_with_provider 自动添加 provider 前缀
+        任务: migrate-litellm-to-openai-sdk
+        修改内容: 使用 OpenAI SDK，移除 extra_body，添加 reasoning_effort 支持
         """
-        model_name = get_model_with_provider(self._config.model, self._config)
         request_params: dict[str, Any] = {
-            "model": model_name,
+            "model": self._config.model,
             "messages": cast(Any, messages),
         }
 
         thinking_enabled = self._config.thinking_enabled
         if thinking_enabled:
-            model_name = (self._config.model or "").lower()
-            if "claude" in model_name or "anthropic" in model_name:
-                budget = self._config.thinking_budget_tokens
-                if budget:
-                    request_params["thinking"] = {"type": "enabled", "budget_tokens": budget}
-                else:
-                    request_params["thinking"] = {"type": "enabled"}
-            elif "deepseek" in model_name:
-                request_params["thinking"] = {"type": "enabled"}
-            # 其他模型（如 GLM-5）不支持 reasoning_effort，不添加该参数
+            request_params["reasoning_effort"] = "medium"
 
         return request_params
 

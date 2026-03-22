@@ -19,6 +19,16 @@
 5. 添加 _log_model_call 统一日志方法
 6. 添加 _parse_structured_response 方法
 
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: migrate-litellm-to-openai-sdk
+修改内容:
+1. 移除 LiteLLM 依赖，改用 OpenAI SDK
+2. 移除 extra_body 参数，改用顶级参数
+3. 移除 _build_extra_body 方法
+4. 添加 reasoning_effort 参数支持
+5. 更新异常处理使用 OpenAI SDK 异常类型
+
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
@@ -26,75 +36,30 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Optional, Type, TypeVar
 
-import litellm
-from litellm.exceptions import APIConnectionError, Timeout, BadRequestError
 from loguru import logger
+from openai import OpenAI, APIConnectionError, APITimeoutError, BadRequestError
 from pydantic import BaseModel
 
 from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
-from src.models.local.litellm_utils import get_model_with_provider
 
 T = TypeVar("T", bound=BaseModel)
 
+from typing import NamedTuple
+
+
+class TokenUsage(NamedTuple):
+    """Token使用量记录"""
+    novel_id: str
+    task_type: str
+    call_type: str
+    prompt_tokens: int
+    total_tokens: int
+    completion_tokens: int | None
+    chunk_id: int | None
+
+
 TokenUsageCallback = Callable[[str, str, str, int, int, Optional[int], Optional[int]], None]
-
-
-class _LiteLLMCompletionsWrapper:
-    """
-    LiteLLM Completions 包装器
-    提供与 OpenAI SDK 类似的 chat.completions.create() 接口
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容:
-    1. 支持 provider 前缀自动添加
-    2. 使用共享的 get_model_with_provider 函数
-    """
-
-    def __init__(self, config: "TaskModelConfig") -> None:
-        self._config = config
-
-    def create(self, **kwargs) -> Any:
-        """
-        调用 LiteLLM completion API
-
-        LiteLLM 会根据 model 参数自动路由到正确的提供商
-
-        修改时间: 2026-03-16
-        修改者: TraeAI
-        任务: 修复测试耗时异常
-        修改内容: 添加 num_retries 参数支持，默认禁用 LiteLLM 内部重试
-        """
-        # 处理 model 参数，添加 provider 前缀
-        model = kwargs.get("model")
-        if model:
-            kwargs["model"] = get_model_with_provider(model, self._config)
-
-        # 如果没有显式传递 num_retries，则禁用 LiteLLM 内部重试
-        if "num_retries" not in kwargs:
-            kwargs["num_retries"] = 0
-
-        return litellm.completion(api_base=self._config.base_url, api_key=self._config.api_key, **kwargs)
-
-
-class _LiteLLMChatWrapper:
-    """LiteLLM Chat API 包装器"""
-
-    def __init__(self, config: "TaskModelConfig") -> None:
-        self._config = config
-        self.completions = _LiteLLMCompletionsWrapper(config)
-
-
-class _LiteLLMClientWrapper:
-    """
-    LiteLLM 客户端包装器
-    提供与 OpenAI SDK 类似的 client.chat.completions.create() 接口
-    """
-
-    def __init__(self, config: "TaskModelConfig") -> None:
-        self._config = config
-        self.chat = _LiteLLMChatWrapper(config)
 
 
 class BaseModelClient:
@@ -107,6 +72,11 @@ class BaseModelClient:
     修改者: TraeAI
     任务: 支持传入 session 用于保存模型交互记录
     修改内容: 添加 _session 属性，用于在同一个 session 中保存模型交互记录
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 使用 OpenAI SDK 替代 LiteLLM
     """
 
     def __init__(
@@ -126,15 +96,15 @@ class BaseModelClient:
         if client is not None:
             self._client = client
         else:
-            self._client = _LiteLLMClientWrapper(self._config)
-            if self._config.api_key:
-                litellm.api_key = self._config.api_key
-            if self._config.base_url:
-                litellm.api_base = self._config.base_url
+            self._client = OpenAI(
+                base_url=self._config.base_url,
+                api_key=self._config.api_key,
+                timeout=self._config.timeout_s,
+            )
         self._analysis_logger = analysis_logger
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
-        self._session = session  # 用于保存模型交互记录的 session
+        self._session = session
         logger.debug(
             "model client initialized: task_type={} base_url={} model={} timeout={}s",
             task_type,
@@ -153,7 +123,6 @@ class BaseModelClient:
         修改内容: 将 _is_cloud_api 改为公共方法 is_cloud_api
         """
         base_url = self._config.base_url or ""
-        # 空字符串或未配置视为本地API
         if not base_url:
             return False
         is_cloud = not base_url.startswith("http://127.0.0.1") and not base_url.startswith("http://localhost")
@@ -168,46 +137,7 @@ class BaseModelClient:
         """向后兼容的内部方法，委托给 is_cloud_api"""
         return self.is_cloud_api()
 
-    def _build_extra_body(self, enable_thinking: bool) -> dict[str, Any]:
-        """
-        构建 extra_body 参数，统一处理所有参数（包括 thinking）
-
-        修改时间: 2026-03-21
-        修改者: TraeAI
-        任务: 重写 _build_extra_body，依据 provider 判断该添加什么参数
-        修改内容:
-        1. 所有参数统一通过 extra_body 传递
-        2. 删除 _get_thinking_params 方法
-        3. 未识别的 provider 使用 reasoning_effort 参数
-        """
-        extra_body: dict[str, Any] = {}
-        provider = (self._config.provider or "").lower()
-
-        if provider in ("llamacpp", "ollama"):
-            extra_body["top_k"] = self._config.top_k
-
-        if provider == "llamacpp":
-            extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
-        elif provider == "ollama":
-            extra_body["think"] = enable_thinking
-        elif provider == "deepseek":
-            extra_body["enable_thinking"] = enable_thinking
-        elif provider == "claude":
-            if enable_thinking:
-                budget = self._config.thinking_budget_tokens
-                if budget:
-                    extra_body["thinking"] = {"type": "enabled", "budget_tokens": budget}
-                else:
-                    extra_body["thinking"] = {"type": "enabled"}
-            else:
-                extra_body["thinking"] = {"type": "disabled"}
-        else:
-            if enable_thinking:
-                extra_body["reasoning_effort"] = "medium"
-
-        return extra_body
-
-    def _handle_api_timeout(self, error: Timeout) -> None:
+    def _handle_api_timeout(self, error: APITimeoutError) -> None:
         """处理API超时错误"""
         logger.error(
             "timeout error: base_url={} timeout={}s error={}",
@@ -230,11 +160,11 @@ class BaseModelClient:
         """处理API状态错误"""
         logger.error(
             "api status error: status={} base_url={} error={}",
-            error.status_code,
+            error.status_code if hasattr(error, "status_code") else "unknown",
             self._config.base_url,
             str(error),
         )
-        raise RuntimeError(f"模型服务错误 (状态码 {error.status_code}): {error.message}") from error
+        raise RuntimeError(f"模型服务错误: {error}") from error
 
     def _record_token_usage(
         self,
@@ -297,7 +227,7 @@ class BaseModelClient:
                 "name": response_model.__name__,
                 "schema": schema,
                 "strict": True,
-            }
+            },
         }
 
     def _call_api(
@@ -316,26 +246,31 @@ class BaseModelClient:
 
         修改时间: 2026-03-21
         修改者: TraeAI
-        任务: 统一参数处理
-        修改内容: 移除 _get_thinking_params 调用，所有参数通过 _build_extra_body 处理
+        任务: migrate-litellm-to-openai-sdk
+        修改内容: 使用 OpenAI SDK，移除 extra_body，添加 reasoning_effort 支持
+
+        修改时间: 2026-03-21
+        修改者: TraeAI
+        任务: migrate-litellm-to-openai-sdk - 修复 Ollama think 参数
+        修改内容: Ollama 使用 think 参数而非 reasoning_effort，需要通过 extra_body 传递
         """
         if not self._config.model:
             raise ValueError("model is required")
 
-        model_name = get_model_with_provider(self._config.model, self._config)
-        extra_body = self._build_extra_body(enable_thinking)
-
-        if self._client is None:
-            raise ValueError("client is required")
-
         request_params: dict[str, Any] = {
-            "model": model_name,
+            "model": self._config.model,
             "messages": messages,
             "temperature": self._config.temperature,
             "top_p": self._config.top_p,
-            "presence_penalty": self._config.presence_penalty,
-            "extra_body": extra_body,
         }
+
+        is_cloud = self.is_cloud_api()
+        if not is_cloud:
+            request_params["extra_body"] = {"think": enable_thinking}
+        elif enable_thinking:
+            request_params["reasoning_effort"] = "medium"
+        else:
+            request_params["reasoning_effort"] = "none"
 
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
@@ -355,9 +290,6 @@ class BaseModelClient:
         任务: code-quality-refactor - 提取API调用基类
         说明: 统一的流式API调用方法，支持实时控制台输出（仅云端API）
         """
-        if self._client is None:
-            raise ValueError("client is required")
-
         request_params["stream"] = True
 
         logger.debug("Using streaming mode for API call")
@@ -366,7 +298,6 @@ class BaseModelClient:
         reasoning_chunks: list[str] = []
         chunk_count = 0
 
-        # 只在云端API时输出到控制台
         if is_cloud:
             print(f"[Stream] Starting API call with model={request_params.get('model', 'unknown')}", flush=True)
 
@@ -376,12 +307,10 @@ class BaseModelClient:
                 delta = chunk.choices[0].delta
                 if delta.content:
                     content_chunks.append(delta.content)
-                    # 只在云端API时实时输出到控制台
                     if is_cloud:
                         print(delta.content, end="", flush=True)
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                     reasoning_chunks.append(delta.reasoning_content)
-                    # 只在云端API时实时输出 reasoning 到控制台（使用不同颜色）
                     if is_cloud:
                         print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)
 
@@ -465,7 +394,6 @@ class BaseModelClient:
         if not content:
             raise ValueError("Empty content in response")
 
-        # 确保 content 是字符串类型
         if not isinstance(content, str):
             raise ValueError(f"Content must be a string, got {type(content).__name__}")
 
