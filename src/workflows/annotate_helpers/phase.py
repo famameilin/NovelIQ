@@ -26,7 +26,7 @@ from src.models.local.unified_client import UnifiedModelClient
 if TYPE_CHECKING:
     import networkx as nx
     from src.rag import RAGRetriever
-    from src.models.local.annotation import TwoPhaseAnnotationResult
+    from src.models.local.annotation import MultiPhaseAnnotationResult
 
 
 @dataclass
@@ -67,7 +67,7 @@ def _annotate_chunk(
     cloud_client: UnifiedModelClient | None = None,
     run_id: str | None = None,
     character_appearances: list[dict] | None = None,
-) -> "TwoPhaseAnnotationResult":
+) -> "MultiPhaseAnnotationResult":
     """
     Chunk 标注函数
 
@@ -303,20 +303,6 @@ def _process_single_chunk(
         character_appearances=ctx.character_appearances,
     )
     
-    dialogue_lengths = None
-    if annotation_result.annotation.dialogues:
-        from src.models.local.annotation import compute_dialogue_lengths_with_llm
-        speakers = [d.speaker for d in annotation_result.annotation.dialogues]
-        logger.info(f"phase3: chunk_id={chunk_id} speakers={speakers}")
-        dialogue_lengths = compute_dialogue_lengths_with_llm(
-            phase_result.annotation_client,
-            chunk_text,
-            speakers,
-            chunk_id=chunk_id,
-            run_id=run_id,
-        )
-        logger.info(f"phase3: chunk_id={chunk_id} dialogue_lengths={dialogue_lengths}")
-    
     _store_annotation_results(
         conn,
         chunk_id,
@@ -326,7 +312,7 @@ def _process_single_chunk(
         run_id=run_id,
         foreshadowing=annotation_result.foreshadowing,
         alias_map=alias_map if alias_map else None,
-        dialogue_lengths=dialogue_lengths,
+        dialogue_lengths=annotation_result.annotation.dialogue_lengths if hasattr(annotation_result.annotation, 'dialogue_lengths') else None,
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 

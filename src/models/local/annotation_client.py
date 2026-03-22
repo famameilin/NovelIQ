@@ -23,7 +23,7 @@ from src.config.analysis_logger import AnalysisLogger
 
 from .annotation import (
     AnnotationContext,
-    TwoPhaseAnnotationResult,
+    MultiPhaseAnnotationResult,
     log_annotation_start as _log_annotation_start_impl,
     log_prompt_response,
     parse_annotation as _parse_annotation_impl,
@@ -32,7 +32,7 @@ from .annotation import (
 )
 from pydantic import BaseModel
 
-from .annotation.two_phase import annotate_chunk_two_phase as _annotate_chunk_two_phase_impl
+from .annotation.multi_phase import annotate_chunk_multi_phase as _annotate_chunk_multi_phase_impl
 from .base import BaseModelClient, TokenUsageCallback
 from .schema import ChunkAnnotation
 
@@ -109,7 +109,7 @@ class AnnotationClient(BaseModelClient):
         cloud_client: "AnnotationClient | None" = None,
         run_id: str | None = None,
         character_appearances: List[dict] | None = None,
-    ) -> TwoPhaseAnnotationResult:
+    ) -> MultiPhaseAnnotationResult:
         """
         对文本块进行语义标注
 
@@ -143,7 +143,7 @@ class AnnotationClient(BaseModelClient):
             character_appearances=character_appearances,
         )
 
-        return _annotate_chunk_two_phase_impl(
+        return _annotate_chunk_multi_phase_impl(
                 client=self,
                 text=ctx.text,
                 prev_summary=ctx.prev_summary,
@@ -218,6 +218,8 @@ class AnnotationClient(BaseModelClient):
         if self._client is None:
             raise ValueError("client is required")
 
+        is_cloud = self._is_cloud_api()
+
         request_params: dict[str, Any] = {
             "model": self._config.model,
             "messages": messages,
@@ -233,7 +235,6 @@ class AnnotationClient(BaseModelClient):
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
 
-        is_cloud = self._is_cloud_api()
         response = self._call_api_stream(request_params, is_cloud=is_cloud)
 
         if response_model is not None:
