@@ -96,13 +96,14 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_annotation_client._is_cloud_api.return_value = False
         mock_annotation_client._build_json_schema.return_value = {}
         mock_annotation_client._call_api_stream.return_value = MagicMock()
-        mock_annotation_client._parse_structured_response.return_value = MagicMock(
+        mock_response = MagicMock(
             dialogues=[
                 MagicMock(index=1, speaker="张三"),
                 MagicMock(index=2, speaker="李四"),
             ],
             model_dump=MagicMock(return_value={}),
         )
+        mock_annotation_client._call_annotation_api.return_value = (mock_response, "{}")
         mock_client._annotation_client = mock_annotation_client
 
         dialogues = [(1, "你好"), (2, "你好啊")]

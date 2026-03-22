@@ -25,7 +25,7 @@ from src.models.local.annotation import (
 )
 from src.models.local.annotation.phase1 import annotate_chunk_phase1
 from src.models.local.annotation.phase2 import annotate_chunk_phase2
-from src.models.local.annotation.two_phase import annotate_chunk_two_phase
+from src.models.local.annotation.multi_phase import annotate_chunk_multi_phase
 from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
 
 
@@ -382,16 +382,15 @@ class TestTwoPhaseIntegration(unittest.TestCase):
     修改内容: 更新测试以调用子模块函数
     """
 
-    @patch('src.models.local.annotation.two_phase.settings')
+    @patch('src.models.local.annotation.multi_phase.settings')
     def test_two_phase_serial_passes_cloud_client(self, mock_settings):
         """串行模式传递 cloud_client 参数"""
-        mock_settings.analysis.two_phase_annotation.parallel = False
-        mock_settings.analysis.two_phase_annotation.enabled = True
+        mock_settings.analysis.multi_phase_annotation.parallel = False
 
         client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        result = annotate_chunk_two_phase(
+        result = annotate_chunk_multi_phase(
             client=client,
             text="测试文本",
             chunk_id=1,
@@ -400,16 +399,15 @@ class TestTwoPhaseIntegration(unittest.TestCase):
 
         self.assertIsInstance(result.annotation, ChunkAnnotation)
 
-    @patch('src.models.local.annotation.two_phase.settings')
+    @patch('src.models.local.annotation.multi_phase.settings')
     def test_two_phase_parallel_passes_cloud_client(self, mock_settings):
         """并行模式传递 cloud_client 参数"""
-        mock_settings.analysis.two_phase_annotation.parallel = True
-        mock_settings.analysis.two_phase_annotation.enabled = True
+        mock_settings.analysis.multi_phase_annotation.parallel = True
 
         client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        result = annotate_chunk_two_phase(
+        result = annotate_chunk_multi_phase(
             client=client,
             text="测试文本",
             chunk_id=1,

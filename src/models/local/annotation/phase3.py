@@ -34,14 +34,14 @@ if TYPE_CHECKING:
     from src.models.local.unified_client import UnifiedModelClient
 
 
-def _get_annotation_client(client: "UnifiedModelClient | AnnotationClient") -> "AnnotationClient":
+def _get_annotation_client(client: UnifiedModelClient | AnnotationClient) -> AnnotationClient:
     """从 UnifiedModelClient 或直接返回 AnnotationClient"""
     if hasattr(client, "_annotation_client"):
         return client._annotation_client
     return client
 
 
-def _get_unified_client(client: "UnifiedModelClient | AnnotationClient") -> "UnifiedModelClient | AnnotationClient":
+def _get_unified_client(client: UnifiedModelClient | AnnotationClient) -> UnifiedModelClient | AnnotationClient:
     """如果输入是 AnnotationClient，直接返回；如果是 UnifiedModelClient 也返回自身"""
     return client
 
@@ -96,7 +96,7 @@ def extract_dialogues_from_text(text: str) -> list[tuple[int, str]]:
 
 
 def _save_interaction(
-    client: "UnifiedModelClient | AnnotationClient",
+    client: UnifiedModelClient | AnnotationClient,
     run_id: str | None,
     chunk_id: int | None,
     phase: str,
@@ -144,10 +144,10 @@ def _save_interaction(
 
 
 def attribute_dialogues_with_llm(
-    client: "UnifiedModelClient | AnnotationClient",
+    client: UnifiedModelClient | AnnotationClient,
     chunk_text: str,
     dialogues: list[tuple[int, str]],
-    known_characters: list[str],
+    known_characters: list[str] | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
 ) -> dict[int, str]:
@@ -169,11 +169,16 @@ def attribute_dialogues_with_llm(
     任务: refactor-phase3-to-annotation-layer
     修改内容: 迁移到 models/local/annotation/phase3.py，添加 chunk_id 和 run_id 参数支持交互记录保存
 
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: fix-phase3-speaker-alias-mapping
+    修改内容: known_characters 改为可选参数，支持 None 让 LLM 自由判断说话者
+
     Args:
         client: 统一模型客户端
         chunk_text: chunk 原文
         dialogues: 对话列表 [(index, content), ...]
-        known_characters: 已知人物列表
+        known_characters: 已知人物列表，None 时 LLM 自由判断
         chunk_id: chunk ID（用于交互记录）
         run_id: 运行 ID（用于交互记录）
 
@@ -210,18 +215,15 @@ def attribute_dialogues_with_llm(
         if not config.model:
             raise ValueError("model is required")
 
-        request_params: dict = {
-            "model": config.model,
-            "messages": messages,
-            "temperature": config.temperature,
-            "top_p": config.top_p,
-            "response_format": annotation_client._build_json_schema(DialogueAttributionResult),
-        }
-
         is_cloud = annotation_client._is_cloud_api()
-        response = annotation_client._call_api_stream(request_params, is_cloud=is_cloud)
+        enable_thinking = config.thinking_enabled
 
-        parsed = annotation_client._parse_structured_response(response, DialogueAttributionResult)
+        parsed, response = annotation_client._call_annotation_api(
+            messages=messages,
+            enable_thinking=enable_thinking,
+            chunk_id=chunk_id,
+            response_model=DialogueAttributionResult,
+        )
 
         duration_ms = int((time.time() - start_time) * 1000)
 
@@ -250,9 +252,10 @@ def attribute_dialogues_with_llm(
 
 
 def compute_dialogue_lengths_with_llm(
-    client: "UnifiedModelClient | AnnotationClient",
+    client: UnifiedModelClient | AnnotationClient,
     text: str,
     speakers: list[str],
+    alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
 ) -> list[int]:
@@ -274,10 +277,16 @@ def compute_dialogue_lengths_with_llm(
     任务: fix-dialogue-extraction-quotes
     修改内容: 添加调试日志
 
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: fix-phase3-speaker-alias-mapping
+    修改内容: 添加 alias_map 参数，LLM 自由判断说话者并通过 alias_map 映射到规范名
+
     Args:
         client: 统一模型客户端
         text: chunk 原文
-        speakers: 说话者列表
+        speakers: 说话者列表（用于返回结果顺序）
+        alias_map: 别名到规范名的映射，None 时不进行映射
         chunk_id: chunk ID（用于交互记录）
         run_id: 运行 ID（用于交互记录）
 
@@ -299,14 +308,15 @@ def compute_dialogue_lengths_with_llm(
     if not dialogues:
         return [0] * len(speakers)
 
-    attribution = attribute_dialogues_with_llm(client, text, dialogues, speakers, chunk_id=chunk_id, run_id=run_id)
+    attribution = attribute_dialogues_with_llm(client, text, dialogues, known_characters=None, chunk_id=chunk_id, run_id=run_id)
     logger.info(f"compute_dialogue_lengths_with_llm: attribution={attribution}")
 
-    speaker_lengths = {s: 0 for s in speakers}
+    speaker_lengths: dict[str, int] = {}
     for idx, content in dialogues:
-        speaker = attribution.get(idx, "")
-        if speaker in speaker_lengths:
-            speaker_lengths[speaker] += len(content)
+        raw_speaker = attribution.get(idx, "")
+        if raw_speaker and raw_speaker != "未知":
+            canonical = alias_map.get(raw_speaker, raw_speaker) if alias_map else raw_speaker
+            speaker_lengths[canonical] = speaker_lengths.get(canonical, 0) + len(content)
 
     result = [speaker_lengths.get(s, 0) for s in speakers]
     logger.info(f"compute_dialogue_lengths_with_llm: result={result}")
