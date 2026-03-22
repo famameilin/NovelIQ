@@ -33,15 +33,19 @@ from src.models.local.annotation.api_call import (
 from src.models.local.annotation.context import (
     PHASE_MAX_RETRIES,
     AnnotationContext,
+    MultiPhaseAnnotationResult,
     NameValidationMaxRetriesExceededError,
     Phase1MaxRetriesExceededError,
     Phase2MaxRetriesExceededError,
-    TwoPhaseAnnotationResult,
 )
-
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
     _build_foreshadowing_messages,
+)
+from src.models.local.annotation.phase3 import (
+    attribute_dialogues_with_llm,
+    compute_dialogue_lengths_with_llm,
+    extract_dialogues_from_text,
 )
 from src.models.local.annotation.phases import (
     build_phase1_messages,
@@ -52,12 +56,6 @@ from src.models.local.annotation.response import (
     log_annotation_result,
     log_prompt_response,
     process_annotation_response,
-)
-
-from src.models.local.annotation.phase3 import (
-    attribute_dialogues_with_llm,
-    compute_dialogue_lengths_with_llm,
-    extract_dialogues_from_text,
 )
 from src.models.local.annotation.validation import (
     retry_with_validation,
@@ -70,7 +68,7 @@ __all__ = [
     "NameValidationMaxRetriesExceededError",
     "Phase1MaxRetriesExceededError",
     "Phase2MaxRetriesExceededError",
-    "TwoPhaseAnnotationResult",
+    "MultiPhaseAnnotationResult",
     "_build_annotation_messages_v2",
     "_build_foreshadowing_messages",
     "build_phase1_messages",

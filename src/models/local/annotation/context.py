@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.models.local.annotation_client import AnnotationClient
@@ -38,7 +38,7 @@ class AnnotationContext:
 
     text: str
     prev_summary: str | None = None
-    alias_map: Dict[str, str] | None = None
+    alias_map: dict[str, str] | None = None
     chunk_id: int | None = None
     global_context: str | None = None
     prev_chunk_text: str | None = None
@@ -50,9 +50,9 @@ class AnnotationContext:
     main_characters: str | None = None
     position_pct: float | None = None
     chapter_id: int | None = None
-    cloud_client: "AnnotationClient | None" = None
+    cloud_client: AnnotationClient | None = None
     run_id: str | None = None
-    character_appearances: List[dict] | None = None
+    character_appearances: list[dict] | None = None
 
 
 class Phase1MaxRetriesExceededError(Exception):
@@ -112,17 +112,22 @@ class DialogueAttributionError(Exception):
 
 
 @dataclass
-class TwoPhaseAnnotationResult:
+class MultiPhaseAnnotationResult:
     """
-    双阶段标注结果
+    多阶段标注结果
 
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: rename-two-phase-to-multi-phase
+    修改内容: 重命名为 MultiPhaseAnnotationResult 以支持多阶段架构
     """
 
-    annotation: "ChunkAnnotation"
-    foreshadowing: "ForeshadowingResult | None" = None
+    annotation: ChunkAnnotation
+    foreshadowing: ForeshadowingResult | None = None
 
 
 PHASE_MAX_RETRIES = 3

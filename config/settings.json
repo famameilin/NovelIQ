@@ -6,10 +6,12 @@
       "api_key": null,
       "timeout_s": null,
       "max_retries": 2,
-      "temperature": 0.0,
+      "temperature": 0.7,
       "top_p": 0.8,
       "top_k": 20,
-      "presence_penalty": 1.5
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
     },
     "cloud_annotation": {
       "base_url": null,
@@ -17,10 +19,12 @@
       "api_key": null,
       "timeout_s": null,
       "max_retries": 2,
-      "temperature": 1.0,
-      "top_p": 0.95,
+      "temperature": 0.7,
+      "top_p": 0.8,
       "top_k": 20,
-      "presence_penalty": 1.5
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
     },
     "incremental_disambig": {
       "base_url": null,
@@ -166,8 +170,7 @@
     "sentence_preview_max_chars": 100,
     "sentence_pool_max_chars": 80,
     "cloud_annotation_fallback_enabled": true,
-    "two_phase_annotation": {
-      "enabled": true,
+    "multi_phase_annotation": {
       "parallel": false
     },
     "progress": {
@@ -279,7 +282,7 @@
     ],
     "local_annotation_user_template": "<全局背景>\n书名：{novel_title}\n核心人物：{main_characters}\n当前位置：全书第 {position_pct}%（第 {chapter_id} 章）\n</全局背景>\n\n<已知别名表>\n{alias_map}\n</已知别名表>\n\n<活跃实体状态>\n{active_entities}\n</活跃实体状态>\n\n<角色出场线索>\n{character_appearances}\n</角色出场线索>\n\n<Previous_Chunk>\n{prev_chunk_text}\n</Previous_Chunk>\n\n<Current_Chunk>\n{chunk_text}\n</Current_Chunk>\n\n<Next_Chunk>\n{next_chunk_text}\n</Next_Chunk>",
     "foreshadowing_system": "你是专业的叙事结构分析助手，专注于识别小说文本中的伏笔（Foreshadowing）元素。\n\n## 任务说明\n分析当前文本块，识别其中可能存在的伏笔线索。伏笔是指作者在前文暗示后文情节发展的写作手法。\n\n## 输出格式\n请严格按以下JSON格式输出：\n{\n  \"has_foreshadowing\": true/false,\n  \"confidence\": \"high/medium/low\",\n  \"foreshadowing_type\": \"物件/对话/场景/人物行为/其他\" 或 null,\n  \"anchor_text\": \"具体的伏笔文本片段\",\n  \"anchor_reason\": \"为什么认为这是伏笔的解释\"\n}\n\n## 判断标准\n- high: 有明显的线索暗示后文发展\n- medium: 有一定暗示性，但不明确\n- low: 几乎没有伏笔特征\n\n如果没有发现明显伏笔，has_foreshadowing 为 false，confidence 为 low。",
-    "foreshadowing_user_template": "<小说信息>\n书名：{novel_title}\n核心人物：{main_characters}\n当前位置：全书第 {position_pct}%（第 {chapter_id} 章）\n</小说信息>\n\n<前文摘要>\n{prev_chunk_summary}\n</前文摘要>\n\n<前文片段>\n{prev_chunk_text}\n</前文片段>\n\n<当前文本>\n{chunk_text}\n</当前文本>\n\n<后文片段>\n{next_chunk_text}\n</后文片段>\n\n请分析<当前文本>中是否存在伏笔元素，并按指定JSON格式输出结果。",
+    "foreshadowing_user_template": "<小说信息>\n书名：{novel_title}\n核心人物：{main_characters}\n当前位置：全书第 {position_pct}%（第 {chapter_id} 章）\n</小说信息>\n\n<前文片段>\n{prev_chunk_text}\n</前文片段>\n\n<当前文本>\n{chunk_text}\n</当前文本>\n\n<后文片段>\n{next_chunk_text}\n</后文片段>\n\n请分析<当前文本>中是否存在伏笔元素，并按指定JSON格式输出结果。",
     "foreshadowing_examples": "<示例1>\n输入：\"那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看。\"\n输出：{\n  \"has_foreshadowing\": true,\n  \"confidence\": \"medium\",\n  \"foreshadowing_type\": \"物件\",\n  \"anchor_text\": \"那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看\",\n  \"anchor_reason\": \"玉佩的诡异红光和'盯着看'的感觉暗示这件物品不简单，可能在后文引发超自然事件或揭示隐藏秘密\"\n}\n\n<示例2>\n输入：\"今天天气真好，适合出去走走。\"\n输出：{\n  \"has_foreshadowing\": false,\n  \"confidence\": \"low\",\n  \"foreshadowing_type\": null,\n  \"anchor_text\": \"\",\n  \"anchor_reason\": \"这是一句普通的日常对话，没有暗示后文情节发展的线索\"\n}",
     "dialogue_attribution_system": "你是一个对话归属判断助手。根据文本上下文，判断每段对话的说话者。\n\n【规则】\n1. 对话内容必须与原文完全一致\n2. 说话者必须是文本中出现的人物\n3. 如果无法确定，输出 \"未知\"\n\n【输出格式】\n{\n  \"dialogues\": [\n    {\"index\": 1, \"speaker\": \"说话者\"},\n    ...\n  ]\n}",
     "dialogue_attribution_user_template": "请判断以下对话的说话者：\n\n【文本】\n{chunk_text}\n\n【对话列表】\n{dialogue_list}\n\n【已知人物】\n{known_characters}\n\n请输出 JSON 格式结果。"

@@ -35,19 +35,19 @@ from src.workflows.annotate import run_annotate
 from src.chunking.chunker import Chunk
 from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.schema import ChunkAnnotation, CharacterSnapshot, RelationChangeSnapshot, DialogueSnapshot
-from src.models.local.annotation import TwoPhaseAnnotationResult
+from src.models.local.annotation import MultiPhaseAnnotationResult
 from src.models.local.disambiguation import ExtendedDisambigResult
 
 
-def create_mock_annotation() -> TwoPhaseAnnotationResult:
+def create_mock_annotation() -> MultiPhaseAnnotationResult:
     """
-    创建模拟的 TwoPhaseAnnotationResult
+    创建模拟的 MultiPhaseAnnotationResult
 
     修改时间: 2026-03-18
     修改者: TraeAI
-    任务: code-quality-refactor - 修复测试以适应 TwoPhaseAnnotationResult 返回类型
+    任务: code-quality-refactor - 修复测试以适应 MultiPhaseAnnotationResult 返回类型
     """
-    return TwoPhaseAnnotationResult(
+    return MultiPhaseAnnotationResult(
         annotation=ChunkAnnotation(
             emotional_valence="neutral",
             event_type="铺垫",
