@@ -58,9 +58,9 @@ class ProgressSettings:
 
 
 @dataclass
-class TwoPhaseAnnotationSettings:
+class MultiPhaseAnnotationSettings:
     """
-    双次调用标注配置
+    多阶段标注配置
 
     创建时间: 2026-03-14
     创建者: TraeAI
@@ -70,6 +70,11 @@ class TwoPhaseAnnotationSettings:
     修改者: TraeAI
     任务: 移除单次调用模式，仅保留双次调用
     修改内容: 移除 enabled 字段，保留 parallel 字段控制并行/串行执行模式
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: rename-two-phase-to-multi-phase
+    修改内容: 重命名为 MultiPhaseAnnotationSettings
     """
 
     parallel: bool = False
@@ -83,7 +88,7 @@ class AnalysisSettings:
     修改时间: 2026-03-14
     修改者: TraeAI
     修改内容: 添加双次调用标注配置
-    - two_phase_annotation: 双次调用标注配置
+    - multi_phase_annotation: 多阶段标注配置
 
     修改时间: 2026-03-12
     修改者: TraeAI
@@ -103,7 +108,7 @@ class AnalysisSettings:
     sentence_pool_max_chars: int = 80
     cloud_annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
-    two_phase_annotation: TwoPhaseAnnotationSettings = field(default_factory=TwoPhaseAnnotationSettings)
+    multi_phase_annotation: MultiPhaseAnnotationSettings = field(default_factory=MultiPhaseAnnotationSettings)
     valid_hierarchical_relation_types: List[str] = field(
         default_factory=lambda: ["belongs_to", "member_of", "leader_of", "affiliated_with"]
     )
@@ -251,9 +256,9 @@ def _parse_progress_settings(data: dict[str, Any] | None) -> ProgressSettings:
     )
 
 
-def _parse_two_phase_annotation_settings(data: dict[str, Any] | None) -> TwoPhaseAnnotationSettings:
+def _parse_multi_phase_annotation_settings(data: dict[str, Any] | None) -> MultiPhaseAnnotationSettings:
     """
-    解析双次调用标注配置
+    解析多阶段标注配置
 
     创建时间: 2026-03-14
     创建者: TraeAI
@@ -263,10 +268,15 @@ def _parse_two_phase_annotation_settings(data: dict[str, Any] | None) -> TwoPhas
     修改者: TraeAI
     任务: 移除单次调用模式，仅保留双次调用
     修改内容: 删除 enabled 字段解析
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: rename-two-phase-to-multi-phase
+    修改内容: 重命名为 _parse_multi_phase_annotation_settings
     """
     if not data:
-        return TwoPhaseAnnotationSettings()
-    return TwoPhaseAnnotationSettings(
+        return MultiPhaseAnnotationSettings()
+    return MultiPhaseAnnotationSettings(
         parallel=data.get("parallel", False),
     )
 
@@ -297,7 +307,7 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         sentence_pool_max_chars=data.get("sentence_pool_max_chars", 80),
         cloud_annotation_fallback_enabled=data.get("cloud_annotation_fallback_enabled", True),
         progress=_parse_progress_settings(data.get("progress")),
-        two_phase_annotation=_parse_two_phase_annotation_settings(data.get("two_phase_annotation")),
+        multi_phase_annotation=_parse_multi_phase_annotation_settings(data.get("multi_phase_annotation")),
         valid_hierarchical_relation_types=data.get(
             "valid_hierarchical_relation_types", ["belongs_to", "member_of", "leader_of", "affiliated_with"]
         ),

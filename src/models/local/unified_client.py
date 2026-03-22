@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 
-from .annotation_client import AnnotationClient, TwoPhaseAnnotationResult
+from .annotation_client import AnnotationClient, MultiPhaseAnnotationResult
 from .base import TokenUsageCallback
 from .disambiguation import ExtendedDisambigResult
 from .disambiguation_client import DisambiguationClient
@@ -161,7 +161,7 @@ class UnifiedModelClient:
         cloud_client: "UnifiedModelClient | None" = None,
         run_id: str | None = None,
         character_appearances: List[dict] | None = None,
-    ) -> "TwoPhaseAnnotationResult":
+    ) -> "MultiPhaseAnnotationResult":
         """
         对文本块进行语义标注
 
