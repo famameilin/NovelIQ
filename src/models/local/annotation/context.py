@@ -124,10 +124,17 @@ class MultiPhaseAnnotationResult:
     修改者: TraeAI
     任务: rename-two-phase-to-multi-phase
     修改内容: 重命名为 MultiPhaseAnnotationResult 以支持多阶段架构
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: phase3-return-speaker-to-storage
+    修改内容: 添加 dialogue_speakers 字段存储 phase3 判断的说话者
     """
 
     annotation: ChunkAnnotation
     foreshadowing: ForeshadowingResult | None = None
+    dialogue_lengths: list[int] | None = None
+    dialogue_speakers: list[str] | None = None
 
 
 PHASE_MAX_RETRIES = 3

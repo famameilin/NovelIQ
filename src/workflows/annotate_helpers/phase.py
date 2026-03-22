@@ -312,7 +312,8 @@ def _process_single_chunk(
         run_id=run_id,
         foreshadowing=annotation_result.foreshadowing,
         alias_map=alias_map if alias_map else None,
-        dialogue_lengths=annotation_result.annotation.dialogue_lengths if hasattr(annotation_result.annotation, 'dialogue_lengths') else None,
+        dialogue_lengths=annotation_result.dialogue_lengths,
+        dialogue_speakers=annotation_result.dialogue_speakers,
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 
