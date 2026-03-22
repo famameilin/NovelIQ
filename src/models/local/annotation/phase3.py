@@ -258,7 +258,7 @@ def compute_dialogue_lengths_with_llm(
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
-) -> tuple[list[int], list[str]]:
+) -> tuple[list[int], list[str], list[tuple[int, str]]]:
     """
     计算每个说话者的对话长度（使用 LLM 判断）
 
@@ -287,6 +287,11 @@ def compute_dialogue_lengths_with_llm(
     任务: phase3-return-speaker-to-storage
     修改内容: 返回 tuple[list[int], list[str]] 包含 (对话长度列表, 说话者列表)
 
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: phase3-return-dialogues-to-storage
+    修改内容: 返回 tuple[list[int], list[str], list[tuple[int, str]]] 包含 (对话长度列表, 说话者列表, 对话内容列表)
+
     Args:
         client: 统一模型客户端
         text: chunk 原文
@@ -296,7 +301,7 @@ def compute_dialogue_lengths_with_llm(
         run_id: 运行 ID（用于交互记录）
 
     Returns:
-        tuple[list[int], list[str]]: (每个说话者的对话长度列表, 说话者列表)
+        tuple[list[int], list[str], list[tuple[int, str]]]: (每个说话者的对话长度列表, 说话者列表, 对话列表)
     """
     logger.info(
         f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0} speakers={speakers}"
@@ -306,12 +311,12 @@ def compute_dialogue_lengths_with_llm(
         logger.info(
             f"compute_dialogue_lengths_with_llm: early return - text_empty={not text} speakers_empty={not speakers}"
         )
-        return ([0] * len(speakers), list(speakers))
+        return ([0] * len(speakers), list(speakers), [])
 
     dialogues = extract_dialogues_from_text(text)
     logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(dialogues)} dialogues")
     if not dialogues:
-        return ([0] * len(speakers), list(speakers))
+        return ([0] * len(speakers), list(speakers), [])
 
     attribution = attribute_dialogues_with_llm(client, text, dialogues, known_characters=None, chunk_id=chunk_id, run_id=run_id)
     logger.info(f"compute_dialogue_lengths_with_llm: attribution={attribution}")
@@ -325,4 +330,4 @@ def compute_dialogue_lengths_with_llm(
 
     result = [speaker_lengths.get(s, 0) for s in speakers]
     logger.info(f"compute_dialogue_lengths_with_llm: result={result}")
-    return (result, list(speakers))
+    return (result, list(speakers), dialogues)

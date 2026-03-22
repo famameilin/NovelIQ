@@ -17,7 +17,6 @@ from ..schema import (
     ChunkAnnotation,
     CharacterSnapshot,
     CharacterAppearance,
-    DialogueSnapshot,
     RelationChangeSnapshot,
     ClueType,
     ForeshadowingType,
@@ -118,21 +117,6 @@ def _parse_relations(data: Dict[str, Any]) -> List[RelationChangeSnapshot]:
             )
         )
     return relations
-
-
-def _parse_dialogues(data: Dict[str, Any]) -> List[DialogueSnapshot]:
-    """
-    解析对话快照列表
-
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取build_annotation中的对话处理逻辑
-    """
-    dialogues = []
-    for d in data.get("dialogues", []):
-        if isinstance(d, dict):
-            dialogues.append(DialogueSnapshot(speaker=d.get("speaker", "")))
-    return dialogues
 
 
 def _parse_character_appearances(data: Dict[str, Any]) -> List[CharacterAppearance]:
@@ -243,7 +227,6 @@ def build_annotation(data: Dict[str, Any]) -> ChunkAnnotation:
         foreshadowing_desc=data.get("foreshadowing_desc", ""),
         characters=_parse_characters(data),
         relations=_parse_relations(data),
-        dialogues=_parse_dialogues(data),
         character_appearances=_parse_character_appearances(data),
         chunk_summary=data.get("chunk_summary", ""),
     )

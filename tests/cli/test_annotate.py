@@ -73,11 +73,12 @@ def create_mock_annotation() -> MultiPhaseAnnotationResult:
                     change="新建",
                 )
             ],
-            dialogues=[
-                DialogueSnapshot(speaker="张三"),
-            ],
+            dialogues=[],
         ),
         foreshadowing=None,
+        dialogue_lengths=[5],
+        dialogue_speakers=["张三"],
+        dialogues=[(0, "测试对话内容")],
     )
 
 

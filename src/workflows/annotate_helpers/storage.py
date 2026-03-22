@@ -40,6 +40,7 @@ def _store_annotation_results(
     alias_map: dict[str, str] | None = None,
     dialogue_lengths: list[int] | None = None,
     dialogue_speakers: list[str] | None = None,
+    dialogues: list[tuple[int, str]] | None = None,
 ) -> None:
     """存储标注结果
 
@@ -66,7 +67,13 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: phase3-return-speaker-to-storage
     修改内容: 添加 dialogue_speakers 参数，使用 phase3 判断的说话者替代 phase1 的
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: phase3-return-dialogues-to-storage
+    修改内容: 添加 dialogues 参数，完全由 Phase3 构建对话列表，不再依赖 annotation.dialogues
     """
+    from src.models.local.schema import DialogueSnapshot
     from src.storage.repositories import AnnotationRepository, StatsRepository
 
     ann_repo = AnnotationRepository(conn)
@@ -107,17 +114,12 @@ def _store_annotation_results(
     if annotation.relations:
         ann_repo.insert_chunk_relations(run_id, chunk_id, annotation.relations)
 
-    if annotation.dialogues:
-        from .sentence import compute_dialogue_lengths
-
-        phase1_speakers = [d.speaker for d in annotation.dialogues]
-        if dialogue_speakers is not None and len(dialogue_speakers) == len(phase1_speakers):
-            effective_speakers = dialogue_speakers
-        else:
-            effective_speakers = phase1_speakers
-        if dialogue_lengths is None:
-            dialogue_lengths = compute_dialogue_lengths(chunk_text, effective_speakers)
-        ann_repo.insert_chunk_dialogues(run_id, chunk_id, annotation.dialogues, dialogue_lengths, effective_speakers)
+    if dialogues:
+        effective_dialogues = []
+        for idx, (dialogue_idx, content) in enumerate(dialogues):
+            speaker = dialogue_speakers[idx] if dialogue_speakers and idx < len(dialogue_speakers) else ""
+            effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content))
+        ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, dialogue_lengths, dialogue_speakers)
 
     if annotation.chunk_summary:
         stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
