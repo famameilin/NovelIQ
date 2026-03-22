@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: API调用和验证相关逻辑
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: migrate-litellm-to-openai-sdk
+修改内容: 使用 OpenAI SDK，移除 get_model_with_provider 调用
 """
 
 from __future__ import annotations
@@ -11,7 +16,6 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from loguru import logger
 
-from src.models.local.litellm_utils import get_model_with_provider
 from src.models.local.parser import extract_thinking_unified, try_parse_json
 from src.models.local.validator import validate_names_in_sources
 
@@ -138,28 +142,26 @@ def execute_validation_retry_call(
 
     修改时间: 2026-03-21
     修改者: TraeAI
-    任务: 统一参数处理
-    修改内容: 移除 _get_thinking_params 调用，所有参数通过 _build_extra_body 处理
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 使用 OpenAI SDK，移除 extra_body，添加 reasoning_effort 支持
     """
-    model_name = get_model_with_provider(config.model, config)
-    if not model_name:
-        raise ValueError("model is required")
+    config.validate()
 
     client_obj = client._client
     if client_obj is None:
         raise ValueError("client is required")
 
     enable_thinking = config.thinking_enabled
-    extra_body = client._build_extra_body(enable_thinking)
 
     request_params = {
-        "model": model_name,
+        "model": config.model,
         "messages": cast(Any, retry_messages),
         "temperature": config.temperature,
         "top_p": config.top_p,
-        "presence_penalty": config.presence_penalty,
-        "extra_body": extra_body,
     }
+
+    if enable_thinking:
+        request_params["reasoning_effort"] = "medium"
 
     response = client_obj.chat.completions.create(**request_params)
     message = response.choices[0].message

@@ -7,6 +7,16 @@
 修改者: TraeAI
 任务: 更新测试用例适配新架构
 修改内容: 适配 LiteLLM，将 openai.OpenAI mock 替换为 litellm.embedding mock
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: migrate-litellm-to-openai-sdk
+修改内容: 更新测试用例适配 OpenAI SDK
+
+修改时间: 2026-03-22
+修改者: TraeAI
+任务: code-quality-review
+修改内容: 更新测试用例，适配 API key 必填的改动
 """
 import sys
 import unittest
@@ -55,28 +65,34 @@ class TestEmbeddingClient(unittest.TestCase):
         expected = 1.0 / np.sqrt(2)
         self.assertAlmostEqual(similarity, expected, places=5)
 
-    @patch("src.models.local.embedding.litellm.embedding")
-    def test_get_embedding_success(self, mock_embedding: MagicMock) -> None:
+    @patch("src.models.local.embedding.OpenAI")
+    def test_get_embedding_success(self, mock_openai: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
         mock_response = MagicMock()
         mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
         mock_response.usage = MagicMock()
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.total_tokens = 20
-        mock_embedding.return_value = mock_response
+        mock_client.embeddings.create.return_value = mock_response
 
-        client = EmbeddingClient(base_url="http://test", model="test-model")
+        client = EmbeddingClient(base_url="http://test", model="test-model", api_key="test-key")
         result = client.get_embedding("测试文本")
 
         self.assertEqual(result, [0.1, 0.2, 0.3])
-        mock_embedding.assert_called_once()
+        mock_client.embeddings.create.assert_called_once()
 
-    @patch("src.models.local.embedding.litellm.embedding")
-    def test_get_embedding_empty_text(self, mock_embedding: MagicMock) -> None:
-        client = EmbeddingClient(base_url="http://test", model="test-model")
+    @patch("src.models.local.embedding.OpenAI")
+    def test_get_embedding_empty_text(self, mock_openai: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        client = EmbeddingClient(base_url="http://test", model="test-model", api_key="test-key")
         result = client.get_embedding("")
 
         self.assertEqual(result, [])
-        mock_embedding.assert_not_called()
+        mock_client.embeddings.create.assert_not_called()
 
 
 if __name__ == "__main__":

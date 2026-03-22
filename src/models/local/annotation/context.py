@@ -98,6 +98,19 @@ class Phase2MaxRetriesExceededError(Exception):
     pass
 
 
+class DialogueAttributionError(Exception):
+    """
+    对话归属失败异常
+
+    创建时间: 2026-03-22
+    创建者: TraeAI
+    任务: code-quality-review
+    说明: 当 LLM 无法正确归属对话说话者时抛出此异常
+    """
+
+    pass
+
+
 @dataclass
 class TwoPhaseAnnotationResult:
     """

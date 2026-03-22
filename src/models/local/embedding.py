@@ -1,12 +1,41 @@
+"""
+创建时间: 2025-03-11
+创建者: TraeAI
+任务: Embedding客户端
+
+修改时间: 2026-03-11
+修改者: TraeAI
+修改内容: 将云端embedding相关日志提升为info等级，添加请求和返回内容的控制台打印
+
+修改时间: 2026-03-13
+修改者: TraeAI
+修改内容: 提取 _log 方法统一处理日志记录，减少 get_embedding 方法中的重复代码
+
+修改时间: 2026-03-16
+修改者: TraeAI
+修改内容: 将 OpenAI SDK 替换为 LiteLLM，移除 _client 对象，改用 litellm.embedding() 函数调用
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: migrate-litellm-to-openai-sdk
+修改内容: 使用 OpenAI SDK 替代 LiteLLM
+
+修改时间: 2026-03-22
+修改者: TraeAI
+任务: code-quality-review
+修改内容:
+1. 移除 API 密钥硬编码默认值，改为从环境变量读取
+2. 修复云端 API 错误降级为 info 级别的问题，统一使用 error 级别
+"""
+
 from __future__ import annotations
 
+import os
 from typing import Callable, List, Optional
 
-import litellm
 import numpy as np
-from litellm.exceptions import APIConnectionError, Timeout
 from loguru import logger
-from openai import APIStatusError
+from openai import OpenAI, APIConnectionError, APITimeoutError, BadRequestError
 
 from src.config import settings
 
@@ -15,21 +44,12 @@ TokenUsageCallback = Callable[[str, str, str, int, int, Optional[int], Optional[
 
 class EmbeddingClient:
     """
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: Embedding客户端
+    Embedding客户端
 
-    修改时间: 2026-03-11
+    修改时间: 2026-03-21
     修改者: TraeAI
-    修改内容: 将云端embedding相关日志提升为info等级，添加请求和返回内容的控制台打印
-
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    修改内容: 提取 _log 方法统一处理日志记录，减少 get_embedding 方法中的重复代码
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将 OpenAI SDK 替换为 LiteLLM，移除 _client 对象，改用 litellm.embedding() 函数调用
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 使用 OpenAI SDK 替代 LiteLLM
     """
 
     def __init__(
@@ -46,22 +66,34 @@ class EmbeddingClient:
             semantic_config = settings.models.semantic_chunking
             self._base_url = base_url or semantic_config.base_url
             self._model = model or semantic_config.model
-            self._api_key = api_key or semantic_config.api_key or "sk-no-key-required"
+            self._api_key = api_key or semantic_config.api_key or os.environ.get("OPENAI_API_KEY", "")
+            if not self._api_key:
+                raise ValueError(
+                    "API key is required: provide api_key parameter or set OPENAI_API_KEY environment variable"
+                )
             self._timeout_s = timeout_s if timeout_s is not None else semantic_config.timeout_s
             self._max_retries = max_retries if max_retries is not None else semantic_config.max_retries
         else:
             self._base_url = base_url
             self._model = model
-            self._api_key = api_key or "sk-no-key-required"
+            self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+            if not self._api_key:
+                raise ValueError(
+                    "API key is required: provide api_key parameter or set OPENAI_API_KEY environment variable"
+                )
             self._timeout_s = timeout_s
             self._max_retries = max_retries if max_retries is not None else 2
-        if self._model and "/" not in self._model and self._base_url:
-            if self._base_url.startswith("http://127.0.0.1") or self._base_url.startswith("http://localhost"):
-                self._model = f"openai/{self._model}"
 
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
         self._is_cloud = self._check_is_cloud()
+
+        self._client = OpenAI(
+            base_url=self._base_url,
+            api_key=self._api_key,
+            timeout=self._timeout_s,
+        )
+
         if self._is_cloud:
             logger.info(
                 "[云端模型] Embedding客户端初始化: base_url={} model={}",
@@ -117,13 +149,16 @@ class EmbeddingClient:
 
     def get_embedding(self, text: str, chunk_id: Optional[int] = None) -> List[float]:
         """
+        获取文本的embedding向量
+
         修改时间: 2026-03-13
         修改者: TraeAI
         修改内容: 使用 _log 方法统一处理日志记录，减少重复代码
 
-        修改时间: 2026-03-16
+        修改时间: 2026-03-21
         修改者: TraeAI
-        修改内容: 将 OpenAI SDK 调用替换为 litellm.embedding()
+        任务: migrate-litellm-to-openai-sdk
+        修改内容: 使用 OpenAI SDK 替代 LiteLLM
         """
         if not self._model:
             raise ValueError("embedding model is required")
@@ -140,27 +175,21 @@ class EmbeddingClient:
             chunk_id,
         )
         try:
-            response = litellm.embedding(
+            response = self._client.embeddings.create(
                 model=self._model,
                 input=text,
-                api_base=self._base_url,
-                api_key=self._api_key,
                 encoding_format="float",
             )
-            data = response["data"] if isinstance(response, dict) else response.data
-            first_item = data[0]
-            embedding = first_item["embedding"] if isinstance(first_item, dict) else first_item.embedding
 
-            usage = response.get("usage") if isinstance(response, dict) else response.usage
-            if self._token_usage_callback and usage:
-                prompt_tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else usage.prompt_tokens
-                total_tokens = usage.get("total_tokens") if isinstance(usage, dict) else usage.total_tokens
+            embedding = response.data[0].embedding
+
+            if self._token_usage_callback and response.usage:
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",
                     "local",
-                    prompt_tokens,
-                    total_tokens,
+                    response.usage.prompt_tokens,
+                    response.usage.total_tokens,
                     None,
                     chunk_id,
                 )
@@ -176,35 +205,35 @@ class EmbeddingClient:
             return embedding
         except APIConnectionError as e:
             self._log(
-                "info" if self._is_cloud else "error",
+                "error",
                 "get_embedding 连接错误: base_url={} error={}",
                 "connection error to embedding service: base_url={} error={}",
                 self._base_url,
                 str(e),
             )
             raise ConnectionError(f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动") from e
-        except Timeout as e:
+        except APITimeoutError as e:
             self._log(
-                "info" if self._is_cloud else "error",
+                "error",
                 "get_embedding 超时错误: base_url={} error={}",
                 "timeout error: base_url={} error={}",
                 self._base_url,
                 str(e),
             )
             raise TimeoutError("embedding 服务请求超时，请检查服务响应") from e
-        except APIStatusError as e:
+        except BadRequestError as e:
             self._log(
-                "info" if self._is_cloud else "error",
+                "error",
                 "get_embedding API错误: status={} base_url={} error={}",
                 "api status error: status={} base_url={} error={}",
-                e.status_code,
+                e.status_code if hasattr(e, "status_code") else "unknown",
                 self._base_url,
                 str(e),
             )
-            raise RuntimeError(f"embedding 服务错误 (状态码 {e.status_code}): {e.message}") from e
+            raise RuntimeError(f"embedding 服务错误: {e}") from e
         except Exception as e:
             self._log(
-                "info" if self._is_cloud else "error",
+                "error",
                 "get_embedding 未知错误: {}",
                 "get_embedding unexpected error: {}",
                 str(e),

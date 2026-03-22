@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+
 from loguru import logger
 
 
@@ -31,30 +33,38 @@ def parse_active_entities(active_entities: str | None) -> list[str]:
         return []
     names: list[str] = []
 
-    if "\n" in active_entities and "- " in active_entities:
+    def _extract_name(line: str) -> str:
+        if "：" in line:
+            line = line.split("：")[0].strip()
+        elif ":" in line:
+            line = line.split(":")[0].strip()
+        for sep in ["（", "(", "）", ")"]:
+            if sep in line:
+                return line.split(sep)[0].strip()
+        return line.strip()
+
+    if active_entities.strip() in {"[]", "[ ]"}:
+        return []
+
+    if "\n" in active_entities:
         for line in active_entities.split("\n"):
             line = line.strip()
+            if not line:
+                continue
+            if line.startswith("【") and line.endswith("】"):
+                continue
             if line.startswith("- "):
-                name_part = line[2:]
-                if "（" in name_part:
-                    name = name_part.split("（")[0].strip()
-                elif "：" in name_part:
-                    name = name_part.split("：")[0].strip()
-                elif ":" in name_part:
-                    name = name_part.split(":")[0].strip()
-                else:
-                    name = name_part.strip()
-                if name:
-                    names.append(name)
-    elif "\n" in active_entities:
-        pass
-    else:
-        for part in active_entities.split(","):
-            part = part.strip()
-            if ":" in part:
-                name = part.split(":")[0].strip()
+                name = _extract_name(line[2:].strip())
             else:
-                name = part
+                name = _extract_name(line)
+            if name and name not in {"[]", "[ ]"}:
+                names.append(name)
+    else:
+        for part in re.split(r"[，,]", active_entities):
+            part = part.strip()
+            if not part or part in {"[]", "[ ]"}:
+                continue
+            name = _extract_name(part)
             if name:
                 names.append(name)
 

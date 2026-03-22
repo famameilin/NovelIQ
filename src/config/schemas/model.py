@@ -37,6 +37,11 @@ class TaskModelSettings:
     修改时间: 2026-03-16
     修改者: TraeAI
     修改内容: 添加 provider 字段，支持明确指定 LLM provider
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 移除 backend_name 字段，迁移到 OpenAI SDK 后不再需要区分后端
     """
 
     base_url: str | None = None
@@ -48,7 +53,7 @@ class TaskModelSettings:
     top_p: float = 0.8
     top_k: int = 20
     presence_penalty: float = 1.5
-    provider: str | None = None  # 明确指定 provider，如 openai, azure, anthropic 等
+    provider: str | None = None
 
 
 @dataclass
@@ -137,6 +142,11 @@ def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = ""
     修改内容:
     1. 支持从环境变量覆盖配置，优先级：环境变量 > JSON配置
     2. 添加 provider 字段支持
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 移除 backend_name 字段
     """
     env_base_url = _get_env_var(env_prefix, "BASE_URL")
     env_model = _get_env_var(env_prefix, "MODEL")

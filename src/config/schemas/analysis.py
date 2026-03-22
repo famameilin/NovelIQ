@@ -65,9 +65,13 @@ class TwoPhaseAnnotationSettings:
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: 移除单次调用模式，仅保留双次调用
+    修改内容: 移除 enabled 字段，保留 parallel 字段控制并行/串行执行模式
     """
 
-    enabled: bool = False
     parallel: bool = False
 
 
@@ -100,9 +104,9 @@ class AnalysisSettings:
     cloud_annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     two_phase_annotation: TwoPhaseAnnotationSettings = field(default_factory=TwoPhaseAnnotationSettings)
-    valid_hierarchical_relation_types: List[str] = field(default_factory=lambda: [
-        "belongs_to", "member_of", "leader_of", "affiliated_with"
-    ])
+    valid_hierarchical_relation_types: List[str] = field(
+        default_factory=lambda: ["belongs_to", "member_of", "leader_of", "affiliated_with"]
+    )
 
 
 @dataclass
@@ -254,11 +258,15 @@ def _parse_two_phase_annotation_settings(data: dict[str, Any] | None) -> TwoPhas
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: 移除单次调用模式，仅保留双次调用
+    修改内容: 删除 enabled 字段解析
     """
     if not data:
         return TwoPhaseAnnotationSettings()
     return TwoPhaseAnnotationSettings(
-        enabled=data.get("enabled", False),
         parallel=data.get("parallel", False),
     )
 
@@ -290,9 +298,9 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         cloud_annotation_fallback_enabled=data.get("cloud_annotation_fallback_enabled", True),
         progress=_parse_progress_settings(data.get("progress")),
         two_phase_annotation=_parse_two_phase_annotation_settings(data.get("two_phase_annotation")),
-        valid_hierarchical_relation_types=data.get("valid_hierarchical_relation_types", [
-            "belongs_to", "member_of", "leader_of", "affiliated_with"
-        ]),
+        valid_hierarchical_relation_types=data.get(
+            "valid_hierarchical_relation_types", ["belongs_to", "member_of", "leader_of", "affiliated_with"]
+        ),
     )
 
 

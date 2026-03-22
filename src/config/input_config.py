@@ -31,6 +31,11 @@ class TaskModelConfig:
     修改时间: 2026-03-16
     修改者: TraeAI
     修改内容: 添加 stream_enabled 和 stream_cloud_only 字段支持流式响应
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 移除 backend_name 字段，迁移到 OpenAI SDK 后不再需要区分后端
     """
 
     base_url: str | None = None
@@ -44,9 +49,9 @@ class TaskModelConfig:
     presence_penalty: float = 1.5
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
-    provider: str | None = None  # 明确指定 provider，如 openai, azure, anthropic 等
-    stream_enabled: bool = False  # 是否启用流式响应模式
-    stream_cloud_only: bool = True  # 是否仅在云端模型启用流式模式
+    provider: str | None = None
+    stream_enabled: bool = False
+    stream_cloud_only: bool = True
 
     def validate(self) -> None:
         if self.timeout_s is not None and self.timeout_s <= 0:
@@ -77,6 +82,11 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
     修改时间: 2026-03-16
     修改者: TraeAI
     修改内容: 添加 stream_enabled 支持
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: migrate-litellm-to-openai-sdk
+    修改内容: 移除 backend_name 字段
     """
     task_settings = getattr(settings.models, task_type, None)
     if task_settings is None:

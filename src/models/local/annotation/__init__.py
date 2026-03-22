@@ -38,11 +38,10 @@ from src.models.local.annotation.context import (
     Phase2MaxRetriesExceededError,
     TwoPhaseAnnotationResult,
 )
-from src.models.local.annotation.foreshadowing import build_foreshadowing_from_annotation
+
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
     _build_foreshadowing_messages,
-    _build_messages,
 )
 from src.models.local.annotation.phases import (
     build_phase1_messages,
@@ -54,10 +53,7 @@ from src.models.local.annotation.response import (
     log_prompt_response,
     process_annotation_response,
 )
-from src.models.local.annotation.single_call import (
-    annotate_single_call_with_retry,
-    execute_single_call,
-)
+
 from src.models.local.annotation.phase3 import (
     attribute_dialogues_with_llm,
     compute_dialogue_lengths_with_llm,
@@ -75,7 +71,6 @@ __all__ = [
     "Phase1MaxRetriesExceededError",
     "Phase2MaxRetriesExceededError",
     "TwoPhaseAnnotationResult",
-    "_build_messages",
     "_build_annotation_messages_v2",
     "_build_foreshadowing_messages",
     "build_phase1_messages",
@@ -92,9 +87,6 @@ __all__ = [
     "validate_annotation",
     "log_annotation_start",
     "should_use_stream",
-    "execute_single_call",
-    "annotate_single_call_with_retry",
-    "build_foreshadowing_from_annotation",
     "attribute_dialogues_with_llm",
     "compute_dialogue_lengths_with_llm",
     "extract_dialogues_from_text",

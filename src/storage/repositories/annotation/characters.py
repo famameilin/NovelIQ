@@ -255,7 +255,7 @@ def fetch_character_appearances_for_chunks(
     stmt = (
         select(CharacterAppearance.raw_name)
         .where(CharacterAppearance.run_id == run_id)
-        .where(CharacterAppearance.chunk_id > min_chunk_id)
+        .where(CharacterAppearance.chunk_id >= min_chunk_id)
         .where(CharacterAppearance.chunk_id <= max_chunk_id)
     )
     result = session.execute(stmt)

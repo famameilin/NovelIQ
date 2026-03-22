@@ -11,7 +11,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
     "psycopg[binary]>=3.1.0",
-    "litellm>=1.0.0",
+    "openai>=1.0.0",
     "pydantic>=2.0.0",
     "pgvector>=0.4.2",
     "jieba>=0.42.1",
@@ -32,8 +32,11 @@ line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F"]
-ignore = ["E501"]
+select = ["E", "F", "I", "B", "C4", "UP"]
+ignore = ["E501", "B008", "B017"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
 
 [tool.mypy]
 python_version = "3.12"

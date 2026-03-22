@@ -32,6 +32,7 @@ def build_phase1_messages(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
+    character_appearances: List[dict] | None = None,
 ) -> List[dict]:
     """
     构建Phase1消息
@@ -51,6 +52,7 @@ def build_phase1_messages(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
+        character_appearances=character_appearances,
     )
 
 

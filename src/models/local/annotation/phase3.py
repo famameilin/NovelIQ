@@ -6,6 +6,16 @@
 
 修改历史:
 - 2026-03-21: 从 sentence.py 迁移 attribute_dialogues_with_llm 和相关函数
+
+修改时间: 2026-03-21
+修改者: TraeAI
+任务: migrate-litellm-to-openai-sdk
+修改内容: 移除 litellm_utils 导入，直接使用配置中的模型名称
+
+修改时间: 2026-03-22
+修改者: TraeAI
+任务: code-quality-review
+修改内容: 对话归属失败时抛出 DialogueAttributionError 而非静默返回空字典
 """
 
 from __future__ import annotations
@@ -17,10 +27,23 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
-from src.models.local.litellm_utils import get_model_with_provider
+from src.models.local.annotation.context import DialogueAttributionError
 
 if TYPE_CHECKING:
+    from src.models.local.annotation_client import AnnotationClient
     from src.models.local.unified_client import UnifiedModelClient
+
+
+def _get_annotation_client(client: "UnifiedModelClient | AnnotationClient") -> "AnnotationClient":
+    """从 UnifiedModelClient 或直接返回 AnnotationClient"""
+    if hasattr(client, "_annotation_client"):
+        return client._annotation_client
+    return client
+
+
+def _get_unified_client(client: "UnifiedModelClient | AnnotationClient") -> "UnifiedModelClient | AnnotationClient":
+    """如果输入是 AnnotationClient，直接返回；如果是 UnifiedModelClient 也返回自身"""
+    return client
 
 
 def extract_dialogues_from_text(text: str) -> list[tuple[int, str]]:
@@ -32,23 +55,48 @@ def extract_dialogues_from_text(text: str) -> list[tuple[int, str]]:
     任务: analyze-dialogue-length-zero
     说明: 使用正则提取所有双引号包裹的对话内容
 
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-dialogue-extraction-quotes
+    修改内容: 支持中文双引号、英文双引号、中文方引号等多种引号格式，避免重复匹配
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: fix-dialogue-extraction-chinese-quotes
+    修改内容: 修复中文双引号正则，添加「」和『』的匹配
+
     Args:
         text: 原文文本
 
     Returns:
         [(index, content), ...] 对话序号（1开始）和内容
     """
-    pattern = r'"([^"]*)"'
     dialogues = []
-    for i, match in enumerate(re.finditer(pattern, text), 1):
+    seen_positions = set()
+    patterns = [
+        r'"([^"]*)"',  # 英文双引号 U+0022
+        r"[\u201c\u201e]([^\u201c\u201e]*)[\u201c\u201e]",  # 中文双引号 U+201C/U+201D
+        r"['\u2018\u2019]([^'\u2018\u2019]*)['\u2018\u2019]",  # 中文单引号 U+2018/U+2019
+        r"「([^」]*)」",  # 中文方引号「」
+        r"『([^』]*)』",  # 中文书名号『』
+    ]
+    all_matches = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            if match.start() in seen_positions:
+                continue
+            seen_positions.add(match.start())
+            all_matches.append(match)
+    all_matches.sort(key=lambda m: m.start())
+    for idx, match in enumerate(all_matches, 1):
         content = match.group(1).strip()
         if content:
-            dialogues.append((i, content))
+            dialogues.append((idx, content))
     return dialogues
 
 
 def _save_interaction(
-    client: "UnifiedModelClient",
+    client: "UnifiedModelClient | AnnotationClient",
     run_id: str | None,
     chunk_id: int | None,
     phase: str,
@@ -75,8 +123,8 @@ def _save_interaction(
 
         prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
 
-        annotation_client = client._annotation_client
-        if hasattr(annotation_client, '_session') and annotation_client._session is not None:
+        annotation_client = _get_annotation_client(client)
+        if hasattr(annotation_client, "_session") and annotation_client._session is not None:
             repo = ModelInteractionRepository(annotation_client._session)
             repo.save_interaction(
                 run_id=run_id,
@@ -84,7 +132,7 @@ def _save_interaction(
                 interaction_type="dialogue_attribution",
                 phase=phase,
                 attempt_number=attempt_number,
-                model_name=annotation_client._config.model if hasattr(annotation_client._config, 'model') else None,
+                model_name=annotation_client._config.model if hasattr(annotation_client._config, "model") else None,
                 model_provider="cloud" if is_cloud else "local",
                 prompt=prompt_text,
                 response=content_clean,
@@ -96,7 +144,7 @@ def _save_interaction(
 
 
 def attribute_dialogues_with_llm(
-    client: "UnifiedModelClient",
+    client: "UnifiedModelClient | AnnotationClient",
     chunk_text: str,
     dialogues: list[tuple[int, str]],
     known_characters: list[str],
@@ -156,20 +204,17 @@ def attribute_dialogues_with_llm(
     try:
         from src.models.local.schema import DialogueAttributionResult
 
-        annotation_client = client._annotation_client
+        annotation_client = _get_annotation_client(client)
         config = annotation_client._config
 
         if not config.model:
             raise ValueError("model is required")
 
-        model_name = get_model_with_provider(config.model, config)
-
         request_params: dict = {
-            "model": model_name,
+            "model": config.model,
             "messages": messages,
             "temperature": config.temperature,
             "top_p": config.top_p,
-            "presence_penalty": config.presence_penalty,
             "response_format": annotation_client._build_json_schema(DialogueAttributionResult),
         }
 
@@ -182,7 +227,7 @@ def attribute_dialogues_with_llm(
 
         content_clean = str(parsed.model_dump())
         _save_interaction(
-            client=client,
+            client=_get_unified_client(client),
             run_id=run_id,
             chunk_id=chunk_id,
             phase="phase3",
@@ -194,16 +239,18 @@ def attribute_dialogues_with_llm(
             is_cloud=is_cloud,
         )
 
-        logger.info(f"dialogue_attribution: chunk_text_len={len(chunk_text)} dialogues={len(dialogues)} result_count={len(parsed.dialogues)}")
+        logger.info(
+            f"dialogue_attribution: chunk_text_len={len(chunk_text)} dialogues={len(dialogues)} result_count={len(parsed.dialogues)}"
+        )
 
         return {d.index: d.speaker for d in parsed.dialogues}
     except Exception as e:
         logger.warning(f"Failed to attribute dialogues with LLM: {e}")
-        return {}
+        raise DialogueAttributionError(f"对话归属判断失败: {e}") from e
 
 
 def compute_dialogue_lengths_with_llm(
-    client: "UnifiedModelClient",
+    client: "UnifiedModelClient | AnnotationClient",
     text: str,
     speakers: list[str],
     chunk_id: int | None = None,
@@ -222,6 +269,11 @@ def compute_dialogue_lengths_with_llm(
     任务: refactor-phase3-to-annotation-layer
     修改内容: 迁移到 models/local/annotation/phase3.py，添加 chunk_id 和 run_id 参数
 
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: fix-dialogue-extraction-quotes
+    修改内容: 添加调试日志
+
     Args:
         client: 统一模型客户端
         text: chunk 原文
@@ -232,16 +284,23 @@ def compute_dialogue_lengths_with_llm(
     Returns:
         每个说话者的对话长度列表（与 speakers 顺序对应）
     """
+    logger.info(
+        f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0} speakers={speakers}"
+    )
+
     if not text or not speakers:
+        logger.info(
+            f"compute_dialogue_lengths_with_llm: early return - text_empty={not text} speakers_empty={not speakers}"
+        )
         return [0] * len(speakers)
 
     dialogues = extract_dialogues_from_text(text)
+    logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(dialogues)} dialogues")
     if not dialogues:
         return [0] * len(speakers)
 
-    attribution = attribute_dialogues_with_llm(
-        client, text, dialogues, speakers, chunk_id=chunk_id, run_id=run_id
-    )
+    attribution = attribute_dialogues_with_llm(client, text, dialogues, speakers, chunk_id=chunk_id, run_id=run_id)
+    logger.info(f"compute_dialogue_lengths_with_llm: attribution={attribution}")
 
     speaker_lengths = {s: 0 for s in speakers}
     for idx, content in dialogues:
@@ -249,4 +308,6 @@ def compute_dialogue_lengths_with_llm(
         if speaker in speaker_lengths:
             speaker_lengths[speaker] += len(content)
 
-    return [speaker_lengths.get(s, 0) for s in speakers]
+    result = [speaker_lengths.get(s, 0) for s in speakers]
+    logger.info(f"compute_dialogue_lengths_with_llm: result={result}")
+    return result
