@@ -22,7 +22,9 @@
 修改时间: 2026-03-23
 修改者: TraeAI
 任务: unify-model-client-architecture
-修改内容: 移除 CloudDisambiguationClient 依赖（已废弃，统一使用 DisambiguationClient）
+修改内容: 
+- 移除 CloudDisambiguationClient 依赖（已废弃，统一使用 DisambiguationClient）
+- 使用统一的 DiagnosisClient（从 src.models.diagnosis 导入）
 """
 
 from __future__ import annotations
@@ -31,9 +33,9 @@ from typing import Any, Dict, List, Optional
 
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
+from src.models.diagnosis import DiagnosisClient
 
 from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
-from .diagnosis_client import DiagnosisClient
 from .schema import CloudAnalysis
 
 
