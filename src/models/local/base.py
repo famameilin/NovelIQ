@@ -19,21 +19,22 @@
 5. 添加 _log_model_call 统一日志方法
 6. 添加 _parse_structured_response 方法
 
-修改时间: 2026-03-21
+修改时间: 2026-03-24
 修改者: TraeAI
-任务: migrate-litellm-to-openai-sdk
+任务: Phase 2 - 统一客户端基类
 修改内容:
-1. 移除 LiteLLM 依赖，改用 OpenAI SDK
-2. 移除 extra_body 参数，改用顶级参数
-3. 移除 _build_extra_body 方法
-4. 添加 reasoning_effort 参数支持
-5. 更新异常处理使用 OpenAI SDK 异常类型
+1. 添加 _build_request_params 方法（统一请求参数构建）
+2. 添加 _extract_response_content 方法（提取响应内容）
+3. 添加 _parse_response 方法（解析JSON响应）
+4. 统一 reasoning_effort 处理逻辑
 
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any, Callable, List, Optional, Type, TypeVar
 
 from loguru import logger
@@ -42,6 +43,7 @@ from pydantic import BaseModel
 
 from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
+from src.models.local.parser.thinking import extract_thinking_unified
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -50,6 +52,7 @@ from typing import NamedTuple
 
 class TokenUsage(NamedTuple):
     """Token使用量记录"""
+
     novel_id: str
     task_type: str
     call_type: str
@@ -402,3 +405,104 @@ class BaseModelClient:
             raise ValueError(f"Failed to parse JSON from response: {content[:200]}")
 
         return response_model.model_validate(json_data)
+
+    def _build_request_params(self, messages: List[dict], enable_thinking: bool = False) -> dict[str, Any]:
+        """
+        构建请求参数（统一方法）
+
+        创建时间: 2026-03-24
+        创建者: TraeAI
+        任务: Phase 2 - 统一客户端基类
+        说明: 统一云端和本地的请求参数构建逻辑
+
+        修改时间: 2026-03-24
+        修改者: TraeAI
+        任务: Phase 2 - 统一客户端基类
+        修改内容: 统一 reasoning_effort 处理，本地使用 extra_body={"think": true/false}
+        """
+        if not self._config.model:
+            raise ValueError("model is required")
+
+        request_params: dict[str, Any] = {
+            "model": self._config.model,
+            "messages": messages,
+            "temperature": self._config.temperature,
+            "top_p": self._config.top_p,
+        }
+
+        is_cloud = self.is_cloud_api()
+        if not is_cloud:
+            # 本地模型（如 Ollama）使用 extra_body 传递 think 参数
+            request_params["extra_body"] = {"think": enable_thinking}
+        elif enable_thinking:
+            request_params["reasoning_effort"] = "medium"
+        else:
+            request_params["reasoning_effort"] = "none"
+
+        return request_params
+
+    def _extract_response_content(self, message) -> tuple[str, str | None]:
+        """
+        提取响应内容（统一方法）
+
+        创建时间: 2026-03-24
+        创建者: TraeAI
+        任务: Phase 2 - 统一客户端基类
+        说明: 统一云端和本地的响应内容提取逻辑，支持多种思考内容格式
+        """
+        content = message.content or ""
+        extraction = extract_thinking_unified(
+            content=content,
+            reasoning_content=getattr(message, "reasoning_content", None),
+            support_reasoning_content=True,
+            support_think_tags=True,
+        )
+        return extraction.content_without_thinking, extraction.thinking_content
+
+    def _parse_response(self, content: str) -> dict[str, Any] | None:
+        """
+        解析JSON响应（统一方法）
+
+        创建时间: 2026-03-24
+        创建者: TraeAI
+        任务: Phase 2 - 统一客户端基类
+        说明: 支持处理 markdown 代码块包裹的 JSON，兼容云端和本地响应格式
+        """
+        content_to_parse = content.strip()
+
+        if not content_to_parse:
+            return None
+
+        # 尝试直接解析
+        try:
+            data = json.loads(content_to_parse)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试从 markdown 代码块中提取 JSON
+        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content_to_parse)
+        if json_match:
+            extracted = json_match.group(1).strip()
+            try:
+                data = json.loads(extracted)
+                if isinstance(data, dict):
+                    logger.info("[模型] JSON从markdown代码块中提取成功")
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+        # 尝试从混合内容中提取 JSON 对象
+        json_match = re.search(r"\{[\s\S]*\}", content_to_parse)
+        if json_match:
+            extracted = json_match.group(0)
+            try:
+                data = json.loads(extracted)
+                if isinstance(data, dict):
+                    logger.info("[模型] JSON从混合内容中提取成功")
+                    return data
+            except json.JSONDecodeError:
+                pass
+
+        return None
