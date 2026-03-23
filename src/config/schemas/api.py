@@ -4,13 +4,175 @@
 任务: 项目文件结构整理与拆解 - 从 settings.py 拆分API相关配置类
 
 本模块包含API和路径相关的配置数据类。
+
+修改时间: 2026-03-23
+修改者: TraeAI
+任务: refactor-dialogue-attribution-pipeline
+修改内容: 添加 load_prompt_from_file 函数，支持从文件加载 prompt
+
+修改时间: 2026-03-23
+修改者: TraeAI
+任务: prompt-consolidation
+修改内容: 重构 prompt 加载逻辑，按任务组织 prompt 结构
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List
+from typing import Any
+
+
+def load_prompt_from_file(prompt_name: str, config_dir: Path | None = None) -> str:
+    """
+    从文件加载 prompt
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: refactor-dialogue-attribution-pipeline
+    说明: 从 config/prompts/ 目录加载 prompt 文件
+
+    Args:
+        prompt_name: prompt 文件名（不含扩展名）
+        config_dir: 配置目录路径，默认为项目根目录下的 config
+
+    Returns:
+        prompt 内容，如果文件不存在则返回空字符串
+    """
+    if config_dir is None:
+        config_dir = Path(__file__).parent.parent.parent.parent / "config"
+    prompt_file = config_dir / "prompts" / f"{prompt_name}.txt"
+    if prompt_file.exists():
+        return prompt_file.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def parse_prompt_sections(content: str) -> dict[str, str]:
+    """
+    解析包含多个分段的 prompt 文件
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    说明: 解析使用 ===SECTION_NAME=== 标记的分段 prompt
+
+    Args:
+        content: prompt 文件内容
+
+    Returns:
+        分段名称到内容的映射
+    """
+    sections: dict[str, str] = {}
+    current_section: str | None = None
+    current_content: list[str] = []
+
+    for line in content.split("\n"):
+        if line.startswith("===") and line.endswith("==="):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_content).strip()
+            current_section = line.strip("=")
+            current_content = []
+        else:
+            current_content.append(line)
+
+    if current_section is not None:
+        sections[current_section] = "\n".join(current_content).strip()
+
+    return sections
+
+
+def parse_few_shot_examples(content: str) -> list[dict[str, str]]:
+    """
+    解析 Few-shot 示例
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    说明: 解析使用 ---EXAMPLE_N_USER--- 和 ---EXAMPLE_N_ASSISTANT--- 标记的示例
+
+    Args:
+        content: FEW_SHOT 分段的内容
+
+    Returns:
+        示例列表，每个示例包含 user 和 assistant 两个键
+    """
+    examples: list[dict[str, str]] = []
+    current_user: str | None = None
+    current_assistant: str | None = None
+    current_content: list[str] = []
+    current_section: str | None = None
+
+    for line in content.split("\n"):
+        if line.startswith("---EXAMPLE_") and "_USER---" in line:
+            if current_user is not None and current_assistant is not None:
+                examples.append({"user": current_user, "assistant": current_assistant})
+            current_user = None
+            current_assistant = None
+            current_section = "user"
+            current_content = []
+        elif line.startswith("---EXAMPLE_") and "_ASSISTANT---" in line:
+            if current_section == "user":
+                current_user = "\n".join(current_content).strip()
+            current_section = "assistant"
+            current_content = []
+        elif line.startswith("===") and line.endswith("==="):
+            if current_section == "assistant":
+                current_assistant = "\n".join(current_content).strip()
+                if current_user is not None and current_assistant is not None:
+                    examples.append({"user": current_user, "assistant": current_assistant})
+            break
+        else:
+            current_content.append(line)
+
+    if current_section == "assistant":
+        current_assistant = "\n".join(current_content).strip()
+        if current_user is not None and current_assistant is not None:
+            examples.append({"user": current_user, "assistant": current_assistant})
+
+    return examples
+
+
+@dataclass
+class Phase1Prompts:
+    """Phase1（基础标注）Prompt 配置
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    """
+
+    system: str = ""
+    user_template: str = ""
+    few_shot: list[dict[str, str]] = field(default_factory=list)
+    format: str = ""
+
+
+@dataclass
+class Phase2Prompts:
+    """Phase2（伏笔分析）Prompt 配置
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    """
+
+    system: str = ""
+    user_template: str = ""
+    examples: str = ""
+
+
+@dataclass
+class Phase3Prompts:
+    """Phase3（对话归属）Prompt 配置
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    """
+
+    system: str = ""
+    user_template: str = ""
 
 
 @dataclass
@@ -38,10 +200,10 @@ class APISettings:
     docs_url: str = "/api/docs"
     redoc_url: str = "/api/redoc"
     openapi_url: str = "/api/openapi.json"
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = field(default_factory=lambda: ["*"])
     cors_allow_credentials: bool = True
-    cors_allow_methods: List[str] = field(default_factory=lambda: ["*"])
-    cors_allow_headers: List[str] = field(default_factory=lambda: ["*"])
+    cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
     novel_name_max_length: int = 50
     query_limit: int = 50
 
@@ -49,35 +211,20 @@ class APISettings:
 @dataclass
 class PromptSettings:
     """
-    Prompt配置
+    Prompt 配置
 
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    修改内容: 添加双次调用标注相关prompt配置
-    - local_annotation_system_v2: 第一次调用（基础标注）的System Prompt
-    - local_annotation_format_v2: 第一次调用的输出格式
-    - local_annotation_few_shot_v2: 第一次调用的Few-shot示例
-    - local_annotation_user_template: 第一次调用的User Prompt模板
-    - foreshadowing_system: 第二次调用（伏笔分析）的System Prompt
-    - foreshadowing_user_template: 第二次调用的User Prompt模板
-    - foreshadowing_examples: 第二次调用的Few-shot示例
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    修改内容: 按任务重组 prompt 结构
     """
 
-    local_annotation_system: str = ""
-    local_annotation_format: str = ""
-    local_annotation_few_shot: list[dict[str, str]] = field(default_factory=list)
-    local_disambiguate_system: str = ""
-    local_anonymous_disambig_system: str = ""
-    cloud_diagnose_system: str = ""
-    local_annotation_system_v2: str = ""
-    local_annotation_format_v2: str = ""
-    local_annotation_few_shot_v2: list[dict[str, str]] = field(default_factory=list)
-    local_annotation_user_template: str = ""
-    foreshadowing_system: str = ""
-    foreshadowing_user_template: str = ""
-    foreshadowing_examples: str = ""
-    dialogue_attribution_system: str = ""
-    dialogue_attribution_user_template: str = ""
+    phase1: Phase1Prompts = field(default_factory=Phase1Prompts)
+    phase2: Phase2Prompts = field(default_factory=Phase2Prompts)
+    phase3: Phase3Prompts = field(default_factory=Phase3Prompts)
+    disambiguate: str = ""
+    anonymous_disambig: str = ""
+    diagnose: str = ""
 
 
 def _parse_path_settings(data: dict[str, Any] | None) -> PathSettings:
@@ -112,30 +259,84 @@ def _parse_api_settings(data: dict[str, Any] | None) -> APISettings:
     )
 
 
+def _load_phase1_prompts() -> Phase1Prompts:
+    """
+    加载 Phase1 prompt
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    """
+    content = load_prompt_from_file("phase1")
+    if not content:
+        return Phase1Prompts()
+
+    sections = parse_prompt_sections(content)
+    few_shot: list[dict[str, str]] = []
+    if "FEW_SHOT" in sections:
+        few_shot = parse_few_shot_examples(sections["FEW_SHOT"])
+
+    return Phase1Prompts(
+        system=sections.get("SYSTEM", ""),
+        user_template=sections.get("USER_TEMPLATE", ""),
+        few_shot=few_shot,
+        format=sections.get("FORMAT", ""),
+    )
+
+
+def _load_phase2_prompts() -> Phase2Prompts:
+    """
+    加载 Phase2 prompt
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    """
+    content = load_prompt_from_file("phase2")
+    if not content:
+        return Phase2Prompts()
+
+    sections = parse_prompt_sections(content)
+    return Phase2Prompts(
+        system=sections.get("SYSTEM", ""),
+        user_template=sections.get("USER_TEMPLATE", ""),
+        examples=sections.get("EXAMPLES", ""),
+    )
+
+
+def _load_phase3_prompts() -> Phase3Prompts:
+    """
+    加载 Phase3 prompt
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    """
+    content = load_prompt_from_file("phase3")
+    if not content:
+        return Phase3Prompts()
+
+    sections = parse_prompt_sections(content)
+    return Phase3Prompts(
+        system=sections.get("SYSTEM", ""),
+        user_template=sections.get("USER_TEMPLATE", ""),
+    )
+
+
 def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
     """
-    解析Prompt配置
+    解析 Prompt 配置
 
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    修改内容: 添加双次调用标注相关prompt配置解析
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: prompt-consolidation
+    修改内容: 按任务从合并文件加载 prompt
     """
-    if not data:
-        return PromptSettings()
     return PromptSettings(
-        local_annotation_system=data.get("local_annotation_system", ""),
-        local_annotation_format=data.get("local_annotation_format", ""),
-        local_annotation_few_shot=data.get("local_annotation_few_shot", []),
-        local_disambiguate_system=data.get("local_disambiguate_system", ""),
-        local_anonymous_disambig_system=data.get("local_anonymous_disambig_system", ""),
-        cloud_diagnose_system=data.get("cloud_diagnose_system", ""),
-        local_annotation_system_v2=data.get("local_annotation_system_v2", ""),
-        local_annotation_format_v2=data.get("local_annotation_format_v2", ""),
-        local_annotation_few_shot_v2=data.get("local_annotation_few_shot_v2", []),
-        local_annotation_user_template=data.get("local_annotation_user_template", ""),
-        foreshadowing_system=data.get("foreshadowing_system", ""),
-        foreshadowing_user_template=data.get("foreshadowing_user_template", ""),
-        foreshadowing_examples=data.get("foreshadowing_examples", ""),
-        dialogue_attribution_system=data.get("dialogue_attribution_system", ""),
-        dialogue_attribution_user_template=data.get("dialogue_attribution_user_template", ""),
+        phase1=_load_phase1_prompts(),
+        phase2=_load_phase2_prompts(),
+        phase3=_load_phase3_prompts(),
+        disambiguate=load_prompt_from_file("disambiguate"),
+        anonymous_disambig=load_prompt_from_file("anonymous_disambig"),
+        diagnose=load_prompt_from_file("diagnose"),
     )

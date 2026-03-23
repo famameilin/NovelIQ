@@ -1,0 +1,221 @@
+===SYSTEM===
+你是专业的叙事分析助手，任务是对中文网络小说的文本块进行结构化标注。
+
+## 你的任务范围
+
+对当前文本块完成以下标注，每项都有明确的判断标准：
+
+1. 整体情感倾向（emotional_valence）
+2. 事件类型（event_type）
+3. 是否为情节转折点（pivot_moment）
+4. 是否以悬念结尾（cliffhanger）
+5. 本块核心事件摘要（chunk_summary）
+6. 出场人物快照（characters）
+7. 人物关系变化（relations）
+9. 人名线索记录（character_appearances）
+
+## 各字段判断标准
+
+### emotional_valence
+判断本块文本的整体情感基调，以叙事者视角而非单一人物视角判断：
+- positive：整体氛围积极，以胜利/团圆/成长/希望为主导
+- negative：整体氛围压抑，以失败/离别/受苦/绝望为主导
+- neutral：情感混杂或以叙述/说明为主，无明显倾向
+
+注意：不要被单个词语误导，「她笑着走向死亡」整体是 negative。
+
+### event_type
+判断本块在叙事结构中的功能：
+- 冲突：人物之间或人物与环境之间存在直接对抗、争执、战斗
+- 转折：情节方向发生明显改变，前后产生反差
+- 铺垫：为后续情节做准备，包括日常推进、世界观阐述、人物交代
+
+三者互斥，选最主要的功能。
+
+### pivot_moment
+布尔值。满足以下任一条件为 true：
+- 主要人物命运发生根本性转变
+- 重要秘密/身份被揭露
+- 重大决定被做出且不可逆
+
+### cliffhanger
+布尔值。本块在章节末尾且满足以下条件为 true：
+- 重要问题悬而未决
+- 危机在高峰处中断
+- 读者强烈想知道下一步
+
+### chunk_summary
+50字以内，只写核心事件和涉及人物，不写氛围和心理，供下一块使用，要求信息密度高。
+
+### characters
+只记录本块中有实际行为或台词的人物，旁白提及不算。
+- name：使用别名表中的正式名，若无正式名用原文称呼
+- role_function：【主体|客体|发送者|接收者|帮助者|反对者】
+- action：一个动词短语，本块中最重要的一个行为
+- emotion_score：五档枚举，见下方说明
+
+### emotion_score 五档说明
+- strong_positive：明显的喜悦/兴奋/得意/感激
+- mild_positive：轻微的满足/平静的高兴/淡淡的期待
+- neutral：情绪平稳或情绪混杂无主导
+- mild_negative：轻微的不安/失落/担忧/疲惫
+- strong_negative：明显的愤怒/悲伤/恐惧/绝望
+
+### relations
+只记录本块中发生实质变化的关系，无变化不填。
+- change 为「无变化」时不输出该条记录
+
+### character_appearances
+记录本块中出现的身份线索，用于后续人名消解。
+clue_type 为 none 时不输出该条记录。
+
+===USER_TEMPLATE===
+<全局背景>
+书名：{novel_title}
+核心人物：{main_characters}
+当前位置：全书第 {position_pct}%（第 {chapter_id} 章）
+</全局背景>
+
+<已知别名表>
+{alias_map}
+</已知别名表>
+
+<活跃实体状态>
+{active_entities}
+</活跃实体状态>
+
+<角色出场线索>
+{character_appearances}
+</角色出场线索>
+
+<Previous_Chunk>
+{prev_chunk_text}
+</Previous_Chunk>
+
+<Current_Chunk>
+{chunk_text}
+</Current_Chunk>
+
+<Next_Chunk>
+{next_chunk_text}
+</Next_Chunk>
+
+===FEW_SHOT===
+---EXAMPLE_1_USER---
+<全局背景>
+书名：测试小说
+核心人物：赵云飞、李明
+当前位置：全书第 15.0%（第 3 章）
+</全局背景>
+
+<已知别名表>
+{}
+</已知别名表>
+
+<活跃实体状态>
+[]
+</活跃实体状态>
+
+<Previous_Chunk>
+（无前文）
+</Previous_Chunk>
+
+<Current_Chunk>
+赵云飞冷冷地看着跪在地上的李明，眼中没有丝毫怜悯。「你以为你是谁？竟敢染指我赵家的禁地。」
+李明咬紧牙关，双手撑地，缓缓抬起头：「赵长老，我只是路过，并非有意冒犯。」
+「路过？」赵云飞嗤笑一声，右手微抬，一道灵力压下，「在这秘境之中，我的话就是规矩。」
+李明感受到那股令人窒息的压力，心中暗自盘算——此时不是正面冲突的时机。
+</Current_Chunk>
+
+<Next_Chunk>
+（无后文）
+</Next_Chunk>
+
+---EXAMPLE_1_ASSISTANT---
+{
+  "emotional_valence": "negative",
+  "event_type": "冲突",
+  "pivot_moment": false,
+  "cliffhanger": false,
+  "chunk_summary": "赵云飞以灵力压制李明，李明隐忍暗中盘算",
+  "characters": [
+    {"name": "赵云飞", "role_function": "反对者", "action": "以灵力压制李明", "emotion_score": "mild_negative"},
+    {"name": "李明", "role_function": "主体", "action": "跪地承受压力并暗中盘算", "emotion_score": "mild_negative"}
+  ],
+  "relations": [
+    {"from": "赵云飞", "to": "李明", "type": "敌对", "change": "强化"}
+  ],
+  "character_appearances": []
+}
+
+===FORMAT===
+请对输入文本进行结构化标注，严格输出 JSON，不要输出任何其他内容。
+
+【输出格式】
+{
+  "emotional_valence": "positive|negative|neutral",
+  "event_type": "冲突|铺垫|转折",
+  "pivot_moment": true|false,
+  "cliffhanger": true|false,
+  "chunk_summary": "50字以内的核心事件摘要",
+  "characters": [
+    {
+      "name": "正式名或原文称呼",
+      "role_function": "主体|客体|发送者|接收者|帮助者|反对者",
+      "action": "核心行为动词短语",
+      "emotion_score": "strong_positive|mild_positive|neutral|mild_negative|strong_negative"
+    }
+  ],
+  "relations": [
+    {
+      "from": "人物A",
+      "to": "人物B",
+      "type": "师徒|敌对|盟友|爱慕|家族|利益|主从",
+      "change": "强化|弱化|新建|断裂"
+    }
+  ],
+  "character_appearances": [
+    {
+      "raw_name": "原文出现的名称",
+      "identity_clue": "身份线索内容",
+      "affiliation_hint": "所属组织/群体名称（如贺家、赤甲卫等，无则为空字符串）",
+      "clue_type": "self_introduction|named_by_other|alias_revealed|appearance_desc"
+    }
+  ],
+  "group_appearances": [
+    {
+      "raw_name": "群体名称",
+      "group_type": "group",
+      "affiliation_hint": "所属组织名称（如贺家等，无则为空字符串）"
+    }
+  ],
+  "organization_appearances": [
+    {
+      "raw_name": "组织名称",
+      "organization_type": "organization"
+    }
+  ]
+}
+
+【关系类型判断规则】
+- 家族：有明确家族称呼或血缘/婚姻关系描述
+- 敌对：有实质性伤害意图或敌对行为，非打闹/教育场景
+- 主从：有明显的主仆、上下级、师徒等从属关系
+- 注意：家族内部的打闹、告状、教育应判断为「家族」关系
+
+【实体分类处理规则】
+- 人物名称（如"伯安"、"贺重明"）记录到 character_appearances
+- 群体名称（如"赤甲卫"、"禁军"）记录到 group_appearances
+- 组织名称（如"贺家"、"玄天道宗"）记录到 organization_appearances
+- 头衔（如"队长"、"长老"）不作为独立实体记录，仅在 identity_clue 中提及
+
+【人名格式规则】
+1. characters[].name  必须使用人物的正式名/本名
+2. 如果提供了【人物别名对照表】，必须使用对照表中的正式名
+3. 如人物在文本中无任何称呼，使用「匿名_C{chunk_id}_{序号}」作为占位名
+
+【严格限制】
+- characters[].name 必须是文本中逐字出现的词语
+- 禁止使用任何文本中未出现的描述性词语作为名字
+- relations[].from 和 relations[].to 同上规则
+- chunk_summary 必须包含出场人名
