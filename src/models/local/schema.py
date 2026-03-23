@@ -260,9 +260,10 @@ class DisambiguateResponseModel(BaseModel):
         default_factory=list,
         description="实体间的层级关系列表",
     )
-    _thinking_content: str | None = Field(
+    thinking_content: str | None = Field(
         default=None,
         description="模型的 thinking 内容（内部使用，不写入数据库）",
+        alias="_thinking_content",
     )
 
 

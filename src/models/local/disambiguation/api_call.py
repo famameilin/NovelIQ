@@ -104,7 +104,7 @@ def call_disambiguate_api(
     parsed_response = client._parse_structured_response(response, DisambiguateResponseModel)
 
     if thinking_content:
-        parsed_response = parsed_response.model_copy(update={"_thinking_content": thinking_content})
+        parsed_response = parsed_response.model_copy(update={"thinking_content": thinking_content})
 
     response_content = response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
     completion_tokens = count_tokens(response_content, model_for_token_count)

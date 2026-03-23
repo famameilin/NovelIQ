@@ -104,7 +104,7 @@ def build_extended_result_from_response(
             "type": rel.type,
         })
 
-    thinking_content = getattr(response_data, "_thinking_content", None)
+    thinking_content = getattr(response_data, "thinking_content", None)
 
     return ExtendedDisambigResult(
         alias_map=alias_map,
