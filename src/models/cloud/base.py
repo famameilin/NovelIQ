@@ -115,7 +115,7 @@ class BaseCloudModelClient(BaseModelClient):
             self._config.base_url,
         )
 
-    def _build_request_params(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def _build_request_params(self, messages: list[dict[Any, Any]], enable_thinking: bool = False) -> dict[str, Any]:
         """
         构建请求参数（云端版本）
 
