@@ -29,11 +29,17 @@ class ExtendedDisambigResult:
     创建者: TraeAI
     任务: entity-type-relation-extraction
     说明: 包含别名映射、实体类型和实体关系的完整消歧结果
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: fix/disambig-thinking-save
+    修改内容: 添加 _thinking_content 字段保存 thinking 内容
     """
 
     alias_map: Dict[str, str]
     entity_types: Dict[str, str]
     entity_relations: List[Dict[str, str]]
+    _thinking_content: str | None = None
 
 
 def build_result_from_response(
@@ -80,6 +86,11 @@ def build_extended_result_from_response(
     创建者: TraeAI
     任务: entity-type-relation-extraction
     说明: 返回完整的消歧结果，包括alias_map、entity_types和entity_relations
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: fix/disambig-thinking-save
+    修改内容: 复制 _thinking_content 到 ExtendedDisambigResult
     """
     alias_map = build_result_from_response(response_data, candidates)
 
@@ -93,8 +104,11 @@ def build_extended_result_from_response(
             "type": rel.type,
         })
 
+    thinking_content = getattr(response_data, "_thinking_content", None)
+
     return ExtendedDisambigResult(
         alias_map=alias_map,
         entity_types=entity_types,
         entity_relations=entity_relations,
+        _thinking_content=thinking_content,
     )

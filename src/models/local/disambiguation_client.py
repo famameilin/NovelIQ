@@ -153,7 +153,6 @@ class DisambiguationClient(BaseModelClient):
                 config=self._config,
                 messages=messages,
                 log_type="disambiguate_characters",
-                is_cloud=is_cloud,
             )
             log_disambiguate_response(
                 "disambiguate_characters",
@@ -221,7 +220,6 @@ class DisambiguationClient(BaseModelClient):
                 config=self._config,
                 messages=messages,
                 log_type="disambiguate_anonymous",
-                is_cloud=is_cloud,
             )
             log_disambiguate_response(
                 "disambiguate_anonymous",

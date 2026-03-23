@@ -239,6 +239,11 @@ class DisambiguateResponseModel(BaseModel):
     修改者: TraeAI
     任务: entity-type-relation-extraction
     修改内容: 新增 entity_types 和 entity_relations 字段
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: fix/disambig-thinking-save
+    修改内容: 新增 _thinking_content 字段保存 thinking 内容
     """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -254,6 +259,10 @@ class DisambiguateResponseModel(BaseModel):
     entity_relations: list[HierarchicalRelation] = Field(
         default_factory=list,
         description="实体间的层级关系列表",
+    )
+    _thinking_content: str | None = Field(
+        default=None,
+        description="模型的 thinking 内容（内部使用，不写入数据库）",
     )
 
 
