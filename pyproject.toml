@@ -8,16 +8,29 @@ dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
     "python-multipart>=0.0.6",
+    "aiofiles>=23.2.1",
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
     "psycopg[binary]>=3.1.0",
     "openai>=1.0.0",
+    "instructor>=1.7.0",
+    "litellm>=1.63.0",
     "pydantic>=2.0.0",
     "pgvector>=0.4.2",
     "jieba>=0.42.1",
     "streamingjson>=0.0.5",
     "tiktoken>=0.7.0",
     "json5>=0.9.0",
+    "gensim>=4.3.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-xdist>=3.6.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.11.0",
+    "mypy>=1.15.0",
 ]
 
 [tool.pytest.ini_options]
