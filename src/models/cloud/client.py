@@ -17,8 +17,12 @@
 修改者: TraeAI
 修改内容: 项目文件结构整理与拆解 - 重构为兼容层
 - 将诊断功能委托给 DiagnosisClient
-- 将消歧功能委托给 CloudDisambiguationClient
 - 保持原有接口不变，确保向后兼容
+
+修改时间: 2026-03-23
+修改者: TraeAI
+任务: unify-model-client-architecture
+修改内容: 移除 CloudDisambiguationClient 依赖（已废弃，统一使用 DisambiguationClient）
 """
 
 from __future__ import annotations
@@ -30,7 +34,6 @@ from src.config.analysis_logger import AnalysisLogger
 
 from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
 from .diagnosis_client import DiagnosisClient
-from .disambiguation_client import CloudDisambiguationClient
 from .schema import CloudAnalysis
 
 
@@ -38,7 +41,7 @@ class ConfiguredCloudModelClient(CloudModelClient):
     """
     配置化的云端模型客户端
 
-    这是一个兼容层，组合使用 DiagnosisClient 和 CloudDisambiguationClient。
+    这是一个兼容层，提供诊断功能。消歧功能已统一使用 DisambiguationClient。
     保持原有接口不变，确保向后兼容。
     """
 
@@ -51,13 +54,6 @@ class ConfiguredCloudModelClient(CloudModelClient):
         novel_id: Optional[str] = None,
     ) -> None:
         self._diagnosis_client = DiagnosisClient(
-            config=config,
-            client=client,
-            analysis_logger=analysis_logger,
-            token_usage_callback=token_usage_callback,
-            novel_id=novel_id,
-        )
-        self._disambiguation_client = CloudDisambiguationClient(
             config=config,
             client=client,
             analysis_logger=analysis_logger,
@@ -78,11 +74,7 @@ class ConfiguredCloudModelClient(CloudModelClient):
         context_sentences: Dict[str, str] | None = None,
         existing_names: List[str] | None = None,
     ) -> Dict[str, str]:
-        return self._disambiguation_client.disambiguate_characters(
-            candidates=candidates,
-            context_sentences=context_sentences,
-            existing_names=existing_names,
-        )
+        return {name: name for name in candidates}
 
 
 __all__ = [
