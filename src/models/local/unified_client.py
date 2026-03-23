@@ -256,6 +256,17 @@ class UnifiedModelClient:
             existing_contexts=existing_contexts,
         )
 
+    def is_cloud_api(self) -> bool:
+        """
+        判断当前客户端是否使用云端 API
+
+        修改时间: 2026-03-23
+        修改者: TraeAI
+        任务: fix/disambig-thinking-save
+        修改内容: 添加 is_cloud_api 方法代理，修复 _save_disambiguation_interaction 无法正确判断云端的问题
+        """
+        return self._disambiguation_client.is_cloud_api()
+
 
 __all__ = [
     "UnifiedModelClient",

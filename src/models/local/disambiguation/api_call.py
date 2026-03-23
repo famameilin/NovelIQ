@@ -37,7 +37,6 @@ def call_disambiguate_api(
     config: TaskModelConfig,
     messages: List[Dict[str, str]],
     log_type: str,
-    is_cloud: bool,
 ) -> DisambiguateResponseModel:
     """
     统一调用消歧API，处理响应字符串/对象两种情况
@@ -65,6 +64,11 @@ def call_disambiguate_api(
     修改者: TraeAI
     任务: migrate-litellm-to-openai-sdk
     修改内容: 使用 OpenAI SDK，移除 get_model_with_provider 调用
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: fix/disambig-thinking-save
+    修改内容: 添加 reasoning_effort 参数，移除 is_cloud 参数（本地和云端统一使用 reasoning_effort）
     """
     if not config.model:
         raise ValueError("model is required")
@@ -72,6 +76,7 @@ def call_disambiguate_api(
     if client._client is None:
         raise ValueError("client is required")
 
+    enable_thinking = config.thinking_enabled
     request_params: dict[str, Any] = {
         "model": config.model,
         "messages": cast(Any, messages),
@@ -79,11 +84,15 @@ def call_disambiguate_api(
         "top_p": config.top_p,
         "response_format": client._build_json_schema(DisambiguateResponseModel),
     }
+    if enable_thinking:
+        request_params["reasoning_effort"] = "medium"
+    else:
+        request_params["reasoning_effort"] = "none"
 
     model_for_token_count = config.model
     prompt_tokens = count_messages_tokens(messages, model_for_token_count)
 
-    response = client._call_api_stream(request_params, is_cloud=is_cloud)
+    response = client._call_api_stream(request_params)
 
     thinking_content = None
     if hasattr(response, "choices") and response.choices:
@@ -95,7 +104,7 @@ def call_disambiguate_api(
     parsed_response = client._parse_structured_response(response, DisambiguateResponseModel)
 
     if thinking_content:
-        parsed_response._thinking_content = thinking_content  # type: ignore[attr-defined]
+        parsed_response = parsed_response.model_copy(update={"_thinking_content": thinking_content})
 
     response_content = response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
     completion_tokens = count_tokens(response_content, model_for_token_count)
