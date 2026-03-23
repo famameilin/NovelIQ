@@ -138,8 +138,8 @@ class MultiPhaseAnnotationResult:
 
     annotation: ChunkAnnotation
     foreshadowing: ForeshadowingResult | None = None
-    dialogue_lengths: list[int] | None = None
-    dialogue_speakers: list[str] | None = None
+    dialogue_lengths: dict[str, int] | None = None
+    dialogue_speakers: dict[int, str] | None = None
     dialogues: list[tuple[int, str]] | None = None
 
 
