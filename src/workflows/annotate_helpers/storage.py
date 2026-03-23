@@ -116,10 +116,11 @@ def _store_annotation_results(
 
     if dialogues:
         effective_dialogues = []
-        for idx, (dialogue_idx, content) in enumerate(dialogues):
-            speaker = dialogue_speakers[idx] if dialogue_speakers and idx < len(dialogue_speakers) else ""
+        for dialogue_idx, content in dialogues:
+            speaker = dialogue_speakers.get(dialogue_idx, "") if isinstance(dialogue_speakers, dict) else ""
             effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content))
-        ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, dialogue_lengths, dialogue_speakers)
+        lengths = [dialogue_lengths.get(speaker, 0) for speaker in effective_dialogues] if isinstance(dialogue_lengths, dict) else dialogue_lengths
+        ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)
 
     if annotation.chunk_summary:
         stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
