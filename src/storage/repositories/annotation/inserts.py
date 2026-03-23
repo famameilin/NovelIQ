@@ -98,23 +98,21 @@ def insert_chunk_dialogues(
     chunk_id: int,
     dialogues: Sequence[DialogueSnapshot],
     lengths: Sequence[int] | None = None,
-    speakers: Sequence[str] | None = None,
 ) -> None:
     """插入分块对话数据
 
-    修改时间: 2026-03-22
+    修改时间: 2026-03-23
     修改者: TraeAI
-    任务: phase3-return-speaker-to-storage
-    修改内容: 添加 speakers 参数，允许使用外部传入的说话者替代 dialogues 中的 speaker
+    任务: fix-insert_chunk_dialogues-speakers-param
+    修改内容: speakers 参数已移除， dialogue.speaker 字段已包含正确的说话者
     """
     records: List[ChunkDialogue] = []
     for idx, dialogue in enumerate(dialogues):
         length = lengths[idx] if lengths is not None and idx < len(lengths) else None
-        effective_speaker = speakers[idx] if speakers is not None and idx < len(speakers) else dialogue.speaker
         records.append(
             ChunkDialogue(
                 chunk_id=chunk_id,
-                speaker=effective_speaker,
+                speaker=dialogue.speaker,
                 length=length,
                 run_id=run_id,
             )

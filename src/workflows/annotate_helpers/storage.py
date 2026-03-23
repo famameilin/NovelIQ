@@ -38,8 +38,8 @@ def _store_annotation_results(
     run_id: str,
     foreshadowing=None,
     alias_map: dict[str, str] | None = None,
-    dialogue_lengths: list[int] | None = None,
-    dialogue_speakers: list[str] | None = None,
+    dialogue_lengths: dict[str, int] | None = None,
+    dialogue_speakers: dict[int, str] | None = None,
     dialogues: list[tuple[int, str]] | None = None,
 ) -> None:
     """存储标注结果
@@ -117,9 +117,9 @@ def _store_annotation_results(
     if dialogues:
         effective_dialogues = []
         for dialogue_idx, content in dialogues:
-            speaker = dialogue_speakers.get(dialogue_idx, "") if isinstance(dialogue_speakers, dict) else ""
+            speaker = dialogue_speakers.get(dialogue_idx, "") if dialogue_speakers else ""
             effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content))
-        lengths = [dialogue_lengths.get(speaker, 0) for speaker in effective_dialogues] if isinstance(dialogue_lengths, dict) else dialogue_lengths
+        lengths = [dialogue_lengths.get(ds.speaker, 0) for ds in effective_dialogues] if dialogue_lengths else None
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)
 
     if annotation.chunk_summary:

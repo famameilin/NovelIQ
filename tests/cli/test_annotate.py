@@ -76,9 +76,9 @@ def create_mock_annotation() -> MultiPhaseAnnotationResult:
             dialogues=[],
         ),
         foreshadowing=None,
-        dialogue_lengths=[5],
-        dialogue_speakers=["张三"],
-        dialogues=[(0, "测试对话内容")],
+        dialogue_lengths={"张三": 5},
+        dialogue_speakers={0: "张三"},
+        dialogues=[(1, "测试对话内容")],
     )
 
 
