@@ -33,7 +33,7 @@ from src.models.local.parser import validate_foreshadowing_result
 from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
 from .phase2 import annotate_chunk_phase2
-from .phase3 import compute_dialogue_lengths_with_llm
+from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_text
 
 if TYPE_CHECKING:
     from src.models.local.annotation_client import AnnotationClient
@@ -224,13 +224,14 @@ def annotate_chunk_parallel(
         dialogue_lengths = None
         dialogue_speakers = None
         dialogues = None
-        if annotation.dialogues:
-            phase1_speakers = [d.speaker for d in annotation.dialogues]
-            logger.debug("annotate_chunk_parallel: phase3 phase1_speakers={} chunk_id={}", phase1_speakers, chunk_id)
+        extracted_dialogues = extract_dialogues_from_text(text)
+        if extracted_dialogues:
+            speakers = [f"speaker_{i+1}" for i in range(len(extracted_dialogues))]
+            logger.debug("annotate_chunk_parallel: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
             dialogue_lengths, dialogue_speakers, dialogues = compute_dialogue_lengths_with_llm(
                 client=unified_client,
                 text=text,
-                speakers=phase1_speakers,
+                speakers=speakers,
                 alias_map=alias_map,
                 chunk_id=chunk_id,
                 run_id=run_id,
@@ -338,13 +339,14 @@ def annotate_chunk_serial(
     dialogue_lengths = None
     dialogue_speakers = None
     dialogues = None
-    if annotation.dialogues:
-        phase1_speakers = [d.speaker for d in annotation.dialogues]
-        logger.debug("annotate_chunk_serial: phase3 phase1_speakers={} chunk_id={}", phase1_speakers, chunk_id)
+    extracted_dialogues = extract_dialogues_from_text(text)
+    if extracted_dialogues:
+        speakers = [f"speaker_{i+1}" for i in range(len(extracted_dialogues))]
+        logger.debug("annotate_chunk_serial: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
         dialogue_lengths, dialogue_speakers, dialogues = compute_dialogue_lengths_with_llm(
             client=client,
             text=text,
-            speakers=phase1_speakers,
+            speakers=speakers,
             alias_map=alias_map,
             chunk_id=chunk_id,
             run_id=run_id,
