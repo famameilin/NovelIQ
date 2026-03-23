@@ -254,13 +254,12 @@ def attribute_dialogues_with_llm(
 def compute_dialogue_lengths_with_llm(
     client: UnifiedModelClient | AnnotationClient,
     text: str,
-    speakers: list[str],
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
-) -> tuple[list[int], list[str], list[tuple[int, str]]]:
+) -> tuple[dict[str, int], list[tuple[int, str]]]:
     """
-    计算每个说话者的对话长度（使用 LLM 判断）
+    计算每个说话者的对话长度（使用 LLM 判断说话者）
 
     创建时间: 2026-03-20
     创建者: TraeAI
@@ -282,41 +281,33 @@ def compute_dialogue_lengths_with_llm(
     任务: fix-phase3-speaker-alias-mapping
     修改内容: 添加 alias_map 参数，LLM 自由判断说话者并通过 alias_map 映射到规范名
 
-    修改时间: 2026-03-22
+    修改时间: 2026-03-23
     修改者: TraeAI
-    任务: phase3-return-speaker-to-storage
-    修改内容: 返回 tuple[list[int], list[str]] 包含 (对话长度列表, 说话者列表)
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: phase3-return-dialogues-to-storage
-    修改内容: 返回 tuple[list[int], list[str], list[tuple[int, str]]] 包含 (对话长度列表, 说话者列表, 对话内容列表)
+    任务: remove-speakers-param
+    修改内容: 删除 speakers 参数，从 attribution 自动提取说话者，返回 dict[str, int]
 
     Args:
         client: 统一模型客户端
         text: chunk 原文
-        speakers: 说话者列表（用于返回结果顺序）
         alias_map: 别名到规范名的映射，None 时不进行映射
         chunk_id: chunk ID（用于交互记录）
         run_id: 运行 ID（用于交互记录）
 
     Returns:
-        tuple[list[int], list[str], list[tuple[int, str]]]: (每个说话者的对话长度列表, 说话者列表, 对话列表)
+        tuple[dict[str, int], list[tuple[int, str]]]: ({说话者: 对话长度}, [(index, content), ...])
     """
     logger.info(
-        f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0} speakers={speakers}"
+        f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}"
     )
 
-    if not text or not speakers:
-        logger.info(
-            f"compute_dialogue_lengths_with_llm: early return - text_empty={not text} speakers_empty={not speakers}"
-        )
-        return ([0] * len(speakers), list(speakers), [])
+    if not text:
+        logger.info(f"compute_dialogue_lengths_with_llm: early return - text_empty=True")
+        return ({}, [])
 
     dialogues = extract_dialogues_from_text(text)
     logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(dialogues)} dialogues")
     if not dialogues:
-        return ([0] * len(speakers), list(speakers), [])
+        return ({}, [])
 
     attribution = attribute_dialogues_with_llm(client, text, dialogues, known_characters=None, chunk_id=chunk_id, run_id=run_id)
     logger.info(f"compute_dialogue_lengths_with_llm: attribution={attribution}")
@@ -328,6 +319,5 @@ def compute_dialogue_lengths_with_llm(
             canonical = alias_map.get(raw_speaker, raw_speaker) if alias_map else raw_speaker
             speaker_lengths[canonical] = speaker_lengths.get(canonical, 0) + len(content)
 
-    result = [speaker_lengths.get(s, 0) for s in speakers]
-    logger.info(f"compute_dialogue_lengths_with_llm: result={result}")
-    return (result, list(speakers), dialogues)
+    logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
+    return (speaker_lengths, dialogues)
