@@ -227,7 +227,7 @@ def annotate_chunk_parallel(
         extracted_dialogues = extract_dialogues_from_text(text)
         if extracted_dialogues:
             logger.debug("annotate_chunk_parallel: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
-            speaker_lengths, dialogues = compute_dialogue_lengths_with_llm(
+            speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(
                 client=unified_client,
                 text=text,
                 alias_map=alias_map,
@@ -235,7 +235,7 @@ def annotate_chunk_parallel(
                 run_id=run_id,
             )
             dialogue_lengths = speaker_lengths
-            dialogue_speakers = list(speaker_lengths.keys())
+            dialogue_speakers = attribution
             logger.debug("annotate_chunk_parallel: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, chunk_id)
 
     if foreshadowing and validate_foreshadowing_result(foreshadowing, text):
@@ -342,7 +342,7 @@ def annotate_chunk_serial(
     extracted_dialogues = extract_dialogues_from_text(text)
     if extracted_dialogues:
         logger.debug("annotate_chunk_serial: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
-        speaker_lengths, dialogues = compute_dialogue_lengths_with_llm(
+        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -350,7 +350,7 @@ def annotate_chunk_serial(
             run_id=run_id,
         )
         dialogue_lengths = speaker_lengths
-        dialogue_speakers = list(speaker_lengths.keys())
+        dialogue_speakers = attribution
         logger.debug("annotate_chunk_serial: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, chunk_id)
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)

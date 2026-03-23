@@ -140,15 +140,17 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
     def test_empty_text_returns_empty_dict(self) -> None:
         """空文本返回空字典"""
         mock_client = MagicMock()
-        speaker_lengths, dialogues = compute_dialogue_lengths_with_llm(mock_client, "")
+        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, "")
         self.assertEqual(speaker_lengths, {})
+        self.assertEqual(attribution, {})
         self.assertEqual(dialogues, [])
 
     def test_no_dialogues_returns_empty_dict(self) -> None:
         """没有对话返回空字典"""
         mock_client = MagicMock()
-        speaker_lengths, dialogues = compute_dialogue_lengths_with_llm(mock_client, "没有对话的文本")
+        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, "没有对话的文本")
         self.assertEqual(speaker_lengths, {})
+        self.assertEqual(attribution, {})
         self.assertEqual(dialogues, [])
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
@@ -159,11 +161,12 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         text = '"你好"他说道。"你好啊"她回答。"再见"他说。'
 
-        speaker_lengths, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
+        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertIsInstance(speaker_lengths, dict)
         self.assertEqual(speaker_lengths.get("张三", 0), 4)
         self.assertEqual(speaker_lengths.get("李四", 0), 3)
+        self.assertIsInstance(attribution, dict)
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
     def test_unknown_speaker_not_counted(self, mock_attribute: MagicMock) -> None:
@@ -173,7 +176,7 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         text = '"你好"他说道。"你好啊"她回答。'
 
-        speaker_lengths, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
+        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertEqual(speaker_lengths.get("张三", 0), 2)
         self.assertNotIn("李四", speaker_lengths)
