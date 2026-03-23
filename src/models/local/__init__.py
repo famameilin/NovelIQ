@@ -6,11 +6,14 @@
 修改时间: 2026-03-12
 修改者: TraeAI
 修改内容: 项目文件结构整理与拆解 - 添加新客户端类导出
+
+修改时间: 2026-03-23
+修改者: TraeAI
+任务: unify-model-client-architecture
+修改内容: AnnotationClient 和 DisambiguationClient 已移动到 src/models/
 """
 
-from .annotation_client import AnnotationClient
 from .base import TokenUsageCallback
-from .disambiguation_client import DisambiguationClient
 from .embedding import EmbeddingClient
 from .parser import extract_think_content, make_empty_annotation
 from .schema import (
@@ -22,11 +25,9 @@ from .schema import (
 from .unified_client import UnifiedModelClient
 
 __all__ = [
-    "AnnotationClient",
     "ChunkAnnotation",
     "CharacterSnapshot",
     "DialogueSnapshot",
-    "DisambiguationClient",
     "EmbeddingClient",
     "extract_think_content",
     "make_empty_annotation",
