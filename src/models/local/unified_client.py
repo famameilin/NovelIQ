@@ -57,14 +57,14 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 
-from .annotation_client import AnnotationClient, MultiPhaseAnnotationResult
+from ..annotation import AnnotationClient, MultiPhaseAnnotationResult
+from ..disambiguation import DisambiguationClient
 from .base import TokenUsageCallback
 from .disambiguation import ExtendedDisambigResult
-from .disambiguation_client import DisambiguationClient
 from .schema import ChunkAnnotation
 
 if TYPE_CHECKING:
-    from .annotation_client import AnnotationClient as AnnotationClientType
+    from ..annotation import AnnotationClient as AnnotationClientType
 
 
 class UnifiedModelClient:

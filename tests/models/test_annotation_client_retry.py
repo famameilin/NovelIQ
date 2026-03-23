@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.local.annotation_client import AnnotationClient
+from src.models.annotation import AnnotationClient
 from src.models.local.annotation import (
     PHASE_MAX_RETRIES,
     Phase1MaxRetriesExceededError,
