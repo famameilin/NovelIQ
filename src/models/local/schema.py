@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -114,7 +114,7 @@ class ForeshadowingResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     has_foreshadowing: bool
-    foreshadowing_type: Optional[str] = None
+    foreshadowing_type: str | None = None
     anchor_text: str = ""
     anchor_reason: str = ""
     confidence: str
@@ -129,14 +129,58 @@ class ForeshadowingResult(BaseModel):
         }
 
 
+class QuoteCandidate(BaseModel):
+    """
+    正则提取阶段的候选结构
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: refactor-dialogue-attribution-pipeline
+    说明: 用于存储正则提取的引号候选及其上下文
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int = Field(description="候选序号（1开始）")
+    ctx_before: str = Field(default="", description="引号前的上下文")
+    content: str = Field(description="引号内的文字")
+    ctx_after: str = Field(default="", description="引号后的上下文")
+
+
+class DialogueRecord(BaseModel):
+    """
+    模型判断后的结果结构，写入数据库
+
+    创建时间: 2026-03-23
+    创建者: TraeAI
+    任务: refactor-dialogue-attribution-pipeline
+    说明: 用于存储 LLM 判断后的对话结果，包含是否为对话、说话者、语气等信息
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int = Field(description="候选序号（1开始）")
+    content: str = Field(description="引号内的文字")
+    is_dialogue: bool = Field(description="是否为真实对话")
+    speaker: str | None = Field(default=None, description="说话人，无法确定为 null")
+    tone: str | None = Field(default=None, description="语气：强硬/温和/讽刺/恳求/命令/恐惧/惊慌")
+    is_inner_monologue: bool = Field(default=False, description="是否为内心独白")
+    evidence: str = Field(default="", description="判断依据（用于调试）")
+
+
 class DialogueAttribution(BaseModel):
     """
-    单条对话归属数据结构
+    单条对话归属数据结构（已废弃，请使用 DialogueRecord）
 
     创建时间: 2026-03-20
     创建者: TraeAI
     任务: analyze-dialogue-length-zero
     说明: 用于存储单条对话的说话者归属判断结果
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: refactor-dialogue-attribution-pipeline
+    修改内容: 标记为废弃，建议使用 DialogueRecord
     """
 
     model_config = ConfigDict(frozen=True)
@@ -153,11 +197,16 @@ class DialogueAttributionResult(BaseModel):
     创建者: TraeAI
     任务: analyze-dialogue-length-zero
     说明: 用于 LLM 结构化输出的对话归属判断结果模型
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: refactor-dialogue-attribution-pipeline
+    修改内容: 使用 DialogueRecord 替代 DialogueAttribution
     """
 
     model_config = ConfigDict(frozen=True)
 
-    dialogues: List[DialogueAttribution] = Field(default_factory=list, description="对话归属列表")
+    dialogues: list[DialogueRecord] = Field(default_factory=list, description="对话归属列表")
 
 
 class HierarchicalRelation(BaseModel):
@@ -202,7 +251,7 @@ class DisambiguateResponseModel(BaseModel):
         default_factory=dict,
         description="实体类型映射，key为实体名称，value为类型（character/group/organization）",
     )
-    entity_relations: List[HierarchicalRelation] = Field(
+    entity_relations: list[HierarchicalRelation] = Field(
         default_factory=list,
         description="实体间的层级关系列表",
     )
@@ -230,14 +279,14 @@ class ChunkAnnotation(BaseModel):
     pivot_moment: bool
     cliffhanger: bool
     has_foreshadowing: bool
-    foreshadowing_type: Optional[str] = None
+    foreshadowing_type: str | None = None
     foreshadowing_desc: str = ""
-    characters: List[CharacterSnapshot] = Field(default_factory=list)
-    relations: List[RelationChangeSnapshot] = Field(default_factory=list)
-    dialogues: List[DialogueSnapshot] = Field(default_factory=list)
-    character_appearances: List[CharacterAppearance] = Field(default_factory=list)
+    characters: list[CharacterSnapshot] = Field(default_factory=list)
+    relations: list[RelationChangeSnapshot] = Field(default_factory=list)
+    dialogues: list[DialogueSnapshot] = Field(default_factory=list)
+    character_appearances: list[CharacterAppearance] = Field(default_factory=list)
     chunk_summary: str = ""
-    dialogue_lengths: Optional[List[int]] = Field(default=None)
+    dialogue_lengths: list[int] | None = Field(default=None)
 
     def to_dict(self) -> dict:
         return {

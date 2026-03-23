@@ -288,7 +288,7 @@ class CloudDisambiguationClient(BaseCloudModelClient):
                 lines.append(f"- {name}")
         body = "\n".join(lines)
 
-        system_prompt = settings.prompts.local_disambiguate_system
+        system_prompt = settings.prompts.disambiguate
         if existing_names:
             anchor_str = "、".join(existing_names)
             system_prompt += f"\n\n【已存在的角色】以下名字已在知识库中存在：[{anchor_str}]。如果你有充分证据认为候选人名与这些角色是同一人物，可以合并；如果证据不足，保持独立。"

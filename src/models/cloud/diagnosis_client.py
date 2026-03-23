@@ -346,7 +346,7 @@ class DiagnosisClient(BaseCloudModelClient):
         from src.config import settings
 
         prompt = json.dumps(payload, ensure_ascii=False)
-        system_prompt = settings.prompts.cloud_diagnose_system
+        system_prompt = settings.prompts.diagnose
         return [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},

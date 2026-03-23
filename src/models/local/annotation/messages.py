@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: 消息构建相关方法
+
+修改时间: 2026-03-23
+修改者: TraeAI
+任务: prompt-consolidation
+修改内容: 移除旧版 prompt 导入
 """
 
 from __future__ import annotations

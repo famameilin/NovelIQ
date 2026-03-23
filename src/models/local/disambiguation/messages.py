@@ -10,6 +10,11 @@
 修改者: TraeAI
 任务: fix-hardcoded-relation-types
 修改内容: 动态生成层级关系类型说明，从配置读取而非硬编码
+
+修改时间: 2026-03-23
+修改者: TraeAI
+任务: prompt-consolidation
+修改内容: 使用占位符替换动态构建 prompt
 """
 
 from __future__ import annotations
@@ -65,29 +70,25 @@ def _build_relation_types_union() -> str:
 
 def _build_dynamic_system_prompt() -> str:
     """
-    构建动态的系统 prompt，替换硬编码的关系类型
+    构建动态的系统 prompt，替换占位符
 
     创建时间: 2026-03-20
     创建者: TraeAI
     任务: fix-hardcoded-relation-types
     说明: 基于静态 prompt 模板，动态替换关系类型相关内容
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: prompt-consolidation
+    修改内容: 使用占位符 {{RELATION_TYPES_UNION}} 和 {{RELATION_TYPES_SECTION}}
     """
     base_prompt = DISAMBIGUATE_SYSTEM_PROMPT
 
     relation_types_union = _build_relation_types_union()
-    base_prompt = base_prompt.replace(
-        '"type": "belongs_to|member_of|leader_of|affiliated_with"',
-        f'"type": "{relation_types_union}"'
-    )
+    base_prompt = base_prompt.replace("{{RELATION_TYPES_UNION}}", relation_types_union)
 
     relation_types_section = _build_relation_types_section()
-    old_section = """【层级关系类型说明】
-- belongs_to：人物属于某组织（如 伯安 belongs_to 贺家）
-- member_of：人物是某群体成员（如 张三 member_of 赤甲卫）
-- leader_of：人物是某群体/组织领袖（如 贺重明 leader_of 贺家）
-- affiliated_with：群体隶属于某组织（如 赤甲卫 affiliated_with 贺家）"""
-
-    base_prompt = base_prompt.replace(old_section, relation_types_section)
+    base_prompt = base_prompt.replace("{{RELATION_TYPES_SECTION}}", relation_types_section)
 
     return base_prompt
 
