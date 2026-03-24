@@ -110,7 +110,18 @@ class AnalysisSettings:
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     multi_phase_annotation: MultiPhaseAnnotationSettings = field(default_factory=MultiPhaseAnnotationSettings)
     valid_hierarchical_relation_types: List[str] = field(
-        default_factory=lambda: ["belongs_to", "member_of", "leader_of", "affiliated_with"]
+        default_factory=lambda: [
+            "belongs_to",
+            "member_of",
+            "leader_of",
+            "affiliated_with",
+            "father_of",
+            "son_of",
+            "parent_of",
+            "child_of",
+            "sibling_of",
+            "spouse_of",
+        ]
     )
 
 
@@ -309,7 +320,19 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         progress=_parse_progress_settings(data.get("progress")),
         multi_phase_annotation=_parse_multi_phase_annotation_settings(data.get("multi_phase_annotation")),
         valid_hierarchical_relation_types=data.get(
-            "valid_hierarchical_relation_types", ["belongs_to", "member_of", "leader_of", "affiliated_with"]
+            "valid_hierarchical_relation_types",
+            [
+                "belongs_to",
+                "member_of",
+                "leader_of",
+                "affiliated_with",
+                "father_of",
+                "son_of",
+                "parent_of",
+                "child_of",
+                "sibling_of",
+                "spouse_of",
+            ],
         ),
     )
 

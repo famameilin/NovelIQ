@@ -93,7 +93,18 @@ class AnnotationConfig:
             object.__setattr__(
                 self,
                 "valid_hierarchical_relation_types",
-                ["belongs_to", "member_of", "leader_of", "affiliated_with"]
+                [
+                    "belongs_to",
+                    "member_of",
+                    "leader_of",
+                    "affiliated_with",
+                    "father_of",
+                    "son_of",
+                    "parent_of",
+                    "child_of",
+                    "sibling_of",
+                    "spouse_of",
+                ]
             )
         if self.valid_entity_types is None:
             object.__setattr__(

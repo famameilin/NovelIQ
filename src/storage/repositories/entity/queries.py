@@ -30,10 +30,10 @@ def insert_entity(
     novel_id: str,
     canonical: str,
     entity_type: str,
+    run_id: str,
     first_chunk: int | None = None,
     description: str | None = None,
     confidence: float = 1.0,
-    run_id: str | None = None,
 ) -> int | None:
     """插入实体"""
     entity = Entity(
@@ -55,9 +55,9 @@ def insert_entity_alias(
     session: Session,
     entity_id: int,
     alias: str,
+    run_id: str,
     alias_type: str | None = None,
     source_chunk: int | None = None,
-    run_id: str | None = None,
 ) -> int | None:
     """插入实体别名"""
     stmt = (
@@ -129,6 +129,7 @@ def fetch_entity_by_alias(
     conditions = [Entity.novel_id == novel_id, EntityAlias.alias == alias]
     if run_id is not None:
         conditions.append(Entity.run_id == run_id)
+        conditions.append(EntityAlias.run_id == run_id)
 
     stmt = (
         select(Entity, EntityAlias.alias_type, EntityAlias.confirm_count)
@@ -211,6 +212,7 @@ def fetch_all_aliases_with_canonical(
     conditions = [Entity.novel_id == novel_id]
     if run_id is not None:
         conditions.append(Entity.run_id == run_id)
+        conditions.append(EntityAlias.run_id == run_id)
 
     stmt = (
         select(Entity.canonical, EntityAlias.alias)
