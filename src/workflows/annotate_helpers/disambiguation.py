@@ -99,6 +99,27 @@ def _merge_relations(
     """合并两批关系并去重。"""
     return _dedupe_relations((first or []) + (second or []))
 
+def _extract_retryable_relations(skipped_relations: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """Extract retryable relations from skipped results for checkpoint recovery."""
+    if not skipped_relations:
+        return []
+
+    retryable: list[dict[str, str]] = []
+    retryable_reasons = {"from_entity_not_found", "to_entity_not_found"}
+
+    for item in skipped_relations:
+        reason = item.get("reason")
+        relation = item.get("relation")
+
+        if not isinstance(relation, dict):
+            continue
+
+        if reason in retryable_reasons or (isinstance(reason, str) and reason.startswith("insert_error:")):
+            retryable.append(relation)
+
+    return _dedupe_relations(retryable)
+
+
 def _save_disambig_checkpoint(
     conn, run_id: str, alias_map: dict[str, str], entity_relations: list[dict[str, str]] | None = None
 ) -> None:
@@ -477,14 +498,21 @@ def _run_final_disambiguation(
     # 优先处理 checkpoint 中未保存的关系（恢复场景）
     final_relations = _normalize_relations_with_alias_map(result.entity_relations, alias_map)
     relations_to_process = _merge_relations(pending_relations, final_relations)
+    retryable_relations: list[dict[str, str]] = []
     if relations_to_process:
         success_count, skipped = _process_entity_relations(
             conn, novel_id, run_id, relations_to_process, result.entity_types, alias_map
         )
         logger.info(f"final disambig: processed {success_count} hierarchical relations")
+        retryable_relations = _extract_retryable_relations(skipped)
+        if retryable_relations:
+            logger.warning(
+                "final disambig: {} relations left for retry, kept in checkpoint",
+                len(retryable_relations),
+            )
 
     # 保存 checkpoint，同时保存关系数据（用于系统意外停止后恢复）
-    _save_disambig_checkpoint(conn, run_id, alias_map, None)
+    _save_disambig_checkpoint(conn, run_id, alias_map, retryable_relations or None)
 
     return alias_map
 
