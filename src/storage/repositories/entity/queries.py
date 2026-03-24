@@ -30,10 +30,10 @@ def insert_entity(
     novel_id: str,
     canonical: str,
     entity_type: str,
+    run_id: str,
     first_chunk: int | None = None,
     description: str | None = None,
     confidence: float = 1.0,
-    run_id: str | None = None,
 ) -> int | None:
     """插入实体"""
     entity = Entity(
@@ -55,9 +55,9 @@ def insert_entity_alias(
     session: Session,
     entity_id: int,
     alias: str,
+    run_id: str,
     alias_type: str | None = None,
     source_chunk: int | None = None,
-    run_id: str | None = None,
 ) -> int | None:
     """插入实体别名"""
     stmt = (

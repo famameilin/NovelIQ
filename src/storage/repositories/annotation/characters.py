@@ -152,6 +152,7 @@ def _ensure_entity_exists(
     stmt = select(Entity.entity_id).where(
         Entity.novel_id == novel_id,
         Entity.canonical == canonical,
+        Entity.run_id == run_id,
     )
     row = session.execute(stmt).fetchone()
     if row:
