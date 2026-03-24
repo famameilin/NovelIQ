@@ -21,15 +21,16 @@ from loguru import logger
 
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
+from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.local.unified_client import UnifiedModelClient
 
 
 def _init_annotation_clients(
     analysis_logger: AnalysisLogger | None,
-    annotate_client: UnifiedModelClient | None = None,
-    incremental_disambig_client: UnifiedModelClient | None = None,
-    full_disambig_client: UnifiedModelClient | None = None,
-) -> Tuple[UnifiedModelClient, UnifiedModelClient | None, UnifiedModelClient, UnifiedModelClient]:
+    annotate_client: AnnotationLike | None = None,
+    incremental_disambig_client: DisambiguationLike | None = None,
+    full_disambig_client: DisambiguationLike | None = None,
+) -> Tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端"""
     annotation_client = annotate_client or UnifiedModelClient("annotation", analysis_logger=analysis_logger)
 
@@ -76,7 +77,7 @@ def _setup_token_usage_callback(
     conn,
     clients: list,
     novel_id: str,
-    annotation_client: UnifiedModelClient,
+    annotation_client: AnnotationLike,
     run_id: str,
 ) -> None:
     """设置token使用回调"""
