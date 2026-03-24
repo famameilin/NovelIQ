@@ -55,12 +55,12 @@ class Entity(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     embedding_vector: Mapped[Optional[list]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
-    run_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     __table_args__ = (
-        UniqueConstraint("novel_id", "canonical", name="uq_entities_novel_canonical"),
+        UniqueConstraint("novel_id", "run_id", "canonical", name="uq_entities_novel_run_canonical"),
         Index("idx_entities_novel_id", "novel_id"),
         Index("idx_entities_run_id", "run_id"),
     )
@@ -89,8 +89,8 @@ class EntityAlias(Base):
     alias_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     source_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     confirm_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    run_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     __table_args__ = (
@@ -134,12 +134,19 @@ class EntityRelation(Base):
     last_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tension: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    run_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     __table_args__ = (
-        UniqueConstraint("novel_id", "from_entity", "to_entity", "rel_type", name="uq_entity_relations"),
+        UniqueConstraint(
+            "novel_id",
+            "run_id",
+            "from_entity",
+            "to_entity",
+            "rel_type",
+            name="uq_entity_relations_novel_run",
+        ),
         Index("idx_entity_relations_novel_id", "novel_id"),
         Index("idx_entity_relations_run_id", "run_id"),
     )

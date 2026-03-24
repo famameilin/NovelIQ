@@ -1,20 +1,20 @@
-"""
-测试实体知识图谱相关操作
+﻿"""
+娴嬭瘯瀹炰綋鐭ヨ瘑鍥捐氨鐩稿叧鎿嶄綔
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
+淇敼鏃堕棿: 2026-03-15
+淇敼鑰? TraeAI
+浠诲姟: storage-layer-decoupling
+淇敼鍐呭: 浣跨敤 SessionFactory 鏇夸唬 connect_db/create_tables锛屾秷闄?DeprecationWarning
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 替换 sqlite_master 查询为 PostgreSQL information_schema 查询，添加 analysis_runs 记录创建，使用唯一 novel_id 避免数据冲突
+淇敼鏃堕棿: 2026-03-15
+淇敼鑰? TraeAI
+浠诲姟: postgresql-migration
+淇敼鍐呭: 鏇挎崲 sqlite_master 鏌ヨ涓?PostgreSQL information_schema 鏌ヨ锛屾坊鍔?analysis_runs 璁板綍鍒涘缓锛屼娇鐢ㄥ敮涓€ novel_id 閬垮厤鏁版嵁鍐茬獊
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration-cleanup
-修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
+淇敼鏃堕棿: 2026-03-15
+淇敼鑰? TraeAI
+浠诲姟: postgresql-migration-cleanup
+淇敼鍐呭: 鏀圭敤 PostgreSQL db_session fixture锛岀Щ闄?SQLite 渚濊禆
 """
 import sys
 import json
@@ -88,7 +88,7 @@ class TestEntityOperations:
     def test_insert_entity(self):
         entity_id = self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="李玄",
+            canonical="鏉庣巹",
             entity_type="character",
             first_chunk=1,
             description="青云宗弟子",
@@ -100,40 +100,54 @@ class TestEntityOperations:
     def test_fetch_entity_by_canonical(self):
         self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="李玄",
+            canonical="鏉庣巹",
             entity_type="character",
             first_chunk=1,
             description="青云宗弟子",
             run_id=self.run_id,
         )
-        entity = self.entity_repo.fetch_entity_by_canonical(self.novel_id, "李玄", self.run_id)
+        entity = self.entity_repo.fetch_entity_by_canonical(self.novel_id, "鏉庣巹", self.run_id)
         assert entity is not None
-        assert entity["canonical"] == "李玄"
+        assert entity["canonical"] == "鏉庣巹"
         assert entity["entity_type"] == "character"
 
     def test_update_entity_last_chunk(self):
         entity_id = self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="李玄",
+            canonical="鏉庣巹",
             entity_type="character",
             first_chunk=1,
             run_id=self.run_id,
         )
         self.entity_repo.update_entity_last_chunk(entity_id, 10)
-        entity = self.entity_repo.fetch_entity_by_canonical(self.novel_id, "李玄", self.run_id)
+        entity = self.entity_repo.fetch_entity_by_canonical(self.novel_id, "鏉庣巹", self.run_id)
         assert entity["last_chunk"] == 10
 
     def test_insert_entity_embedding(self):
         entity_id = self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="李玄",
+            canonical="鏉庣巹",
             entity_type="character",
             run_id=self.run_id,
         )
         embedding = [0.1] * 1536
         self.entity_repo.insert_entity_embedding(entity_id, embedding)
-        entity = self.entity_repo.fetch_entity_by_canonical(self.novel_id, "李玄", self.run_id)
+        entity = self.entity_repo.fetch_entity_by_canonical(self.novel_id, "鏉庣巹", self.run_id)
         assert entity["entity_id"] == entity_id
+
+    def test_entity_unique_key_is_run_scoped(self):
+        from src.storage.models.entity import Entity
+
+        unique_constraints = [
+            constraint
+            for constraint in Entity.__table__.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        ]
+        target = next(
+            c for c in unique_constraints if c.name == "uq_entities_novel_run_canonical"
+        )
+        column_names = [col.name for col in target.columns]
+        assert column_names == ["novel_id", "run_id", "canonical"]
 
 
 class TestAliasOperations:
@@ -148,7 +162,7 @@ class TestAliasOperations:
 
         self.entity_id = self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="李玄",
+            canonical="鏉庣巹",
             entity_type="character",
             run_id=self.run_id,
         )
@@ -156,7 +170,8 @@ class TestAliasOperations:
     def test_insert_entity_alias(self):
         alias_id = self.entity_repo.insert_entity_alias(
             entity_id=self.entity_id,
-            alias="那人",
+            alias="閭ｄ汉",
+            run_id=self.run_id,
             alias_type="pronoun",
             source_chunk=5,
         )
@@ -165,25 +180,27 @@ class TestAliasOperations:
     def test_fetch_entity_by_alias(self):
         self.entity_repo.insert_entity_alias(
             entity_id=self.entity_id,
-            alias="那人",
+            alias="閭ｄ汉",
+            run_id=self.run_id,
             alias_type="pronoun",
         )
-        entity = self.entity_repo.fetch_entity_by_alias(self.novel_id, "那人", self.run_id)
+        entity = self.entity_repo.fetch_entity_by_alias(self.novel_id, "閭ｄ汉", self.run_id)
         assert entity is not None
-        assert entity["canonical"] == "李玄"
+        assert entity["canonical"] == "鏉庣巹"
 
     def test_increment_alias_confirm(self):
         self.entity_repo.insert_entity_alias(
             entity_id=self.entity_id,
-            alias="那人",
+            alias="閭ｄ汉",
+            run_id=self.run_id,
         )
-        self.entity_repo.increment_alias_confirm(self.entity_id, "那人")
-        entity = self.entity_repo.fetch_entity_by_alias(self.novel_id, "那人", self.run_id)
+        self.entity_repo.increment_alias_confirm(self.entity_id, "閭ｄ汉")
+        entity = self.entity_repo.fetch_entity_by_alias(self.novel_id, "閭ｄ汉", self.run_id)
         assert entity["confirm_count"] == 2
 
     def test_fetch_all_aliases_for_entity(self):
-        self.entity_repo.insert_entity_alias(self.entity_id, "那人", "pronoun")
-        self.entity_repo.insert_entity_alias(self.entity_id, "前辈", "title")
+        self.entity_repo.insert_entity_alias(self.entity_id, "閭ｄ汉", self.run_id, "pronoun")
+        self.entity_repo.insert_entity_alias(self.entity_id, "鍓嶈緢", self.run_id, "title")
         aliases = self.entity_repo.fetch_all_aliases_for_entity(self.entity_id)
         assert len(aliases) == 2
 
@@ -200,13 +217,13 @@ class TestRelationOperations:
 
         self.entity1_id = self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="李玄",
+            canonical="鏉庣巹",
             entity_type="character",
             run_id=self.run_id,
         )
         self.entity2_id = self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="陈峰",
+            canonical="闄堝嘲",
             entity_type="character",
             run_id=self.run_id,
         )
@@ -216,7 +233,7 @@ class TestRelationOperations:
             novel_id=self.novel_id,
             from_entity=self.entity1_id,
             to_entity=self.entity2_id,
-            rel_type="盟友",
+            rel_type="鐩熷弸",
             first_chunk=1,
             tension=0.5,
             run_id=self.run_id,
@@ -228,19 +245,19 @@ class TestRelationOperations:
             novel_id=self.novel_id,
             from_entity=self.entity1_id,
             to_entity=self.entity2_id,
-            rel_type="盟友",
+            rel_type="鐩熷弸",
             run_id=self.run_id,
         )
         relations = self.entity_repo.fetch_relations_for_entity(self.entity1_id, self.novel_id, self.run_id)
         assert len(relations) == 1
-        assert relations[0]["rel_type"] == "盟友"
+        assert relations[0]["rel_type"] == "鐩熷弸"
 
     def test_update_relation_last_chunk(self):
         rel_id = self.entity_repo.insert_entity_relation(
             novel_id=self.novel_id,
             from_entity=self.entity1_id,
             to_entity=self.entity2_id,
-            rel_type="盟友",
+            rel_type="鐩熷弸",
             first_chunk=1,
             run_id=self.run_id,
         )
@@ -253,7 +270,7 @@ class TestRelationOperations:
             novel_id=self.novel_id,
             from_entity=self.entity1_id,
             to_entity=self.entity2_id,
-            rel_type="盟友",
+            rel_type="鐩熷弸",
             run_id=self.run_id,
         )
         relations = self.entity_repo.fetch_active_relations(self.novel_id, self.entity1_id, self.run_id)
@@ -272,7 +289,7 @@ class TestSnapshotOperations:
 
         self.entity_id = self.entity_repo.insert_entity(
             novel_id=self.novel_id,
-            canonical="李玄",
+            canonical="鏉庣巹",
             entity_type="character",
             run_id=self.run_id,
         )
@@ -312,3 +329,5 @@ class TestSnapshotOperations:
         snapshots = self.entity_repo.fetch_recent_snapshots(self.novel_id, self.run_id, limit=3)
         assert len(snapshots) == 3
         assert snapshots[0]["chunk_id"] == 4
+
+
