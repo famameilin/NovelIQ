@@ -131,10 +131,8 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
             model_dump=MagicMock(return_value={}),
         )
         mock_annotation_client._call_annotation_api.return_value = (mock_response, "{}")
-        mock_client._annotation_client = mock_annotation_client
-
         candidates = [QuoteCandidate(index=1, content="你好"), QuoteCandidate(index=2, content="你好啊")]
-        result = attribute_dialogues_with_llm(mock_client, "对话文本", candidates, ["张三", "李四"])
+        result = attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三", "李四"])
 
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0].speaker, "张三")
@@ -149,12 +147,10 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = None
-        mock_client._annotation_client = mock_annotation_client
-
         candidates = [QuoteCandidate(index=1, content="你好")]
 
         with self.assertRaises(ValueError):
-            attribute_dialogues_with_llm(mock_client, "对话文本", candidates, ["张三"])
+            attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三"])
 
     @patch("src.models.local.annotation.phase3.settings")
     def test_alias_speaker_normalized_before_known_filter(self, mock_settings: MagicMock) -> None:
@@ -178,11 +174,9 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
             model_dump=MagicMock(return_value={}),
         )
         mock_annotation_client._call_annotation_api.return_value = (mock_response, "{}")
-        mock_client._annotation_client = mock_annotation_client
-
         candidates = [QuoteCandidate(index=1, content="你好")]
         result = attribute_dialogues_with_llm(
-            mock_client,
+            mock_annotation_client,
             "对话文本",
             candidates,
             known_characters=["侯飞白"],

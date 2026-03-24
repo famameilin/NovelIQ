@@ -181,12 +181,14 @@ def _init_annotation_phase_with_config(
     )
 
     alias_keywords = _load_alias_keywords()
+    token_usage_callback = getattr(annotation_client, "_token_usage_callback", None)
+
     rag_retriever, character_graph, _ = _init_rag_retriever(
         config.conn,
         config.novel_id,
         config.use_rag,
         config.resume,
-        annotation_client._token_usage_callback,
+        token_usage_callback,
         run_id=config.run_id,
     )
 
