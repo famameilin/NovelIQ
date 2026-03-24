@@ -25,6 +25,12 @@ class AnnotationLike(Protocol):
     _novel_id: str | None
     _token_usage_callback: Any
 
+    def set_session(self, session: Any) -> None:
+        ...
+
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
+        ...
+
     def annotate_chunk(
         self,
         text: str,
@@ -51,6 +57,12 @@ class DisambiguationLike(Protocol):
     _config: Any
     _novel_id: str | None
     _token_usage_callback: Any
+
+    def set_session(self, session: Any) -> None:
+        ...
+
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
+        ...
 
     def disambiguate_characters(
         self,
