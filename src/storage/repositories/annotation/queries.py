@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, List, Set
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 
 from src.storage.models import (
     Chunk,
@@ -60,7 +60,7 @@ def fetch_chunk_annotations_full(session: Session, run_id: str) -> List[Any]:
             ChunkAnnotation.foreshadowing_type,
             ChunkAnnotation.foreshadowing_desc,
         )
-        .where(or_(ChunkAnnotation.run_id == run_id, ChunkAnnotation.run_id.is_(None)))
+        .where(ChunkAnnotation.run_id == run_id)
         .order_by(ChunkAnnotation.chunk_id)
     )
     result = session.execute(stmt)
@@ -82,7 +82,7 @@ def fetch_chunk_characters_full(session: Session, run_id: str) -> List[Any]:
             ChunkCharacter.action,
             ChunkCharacter.emotion_score,
         )
-        .where(or_(ChunkCharacter.run_id == run_id, ChunkCharacter.run_id.is_(None)))
+        .where(ChunkCharacter.run_id == run_id)
         .order_by(ChunkCharacter.chunk_id)
     )
     result = session.execute(stmt)
@@ -104,7 +104,7 @@ def fetch_chunk_relations_full(session: Session, run_id: str) -> List[Any]:
             ChunkRelation.type,
             ChunkRelation.change,
         )
-        .where(or_(ChunkRelation.run_id == run_id, ChunkRelation.run_id.is_(None)))
+        .where(ChunkRelation.run_id == run_id)
         .order_by(ChunkRelation.chunk_id)
     )
     result = session.execute(stmt)
@@ -120,7 +120,7 @@ def fetch_chunk_dialogues_full(session: Session, run_id: str) -> List[Any]:
     """
     stmt = (
         select(ChunkDialogue.chunk_id, ChunkDialogue.speaker, ChunkDialogue.length)
-        .where(or_(ChunkDialogue.run_id == run_id, ChunkDialogue.run_id.is_(None)))
+        .where(ChunkDialogue.run_id == run_id)
         .order_by(ChunkDialogue.chunk_id)
     )
     result = session.execute(stmt)

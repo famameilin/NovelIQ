@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from src.chunking.chunker import Chunk
@@ -162,7 +162,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             (total_chunks, total_chars) 元组
         """
         stmt = select(func.count(), func.sum(func.length(ChunkModel.text))).where(
-            or_(ChunkModel.run_id == run_id, ChunkModel.run_id.is_(None))
+            ChunkModel.run_id == run_id
         )
         result = self.session.execute(stmt)
         row = result.fetchone()

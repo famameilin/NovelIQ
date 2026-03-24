@@ -38,10 +38,10 @@ def insert_chunk_annotation(
     record = ChunkAnnotation(
         chunk_id=chunk_id,
         emotional_valence=annotation.emotional_valence,
-        pivot_moment=int(annotation.pivot_moment) if annotation.pivot_moment else None,
+        pivot_moment=int(annotation.pivot_moment) if annotation.pivot_moment is not None else None,
         event_type=annotation.event_type,
-        cliffhanger=int(annotation.cliffhanger) if annotation.cliffhanger else None,
-        has_foreshadowing=int(annotation.has_foreshadowing) if annotation.has_foreshadowing else None,
+        cliffhanger=int(annotation.cliffhanger) if annotation.cliffhanger is not None else None,
+        has_foreshadowing=int(annotation.has_foreshadowing) if annotation.has_foreshadowing is not None else None,
         foreshadowing_type=annotation.foreshadowing_type,
         foreshadowing_desc=annotation.foreshadowing_desc,
         run_id=run_id,
