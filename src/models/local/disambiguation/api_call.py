@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, cast
+from typing import TYPE_CHECKING, Dict, List
 
 from loguru import logger
 
@@ -76,23 +76,16 @@ def call_disambiguate_api(
     if client._client is None:
         raise ValueError("client is required")
 
-    enable_thinking = config.thinking_enabled
-    request_params: dict[str, Any] = {
-        "model": config.model,
-        "messages": cast(Any, messages),
-        "temperature": config.temperature,
-        "top_p": config.top_p,
-        "response_format": client._build_json_schema(DisambiguateResponseModel),
-    }
-    if enable_thinking:
-        request_params["reasoning_effort"] = "medium"
-    else:
-        request_params["reasoning_effort"] = "none"
+    request_params = client._build_request_params(
+        messages=messages,
+        enable_thinking=config.thinking_enabled,
+    )
+    request_params["response_format"] = client._build_json_schema(DisambiguateResponseModel)
 
     model_for_token_count = config.model
     prompt_tokens = count_messages_tokens(messages, model_for_token_count)
 
-    response = client._call_api_stream(request_params)
+    response = client._call_api_stream(request_params, is_cloud=client.is_cloud_api())
 
     thinking_content = None
     if hasattr(response, "choices") and response.choices:

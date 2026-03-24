@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.models.local.annotation_client import AnnotationClient
+    from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
 
 

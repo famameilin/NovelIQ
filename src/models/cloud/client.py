@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
+from src.models.disambiguation import DisambiguationClient
 from src.models.diagnosis import DiagnosisClient
 
 from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
@@ -62,6 +63,14 @@ class ConfiguredCloudModelClient(CloudModelClient):
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
         )
+        self._disambiguation_client = DisambiguationClient(
+            task_type="incremental_disambig",
+            config=config,
+            client=client,
+            analysis_logger=analysis_logger,
+            token_usage_callback=token_usage_callback,
+            novel_id=novel_id,
+        )
         self._config = self._diagnosis_client._config
         self._analysis_logger = analysis_logger
         self._token_usage_callback = token_usage_callback
@@ -76,7 +85,12 @@ class ConfiguredCloudModelClient(CloudModelClient):
         context_sentences: Dict[str, str] | None = None,
         existing_names: List[str] | None = None,
     ) -> Dict[str, str]:
-        return {name: name for name in candidates}
+        result = self._disambiguation_client.disambiguate_characters(
+            candidates=candidates,
+            context_sentences=context_sentences,
+            existing_names=existing_names,
+        )
+        return result.alias_map
 
 
 __all__ = [
