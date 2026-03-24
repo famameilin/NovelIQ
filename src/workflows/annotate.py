@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.storage.repositories import ChunkRepository, AnnotationRepository
 
 
@@ -39,9 +39,9 @@ def run_annotate(
     novel_title: str | None = None,
     use_context_enhancement: bool = True,
     use_rag: bool = True,
-    annotate_client: UnifiedModelClient | None = None,
-    incremental_disambig_client: UnifiedModelClient | None = None,
-    full_disambig_client: UnifiedModelClient | None = None,
+    annotate_client: AnnotationLike | None = None,
+    incremental_disambig_client: DisambiguationLike | None = None,
+    full_disambig_client: DisambiguationLike | None = None,
 ) -> Tuple[int, int, int]:
     """
     执行小说标注流程

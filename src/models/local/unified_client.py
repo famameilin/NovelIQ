@@ -146,6 +146,16 @@ class UnifiedModelClient:
         self._annotation_client._novel_id = value
         self._disambiguation_client._novel_id = value
 
+    def set_session(self, session: Any) -> None:
+        """设置数据库会话并同步到内部客户端。"""
+        self._annotation_client.set_session(session)
+        self._disambiguation_client.set_session(session)
+
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
+        """设置运行时上下文并同步到内部客户端。"""
+        self._novel_id = novel_id
+        self._token_usage_callback = token_usage_callback
+
     def annotate_chunk(
         self,
         text: str,
