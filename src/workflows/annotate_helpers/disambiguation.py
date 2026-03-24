@@ -165,8 +165,8 @@ def _save_disambiguation_interaction(
             thinking_chars = len(thinking_content) if thinking_content else 0
             has_thinking = bool(thinking_content and thinking_content.strip())
 
-            # 判断是否是云端模型（使用客户端的 is_cloud_api 方法）
-            is_cloud = client.is_cloud_api() if hasattr(client, 'is_cloud_api') else False
+            # 判断是否是云端模型
+            is_cloud = client.is_cloud_api()
 
             repo.save_interaction(
                 run_id=run_id,
@@ -174,7 +174,7 @@ def _save_disambiguation_interaction(
                 interaction_type="disambiguate",
                 phase=stage_name.replace(" ", "_"),
                 attempt_number=attempt_number,
-                model_name=client._config.model if hasattr(client, '_config') else None,
+                model_name=client._config.model,
                 model_provider="cloud" if is_cloud else "local",
                 prompt=prompt_text,
                 response=response_text,

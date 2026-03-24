@@ -134,24 +134,13 @@ class AnnotationPhaseResult:
 
 def _set_client_session(client: Any, session: Any) -> None:
     """
-    为客户端设置会话（兼容 UnifiedModelClient 与任务专用客户端）。
+    为客户端设置会话。
 
-    优先使用公开方法 set_session；若不存在则按兼容路径写入 _session。
+    使用公开方法 set_session 进行会话注入。
     """
     if client is None:
         return
-
-    set_session = getattr(client, "set_session", None)
-    if callable(set_session):
-        set_session(session)
-        return
-
-    if hasattr(client, "_annotation_client"):
-        client._annotation_client._session = session
-        return
-
-    if hasattr(client, "_session"):
-        client._session = session
+    client.set_session(session)
 
 
 def _init_annotation_phase_with_config(

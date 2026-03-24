@@ -33,7 +33,8 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.storage.repositories import ChunkRepository, RunRepository
 from src.workflows.annotate import run_annotate
 from src.chunking.chunker import Chunk
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.annotation import AnnotationClient
+from src.models.disambiguation import DisambiguationClient
 from src.models.local.schema import ChunkAnnotation, CharacterSnapshot, RelationChangeSnapshot, DialogueSnapshot
 from src.models.local.annotation import MultiPhaseAnnotationResult
 from src.models.local.disambiguation import ExtendedDisambigResult
@@ -96,18 +97,20 @@ class TestAnnotate:
         chunks = [Chunk(index=i, start=0, end=10, text=f"张三在测试文本{i}中行动") for i in range(chunk_count)]
         chunk_repo.insert_chunks(self.run_id, chunks)
 
-    @patch("src.workflows.annotate_helpers.client_init.UnifiedModelClient")
-    def test_annotate_basic(self, mock_client_class: MagicMock) -> None:
-        mock_client = MagicMock(spec=UnifiedModelClient)
-        mock_client.annotate_chunk.return_value = create_mock_annotation()
-        mock_client.disambiguate_characters.return_value = ExtendedDisambigResult(
+    @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
+    @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
+    def test_annotate_basic(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
+        mock_annotation_client = MagicMock(spec=AnnotationClient)
+        mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
+        mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
+        mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
+        mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
             alias_map={},
             entity_types={},
             entity_relations=[]
         )
-        # 设置 _annotation_client 嵌套属性，用于 session 设置
-        mock_client._annotation_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        mock_annotation_class.return_value = mock_annotation_client
+        mock_disambiguation_class.return_value = mock_disambiguation_client
 
         self._create_chunks(3)
 
@@ -141,18 +144,20 @@ class TestAnnotate:
         assert relation_count == 3
         assert dialogue_count == 3
 
-    @patch("src.workflows.annotate_helpers.client_init.UnifiedModelClient")
-    def test_annotate_resume(self, mock_client_class: MagicMock) -> None:
-        mock_client = MagicMock(spec=UnifiedModelClient)
-        mock_client.annotate_chunk.return_value = create_mock_annotation()
-        mock_client.disambiguate_characters.return_value = ExtendedDisambigResult(
+    @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
+    @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
+    def test_annotate_resume(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
+        mock_annotation_client = MagicMock(spec=AnnotationClient)
+        mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
+        mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
+        mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
+        mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
             alias_map={},
             entity_types={},
             entity_relations=[]
         )
-        # 设置 _annotation_client 嵌套属性，用于 session 设置
-        mock_client._annotation_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        mock_annotation_class.return_value = mock_annotation_client
+        mock_disambiguation_class.return_value = mock_disambiguation_client
 
         self._create_chunks(5)
 
@@ -195,18 +200,22 @@ class TestAnnotate:
         ).scalar()
         assert annotation_count == 5
 
-    @patch("src.workflows.annotate_helpers.client_init.UnifiedModelClient")
-    def test_annotate_disambiguation(self, mock_client_class: MagicMock) -> None:
-        mock_client = MagicMock(spec=UnifiedModelClient)
-        mock_client.annotate_chunk.return_value = create_mock_annotation()
-        mock_client.disambiguate_characters.return_value = ExtendedDisambigResult(
+    @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
+    @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
+    def test_annotate_disambiguation(
+        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock
+    ) -> None:
+        mock_annotation_client = MagicMock(spec=AnnotationClient)
+        mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
+        mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
+        mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
+        mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
             alias_map={"张三丰": "张三"},
             entity_types={},
             entity_relations=[]
         )
-        # 设置 _annotation_client 嵌套属性，用于 session 设置
-        mock_client._annotation_client = MagicMock()
-        mock_client_class.return_value = mock_client
+        mock_annotation_class.return_value = mock_annotation_client
+        mock_disambiguation_class.return_value = mock_disambiguation_client
 
         self._create_chunks(2)
 
