@@ -21,7 +21,8 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.cloud.client import NullCloudModelClient
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.annotation import AnnotationClient
+from src.models.disambiguation import DisambiguationClient
 from src.models.local.schema import ChunkAnnotation, CharacterSnapshot
 from src.storage.repositories import ChunkRepository, StatsRepository, RunRepository
 
@@ -45,14 +46,14 @@ def _create_mock_clients() -> tuple:
             )
         ],
     )
-    mock_annotate_client = MagicMock(spec=UnifiedModelClient)
+    mock_annotate_client = MagicMock(spec=AnnotationClient)
     mock_annotate_client.annotate_chunk.return_value = mock_annotation
     mock_annotate_client.disambiguate_characters.return_value = {}
 
-    mock_incremental_client = MagicMock(spec=UnifiedModelClient)
+    mock_incremental_client = MagicMock(spec=DisambiguationClient)
     mock_incremental_client.disambiguate_characters.return_value = {}
 
-    mock_full_client = MagicMock(spec=UnifiedModelClient)
+    mock_full_client = MagicMock(spec=DisambiguationClient)
     mock_full_client.disambiguate_characters.return_value = {}
 
     return mock_annotate_client, mock_incremental_client, mock_full_client

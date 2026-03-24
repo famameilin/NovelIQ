@@ -15,14 +15,78 @@
 
 from __future__ import annotations
 
-from typing import Tuple, cast
+from typing import Any, Tuple
 
 from loguru import logger
 
-from src.config import settings
+from src.config import TaskModelConfig, settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.interfaces import AnnotationLike, DisambiguationLike
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.annotation import AnnotationClient
+from src.models.disambiguation import DisambiguationClient
+from src.models.local.disambiguation import ExtendedDisambigResult
+
+
+class _NoopDisambiguationClient:
+    """Fallback disambiguation client for injected lightweight annotation stubs."""
+
+    def __init__(self, config: Any) -> None:
+        self._config = config
+        self._novel_id: str | None = None
+        self._token_usage_callback: Any = None
+        self._session: Any = None
+
+    def set_session(self, session: Any) -> None:
+        self._session = session
+
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
+        self._novel_id = novel_id
+        self._token_usage_callback = token_usage_callback
+
+    def disambiguate_characters(
+        self,
+        candidates: list[str] | list[dict[str, int]],
+        context_sentences: dict[str, str] | None = None,
+        existing_names: list[str] | None = None,
+        rag_hint: str | None = None,
+    ) -> ExtendedDisambigResult:
+        return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
+
+    def is_cloud_api(self) -> bool:
+        return False
+
+
+def _resolve_disambiguation_fallback(
+    role: str,
+    task_type: str,
+    annotation_client: AnnotationLike,
+    analysis_logger: AnalysisLogger | None,
+) -> DisambiguationLike:
+    config = getattr(annotation_client, "_config", None)
+    client = getattr(annotation_client, "_client", None)
+
+    if isinstance(annotation_client, DisambiguationLike):
+        logger.warning(f"{role} disambiguation config missing, using injected annotation client as fallback")
+        return annotation_client
+
+    if isinstance(config, TaskModelConfig):
+        try:
+            return DisambiguationClient(
+                task_type=task_type,
+                config=config,
+                client=client,
+                analysis_logger=analysis_logger,
+            )
+        except Exception as e:
+            logger.warning(
+                f"{role} disambiguation fallback from annotation config failed ({e}), using no-op disambiguation client"
+            )
+    else:
+        logger.warning(
+            f"{role} disambiguation fallback skipped because injected annotation _config is not TaskModelConfig, using no-op disambiguation client"
+        )
+
+    return _NoopDisambiguationClient(config=config)
 
 
 def _get_model_name(client: AnnotationLike) -> str:
@@ -39,24 +103,14 @@ def _init_annotation_clients(
     full_disambig_client: DisambiguationLike | None = None,
 ) -> Tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端"""
+    annotation_client = annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger)
 
-    def _require_disambiguation_fallback(client: AnnotationLike, role: str) -> DisambiguationLike:
-        if isinstance(client, DisambiguationLike):
-            return cast(DisambiguationLike, client)
-
-        raise TypeError(
-            f"{role} disambiguation config is missing and annotation fallback client "
-            "does not implement disambiguate_characters; provide a DisambiguationLike client explicitly"
-        )
-
-    annotation_client = annotate_client or UnifiedModelClient("annotation", analysis_logger=analysis_logger)
-
-    cloud_annotation_client: UnifiedModelClient | None = None
+    cloud_annotation_client: AnnotationLike | None = None
     cloud_fallback_enabled = settings.analysis.cloud_annotation_fallback_enabled
 
     if cloud_fallback_enabled:
         try:
-            cloud_annotation_client = UnifiedModelClient("cloud_annotation", analysis_logger=analysis_logger)
+            cloud_annotation_client = AnnotationClient(task_type="cloud_annotation", analysis_logger=analysis_logger)
             logger.info(
                 f"cloud annotation client initialized for fallback (thinking={cloud_annotation_client._config.thinking_enabled})"
             )
@@ -70,22 +124,32 @@ def _init_annotation_clients(
         incremental_client = incremental_disambig_client
     else:
         try:
-            incremental_client = UnifiedModelClient("incremental_disambig", analysis_logger=analysis_logger)
+            incremental_client = DisambiguationClient(task_type="incremental_disambig", analysis_logger=analysis_logger)
             logger.info("incremental disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"incremental disambiguation config not found, falling back to annotation model: {e}")
-            incremental_client = _require_disambiguation_fallback(annotation_client, "incremental")
+            incremental_client = _resolve_disambiguation_fallback(
+                role="incremental",
+                task_type="incremental_disambig",
+                annotation_client=annotation_client,
+                analysis_logger=analysis_logger,
+            )
 
     # 全量消歧客户端：如果配置为空，回退到标注模型
     if full_disambig_client:
         full_client = full_disambig_client
     else:
         try:
-            full_client = UnifiedModelClient("full_disambig", analysis_logger=analysis_logger)
+            full_client = DisambiguationClient(task_type="full_disambig", analysis_logger=analysis_logger)
             logger.info("full disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"full disambiguation config not found, falling back to annotation model: {e}")
-            full_client = _require_disambiguation_fallback(annotation_client, "full")
+            full_client = _resolve_disambiguation_fallback(
+                role="full",
+                task_type="full_disambig",
+                annotation_client=annotation_client,
+                analysis_logger=analysis_logger,
+            )
 
     return annotation_client, cloud_annotation_client, incremental_client, full_client
 
@@ -127,9 +191,4 @@ def _setup_token_usage_callback(
 
     for client in clients:
         if client is not None:
-            set_runtime_context = getattr(client, "set_runtime_context", None)
-            if callable(set_runtime_context):
-                set_runtime_context(novel_id, _token_usage_callback)
-            else:
-                client._token_usage_callback = _token_usage_callback
-                client._novel_id = novel_id
+            client.set_runtime_context(novel_id, _token_usage_callback)

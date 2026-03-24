@@ -5,7 +5,7 @@
 创建者: Codex
 任务: decouple-unified-client-phase1
 说明:
-- 为 workflow 层提供最小能力接口，减少对 UnifiedModelClient 的类型耦合
+- 为 workflow 层提供最小能力接口，减少对具体客户端实现的类型耦合
 - 仅约束 workflow 实际使用的方法与属性
 """
 

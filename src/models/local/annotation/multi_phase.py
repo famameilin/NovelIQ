@@ -37,23 +37,10 @@ from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_te
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-    from src.models.local.unified_client import UnifiedModelClient
-
-
-def _get_annotation_client(client: AnnotationClient | UnifiedModelClient) -> AnnotationClient:
-    """从 UnifiedModelClient 或直接返回 AnnotationClient"""
-    if hasattr(client, "_annotation_client"):
-        return client._annotation_client
-    return client
-
-
-def _get_unified_client(client: AnnotationClient | UnifiedModelClient) -> UnifiedModelClient | AnnotationClient:
-    """如果输入是 AnnotationClient，直接返回；如果是 UnifiedModelClient 也返回自身"""
-    return client
 
 
 def annotate_chunk_multi_phase(
-    client: AnnotationClient | UnifiedModelClient,
+    client: AnnotationClient,
     text: str,
     prev_summary: str | None = None,
     alias_map: dict[str, str] | None = None,
@@ -68,7 +55,7 @@ def annotate_chunk_multi_phase(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
-    cloud_client: AnnotationClient | UnifiedModelClient | None = None,
+    cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     character_appearances: list[dict] | None = None,
     rag_retriever: Any | None = None,
@@ -135,7 +122,7 @@ def annotate_chunk_multi_phase(
 
 
 def annotate_chunk_parallel(
-    client: AnnotationClient | UnifiedModelClient,
+    client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
@@ -146,7 +133,7 @@ def annotate_chunk_parallel(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    cloud_client: AnnotationClient | UnifiedModelClient | None = None,
+    cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     character_appearances: list[dict] | None = None,
     rag_retriever: Any | None = None,
@@ -180,9 +167,8 @@ def annotate_chunk_parallel(
     """
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
-    annotation_client = _get_annotation_client(client)
-    cloud_annotation_client = _get_annotation_client(cloud_client) if cloud_client else None
-    unified_client = _get_unified_client(client)
+    annotation_client = client
+    cloud_annotation_client = cloud_client
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         phase1_future = executor.submit(
@@ -229,7 +215,7 @@ def annotate_chunk_parallel(
             logger.debug("annotate_chunk_parallel: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
             known_characters = [c.name for c in annotation.characters] if annotation.characters else None
             speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(
-                client=unified_client,
+                client=annotation_client,
                 text=text,
                 alias_map=alias_map,
                 chunk_id=chunk_id,
@@ -254,7 +240,7 @@ def annotate_chunk_parallel(
 
 
 def annotate_chunk_serial(
-    client: AnnotationClient | UnifiedModelClient,
+    client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
@@ -265,7 +251,7 @@ def annotate_chunk_serial(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    cloud_client: AnnotationClient | UnifiedModelClient | None = None,
+    cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     character_appearances: list[dict] | None = None,
     rag_retriever: Any | None = None,
@@ -294,8 +280,8 @@ def annotate_chunk_serial(
     """
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
 
-    annotation_client = _get_annotation_client(client)
-    cloud_annotation_client = _get_annotation_client(cloud_client) if cloud_client else None
+    annotation_client = client
+    cloud_annotation_client = cloud_client
 
     annotation = annotate_chunk_phase1(
         client=annotation_client,
