@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Tuple, cast
 
 from loguru import logger
 
@@ -39,6 +39,16 @@ def _init_annotation_clients(
     full_disambig_client: DisambiguationLike | None = None,
 ) -> Tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端"""
+
+    def _require_disambiguation_fallback(client: AnnotationLike, role: str) -> DisambiguationLike:
+        if isinstance(client, DisambiguationLike):
+            return cast(DisambiguationLike, client)
+
+        raise TypeError(
+            f"{role} disambiguation config is missing and annotation fallback client "
+            "does not implement disambiguate_characters; provide a DisambiguationLike client explicitly"
+        )
+
     annotation_client = annotate_client or UnifiedModelClient("annotation", analysis_logger=analysis_logger)
 
     cloud_annotation_client: UnifiedModelClient | None = None
@@ -64,7 +74,7 @@ def _init_annotation_clients(
             logger.info("incremental disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"incremental disambiguation config not found, falling back to annotation model: {e}")
-            incremental_client = annotation_client
+            incremental_client = _require_disambiguation_fallback(annotation_client, "incremental")
 
     # 全量消歧客户端：如果配置为空，回退到标注模型
     if full_disambig_client:
@@ -75,7 +85,7 @@ def _init_annotation_clients(
             logger.info("full disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"full disambiguation config not found, falling back to annotation model: {e}")
-            full_client = annotation_client
+            full_client = _require_disambiguation_fallback(annotation_client, "full")
 
     return annotation_client, cloud_annotation_client, incremental_client, full_client
 
