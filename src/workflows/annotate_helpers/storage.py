@@ -116,7 +116,7 @@ def _store_annotation_results(
     if dialogues:
         effective_dialogues = []
         for dialogue_idx, content in dialogues:
-            speaker = dialogue_speakers.get(dialogue_idx, "") if dialogue_speakers else ""
+            speaker = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
             effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content))
         lengths = [len(content) for _, content in dialogues]
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)

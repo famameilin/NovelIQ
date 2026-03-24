@@ -98,7 +98,7 @@ def update_character_names(
     for alias, canonical in alias_map.items():
         if alias != canonical:
             _update_character_names_in_tables(session, alias, canonical, run_id)
-        entity_id = _ensure_entity_exists(session, novel_id, canonical, canonical_to_entity_id)
+        entity_id = _ensure_entity_exists(session, novel_id, canonical, canonical_to_entity_id, run_id)
         if entity_id is not None:
             _create_alias_mapping(session, entity_id, alias, canonical, run_id)
     session.execute(
@@ -135,7 +135,11 @@ def _update_character_names_in_tables(session: Session, alias: str, canonical: s
 
 
 def _ensure_entity_exists(
-    session: Session, novel_id: str, canonical: str, canonical_to_entity_id: dict[str, int]
+    session: Session,
+    novel_id: str,
+    canonical: str,
+    canonical_to_entity_id: dict[str, int],
+    run_id: str,
 ) -> int | None:
     """
     确保实体存在，返回实体ID
@@ -148,6 +152,7 @@ def _ensure_entity_exists(
     stmt = select(Entity.entity_id).where(
         Entity.novel_id == novel_id,
         Entity.canonical == canonical,
+        Entity.run_id == run_id,
     )
     row = session.execute(stmt).fetchone()
     if row:
@@ -161,6 +166,7 @@ def _ensure_entity_exists(
         last_chunk=None,
         description=None,
         confidence=1.0,
+        run_id=run_id,
     )
     session.add(entity)
     session.flush()

@@ -36,10 +36,10 @@ def insert_entity_relation(
     from_entity: int,
     to_entity: int,
     rel_type: str,
+    run_id: str,
     first_chunk: int | None = None,
     tension: float = 0.0,
     rel_category: str = "interpersonal",
-    run_id: str | None = None,
 ) -> int | None:
     """
     插入实体关系
@@ -64,7 +64,7 @@ def insert_entity_relation(
             tension=tension,
             run_id=run_id,
         )
-        .on_conflict_do_nothing(constraint="uq_entity_relations")
+        .on_conflict_do_nothing(constraint="uq_entity_relations_novel_run")
         .returning(EntityRelation.rel_id)
     )
 

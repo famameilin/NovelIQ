@@ -87,7 +87,7 @@ def _parse_int_field(value: Any) -> Optional[int]:
         return None
 
 
-def _normalize_name(name: str, alias_map: dict[str, str] | None) -> str:
+def _normalize_name(name: str | None, alias_map: dict[str, str] | None) -> str | None:
     """
     别名归一化函数
 
@@ -106,6 +106,8 @@ def _normalize_name(name: str, alias_map: dict[str, str] | None) -> str:
     Returns:
         归一化后的名称
     """
+    if name is None:
+        return None
     if alias_map and name in alias_map:
         return alias_map[name]
     return name
@@ -355,8 +357,12 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository,
     dialogues_by_chunk: Dict[int, List[ChunkDialogue]] = defaultdict(list)
     for row in dialogues_raw:
         cid = row[0]
+        speaker = row[1] if row[1] else None
         dialogues_by_chunk[cid].append(
-            ChunkDialogue(speaker=_normalize_name(str(row[1]), alias_map), length=int(row[2]) if row[2] is not None else None)
+            ChunkDialogue(
+                speaker=_normalize_name(speaker, alias_map),
+                length=int(row[2]) if row[2] is not None else None,
+            )
         )
 
     result: List[ChunkAnnotation] = []

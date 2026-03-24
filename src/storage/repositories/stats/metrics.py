@@ -88,7 +88,7 @@ def fetch_global_stats_dict(session: Session, run_id: str) -> Dict[str, float]:
         统计名称到值的映射字典
     """
     stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(
-        (GlobalStats.run_id == run_id) | (GlobalStats.run_id.is_(None))
+        GlobalStats.run_id == run_id
     )
     result = session.execute(stmt).fetchall()
     return {row.stat_name: row.stat_value for row in result}
@@ -284,7 +284,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> Option
         select(CloudAnalysis)
         .where(
             CloudAnalysis.novel_id == novel_id,
-            (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
+            CloudAnalysis.run_id == run_id,
         )
         .limit(1)
     )
@@ -297,7 +297,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> Option
             select(CloudAnalysis)
             .where(
                 CloudAnalysis.foreshadow_rate.isnot(None),
-                (CloudAnalysis.run_id == run_id) | (CloudAnalysis.run_id.is_(None)),
+                CloudAnalysis.run_id == run_id,
             )
             .order_by(CloudAnalysis.id.desc())
             .limit(1)
@@ -444,7 +444,7 @@ def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> Optional[
         select(GlobalContext.novel_title)
         .where(
             GlobalContext.novel_id == novel_id,
-            (GlobalContext.run_id == run_id) | (GlobalContext.run_id.is_(None)),
+            GlobalContext.run_id == run_id,
         )
         .limit(1)
     )
