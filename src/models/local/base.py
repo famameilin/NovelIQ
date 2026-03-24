@@ -1,7 +1,7 @@
 """
 创建时间: 2026-03-12
 创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 从 unified_client.py 拆分基础客户端类
+任务: 项目文件结构整理与拆解 - 拆分基础客户端类
 修改时间: 2026-03-16
 修改者: TraeAI
 修改内容:
@@ -115,6 +115,15 @@ class BaseModelClient:
             self._config.model,
             self._config.timeout_s,
         )
+
+    def set_session(self, session: Any) -> None:
+        """设置数据库会话（用于保存模型交互记录）。"""
+        self._session = session
+
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
+        """设置运行时上下文（novel_id 和 token 回调）。"""
+        self._novel_id = novel_id
+        self._token_usage_callback = token_usage_callback
 
     def is_cloud_api(self) -> bool:
         """

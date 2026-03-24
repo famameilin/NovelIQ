@@ -21,24 +21,33 @@ from loguru import logger
 
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.interfaces import AnnotationLike, DisambiguationLike
+from src.models.annotation import AnnotationClient
+from src.models.disambiguation import DisambiguationClient
+
+
+def _get_model_name(client: AnnotationLike) -> str:
+    """获取模型名称（兼容不同客户端实现）。"""
+    config = getattr(client, "_config", None)
+    model = getattr(config, "model", None) if config is not None else None
+    return model or "unknown"
 
 
 def _init_annotation_clients(
     analysis_logger: AnalysisLogger | None,
-    annotate_client: UnifiedModelClient | None = None,
-    incremental_disambig_client: UnifiedModelClient | None = None,
-    full_disambig_client: UnifiedModelClient | None = None,
-) -> Tuple[UnifiedModelClient, UnifiedModelClient | None, UnifiedModelClient, UnifiedModelClient]:
+    annotate_client: AnnotationLike | None = None,
+    incremental_disambig_client: DisambiguationLike | None = None,
+    full_disambig_client: DisambiguationLike | None = None,
+) -> Tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端"""
-    annotation_client = annotate_client or UnifiedModelClient("annotation", analysis_logger=analysis_logger)
+    annotation_client = annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger)
 
-    cloud_annotation_client: UnifiedModelClient | None = None
+    cloud_annotation_client: AnnotationLike | None = None
     cloud_fallback_enabled = settings.analysis.cloud_annotation_fallback_enabled
 
     if cloud_fallback_enabled:
         try:
-            cloud_annotation_client = UnifiedModelClient("cloud_annotation", analysis_logger=analysis_logger)
+            cloud_annotation_client = AnnotationClient(task_type="cloud_annotation", analysis_logger=analysis_logger)
             logger.info(
                 f"cloud annotation client initialized for fallback (thinking={cloud_annotation_client._config.thinking_enabled})"
             )
@@ -52,22 +61,32 @@ def _init_annotation_clients(
         incremental_client = incremental_disambig_client
     else:
         try:
-            incremental_client = UnifiedModelClient("incremental_disambig", analysis_logger=analysis_logger)
+            incremental_client = DisambiguationClient(task_type="incremental_disambig", analysis_logger=analysis_logger)
             logger.info("incremental disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"incremental disambiguation config not found, falling back to annotation model: {e}")
-            incremental_client = annotation_client
+            incremental_client = DisambiguationClient(
+                task_type="incremental_disambig",
+                config=annotation_client._config,
+                client=getattr(annotation_client, "_client", None),
+                analysis_logger=analysis_logger,
+            )
 
     # 全量消歧客户端：如果配置为空，回退到标注模型
     if full_disambig_client:
         full_client = full_disambig_client
     else:
         try:
-            full_client = UnifiedModelClient("full_disambig", analysis_logger=analysis_logger)
+            full_client = DisambiguationClient(task_type="full_disambig", analysis_logger=analysis_logger)
             logger.info("full disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"full disambiguation config not found, falling back to annotation model: {e}")
-            full_client = annotation_client
+            full_client = DisambiguationClient(
+                task_type="full_disambig",
+                config=annotation_client._config,
+                client=getattr(annotation_client, "_client", None),
+                analysis_logger=analysis_logger,
+            )
 
     return annotation_client, cloud_annotation_client, incremental_client, full_client
 
@@ -76,7 +95,7 @@ def _setup_token_usage_callback(
     conn,
     clients: list,
     novel_id: str,
-    annotation_client: UnifiedModelClient,
+    annotation_client: AnnotationLike,
     run_id: str,
 ) -> None:
     """设置token使用回调"""
@@ -98,7 +117,7 @@ def _setup_token_usage_callback(
                 cb_novel_id,
                 task_type,
                 call_type,
-                annotation_client._config.model or "unknown",
+                _get_model_name(annotation_client),
                 prompt_tokens,
                 total_tokens,
                 completion_tokens,
@@ -109,5 +128,4 @@ def _setup_token_usage_callback(
 
     for client in clients:
         if client is not None:
-            client._token_usage_callback = _token_usage_callback
-            client._novel_id = novel_id
+            client.set_runtime_context(novel_id, _token_usage_callback)

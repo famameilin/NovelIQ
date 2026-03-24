@@ -24,12 +24,13 @@ from __future__ import annotations
 import json
 import time
 from collections import Counter, defaultdict
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import text
 
 from src.config import settings
+from src.models.interfaces import DisambiguationLike
 from src.models.local.disambiguation import ExtendedDisambigResult
 from src.storage.repositories import AnnotationRepository
 from .sentence import build_context_sentences
@@ -45,10 +46,6 @@ class DisambiguationMaxRetriesExceededError(Exception):
     说明: 从 phase.py 移动到 disambiguation.py，与消歧逻辑放在一起
     """
     pass
-
-if TYPE_CHECKING:
-    from src.models.local.unified_client import UnifiedModelClient
-
 
 def _save_disambig_checkpoint(
     conn, run_id: str, alias_map: dict[str, str], entity_relations: list[dict[str, str]] | None = None
@@ -114,7 +111,7 @@ def _load_disambig_checkpoint(conn, run_id: str) -> tuple[dict[str, str] | None,
 
 
 def _save_disambiguation_interaction(
-    client: "UnifiedModelClient",
+    client: DisambiguationLike,
     run_id: str | None,
     candidates: list,
     context_sentences: dict,
@@ -168,8 +165,8 @@ def _save_disambiguation_interaction(
             thinking_chars = len(thinking_content) if thinking_content else 0
             has_thinking = bool(thinking_content and thinking_content.strip())
 
-            # 判断是否是云端模型（使用客户端的 is_cloud_api 方法）
-            is_cloud = client.is_cloud_api() if hasattr(client, 'is_cloud_api') else False
+            # 判断是否是云端模型
+            is_cloud = client.is_cloud_api()
 
             repo.save_interaction(
                 run_id=run_id,
@@ -177,7 +174,7 @@ def _save_disambiguation_interaction(
                 interaction_type="disambiguate",
                 phase=stage_name.replace(" ", "_"),
                 attempt_number=attempt_number,
-                model_name=client._config.model if hasattr(client, '_config') else None,
+                model_name=client._config.model,
                 model_provider="cloud" if is_cloud else "local",
                 prompt=prompt_text,
                 response=response_text,
@@ -202,7 +199,7 @@ def _save_disambiguation_interaction(
 
 
 def _retry_disambig(
-    client: UnifiedModelClient,
+    client: DisambiguationLike,
     candidates: list[str] | list[dict],
     context_sentences: dict[str, str],
     alias_keywords: list[str],
@@ -314,7 +311,7 @@ def extract_new_names_from_db(
 def _run_incremental_disambiguation(
     conn,
     alias_map: dict[str, str],
-    incremental_disambig_client: UnifiedModelClient,
+    incremental_disambig_client: DisambiguationLike,
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
@@ -376,7 +373,7 @@ def _run_incremental_disambiguation(
 def _run_final_disambiguation(
     conn,
     alias_map: dict[str, str],
-    full_disambig_client: UnifiedModelClient,
+    full_disambig_client: DisambiguationLike,
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
@@ -433,7 +430,7 @@ def _run_final_disambiguation(
 def _run_cloud_disambiguation(
     conn,
     alias_map: dict[str, str],
-    cloud_disambig_client: UnifiedModelClient | None,
+    cloud_disambig_client: DisambiguationLike | None,
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
@@ -466,8 +463,8 @@ def _run_cloud_disambiguation(
 def run_disambiguation(
     conn,
     alias_map: dict[str, str],
-    full_disambig_client: UnifiedModelClient,
-    cloud_disambig_client: UnifiedModelClient | None,
+    full_disambig_client: DisambiguationLike,
+    cloud_disambig_client: DisambiguationLike | None,
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
