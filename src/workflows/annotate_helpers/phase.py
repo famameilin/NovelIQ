@@ -184,8 +184,8 @@ def _init_annotation_phase_with_config(
     clients = [
         annotation_client,
         cloud_annotation_client,
-        config.incremental_disambig_client,
-        config.full_disambig_client,
+        incremental_client,
+        full_client,
     ]
     _setup_token_usage_callback(
         config.conn, clients, config.novel_id, annotation_client, run_id=config.run_id
