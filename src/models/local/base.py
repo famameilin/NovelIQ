@@ -242,6 +242,12 @@ class BaseModelClient:
             },
         }
 
+    def _build_thinking_params(self, enable_thinking: bool) -> tuple[str, dict[str, bool]]:
+        """Build thinking parameters for cloud/local providers."""
+        if enable_thinking:
+            return "medium", {"think": True}
+        return "none", {"think": False}
+
     def _call_api(
         self,
         messages: List[dict],
@@ -276,13 +282,11 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        is_cloud = self.is_cloud_api()
-        if not is_cloud:
-            request_params["extra_body"] = {"think": enable_thinking}
-        elif enable_thinking:
-            request_params["reasoning_effort"] = "medium"
+        reasoning_effort, extra_body = self._build_thinking_params(enable_thinking)
+        if self.is_cloud_api():
+            request_params["reasoning_effort"] = reasoning_effort
         else:
-            request_params["reasoning_effort"] = "none"
+            request_params["extra_body"] = extra_body
 
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
@@ -439,15 +443,13 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        is_cloud = self.is_cloud_api()
-        if not is_cloud:
-            # 本地模型（如 Ollama）使用 extra_body 传递 think 参数
-            request_params["extra_body"] = {"think": enable_thinking}
-        elif enable_thinking:
-            request_params["reasoning_effort"] = "medium"
+        reasoning_effort, extra_body = self._build_thinking_params(enable_thinking)
+        if self.is_cloud_api():
+            # Cloud providers use reasoning_effort.
+            request_params["reasoning_effort"] = reasoning_effort
         else:
-            request_params["reasoning_effort"] = "none"
-
+            # Local providers (e.g. Ollama) use extra_body.think.
+            request_params["extra_body"] = extra_body
         return request_params
 
     def _extract_response_content(self, message) -> tuple[str, str | None]:
