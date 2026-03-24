@@ -15,7 +15,6 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.cloud.client import CloudModelClient
 from src.models.cloud.schema import CloudAnalysis
-from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.schema import (
     ChunkAnnotation,
     CharacterSnapshot,
@@ -36,9 +35,20 @@ class FakeClient(CloudModelClient):
         )
 
 
-class FakeLocalModelClient(UnifiedModelClient):
+class FakeLocalModelClient:
     def __init__(self) -> None:
         self._call_count = 0
+        self._config = type("Config", (), {"model": "test-model"})()
+        self._session = None
+        self._novel_id = None
+        self._token_usage_callback = None
+
+    def set_session(self, session) -> None:
+        self._session = session
+
+    def set_runtime_context(self, novel_id, token_usage_callback) -> None:
+        self._novel_id = novel_id
+        self._token_usage_callback = token_usage_callback
 
     def annotate_chunk(
         self,

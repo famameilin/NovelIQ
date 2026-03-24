@@ -21,16 +21,14 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from litellm.exceptions import APIConnectionError, Timeout
-from openai import APIStatusError
-
 from src.config import TaskModelConfig
+from src.models.annotation import AnnotationClient
+from src.models.disambiguation import DisambiguationClient
 from src.models.local.annotation import Phase1MaxRetriesExceededError
-from src.models.local.unified_client import UnifiedModelClient
 from src.models.local.schema import ForeshadowingResult
 
 
@@ -66,7 +64,7 @@ class TestErrorHandling(unittest.TestCase):
         def mock_instructor_factory():
             return mock_client
 
-        client = UnifiedModelClient(
+        client = AnnotationClient(
             task_type="annotation",
             config=config,
             client=mock_client,
@@ -98,7 +96,7 @@ class TestErrorHandling(unittest.TestCase):
         def mock_instructor_factory():
             return mock_client
 
-        client = UnifiedModelClient(
+        client = AnnotationClient(
             task_type="annotation",
             config=config,
             client=mock_client,
@@ -131,7 +129,7 @@ class TestErrorHandling(unittest.TestCase):
         def mock_instructor_factory():
             return mock_client
 
-        client = UnifiedModelClient(
+        client = AnnotationClient(
             task_type="annotation",
             config=config,
             client=mock_client,
@@ -162,7 +160,7 @@ class TestErrorHandling(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = ConnectionError("Connection error")
 
-        client = UnifiedModelClient(
+        client = DisambiguationClient(
             task_type="incremental_disambig",
             config=config,
             client=mock_client,
@@ -174,14 +172,14 @@ class TestErrorHandling(unittest.TestCase):
         config = TaskModelConfig(base_url="http://test:8000/v1", model=None)
         mock_client = MagicMock()
         with self.assertRaises(ValueError) as ctx:
-            UnifiedModelClient(task_type="annotation", config=config, client=mock_client)
+            AnnotationClient(task_type="annotation", config=config, client=mock_client)
         self.assertIn("model 不能为空", str(ctx.exception))
 
     def test_disambiguate_without_model_raises_value_error(self) -> None:
         config = TaskModelConfig(base_url="http://test:8000/v1", model=None)
         mock_client = MagicMock()
         with self.assertRaises(ValueError) as ctx:
-            UnifiedModelClient(task_type="incremental_disambig", config=config, client=mock_client)
+            DisambiguationClient(task_type="incremental_disambig", config=config, client=mock_client)
         self.assertIn("model 不能为空", str(ctx.exception))
 
 

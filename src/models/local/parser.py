@@ -3,7 +3,7 @@ Parser 兼容性转发模块
 
 创建时间: 2026-03-12
 创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 从 unified_client.py 拆分解析模块
+任务: 项目文件结构整理与拆解 - 拆分解析模块
 
 修改历史:
 - 2026-03-12: 更新 build_annotation 函数，解析 character_appearances 和 chunk_summary 新字段

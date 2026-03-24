@@ -38,22 +38,9 @@ from src.models.local.schema import DialogueAttributionResult, DialogueRecord, Q
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-    from src.models.local.unified_client import UnifiedModelClient
 
 
 PHASE3_MAX_RETRIES = 3
-
-
-def _get_annotation_client(client: UnifiedModelClient | AnnotationClient) -> AnnotationClient:
-    """从 UnifiedModelClient 或直接返回 AnnotationClient"""
-    if hasattr(client, "_annotation_client"):
-        return client._annotation_client
-    return client
-
-
-def _get_unified_client(client: UnifiedModelClient | AnnotationClient) -> UnifiedModelClient | AnnotationClient:
-    """如果输入是 AnnotationClient，直接返回；如果是 UnifiedModelClient 也返回自身"""
-    return client
 
 
 def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[QuoteCandidate]:
@@ -123,7 +110,7 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
 
 
 def _save_interaction(
-    client: UnifiedModelClient | AnnotationClient,
+    client: AnnotationClient,
     run_id: str | None,
     chunk_id: int | None,
     phase: str,
@@ -150,16 +137,15 @@ def _save_interaction(
 
         prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
 
-        annotation_client = _get_annotation_client(client)
-        if hasattr(annotation_client, "_session") and annotation_client._session is not None:
-            repo = ModelInteractionRepository(annotation_client._session)
+        if client._session is not None:
+            repo = ModelInteractionRepository(client._session)
             repo.save_interaction(
                 run_id=run_id,
                 chunk_id=chunk_id,
                 interaction_type="dialogue_attribution",
                 phase=phase,
                 attempt_number=attempt_number,
-                model_name=annotation_client._config.model if hasattr(annotation_client._config, "model") else None,
+                model_name=client._config.model,
                 model_provider="cloud" if is_cloud else "local",
                 prompt=prompt_text,
                 response=content_clean,
@@ -171,7 +157,7 @@ def _save_interaction(
 
 
 def attribute_dialogues_with_llm(
-    client: UnifiedModelClient | AnnotationClient,
+    client: AnnotationClient,
     chunk_text: str,
     candidates: list[QuoteCandidate],
     known_characters: list[str] | None = None,
@@ -226,19 +212,17 @@ def attribute_dialogues_with_llm(
     if not candidates:
         return []
 
-    annotation_client = _get_annotation_client(client)
-    config = annotation_client._config
+    config = client._config
     if not config.model:
         raise ValueError("model is required")
 
-    is_cloud = annotation_client._is_cloud_api()
+    is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
 
     def _execute_call(
-        current_client: UnifiedModelClient | AnnotationClient,
+        current_client: AnnotationClient,
         retry_messages: list[dict] | None = None,
     ) -> list[DialogueRecord]:
-        current_annotation_client = _get_annotation_client(current_client)
         dialogue_list = "\n".join(
             [f'{c.index}. ctx_before: "{c.ctx_before}"\n   content: "{c.content}"\n   ctx_after: "{c.ctx_after}"' for c in candidates]
         )
@@ -259,7 +243,7 @@ def attribute_dialogues_with_llm(
         ]
 
         start_time = time.time()
-        parsed, response = current_annotation_client._call_annotation_api(
+        parsed, response = current_client._call_annotation_api(
             messages=messages,
             enable_thinking=enable_thinking,
             chunk_id=chunk_id,
@@ -270,7 +254,7 @@ def attribute_dialogues_with_llm(
         content_clean = str(parsed.model_dump())
 
         _save_interaction(
-            client=_get_unified_client(current_client),
+            client=current_client,
             run_id=run_id,
             chunk_id=chunk_id,
             phase="phase3",
@@ -368,7 +352,7 @@ def _post_process_validation(
 
 
 def compute_dialogue_lengths_with_llm(
-    client: UnifiedModelClient | AnnotationClient,
+    client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,

@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import TaskModelConfig
+from src.models.annotation import AnnotationClient
 from src.models.local.parser import make_empty_annotation, try_parse_json
 from src.models.local.schema import ChunkAnnotation
-from src.models.local.unified_client import UnifiedModelClient
 
 
 class TestJsonParsing(unittest.TestCase):
@@ -60,7 +60,7 @@ class TestJsonParsing(unittest.TestCase):
     def test_parse_annotation_invalid_json_returns_empty(self) -> None:
         config = TaskModelConfig(base_url="http://test:8000/v1", model="test-model")
         mock_client = MagicMock()
-        client = UnifiedModelClient(task_type="annotation", config=config, client=mock_client)
+        client = AnnotationClient(task_type="annotation", config=config, client=mock_client)
         annotation = client._parse_annotation("invalid json content")
         self.assertEqual(annotation.emotional_valence, "neutral")
         self.assertEqual(annotation.event_type, "铺垫")

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import TaskModelConfig
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.disambiguation import DisambiguationClient
 from src.models.local.schema import DisambiguateResponseModel
 from src.models.local.disambiguation import ExtendedDisambigResult
 
@@ -57,7 +57,7 @@ class TestLocalDisambiguate(unittest.TestCase):
         disambiguate_result = DisambiguateResponseModel(alias_map={"三哥": "张三", "张公子": "张三"})
         mock_client.chat.completions.create.return_value = create_mock_stream_response(disambiguate_result.model_dump_json())
 
-        client = UnifiedModelClient(
+        client = DisambiguationClient(
             task_type="incremental_disambig",
             config=config,
             client=mock_client,
@@ -90,7 +90,7 @@ class TestLocalDisambiguate(unittest.TestCase):
         disambiguate_result = DisambiguateResponseModel(alias_map={"猴子": "侯飞白"})
         mock_client.chat.completions.create.return_value = create_mock_stream_response(disambiguate_result.model_dump_json())
 
-        client = UnifiedModelClient(
+        client = DisambiguationClient(
             task_type="incremental_disambig",
             config=config,
             client=mock_client,
@@ -114,7 +114,7 @@ class TestLocalDisambiguate(unittest.TestCase):
             api_key="test-key",
         )
         mock_client = MagicMock()
-        client = UnifiedModelClient(task_type="incremental_disambig", config=config, client=mock_client)
+        client = DisambiguationClient(task_type="incremental_disambig", config=config, client=mock_client)
         result = client.disambiguate_characters([])
         # 现在返回 ExtendedDisambigResult，空候选人时返回空对象
         self.assertIsInstance(result, ExtendedDisambigResult)
@@ -135,7 +135,7 @@ class TestLocalDisambiguate(unittest.TestCase):
         disambiguate_result = DisambiguateResponseModel(alias_map={})
         mock_client.chat.completions.create.return_value = create_mock_stream_response(disambiguate_result.model_dump_json())
 
-        client = UnifiedModelClient(
+        client = DisambiguationClient(
             task_type="incremental_disambig",
             config=config,
             client=mock_client,

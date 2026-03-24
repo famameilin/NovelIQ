@@ -22,7 +22,6 @@ from .schema import (
     DialogueSnapshot,
     RelationChangeSnapshot,
 )
-from .unified_client import UnifiedModelClient
 
 __all__ = [
     "ChunkAnnotation",
@@ -33,5 +32,4 @@ __all__ = [
     "make_empty_annotation",
     "RelationChangeSnapshot",
     "TokenUsageCallback",
-    "UnifiedModelClient",
 ]

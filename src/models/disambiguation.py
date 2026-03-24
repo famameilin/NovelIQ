@@ -3,7 +3,7 @@ DisambiguationClient 模块
 
 创建时间: 2026-03-12
 创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 从 unified_client.py 拆分消歧专用客户端
+任务: 项目文件结构整理与拆解 - 拆分消歧专用客户端
 
 修改时间: 2026-03-23
 修改者: TraeAI

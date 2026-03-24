@@ -1,45 +1,22 @@
 """
-创建时间: 2026-03-13
-创建者: TraeAI
-任务: refactor-model-interaction-layer
-修改内容: 更新测试以测试迁移后的 parse_active_entities 函数
+创建时间: 2026-03-24
+创建者: Codex
+任务: decouple-unified-client-phase5
+修改内容: 迁移 parse_active_entities 专项用例并独立成文件
 """
+
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.parser import parse_active_entities
-from src.models.local.unified_client import UnifiedModelClient
-
-
-class MockUnifiedModelClient(UnifiedModelClient):
-    """
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    修改内容: 修复 Mock 类初始化问题，避免触发父类的 property setter
-    """
-    def __init__(self):
-        self.__dict__['_novel_id_value'] = None
-        self.__dict__['_token_usage_callback_value'] = None
-        self._task_type = "annotation"
-        self._analysis_logger = None
-        self._annotation_client = MagicMock()
-        self._annotation_client._parse_active_entities = parse_active_entities
-        self._disambiguation_client = MagicMock()
-        self._config = MagicMock()
 
 
 class TestParseActiveEntities(unittest.TestCase):
-    """
-    测试 parse_active_entities 函数
-    
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    修改内容: 直接测试 parser.parse_active_entities 函数
-    """
+    """测试 parse_active_entities 函数。"""
+
     def setUp(self):
         self.parse_func = parse_active_entities
 
@@ -118,24 +95,6 @@ class TestParseActiveEntities(unittest.TestCase):
 - 王老汉（other）：旁观；好奇（0）"""
         result = self.parse_func(active_entities)
         self.assertEqual(result, ["贺伯安", "林清婉", "王老汉"])
-
-
-class TestUnifiedClientProxy(unittest.TestCase):
-    """
-    测试 UnifiedModelClient 对 parse_active_entities 的代理调用
-    
-    修改时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
-    """
-    def setUp(self):
-        self.client = MockUnifiedModelClient()
-
-    def test_proxy_parse_active_entities(self):
-        active_entities = """【近期活跃角色】
-- 贺伯安（主角）：修炼；平静（0）"""
-        result = self.client._parse_active_entities(active_entities)
-        self.assertEqual(result, ["贺伯安"])
 
 
 if __name__ == "__main__":

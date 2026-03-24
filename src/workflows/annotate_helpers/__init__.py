@@ -17,8 +17,6 @@
 - sentence.py: 例句构建相关
 """
 
-from src.models.local.unified_client import UnifiedModelClient
-
 from .client_init import (
     _init_annotation_clients,
     _setup_token_usage_callback,
@@ -50,7 +48,6 @@ from .sentence import (
 from .storage import _store_annotation_results
 
 __all__ = [
-    "UnifiedModelClient",
     "ChunkContext",
     "AnnotationPhaseResult",
     "_init_annotation_clients",
