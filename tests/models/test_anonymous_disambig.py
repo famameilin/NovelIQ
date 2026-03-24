@@ -36,7 +36,7 @@ class TestBuildAnonymousContexts(unittest.TestCase):
 class TestAnonymousDisambigClient(unittest.TestCase):
     def test_client_initialization(self) -> None:
         """测试匿名消歧客户端能正确初始化"""
-        from src.models.local.unified_client import UnifiedModelClient
+        from src.models.disambiguation import DisambiguationClient
         from src.config.input_config import TaskModelConfig
 
         config = TaskModelConfig(
@@ -44,10 +44,10 @@ class TestAnonymousDisambigClient(unittest.TestCase):
             base_url='http://localhost:8000',
             api_key='test',
         )
-        client = UnifiedModelClient(config=config, task_type='test')
+        client = DisambiguationClient(config=config, task_type='incremental_disambig')
 
         # 验证客户端已初始化
-        self.assertIsNotNone(client._disambiguation_client)
+        self.assertIsNotNone(client._client)
 
 
 if __name__ == '__main__':

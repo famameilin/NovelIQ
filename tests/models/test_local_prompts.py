@@ -21,12 +21,13 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import TaskModelConfig
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.annotation import AnnotationClient
+from src.models.disambiguation import DisambiguationClient
 
 
 class TestLocalPrompts(unittest.TestCase):
@@ -38,13 +39,13 @@ class TestLocalPrompts(unittest.TestCase):
             api_key="test-key",
         )
 
-        client = UnifiedModelClient(
+        client = AnnotationClient(
             task_type="annotation",
             config=config,
         )
 
         # 验证客户端已初始化
-        self.assertIsNotNone(client._annotation_client)
+        self.assertIsNotNone(client._client)
 
     def test_disambiguation_client_initialization(self) -> None:
         """测试消歧客户端能正确初始化"""
@@ -55,14 +56,14 @@ class TestLocalPrompts(unittest.TestCase):
         )
         mock_client = MagicMock()
 
-        client = UnifiedModelClient(
+        client = DisambiguationClient(
             task_type="incremental_disambig",
             config=config,
             client=mock_client,
         )
 
         # 验证客户端已初始化
-        self.assertIsNotNone(client._disambiguation_client)
+        self.assertIsNotNone(client._client)
 
 
 if __name__ == "__main__":
