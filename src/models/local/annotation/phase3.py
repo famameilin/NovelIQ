@@ -37,7 +37,7 @@ from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import DialogueAttributionResult, DialogueRecord, QuoteCandidate
 
 if TYPE_CHECKING:
-    from src.models.local.annotation_client import AnnotationClient
+    from src.models.annotation import AnnotationClient
     from src.models.local.unified_client import UnifiedModelClient
 
 

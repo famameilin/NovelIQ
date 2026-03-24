@@ -29,7 +29,7 @@ from .context import PHASE_MAX_RETRIES, Phase2MaxRetriesExceededError
 from .messages import _build_foreshadowing_messages
 
 if TYPE_CHECKING:
-    from src.models.local.annotation_client import AnnotationClient
+    from src.models.annotation import AnnotationClient
 
 
 def _save_interaction(

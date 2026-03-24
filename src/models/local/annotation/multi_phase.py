@@ -36,7 +36,7 @@ from .phase2 import annotate_chunk_phase2
 from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_text
 
 if TYPE_CHECKING:
-    from src.models.local.annotation_client import AnnotationClient
+    from src.models.annotation import AnnotationClient
     from src.models.local.unified_client import UnifiedModelClient
 
 

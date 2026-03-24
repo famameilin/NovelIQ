@@ -38,7 +38,7 @@ from .context import (
 from .messages import _build_annotation_messages_v2
 
 if TYPE_CHECKING:
-    from src.models.local.annotation_client import AnnotationClient
+    from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation
 
 
