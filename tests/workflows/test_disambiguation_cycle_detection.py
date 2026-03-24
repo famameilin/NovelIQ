@@ -13,7 +13,10 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.workflows.annotate_helpers.disambiguation import detect_cycle_in_relations
+from src.workflows.annotate_helpers.disambiguation import (
+    _extract_retryable_relations,
+    detect_cycle_in_relations,
+)
 
 
 class TestDetectCycleInRelations(unittest.TestCase):
@@ -137,6 +140,29 @@ class TestDetectCycleInRelations(unittest.TestCase):
         # 循环部分应该被跳过
         self.assertEqual(len(skipped), 3)
         self.assertEqual(len(paths), 1)
+
+
+class TestExtractRetryableRelations(unittest.TestCase):
+    def test_keeps_retryable_skip_reasons(self) -> None:
+        skipped = [
+            {"relation": {"from": "A", "to": "B", "type": "member_of"}, "reason": "from_entity_not_found"},
+            {"relation": {"from": "B", "to": "C", "type": "belongs_to"}, "reason": "to_entity_not_found"},
+            {"relation": {"from": "C", "to": "D", "type": "affiliated_with"}, "reason": "insert_error: timeout"},
+        ]
+
+        retryable = _extract_retryable_relations(skipped)
+        self.assertEqual(len(retryable), 3)
+
+    def test_ignores_non_retryable_or_malformed_entries(self) -> None:
+        skipped = [
+            {"relation": {"from": "A", "to": "B", "type": "member_of"}, "reason": "invalid_relation_type"},
+            {"relation": {"from": "A", "to": "B", "type": "member_of"}, "reason": "missing_fields"},
+            {"from": "X", "to": "Y", "type": "member_of"},  # cycle_skipped raw relation format
+            {"relation": "not_a_dict", "reason": "insert_error: x"},
+        ]
+
+        retryable = _extract_retryable_relations(skipped)
+        self.assertEqual(retryable, [])
 
 
 if __name__ == "__main__":
