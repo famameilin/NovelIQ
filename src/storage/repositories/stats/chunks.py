@@ -192,7 +192,7 @@ def fetch_emotion_curve_full(session: Session, run_id: str) -> List[Tuple[int, f
             EmotionCurve.net_density,
             EmotionCurve.smoothed_density,
         )
-        .where((EmotionCurve.run_id == run_id) | (EmotionCurve.run_id.is_(None)))
+        .where(EmotionCurve.run_id == run_id)
         .order_by(EmotionCurve.chunk_id)
     )
 
@@ -226,7 +226,7 @@ def fetch_rhythm_curve_full(session: Session, run_id: str) -> List[Tuple[int, fl
             RhythmCurve.tension_proxy,
             RhythmCurve.tension_composite,
         )
-        .where((RhythmCurve.run_id == run_id) | (RhythmCurve.run_id.is_(None)))
+        .where(RhythmCurve.run_id == run_id)
         .order_by(RhythmCurve.chunk_id)
     )
 

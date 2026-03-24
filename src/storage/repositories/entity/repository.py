@@ -39,27 +39,27 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         novel_id: str,
         canonical: str,
         entity_type: str,
+        run_id: str,
         first_chunk: int | None = None,
         description: str | None = None,
         confidence: float = 1.0,
-        run_id: str | None = None,
     ) -> int | None:
         """插入实体"""
         return queries.insert_entity(
-            self.session, novel_id, canonical, entity_type, first_chunk, description, confidence, run_id
+            self.session, novel_id, canonical, entity_type, run_id, first_chunk, description, confidence
         )
 
     def insert_entity_alias(
         self,
         entity_id: int,
         alias: str,
+        run_id: str,
         alias_type: str | None = None,
         source_chunk: int | None = None,
-        run_id: str | None = None,
     ) -> int | None:
         """插入实体别名"""
         return queries.insert_entity_alias(
-            self.session, entity_id, alias, alias_type, source_chunk, run_id
+            self.session, entity_id, alias, run_id, alias_type, source_chunk
         )
 
     def insert_entity_embedding(self, entity_id: int, embedding: List[float]) -> None:
@@ -134,14 +134,14 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         from_entity: int,
         to_entity: int,
         rel_type: str,
+        run_id: str,
         first_chunk: int | None = None,
         tension: float = 0.0,
         rel_category: str = "interpersonal",
-        run_id: str | None = None,
     ) -> int | None:
         """插入实体关系"""
         return relations.insert_entity_relation(
-            self.session, novel_id, from_entity, to_entity, rel_type, first_chunk, tension, rel_category, run_id
+            self.session, novel_id, from_entity, to_entity, rel_type, run_id, first_chunk, tension, rel_category
         )
 
     def fetch_relations_for_entity(
