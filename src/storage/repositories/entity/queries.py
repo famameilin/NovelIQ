@@ -129,6 +129,7 @@ def fetch_entity_by_alias(
     conditions = [Entity.novel_id == novel_id, EntityAlias.alias == alias]
     if run_id is not None:
         conditions.append(Entity.run_id == run_id)
+        conditions.append(EntityAlias.run_id == run_id)
 
     stmt = (
         select(Entity, EntityAlias.alias_type, EntityAlias.confirm_count)
@@ -211,6 +212,7 @@ def fetch_all_aliases_with_canonical(
     conditions = [Entity.novel_id == novel_id]
     if run_id is not None:
         conditions.append(Entity.run_id == run_id)
+        conditions.append(EntityAlias.run_id == run_id)
 
     stmt = (
         select(Entity.canonical, EntityAlias.alias)

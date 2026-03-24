@@ -90,7 +90,7 @@ class ChunkRelation(BaseModel):
 
 
 class ChunkDialogue(BaseModel):
-    speaker: str
+    speaker: Optional[str] = None
     length: Optional[int] = None
 
 

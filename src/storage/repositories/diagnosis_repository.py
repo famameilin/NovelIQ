@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
@@ -66,7 +66,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .where(
                 and_(
                     ChunkAnnotation.pivot_moment == 1,
-                    or_(ChunkAnnotation.run_id == run_id, ChunkAnnotation.run_id.is_(None)),
+                    ChunkAnnotation.run_id == run_id,
                 )
             )
             .order_by(Chunk.chunk_id)
@@ -99,7 +99,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .where(
                 and_(
                     func.abs(EmotionCurve.net_density) > 0.01,
-                    or_(EmotionCurve.run_id == run_id, EmotionCurve.run_id.is_(None)),
+                    EmotionCurve.run_id == run_id,
                 )
             )
             .order_by(tension_expr.desc())
@@ -131,7 +131,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 ChunkRelation.type,
                 ChunkRelation.change,
             )
-            .where(or_(ChunkRelation.run_id == run_id, ChunkRelation.run_id.is_(None)))
+            .where(ChunkRelation.run_id == run_id)
             .order_by(ChunkRelation.chunk_id)
             .limit(limit)
         )
@@ -165,7 +165,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .where(
                 and_(
                     ChunkAnnotation.has_foreshadowing == 1,
-                    or_(ChunkAnnotation.run_id == run_id, ChunkAnnotation.run_id.is_(None)),
+                    ChunkAnnotation.run_id == run_id,
                 )
             )
             .order_by(Chunk.chunk_id)
@@ -191,7 +191,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
         stmt = (
             select(Chunk.chunk_id, Chunk.text)
-            .where(or_(Chunk.run_id == run_id, Chunk.run_id.is_(None)))
+            .where(Chunk.run_id == run_id)
             .order_by(Chunk.chunk_id)
         )
 
@@ -226,7 +226,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .where(
                 and_(
                     ChunkAnnotation.event_type == "高潮",
-                    or_(ChunkAnnotation.run_id == run_id, ChunkAnnotation.run_id.is_(None)),
+                    ChunkAnnotation.run_id == run_id,
                 )
             )
             .order_by(Chunk.chunk_id)
@@ -304,7 +304,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                     EntitySnapshot.novel_id == novel_id,
                     EntitySnapshot.chunk_id >= start_chunk,
                     EntitySnapshot.chunk_id <= end_chunk,
-                    or_(EntitySnapshot.run_id == run_id, EntitySnapshot.run_id.is_(None)),
+                    EntitySnapshot.run_id == run_id,
                 )
             )
             .order_by(EntitySnapshot.chunk_id.desc())
@@ -352,7 +352,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             .where(
                 and_(
                     EntitySnapshot.novel_id == novel_id,
-                    or_(EntitySnapshot.run_id == run_id, EntitySnapshot.run_id.is_(None)),
+                    EntitySnapshot.run_id == run_id,
                 )
             )
             .order_by(EntitySnapshot.chunk_id.desc())

@@ -47,6 +47,58 @@ class DisambiguationMaxRetriesExceededError(Exception):
     """
     pass
 
+
+def _dedupe_relations(relations: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """按 (from, to, type) 去重关系并保留顺序。"""
+    if not relations:
+        return []
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[dict[str, str]] = []
+    for rel in relations:
+        from_name = rel.get("from")
+        to_name = rel.get("to")
+        rel_type = rel.get("type")
+        if not from_name or not to_name or not rel_type:
+            continue
+        key = (from_name, to_name, rel_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append({"from": from_name, "to": to_name, "type": rel_type})
+    return deduped
+
+
+def _normalize_relations_with_alias_map(
+    relations: list[dict[str, str]] | None,
+    alias_map: dict[str, str],
+) -> list[dict[str, str]]:
+    """按 alias_map 归一关系实体名后去重。"""
+    if not relations:
+        return []
+    normalized: list[dict[str, str]] = []
+    for rel in relations:
+        from_name = rel.get("from")
+        to_name = rel.get("to")
+        rel_type = rel.get("type")
+        if not from_name or not to_name or not rel_type:
+            continue
+        normalized.append(
+            {
+                "from": alias_map.get(from_name, from_name),
+                "to": alias_map.get(to_name, to_name),
+                "type": rel_type,
+            }
+        )
+    return _dedupe_relations(normalized)
+
+
+def _merge_relations(
+    first: list[dict[str, str]] | None,
+    second: list[dict[str, str]] | None,
+) -> list[dict[str, str]]:
+    """合并两批关系并去重。"""
+    return _dedupe_relations((first or []) + (second or []))
+
 def _save_disambig_checkpoint(
     conn, run_id: str, alias_map: dict[str, str], entity_relations: list[dict[str, str]] | None = None
 ) -> None:
@@ -358,14 +410,23 @@ def _run_incremental_disambiguation(
         run_id=run_id,
     )
 
-    if result.alias_map:
-        alias_map.update(result.alias_map)
-        logger.debug(f"alias_map updated in memory: {len(alias_map)} entries")
+    has_alias_update = bool(result.alias_map)
+    has_relation_update = bool(result.entity_relations)
+    if has_alias_update or has_relation_update:
+        if has_alias_update:
+            alias_map.update(result.alias_map)
+            logger.debug(f"alias_map updated in memory: {len(alias_map)} entries")
 
-        if result.entity_relations:
-            logger.debug(f"incremental disambig: skipped {len(result.entity_relations)} relations (will be processed in final disambiguation)")
-
-        _save_disambig_checkpoint(conn, run_id, alias_map)
+        _, pending_relations = _load_disambig_checkpoint(conn, run_id)
+        new_relations = _normalize_relations_with_alias_map(result.entity_relations, alias_map)
+        merged_relations = _merge_relations(pending_relations, new_relations)
+        if new_relations:
+            logger.debug(
+                "incremental disambig: cached {} relations, pending total {}",
+                len(new_relations),
+                len(merged_relations),
+            )
+        _save_disambig_checkpoint(conn, run_id, alias_map, merged_relations)
 
     return alias_map
 
@@ -414,15 +475,16 @@ def _run_final_disambiguation(
 
     # 2. 再保存关系（实体必须先创建）
     # 优先处理 checkpoint 中未保存的关系（恢复场景）
-    relations_to_process = pending_relations if pending_relations else result.entity_relations
+    final_relations = _normalize_relations_with_alias_map(result.entity_relations, alias_map)
+    relations_to_process = _merge_relations(pending_relations, final_relations)
     if relations_to_process:
         success_count, skipped = _process_entity_relations(
-            conn, novel_id, run_id, relations_to_process, result.entity_types, result.alias_map
+            conn, novel_id, run_id, relations_to_process, result.entity_types, alias_map
         )
         logger.info(f"final disambig: processed {success_count} hierarchical relations")
 
     # 保存 checkpoint，同时保存关系数据（用于系统意外停止后恢复）
-    _save_disambig_checkpoint(conn, run_id, alias_map, result.entity_relations)
+    _save_disambig_checkpoint(conn, run_id, alias_map, None)
 
     return alias_map
 
@@ -601,9 +663,11 @@ def _process_entity_relations(
     valid_relation_types = set(settings.analysis.valid_hierarchical_relation_types)
 
     for rel in valid_relations:
-        from_name = rel.get("from")
-        to_name = rel.get("to")
+        raw_from_name = rel.get("from")
+        raw_to_name = rel.get("to")
         rel_type = rel.get("type")
+        from_name = alias_map.get(raw_from_name, raw_from_name) if raw_from_name else None
+        to_name = alias_map.get(raw_to_name, raw_to_name) if raw_to_name else None
 
         if not from_name or not to_name or not rel_type:
             skipped_relations.append({

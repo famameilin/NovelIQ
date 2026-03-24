@@ -94,7 +94,7 @@ class DialogueSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    speaker: str
+    speaker: str | None = None
     content: str = ""
 
 
