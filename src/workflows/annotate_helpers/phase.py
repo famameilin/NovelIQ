@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Tuple
 from loguru import logger
 
 from src.config.analysis_logger import AnalysisLogger
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.interfaces import AnnotationLike, DisambiguationLike
 
 if TYPE_CHECKING:
     import networkx as nx
@@ -41,9 +41,9 @@ class AnnotationPhaseConfig:
     use_rag: bool = False
     resume: bool = False
     analysis_logger: AnalysisLogger | None = None
-    annotate_client: UnifiedModelClient | None = None
-    incremental_disambig_client: UnifiedModelClient | None = None
-    full_disambig_client: UnifiedModelClient | None = None
+    annotate_client: AnnotationLike | None = None
+    incremental_disambig_client: DisambiguationLike | None = None
+    full_disambig_client: DisambiguationLike | None = None
     run_id: str = ""
 
 
@@ -53,7 +53,7 @@ class ChunkAnnotationMaxRetriesExceededError(Exception):
 
 
 def _annotate_chunk(
-    client: UnifiedModelClient,
+    client: AnnotationLike,
     text: str,
     prev_summary: str | None = None,
     alias_map: dict[str, str] | None = None,
@@ -64,7 +64,7 @@ def _annotate_chunk(
     rag_evidence: str | None = None,
     known_aliases: str | None = None,
     next_chunk_text: str | None = None,
-    cloud_client: UnifiedModelClient | None = None,
+    cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
     character_appearances: list[dict] | None = None,
 ) -> "MultiPhaseAnnotationResult":
@@ -111,10 +111,10 @@ class AnnotationPhaseResult:
 
     def __init__(
         self,
-        annotation_client: UnifiedModelClient,
-        cloud_annotation_client: UnifiedModelClient | None,
-        incremental_disambig_client: UnifiedModelClient,
-        full_disambig_client: UnifiedModelClient,
+        annotation_client: AnnotationLike,
+        cloud_annotation_client: AnnotationLike | None,
+        incremental_disambig_client: DisambiguationLike,
+        full_disambig_client: DisambiguationLike,
         rag_retriever: "RAGRetriever | None",
         character_graph: "nx.Graph | None",
         alias_keywords: list[str],
@@ -130,6 +130,28 @@ class AnnotationPhaseResult:
         self.alias_keywords = alias_keywords
         self.global_context_str = global_context_str
         self.alias_map = alias_map
+
+
+def _set_client_session(client: Any, session: Any) -> None:
+    """
+    为客户端设置会话（兼容 UnifiedModelClient 与任务专用客户端）。
+
+    优先使用公开方法 set_session；若不存在则按兼容路径写入 _session。
+    """
+    if client is None:
+        return
+
+    set_session = getattr(client, "set_session", None)
+    if callable(set_session):
+        set_session(session)
+        return
+
+    if hasattr(client, "_annotation_client"):
+        client._annotation_client._session = session
+        return
+
+    if hasattr(client, "_session"):
+        client._session = session
 
 
 def _init_annotation_phase_with_config(
@@ -154,11 +176,10 @@ def _init_annotation_phase_with_config(
 
     # 设置 session 用于保存模型交互记录
     if config.conn is not None:
-        annotation_client._annotation_client._session = config.conn
-        if cloud_annotation_client:
-            cloud_annotation_client._annotation_client._session = config.conn
-        incremental_client._annotation_client._session = config.conn
-        full_client._annotation_client._session = config.conn
+        _set_client_session(annotation_client, config.conn)
+        _set_client_session(cloud_annotation_client, config.conn)
+        _set_client_session(incremental_client, config.conn)
+        _set_client_session(full_client, config.conn)
 
     clients = [
         annotation_client,
@@ -213,9 +234,9 @@ def _init_annotation_phase(
     use_rag: bool,
     resume: bool,
     analysis_logger: AnalysisLogger | None,
-    annotate_client: UnifiedModelClient | None,
-    incremental_disambig_client: UnifiedModelClient | None = None,
-    full_disambig_client: UnifiedModelClient | None = None,
+    annotate_client: AnnotationLike | None,
+    incremental_disambig_client: DisambiguationLike | None = None,
+    full_disambig_client: DisambiguationLike | None = None,
     run_id: str = "",
 ) -> AnnotationPhaseResult:
     """

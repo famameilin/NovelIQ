@@ -32,7 +32,7 @@ from sqlalchemy import text
 from src.config import settings
 from src.config.schemas import ANNOTATION_CONFIG
 from src.lexicons.loader import load_lexicon
-from src.models.local.unified_client import UnifiedModelClient
+from src.models.interfaces import AnnotationLike
 
 if TYPE_CHECKING:
     pass
@@ -208,7 +208,7 @@ def _extract_and_save_global_context(
     novel_title: str | None,
     use_context_enhancement: bool,
     resume: bool,
-    annotation_client: UnifiedModelClient,
+    annotation_client: AnnotationLike,
     run_id: str | None = None,
 ) -> str | None:
     """提取并保存全局上下文"""
