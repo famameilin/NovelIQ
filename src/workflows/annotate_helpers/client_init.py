@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Tuple, cast
 
 from loguru import logger
 
@@ -25,6 +25,13 @@ from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.local.unified_client import UnifiedModelClient
 
 
+def _get_model_name(client: AnnotationLike) -> str:
+    """获取模型名称（兼容不同客户端实现）。"""
+    config = getattr(client, "_config", None)
+    model = getattr(config, "model", None) if config is not None else None
+    return model or "unknown"
+
+
 def _init_annotation_clients(
     analysis_logger: AnalysisLogger | None,
     annotate_client: AnnotationLike | None = None,
@@ -32,6 +39,16 @@ def _init_annotation_clients(
     full_disambig_client: DisambiguationLike | None = None,
 ) -> Tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端"""
+
+    def _require_disambiguation_fallback(client: AnnotationLike, role: str) -> DisambiguationLike:
+        if isinstance(client, DisambiguationLike):
+            return cast(DisambiguationLike, client)
+
+        raise TypeError(
+            f"{role} disambiguation config is missing and annotation fallback client "
+            "does not implement disambiguate_characters; provide a DisambiguationLike client explicitly"
+        )
+
     annotation_client = annotate_client or UnifiedModelClient("annotation", analysis_logger=analysis_logger)
 
     cloud_annotation_client: UnifiedModelClient | None = None
@@ -57,7 +74,7 @@ def _init_annotation_clients(
             logger.info("incremental disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"incremental disambiguation config not found, falling back to annotation model: {e}")
-            incremental_client = annotation_client
+            incremental_client = _require_disambiguation_fallback(annotation_client, "incremental")
 
     # 全量消歧客户端：如果配置为空，回退到标注模型
     if full_disambig_client:
@@ -68,7 +85,7 @@ def _init_annotation_clients(
             logger.info("full disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"full disambiguation config not found, falling back to annotation model: {e}")
-            full_client = annotation_client
+            full_client = _require_disambiguation_fallback(annotation_client, "full")
 
     return annotation_client, cloud_annotation_client, incremental_client, full_client
 
@@ -99,7 +116,7 @@ def _setup_token_usage_callback(
                 cb_novel_id,
                 task_type,
                 call_type,
-                annotation_client._config.model or "unknown",
+                _get_model_name(annotation_client),
                 prompt_tokens,
                 total_tokens,
                 completion_tokens,
@@ -110,5 +127,9 @@ def _setup_token_usage_callback(
 
     for client in clients:
         if client is not None:
-            client._token_usage_callback = _token_usage_callback
-            client._novel_id = novel_id
+            set_runtime_context = getattr(client, "set_runtime_context", None)
+            if callable(set_runtime_context):
+                set_runtime_context(novel_id, _token_usage_callback)
+            else:
+                client._token_usage_callback = _token_usage_callback
+                client._novel_id = novel_id
