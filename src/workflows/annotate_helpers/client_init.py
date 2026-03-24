@@ -15,15 +15,78 @@
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Any, Tuple
 
 from loguru import logger
 
-from src.config import settings
+from src.config import TaskModelConfig, settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
+from src.models.local.disambiguation import ExtendedDisambigResult
+
+
+class _NoopDisambiguationClient:
+    """Fallback disambiguation client for injected lightweight annotation stubs."""
+
+    def __init__(self, config: Any) -> None:
+        self._config = config
+        self._novel_id: str | None = None
+        self._token_usage_callback: Any = None
+        self._session: Any = None
+
+    def set_session(self, session: Any) -> None:
+        self._session = session
+
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
+        self._novel_id = novel_id
+        self._token_usage_callback = token_usage_callback
+
+    def disambiguate_characters(
+        self,
+        candidates: list[str] | list[dict[str, int]],
+        context_sentences: dict[str, str] | None = None,
+        existing_names: list[str] | None = None,
+        rag_hint: str | None = None,
+    ) -> ExtendedDisambigResult:
+        return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
+
+    def is_cloud_api(self) -> bool:
+        return False
+
+
+def _resolve_disambiguation_fallback(
+    role: str,
+    task_type: str,
+    annotation_client: AnnotationLike,
+    analysis_logger: AnalysisLogger | None,
+) -> DisambiguationLike:
+    config = getattr(annotation_client, "_config", None)
+    client = getattr(annotation_client, "_client", None)
+
+    if isinstance(annotation_client, DisambiguationLike):
+        logger.warning(f"{role} disambiguation config missing, using injected annotation client as fallback")
+        return annotation_client
+
+    if isinstance(config, TaskModelConfig):
+        try:
+            return DisambiguationClient(
+                task_type=task_type,
+                config=config,
+                client=client,
+                analysis_logger=analysis_logger,
+            )
+        except Exception as e:
+            logger.warning(
+                f"{role} disambiguation fallback from annotation config failed ({e}), using no-op disambiguation client"
+            )
+    else:
+        logger.warning(
+            f"{role} disambiguation fallback skipped because injected annotation _config is not TaskModelConfig, using no-op disambiguation client"
+        )
+
+    return _NoopDisambiguationClient(config=config)
 
 
 def _get_model_name(client: AnnotationLike) -> str:
@@ -65,10 +128,10 @@ def _init_annotation_clients(
             logger.info("incremental disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"incremental disambiguation config not found, falling back to annotation model: {e}")
-            incremental_client = DisambiguationClient(
+            incremental_client = _resolve_disambiguation_fallback(
+                role="incremental",
                 task_type="incremental_disambig",
-                config=annotation_client._config,
-                client=getattr(annotation_client, "_client", None),
+                annotation_client=annotation_client,
                 analysis_logger=analysis_logger,
             )
 
@@ -81,10 +144,10 @@ def _init_annotation_clients(
             logger.info("full disambiguation client initialized")
         except ValueError as e:
             logger.warning(f"full disambiguation config not found, falling back to annotation model: {e}")
-            full_client = DisambiguationClient(
+            full_client = _resolve_disambiguation_fallback(
+                role="full",
                 task_type="full_disambig",
-                config=annotation_client._config,
-                client=getattr(annotation_client, "_client", None),
+                annotation_client=annotation_client,
                 analysis_logger=analysis_logger,
             )
 
