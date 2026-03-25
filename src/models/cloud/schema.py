@@ -51,7 +51,7 @@ class CloudAnalysis(BaseModel):
     dignity_reason: str | None = None
     cultural_depth_score: int | None = Field(default=None, ge=0, le=5)
     cultural_depth_reason: str | None = None
-    emotion_curve_type: str | None = None
+    narrative_arc_type: str | None = None
 
     @field_validator("value_logic_type")
     @classmethod
@@ -84,5 +84,5 @@ class CloudAnalysis(BaseModel):
             "dignity_reason": self.dignity_reason,
             "cultural_depth_score": self.cultural_depth_score,
             "cultural_depth_reason": self.cultural_depth_reason,
-            "emotion_curve_type": self.emotion_curve_type,
+            "narrative_arc_type": self.narrative_arc_type,
         }
