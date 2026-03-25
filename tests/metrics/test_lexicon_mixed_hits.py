@@ -15,3 +15,21 @@ def test_mixed_hits_detects_multi_word_phrase() -> None:
 
     assert count_token_hits(tokens, ["golden core"]) == 0
     assert count_mixed_hits(text, tokens, ["golden core"]) == 1
+
+
+def test_mixed_hits_prefers_longest_non_overlapping_phrase_matches() -> None:
+    text = "渡劫飞升"
+    tokens = ["渡劫飞升"]
+
+    hits = count_mixed_hits(text, tokens, ["渡劫", "渡劫飞升"])
+
+    assert hits == 1
+
+
+def test_mixed_hits_counts_each_non_overlapping_span_once() -> None:
+    text = "渡劫飞升渡劫"
+    tokens = ["渡劫飞升", "渡劫"]
+
+    hits = count_mixed_hits(text, tokens, ["渡劫", "渡劫飞升"])
+
+    assert hits == 2
