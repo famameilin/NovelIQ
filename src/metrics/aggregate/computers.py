@@ -122,7 +122,7 @@ def compute_emotion_curve_metrics(
     修改时间: 2026-03-25
     修改者: TraeAI
     任务: improve-emotion-curve-accuracy
-    修改内容: 使用 compute_lexical_emotion_trend 替代 compute_emotion_curve_type
+    修改内容: 输出 lexical_emotion_trend 词表趋势指标
     """
     return {
         "emotion_recovery_speed": compute_emotion_recovery_speed(emotion_data.emotion_values),

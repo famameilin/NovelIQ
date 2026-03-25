@@ -274,7 +274,7 @@ def _fetch_diagnosis(run_id: str, novel_id: str, stats_repo: StatsRepository) ->
         dignity_reason=data.get("dignity_reason"),
         cultural_depth_score=data.get("cultural_depth_score"),
         cultural_depth_reason=data.get("cultural_depth_reason"),
-        emotion_curve_type=data.get("emotion_curve_type"),
+        narrative_arc_type=data.get("narrative_arc_type"),
     )
 
 
