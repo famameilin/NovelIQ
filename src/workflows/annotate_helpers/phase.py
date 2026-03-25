@@ -326,6 +326,7 @@ def _process_single_chunk(
         alias_map=alias_map if alias_map else None,
         dialogue_speakers=annotation_result.dialogue_speakers,
         dialogues=annotation_result.dialogues,
+        dialogue_tones=annotation_result.dialogue_tones,
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 

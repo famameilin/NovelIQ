@@ -88,6 +88,19 @@ class TensionData:
     tension_composite_scores: List[float]
 
 
+@dataclass
+class DialogueData:
+    """对话数据
+
+    创建时间: 2026-03-25
+    创建者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    说明: 存储对话语气数据用于聚合计算
+    """
+
+    tones: List[str]
+
+
 # 情绪分数映射
 EMOTION_SCORE_MAPPING = {
     "strong_positive": 2,

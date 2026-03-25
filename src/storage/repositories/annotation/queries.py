@@ -115,11 +115,16 @@ def fetch_chunk_dialogues_full(session: Session, run_id: str) -> List[Any]:
     """
     获取完整的分块对话数据
 
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    修改内容: 添加 tone 字段到返回结果
+
     Returns:
-        (chunk_id, speaker, length) 元组列表
+        (chunk_id, speaker, length, tone) 元组列表
     """
     stmt = (
-        select(ChunkDialogue.chunk_id, ChunkDialogue.speaker, ChunkDialogue.length)
+        select(ChunkDialogue.chunk_id, ChunkDialogue.speaker, ChunkDialogue.length, ChunkDialogue.tone)
         .where(ChunkDialogue.run_id == run_id)
         .order_by(ChunkDialogue.chunk_id)
     )
