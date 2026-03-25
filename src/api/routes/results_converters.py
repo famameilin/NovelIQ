@@ -65,7 +65,7 @@ def _convert_emotion_stats(
     if not result.emotion_curve:
         return None
 
-    curve_type = result.emotion_curve.get("emotion_curve_type")
+    curve_type = result.emotion_curve.get("lexical_emotion_trend")
 
     return EmotionStats(
         pos_neg_ratio=result.emotion_curve.get("pos_neg_ratio"),
@@ -74,7 +74,7 @@ def _convert_emotion_stats(
         neutral_ratio=result.emotion_curve.get("neutral_ratio"),
         recovery_speed=result.emotion_curve.get("emotion_recovery_speed"),
         pivot_moment_density=result.emotion_curve.get("pivot_moment_density"),
-        emotion_curve_type=str(curve_type) if curve_type is not None else None,
+        lexical_emotion_trend=str(curve_type) if curve_type is not None else None,
     )
 
 

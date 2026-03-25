@@ -163,7 +163,7 @@ class EmotionStats(BaseModel):
     neutral_ratio: Optional[float] = None
     recovery_speed: Optional[float] = None
     pivot_moment_density: Optional[float] = None
-    emotion_curve_type: Optional[str] = None
+    lexical_emotion_trend: Optional[str] = None
 
 
 class CharacterStatsAggregate(BaseModel):
@@ -225,7 +225,7 @@ class DiagnosisResult(BaseModel):
     dignity_reason: Optional[str] = None
     cultural_depth_score: Optional[int] = None
     cultural_depth_reason: Optional[str] = None
-    emotion_curve_type: Optional[str] = None
+    narrative_arc_type: Optional[str] = None
 
 
 class NovelResultsResponse(BaseModel):

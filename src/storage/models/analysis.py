@@ -54,7 +54,7 @@ class CloudAnalysis(Base):
     dignity_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cultural_depth_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     cultural_depth_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    emotion_curve_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    narrative_arc_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     run_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )

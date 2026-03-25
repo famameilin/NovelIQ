@@ -16,7 +16,7 @@
   "value_logic_reason": "判断依据...",
   "cultural_depth_score": 3,
   "cultural_depth_reason": "判断依据...",
-  "emotion_curve_type": "白手起家"
+  "narrative_arc_type": "白手起家"
 }
 
 字段说明：
@@ -26,8 +26,8 @@
 - topic_labels: 主题标签列表
 - diagnosis: 宏观诊断分析(自然语言)
 
-情感曲线形态分类（必须输出以下字段）：
-- emotion_curve_type: 情感曲线形态类型，必须是以下六种原型之一：
+叙事弧线形态分类（必须输出以下字段）：
+- narrative_arc_type: 叙事弧线形态类型，必须是以下六种原型之一：
   - "白手起家": 情感从低谷逐渐上升
   - "伊卡洛斯": 情感先升后降
   - "落坑爬出": 情感先降后升
@@ -58,7 +58,7 @@
 1. value_logic_type 只能是「善义有价值」「强者为王」「混合型」三者之一，不允许其他值
 2. power_stance_score、common_people_dignity、cultural_depth_score 必须是整数，不允许小数
 3. 所有九个字段都必须输出，不能缺失
-4. emotion_curve_type 只能是六种原型之一，不允许其他值
+4. narrative_arc_type 只能是六种原型之一，不允许其他值
 5. arc_scores 必须是字典格式，Key为人物名称
 
 主题命名规则：
