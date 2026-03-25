@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional
 from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.base import BaseModelClient, TokenUsageCallback
-from src.models.local.schema import DisambiguateResponseModel
 
 from .local.disambiguation import (
     ExtendedDisambigResult,
@@ -75,7 +74,7 @@ class DisambiguationClient(BaseModelClient):
         rag_hint: str | None = None,
     ) -> ExtendedDisambigResult:
         if not candidates:
-            return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
+            return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[], alias_confidence={})
 
         messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
         is_cloud = self._is_cloud_api()

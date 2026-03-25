@@ -13,6 +13,7 @@ EmotionScore = Literal["strong_positive", "mild_positive", "neutral", "mild_nega
 EventType = Literal["冲突", "铺垫", "转折"]
 ForeshadowingType = Literal["causal", "thematic"]
 ForeshadowingConfidence = Literal["high", "medium", "low"]
+DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
 RelationChange = Literal["强化", "弱化", "新建", "断裂", "无变化"]
@@ -251,6 +252,10 @@ class DisambiguateResponseModel(BaseModel):
     alias_map: dict[str, str] = Field(
         default_factory=dict,
         description="人名到标准名的映射，key为原名，value为标准名",
+    )
+    alias_confidence: dict[str, DisambigConfidence] = Field(
+        default_factory=dict,
+        description="disambiguation confidence per candidate (low/medium/high)",
     )
     entity_types: dict[str, str] = Field(
         default_factory=dict,
