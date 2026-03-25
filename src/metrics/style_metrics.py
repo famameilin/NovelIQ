@@ -189,7 +189,7 @@ def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str | Non
     total_tokens = len(tokens)
     if text is None:
         hit_count = count_token_hits(tokens, terms)
-        return hit_count / max(total_tokens, 1)
+        return min(hit_count / max(total_tokens, 1), 1.0)
 
     hit_count = count_mixed_hits(text, tokens, terms)
     density = hit_count / max(total_tokens, 1)
@@ -198,7 +198,7 @@ def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str | Non
     if hit_count > 0 and total_tokens <= SHORT_CHUNK_TOKEN_THRESHOLD:
         density = max(density, SHORT_CHUNK_MIN_POSITIVE_DENSITY)
 
-    return density
+    return min(density, 1.0)
 
 
 def sensory_density(text: str, terms: Iterable[str]) -> float:
@@ -232,7 +232,7 @@ def semantic_category_densities(text: str, category_terms: Dict[str, List[str]])
         density = hit_count / total_tokens
         if hit_count > 0 and total_tokens <= SHORT_CHUNK_TOKEN_THRESHOLD:
             density = max(density, SHORT_CHUNK_MIN_POSITIVE_DENSITY)
-        densities[category] = density
+        densities[category] = min(density, 1.0)
 
     return densities
 
