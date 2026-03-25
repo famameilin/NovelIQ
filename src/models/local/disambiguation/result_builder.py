@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, cast
 
 from ..schema import DisambiguateResponseModel
@@ -39,6 +39,7 @@ class ExtendedDisambigResult:
     alias_map: Dict[str, str]
     entity_types: Dict[str, str]
     entity_relations: List[Dict[str, str]]
+    alias_confidence: Dict[str, str] = field(default_factory=dict)
     _thinking_content: str | None = None
 
 
@@ -94,6 +95,18 @@ def build_extended_result_from_response(
     """
     alias_map = build_result_from_response(response_data, candidates)
 
+    name_list: list[str] = []
+    if candidates and isinstance(candidates[0], dict):
+        dict_candidates = cast(list[dict[str, int]], candidates)
+        name_list = [str(c["name"]) for c in dict_candidates]
+    else:
+        str_candidates = cast(list[str], candidates)
+        name_list = list(str_candidates)
+
+    alias_confidence: Dict[str, str] = {}
+    for name in name_list:
+        alias_confidence[name] = str(response_data.alias_confidence.get(name, "medium"))
+
     entity_types = dict(response_data.entity_types)
 
     entity_relations: List[Dict[str, str]] = []
@@ -110,5 +123,6 @@ def build_extended_result_from_response(
         alias_map=alias_map,
         entity_types=entity_types,
         entity_relations=entity_relations,
+        alias_confidence=alias_confidence,
         _thinking_content=thinking_content,
     )

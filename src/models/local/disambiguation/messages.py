@@ -140,6 +140,11 @@ def build_disambiguate_messages(
     body = "\n".join(lines)
 
     system_prompt = _build_dynamic_system_prompt()
+    system_prompt += (
+        "\n\n【置信度输出要求】请在 JSON 中额外输出 alias_confidence 字段，"
+        "key 为候选名字，value 仅允许 low|medium|high。"
+        "high 表示证据充分，medium 表示倾向但证据不足，low 表示无法确认。"
+    )
     if existing_names:
         anchor_str = "、".join(existing_names)
         system_prompt += f"\n\n【已存在的角色】以下名字已在知识库中存在：[{anchor_str}]。如果你有充分证据认为候选人名与这些角色是同一人物，可以合并；如果证据不足，保持独立。"
