@@ -451,3 +451,23 @@ def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> Optional[
 
     result = session.execute(stmt).fetchone()
     return result.novel_title if result else None
+
+
+def has_global_context(session: Session, run_id: str) -> bool:
+    """
+    检查是否已存在 global_context 记录
+
+    创建时间: 2026-03-25
+    创建者: TraeAI
+    任务: fix-resume-feature - 断点续传功能修复
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+
+    Returns:
+        是否存在 global_context 记录
+    """
+    stmt = select(GlobalContext).where(GlobalContext.run_id == run_id).limit(1)
+    result = session.execute(stmt).scalar_one_or_none()
+    return result is not None
