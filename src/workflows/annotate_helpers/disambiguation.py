@@ -420,7 +420,7 @@ def _run_incremental_disambiguation(
 
     candidates = new_names
 
-    context_sentences = build_context_sentences(conn, candidates, alias_keywords)
+    context_sentences = build_context_sentences(conn, candidates, alias_keywords, run_id=run_id)
 
     result = _retry_disambig(
         incremental_disambig_client,

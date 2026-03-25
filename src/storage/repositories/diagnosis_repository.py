@@ -62,11 +62,18 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         stmt = (
             select(Chunk.chunk_id, Chunk.text, ChunkAnnotation.event_type)
             .select_from(Chunk)
-            .join(ChunkAnnotation, Chunk.chunk_id == ChunkAnnotation.chunk_id)
+            .join(
+                ChunkAnnotation,
+                and_(
+                    Chunk.chunk_id == ChunkAnnotation.chunk_id,
+                    Chunk.run_id == ChunkAnnotation.run_id,
+                ),
+            )
             .where(
                 and_(
                     ChunkAnnotation.pivot_moment == 1,
                     ChunkAnnotation.run_id == run_id,
+                    Chunk.run_id == run_id,
                 )
             )
             .order_by(Chunk.chunk_id)
@@ -95,11 +102,18 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         stmt = (
             select(Chunk.chunk_id, Chunk.text, tension_expr)
             .select_from(Chunk)
-            .join(EmotionCurve, Chunk.chunk_id == EmotionCurve.chunk_id)
+            .join(
+                EmotionCurve,
+                and_(
+                    Chunk.chunk_id == EmotionCurve.chunk_id,
+                    Chunk.run_id == EmotionCurve.run_id,
+                ),
+            )
             .where(
                 and_(
                     func.abs(EmotionCurve.net_density) > 0.01,
                     EmotionCurve.run_id == run_id,
+                    Chunk.run_id == run_id,
                 )
             )
             .order_by(tension_expr.desc())
@@ -161,11 +175,18 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 ChunkAnnotation.foreshadowing_desc,
             )
             .select_from(Chunk)
-            .join(ChunkAnnotation, Chunk.chunk_id == ChunkAnnotation.chunk_id)
+            .join(
+                ChunkAnnotation,
+                and_(
+                    Chunk.chunk_id == ChunkAnnotation.chunk_id,
+                    Chunk.run_id == ChunkAnnotation.run_id,
+                ),
+            )
             .where(
                 and_(
                     ChunkAnnotation.has_foreshadowing == 1,
                     ChunkAnnotation.run_id == run_id,
+                    Chunk.run_id == run_id,
                 )
             )
             .order_by(Chunk.chunk_id)
@@ -222,11 +243,18 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         stmt = (
             select(Chunk.chunk_id, Chunk.text)
             .select_from(Chunk)
-            .join(ChunkAnnotation, Chunk.chunk_id == ChunkAnnotation.chunk_id)
+            .join(
+                ChunkAnnotation,
+                and_(
+                    Chunk.chunk_id == ChunkAnnotation.chunk_id,
+                    Chunk.run_id == ChunkAnnotation.run_id,
+                ),
+            )
             .where(
                 and_(
                     ChunkAnnotation.event_type == "高潮",
                     ChunkAnnotation.run_id == run_id,
+                    Chunk.run_id == run_id,
                 )
             )
             .order_by(Chunk.chunk_id)
