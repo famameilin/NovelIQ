@@ -358,7 +358,10 @@ def compute_dialogue_lengths_with_llm(
     chunk_id: int | None = None,
     run_id: str | None = None,
     known_characters: list[str] | None = None,
-) -> tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]]:
+    return_tones: bool = False,
+) -> tuple[dict[str, int], dict[int, str], list[tuple[int, str]]] | tuple[
+    dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]
+]:
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
 
@@ -390,12 +393,16 @@ def compute_dialogue_lengths_with_llm(
 
     if not text:
         logger.info("compute_dialogue_lengths_with_llm: early return - text_empty=True")
-        return ({}, {}, [], {})
+        if return_tones:
+            return ({}, {}, [], {})
+        return ({}, {}, [])
 
     candidates = extract_dialogues_from_text(text)
     logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(candidates)} candidates")
     if not candidates:
-        return ({}, {}, [], {})
+        if return_tones:
+            return ({}, {}, [], {})
+        return ({}, {}, [])
 
     records = attribute_dialogues_with_llm(
         client,
@@ -443,4 +450,6 @@ def compute_dialogue_lengths_with_llm(
             canonical_attribution[record.index] = canonical
 
     logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
-    return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones)
+    if return_tones:
+        return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones)
+    return (speaker_lengths, canonical_attribution, dialogues)

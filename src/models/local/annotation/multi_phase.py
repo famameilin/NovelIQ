@@ -222,6 +222,7 @@ def annotate_chunk_parallel(
                 chunk_id=chunk_id,
                 run_id=run_id,
                 known_characters=known_characters,
+                return_tones=True,
             )
             dialogue_lengths = speaker_lengths
             dialogue_speakers = attribution
@@ -341,6 +342,7 @@ def annotate_chunk_serial(
             chunk_id=chunk_id,
             run_id=run_id,
             known_characters=known_characters,
+            return_tones=True,
         )
         dialogue_lengths = speaker_lengths
         dialogue_speakers = attribution
