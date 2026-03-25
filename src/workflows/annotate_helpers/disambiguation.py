@@ -424,7 +424,7 @@ def extract_new_names_from_db(
     任务: 修复候选人名没有频次的问题
     修改内容: 返回带频次的字典列表 [{"name": "伯安", "count": 312}, ...]
     """
-    existing_names = set(alias_map.values()) if alias_map else set()
+    existing_names = set(alias_map.keys()) | set(alias_map.values()) if alias_map else set()
     all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)
 
     candidates: list[dict[str, int]] = []
@@ -489,9 +489,10 @@ def _build_alias_and_state_updates(
         canonical_name = canonical or name
 
         previous_canonical = alias_map.get(name)
+        has_existing_alias_resolution = previous_canonical is not None and previous_canonical != name
         resolved_conflict = (
             confidence == DISAMBIG_CONFIDENCE_HIGH
-            and previous_canonical is not None
+            and has_existing_alias_resolution
             and previous_canonical != canonical_name
         )
 
@@ -505,10 +506,12 @@ def _build_alias_and_state_updates(
             }
         elif confidence == DISAMBIG_CONFIDENCE_MEDIUM or resolved_conflict:
             state = DISAMBIG_STATE_REVIEW
-            alias_updates[name] = name
+            if not has_existing_alias_resolution:
+                alias_updates[name] = name
         else:
             state = DISAMBIG_STATE_UNRESOLVED
-            alias_updates[name] = name
+            if not has_existing_alias_resolution:
+                alias_updates[name] = name
 
         state_updates[name] = {
             "state": state,

@@ -158,25 +158,45 @@ def test_build_alias_and_state_updates_from_confidence() -> None:
     assert snapshot["gray_man"]["state"] == disambig_mod.DISAMBIG_STATE_UNRESOLVED
 
 
+def test_build_alias_and_state_updates_does_not_revert_existing_alias_on_medium_or_low() -> None:
+    result = ExtendedDisambigResult(
+        alias_map={"masked_person": "bai_zhi", "gray_man": "bai_zhi"},
+        entity_types={},
+        entity_relations=[],
+        alias_confidence={"masked_person": "medium", "gray_man": "low"},
+    )
+    alias_updates, snapshot = disambig_mod._build_alias_and_state_updates(
+        result=result,
+        alias_map={"masked_person": "bai_zhi", "gray_man": "bai_zhi", "bai_zhi": "bai_zhi"},
+        state_snapshot=None,
+    )
+    assert "masked_person" not in alias_updates
+    assert "gray_man" not in alias_updates
+    assert snapshot["masked_person"]["state"] == disambig_mod.DISAMBIG_STATE_REVIEW
+    assert snapshot["gray_man"]["state"] == disambig_mod.DISAMBIG_STATE_UNRESOLVED
+    assert snapshot["masked_person"]["canonical"] == "bai_zhi"
+    assert snapshot["gray_man"]["canonical"] == "bai_zhi"
+
+
 def test_extract_new_names_from_db_uses_combined_character_sources() -> None:
     all_names = [
         {"name": "柳婉儿", "count": 5},
         {"name": "二妈妈", "count": 3},
         {"name": "赵兰英", "count": 2},
+        {"name": "王成", "count": 1},
     ]
 
     with patch.object(disambig_mod, "fetch_all_character_names", return_value=all_names) as fetch_mock:
         result = disambig_mod.extract_new_names_from_db(
             conn=None,
-            alias_map={"柳婉儿": "柳婉儿"},
+            alias_map={"柳婉儿": "柳婉儿", "二妈妈": "赵兰英"},
             run_id="run-1",
             current_chunk_id=12,
         )
 
     fetch_mock.assert_called_once_with(None, "run-1", max_chunk_id=12)
     assert result == [
-        {"name": "二妈妈", "count": 3},
-        {"name": "赵兰英", "count": 2},
+        {"name": "王成", "count": 1},
     ]
 
 
