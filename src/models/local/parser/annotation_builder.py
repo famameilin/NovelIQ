@@ -28,8 +28,7 @@ _VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types or []
 _VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores or []
 _VALID_RELATION_TYPES = ANNOTATION_CONFIG.valid_interpersonal_relation_types or []
 _VALID_CLUE_TYPES = ANNOTATION_CONFIG.valid_clue_types or []
-_VALID_EMOTIONAL_VALENCES_V2 = ["positive", "negative", "neutral"]
-_VALID_EMOTIONAL_VALENCES_V1 = ANNOTATION_CONFIG.valid_emotion_scores or []
+_VALID_EMOTIONAL_VALENCES = ANNOTATION_CONFIG.valid_emotion_scores or []
 _VALID_EVENT_TYPES = ANNOTATION_CONFIG.valid_event_types or []
 _VALID_FORESHADOWING_TYPES = ANNOTATION_CONFIG.valid_foreshadowing_types or []
 
@@ -158,18 +157,15 @@ def _normalize_emotional_valence(valence: Any) -> str:
     创建时间: 2026-03-17
     创建者: TraeAI
     任务: code-quality-refactor - 提取build_annotation中的情感倾向处理逻辑
-    说明: 支持v1（五档）到v2（三档）的转换
-    """
-    if valence in _VALID_EMOTIONAL_VALENCES_V2:
-        return valence
+    说明: 支持v1（三档）到v2（五档）的转换
 
-    if valence in _VALID_EMOTIONAL_VALENCES_V1:
-        if valence in ["strong_positive", "mild_positive"]:
-            return "positive"
-        elif valence in ["mild_negative", "strong_negative"]:
-            return "negative"
-        else:
-            return "neutral"
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: upgrade-emotional-valence-to-five-level
+    修改内容: 升级为五档枚举，v2为五档，v1为旧三档（兼容历史数据）
+    """
+    if valence in _VALID_EMOTIONAL_VALENCES:
+        return valence
 
     return "neutral"
 
