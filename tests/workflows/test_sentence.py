@@ -98,7 +98,7 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         with patch("src.metrics.text_utils.split_sentences") as mock_split:
             mock_split.side_effect = lambda text: [text]
 
-            result = _build_sentence_pool(mock_conn, ["贺重明"], ["号", "人称"])
+            result = _build_sentence_pool(mock_conn, ["贺重明"], ["号", "人称"], "run-test")
 
             self.assertIn("贺重明", result)
             self.assertIn("贺重明号伯安", result["贺重明"])
@@ -116,7 +116,7 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         with patch("src.metrics.text_utils.split_sentences") as mock_split:
             mock_split.side_effect = lambda text: [text]
 
-            result = _build_sentence_pool(mock_conn, ["贺重明", "重明"], [])
+            result = _build_sentence_pool(mock_conn, ["贺重明", "重明"], [], "run-test")
 
             self.assertIn("重明", result)
             self.assertIn("重明说道", result["重明"])
@@ -134,7 +134,7 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         with patch("src.metrics.text_utils.split_sentences") as mock_split:
             mock_split.side_effect = lambda text: [text]
 
-            result = _build_sentence_pool(mock_conn, ["贺重明"], [])
+            result = _build_sentence_pool(mock_conn, ["贺重明"], [], "run-test")
 
             self.assertIn("贺重明", result)
             self.assertIn("贺重明走进了房间", result["贺重明"])
@@ -152,7 +152,7 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         with patch("src.metrics.text_utils.split_sentences") as mock_split:
             mock_split.side_effect = lambda text: [text]
 
-            result = _build_sentence_pool(mock_conn, ["贺重明", "李四"], [])
+            result = _build_sentence_pool(mock_conn, ["贺重明", "李四"], [], "run-test")
 
             self.assertIn("贺重明", result)
             self.assertIn("重明和伯安", result["贺重明"])
