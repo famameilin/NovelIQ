@@ -28,10 +28,7 @@ _VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types or []
 _VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores or []
 _VALID_RELATION_TYPES = ANNOTATION_CONFIG.valid_interpersonal_relation_types or []
 _VALID_CLUE_TYPES = ANNOTATION_CONFIG.valid_clue_types or []
-_VALID_EMOTIONAL_VALENCES_V2 = [
-    "strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"
-]
-_VALID_EMOTIONAL_VALENCES_V1 = ["positive", "negative", "neutral"]
+_VALID_EMOTIONAL_VALENCES = ANNOTATION_CONFIG.valid_emotion_scores or []
 _VALID_EVENT_TYPES = ANNOTATION_CONFIG.valid_event_types or []
 _VALID_FORESHADOWING_TYPES = ANNOTATION_CONFIG.valid_foreshadowing_types or []
 
@@ -167,16 +164,8 @@ def _normalize_emotional_valence(valence: Any) -> str:
     任务: upgrade-emotional-valence-to-five-level
     修改内容: 升级为五档枚举，v2为五档，v1为旧三档（兼容历史数据）
     """
-    if valence in _VALID_EMOTIONAL_VALENCES_V2:
+    if valence in _VALID_EMOTIONAL_VALENCES:
         return valence
-
-    if valence in _VALID_EMOTIONAL_VALENCES_V1:
-        if valence == "positive":
-            return "mild_positive"
-        elif valence == "negative":
-            return "mild_negative"
-        else:
-            return "neutral"
 
     return "neutral"
 
