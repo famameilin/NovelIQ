@@ -153,6 +153,10 @@ class ChunkDialogue(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储分块中的对话信息
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    修改内容: 添加 tone 字段，存储对话语气类型（强硬/温和/讽刺/恳求/命令/恐惧/惊慌）
     """
 
     __tablename__ = "chunk_dialogues"
@@ -161,6 +165,7 @@ class ChunkDialogue(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     speaker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     run_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )

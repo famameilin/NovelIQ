@@ -210,11 +210,12 @@ def annotate_chunk_parallel(
         dialogue_lengths = None
         dialogue_speakers = None
         dialogues = None
+        dialogue_tones = None
         extracted_dialogues = extract_dialogues_from_text(text)
         if extracted_dialogues:
             logger.debug("annotate_chunk_parallel: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
             known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-            speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(
+            speaker_lengths, attribution, dialogues, tones = compute_dialogue_lengths_with_llm(
                 client=annotation_client,
                 text=text,
                 alias_map=alias_map,
@@ -224,7 +225,8 @@ def annotate_chunk_parallel(
             )
             dialogue_lengths = speaker_lengths
             dialogue_speakers = attribution
-            logger.debug("annotate_chunk_parallel: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, chunk_id)
+            dialogue_tones = tones
+            logger.debug("annotate_chunk_parallel: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, dialogue_tones, chunk_id)
 
     if foreshadowing and validate_foreshadowing_result(foreshadowing, text):
         logger.debug(
@@ -236,7 +238,7 @@ def annotate_chunk_parallel(
         foreshadowing = None
 
     logger.debug("annotate_chunk_parallel complete chunk_id={}", chunk_id)
-    return MultiPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing, dialogue_lengths=dialogue_lengths, dialogue_speakers=dialogue_speakers, dialogues=dialogues)
+    return MultiPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing, dialogue_lengths=dialogue_lengths, dialogue_speakers=dialogue_speakers, dialogues=dialogues, dialogue_tones=dialogue_tones)
 
 
 def annotate_chunk_serial(
@@ -327,11 +329,12 @@ def annotate_chunk_serial(
     dialogue_lengths = None
     dialogue_speakers = None
     dialogues = None
+    dialogue_tones = None
     extracted_dialogues = extract_dialogues_from_text(text)
     if extracted_dialogues:
         logger.debug("annotate_chunk_serial: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
         known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(
+        speaker_lengths, attribution, dialogues, tones = compute_dialogue_lengths_with_llm(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -341,7 +344,8 @@ def annotate_chunk_serial(
         )
         dialogue_lengths = speaker_lengths
         dialogue_speakers = attribution
-        logger.debug("annotate_chunk_serial: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, chunk_id)
+        dialogue_tones = tones
+        logger.debug("annotate_chunk_serial: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, dialogue_tones, chunk_id)
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)
-    return MultiPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing, dialogue_lengths=dialogue_lengths, dialogue_speakers=dialogue_speakers, dialogues=dialogues)
+    return MultiPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing, dialogue_lengths=dialogue_lengths, dialogue_speakers=dialogue_speakers, dialogues=dialogues, dialogue_tones=dialogue_tones)

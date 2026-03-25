@@ -91,12 +91,18 @@ class DialogueSnapshot(BaseModel):
     修改者: TraeAI
     任务: 添加对话内容字段以支持对话长度计算
     修改内容: 添加 content 字段存储对话内容
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    修改内容: 添加 tone 字段存储对话语气类型
     """
 
     model_config = ConfigDict(frozen=True)
 
     speaker: str | None = None
     content: str = ""
+    tone: str | None = None
 
 
 class ForeshadowingResult(BaseModel):

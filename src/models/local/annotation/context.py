@@ -134,6 +134,11 @@ class MultiPhaseAnnotationResult:
     修改者: TraeAI
     任务: phase3-return-dialogues-to-storage
     修改内容: 添加 dialogues 字段存储 phase3 提取的对话列表
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    修改内容: 添加 dialogue_tones 字段存储对话语气类型
     """
 
     annotation: ChunkAnnotation
@@ -141,6 +146,7 @@ class MultiPhaseAnnotationResult:
     dialogue_lengths: dict[str, int] | None = None
     dialogue_speakers: dict[int, str] | None = None
     dialogues: list[tuple[int, str]] | None = None
+    dialogue_tones: dict[int, str] | None = None
 
 
 PHASE_MAX_RETRIES = 3
