@@ -1,27 +1,27 @@
 """
-聚合流程核心业务逻辑
+鑱氬悎娴佺▼鏍稿績涓氬姟閫昏緫
 
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: refactor-cli-layer-functions
-说明: 从 src/cli/aggregate.py 提取的核心业务逻辑，用于 workflows 模块
+鍒涘缓鏃堕棿: 2026-03-14
+鍒涘缓鑰? TraeAI
+浠诲姟: refactor-cli-layer-functions
+璇存槑: 浠?src/cli/aggregate.py 鎻愬彇鐨勬牳蹇冧笟鍔￠€昏緫锛岀敤浜?workflows 妯″潡
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id/session 参数支持，使用 ChunkRepository/StatsRepository 替代直接调用 operations 函数
+淇敼鏃堕棿: 2026-03-14
+淇敼鑰? TraeAI
+浠诲姟: workflows 浣跨敤 Repository 妯″紡閲嶆瀯
+淇敼鍐呭: 娣诲姞 run_id/session 鍙傛暟鏀寔锛屼娇鐢?ChunkRepository/StatsRepository 鏇夸唬鐩存帴璋冪敤 operations 鍑芥暟
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 移除向后兼容代码，只保留 Repository 模式
+淇敼鏃堕棿: 2026-03-15
+淇敼鑰? TraeAI
+浠诲姟: storage-layer-decoupling
+淇敼鍐呭: 绉婚櫎鍚戝悗鍏煎浠ｇ爜锛屽彧淇濈暀 Repository 妯″紡
 """
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -35,6 +35,12 @@ from src.workflows.curve_metrics import (
 )
 from src.metrics.aggregate_metrics import aggregate_all_metrics
 from src.storage.repositories import ChunkRepository, StatsRepository, AnnotationRepository
+
+QUALITY_TARGETS = {
+    "tone_distribution_non_empty_rate": 1.0,
+    "imagery_density_non_null_rate": 1.0,
+    "culture_all_zero_chunk_ratio_max": 0.30,
+}
 
 
 def _compute_tension_composite(signals: List[dict]) -> List[float]:
@@ -60,12 +66,12 @@ def _compute_tension_composite(signals: List[dict]) -> List[float]:
 
 def _log_aggregate_results(agg_result) -> None:
     """
-    输出聚合结果日志
+    杈撳嚭鑱氬悎缁撴灉鏃ュ織
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 从 run_aggregate 中提取，负责输出聚合指标日志
+    鍒涘缓鏃堕棿: 2026-03-13
+    鍒涘缓鑰? TraeAI
+    浠诲姟: refactor-cli-layer-functions
+    璇存槑: 浠?run_aggregate 涓彁鍙栵紝璐熻矗杈撳嚭鑱氬悎鎸囨爣鏃ュ織
     """
     logger.info("\n=== Aggregate Metrics ===")
 
@@ -113,34 +119,88 @@ def _log_aggregate_results(agg_result) -> None:
                 logger.info(f"  {key}: {value}")
 
 
+def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkRepository) -> Dict[str, Any]:
+    language_style = agg_result.language_style if isinstance(agg_result.language_style, dict) else {}
+    traditional_culture = agg_result.traditional_culture if isinstance(agg_result.traditional_culture, dict) else {}
+
+    tone_distribution = language_style.get("tone_distribution")
+    tone_non_empty = isinstance(tone_distribution, dict) and len(tone_distribution) > 0
+
+    imagery_density = traditional_culture.get("imagery_density")
+    imagery_non_null = imagery_density is not None
+
+    culture_rows = chunk_repo.fetch_chunk_cultures_full(run_id)
+    zero_chunk_ids: List[int] = []
+    for row in culture_rows:
+        if not row:
+            continue
+        chunk_id = int(row[0])
+        density_values = [float(value or 0.0) for value in row[1:]]
+        if density_values and all(value <= 0.0 for value in density_values):
+            zero_chunk_ids.append(chunk_id)
+
+    zero_ratio = (len(zero_chunk_ids) / len(culture_rows)) if culture_rows else 0.0
+
+    return {
+        "tone_distribution_non_empty_rate": 1.0 if tone_non_empty else 0.0,
+        "imagery_density_non_null_rate": 1.0 if imagery_non_null else 0.0,
+        "culture_all_zero_chunk_ratio": zero_ratio,
+        "culture_all_zero_chunk_ids": zero_chunk_ids,
+    }
+
+
+def _log_quality_gate_report(run_id: str, report: Dict[str, Any]) -> None:
+    tone_rate = float(report.get("tone_distribution_non_empty_rate", 0.0))
+    imagery_rate = float(report.get("imagery_density_non_null_rate", 0.0))
+    zero_ratio = float(report.get("culture_all_zero_chunk_ratio", 0.0))
+    zero_chunk_ids = report.get("culture_all_zero_chunk_ids", [])
+
+    logger.info("\n=== Aggregate Quality Gate ===")
+    logger.info(f"tone_distribution_non_empty_rate={tone_rate:.0%}")
+    logger.info(f"imagery_density_non_null_rate={imagery_rate:.0%}")
+    logger.info(f"culture_all_zero_chunk_ratio={zero_ratio:.2%}")
+
+    if tone_rate < QUALITY_TARGETS["tone_distribution_non_empty_rate"]:
+        logger.warning(f"[quality-gate] tone_distribution empty (run_id={run_id})")
+
+    if imagery_rate < QUALITY_TARGETS["imagery_density_non_null_rate"]:
+        logger.warning(f"[quality-gate] imagery_density is null (run_id={run_id})")
+
+    if zero_ratio > QUALITY_TARGETS["culture_all_zero_chunk_ratio_max"]:
+        logger.warning(
+            f"[quality-gate] culture all-zero chunk ratio {zero_ratio * 100:.2f}% exceeds target "
+            f"{QUALITY_TARGETS['culture_all_zero_chunk_ratio_max'] * 100:.2f}% (run_id={run_id})"
+        )
+        logger.warning(f"[quality-gate] all-zero chunk_ids={zero_chunk_ids}")
+
+
 def run_aggregate(
     run_id: str,
     session: Session,
     cache_path: Path | None = None,
 ) -> Tuple[int, int, int]:
     """
-    执行聚合流程
+    鎵ц鑱氬悎娴佺▼
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 聚合流程
+    鍒涘缓鏃堕棿: 2025-03-11
+    鍒涘缓鑰? TraeAI
+    浠诲姟: 鑱氬悎娴佺▼
 
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: refactor-cli-layer-functions
-    修改内容: 提取日志输出为 _log_aggregate_results 辅助函数
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id/session 参数，支持 Repository 模式
+    淇敼鏃堕棿: 2026-03-13
+    淇敼鑰? TraeAI
+    浠诲姟: refactor-cli-layer-functions
+    淇敼鍐呭: 鎻愬彇鏃ュ織杈撳嚭涓?_log_aggregate_results 杈呭姪鍑芥暟
+    淇敼鏃堕棿: 2026-03-14
+    淇敼鑰? TraeAI
+    浠诲姟: workflows 浣跨敤 Repository 妯″紡閲嶆瀯
+    淇敼鍐呭: 娣诲姞 run_id/session 鍙傛暟锛屾敮鎸?Repository 妯″紡
 
     Args:
-        run_id: 运行ID
-        session: 数据库连接
-        cache_path: 缓存路径
+        run_id: 杩愯ID
+        session: 鏁版嵁搴撹繛鎺?        cache_path: 缂撳瓨璺緞
 
     Returns:
-        Tuple[int, int, int]: (总块数, 情绪曲线行数, 节奏曲线行数)
+        Tuple[int, int, int]: (鎬诲潡鏁? 鎯呯华鏇茬嚎琛屾暟, 鑺傚鏇茬嚎琛屾暟)
     """
     start_time = time.time()
 
@@ -190,6 +250,8 @@ def run_aggregate(
     try:
         agg_result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
         _log_aggregate_results(agg_result)
+        quality_report = _build_quality_gate_report(run_id, agg_result, chunk_repo)
+        _log_quality_gate_report(run_id, quality_report)
     except Exception as e:
         logger.warning(f"Failed to compute aggregate metrics: {e}")
 
@@ -204,3 +266,4 @@ def run_aggregate(
     logger.info(f"Global stats: {len(global_stats)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
     return total_chunks, len(emotion_rows), len(rhythm_rows)
+

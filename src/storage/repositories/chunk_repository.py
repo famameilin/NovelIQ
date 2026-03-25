@@ -145,7 +145,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
         return fetch_chunk_styles_full(self.session, run_id)
 
-    def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float]]:
+    def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float, float]]:
         return fetch_chunk_cultures_full(self.session, run_id)
 
     def fetch_chunk_topics_agg(self, run_id: str) -> List[Tuple[int, float]]:

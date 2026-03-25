@@ -169,11 +169,17 @@ def _compute_chunk_culture_metrics(
     """
     from src.metrics.style_metrics import imagery_density
 
-    confucian_val = lexicon_density(tokens, culture_lexicons["confucian"]) if culture_lexicons["confucian"] else 0.0
-    dao_val = lexicon_density(tokens, culture_lexicons["dao"]) if culture_lexicons["dao"] else 0.0
-    buddhism_val = lexicon_density(tokens, culture_lexicons["buddhism"]) if culture_lexicons["buddhism"] else 0.0
-    folk_val = lexicon_density(tokens, culture_lexicons["folk"]) if culture_lexicons["folk"] else 0.0
-    allusion_val = lexicon_density(tokens, culture_lexicons["allusion"]) if culture_lexicons["allusion"] else 0.0
+    confucian_val = (
+        lexicon_density(tokens, culture_lexicons["confucian"], text=chunk.text) if culture_lexicons["confucian"] else 0.0
+    )
+    dao_val = lexicon_density(tokens, culture_lexicons["dao"], text=chunk.text) if culture_lexicons["dao"] else 0.0
+    buddhism_val = (
+        lexicon_density(tokens, culture_lexicons["buddhism"], text=chunk.text) if culture_lexicons["buddhism"] else 0.0
+    )
+    folk_val = lexicon_density(tokens, culture_lexicons["folk"], text=chunk.text) if culture_lexicons["folk"] else 0.0
+    allusion_val = (
+        lexicon_density(tokens, culture_lexicons["allusion"], text=chunk.text) if culture_lexicons["allusion"] else 0.0
+    )
     imagery_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else 0.0
 
     return (

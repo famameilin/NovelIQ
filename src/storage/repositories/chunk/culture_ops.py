@@ -48,7 +48,7 @@ def insert_chunk_culture(
 
 def fetch_chunk_cultures_full(
     session: Session, run_id: str
-) -> List[Tuple[int, float, float, float, float, float]]:
+) -> List[Tuple[int, float, float, float, float, float, float]]:
     """
     获取完整的分块文化数据
 
@@ -57,7 +57,7 @@ def fetch_chunk_cultures_full(
         run_id: 运行ID
 
     Returns:
-        (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density) 元组列表
+        (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density) 元组列表
     """
     stmt = select(
         ChunkCulture.chunk_id,
@@ -66,6 +66,7 @@ def fetch_chunk_cultures_full(
         ChunkCulture.buddhist_density,
         ChunkCulture.folk_density,
         ChunkCulture.allusion_density,
+        ChunkCulture.imagery_density,
     ).where(ChunkCulture.run_id == run_id)
     result = session.execute(stmt)
     return [tuple(row) for row in result.fetchall()]
