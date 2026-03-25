@@ -1,8 +1,23 @@
+"""
+语言风格指标计算模块 (扩展)
+
+创建时间: 2026-03-13
+创建者: TraeAI
+任务: refactor-metrics-layer-functions
+说明: 从 style_metrics.py 提取扩展指标计算函数
+
+修改时间: 2026-03-25
+修改者: TraeAI
+任务: fix-category-density-keys
+修改内容: 删除硬编码 SEMANTIC_CATEGORIES，改为从词表文件加载
+"""
+
 from __future__ import annotations
 
 import re
 import statistics
 from collections import Counter
+from pathlib import Path
 from typing import Dict, List, Set
 
 import jieba
@@ -40,18 +55,18 @@ FUNCTION_WORDS = {
     "何",
 }
 
-SEMANTIC_CATEGORIES = {
-    "人物": ["人", "者", "夫", "子", "男", "女", "老", "少", "亲", "友"],
-    "自然": ["天", "地", "山", "水", "风", "雨", "云", "月", "日", "星"],
-    "器物": ["剑", "刀", "书", "琴", "酒", "茶", "衣", "冠", "马", "车"],
-    "建筑": ["楼", "阁", "亭", "台", "殿", "堂", "门", "窗", "墙", "院"],
-    "情感": ["爱", "恨", "情", "愁", "喜", "怒", "悲", "乐", "思", "念"],
-    "动作": ["行", "走", "坐", "卧", "立", "起", "来", "去", "入", "出"],
-    "时间": ["年", "月", "日", "时", "晨", "暮", "春", "夏", "秋", "冬"],
-    "空间": ["东", "西", "南", "北", "上", "下", "前", "后", "左", "右"],
-    "颜色": ["红", "白", "黑", "青", "黄", "绿", "紫", "金", "银", "翠"],
-    "数量": ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"],
-}
+SEMANTIC_CATEGORY_KEYS = [
+    "combat",
+    "body",
+    "relation",
+    "faction",
+    "command",
+    "action",
+    "psychology",
+    "measure",
+    "emotion",
+    "color",
+]
 
 CLASSICAL_IMAGERY = {
     "月",
@@ -298,15 +313,44 @@ def compute_function_word_vector(
     return {word: counts.get(word, 0) / total_chars for word in FUNCTION_WORDS}
 
 
+def _load_semantic_categories() -> Dict[str, List[str]]:
+    """
+    加载语义类别词表
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-category-density-keys
+    修改内容: 新增函数，从词表文件加载分类
+    """
+    from src.metrics.style_metrics import parse_semantic_category_lexicon
+
+    lexicon_path = Path(__file__).parent.parent.parent / "data" / "lexicons" / "semantic_category.txt"
+
+    if not lexicon_path.exists():
+        return {key: [] for key in SEMANTIC_CATEGORY_KEYS}
+
+    return parse_semantic_category_lexicon(str(lexicon_path))
+
+
 def compute_category_density(
     texts: List[str],
 ) -> Dict[str, float]:
+    """
+    计算语义类别密度
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-category-density-keys
+    修改内容: 从词表文件加载分类，使用英文键名
+    """
+    category_terms = _load_semantic_categories()
+
     if not texts:
-        return {category: 0.0 for category in SEMANTIC_CATEGORIES.keys()}
+        return {category: 0.0 for category in category_terms.keys()}
 
     total_chars = sum(len(text) for text in texts)
     if total_chars == 0:
-        return {category: 0.0 for category in SEMANTIC_CATEGORIES.keys()}
+        return {category: 0.0 for category in category_terms.keys()}
 
     all_chars = []
     for text in texts:
@@ -315,8 +359,11 @@ def compute_category_density(
     char_counts = Counter(all_chars)
 
     result = {}
-    for category, chars in SEMANTIC_CATEGORIES.items():
-        category_count = sum(char_counts.get(c, 0) for c in chars)
+    for category, terms in category_terms.items():
+        if not terms:
+            result[category] = 0.0
+            continue
+        category_count = sum(char_counts.get(c, 0) for c in terms)
         result[category] = category_count / total_chars
 
     return result
