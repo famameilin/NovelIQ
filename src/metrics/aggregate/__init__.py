@@ -44,6 +44,7 @@ __all__ = [
     "AnnotationData",
     "CharacterData",
     "CultureData",
+    "DialogueData",
     "EmotionData",
     "RelationData",
     "TensionData",
@@ -56,6 +57,7 @@ __all__ = [
     "fetch_text_data",
     "fetch_culture_data",
     "fetch_tension_data",
+    "fetch_dialogue_data",
     # computers
     "compute_narrative_structure_metrics",
     "compute_emotion_curve_metrics",
