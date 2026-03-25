@@ -240,7 +240,11 @@ class TestCloudDiagnose:
             client=FakeClient(),
         )
         rows = self.db_session.execute(
-            text("SELECT novel_id, narrative_type, foreshadow_rate FROM cloud_analysis WHERE run_id = :run_id"),
+            text(
+                "SELECT novel_id, narrative_type, foreshadow_rate, narrative_arc_type "
+                "FROM cloud_analysis WHERE run_id = :run_id"
+            ),
             {"run_id": self.run_id},
         ).fetchall()
         assert len(rows) > 0
+        assert rows[0][3] == "白手起家"
