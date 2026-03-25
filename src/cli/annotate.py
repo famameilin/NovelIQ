@@ -21,9 +21,6 @@ from src.workflows.annotate_helpers.phase import (
 from src.workflows.annotate_helpers.sentence import (
     annotate_dialogue_structure,
     build_context_sentences,
-    build_prev_summary,
-    compute_dialogue_lengths,
-    extract_new_names_from_db,
     extract_speaker_from_sentence,
 )
 from src.workflows.retry_utils import MaxRetriesExceededError, RetryableOperation
@@ -37,9 +34,6 @@ __all__ = [
     "_retry_disambig",
     "annotate_dialogue_structure",
     "build_context_sentences",
-    "build_prev_summary",
-    "compute_dialogue_lengths",
-    "extract_new_names_from_db",
     "extract_speaker_from_sentence",
     "run_annotate",
 ]

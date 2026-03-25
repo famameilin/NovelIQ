@@ -64,33 +64,6 @@ def annotate_dialogue_structure(sentence: str) -> str:
     return sentence
 
 
-def compute_dialogue_lengths(text: str, speakers: list[str]) -> list[int]:
-    """计算每个说话者的对话长度"""
-    if not text or not speakers:
-        return [0] * len(speakers)
-
-    speaker_lengths: dict[str, int] = {speaker: 0 for speaker in speakers}
-
-    patterns = [
-        (r"「(.*?)」", 1),
-        (r'"([^"]*)"', 1),
-        (r'"(.*?)"', 1),
-        (r"'(.*?)'", 1),
-    ]
-
-    sentences = re.split(r"[。！？\n]+", text)
-
-    for sentence in sentences:
-        speaker = extract_speaker_from_sentence(sentence)
-        if speaker and speaker in speaker_lengths:
-            for pattern, _ in patterns:
-                matches = re.findall(pattern, sentence, re.DOTALL)
-                for match in matches:
-                    speaker_lengths[speaker] += len(match)
-
-    return [speaker_lengths.get(speaker, 0) for speaker in speakers]
-
-
 def build_context_sentences(
     conn,
     candidates: list[str] | list[dict],
@@ -114,95 +87,6 @@ def build_context_sentences(
     _add_identity_clues(conn, result, name_list, run_id)
 
     return result
-
-
-def extract_new_names_from_db(
-    conn,
-    alias_map: dict,
-    run_id: str,
-    last_n_chunks: int = ANNOTATION_CONFIG.last_n_chunks,
-    current_chunk_id: int | None = None,
-) -> list[dict]:
-    """
-    从数据库提取新名字
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: fix-character-alias-inconsistency
-    修改内容: 同时从 chunk_characters 和 character_appearances 提取名字，
-              确保外号（如"猴子"）也能被识别为候选名参与消歧
-    """
-    known = set(alias_map.keys()) | set(alias_map.values())
-
-    # 如果没有提供 current_chunk_id，使用数据库中的最大 chunk_id（向后兼容）
-    if current_chunk_id is None:
-        max_chunk_result = conn.execute(
-            text("SELECT MAX(chunk_id) FROM chunk_characters WHERE run_id = :run_id"),
-            {"run_id": run_id},
-        )
-        current_chunk_id = max_chunk_result.scalar() or 0
-
-    # 查询当前 chunk 之前最近 N 个 chunk 的名字
-    min_chunk_id = max(0, current_chunk_id - last_n_chunks)
-
-    # 从 chunk_characters 提取名字
-    rows_characters = conn.execute(
-        text("""
-            SELECT name, COUNT(*) as count
-            FROM chunk_characters
-            WHERE chunk_id > :min_chunk_id
-              AND chunk_id <= :current_chunk_id
-              AND run_id = :run_id
-            GROUP BY name
-            ORDER BY count DESC
-        """),
-        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id, "run_id": run_id},
-    ).fetchall()
-
-    # 从 character_appearances 提取 raw_name（包含外号、别名等）
-    rows_appearances = conn.execute(
-        text("""
-            SELECT raw_name, COUNT(*) as count
-            FROM character_appearances
-            WHERE chunk_id > :min_chunk_id
-              AND chunk_id <= :current_chunk_id
-              AND run_id = :run_id
-            GROUP BY raw_name
-            ORDER BY count DESC
-        """),
-        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id, "run_id": run_id},
-    ).fetchall()
-
-    # 合并两个来源的名字，累加频次
-    name_counts: dict[str, int] = {}
-    for row in rows_characters:
-        name = row[0]
-        count = row[1]
-        if name and name not in known:
-            name_counts[name] = name_counts.get(name, 0) + count
-
-    for row in rows_appearances:
-        name = row[0]
-        count = row[1]
-        if name and name not in known:
-            name_counts[name] = name_counts.get(name, 0) + count
-
-    # 按频次降序排序
-    sorted_names = sorted(name_counts.items(), key=lambda x: -x[1])
-    return [{"name": name, "count": count} for name, count in sorted_names]
-
-
-def build_prev_summary(annotation) -> str:
-    """构建前文摘要"""
-    if annotation is None:
-        return ""
-    parts = []
-    if annotation.characters:
-        names = [c.name for c in annotation.characters]
-        parts.append(f"人物：{', '.join(names)}")
-    parts.append(f"事件类型：{annotation.event_type}")
-    parts.append(f"情感倾向：{annotation.emotional_valence}")
-    return "；".join(parts)
 
 
 def _load_alias_keywords() -> list[str]:
@@ -403,3 +287,4 @@ def _add_identity_clues(
         if raw_name in result and clue_type in clue_type_labels:
             label = clue_type_labels[clue_type]
             result[raw_name] += f" | 【{label}】{clue}"
+

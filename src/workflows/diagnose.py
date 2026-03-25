@@ -19,9 +19,8 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -258,41 +257,4 @@ def run_diagnose(
     return result
 
 
-def run_local_diagnose(
-    run_id: str,
-    session: Session,
-    cache_path: Path | None = None,
-) -> Tuple[int, int]:
-    """
-    执行本地诊断流程
 
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id/session 参数，支持 Repository 模式
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: decouple-migration-progress-evaluation
-    修改内容: 使用 StatsRepository 替代直接 SQL 调用
-    """
-    start_time = time.time()
-
-    stats_repo = StatsRepository(session)
-    emotion_rows = stats_repo.fetch_emotion_curve_full(run_id)
-    rhythm_rows = stats_repo.fetch_rhythm_curve_full(run_id)
-    stats_map = stats_repo.fetch_global_stats_dict(run_id)
-    total_chunks = len(emotion_rows)
-    logger.info(f"loaded {len(emotion_rows)} emotion rows and {len(rhythm_rows)} rhythm rows")
-
-    elapsed = time.time() - start_time
-    logger.info(f"local_diagnose completed chunks={total_chunks} stats={len(stats_map)} time={elapsed:.2f}s")
-    logger.info("\n=== Local Diagnose Statistics ===")
-    logger.info(f"Total chunks: {total_chunks}")
-    logger.info(f"Global stats: {len(stats_map)}")
-    logger.info(f"Processing time: {elapsed:.2f}s")
-    if stats_map:
-        logger.info("\n--- Key Metrics ---")
-        for name, value in sorted(stats_map.items()):
-            logger.info(f"  {name}: {value:.4f}")
-    return total_chunks, len(stats_map)
