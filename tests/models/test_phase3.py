@@ -300,5 +300,27 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         self.assertEqual(dialogues, [(1, "你好")])
 
 
+    @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
+    def test_return_tones_when_requested(self, mock_attribute: MagicMock) -> None:
+        """鏄惧紡璇锋眰鏃惰繑鍥炲璇濊姘旀槧灏?"""
+        mock_attribute.return_value = [
+            DialogueRecord(index=1, content="浣犲ソ", is_dialogue=True, speaker="寮犱笁", tone="寮虹‖"),
+        ]
+
+        mock_client = MagicMock()
+        text = '"浣犲ソ"浠栬閬撱€?'
+
+        speaker_lengths, attribution, dialogues, tones = compute_dialogue_lengths_with_llm(
+            mock_client,
+            text,
+            return_tones=True,
+        )
+
+        self.assertEqual(speaker_lengths.get("寮犱笁", 0), len(dialogues[0][1]))
+        self.assertEqual(attribution, {1: "寮犱笁"})
+        self.assertEqual(dialogues[0][0], 1)
+        self.assertEqual(tones, {1: "寮虹‖"})
+
+
 if __name__ == "__main__":
     unittest.main()

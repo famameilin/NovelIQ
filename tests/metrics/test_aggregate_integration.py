@@ -1,25 +1,7 @@
 """
-聚合指标集成测试
-
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 测试聚合指标
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration-cleanup
-修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
+Aggregate metrics integration tests.
 """
+
 import sys
 import uuid
 from pathlib import Path
@@ -30,7 +12,7 @@ from sqlalchemy import text
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.aggregate_metrics import AggregateResult, aggregate_all_metrics
-from src.storage.repositories import RunRepository, ChunkRepository, AnnotationRepository, StatsRepository
+from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
 
 
 class TestAggregateAllMetrics:
@@ -54,43 +36,80 @@ class TestAggregateAllMetrics:
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO chunk_annotation (chunk_id, event_type, cliffhanger, pivot_moment, emotional_valence, run_id) VALUES (0, '铺垫', 1, 0, 'mild_positive', :run_id)"),
+            text(
+                "INSERT INTO chunk_annotation "
+                "(chunk_id, event_type, cliffhanger, pivot_moment, emotional_valence, run_id) "
+                "VALUES (0, '铺垫', 1, 0, 'mild_positive', :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO chunk_annotation (chunk_id, event_type, cliffhanger, pivot_moment, emotional_valence, run_id) VALUES (1, '冲突', 0, 1, 'mild_negative', :run_id)"),
+            text(
+                "INSERT INTO chunk_annotation "
+                "(chunk_id, event_type, cliffhanger, pivot_moment, emotional_valence, run_id) "
+                "VALUES (1, '冲突', 0, 1, 'mild_negative', :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO chunk_characters (chunk_id, name, role_function, action_type, emotion_score, run_id) VALUES (0, '主角', '主体', '对话', 'mild_positive', :run_id)"),
+            text(
+                "INSERT INTO chunk_characters "
+                "(chunk_id, name, role_function, action_type, emotion_score, run_id) "
+                "VALUES (0, '主角', '主体', '对话', 'mild_positive', :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO chunk_characters (chunk_id, name, role_function, action_type, emotion_score, run_id) VALUES (0, '反派', '反对者', '战斗', 'mild_negative', :run_id)"),
+            text(
+                "INSERT INTO chunk_characters "
+                "(chunk_id, name, role_function, action_type, emotion_score, run_id) "
+                "VALUES (0, '反派', '反对者', '战斗', 'mild_negative', :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO chunk_relations (chunk_id, from_char, to_char, type, change, run_id) VALUES (0, '主角', '反派', '敌对', '强化', :run_id)"),
+            text(
+                "INSERT INTO chunk_relations "
+                "(chunk_id, from_char, to_char, type, change, run_id) "
+                "VALUES (0, '主角', '反派', '敌对', '强化', :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO chunk_dialogues (chunk_id, speaker, run_id) VALUES (0, '主角', :run_id)"),
+            text(
+                "INSERT INTO chunk_dialogues (chunk_id, speaker, tone, run_id) "
+                "VALUES (0, '主角', '强硬', :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO emotion_curve (chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) VALUES (0, 0.1, 0.05, 0.05, 0.05, :run_id)"),
+            text(
+                "INSERT INTO emotion_curve "
+                "(chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) "
+                "VALUES (0, 0.1, 0.05, 0.05, 0.05, :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO emotion_curve (chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) VALUES (1, 0.02, 0.1, -0.08, -0.06, :run_id)"),
+            text(
+                "INSERT INTO emotion_curve "
+                "(chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) "
+                "VALUES (1, 0.02, 0.1, -0.08, -0.06, :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO rhythm_curve (chunk_id, tension_proxy, tension_composite, run_id) VALUES (0, 0.3, 0.25, :run_id)"),
+            text(
+                "INSERT INTO rhythm_curve (chunk_id, tension_proxy, tension_composite, run_id) "
+                "VALUES (0, 0.3, 0.25, :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.execute(
-            text("INSERT INTO rhythm_curve (chunk_id, tension_proxy, tension_composite, run_id) VALUES (1, 0.7, 0.65, :run_id)"),
+            text(
+                "INSERT INTO rhythm_curve (chunk_id, tension_proxy, tension_composite, run_id) "
+                "VALUES (1, 0.7, 0.65, :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.commit()
@@ -145,6 +164,7 @@ class TestAggregateAllMetrics:
         stats_repo = StatsRepository(self.db_session)
         result = aggregate_all_metrics(self.run_id, ann_repo, chunk_repo, stats_repo)
         assert "vocab_breadth" in result.language_style
+        assert result.language_style["tone_distribution"] == {"强硬": 1.0}
 
     def test_aggregate_traditional_culture(self) -> None:
         ann_repo = AnnotationRepository(self.db_session)

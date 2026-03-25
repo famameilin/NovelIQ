@@ -40,6 +40,7 @@ def _store_annotation_results(
     alias_map: dict[str, str] | None = None,
     dialogue_speakers: dict[int, str] | None = None,
     dialogues: list[tuple[int, str]] | None = None,
+    dialogue_tones: dict[int, str] | None = None,
 ) -> None:
     """存储标注结果
 
@@ -71,6 +72,11 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: phase3-return-dialogues-to-storage
     修改内容: 添加 dialogues 参数，完全由 Phase3 构建对话列表，不再依赖 annotation.dialogues
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    修改内容: 添加 dialogue_tones 参数，传递对话语气类型
     """
     from src.models.local.schema import DialogueSnapshot
     from src.storage.repositories import AnnotationRepository, StatsRepository
@@ -117,7 +123,8 @@ def _store_annotation_results(
         effective_dialogues = []
         for dialogue_idx, content in dialogues:
             speaker = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
-            effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content))
+            tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
+            effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content, tone=tone))
         lengths = [len(content) for _, content in dialogues]
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)
 
