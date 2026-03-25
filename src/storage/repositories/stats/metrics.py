@@ -323,7 +323,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> Option
         "dignity_reason": result.dignity_reason,
         "cultural_depth_score": result.cultural_depth_score,
         "cultural_depth_reason": result.cultural_depth_reason,
-        "emotion_curve_type": result.emotion_curve_type,
+        "narrative_arc_type": result.narrative_arc_type,
         "run_id": result.run_id,
     }
 
