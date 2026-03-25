@@ -261,7 +261,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
         dignity_reason=analysis.dignity_reason,
         cultural_depth_score=analysis.cultural_depth_score,
         cultural_depth_reason=analysis.cultural_depth_reason,
-        emotion_curve_type=analysis.emotion_curve_type,
+        narrative_arc_type=analysis.narrative_arc_type,
         run_id=run_id,
     )
     session.add(cloud_analysis)
