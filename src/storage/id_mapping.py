@@ -125,6 +125,11 @@ def task_id_to_run_id(task_id: str, conn: "Union[Connection, Session]") -> str:
     Example:
         >>> task_id_to_run_id('3a25baca', conn)
         '3a25baca-1a72-4444-a772-2ddc64334cd2'
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-resume-feature - 断点续传功能修复
+    修改内容: 使用 limit(1) 避免多记录时抛出异常
     """
     if not task_id or len(task_id) != 8:
         raise ValueError(f"Invalid task_id: {task_id}. Expected exactly 8 characters.")
@@ -134,7 +139,7 @@ def task_id_to_run_id(task_id: str, conn: "Union[Connection, Session]") -> str:
     from src.storage.models.core import AnalysisRun
 
     pattern = task_id_to_run_id_pattern(task_id)
-    stmt = select(AnalysisRun.run_id).where(AnalysisRun.run_id.like(pattern))
+    stmt = select(AnalysisRun.run_id).where(AnalysisRun.run_id.like(pattern)).order_by(AnalysisRun.created_at.asc()).limit(1)
     result = conn.execute(stmt).scalar_one_or_none()
 
     if result is None:

@@ -148,8 +148,13 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
 
         Returns:
             运行记录字典，不存在则返回 None
+
+        修改时间: 2026-03-25
+        修改者: TraeAI
+        任务: fix-resume-feature - 断点续传功能修复
+        修改内容: 使用 limit(1) 避免多记录时抛出异常
         """
-        stmt = select(AnalysisRun).where(AnalysisRun.run_id.like(f"{run_id_prefix}%"))
+        stmt = select(AnalysisRun).where(AnalysisRun.run_id.like(f"{run_id_prefix}%")).order_by(AnalysisRun.created_at.asc()).limit(1)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run is None:
             return None

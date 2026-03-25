@@ -164,6 +164,16 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         """获取小说标题"""
         return metrics.fetch_novel_title(self.session, novel_id, run_id)
 
+    def has_global_context(self, run_id: str) -> bool:
+        """
+        检查是否已存在 global_context 记录
+
+        创建时间: 2026-03-25
+        创建者: TraeAI
+        任务: fix-resume-feature - 断点续传功能修复
+        """
+        return metrics.has_global_context(self.session, run_id)
+
     # ==================== summaries 模块方法 ====================
 
     def insert_chunk_summary(self, run_id: str, chunk_id: int, summary: str) -> None:

@@ -134,6 +134,11 @@ class AnalysisService:
         修改者: TraeAI
         任务: 修复task_id和run_id不关联的问题
         修改内容: run_id以task_id为前缀生成，确保task_id = run_id[:8]
+
+        修改时间: 2026-03-25
+        修改者: TraeAI
+        任务: fix-resume-feature - 断点续传功能修复
+        修改内容: 先检查是否已存在该task_id对应的run_id，存在则复用
         """
         novel_id = novel["novel_id"]
         source_path = Path(novel["file_path"])
@@ -148,26 +153,33 @@ class AnalysisService:
         conn = db_session.connection
 
         run_repo = RunRepository(conn)
-        import uuid
-        run_id = f"{task_id}{str(uuid.uuid4())[8:]}"
         
-        run_repo.create_run(
-            novel_id=novel_id,
-            source_path=str(source_path),
-            title=novel_title,
-            run_id=run_id,
-        )
-        logger.info(f"Created analysis run: run_id={run_id} for novel_id={novel_id}")
+        existing_run = run_repo.get_run_by_run_id_prefix(task_id)
+        if existing_run:
+            run_id = existing_run["run_id"]
+            logger.info(f"Reusing existing run_id: {run_id} for task_id: {task_id}")
+        else:
+            import uuid
+            run_id = f"{task_id}{str(uuid.uuid4())[8:]}"
+
+            run_repo.create_run(
+                novel_id=novel_id,
+                source_path=str(source_path),
+                title=novel_title,
+                run_id=run_id,
+            )
+            logger.info(f"Created analysis run: run_id={run_id} for novel_id={novel_id}")
 
         stats_repo = StatsRepository(conn)
-        stats_repo.insert_global_context(
-            run_id=run_id,
-            novel_id=novel_id,
-            novel_title=novel_title,
-            core_characters="[]",
-            world_setting="",
-        )
-        logger.info(f"Created database with novel_id={novel_id}")
+        if not stats_repo.has_global_context(run_id):
+            stats_repo.insert_global_context(
+                run_id=run_id,
+                novel_id=novel_id,
+                novel_title=novel_title,
+                core_characters="[]",
+                world_setting="",
+            )
+            logger.info(f"Created database with novel_id={novel_id}")
 
         return novel_id, source_path, novel_title, conn, analysis_logger, run_id
 
