@@ -533,79 +533,6 @@ def _run_final_disambiguation(
     return alias_map
 
 
-def _run_cloud_disambiguation(
-    conn,
-    alias_map: dict[str, str],
-    cloud_disambig_client: DisambiguationLike | None,
-    alias_keywords: list[str],
-    novel_id: str,
-    run_id: str,
-) -> dict[str, str]:
-    """
-    执行云端消歧（如果需要）
-
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-final-disambig-missing-context
-    修改内容: 修复云端消解丢失频次和例句的问题，与增量消解保持一致的 prompt 格式
-    """
-    if not cloud_disambig_client:
-        return alias_map
-
-    existing_names = list(set(alias_map.values())) if alias_map else []
-
-    if not existing_names:
-        return alias_map
-
-    candidates = fetch_all_character_names(conn, run_id)
-
-    context_sentences = build_context_sentences(conn, candidates, alias_keywords, run_id=run_id)
-
-    result = _retry_disambig(
-        cloud_disambig_client,
-        candidates,
-        context_sentences,
-        alias_keywords,
-        stage_name="cloud disambiguation",
-        run_id=run_id,
-    )
-
-    if isinstance(result, dict):
-        alias_map.update(result)
-    elif hasattr(result, 'alias_map'):
-        alias_map.update(result.alias_map)
-
-    logger.info(f"cloud disambiguation completed: {len(alias_map)} entries")
-
-    return alias_map
-
-
-def run_disambiguation(
-    conn,
-    alias_map: dict[str, str],
-    full_disambig_client: DisambiguationLike,
-    cloud_disambig_client: DisambiguationLike | None,
-    alias_keywords: list[str],
-    novel_id: str,
-    run_id: str,
-) -> dict[str, str]:
-    """
-    执行消歧流程（增量 + 最终 + 云端）
-
-    这是供外部调用的统一接口。
-    """
-    alias_map = _run_final_disambiguation(
-        conn, alias_map, full_disambig_client, alias_keywords, novel_id, run_id
-    )
-
-    if cloud_disambig_client:
-        alias_map = _run_cloud_disambiguation(
-            conn, alias_map, cloud_disambig_client, alias_keywords, novel_id, run_id
-        )
-
-    return alias_map
-
-
 def detect_cycle_in_relations(
     relations: list[dict[str, str]],
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[list[str]]]:
@@ -783,3 +710,4 @@ def _process_entity_relations(
         )
 
     return success_count, skipped_relations
+
