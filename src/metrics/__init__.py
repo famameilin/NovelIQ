@@ -14,9 +14,9 @@ from .narrative_metrics import (
 )
 from .emotion_metrics_extra import (
     compute_arc_delta,
-    compute_emotion_curve_type,
     compute_emotion_polarity_distribution,
     compute_emotion_recovery_speed,
+    compute_lexical_emotion_trend,
     compute_pivot_moment_density,
     compute_pos_neg_ratio,
 )
@@ -93,12 +93,12 @@ __all__ = [
     "compute_cliffhanger_rate",
     "compute_climax_spacing",
     "compute_clustering_coefficient",
-    "compute_emotion_curve_type",
     "compute_emotion_polarity_distribution",
     "compute_emotion_recovery_speed",
     "compute_event_density",
     "compute_function_word_vector",
     "compute_greimas_coverage",
+    "compute_lexical_emotion_trend",
     "compute_idiom_density",
     "compute_imagery_density",
     "compute_largest_component_size",

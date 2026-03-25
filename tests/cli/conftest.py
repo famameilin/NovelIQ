@@ -32,6 +32,7 @@ class FakeClient(CloudModelClient):
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
+            narrative_arc_type="白手起家",
         )
 
 

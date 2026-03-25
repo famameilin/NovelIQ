@@ -9,15 +9,7 @@ def compute_emotion_recovery_speed(
     emotion_values: List[float],
     threshold: float | None = None,
 ) -> Optional[float]:
-    """
-    计算情感恢复速度。
-
-    2026-03-11 创建 - 初始版本
-    2026-03-11 修改 - Claude - 修复 recovery_speed 阈值问题
-        原因：固定阈值 emotion_recovery_threshold: 0.3 远大于情感值量级 (~0.01)，
-        导致没有负向块被识别，recovery_speed 返回 None。
-        修改：使用动态阈值，基于数据标准差计算，确保阈值适配实际数据量级。
-    """
+    """Compute the average distance from a negative dip back toward baseline."""
     if not emotion_values:
         return None
 
@@ -47,13 +39,7 @@ def compute_emotion_recovery_speed(
 def compute_emotion_polarity_distribution(
     emotional_valences: List[str],
 ) -> Dict[str, float]:
-    """
-    计算情感极性分布。
-
-    2026-03-13 修改 - TraeAI
-    任务: chunk-annotation-schema-refactor
-    修改内容: 支持五档枚举 (strong_positive/mild_positive/neutral/mild_negative/strong_negative)
-    """
+    """Compute positive, negative, and neutral valence ratios."""
     if not emotional_valences:
         return {"positive_ratio": 0.0, "negative_ratio": 0.0, "neutral_ratio": 0.0}
 
@@ -83,22 +69,7 @@ def compute_pivot_moment_density(
 def compute_lexical_emotion_trend(
     emotion_values: List[float],
 ) -> str:
-    """
-    计算词表情感趋势，返回四类趋势分类。
-
-    四类趋势：
-    - "rising": 情感上升 (后段平均值 - 前段平均值 > 0.002)
-    - "falling": 情感下降 (后段平均值 - 前段平均值 < -0.002)
-    - "stable": 情感稳定 (|后段 - 前段| <= 0.002 且标准差 < 0.003)
-    - "volatile": 情感波动 (标准差 >= 0.003)
-
-    创建时间: 2026-03-25
-    创建者: TraeAI
-    任务: improve-emotion-curve-accuracy
-    说明: 重命名自 compute_emotion_curve_type，使用量化阈值判断
-    """
-    import statistics
-
+    """Classify lexicon-based emotion trend as rising, falling, stable, or volatile."""
     if len(emotion_values) < 3:
         return "stable"
 
@@ -112,80 +83,15 @@ def compute_lexical_emotion_trend(
     last_avg = sum(last_segment) / len(last_segment) if last_segment else 0.0
 
     stdev = statistics.stdev(emotion_values) if len(emotion_values) > 1 else 0.0
-
     diff = last_avg - first_avg
 
     if stdev >= 0.003:
         return "volatile"
-    elif diff > 0.002:
+    if diff > 0.002:
         return "rising"
-    elif diff < -0.002:
+    if diff < -0.002:
         return "falling"
-    else:
-        return "stable"
-
-
-def compute_emotion_curve_type(
-    emotion_values: List[float],
-) -> str:
-    """
-    计算情感曲线类型，返回规范的六种原型分类。
-
-    六种原型：
-    - "白手起家": 情感从低谷逐渐上升 (前 < 中 < 后)
-    - "伊卡洛斯": 情感先升后降 (前 < 中 > 后)
-    - "落坑爬出": 情感先降后升 (前 > 中 < 后)
-    - "持续下降": 情感持续走低 (前 > 中 > 后)
-    - "灰姑娘": 情感先降后升再降 (前 > 中 < 后，且后半段继续下降)
-    - "俄狄浦斯": 情感先升后降再升 (前 < 中 > 后，且后半段继续上升)
-
-    修改历史：
-    - 2026-03-11 创建 - Claude - 初始版本使用斜率判断
-    - 2026-03-11 修改 - Claude - 修复非规范值问题，改用三段式趋势判断，
-      原返回值"平稳型"/"起伏型"/"悲剧型"/"白手起家型"不符合云端诊断规范
-
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: improve-emotion-curve-accuracy
-    修改内容: 标记为废弃，建议使用 compute_lexical_emotion_trend
-    """
-    if len(emotion_values) < 3:
-        return "白手起家"
-
-    n = len(emotion_values)
-    third = n // 3
-
-    first_segment = emotion_values[:third]
-    mid_segment = emotion_values[third : 2 * third]
-    last_segment = emotion_values[2 * third :]
-
-    first_avg = sum(first_segment) / len(first_segment) if first_segment else 0.0
-    mid_avg = sum(mid_segment) / len(mid_segment) if mid_segment else 0.0
-    last_avg = sum(last_segment) / len(last_segment) if last_segment else 0.0
-
-    if first_avg < mid_avg < last_avg:
-        return "白手起家"
-    elif first_avg > mid_avg > last_avg:
-        return "持续下降"
-    elif first_avg > mid_avg and mid_avg < last_avg:
-        if len(last_segment) >= 2:
-            last_quarter = emotion_values[3 * n // 4 :]
-            last_quarter_avg = sum(last_quarter) / len(last_quarter) if last_quarter else last_avg
-            if last_quarter_avg < last_avg:
-                return "灰姑娘"
-        return "落坑爬出"
-    elif first_avg < mid_avg and mid_avg > last_avg:
-        if len(last_segment) >= 2:
-            last_quarter = emotion_values[3 * n // 4 :]
-            last_quarter_avg = sum(last_quarter) / len(last_quarter) if last_quarter else last_avg
-            if last_quarter_avg > last_avg:
-                return "俄狄浦斯"
-        return "伊卡洛斯"
-    else:
-        if first_avg < last_avg:
-            return "白手起家"
-        else:
-            return "持续下降"
+    return "stable"
 
 
 def compute_arc_delta(
@@ -195,7 +101,7 @@ def compute_arc_delta(
         return 0.0
 
     stds = []
-    for name, scores in character_emotion_scores:
+    for _, scores in character_emotion_scores:
         if len(scores) >= 2:
             stds.append(statistics.stdev(scores))
 
