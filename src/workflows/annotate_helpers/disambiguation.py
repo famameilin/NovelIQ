@@ -33,6 +33,8 @@ from src.config import settings
 from src.models.interfaces import DisambiguationLike
 from src.models.local.disambiguation import ExtendedDisambigResult
 from src.storage.repositories import AnnotationRepository
+from src.storage.repositories.annotation.characters import fetch_all_character_names
+
 from .sentence import build_context_sentences
 
 
@@ -205,9 +207,10 @@ def _save_disambiguation_interaction(
 
     try:
         import json
+
+        from src.models.local.disambiguation import build_disambiguate_messages
         from src.storage.db import get_session_factory
         from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
-        from src.models.local.disambiguation import build_disambiguate_messages
 
         Session = get_session_factory()
         session = Session()
@@ -338,7 +341,7 @@ def _retry_disambig(
                 time.sleep(1)
             else:
                 logger.error(f"{stage_name} failed after {max_retries} attempts: {e}")
-                raise last_exception
+                raise last_exception from None
 
 
 def extract_new_names_from_db(
@@ -362,8 +365,9 @@ def extract_new_names_from_db(
     任务: 修复候选人名没有频次的问题
     修改内容: 返回带频次的字典列表 [{"name": "伯安", "count": 312}, ...]
     """
-    from src.storage.repositories import AnnotationRepository
     from collections import Counter
+
+    from src.storage.repositories import AnnotationRepository
 
     ann_repo = AnnotationRepository(conn)
 
@@ -467,18 +471,30 @@ def _run_final_disambiguation(
     修改者: TraeAI
     任务: fix-entity-relations-not-saved
     修改内容: 调整执行顺序，先创建实体再保存关系；支持恢复时处理未保存的关系
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-final-disambig-missing-context
+    修改内容: 修复最终消解丢失频次和例句的问题，与增量消解保持一致的 prompt 格式
     """
     # 检查是否有未保存的关系数据（系统意外停止后恢复）
     _, pending_relations = _load_disambig_checkpoint(conn, run_id)
     if pending_relations:
         logger.info(f"found {len(pending_relations)} pending relations from checkpoint, will process them")
 
-    existing_names = list(set(alias_map.values())) if alias_map else None
+    existing_names = list(set(alias_map.values())) if alias_map else []
+
+    if not existing_names:
+        return alias_map
+
+    candidates = fetch_all_character_names(conn, run_id)
+
+    context_sentences = build_context_sentences(conn, candidates, alias_keywords, run_id=run_id)
 
     result = _retry_disambig(
         full_disambig_client,
-        existing_names or [],
-        {},
+        candidates,
+        context_sentences,
         alias_keywords,
         stage_name="final disambiguation",
         run_id=run_id,
@@ -525,16 +541,30 @@ def _run_cloud_disambiguation(
     novel_id: str,
     run_id: str,
 ) -> dict[str, str]:
-    """执行云端消歧（如果需要）"""
+    """
+    执行云端消歧（如果需要）
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-final-disambig-missing-context
+    修改内容: 修复云端消解丢失频次和例句的问题，与增量消解保持一致的 prompt 格式
+    """
     if not cloud_disambig_client:
         return alias_map
 
-    existing_names = list(set(alias_map.values())) if alias_map else None
+    existing_names = list(set(alias_map.values())) if alias_map else []
+
+    if not existing_names:
+        return alias_map
+
+    candidates = fetch_all_character_names(conn, run_id)
+
+    context_sentences = build_context_sentences(conn, candidates, alias_keywords, run_id=run_id)
 
     result = _retry_disambig(
         cloud_disambig_client,
-        existing_names or [],
-        {},
+        candidates,
+        context_sentences,
         alias_keywords,
         stage_name="cloud disambiguation",
         run_id=run_id,
