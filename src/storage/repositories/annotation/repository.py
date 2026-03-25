@@ -138,9 +138,9 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
         """获取别名映射表"""
         return characters.fetch_alias_map(self.session, run_id)
 
-    def fetch_all_character_names(self, run_id: str) -> List[Dict[str, str | int]]:
+    def fetch_all_character_names(self, run_id: str, max_chunk_id: int | None = None) -> List[Dict[str, str | int]]:
         """获取指定运行的所有角色名及出现频次"""
-        return characters.fetch_all_character_names(self.session, run_id)
+        return characters.fetch_all_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
 
     def update_character_names(self, run_id: str, alias_map: Dict[str, str], novel_id: str = "default") -> None:
         """更新角色名称（消歧）"""

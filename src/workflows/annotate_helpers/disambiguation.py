@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Any
 
 from loguru import logger
@@ -36,6 +36,21 @@ from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from .sentence import build_context_sentences
+
+DISAMBIG_CONFIDENCE_LOW = "low"
+DISAMBIG_CONFIDENCE_MEDIUM = "medium"
+DISAMBIG_CONFIDENCE_HIGH = "high"
+VALID_DISAMBIG_CONFIDENCE = {
+    DISAMBIG_CONFIDENCE_LOW,
+    DISAMBIG_CONFIDENCE_MEDIUM,
+    DISAMBIG_CONFIDENCE_HIGH,
+}
+
+DISAMBIG_STATE_RESOLVED = "resolved"
+DISAMBIG_STATE_REVIEW = "review"
+DISAMBIG_STATE_UNRESOLVED = "unresolved"
+
+DisambigStateSnapshot = dict[str, dict[str, str]]
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
@@ -123,7 +138,11 @@ def _extract_retryable_relations(skipped_relations: list[dict[str, Any]] | None)
 
 
 def _save_disambig_checkpoint(
-    conn, run_id: str, alias_map: dict[str, str], entity_relations: list[dict[str, str]] | None = None
+    conn,
+    run_id: str,
+    alias_map: dict[str, str],
+    entity_relations: list[dict[str, str]] | None = None,
+    disambig_states: DisambigStateSnapshot | None = None,
 ) -> None:
     """
     保存消歧检查点
@@ -134,26 +153,30 @@ def _save_disambig_checkpoint(
     修改内容: 简化代码，依赖正确的表结构
     """
     try:
+        params = {
+            "run_id": run_id,
+            "alias_map": json.dumps(alias_map),
+            "updated_at": time.time(),
+            "entity_relations": json.dumps(entity_relations) if entity_relations else None,
+            "disambig_states": json.dumps(disambig_states) if disambig_states else None,
+        }
         conn.execute(
             text("""
-            INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at, entity_relations)
-            VALUES (:run_id, :alias_map, :updated_at, :entity_relations)
+            INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at, entity_relations, disambig_states)
+            VALUES (:run_id, :alias_map, :updated_at, :entity_relations, :disambig_states)
             ON CONFLICT (run_id) DO UPDATE SET
                 alias_map = EXCLUDED.alias_map,
                 updated_at = EXCLUDED.updated_at,
-                entity_relations = EXCLUDED.entity_relations
+                entity_relations = EXCLUDED.entity_relations,
+                disambig_states = EXCLUDED.disambig_states
         """),
-            {
-                "run_id": run_id,
-                "alias_map": json.dumps(alias_map),
-                "updated_at": time.time(),
-                "entity_relations": json.dumps(entity_relations) if entity_relations else None,
-            },
+            params,
         )
         conn.commit()
         logger.debug(f"disambig checkpoint saved: {len(alias_map)} entries")
     except Exception as e:
-        logger.warning(f"failed to save disambig checkpoint: {e}")
+        logger.error(f"failed to save disambig checkpoint: {e}")
+        raise
 
 
 def _load_disambig_checkpoint(conn, run_id: str) -> tuple[dict[str, str] | None, list[dict[str, str]] | None]:
@@ -185,11 +208,44 @@ def _load_disambig_checkpoint(conn, run_id: str) -> tuple[dict[str, str] | None,
     return None, None
 
 
+def _load_disambig_states(conn, run_id: str) -> DisambigStateSnapshot | None:
+    """Load optional disambiguation state snapshot from checkpoint."""
+    try:
+        result = conn.execute(
+            text("SELECT disambig_states FROM disambig_checkpoint WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        ).fetchone()
+        if not result or not result[0]:
+            return None
+
+        loaded = json.loads(result[0])
+        if not isinstance(loaded, dict):
+            return None
+
+        normalized: DisambigStateSnapshot = {}
+        for name, payload in loaded.items():
+            if not isinstance(name, str) or not isinstance(payload, dict):
+                continue
+            state = str(payload.get("state", DISAMBIG_STATE_UNRESOLVED))
+            confidence = _normalize_disambig_confidence(payload.get("confidence"))
+            canonical = str(payload.get("canonical", name))
+            normalized[name] = {
+                "state": state,
+                "confidence": confidence,
+                "canonical": canonical,
+            }
+        return normalized
+    except Exception as e:
+        logger.error(f"failed to load disambig states: {e}")
+        raise
+
+
 def _save_disambiguation_interaction(
     client: DisambiguationLike,
     run_id: str | None,
     candidates: list,
     context_sentences: dict,
+    existing_names: list[str] | None,
     result: Any,
     stage_name: str,
     attempt_number: int,
@@ -218,7 +274,7 @@ def _save_disambiguation_interaction(
             repo = ModelInteractionRepository(session)
 
             # 构建消息
-            messages = build_disambiguate_messages(candidates, context_sentences, None, None)
+            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, None)
             prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
 
             # 构建响应内容
@@ -226,13 +282,14 @@ def _save_disambiguation_interaction(
                 # ExtendedDisambigResult
                 response_dict = {
                     "alias_map": result.alias_map,
+                    "alias_confidence": result.alias_confidence if hasattr(result, "alias_confidence") else {},
                     "entity_types": result.entity_types if hasattr(result, 'entity_types') else {},
                     "entity_relations": result.entity_relations if hasattr(result, 'entity_relations') else [],
                 }
             elif isinstance(result, dict):
-                response_dict = {"alias_map": result, "entity_types": {}, "entity_relations": []}
+                response_dict = {"alias_map": result, "alias_confidence": {}, "entity_types": {}, "entity_relations": []}
             else:
-                response_dict = {"alias_map": {}, "entity_types": {}, "entity_relations": []}
+                response_dict = {"alias_map": {}, "alias_confidence": {}, "entity_types": {}, "entity_relations": []}
 
             response_text = json.dumps(response_dict, ensure_ascii=False)
 
@@ -278,7 +335,7 @@ def _retry_disambig(
     client: DisambiguationLike,
     candidates: list[str] | list[dict],
     context_sentences: dict[str, str],
-    alias_keywords: list[str],
+    existing_names: list[str],
     stage_name: str,
     run_id: str | None = None,
 ) -> Any:
@@ -303,7 +360,7 @@ def _retry_disambig(
             result = client.disambiguate_characters(
                 candidates=candidates,
                 context_sentences=context_sentences,
-                existing_names=alias_keywords if alias_keywords else None,
+                existing_names=existing_names if existing_names else None,
             )
             duration_ms = int((time.time() - start_time) * 1000)
 
@@ -313,6 +370,7 @@ def _retry_disambig(
                 run_id=run_id,
                 candidates=candidates,
                 context_sentences=context_sentences,
+                existing_names=existing_names,
                 result=result,
                 stage_name=stage_name,
                 attempt_number=attempt,
@@ -330,6 +388,7 @@ def _retry_disambig(
                 run_id=run_id,
                 candidates=candidates,
                 context_sentences=context_sentences,
+                existing_names=existing_names,
                 result={"error": str(e)},
                 stage_name=stage_name,
                 attempt_number=attempt,
@@ -365,24 +424,158 @@ def extract_new_names_from_db(
     任务: 修复候选人名没有频次的问题
     修改内容: 返回带频次的字典列表 [{"name": "伯安", "count": 312}, ...]
     """
-    from collections import Counter
-
-    from src.storage.repositories import AnnotationRepository
-
-    ann_repo = AnnotationRepository(conn)
-
     existing_names = set(alias_map.values()) if alias_map else set()
+    all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)
 
-    all_characters = ann_repo.fetch_chunk_characters_full(run_id)
+    candidates: list[dict[str, int]] = []
+    for item in all_names:
+        name = str(item.get("name", "")).strip()
+        if not name or name in existing_names:
+            continue
+        raw_count = item.get("count", 0)
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            count = 0
+        candidates.append({"name": name, "count": count})
 
-    name_counter: Counter[str] = Counter()
-    for char_row in all_characters:
-        name = char_row[1] if len(char_row) > 1 else None
-        if name and name not in existing_names:
-            name_counter[name] += 1
+    return candidates
 
-    result = [{"name": name, "count": count} for name, count in name_counter.most_common()]
-    return result  # type: ignore[return-value]
+
+def _normalize_disambig_confidence(confidence: Any) -> str:
+    if isinstance(confidence, str):
+        normalized = confidence.lower().strip()
+        if normalized in VALID_DISAMBIG_CONFIDENCE:
+            return normalized
+    return DISAMBIG_CONFIDENCE_MEDIUM
+
+
+def _ensure_state_snapshot_has_known_names(
+    alias_map: dict[str, str],
+    state_snapshot: DisambigStateSnapshot | None,
+) -> DisambigStateSnapshot:
+    snapshot: DisambigStateSnapshot = dict(state_snapshot or {})
+    for alias, canonical in alias_map.items():
+        snapshot.setdefault(
+            alias,
+            {
+                "state": DISAMBIG_STATE_RESOLVED,
+                "confidence": DISAMBIG_CONFIDENCE_HIGH,
+                "canonical": canonical,
+            },
+        )
+        snapshot.setdefault(
+            canonical,
+            {
+                "state": DISAMBIG_STATE_RESOLVED,
+                "confidence": DISAMBIG_CONFIDENCE_HIGH,
+                "canonical": canonical,
+            },
+        )
+    return snapshot
+
+
+def _build_alias_and_state_updates(
+    result: ExtendedDisambigResult,
+    alias_map: dict[str, str],
+    state_snapshot: DisambigStateSnapshot | None,
+) -> tuple[dict[str, str], DisambigStateSnapshot]:
+    merged_snapshot = _ensure_state_snapshot_has_known_names(alias_map, state_snapshot)
+    alias_updates: dict[str, str] = {}
+    state_updates: DisambigStateSnapshot = {}
+
+    for name, canonical in result.alias_map.items():
+        confidence = _normalize_disambig_confidence(result.alias_confidence.get(name))
+        canonical_name = canonical or name
+
+        previous_canonical = alias_map.get(name)
+        resolved_conflict = (
+            confidence == DISAMBIG_CONFIDENCE_HIGH
+            and previous_canonical is not None
+            and previous_canonical != canonical_name
+        )
+
+        if confidence == DISAMBIG_CONFIDENCE_HIGH and not resolved_conflict:
+            state = DISAMBIG_STATE_RESOLVED
+            alias_updates[name] = canonical_name
+            state_updates[canonical_name] = {
+                "state": DISAMBIG_STATE_RESOLVED,
+                "confidence": DISAMBIG_CONFIDENCE_HIGH,
+                "canonical": canonical_name,
+            }
+        elif confidence == DISAMBIG_CONFIDENCE_MEDIUM or resolved_conflict:
+            state = DISAMBIG_STATE_REVIEW
+            alias_updates[name] = name
+        else:
+            state = DISAMBIG_STATE_UNRESOLVED
+            alias_updates[name] = name
+
+        state_updates[name] = {
+            "state": state,
+            "confidence": confidence,
+            "canonical": canonical_name,
+        }
+
+    merged_snapshot.update(state_updates)
+    return alias_updates, merged_snapshot
+
+
+def _extract_names_from_candidates(candidates: list[str] | list[dict[str, int]]) -> list[str]:
+    names: list[str] = []
+    if candidates and isinstance(candidates[0], dict):
+        names = [str(item.get("name", "")) for item in candidates]
+    else:
+        names = [str(item) for item in candidates]
+    return [name for name in names if name]
+
+
+def _build_candidate_payload_by_names(
+    all_names: list[str] | list[dict[str, int]],
+    candidate_names: list[str],
+) -> list[str] | list[dict[str, int]]:
+    if all_names and isinstance(all_names[0], dict):
+        names_set = set(candidate_names)
+        payload: list[dict[str, int]] = []
+        for item in all_names:
+            name = str(item.get("name", ""))
+            if name in names_set:
+                payload.append(item)
+        return payload
+    return candidate_names
+
+
+def _collect_final_disambiguation_candidates(
+    all_names: list[str] | list[dict[str, int]],
+    alias_map: dict[str, str],
+    state_snapshot: DisambigStateSnapshot | None = None,
+) -> list[str]:
+    """
+    Build unresolved candidates for final disambiguation.
+
+    Prefer state-based filtering:
+    - skip state=resolved
+    - keep state=review/unresolved/unknown
+    """
+    names = _extract_names_from_candidates(all_names)
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    if state_snapshot:
+        for name in names:
+            state = state_snapshot.get(name, {}).get("state")
+            if state == DISAMBIG_STATE_RESOLVED or name in seen:
+                continue
+            candidates.append(name)
+            seen.add(name)
+        return candidates
+
+    known_names = set(alias_map.keys()) | set(alias_map.values())
+    for name in names:
+        if name in known_names or name in seen:
+            continue
+        candidates.append(name)
+        seen.add(name)
+    return candidates
 
 
 def _run_incremental_disambiguation(
@@ -425,33 +618,45 @@ def _run_incremental_disambiguation(
     candidates = new_names
 
     context_sentences = build_context_sentences(conn, candidates, alias_keywords, run_id=run_id)
+    existing_names = list(set(alias_map.values())) if alias_map else []
 
     result = _retry_disambig(
         incremental_disambig_client,
         candidates,
         context_sentences,
-        alias_keywords,
+        existing_names,
         stage_name="incremental disambiguation",
         run_id=run_id,
     )
 
-    has_alias_update = bool(result.alias_map)
-    has_relation_update = bool(result.entity_relations)
-    if has_alias_update or has_relation_update:
-        if has_alias_update:
-            alias_map.update(result.alias_map)
-            logger.debug(f"alias_map updated in memory: {len(alias_map)} entries")
+    previous_alias_map = dict(alias_map)
+    state_snapshot = _load_disambig_states(conn, run_id)
+    alias_updates, merged_state_snapshot = _build_alias_and_state_updates(result, alias_map, state_snapshot)
+    if alias_updates:
+        alias_map.update(alias_updates)
 
-        _, pending_relations = _load_disambig_checkpoint(conn, run_id)
-        new_relations = _normalize_relations_with_alias_map(result.entity_relations, alias_map)
-        merged_relations = _merge_relations(pending_relations, new_relations)
-        if new_relations:
-            logger.debug(
-                "incremental disambig: cached {} relations, pending total {}",
-                len(new_relations),
-                len(merged_relations),
-            )
-        _save_disambig_checkpoint(conn, run_id, alias_map, merged_relations)
+    has_alias_update = alias_map != previous_alias_map
+    has_relation_update = bool(result.entity_relations)
+    if has_alias_update:
+        logger.debug(f"alias_map updated in memory: {len(alias_map)} entries")
+
+    _, pending_relations = _load_disambig_checkpoint(conn, run_id)
+    new_relations = _normalize_relations_with_alias_map(result.entity_relations, alias_map)
+    merged_relations = _merge_relations(pending_relations, new_relations)
+    if new_relations:
+        logger.debug(
+            "incremental disambig: cached {} relations, pending total {}",
+            len(new_relations),
+            len(merged_relations),
+        )
+    if has_alias_update or has_relation_update or merged_state_snapshot:
+        _save_disambig_checkpoint(
+            conn,
+            run_id,
+            alias_map,
+            merged_relations,
+            disambig_states=merged_state_snapshot,
+        )
 
     return alias_map
 
@@ -479,6 +684,7 @@ def _run_final_disambiguation(
     """
     # 检查是否有未保存的关系数据（系统意外停止后恢复）
     _, pending_relations = _load_disambig_checkpoint(conn, run_id)
+    state_snapshot = _ensure_state_snapshot_has_known_names(alias_map, _load_disambig_states(conn, run_id))
     if pending_relations:
         logger.info(f"found {len(pending_relations)} pending relations from checkpoint, will process them")
 
@@ -487,21 +693,29 @@ def _run_final_disambiguation(
     if not existing_names:
         return alias_map
 
-    candidates = fetch_all_character_names(conn, run_id)
+    all_names = fetch_all_character_names(conn, run_id)
+    candidates = _collect_final_disambiguation_candidates(all_names, alias_map, state_snapshot)
 
-    context_sentences = build_context_sentences(conn, candidates, alias_keywords, run_id=run_id)
+    if candidates:
+        candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
+        context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+        result = _retry_disambig(
+            full_disambig_client,
+            candidate_payload,
+            context_sentences,
+            existing_names,
+            stage_name="final disambiguation",
+            run_id=run_id,
+        )
+    else:
+        logger.info("final disambiguation skipped: no unresolved candidates")
+        result = ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[], alias_confidence={})
 
-    result = _retry_disambig(
-        full_disambig_client,
-        candidates,
-        context_sentences,
-        alias_keywords,
-        stage_name="final disambiguation",
-        run_id=run_id,
-    )
-
+    previous_alias_map = dict(alias_map)
     if result.alias_map:
-        alias_map.update(result.alias_map)
+        alias_updates, state_snapshot = _build_alias_and_state_updates(result, alias_map, state_snapshot)
+        alias_map.update(alias_updates)
+    if alias_map != previous_alias_map:
         logger.info(f"final disambiguation completed: {len(alias_map)} entries")
 
     # 1. 先创建实体
@@ -528,7 +742,13 @@ def _run_final_disambiguation(
             )
 
     # 保存 checkpoint，同时保存关系数据（用于系统意外停止后恢复）
-    _save_disambig_checkpoint(conn, run_id, alias_map, retryable_relations or None)
+    _save_disambig_checkpoint(
+        conn,
+        run_id,
+        alias_map,
+        retryable_relations or None,
+        disambig_states=state_snapshot,
+    )
 
     return alias_map
 

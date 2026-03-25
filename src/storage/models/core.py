@@ -78,6 +78,7 @@ class DisambigCheckpoint(Base):
     alias_map: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
     entity_relations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    disambig_states: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<DisambigCheckpoint(run_id={self.run_id}, updated_at={self.updated_at})>"

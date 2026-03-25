@@ -50,7 +50,11 @@ def fetch_alias_map(session: Session, run_id: str) -> Dict[str, str]:
     return {row[0]: row[1] for row in result.fetchall()}
 
 
-def fetch_all_character_names(session: Session, run_id: str) -> List[Dict[str, str | int]]:
+def fetch_all_character_names(
+    session: Session,
+    run_id: str,
+    max_chunk_id: int | None = None,
+) -> List[Dict[str, str | int]]:
     """
     获取指定运行的所有角色名及出现频次
 
@@ -60,16 +64,15 @@ def fetch_all_character_names(session: Session, run_id: str) -> List[Dict[str, s
     Returns:
         [{"name": "角色名", "count": 频次}, ...] 列表
     """
-    stmt1 = (
-        select(ChunkCharacter.name, func.count().label("count"))
-        .where(ChunkCharacter.run_id == run_id)
-        .group_by(ChunkCharacter.name)
+    stmt1 = select(ChunkCharacter.name, func.count().label("count")).where(ChunkCharacter.run_id == run_id)
+    stmt2 = select(CharacterAppearance.raw_name.label("name"), func.count().label("count")).where(
+        CharacterAppearance.run_id == run_id
     )
-    stmt2 = (
-        select(CharacterAppearance.raw_name.label("name"), func.count().label("count"))
-        .where(CharacterAppearance.run_id == run_id)
-        .group_by(CharacterAppearance.raw_name)
-    )
+    if max_chunk_id is not None:
+        stmt1 = stmt1.where(ChunkCharacter.chunk_id <= max_chunk_id)
+        stmt2 = stmt2.where(CharacterAppearance.chunk_id <= max_chunk_id)
+    stmt1 = stmt1.group_by(ChunkCharacter.name)
+    stmt2 = stmt2.group_by(CharacterAppearance.raw_name)
     result1 = session.execute(stmt1).fetchall()
     result2 = session.execute(stmt2).fetchall()
     name_counts: dict[str, int] = {}
