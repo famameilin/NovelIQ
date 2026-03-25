@@ -18,11 +18,13 @@
 
 ### emotional_valence
 判断本块文本的整体情感基调，以叙事者视角而非单一人物视角判断：
-- positive：整体氛围积极，以胜利/团圆/成长/希望为主导
-- negative：整体氛围压抑，以失败/离别/受苦/绝望为主导
-- neutral：情感混杂或以叙述/说明为主，无明显倾向
+- strong_positive：强烈积极，以重大胜利/团圆/突破为主导
+- mild_positive：轻度积极，以小胜利/希望/成长为主导
+- neutral：中性，以叙述/说明为主，或正负情感混杂平衡
+- mild_negative：轻度消极，以小挫折/担忧/紧张为主导
+- strong_negative：强烈消极，以重大失败/离别/绝望为主导
 
-注意：不要被单个词语误导，「她笑着走向死亡」整体是 negative。
+注意：不要被单个词语误导，「她笑着走向死亡」整体是 strong_negative。
 
 ### event_type
 判断本块在叙事结构中的功能：
@@ -147,7 +149,7 @@ clue_type 为 none 时不输出该条记录。
 
 ---EXAMPLE_1_ASSISTANT---
 {
-  "emotional_valence": "negative",
+  "emotional_valence": "mild_negative",
   "event_type": "冲突",
   "pivot_moment": false,
   "cliffhanger": false,
@@ -167,7 +169,7 @@ clue_type 为 none 时不输出该条记录。
 
 【输出格式】
 {
-  "emotional_valence": "positive|negative|neutral",
+  "emotional_valence": "strong_positive|mild_positive|neutral|mild_negative|strong_negative",
   "event_type": "冲突|铺垫|转折",
   "pivot_moment": true|false,
   "cliffhanger": true|false,
