@@ -1,20 +1,21 @@
 """
-Aggregate Metrics 指标计算模块
+Aggregate Metrics 鎸囨爣璁＄畻妯″潡
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-说明: 提取所有指标计算函数
+鍒涘缓鏃堕棿: 2026-03-18
+鍒涘缓鑰? TraeAI
+浠诲姟: code-quality-refactor - Task 11 鎷嗗垎aggregate_metrics.py
+璇存槑: 鎻愬彇鎵€鏈夋寚鏍囪绠楀嚱鏁?
 
-修改历史:
-- 2026-03-13: 创建指标计算函数 (refactor-metrics-layer-functions)
-- 2026-03-13: 使用 tension_composite 计算三幕比例 (chunk-annotation-schema-refactor)
-- 2026-03-18: 提取为独立模块函数 (code-quality-refactor Task 11)
+淇敼鍘嗗彶:
+- 2026-03-13: 鍒涘缓鎸囨爣璁＄畻鍑芥暟 (refactor-metrics-layer-functions)
+- 2026-03-13: 浣跨敤 tension_composite 璁＄畻涓夊箷姣斾緥 (chunk-annotation-schema-refactor)
+- 2026-03-18: 鎻愬彇涓虹嫭绔嬫ā鍧楀嚱鏁?(code-quality-refactor Task 11)
 """
 
 from __future__ import annotations
 
 import statistics
+from collections import Counter
 from typing import Any, Dict
 
 from ..narrative_metrics import (
@@ -64,12 +65,38 @@ from .types import (
     TextData,
 )
 
+_TONE_LEGACY_MAPPING = {
+    "positive": "mild_positive",
+    "negative": "mild_negative",
+}
+
+
+def _normalize_tone_label(label: str) -> str:
+    normalized = label.strip().lower()
+    return _TONE_LEGACY_MAPPING.get(normalized, normalized)
+
+
+def _compute_tone_distribution(emotional_valences: list[str] | None) -> Dict[str, float]:
+    if not emotional_valences:
+        return {}
+
+    normalized_labels = [_normalize_tone_label(value) for value in emotional_valences if value]
+    if not normalized_labels:
+        return {}
+
+    counts = Counter(normalized_labels)
+    total = sum(counts.values())
+    if total == 0:
+        return {}
+
+    return {label: count / total for label, count in counts.items()}
+
 
 def compute_narrative_structure_metrics(
     annotation_data: AnnotationData,
     tension_data: TensionData,
 ) -> Dict[str, Any]:
-    """计算叙事结构聚合指标"""
+    """璁＄畻鍙欎簨缁撴瀯鑱氬悎鎸囨爣"""
     return {
         **compute_three_act_ratio_by_tension(tension_data.tension_composite_scores),
         "climax_spacing": compute_climax_spacing(annotation_data.chunk_ids, tension_data.tension_composite_scores),
@@ -86,7 +113,7 @@ def compute_emotion_curve_metrics(
     annotation_data: AnnotationData,
     char_data: CharacterData,
 ) -> Dict[str, Any]:
-    """计算情感曲线聚合指标"""
+    """璁＄畻鎯呮劅鏇茬嚎鑱氬悎鎸囨爣"""
     return {
         "emotion_recovery_speed": compute_emotion_recovery_speed(emotion_data.emotion_values),
         "pivot_moment_density": compute_pivot_moment_density(annotation_data.pivot_moments),
@@ -102,7 +129,7 @@ def compute_character_relation_metrics(
     char_data: CharacterData,
     total_chunks: int,
 ) -> Dict[str, Any]:
-    """计算人物关系聚合指标"""
+    """璁＄畻浜虹墿鍏崇郴鑱氬悎鎸囨爣"""
     result: Dict[str, Any] = {
         "network_density": compute_relation_network_density(relation_data.relations),
         "antagonist_strength_gap": compute_antagonist_strength_gap(char_data.characters),
@@ -131,9 +158,13 @@ def compute_character_relation_metrics(
     return result
 
 
-def compute_language_style_metrics(text_data: TextData) -> Dict[str, Any]:
-    """计算语言风格聚合指标"""
+def compute_language_style_metrics(
+    text_data: TextData,
+    emotional_valences: list[str] | None = None,
+) -> Dict[str, Any]:
+    """璁＄畻璇█椋庢牸鑱氬悎鎸囨爣"""
     return {
+        "tone_distribution": _compute_tone_distribution(emotional_valences),
         "vocab_breadth": compute_vocab_breadth(text_data.all_tokens),
         "avg_word_len": compute_avg_word_len(text_data.texts),
         "sent_len_std": compute_sent_len_std(text_data.texts),
@@ -146,7 +177,7 @@ def compute_traditional_culture_metrics(
     culture_data: CultureData,
     texts: list[str],
 ) -> Dict[str, float | None]:
-    """计算传统文化聚合指标"""
+    """璁＄畻浼犵粺鏂囧寲鑱氬悎鎸囨爣"""
     return {
         "idiom_density": compute_idiom_density(texts),
         "classical_sentence_ratio": compute_classical_sentence_ratio(texts),
