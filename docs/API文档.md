@@ -773,17 +773,14 @@ GET /api/novels/10960c77/metrics/emotion-stats?task_id=a1b2c3d4
   "neutral_ratio": 0.38,
   "recovery_speed": 3.5,
   "pivot_moment_density": 0.38,
-  "emotion_curve_type": "白手起家"
+  "lexical_emotion_trend": "rising"
 }
-```
 
-**emotion_curve_type 可选值**（规范六种原型）:
-- `白手起家`: 情感从低谷逐渐上升
-- `伊卡洛斯`: 情感先升后降
-- `落坑爬出`: 情感先降后升
-- `持续下降`: 情感持续走低
-- `灰姑娘`: 情感先降后升再降
-- `俄狄浦斯`: 情感先升后降再升
+**lexical_emotion_trend 可选值**（词表情感趋势）:
+- `rising`: 情感上升（后段平均值 - 前段平均值 > 0.002）
+- `falling`: 情感下降（后段平均值 - 前段平均值 < -0.002）
+- `stable`: 情感稳定（|后段 - 前段| <= 0.002 且标准差 < 0.003）
+- `volatile`: 情感波动（标准差 >= 0.003）
 
 ---
 
