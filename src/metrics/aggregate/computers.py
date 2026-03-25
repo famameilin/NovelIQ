@@ -32,9 +32,9 @@ from ..narrative_metrics import (
 )
 from ..emotion_metrics_extra import (
     compute_arc_delta,
-    compute_emotion_curve_type,
     compute_emotion_polarity_distribution,
     compute_emotion_recovery_speed,
+    compute_lexical_emotion_trend,
     compute_pivot_moment_density,
     compute_pos_neg_ratio,
 )
@@ -116,14 +116,21 @@ def compute_emotion_curve_metrics(
     annotation_data: AnnotationData,
     char_data: CharacterData,
 ) -> Dict[str, Any]:
-    """计算情感曲线聚合指标"""
+    """
+    计算情感曲线聚合指标
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: improve-emotion-curve-accuracy
+    修改内容: 使用 compute_lexical_emotion_trend 替代 compute_emotion_curve_type
+    """
     return {
         "emotion_recovery_speed": compute_emotion_recovery_speed(emotion_data.emotion_values),
         "pivot_moment_density": compute_pivot_moment_density(annotation_data.pivot_moments),
         **compute_emotion_polarity_distribution(annotation_data.emotional_valences),
         "pos_neg_ratio": compute_pos_neg_ratio(emotion_data.pos_densities, emotion_data.neg_densities),
         "arc_delta": compute_arc_delta(char_data.char_emotion_scores),
-        "emotion_curve_type": compute_emotion_curve_type(emotion_data.emotion_values),
+        "lexical_emotion_trend": compute_lexical_emotion_trend(emotion_data.emotion_values),
     }
 
 
