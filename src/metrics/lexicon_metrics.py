@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Dict, Iterable, Sequence
+
 
 def term_counts(text: str, terms: Iterable[str]) -> Dict[str, int]:
     counts: Dict[str, int] = {}
@@ -28,9 +29,6 @@ def count_token_hits(tokens: Sequence[str], terms: Iterable[str]) -> int:
         return 0
     return sum(1 for token in tokens if token in term_set)
 
-def _token_counts(tokens: Sequence[str]) -> Counter[str]:
-    return Counter(token for token in tokens if token)
-
 def _is_phrase_term(term: str) -> bool:
     cleaned = term.strip()
     if not cleaned:
@@ -39,7 +37,7 @@ def _is_phrase_term(term: str) -> bool:
         return True
     return len(cleaned) >= 2
 
-def _phrase_span_counts(text: str, terms: Iterable[str]) -> Dict[str, int]:
+def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequence[str]) -> Dict[str, int]:
     counts: Dict[str, int] = defaultdict(int)
     if not text:
         return counts
@@ -48,43 +46,51 @@ def _phrase_span_counts(text: str, terms: Iterable[str]) -> Dict[str, int]:
         {term.strip() for term in terms if term and _is_phrase_term(term.strip())},
         key=lambda term: (-len(term), term),
     )
-    if not phrase_terms:
-        return counts
+    token_terms = {term.strip() for term in terms if term and term.strip()}
 
-    index = 0
-    text_len = len(text)
-    while index < text_len:
-        matched_term = next((term for term in phrase_terms if text.startswith(term, index)), None)
-        if matched_term is None:
-            index += 1
+    candidates: list[tuple[int, int, str]] = []
+
+    for term in phrase_terms:
+        start = 0
+        while True:
+            idx = text.find(term, start)
+            if idx < 0:
+                break
+            candidates.append((idx, idx + len(term), term))
+            start = idx + 1
+
+    cursor = 0
+    for token in tokens:
+        cleaned = token.strip() if token else ""
+        if not cleaned or cleaned not in token_terms:
             continue
 
-        counts[matched_term] += 1
-        index += len(matched_term)
+        start = text.find(cleaned, cursor)
+        if start < 0:
+            start = text.find(cleaned)
+            if start < 0:
+                continue
+        end = start + len(cleaned)
+        candidates.append((start, end, cleaned))
+        cursor = end
+
+    candidates.sort(key=lambda item: (-(item[1] - item[0]), item[0], item[2]))
+
+    occupied: list[tuple[int, int]] = []
+    for start, end, term in candidates:
+        if any(not (end <= occ_start or start >= occ_end) for occ_start, occ_end in occupied):
+            continue
+        occupied.append((start, end))
+        counts[term] += 1
 
     return counts
 
 def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) -> Dict[str, int]:
-    counts: Dict[str, int] = {}
     if not terms:
-        return counts
+        return {}
 
     text_value = text or ""
-    token_counter = _token_counts(tokens)
-    phrase_counts = _phrase_span_counts(text_value, terms)
-
-    for term in terms:
-        cleaned = term.strip() if term else ""
-        if not cleaned:
-            continue
-
-        token_hit = token_counter.get(cleaned, 0)
-        phrase_hit = phrase_counts.get(cleaned, 0)
-        mixed_hit = max(token_hit, phrase_hit)
-        if mixed_hit > 0:
-            counts[cleaned] = mixed_hit
-
-    return counts
+    return dict(_count_non_overlapping_spans(text_value, terms, tokens))
 
 def count_mixed_hits(text: str, tokens: Sequence[str], terms: Iterable[str]) -> int:
     return sum(term_mixed_counts(text, tokens, terms).values())

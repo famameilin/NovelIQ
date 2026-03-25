@@ -33,3 +33,12 @@ def test_mixed_hits_counts_each_non_overlapping_span_once() -> None:
     hits = count_mixed_hits(text, tokens, ["渡劫", "渡劫飞升"])
 
     assert hits == 2
+
+
+def test_mixed_hits_deduplicates_phrase_and_component_token_matches() -> None:
+    text = "渡劫飞升"
+    tokens = ["渡劫", "飞升"]
+
+    hits = count_mixed_hits(text, tokens, ["渡劫", "飞升", "渡劫飞升"])
+
+    assert hits == 1
