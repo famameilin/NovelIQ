@@ -22,6 +22,7 @@ from .types import (
     AnnotationData,
     CharacterData,
     CultureData,
+    DialogueData,
     EmotionData,
     RelationData,
     TextData,
@@ -161,3 +162,20 @@ def fetch_tension_data(
     rows = stats_repo.fetch_rhythm_curve(run_id)
     tension_composite_scores = [row[0] for row in rows if row[0] is not None]
     return TensionData(tension_composite_scores=tension_composite_scores)
+
+
+def fetch_dialogue_data(
+    annotation_repo: "AnnotationRepository",
+    run_id: str,
+) -> DialogueData:
+    """
+    提取 chunk_dialogues 表的 tone 数据
+
+    创建时间: 2026-03-25
+    创建者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    说明: 从对话表获取语气类型数据用于聚合计算
+    """
+    rows = annotation_repo.fetch_chunk_dialogues_full(run_id)
+    tones = [row[3] for row in rows if len(row) > 3 and row[3] is not None]
+    return DialogueData(tones=tones)

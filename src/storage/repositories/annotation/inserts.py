@@ -105,6 +105,11 @@ def insert_chunk_dialogues(
     修改者: TraeAI
     任务: fix-insert_chunk_dialogues-speakers-param
     修改内容: speakers 参数已移除， dialogue.speaker 字段已包含正确的说话者
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    修改内容: 从 dialogue.tone 字段获取语气类型并保存到数据库
     """
     records: List[ChunkDialogue] = []
     for idx, dialogue in enumerate(dialogues):
@@ -114,6 +119,7 @@ def insert_chunk_dialogues(
                 chunk_id=chunk_id,
                 speaker=dialogue.speaker,
                 length=length,
+                tone=dialogue.tone,
                 run_id=run_id,
             )
         )

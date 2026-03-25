@@ -9,6 +9,7 @@ from src.metrics.aggregate import (
     AnnotationData,
     CharacterData,
     CultureData,
+    DialogueData,
     EmotionData,
     RelationData,
     TensionData,
@@ -21,6 +22,7 @@ from src.metrics.aggregate import (
     fetch_annotation_data,
     fetch_character_data,
     fetch_culture_data,
+    fetch_dialogue_data,
     fetch_emotion_data,
     fetch_relation_data,
     fetch_tension_data,
@@ -74,6 +76,7 @@ __all__ = [
     "AnnotationData",
     "CharacterData",
     "CultureData",
+    "DialogueData",
     "EmotionData",
     "RelationData",
     "TensionData",
@@ -85,6 +88,7 @@ __all__ = [
     "fetch_text_data",
     "fetch_culture_data",
     "fetch_tension_data",
+    "fetch_dialogue_data",
     "compute_narrative_structure_metrics",
     "compute_emotion_curve_metrics",
     "compute_character_relation_metrics",
@@ -113,7 +117,14 @@ def aggregate_all_metrics(
     chunk_repo,
     stats_repo,
 ) -> AggregateResult:
-    """Aggregate all metric groups into a single result object."""
+    """
+    Aggregate all metric groups into a single result object.
+
+    修改时间: 2026-03-25
+    修改者: TraeAI
+    任务: fix-tone-distribution-semantic-error
+    修改内容: 使用 fetch_dialogue_data 获取对话语气数据，替代 emotional_valences
+    """
     result = AggregateResult()
 
     annotation_data = fetch_annotation_data(annotation_repo, run_id)
@@ -123,13 +134,14 @@ def aggregate_all_metrics(
     text_data = fetch_text_data(chunk_repo, run_id)
     culture_data = fetch_culture_data(stats_repo, run_id)
     tension_data = fetch_tension_data(stats_repo, run_id)
+    dialogue_data = fetch_dialogue_data(annotation_repo, run_id)
 
     total_chunks = chunk_repo.count_chunks(run_id) or 1
 
     result.narrative_structure = compute_narrative_structure_metrics(annotation_data, tension_data)
     result.emotion_curve = compute_emotion_curve_metrics(emotion_data, annotation_data, char_data)
     result.character_relations = compute_character_relation_metrics(relation_data, char_data, total_chunks)
-    result.language_style = compute_language_style_metrics(text_data, annotation_data.emotional_valences)
+    result.language_style = compute_language_style_metrics(text_data, dialogue_data.tones)
     result.traditional_culture = compute_traditional_culture_metrics(culture_data, text_data.texts)
 
     return result
