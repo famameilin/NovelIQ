@@ -96,8 +96,11 @@ def build_context_sentences(
     candidates: list[str] | list[dict],
     alias_keywords: list[str] | None = None,
     prev_chunks: int = ANNOTATION_CONFIG.prev_chunks,
+    run_id: str | None = None,
 ) -> dict[str, str]:
     """为候选名构建上下文句子"""
+    if not run_id:
+        raise ValueError("run_id is required for build_context_sentences")
     if alias_keywords is None:
         alias_keywords = ["某", "名", "号", "就是", "称号", "全名"]
 
@@ -106,15 +109,19 @@ def build_context_sentences(
     else:
         name_list = list(candidates)  # type: ignore[arg-type]
 
-    result = _build_sentence_pool(conn, name_list, alias_keywords)
-    _add_prev_summaries(conn, result, name_list, prev_chunks)
-    _add_identity_clues(conn, result, name_list)
+    result = _build_sentence_pool(conn, name_list, alias_keywords, run_id)
+    _add_prev_summaries(conn, result, name_list, prev_chunks, run_id)
+    _add_identity_clues(conn, result, name_list, run_id)
 
     return result
 
 
 def extract_new_names_from_db(
-    conn, alias_map: dict, last_n_chunks: int = ANNOTATION_CONFIG.last_n_chunks, current_chunk_id: int | None = None
+    conn,
+    alias_map: dict,
+    run_id: str,
+    last_n_chunks: int = ANNOTATION_CONFIG.last_n_chunks,
+    current_chunk_id: int | None = None,
 ) -> list[dict]:
     """
     从数据库提取新名字
@@ -129,7 +136,10 @@ def extract_new_names_from_db(
 
     # 如果没有提供 current_chunk_id，使用数据库中的最大 chunk_id（向后兼容）
     if current_chunk_id is None:
-        max_chunk_result = conn.execute(text("SELECT MAX(chunk_id) FROM chunk_characters"))
+        max_chunk_result = conn.execute(
+            text("SELECT MAX(chunk_id) FROM chunk_characters WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        )
         current_chunk_id = max_chunk_result.scalar() or 0
 
     # 查询当前 chunk 之前最近 N 个 chunk 的名字
@@ -140,11 +150,13 @@ def extract_new_names_from_db(
         text("""
             SELECT name, COUNT(*) as count
             FROM chunk_characters
-            WHERE chunk_id > :min_chunk_id AND chunk_id <= :current_chunk_id
+            WHERE chunk_id > :min_chunk_id
+              AND chunk_id <= :current_chunk_id
+              AND run_id = :run_id
             GROUP BY name
             ORDER BY count DESC
         """),
-        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id},
+        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id, "run_id": run_id},
     ).fetchall()
 
     # 从 character_appearances 提取 raw_name（包含外号、别名等）
@@ -152,11 +164,13 @@ def extract_new_names_from_db(
         text("""
             SELECT raw_name, COUNT(*) as count
             FROM character_appearances
-            WHERE chunk_id > :min_chunk_id AND chunk_id <= :current_chunk_id
+            WHERE chunk_id > :min_chunk_id
+              AND chunk_id <= :current_chunk_id
+              AND run_id = :run_id
             GROUP BY raw_name
             ORDER BY count DESC
         """),
-        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id},
+        {"min_chunk_id": min_chunk_id, "current_chunk_id": current_chunk_id, "run_id": run_id},
     ).fetchall()
 
     # 合并两个来源的名字，累加频次
@@ -274,6 +288,7 @@ def _build_sentence_pool(
     conn,
     name_list: list[str],
     alias_keywords: list[str],
+    run_id: str,
 ) -> dict[str, str]:
     """构建句子池"""
     from src.metrics.text_utils import split_sentences
@@ -288,7 +303,10 @@ def _build_sentence_pool(
     result = {}
     sentences_pool: dict[str, list[str]] = {name: [] for name in name_list}
 
-    rows = conn.execute(text("SELECT text FROM chunks ORDER BY chunk_id")).fetchall()
+    rows = conn.execute(
+        text("SELECT text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"),
+        {"run_id": run_id},
+    ).fetchall()
     for (text_content,) in rows:
         for sentence in split_sentences(text_content):
             matched: dict[str, bool] = {}
@@ -320,6 +338,7 @@ def _add_prev_summaries(
     result: dict[str, str],
     name_list: list[str],
     prev_chunks: int,
+    run_id: str,
 ) -> None:
     """添加前文摘要"""
     for name in name_list:
@@ -328,9 +347,10 @@ def _add_prev_summaries(
                 SELECT DISTINCT cc.chunk_id 
                 FROM chunk_characters cc 
                 WHERE cc.name = :name
+                  AND cc.run_id = :run_id
                 ORDER BY cc.chunk_id DESC LIMIT 1
             """),
-            {"name": name},
+            {"name": name, "run_id": run_id},
         ).fetchall()
 
         if chunk_rows:
@@ -341,8 +361,9 @@ def _add_prev_summaries(
                     text("""
                         SELECT summary FROM chunk_summaries 
                         WHERE chunk_id = :chunk_id
+                          AND run_id = :run_id
                     """),
-                    {"chunk_id": chunk_id - i},
+                    {"chunk_id": chunk_id - i, "run_id": run_id},
                 ).fetchone()
                 if row and row[0]:
                     summaries.append(row[0])
@@ -355,6 +376,7 @@ def _add_identity_clues(
     conn,
     result: dict[str, str],
     name_list: list[str],
+    run_id: str,
 ) -> None:
     """添加身份线索"""
     if not name_list:
@@ -365,8 +387,9 @@ def _add_identity_clues(
             SELECT raw_name, identity_clue, clue_type 
             FROM character_appearances 
             WHERE raw_name = ANY(:names)
+              AND run_id = :run_id
         """),
-        {"names": name_list},
+        {"names": name_list, "run_id": run_id},
     ).fetchall()
 
     clue_type_labels = {
