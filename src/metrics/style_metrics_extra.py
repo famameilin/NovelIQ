@@ -22,6 +22,9 @@ from typing import Dict, List, Set
 
 import jieba
 
+from .lexicon_metrics import count_mixed_hits
+from .text_utils import tokenize_words
+
 
 CLASSICAL_PATTERNS = [
     r"之[^\s]{0,3}[者也乎哉]",
@@ -329,7 +332,8 @@ def _load_semantic_categories() -> Dict[str, List[str]]:
     if not lexicon_path.exists():
         return {key: [] for key in SEMANTIC_CATEGORY_KEYS}
 
-    return parse_semantic_category_lexicon(str(lexicon_path))
+    parsed_categories = parse_semantic_category_lexicon(str(lexicon_path))
+    return {key: parsed_categories.get(key, []) for key in SEMANTIC_CATEGORY_KEYS}
 
 
 def compute_category_density(
@@ -348,23 +352,30 @@ def compute_category_density(
     if not texts:
         return {category: 0.0 for category in category_terms.keys()}
 
-    total_chars = sum(len(text) for text in texts)
-    if total_chars == 0:
+    total_tokens = 0
+    category_hits = {category: 0 for category in category_terms.keys()}
+
+    for text in texts:
+        if not text:
+            continue
+
+        tokens = tokenize_words(text)
+        total_tokens += len(tokens)
+
+        if not tokens:
+            continue
+
+        for category, terms in category_terms.items():
+            if not terms:
+                continue
+            category_hits[category] += count_mixed_hits(text, tokens, terms)
+
+    if total_tokens == 0:
         return {category: 0.0 for category in category_terms.keys()}
 
-    all_chars = []
-    for text in texts:
-        all_chars.extend([c for c in text])
-
-    char_counts = Counter(all_chars)
-
     result = {}
-    for category, terms in category_terms.items():
-        if not terms:
-            result[category] = 0.0
-            continue
-        category_count = sum(char_counts.get(c, 0) for c in terms)
-        result[category] = category_count / total_chars
+    for category, hit_count in category_hits.items():
+        result[category] = min(hit_count / total_tokens, 1.0)
 
     return result
 
