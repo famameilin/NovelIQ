@@ -13,12 +13,10 @@ from src.workflows.diagnose import (
     build_cloud_payload,
     run_cloud_diagnose,
     run_diagnose,
-    run_local_diagnose,
 )
 
 __all__ = [
     "build_cloud_payload",
     "run_cloud_diagnose",
     "run_diagnose",
-    "run_local_diagnose",
 ]
