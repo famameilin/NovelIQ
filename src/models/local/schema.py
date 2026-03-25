@@ -4,12 +4,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-EmotionalValenceV1 = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
-EmotionalValenceV2 = Literal["positive", "negative", "neutral"]
 EmotionalValence = Literal[
-    "strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative", "positive", "negative"
+    "strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"
 ]
-EmotionScore = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
+EmotionScore = EmotionalValence
 EventType = Literal["冲突", "铺垫", "转折"]
 ForeshadowingType = Literal["causal", "thematic"]
 ForeshadowingConfidence = Literal["high", "medium", "low"]
