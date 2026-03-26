@@ -15,13 +15,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.storage.repositories import EntityRepository
 
 
-EMOTION_SCORE_MAPPING: Dict[str, int] = {
+EMOTION_SCORE_MAPPING: dict[str, int] = {
     "strong_positive": 2,
     "mild_positive": 1,
     "neutral": 0,
@@ -42,11 +42,11 @@ def _convert_emotion_score(score: Any) -> int:
 
 
 def update_entity_registry(
-    entity_repo: "EntityRepository",
+    entity_repo: EntityRepository,
     run_id: str,
     chunk_id: int,
-    characters: List[Any],
-    alias_map: Optional[Dict[str, str]] = None,
+    characters: list[Any],
+    alias_map: dict[str, str] | None = None,
 ) -> None:
     """更新实体注册表"""
     alias_map = alias_map or {}
@@ -75,7 +75,7 @@ def update_entity_registry(
         )
 
 
-def format_entities_for_prompt(entities: List[Dict[str, Any]]) -> str:
+def format_entities_for_prompt(entities: list[dict[str, Any]]) -> str:
     """将实体列表格式化为提示词字符串"""
     if not entities:
         return ""
@@ -110,11 +110,11 @@ def format_entities_for_prompt(entities: List[Dict[str, Any]]) -> str:
 
 
 def get_active_entities(
-    entity_repo: "EntityRepository",
+    entity_repo: EntityRepository,
     run_id: str,
     current_chunk_id: int,
     lookback: int = 10,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """获取活跃实体列表（按名称去重，保留最新）"""
     rows = entity_repo.fetch_active_entities(current_chunk_id, lookback, run_id)
 

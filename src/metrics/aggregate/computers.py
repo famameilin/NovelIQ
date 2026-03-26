@@ -18,24 +18,10 @@ Aggregate Metrics 指标计算模块
 """
 
 from __future__ import annotations
-from collections import Counter
-from typing import Any, Dict
 
-from ..narrative_metrics import (
-    compute_cliffhanger_rate,
-    compute_climax_spacing,
-    compute_event_density,
-    compute_middle_collapse_index,
-    compute_three_act_ratio_by_tension,
-)
-from ..emotion_metrics_extra import (
-    compute_arc_delta,
-    compute_emotion_polarity_distribution,
-    compute_emotion_recovery_speed,
-    compute_lexical_emotion_trend,
-    compute_pivot_moment_density,
-    compute_pos_neg_ratio,
-)
+from collections import Counter
+from typing import Any
+
 from ..character_metrics import (
     compute_antagonist_strength_gap,
     compute_average_clustering,
@@ -47,6 +33,21 @@ from ..character_metrics import (
     compute_protagonist_betweenness,
     compute_relation_change_frequency,
     compute_relation_network_density,
+)
+from ..emotion_metrics_extra import (
+    compute_arc_delta,
+    compute_emotion_polarity_distribution,
+    compute_emotion_recovery_speed,
+    compute_lexical_emotion_trend,
+    compute_pivot_moment_density,
+    compute_pos_neg_ratio,
+)
+from ..narrative_metrics import (
+    compute_cliffhanger_rate,
+    compute_climax_spacing,
+    compute_event_density,
+    compute_middle_collapse_index,
+    compute_three_act_ratio_by_tension,
 )
 from ..style_metrics_extra import (
     compute_avg_word_len,
@@ -69,7 +70,7 @@ from .types import (
 )
 
 
-def _compute_tone_distribution(dialogue_tones: list[str] | None) -> Dict[str, float]:
+def _compute_tone_distribution(dialogue_tones: list[str] | None) -> dict[str, float]:
     """
     计算对话语气分布
 
@@ -96,7 +97,7 @@ def _compute_tone_distribution(dialogue_tones: list[str] | None) -> Dict[str, fl
 def compute_narrative_structure_metrics(
     annotation_data: AnnotationData,
     tension_data: TensionData,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """计算叙事结构聚合指标"""
     return {
         **compute_three_act_ratio_by_tension(tension_data.tension_composite_scores),
@@ -113,7 +114,7 @@ def compute_emotion_curve_metrics(
     emotion_data: EmotionData,
     annotation_data: AnnotationData,
     char_data: CharacterData,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     计算情感曲线聚合指标
 
@@ -136,9 +137,9 @@ def compute_character_relation_metrics(
     relation_data: RelationData,
     char_data: CharacterData,
     total_chunks: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """计算人物关系聚合指标"""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "network_density": compute_relation_network_density(relation_data.relations),
         "antagonist_strength_gap": compute_antagonist_strength_gap(char_data.characters),
         "average_clustering": compute_average_clustering(relation_data.relations),
@@ -169,7 +170,7 @@ def compute_character_relation_metrics(
 def compute_language_style_metrics(
     text_data: TextData,
     dialogue_tones: list[str] | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     计算语言风格聚合指标
 
@@ -191,7 +192,7 @@ def compute_language_style_metrics(
 def compute_traditional_culture_metrics(
     culture_data: CultureData,
     texts: list[str],
-) -> Dict[str, float | None]:
+) -> dict[str, float | None]:
     """
     计算传统文化聚合指标
 

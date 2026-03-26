@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -18,7 +18,7 @@ class EntityRepositoryProtocol(Protocol):
     管理角色、关系等实体的存储和检索。
     """
 
-    def get_characters(self, novel_id: str) -> List[Dict[str, Any]]:
+    def get_characters(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取所有角色
 
@@ -30,7 +30,7 @@ class EntityRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_relations(self, novel_id: str) -> List[Dict[str, Any]]:
+    def get_relations(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取所有关系
 
@@ -42,7 +42,7 @@ class EntityRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_character_by_name(self, novel_id: str, name: str) -> Dict[str, Any] | None:
+    def get_character_by_name(self, novel_id: str, name: str) -> dict[str, Any] | None:
         """
         按名称获取角色
 
@@ -55,7 +55,7 @@ class EntityRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_characters(self, novel_id: str, characters: List[Dict[str, Any]]) -> None:
+    def insert_characters(self, novel_id: str, characters: list[dict[str, Any]]) -> None:
         """
         批量插入角色
 
@@ -65,7 +65,7 @@ class EntityRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_relations(self, novel_id: str, relations: List[Dict[str, Any]]) -> None:
+    def insert_relations(self, novel_id: str, relations: list[dict[str, Any]]) -> None:
         """
         批量插入关系
 

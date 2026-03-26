@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from src.storage.models import ChunkTopic
 
 
 def insert_chunk_topics(
-    session: Session, run_id: str, rows: Iterable[Tuple[int, int, float]]
+    session: Session, run_id: str, rows: Iterable[tuple[int, int, float]]
 ) -> None:
     """
     插入分块主题数据
@@ -44,7 +44,7 @@ def clear_chunk_topics(session: Session, run_id: str) -> None:
     session.execute(delete(ChunkTopic).where(ChunkTopic.run_id == run_id))
 
 
-def fetch_chunk_topics_agg(session: Session, run_id: str) -> List[Tuple[int, float]]:
+def fetch_chunk_topics_agg(session: Session, run_id: str) -> list[tuple[int, float]]:
     """
     获取聚合后的分块主题数据（每个分块的平均主题权重）
 

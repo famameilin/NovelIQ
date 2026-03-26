@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Dict, List, Tuple
 
 import networkx as nx
 
 from src.config import settings
-
 
 PROPP_FUNCTIONS = {
     "主体",
@@ -28,7 +26,7 @@ GREIMAS_FUNCTIONS = {
 }
 
 
-def _build_character_graph(relations: List[Tuple[str, str]]) -> nx.Graph:
+def _build_character_graph(relations: list[tuple[str, str]]) -> nx.Graph:
     G = nx.Graph()
     for from_char, to_char in relations:
         if from_char != to_char:
@@ -37,8 +35,8 @@ def _build_character_graph(relations: List[Tuple[str, str]]) -> nx.Graph:
 
 
 def compute_character_degree_centrality(
-    relations: List[Tuple[str, str]],
-) -> Dict[str, float]:
+    relations: list[tuple[str, str]],
+) -> dict[str, float]:
     if not relations:
         return {}
 
@@ -48,7 +46,7 @@ def compute_character_degree_centrality(
 
 
 def compute_relation_network_density(
-    relations: List[Tuple[str, str]],
+    relations: list[tuple[str, str]],
 ) -> float:
     if not relations:
         return 0.0
@@ -62,7 +60,7 @@ def compute_relation_network_density(
 
 
 def compute_protagonist_betweenness(
-    relations: List[Tuple[str, str]],
+    relations: list[tuple[str, str]],
     protagonist_name: str,
 ) -> float:
     if not relations or not protagonist_name:
@@ -81,8 +79,8 @@ def compute_protagonist_betweenness(
 
 
 def compute_character_closeness_centrality(
-    relations: List[Tuple[str, str]],
-) -> Dict[str, float]:
+    relations: list[tuple[str, str]],
+) -> dict[str, float]:
     if not relations:
         return {}
 
@@ -92,9 +90,9 @@ def compute_character_closeness_centrality(
 
 
 def compute_character_eigenvector_centrality(
-    relations: List[Tuple[str, str]],
+    relations: list[tuple[str, str]],
     max_iter: int | None = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     if max_iter is None:
         max_iter = settings.metrics.character_max_iter
     if not relations:
@@ -103,18 +101,18 @@ def compute_character_eigenvector_centrality(
     G = _build_character_graph(relations)
 
     if G.number_of_nodes() < 2:
-        return {node: 0.0 for node in G.nodes()}
+        return dict.fromkeys(G.nodes(), 0.0)
 
     try:
         centrality = nx.eigenvector_centrality(G, max_iter=max_iter)
         return dict(centrality)
     except nx.NetworkXException:
-        return {node: 0.0 for node in G.nodes()}
+        return dict.fromkeys(G.nodes(), 0.0)
 
 
 def compute_clustering_coefficient(
-    relations: List[Tuple[str, str]],
-) -> Dict[str, float]:
+    relations: list[tuple[str, str]],
+) -> dict[str, float]:
     if not relations:
         return {}
 
@@ -124,7 +122,7 @@ def compute_clustering_coefficient(
 
 
 def compute_average_clustering(
-    relations: List[Tuple[str, str]],
+    relations: list[tuple[str, str]],
 ) -> float:
     if not relations:
         return 0.0
@@ -138,7 +136,7 @@ def compute_average_clustering(
 
 
 def compute_number_of_connected_components(
-    relations: List[Tuple[str, str]],
+    relations: list[tuple[str, str]],
 ) -> int:
     if not relations:
         return 0
@@ -148,7 +146,7 @@ def compute_number_of_connected_components(
 
 
 def compute_largest_component_size(
-    relations: List[Tuple[str, str]],
+    relations: list[tuple[str, str]],
 ) -> int:
     if not relations:
         return 0
@@ -163,10 +161,10 @@ def compute_largest_component_size(
 
 
 def compute_character_function_coverage(
-    role_functions: List[str],
-) -> Dict[str, float]:
+    role_functions: list[str],
+) -> dict[str, float]:
     if not role_functions:
-        return {func: 0.0 for func in PROPP_FUNCTIONS}
+        return dict.fromkeys(PROPP_FUNCTIONS, 0.0)
 
     counts = Counter(role_functions)
     total = len(role_functions)
@@ -175,7 +173,7 @@ def compute_character_function_coverage(
 
 
 def compute_greimas_coverage(
-    role_functions: List[str],
+    role_functions: list[str],
 ) -> float:
     if not role_functions:
         return 0.0
@@ -187,7 +185,7 @@ def compute_greimas_coverage(
 
 
 def compute_antagonist_strength_gap(
-    characters: List[Tuple[str, str, int]],
+    characters: list[tuple[str, str, int]],
 ) -> float:
     if not characters:
         return 0.0
@@ -195,7 +193,7 @@ def compute_antagonist_strength_gap(
     protagonist_scores = []
     antagonist_scores = []
 
-    for name, role, score in characters:
+    for _name, role, score in characters:
         if role == "主体":
             protagonist_scores.append(abs(score))
         elif role == "反对者":
@@ -211,9 +209,9 @@ def compute_antagonist_strength_gap(
 
 
 def compute_relation_change_frequency(
-    relations: List[Tuple[str, str, str, str]],
+    relations: list[tuple[str, str, str, str]],
     total_chunks: int,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     if not relations or total_chunks == 0:
         return {"total_changes": 0.0, "change_rate": 0.0}
 

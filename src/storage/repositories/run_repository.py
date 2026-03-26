@@ -14,15 +14,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import select
 
 from src.storage.models import AnalysisRun
+
 from .base import BaseRepository
 
 
-class RunRepository(BaseRepository[Dict[str, Any]]):
+class RunRepository(BaseRepository[dict[str, Any]]):
     """
     分析运行记录 Repository
 
@@ -35,7 +36,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
     修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
 
-    def _to_dict(self, run: AnalysisRun) -> Dict[str, Any]:
+    def _to_dict(self, run: AnalysisRun) -> dict[str, Any]:
         """将 ORM 对象转换为字典"""
         return {
             "run_id": run.run_id,
@@ -88,7 +89,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
         self.session.commit()
         return run_id
 
-    def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
         """
         获取运行记录
 
@@ -120,7 +121,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
             run.updated_at = now
             self.session.commit()
 
-    def get_runs_by_novel(self, novel_id: str) -> List[Dict[str, Any]]:
+    def get_runs_by_novel(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取指定小说的所有运行记录
 
@@ -134,7 +135,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict(run) for run in runs]
 
-    def get_run_by_run_id_prefix(self, run_id_prefix: str) -> Optional[Dict[str, Any]]:
+    def get_run_by_run_id_prefix(self, run_id_prefix: str) -> dict[str, Any] | None:
         """
         通过run_id前缀获取运行记录
 
@@ -160,7 +161,7 @@ class RunRepository(BaseRepository[Dict[str, Any]]):
             return None
         return self._to_dict(run)
 
-    def get_latest_run(self, novel_id: str) -> Optional[Dict[str, Any]]:
+    def get_latest_run(self, novel_id: str) -> dict[str, Any] | None:
         """
         获取指定小说的最新运行记录
 

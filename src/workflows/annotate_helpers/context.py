@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -24,6 +24,7 @@ from src.models.local.embedding import EmbeddingClient
 
 if TYPE_CHECKING:
     import networkx as nx
+
     from src.rag import RAGRetriever
 
 
@@ -64,7 +65,7 @@ def _init_rag_retriever(
     resume: bool,
     token_usage_callback,
     run_id: str | None = None,
-) -> tuple[Optional["RAGRetriever"], Optional["nx.Graph"], Optional[EmbeddingClient]]:
+) -> tuple[RAGRetriever | None, nx.Graph | None, EmbeddingClient | None]:
     """初始化RAG检索器"""
     if not use_rag or not settings.rag.enabled:
         return None, None, None
@@ -75,8 +76,8 @@ def _init_rag_retriever(
 
     logger.info("initializing RAG retriever")
 
-    embedding_client: Optional[EmbeddingClient] = None
-    character_graph: Optional["nx.Graph"] = None
+    embedding_client: EmbeddingClient | None = None
+    character_graph: nx.Graph | None = None
 
     try:
         embedding_client = EmbeddingClient(
@@ -113,8 +114,8 @@ def _prepare_chunk_context(
     chunk_text: str,
     alias_map: dict[str, str],
     use_context_enhancement: bool,
-    rag_retriever: Optional["RAGRetriever"],
-    run_id: Optional[str] = None,
+    rag_retriever: RAGRetriever | None,
+    run_id: str | None = None,
 ) -> ChunkContext:
     """准备chunk上下文
 

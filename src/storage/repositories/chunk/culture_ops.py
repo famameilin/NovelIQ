@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ from src.storage.models import ChunkCulture
 def insert_chunk_culture(
     session: Session,
     run_id: str,
-    rows: Iterable[Tuple[int, float | None]],
+    rows: Iterable[tuple[int, float | None]],
 ) -> None:
     """
     插入分块文化数据
@@ -46,7 +46,7 @@ def insert_chunk_culture(
         session.bulk_insert_mappings(ChunkCulture, culture_rows)  # type: ignore[arg-type]
 
 
-def fetch_chunk_cultures_full(session: Session, run_id: str) -> List[Tuple[int, float | None]]:
+def fetch_chunk_cultures_full(session: Session, run_id: str) -> list[tuple[int, float | None]]:
     """
     获取完整的分块文化数据
 

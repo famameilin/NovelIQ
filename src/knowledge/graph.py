@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 from loguru import logger
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from src.storage.repositories import EntityRepository, StatsRepository
 
 
-def _init_character_nodes(entity_repo: "EntityRepository", run_id: str, G: nx.Graph) -> None:
+def _init_character_nodes(entity_repo: EntityRepository, run_id: str, G: nx.Graph) -> None:
     """
     2026-03-13 创建 - TraeAI
     任务: 知识增强层函数重构
@@ -59,7 +59,7 @@ def _init_character_nodes(entity_repo: "EntityRepository", run_id: str, G: nx.Gr
         )
 
 
-def _update_character_metadata(entity_repo: "EntityRepository", run_id: str, G: nx.Graph) -> None:
+def _update_character_metadata(entity_repo: EntityRepository, run_id: str, G: nx.Graph) -> None:
     """
     2026-03-13 创建 - TraeAI
     任务: 知识增强层函数重构
@@ -86,7 +86,7 @@ def _update_character_metadata(entity_repo: "EntityRepository", run_id: str, G: 
                 node_data["active_chunks"].append(chunk_id)
 
 
-def _build_character_relations(entity_repo: "EntityRepository", run_id: str, G: nx.Graph) -> None:
+def _build_character_relations(entity_repo: EntityRepository, run_id: str, G: nx.Graph) -> None:
     """
     2026-03-13 创建 - TraeAI
     任务: 知识增强层函数重构
@@ -96,7 +96,7 @@ def _build_character_relations(entity_repo: "EntityRepository", run_id: str, G: 
     任务: metrics-repository-refactor
     修改内容: 使用 EntityRepository 接口
     """
-    relation_counts: Dict[Tuple[str, str, str], Dict] = {}
+    relation_counts: dict[tuple[str, str, str], dict] = {}
     rel_rows = entity_repo.fetch_relation_sequence(run_id)
     logger.debug(f"processing {len(rel_rows)} relation records")
     for row in rel_rows:
@@ -156,7 +156,7 @@ def _build_character_relations(entity_repo: "EntityRepository", run_id: str, G: 
 
 
 def _load_character_aliases(
-    entity_repo: "EntityRepository",
+    entity_repo: EntityRepository,
     run_id: str,
     novel_id: str,
     G: nx.Graph,
@@ -180,7 +180,7 @@ def _load_character_aliases(
 
 
 def build_character_graph(
-    entity_repo: "EntityRepository",
+    entity_repo: EntityRepository,
     run_id: str,
     novel_id: str = "default",
 ) -> nx.Graph:
@@ -209,16 +209,16 @@ def build_character_graph(
 
 
 def serialize_graph(G: nx.Graph) -> str:
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "nodes": {},
         "edges": [],
     }
 
     for node, attrs in G.nodes(data=True):
-        data["nodes"][node] = {k: v for k, v in attrs.items()}
+        data["nodes"][node] = dict(attrs.items())
 
     for u, v, attrs in G.edges(data=True):
-        edge_data: Dict[str, Any] = {"from": u, "to": v}
+        edge_data: dict[str, Any] = {"from": u, "to": v}
         edge_data.update(attrs)
         data["edges"].append(edge_data)
 
@@ -226,7 +226,7 @@ def serialize_graph(G: nx.Graph) -> str:
 
 
 def deserialize_graph(json_str: str) -> nx.Graph:
-    data: Dict[str, Any] = json.loads(json_str)
+    data: dict[str, Any] = json.loads(json_str)
     G = nx.Graph()
 
     for node, attrs in data.get("nodes", {}).items():
@@ -241,7 +241,7 @@ def deserialize_graph(json_str: str) -> nx.Graph:
 
 
 def save_graph_to_db(
-    stats_repo: "StatsRepository",
+    stats_repo: StatsRepository,
     run_id: str,
     G: nx.Graph,
     stat_name: str = "character_graph",
@@ -260,10 +260,10 @@ def save_graph_to_db(
 
 
 def load_graph_from_db(
-    stats_repo: "StatsRepository",
+    stats_repo: StatsRepository,
     run_id: str,
     stat_name: str = "character_graph",
-) -> Optional[nx.Graph]:
+) -> nx.Graph | None:
     """
     从数据库加载图
 
@@ -283,7 +283,7 @@ def get_active_nodes_in_range(
     G: nx.Graph,
     start_chunk: int,
     end_chunk: int,
-) -> List[str]:
+) -> list[str]:
     active_nodes = []
     for node, attrs in G.nodes(data=True):
         active_chunks = attrs.get("active_chunks", [])
@@ -294,13 +294,13 @@ def get_active_nodes_in_range(
     return active_nodes
 
 
-def get_node_aliases(G: nx.Graph, node_name: str) -> List[str]:
+def get_node_aliases(G: nx.Graph, node_name: str) -> list[str]:
     if node_name not in G.nodes:
         return []
     return G.nodes[node_name].get("aliases", [])
 
 
-def get_all_known_aliases(G: nx.Graph) -> Dict[str, str]:
+def get_all_known_aliases(G: nx.Graph) -> dict[str, str]:
     alias_to_canonical = {}
     for node, attrs in G.nodes(data=True):
         canonical = attrs.get("canonical_name", node)

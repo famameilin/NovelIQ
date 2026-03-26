@@ -17,8 +17,8 @@ from .base import TokenUsageCallback
 from .embedding import EmbeddingClient
 from .parser import extract_think_content, make_empty_annotation
 from .schema import (
-    ChunkAnnotation,
     CharacterSnapshot,
+    ChunkAnnotation,
     DialogueSnapshot,
     RelationChangeSnapshot,
 )

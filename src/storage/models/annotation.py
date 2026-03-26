@@ -19,9 +19,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from sqlalchemy import ForeignKeyConstraint, Index, Integer, String, Text, ForeignKey
+from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -45,13 +43,13 @@ class ChunkAnnotation(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    emotional_valence: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    pivot_moment: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    event_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    cliffhanger: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    has_foreshadowing: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    foreshadowing_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    foreshadowing_desc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    emotional_valence: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    pivot_moment: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    cliffhanger: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_foreshadowing: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    foreshadowing_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    foreshadowing_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -85,12 +83,12 @@ class ChunkCharacter(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    role_function: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    action_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    emotion_score: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    role_function: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    emotion_score: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -123,11 +121,11 @@ class ChunkRelation(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    from_char: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    to_char: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    change: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    from_char: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    to_char: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    change: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -163,10 +161,10 @@ class ChunkDialogue(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    speaker: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    tone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    speaker: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    length: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -202,11 +200,11 @@ class ChunkForeshadowing(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    foreshadowing_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    anchor_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    anchor_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    confidence: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    foreshadowing_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    anchor_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    anchor_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -240,11 +238,11 @@ class CharacterAppearance(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    raw_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    identity_clue: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    clue_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    raw_name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    identity_clue: Mapped[str | None] = mapped_column(Text, nullable=True)
+    clue_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 

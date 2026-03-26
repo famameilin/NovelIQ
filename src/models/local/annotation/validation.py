@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, List, Tuple
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -20,10 +21,10 @@ if TYPE_CHECKING:
 
 
 def validate_annotation_names(
-    annotation: "ChunkAnnotation",
+    annotation: ChunkAnnotation,
     sources: dict,
-    extract_names_func: Callable[["ChunkAnnotation"], List[str]],
-) -> List[str]:
+    extract_names_func: Callable[[ChunkAnnotation], list[str]],
+) -> list[str]:
     """
     验证标注结果中的名字
 
@@ -52,13 +53,13 @@ def validate_annotation_names(
 def retry_with_validation(
     original_user_prompt: str,
     bad_output: str,
-    invalid_names: List[str],
+    invalid_names: list[str],
     sources: dict,
     chunk_id: int | None,
     max_retries: int,
-    execute_retry_call_func: Callable[[List[dict], int | None], Tuple["ChunkAnnotation", str]],
-    validate_names_func: Callable[["ChunkAnnotation", dict], List[str]],
-) -> Tuple["ChunkAnnotation", List[str]]:
+    execute_retry_call_func: Callable[[list[dict], int | None], tuple[ChunkAnnotation, str]],
+    validate_names_func: Callable[[ChunkAnnotation, dict], list[str]],
+) -> tuple[ChunkAnnotation, list[str]]:
     """
     名字验证失败后的内部重试
 

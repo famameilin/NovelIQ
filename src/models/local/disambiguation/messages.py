@@ -25,11 +25,11 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, cast
+from typing import cast
 
 from src.config import settings
-from ..prompts import DISAMBIGUATE_SYSTEM_PROMPT, ANONYMOUS_DISAMBIG_SYSTEM_PROMPT
 
+from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
 
 _EVIDENCE_MARKERS = {
     "前文总结": "前文摘要-弱证据",
@@ -69,7 +69,7 @@ def _has_original_sentence_content(context: str) -> bool:
     return False
 
 
-def _extract_evidence_types_from_context(context: str) -> List[str]:
+def _extract_evidence_types_from_context(context: str) -> list[str]:
     """
     从上下文字符串中提取证据类型
 
@@ -84,7 +84,7 @@ def _extract_evidence_types_from_context(context: str) -> List[str]:
     Returns:
         证据类型列表，如 ["原文例句", "身份线索"]
     """
-    evidence_types: List[str] = []
+    evidence_types: list[str] = []
 
     matches = _EVIDENCE_MARKER_PATTERN.findall(context)
     for match in matches:
@@ -98,7 +98,7 @@ def _extract_evidence_types_from_context(context: str) -> List[str]:
     return evidence_types
 
 
-def _format_evidence_annotation(evidence_types: List[str]) -> str:
+def _format_evidence_annotation(evidence_types: list[str]) -> str:
     """
     格式化证据来源标注
 
@@ -111,7 +111,7 @@ def _format_evidence_annotation(evidence_types: List[str]) -> str:
     return "【证据来源：" + "、".join(evidence_types) + "】"
 
 
-_RELATION_TYPE_DESCRIPTIONS: Dict[str, str] = {
+_RELATION_TYPE_DESCRIPTIONS: dict[str, str] = {
     "belongs_to": "人物属于某组织（如 伯安 belongs_to 贺家）",
     "member_of": "人物是某群体成员（如 张三 member_of 赤甲卫）",
     "leader_of": "人物是某群体/组织领袖（如 贺重明 leader_of 贺家）",
@@ -180,11 +180,11 @@ def _build_dynamic_system_prompt() -> str:
 
 
 def build_disambiguate_messages(
-    candidates: List[str] | List[Dict[str, int]],
-    context_sentences: Dict[str, str] | None = None,
-    existing_names: List[str] | None = None,
+    candidates: list[str] | list[dict[str, int]],
+    context_sentences: dict[str, str] | None = None,
+    existing_names: list[str] | None = None,
     rag_hint: str | None = None,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """
     构建消歧消息
 
@@ -210,7 +210,7 @@ def build_disambiguate_messages(
     lines = []
 
     if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(List[Dict[str, int]], candidates)
+        dict_candidates = cast(list[dict[str, int]], candidates)
         for item in dict_candidates:
             name = str(item["name"])
             count = item.get("count", 0)
@@ -222,7 +222,7 @@ def build_disambiguate_messages(
             else:
                 lines.append(f"- {name}（次数：{count}）")
     else:
-        str_candidates = cast(List[str], candidates)
+        str_candidates = cast(list[str], candidates)
         for name in str_candidates:
             ctx = context_sentences.get(name, "") if context_sentences else ""
             evidence_types = _extract_evidence_types_from_context(ctx)
@@ -265,11 +265,11 @@ def build_disambiguate_messages(
 
 
 def build_anonymous_disambig_messages(
-    anonymous_names: List[str],
-    anonymous_contexts: Dict[str, str],
-    existing_names: List[str] | None = None,
-    existing_contexts: Dict[str, str] | None = None,
-) -> List[Dict[str, str]]:
+    anonymous_names: list[str],
+    anonymous_contexts: dict[str, str],
+    existing_names: list[str] | None = None,
+    existing_contexts: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
     """
     构建匿名消歧消息
 

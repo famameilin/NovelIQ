@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -52,7 +52,7 @@ def save_graph(session: Session, run_id: str, graph_name: str, graph_json: str) 
     session.commit()
 
 
-def load_graph(session: Session, run_id: str, graph_name: str) -> Optional[str]:
+def load_graph(session: Session, run_id: str, graph_name: str) -> str | None:
     """
     从数据库加载图数据
 

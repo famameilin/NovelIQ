@@ -23,10 +23,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Float, ForeignKeyConstraint, Index, Integer, String, Text, ForeignKey
+from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -54,8 +54,8 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chapter_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    char_offset: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, primary_key=True, index=True
@@ -85,29 +85,29 @@ class ChunkStyle(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    mtld: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    ttr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    avg_sent_len: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    sent_len_std: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    d_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    pause_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    fight_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    exclaim_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    dialogue_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    question_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    sensory_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    metaphor_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    function_word_vector: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    category_density_combat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_body: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_relation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_faction: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_command: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_action: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_psychology: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_measure: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_emotion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    category_density_color: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    mtld: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ttr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_sent_len: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sent_len_std: Mapped[float | None] = mapped_column(Float, nullable=True)
+    d_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pause_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fight_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exclaim_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dialogue_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    question_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sensory_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metaphor_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    function_word_vector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category_density_combat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_body: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_relation: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_faction: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_command: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_action: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_psychology: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_measure: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_emotion: Mapped[float | None] = mapped_column(Float, nullable=True)
+    category_density_color: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -150,7 +150,7 @@ class ChunkCulture(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    imagery_lexicon_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    imagery_lexicon_density: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -185,8 +185,8 @@ class ChunkTopic(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    topic_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    topic_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -223,8 +223,8 @@ class ChunkEmbedding(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    embedding_vector: Mapped[Optional[list]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
-    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    embedding_vector: Mapped[list | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(

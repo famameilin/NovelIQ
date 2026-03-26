@@ -23,10 +23,8 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Float, ForeignKeyConstraint, Index, Integer, String, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -50,10 +48,10 @@ class Entity(Base):
     novel_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     canonical: Mapped[str] = mapped_column(String(255), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    first_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    last_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    embedding_vector: Mapped[Optional[list]] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    first_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_vector: Mapped[list | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, index=True
@@ -86,8 +84,8 @@ class EntityAlias(Base):
         Integer, ForeignKey("entities.entity_id", ondelete="CASCADE"), nullable=False
     )
     alias: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    alias_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    source_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    alias_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confirm_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, index=True
@@ -130,8 +128,8 @@ class EntityRelation(Base):
     )
     rel_type: Mapped[str] = mapped_column(String(50), nullable=False)
     rel_category: Mapped[str] = mapped_column(String(20), nullable=False, default="interpersonal")
-    first_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    last_chunk: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    first_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tension: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     run_id: Mapped[str] = mapped_column(
@@ -173,8 +171,8 @@ class EntitySnapshot(Base):
         Integer, ForeignKey("entities.entity_id", ondelete="CASCADE"), nullable=False
     )
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    state_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    state_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -206,13 +204,13 @@ class EntityRegistry(Base):
 
     entity_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    last_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    last_emotion: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    emotion_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_emotion: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    emotion_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     __table_args__ = (
         ForeignKeyConstraint(

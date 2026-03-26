@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from typing import List, Dict
-
-from fastapi import APIRouter, UploadFile, File, Depends
 from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, UploadFile
 from loguru import logger
 
+from src.api.exceptions import NovelNotFoundError
 from src.api.models.responses import (
-    UploadResponse,
     BatchDeleteNovelsRequest,
     BatchDeleteNovelsResponse,
+    UploadResponse,
 )
 from src.api.services.novel_service import NovelService
-from src.api.exceptions import NovelNotFoundError
 
 router = APIRouter(prefix="/novels", tags=["novels"])
 
@@ -59,8 +58,8 @@ async def batch_delete_novels(
     批量删除指定的小说及其相关数据。
     即使部分删除失败，也会继续处理其他小说。
     """
-    deleted_ids: List[str] = []
-    failed_ids: List[Dict[str, str]] = []
+    deleted_ids: list[str] = []
+    failed_ids: list[dict[str, str]] = []
 
     for novel_id in request.novel_ids:
         try:

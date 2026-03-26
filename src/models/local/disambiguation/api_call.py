@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -29,13 +29,14 @@ from ..schema import DisambiguateResponseModel
 
 if TYPE_CHECKING:
     from src.config import TaskModelConfig
+
     from ..base import BaseModelClient
 
 
 def call_disambiguate_api(
     client: BaseModelClient,
     config: TaskModelConfig,
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     log_type: str,
 ) -> DisambiguateResponseModel:
     """

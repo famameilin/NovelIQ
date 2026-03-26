@@ -31,15 +31,15 @@
 from __future__ import annotations
 
 import os
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 import numpy as np
 from loguru import logger
-from openai import OpenAI, APIConnectionError, APITimeoutError, BadRequestError
+from openai import APIConnectionError, APITimeoutError, BadRequestError, OpenAI
 
 from src.config import settings
 
-TokenUsageCallback = Callable[[str, str, str, int, int, Optional[int], Optional[int]], None]
+TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
 
 
 class EmbeddingClient:
@@ -59,8 +59,8 @@ class EmbeddingClient:
         api_key: str | None = None,
         timeout_s: float | None = None,
         max_retries: int | None = None,
-        token_usage_callback: Optional[TokenUsageCallback] = None,
-        novel_id: Optional[str] = None,
+        token_usage_callback: TokenUsageCallback | None = None,
+        novel_id: str | None = None,
     ) -> None:
         if base_url is None or model is None:
             semantic_config = settings.models.semantic_chunking
@@ -147,7 +147,7 @@ class EmbeddingClient:
                 log_func = getattr(logger, level, logger.debug)
         log_func(msg, *args)
 
-    def get_embedding(self, text: str, chunk_id: Optional[int] = None) -> List[float]:
+    def get_embedding(self, text: str, chunk_id: int | None = None) -> list[float]:
         """
         获取文本的embedding向量
 
@@ -240,7 +240,7 @@ class EmbeddingClient:
             )
             raise
 
-    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """
         批量获取文本的embedding向量
 
@@ -261,7 +261,7 @@ class EmbeddingClient:
         return embeddings
 
     @staticmethod
-    def compute_similarity(vec1: List[float], vec2: List[float]) -> float:
+    def compute_similarity(vec1: list[float], vec2: list[float]) -> float:
         if not vec1 or not vec2:
             logger.warning("empty vector provided for similarity computation")
             return 0.0

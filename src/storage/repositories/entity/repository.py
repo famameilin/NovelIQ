@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.storage.repositories.base import BaseRepository
 
@@ -62,7 +62,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
             self.session, entity_id, alias, run_id, alias_type, source_chunk
         )
 
-    def insert_entity_embedding(self, entity_id: int, embedding: List[float]) -> None:
+    def insert_entity_embedding(self, entity_id: int, embedding: list[float]) -> None:
         """插入实体嵌入向量"""
         return queries.insert_entity_embedding(self.session, entity_id, embedding)
 
@@ -71,7 +71,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         novel_id: str,
         canonical: str,
         run_id: str | None = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """根据规范名获取实体"""
         return queries.fetch_entity_by_canonical(self.session, novel_id, canonical, run_id)
 
@@ -80,7 +80,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         novel_id: str,
         alias: str,
         run_id: str | None = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """根据别名获取实体"""
         return queries.fetch_entity_by_alias(self.session, novel_id, alias, run_id)
 
@@ -88,7 +88,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         self,
         entity_id: int,
         run_id: str | None = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取实体的所有别名"""
         return queries.fetch_all_aliases_for_entity(self.session, entity_id, run_id)
 
@@ -100,13 +100,13 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         """增加别名确认计数"""
         return queries.increment_alias_confirm(self.session, entity_id, alias)
 
-    def fetch_all_aliases_with_canonical(self, novel_id: str, run_id: str | None = None) -> List[Tuple[str, str]]:
+    def fetch_all_aliases_with_canonical(self, novel_id: str, run_id: str | None = None) -> list[tuple[str, str]]:
         """获取所有别名及其规范名映射"""
         return queries.fetch_all_aliases_with_canonical(self.session, novel_id, run_id)
 
     def fetch_entities_with_embeddings(
         self, novel_id: str, run_id: str | None = None
-    ) -> List[Tuple[int, str, str, bytes | None]]:
+    ) -> list[tuple[int, str, str, bytes | None]]:
         """获取实体及其嵌入向量"""
         return queries.fetch_entities_with_embeddings(self.session, novel_id, run_id)
 
@@ -149,7 +149,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         entity_id: int,
         novel_id: str | None = None,
         run_id: str | None = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取实体的所有关系"""
         return relations.fetch_relations_for_entity(self.session, entity_id, novel_id, run_id)
 
@@ -158,7 +158,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         novel_id: str,
         entity_id: int | None = None,
         run_id: str | None = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取活跃关系"""
         return relations.fetch_active_relations(self.session, novel_id, entity_id, run_id)
 
@@ -170,7 +170,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         self,
         novel_id: str,
         run_id: str | None = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取层级关系（带实体名称）"""
         return relations.fetch_hierarchical_relations_with_names(self.session, novel_id, run_id)
 
@@ -196,19 +196,19 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         current_chunk_id: int,
         lookback: int = 10,
         run_id: str | None = None,
-    ) -> List[Tuple[int, str, str, str, str, int]]:
+    ) -> list[tuple[int, str, str, str, str, int]]:
         """获取活跃实体"""
         return metadata.fetch_active_entities(self.session, current_chunk_id, lookback, run_id)
 
-    def fetch_distinct_characters(self, run_id: str) -> List[Tuple[str]]:
+    def fetch_distinct_characters(self, run_id: str) -> list[tuple[str]]:
         """获取所有不重复的角色名"""
         return metadata.fetch_distinct_characters(self.session, run_id)
 
-    def fetch_character_metadata_sequence(self, run_id: str) -> List[Tuple[str, int, str, str]]:
+    def fetch_character_metadata_sequence(self, run_id: str) -> list[tuple[str, int, str, str]]:
         """获取角色元数据序列"""
         return metadata.fetch_character_metadata_sequence(self.session, run_id)
 
-    def fetch_relation_sequence(self, run_id: str) -> List[Tuple[str, str, str, str, int]]:
+    def fetch_relation_sequence(self, run_id: str) -> list[tuple[str, str, str, str, int]]:
         """获取关系序列"""
         return metadata.fetch_relation_sequence(self.session, run_id)
 
@@ -231,7 +231,7 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         start_chunk: int,
         end_chunk: int,
         run_id: str | None = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取指定分块范围内的快照"""
         return metadata.fetch_snapshots_by_chunk(
             self.session, novel_id, start_chunk, end_chunk, run_id
@@ -242,6 +242,6 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         novel_id: str,
         run_id: str | None = None,
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """获取最近的快照"""
         return metadata.fetch_recent_snapshots(self.session, novel_id, run_id, limit)

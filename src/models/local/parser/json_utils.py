@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict
+from typing import Any
 
 from loguru import logger
 
 
-def try_parse_json(content: str) -> Dict[str, Any] | None:
+def try_parse_json(content: str) -> dict[str, Any] | None:
     """
     尝试解析 JSON，支持不完整的 JSON 和带尾随逗号的 JSON
 

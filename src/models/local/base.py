@@ -35,10 +35,11 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, List, Optional, Type, TypeVar
+from collections.abc import Callable
+from typing import Any, NamedTuple, TypeVar
 
 from loguru import logger
-from openai import OpenAI, APIConnectionError, APITimeoutError, BadRequestError
+from openai import APIConnectionError, APITimeoutError, BadRequestError, OpenAI
 from pydantic import BaseModel
 
 from src.config import TaskModelConfig, TaskType, load_task_config
@@ -46,8 +47,6 @@ from src.config.analysis_logger import AnalysisLogger
 from src.models.local.parser.thinking import extract_thinking_unified
 
 T = TypeVar("T", bound=BaseModel)
-
-from typing import NamedTuple
 
 
 class TokenUsage(NamedTuple):
@@ -62,7 +61,7 @@ class TokenUsage(NamedTuple):
     chunk_id: int | None
 
 
-TokenUsageCallback = Callable[[str, str, str, int, int, Optional[int], Optional[int]], None]
+TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
 
 
 class BaseModelClient:
@@ -88,9 +87,9 @@ class BaseModelClient:
         config: TaskModelConfig | None = None,
         client: Any | None = None,
         analysis_logger: AnalysisLogger | None = None,
-        token_usage_callback: Optional[TokenUsageCallback] = None,
-        novel_id: Optional[str] = None,
-        session: Optional[Any] = None,
+        token_usage_callback: TokenUsageCallback | None = None,
+        novel_id: str | None = None,
+        session: Any | None = None,
     ) -> None:
         self._task_type = task_type
         loaded_config = config or load_task_config(task_type)
@@ -182,7 +181,7 @@ class BaseModelClient:
         self,
         response: Any,
         call_type: str,
-        chunk_id: Optional[int] = None,
+        chunk_id: int | None = None,
     ) -> None:
         """记录token使用量"""
         if self._token_usage_callback and hasattr(response, "usage") and response.usage:
@@ -202,7 +201,7 @@ class BaseModelClient:
         completion_tokens: int,
         total_tokens: int,
         call_type: str,
-        chunk_id: Optional[int] = None,
+        chunk_id: int | None = None,
     ) -> None:
         """
         记录估算的token使用量
@@ -223,7 +222,7 @@ class BaseModelClient:
                 chunk_id,
             )
 
-    def _build_json_schema(self, response_model: Type[T]) -> dict[str, Any]:
+    def _build_json_schema(self, response_model: type[T]) -> dict[str, Any]:
         """
         构建 JSON Schema 用于结构化输出
 
@@ -250,9 +249,9 @@ class BaseModelClient:
 
     def _call_api(
         self,
-        messages: List[dict],
+        messages: list[dict],
         enable_thinking: bool = False,
-        response_model: Type[T] | None = None,
+        response_model: type[T] | None = None,
     ) -> Any:
         """
         非流式API调用
@@ -392,7 +391,7 @@ class BaseModelClient:
         else:
             logger.debug("{} start: {}", operation, base_fields)
 
-    def _parse_structured_response(self, response: Any, response_model: Type[T]) -> T:
+    def _parse_structured_response(self, response: Any, response_model: type[T]) -> T:
         """
         解析结构化响应
 
@@ -419,7 +418,7 @@ class BaseModelClient:
 
         return response_model.model_validate(json_data)
 
-    def _build_request_params(self, messages: List[dict], enable_thinking: bool = False) -> dict[str, Any]:
+    def _build_request_params(self, messages: list[dict], enable_thinking: bool = False) -> dict[str, Any]:
         """
         构建请求参数（统一方法）
 

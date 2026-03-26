@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Set
+from typing import Any
 
 
 class CacheStore:
@@ -20,7 +21,7 @@ class CacheStore:
 
 class MemoryCache(CacheStore):
     def __init__(self) -> None:
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
 
     def has(self, key: str) -> bool:
         return key in self._data
@@ -54,19 +55,19 @@ class FileCache(CacheStore):
 
 @dataclass(frozen=True)
 class PipelineContext:
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     cache_key_base: str
 
 
 @dataclass(frozen=True)
 class Stage:
     name: str
-    handler: Callable[[Dict[str, Any], Dict[str, Any]], Any]
-    dependencies: List[str] = field(default_factory=list)
+    handler: Callable[[dict[str, Any], dict[str, Any]], Any]
+    dependencies: list[str] = field(default_factory=list)
 
 
 def compute_cache_key(cache_key_base: str, stage_name: str) -> str:
-    digest = sha256(f"{cache_key_base}:{stage_name}".encode("utf-8")).hexdigest()
+    digest = sha256(f"{cache_key_base}:{stage_name}".encode()).hexdigest()
     return digest
 
 
@@ -76,12 +77,12 @@ def run_pipeline(
     cache: CacheStore | None = None,
     force: bool = False,
     rerun_stages: Iterable[str] | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     stage_map = {stage.name: stage for stage in stages}
     rerun = set(rerun_stages or [])
-    outputs: Dict[str, Any] = {}
-    visiting: Set[str] = set()
-    visited: Set[str] = set()
+    outputs: dict[str, Any] = {}
+    visiting: set[str] = set()
+    visited: set[str] = set()
 
     def visit(stage_name: str) -> None:
         if stage_name in visited:

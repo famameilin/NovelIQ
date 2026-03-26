@@ -17,9 +17,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Index, String, Text, Float
+from sqlalchemy import DateTime, Float, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -42,11 +42,11 @@ class AnalysisRun(Base):
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     novel_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    source_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         Index("idx_analysis_runs_novel", "novel_id"),
@@ -77,8 +77,8 @@ class DisambigCheckpoint(Base):
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     alias_map: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
-    entity_relations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    disambig_states: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    entity_relations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disambig_states: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<DisambigCheckpoint(run_id={self.run_id}, updated_at={self.updated_at})>"

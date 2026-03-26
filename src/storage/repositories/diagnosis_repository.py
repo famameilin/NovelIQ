@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
@@ -45,7 +45,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         """
         super().__init__(session)
 
-    def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> List[Tuple[int, str, str]]:
+    def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str]]:
         """
         获取转折点分块
 
@@ -83,7 +83,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.text, row.event_type) for row in result]
 
-    def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> List[Tuple[int, str, float]]:
+    def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, float]]:
         """
         获取高张力分块
 
@@ -123,7 +123,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.text, row.tension) for row in result]
 
-    def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> List[Tuple[int, str, str, str, str]]:
+    def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str, str]]:
         """
         获取关系变更记录
 
@@ -153,7 +153,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.from_char, row.to_char, row.type, row.change) for row in result]
 
-    def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> List[Tuple[int, str, str, str]]:
+    def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
         """
         获取伏笔分块
 
@@ -196,7 +196,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.text, row.foreshadowing_type, row.foreshadowing_desc) for row in result]
 
-    def fetch_first_last_chunk_summary(self, run_id: str, max_chars: int | None = None) -> Tuple[str, str]:
+    def fetch_first_last_chunk_summary(self, run_id: str, max_chars: int | None = None) -> tuple[str, str]:
         """
         获取首尾分块摘要
 
@@ -226,7 +226,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         last_text = chunks[-1].text[:max_chars] if chunks[-1].text else ""
         return first_text, last_text
 
-    def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> List[Tuple[int, str]]:
+    def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
         """
         获取高潮时刻
 
@@ -305,7 +305,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         novel_id: str,
         start_chunk: int,
         end_chunk: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         按分块范围获取快照
 
@@ -356,7 +356,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         run_id: str,
         novel_id: str,
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         获取最近的快照
 

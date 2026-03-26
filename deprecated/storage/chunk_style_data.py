@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: split-chunk-repository
 说明: 分块风格数据类定义，从 chunk_repository.py 提取
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: 删除 cultural_density 字段
+修改内容: 移除 cultural_density 字段
 """
 
 from __future__ import annotations
@@ -25,6 +30,11 @@ class ChunkStyleData:
     修改者: TraeAI
     任务: split-chunk-repository
     修改内容: 从 chunk_repository.py 提取到独立模块
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 删除 cultural_density 字段
+    修改内容: 移除 cultural_density 字段
     """
 
     chunk_id: int
@@ -40,7 +50,6 @@ class ChunkStyleData:
     question_density: float
     sensory_density: float
     metaphor_density: float
-    cultural_density: float
     function_word_vector: str
     category_density_combat: float
     category_density_body: float
@@ -57,7 +66,6 @@ class ChunkStyleData:
         self,
     ) -> Tuple[
         int,
-        float,
         float,
         float,
         float,
@@ -96,7 +104,6 @@ class ChunkStyleData:
             self.question_density,
             self.sensory_density,
             self.metaphor_density,
-            self.cultural_density,
             self.function_word_vector,
             self.category_density_combat,
             self.category_density_body,
@@ -126,7 +133,6 @@ class ChunkStyleData:
             "question_density": self.question_density,
             "sensory_density": self.sensory_density,
             "metaphor_density": self.metaphor_density,
-            "cultural_density": self.cultural_density,
             "function_word_vector": self.function_word_vector,
             "category_density_combat": self.category_density_combat,
             "category_density_body": self.category_density_body,

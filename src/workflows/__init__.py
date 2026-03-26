@@ -10,11 +10,6 @@ from src.workflows.annotate import run_annotate
 from src.workflows.annotate_helpers.sentence import (
     build_context_sentences,
 )
-from src.workflows.diagnose import (
-    build_cloud_payload,
-    run_cloud_diagnose,
-    run_diagnose,
-)
 from src.workflows.curve_metrics import (
     EVENT_TYPE_SCORES,
     compute_emotion_curve,
@@ -22,6 +17,11 @@ from src.workflows.curve_metrics import (
     compute_rhythm_curve,
     compute_tension_signals,
     load_all_lexicons,
+)
+from src.workflows.diagnose import (
+    build_cloud_payload,
+    run_cloud_diagnose,
+    run_diagnose,
 )
 from src.workflows.preprocess import run_preprocess
 from src.workflows.topic import run_topic_model

@@ -9,15 +9,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Sequence
+from typing import TYPE_CHECKING
 
 from src.models.local.schema import (
-    ChunkAnnotation as ChunkAnnotationSchema,
     CharacterSnapshot,
     DialogueSnapshot,
     ForeshadowingResult,
     RelationChangeSnapshot,
+)
+from src.models.local.schema import (
+    ChunkAnnotation as ChunkAnnotationSchema,
 )
 from src.storage.models import (
     ChunkAnnotation,
@@ -111,7 +114,7 @@ def insert_chunk_dialogues(
     任务: fix-tone-distribution-semantic-error
     修改内容: 从 dialogue.tone 字段获取语气类型并保存到数据库
     """
-    records: List[ChunkDialogue] = []
+    records: list[ChunkDialogue] = []
     for idx, dialogue in enumerate(dialogues):
         length = lengths[idx] if lengths is not None and idx < len(lengths) else None
         records.append(

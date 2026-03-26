@@ -15,15 +15,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Any, cast
 
 from loguru import logger
 
-from src.config import TaskModelConfig, settings
+from src.config import TaskModelConfig, TaskType, settings
 from src.config.analysis_logger import AnalysisLogger
-from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
+from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.local.disambiguation import ExtendedDisambigResult
 
 
@@ -58,7 +58,7 @@ class _NoopDisambiguationClient:
 
 def _resolve_disambiguation_fallback(
     role: str,
-    task_type: str,
+    task_type: TaskType,
     annotation_client: AnnotationLike,
     analysis_logger: AnalysisLogger | None,
 ) -> DisambiguationLike:
@@ -101,7 +101,7 @@ def _init_annotation_clients(
     annotate_client: AnnotationLike | None = None,
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
-) -> Tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
+) -> tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端"""
     annotation_client = annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger)
 
@@ -110,9 +110,10 @@ def _init_annotation_clients(
 
     if cloud_fallback_enabled:
         try:
-            cloud_annotation_client = AnnotationClient(task_type="cloud_annotation", analysis_logger=analysis_logger)
+            cloud_client = AnnotationClient(task_type="cloud_annotation", analysis_logger=analysis_logger)
+            cloud_annotation_client = cast(AnnotationLike, cloud_client)
             logger.info(
-                f"cloud annotation client initialized for fallback (thinking={cloud_annotation_client._config.thinking_enabled})"
+                f"cloud annotation client initialized for fallback (thinking={cloud_client._config.thinking_enabled})"
             )
         except Exception as e:
             logger.warning(f"cloud annotation client initialization failed, fallback disabled: {e}")

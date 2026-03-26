@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 from src.models.local.prompts import (
     FEW_SHOT_EXAMPLES_V2,
     FORESHADOWING_EXAMPLES,
@@ -27,7 +25,7 @@ from src.models.local.prompts import (
 
 def _build_annotation_messages_v2(
     text: str,
-    alias_map: Dict[str, str] | None = None,
+    alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
     next_chunk_text: str | None = None,
@@ -36,8 +34,8 @@ def _build_annotation_messages_v2(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    character_appearances: List[dict] | None = None,
-) -> List[dict]:
+    character_appearances: list[dict] | None = None,
+) -> list[dict]:
     """
     构建第一次调用（基础标注）的messages
 
@@ -111,7 +109,7 @@ def _build_foreshadowing_messages(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
-) -> List[dict]:
+) -> list[dict]:
     """
     构建第二次调用（伏笔分析）的messages
 

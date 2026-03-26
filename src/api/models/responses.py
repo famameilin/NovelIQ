@@ -1,10 +1,11 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -31,13 +32,13 @@ class StatusResponse(BaseModel):
     """
 
     novel_id: str
-    task_id: Optional[str] = None
+    task_id: str | None = None
     status: TaskStatus
     progress: float = Field(ge=0, le=100)
-    stage: Optional[str] = None
-    error: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    stage: str | None = None
+    error: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class EmotionCurvePoint(BaseModel):
@@ -58,27 +59,27 @@ class CharacterStats(BaseModel):
     name: str
     appearance_count: int
     role_function: str
-    avg_emotion_score: Optional[float] = None
+    avg_emotion_score: float | None = None
 
 
 class ChunkStyle(BaseModel):
     chunk_id: int
-    mtld: Optional[float] = None
-    ttr: Optional[float] = None
-    avg_sent_len: Optional[float] = None
-    d_value: Optional[float] = None
-    pause_density: Optional[float] = None
-    fight_density: Optional[float] = None
-    dialogue_ratio: Optional[float] = None
-    sensory_density: Optional[float] = None
-    metaphor_density: Optional[float] = None
+    mtld: float | None = None
+    ttr: float | None = None
+    avg_sent_len: float | None = None
+    d_value: float | None = None
+    pause_density: float | None = None
+    fight_density: float | None = None
+    dialogue_ratio: float | None = None
+    sensory_density: float | None = None
+    metaphor_density: float | None = None
 
 
 class ChunkCharacter(BaseModel):
     name: str
-    role_function: Optional[str] = None
-    action: Optional[str] = None
-    emotion_score: Optional[str] = None
+    role_function: str | None = None
+    action: str | None = None
+    emotion_score: str | None = None
 
 
 class ChunkRelation(BaseModel):
@@ -89,22 +90,22 @@ class ChunkRelation(BaseModel):
 
 
 class ChunkDialogue(BaseModel):
-    speaker: Optional[str] = None
-    length: Optional[int] = None
+    speaker: str | None = None
+    length: int | None = None
 
 
 class ChunkAnnotation(BaseModel):
     chunk_id: int
-    emotional_valence: Optional[str] = None
-    event_type: Optional[str] = None
-    pivot_moment: Optional[bool] = None
-    cliffhanger: Optional[bool] = None
-    has_foreshadowing: Optional[bool] = None
-    foreshadowing_type: Optional[str] = None
-    foreshadowing_desc: Optional[str] = None
-    characters: List[ChunkCharacter] = []
-    relations: List[ChunkRelation] = []
-    dialogues: List[ChunkDialogue] = []
+    emotional_valence: str | None = None
+    event_type: str | None = None
+    pivot_moment: bool | None = None
+    cliffhanger: bool | None = None
+    has_foreshadowing: bool | None = None
+    foreshadowing_type: str | None = None
+    foreshadowing_desc: str | None = None
+    characters: list[ChunkCharacter] = []
+    relations: list[ChunkRelation] = []
+    dialogues: list[ChunkDialogue] = []
 
 
 class CharacterRelation(BaseModel):
@@ -126,117 +127,117 @@ class HierarchicalRelation(BaseModel):
 
     rel_id: int
     rel_type: str
-    first_chunk: Optional[int] = None
-    last_chunk: Optional[int] = None
+    first_chunk: int | None = None
+    last_chunk: int | None = None
     from_entity: str
     to_entity: str
 
 
 class GlobalStats(BaseModel):
-    total_chunks: Optional[int] = None
-    total_chars: Optional[int] = None
-    avg_mtld: Optional[float] = None
-    avg_ttr: Optional[float] = None
-    avg_sent_len: Optional[float] = None
-    rhythm_avg: Optional[float] = None
-    rhythm_std: Optional[float] = None
-    rhythm_max: Optional[float] = None
-    rhythm_min: Optional[float] = None
-    global_avg_sent_len: Optional[float] = None
-    global_avg_ttr: Optional[float] = None
+    total_chunks: int | None = None
+    total_chars: int | None = None
+    avg_mtld: float | None = None
+    avg_ttr: float | None = None
+    avg_sent_len: float | None = None
+    rhythm_avg: float | None = None
+    rhythm_std: float | None = None
+    rhythm_max: float | None = None
+    rhythm_min: float | None = None
+    global_avg_sent_len: float | None = None
+    global_avg_ttr: float | None = None
 
 
 class NarrativeStructureStats(BaseModel):
-    act1_ratio: Optional[float] = None
-    act2_ratio: Optional[float] = None
-    act3_ratio: Optional[float] = None
-    climax_spacing: Optional[float] = None
-    middle_collapse_index: Optional[float] = None
-    event_density: Optional[Dict[str, float]] = None
-    cliffhanger_rate: Optional[float] = None
+    act1_ratio: float | None = None
+    act2_ratio: float | None = None
+    act3_ratio: float | None = None
+    climax_spacing: float | None = None
+    middle_collapse_index: float | None = None
+    event_density: dict[str, float] | None = None
+    cliffhanger_rate: float | None = None
 
 
 class EmotionStats(BaseModel):
-    pos_neg_ratio: Optional[float] = None
-    positive_ratio: Optional[float] = None
-    negative_ratio: Optional[float] = None
-    neutral_ratio: Optional[float] = None
-    recovery_speed: Optional[float] = None
-    pivot_moment_density: Optional[float] = None
-    lexical_emotion_trend: Optional[str] = None
+    pos_neg_ratio: float | None = None
+    positive_ratio: float | None = None
+    negative_ratio: float | None = None
+    neutral_ratio: float | None = None
+    recovery_speed: float | None = None
+    pivot_moment_density: float | None = None
+    lexical_emotion_trend: str | None = None
 
 
 class CharacterStatsAggregate(BaseModel):
-    network_density: Optional[float] = None
-    protagonist_betweenness: Optional[float] = None
-    greimas_coverage: Optional[float] = None
-    function_coverage_distribution: Optional[Dict[str, float]] = None
-    antagonist_strength_gap: Optional[float] = None
-    relation_change_freq: Optional[float] = None
-    degree_centrality: Optional[Dict[str, float]] = None
+    network_density: float | None = None
+    protagonist_betweenness: float | None = None
+    greimas_coverage: float | None = None
+    function_coverage_distribution: dict[str, float] | None = None
+    antagonist_strength_gap: float | None = None
+    relation_change_freq: float | None = None
+    degree_centrality: dict[str, float] | None = None
 
 
 class StyleStats(BaseModel):
-    tone_distribution: Optional[Dict[str, float]] = None
-    vocab_breadth: Optional[float] = None
-    avg_word_len: Optional[float] = None
-    sent_len_std: Optional[float] = None
-    function_word_vector: Optional[Dict[str, float]] = None
-    category_density: Optional[Dict[str, float]] = None
+    tone_distribution: dict[str, float] | None = None
+    vocab_breadth: float | None = None
+    avg_word_len: float | None = None
+    sent_len_std: float | None = None
+    function_word_vector: dict[str, float] | None = None
+    category_density: dict[str, float] | None = None
 
 
 class CultureStats(BaseModel):
-    idiom_density: Optional[float] = None
-    classical_sentence_ratio: Optional[float] = None
-    imagery_density: Optional[float] = None
+    idiom_density: float | None = None
+    classical_sentence_ratio: float | None = None
+    imagery_density: float | None = None
 
 
 class ChunkCulture(BaseModel):
     chunk_id: int
-    imagery_lexicon_density: Optional[float] = None
+    imagery_lexicon_density: float | None = None
 
 
 class TopicInfo(BaseModel):
     topic_id: int
-    words: List[str]
+    words: list[str]
     weight: float
 
 
 class DiagnosisResult(BaseModel):
-    foreshadow_rate: Optional[float] = None
-    arc_scores: Optional[Union[List[float], Dict[str, float]]] = None
-    narrative_type: Optional[str] = None
-    topic_labels: Optional[List[str]] = None
-    diagnosis: Optional[str] = None
-    value_logic_type: Optional[str] = None
-    value_logic_reason: Optional[str] = None
-    power_stance_score: Optional[int] = None
-    power_stance_reason: Optional[str] = None
-    common_people_dignity: Optional[int] = None
-    dignity_reason: Optional[str] = None
-    cultural_depth_score: Optional[int] = None
-    cultural_depth_reason: Optional[str] = None
-    narrative_arc_type: Optional[str] = None
+    foreshadow_rate: float | None = None
+    arc_scores: list[float] | dict[str, float] | None = None
+    narrative_type: str | None = None
+    topic_labels: list[str] | None = None
+    diagnosis: str | None = None
+    value_logic_type: str | None = None
+    value_logic_reason: str | None = None
+    power_stance_score: int | None = None
+    power_stance_reason: str | None = None
+    common_people_dignity: int | None = None
+    dignity_reason: str | None = None
+    cultural_depth_score: int | None = None
+    cultural_depth_reason: str | None = None
+    narrative_arc_type: str | None = None
 
 
 class NovelResultsResponse(BaseModel):
     novel_id: str
-    novel_info: Dict[str, Any]
-    emotion_curve: List[EmotionCurvePoint]
-    rhythm_curve: List[RhythmCurvePoint]
-    characters: List[CharacterStats]
-    topics: List[TopicInfo]
-    diagnosis: Optional[DiagnosisResult] = None
-    chunk_styles: List[ChunkStyle] = []
-    chunk_annotations: List[ChunkAnnotation] = []
-    character_relations: List[CharacterRelation] = []
-    global_stats: Optional[GlobalStats] = None
-    narrative_structure: Optional[NarrativeStructureStats] = None
-    emotion_stats: Optional[EmotionStats] = None
-    character_stats: Optional[CharacterStatsAggregate] = None
-    style_stats: Optional[StyleStats] = None
-    culture_stats: Optional[CultureStats] = None
-    chunk_cultures: List[ChunkCulture] = []
+    novel_info: dict[str, Any]
+    emotion_curve: list[EmotionCurvePoint]
+    rhythm_curve: list[RhythmCurvePoint]
+    characters: list[CharacterStats]
+    topics: list[TopicInfo]
+    diagnosis: DiagnosisResult | None = None
+    chunk_styles: list[ChunkStyle] = []
+    chunk_annotations: list[ChunkAnnotation] = []
+    character_relations: list[CharacterRelation] = []
+    global_stats: GlobalStats | None = None
+    narrative_structure: NarrativeStructureStats | None = None
+    emotion_stats: EmotionStats | None = None
+    character_stats: CharacterStatsAggregate | None = None
+    style_stats: StyleStats | None = None
+    culture_stats: CultureStats | None = None
+    chunk_cultures: list[ChunkCulture] = []
 
 
 class ErrorResponse(BaseModel):
@@ -248,10 +249,10 @@ class ErrorResponse(BaseModel):
 class ResultsWriteResponse(BaseModel):
     success: bool
     message: str
-    file_path: Optional[str] = None
+    file_path: str | None = None
     novel_id: str
-    novel_name: Optional[str] = None
-    missing_fields: Optional[List[str]] = None
+    novel_name: str | None = None
+    missing_fields: list[str] | None = None
 
 
 class ReanalyzeResponse(BaseModel):
@@ -279,12 +280,12 @@ class TaskInfoResponse(BaseModel):
     task_id: str
     novel_id: str
     status: str
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
 
 class TaskListResponse(BaseModel):
     novel_id: str
-    tasks: List[TaskInfoResponse]
+    tasks: list[TaskInfoResponse]
 
 
 class BatchDeleteNovelsRequest(BaseModel):
@@ -296,7 +297,7 @@ class BatchDeleteNovelsRequest(BaseModel):
     任务: 新增批量删除功能
     """
 
-    novel_ids: List[str] = Field(..., description="要删除的小说ID列表")
+    novel_ids: list[str] = Field(..., description="要删除的小说ID列表")
 
 
 class BatchDeleteNovelsResponse(BaseModel):
@@ -312,8 +313,8 @@ class BatchDeleteNovelsResponse(BaseModel):
     message: str
     deleted_count: int
     failed_count: int
-    deleted_ids: List[str]
-    failed_ids: List[Dict[str, str]]  # [{"novel_id": "xxx", "reason": "错误原因"}]
+    deleted_ids: list[str]
+    failed_ids: list[dict[str, str]]  # [{"novel_id": "xxx", "reason": "错误原因"}]
 
 
 class BatchDeleteTasksRequest(BaseModel):
@@ -325,7 +326,7 @@ class BatchDeleteTasksRequest(BaseModel):
     任务: 新增批量删除功能
     """
 
-    task_ids: List[str] = Field(..., description="要删除的任务ID列表")
+    task_ids: list[str] = Field(..., description="要删除的任务ID列表")
 
 
 class BatchDeleteTasksResponse(BaseModel):
@@ -341,19 +342,19 @@ class BatchDeleteTasksResponse(BaseModel):
     message: str
     deleted_count: int
     failed_count: int
-    deleted_ids: List[str]
-    failed_ids: List[Dict[str, str]]  # [{"task_id": "xxx", "reason": "错误原因"}]
+    deleted_ids: list[str]
+    failed_ids: list[dict[str, str]]  # [{"task_id": "xxx", "reason": "错误原因"}]
 
 
 class TokenUsageRecord(BaseModel):
     id: int
     novel_id: str
-    chunk_id: Optional[int] = None
+    chunk_id: int | None = None
     task_type: str
     call_type: str
     model: str
     prompt_tokens: int
-    completion_tokens: Optional[int] = None
+    completion_tokens: int | None = None
     total_tokens: int
     created_at: str
 
@@ -377,5 +378,5 @@ class TokenUsageByModel(BaseModel):
 
 class TokenUsageStats(BaseModel):
     summary: TokenUsageSummary = TokenUsageSummary()
-    by_task: Dict[str, TokenUsageByTask] = {}
-    by_model: Dict[str, TokenUsageByModel] = {}
+    by_task: dict[str, TokenUsageByTask] = {}
+    by_model: dict[str, TokenUsageByModel] = {}

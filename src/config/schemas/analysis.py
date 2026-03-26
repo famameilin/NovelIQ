@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any
 
 
 @dataclass
@@ -109,7 +109,7 @@ class AnalysisSettings:
     cloud_annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     multi_phase_annotation: MultiPhaseAnnotationSettings = field(default_factory=MultiPhaseAnnotationSettings)
-    valid_hierarchical_relation_types: List[str] = field(
+    valid_hierarchical_relation_types: list[str] = field(
         default_factory=lambda: [
             "belongs_to",
             "member_of",

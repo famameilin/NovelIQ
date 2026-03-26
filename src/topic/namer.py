@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, List
 
 from loguru import logger
 
@@ -12,11 +11,11 @@ from .schema import TopicModel, TopicWord
 
 class TopicNamer(ABC):
     @abstractmethod
-    def name_topic(self, topic_id: int, words: List[TopicWord]) -> str:
+    def name_topic(self, topic_id: int, words: list[TopicWord]) -> str:
         pass
 
-    def name_all_topics(self, topic_model: TopicModel, top_n: int = 15) -> Dict[int, str]:
-        labels: Dict[int, str] = {}
+    def name_all_topics(self, topic_model: TopicModel, top_n: int = 15) -> dict[int, str]:
+        labels: dict[int, str] = {}
         for topic_id in range(topic_model.num_topics):
             words = topic_model.get_topic_words(topic_id, top_n)
             labels[topic_id] = self.name_topic(topic_id, words)
@@ -24,16 +23,16 @@ class TopicNamer(ABC):
 
 
 class NullTopicNamer(TopicNamer):
-    def name_topic(self, topic_id: int, words: List[TopicWord]) -> str:
+    def name_topic(self, topic_id: int, words: list[TopicWord]) -> str:
         return f"主题{topic_id + 1}"
 
 
 class CloudTopicNamer(TopicNamer):
     def __init__(self, cloud_client: CloudModelClient) -> None:
         self._client = cloud_client
-        self._cache: Dict[int, str] = {}
+        self._cache: dict[int, str] = {}
 
-    def name_topic(self, topic_id: int, words: List[TopicWord]) -> str:
+    def name_topic(self, topic_id: int, words: list[TopicWord]) -> str:
         if topic_id in self._cache:
             return self._cache[topic_id]
         if not words:
@@ -67,11 +66,11 @@ class CloudTopicNamer(TopicNamer):
 
 
 class CachedTopicNamer(TopicNamer):
-    def __init__(self, inner: TopicNamer, cache: Dict[int, str] | None = None) -> None:
+    def __init__(self, inner: TopicNamer, cache: dict[int, str] | None = None) -> None:
         self._inner = inner
         self._cache = cache if cache is not None else {}
 
-    def name_topic(self, topic_id: int, words: List[TopicWord]) -> str:
+    def name_topic(self, topic_id: int, words: list[TopicWord]) -> str:
         if topic_id in self._cache:
             logger.debug("缓存命中: topic_id={}", topic_id)
             return self._cache[topic_id]
@@ -79,10 +78,10 @@ class CachedTopicNamer(TopicNamer):
         self._cache[topic_id] = label
         return label
 
-    def get_cache(self) -> Dict[int, str]:
+    def get_cache(self) -> dict[int, str]:
         return self._cache.copy()
 
-    def load_cache(self, cache: Dict[int, str]) -> None:
+    def load_cache(self, cache: dict[int, str]) -> None:
         self._cache.update(cache)
 
 
@@ -98,5 +97,5 @@ def create_topic_namer(
     return namer
 
 
-def apply_topic_labels(topic_model: TopicModel, labels: Dict[int, str]) -> None:
+def apply_topic_labels(topic_model: TopicModel, labels: dict[int, str]) -> None:
     topic_model.labels.update(labels)

@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
     _build_foreshadowing_messages,
@@ -23,7 +21,7 @@ from src.models.local.parser import parse_active_entities
 
 def build_phase1_messages(
     text: str,
-    alias_map: Dict[str, str] | None = None,
+    alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
     next_chunk_text: str | None = None,
@@ -32,8 +30,8 @@ def build_phase1_messages(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    character_appearances: List[dict] | None = None,
-) -> List[dict]:
+    character_appearances: list[dict] | None = None,
+) -> list[dict]:
     """
     构建Phase1消息
 
@@ -66,7 +64,7 @@ def build_phase2_messages(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
-) -> List[dict]:
+) -> list[dict]:
     """
     构建Phase2消息
 
@@ -91,9 +89,9 @@ def build_validation_sources(
     text: str,
     prev_chunk_text: str | None = None,
     active_entities: str | None = None,
-    alias_map: Dict[str, str] | None = None,
+    alias_map: dict[str, str] | None = None,
     next_chunk_text: str | None = None,
-    character_appearances: List[dict] | None = None,
+    character_appearances: list[dict] | None = None,
 ) -> dict:
     """
     构建验证来源字典
