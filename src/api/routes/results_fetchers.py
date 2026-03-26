@@ -503,13 +503,13 @@ def _fetch_chunk_cultures(run_id: str, chunk_repo: ChunkRepository) -> list:
     修改时间: 2026-03-26
     修改者: TraeAI
     任务: 简化文化指标系统
-    修改内容: 只返回 imagery_density
+    修改内容: 只返回 imagery_lexicon_density
     """
     rows = chunk_repo.fetch_chunk_cultures_full(run_id)
     return [
         ChunkCulture(
             chunk_id=row[0],
-            imagery_density=row[1],
+            imagery_lexicon_density=row[1],
         )
         for row in rows
     ]
