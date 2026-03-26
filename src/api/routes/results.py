@@ -229,9 +229,9 @@ def _fetch_all_results_data(
     if not characters:
         missing_fields.append("characters")
 
-    topics = _fetch_topics(run_id, chunk_repo)
+    topics = _fetch_topics(run_id, chunk_repo, alias_map)
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
     if not diagnosis:
         missing_fields.append("diagnosis")
 
@@ -420,7 +420,9 @@ async def get_diagnosis(
         return None
     try:
         stats_repo = StatsRepository(conn)
-        return _fetch_diagnosis(run_id, novel_id, stats_repo)
+        annotation_repo = AnnotationRepository(conn)
+        alias_map = annotation_repo.fetch_alias_map(run_id)
+        return _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
     finally:
         conn.close()
 
