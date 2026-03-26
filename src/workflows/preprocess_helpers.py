@@ -152,7 +152,7 @@ def _compute_chunk_culture_metrics(
     chunk: Chunk,
     tokens: List[str],
     imagery_terms: List[str],
-) -> Tuple[int, float]:
+) -> Tuple[int, float | None]:
     """
     计算单个chunk的文化指标
 
@@ -164,13 +164,13 @@ def _compute_chunk_culture_metrics(
     修改时间: 2026-03-26
     修改者: TraeAI
     任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度计算，只保留 imagery_density
+    修改内容: 删除低价值词表密度计算，只保留 imagery_lexicon_density
     """
     from src.metrics.style_metrics import imagery_density
 
-    imagery_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else 0.0
+    imagery_lexicon_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else None
 
     return (
         chunk.index,
-        imagery_val,
+        imagery_lexicon_val,
     )

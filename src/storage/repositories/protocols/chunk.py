@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Protocol, Sequence, Tuple, runtime_checkable
+from typing import Any, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 from src.chunking.chunker import Chunk
 
@@ -61,12 +61,12 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_chunk_culture(self, rows: Sequence[Tuple[int, float]]) -> None:
+    def insert_chunk_culture(self, rows: Sequence[Tuple[int, Optional[float]]]) -> None:
         """
         插入分块文化数据
 
         Args:
-            rows: 文化数据行 (chunk_id, imagery_density)
+            rows: 文化数据行 (chunk_id, imagery_lexicon_density)
         """
         ...
 

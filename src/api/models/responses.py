@@ -194,7 +194,7 @@ class CultureStats(BaseModel):
 
 class ChunkCulture(BaseModel):
     chunk_id: int
-    imagery_density: Optional[float] = None
+    imagery_lexicon_density: Optional[float] = None
 
 
 class TopicInfo(BaseModel):

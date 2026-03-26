@@ -143,23 +143,23 @@ def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float | Non
         run_id: 运行ID
 
     Returns:
-        (imagery_density,) 元组列表
+        (imagery_lexicon_density,) 元组列表
 
     修改时间: 2026-03-26
     修改者: TraeAI
     任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度字段，只返回 imagery_density
+    修改内容: 删除低价值词表密度字段，只返回 imagery_lexicon_density
     """
     stmt = (
         select(
-            ChunkCulture.imagery_density,
+            ChunkCulture.imagery_lexicon_density,
         )
         .where(ChunkCulture.run_id == run_id)
         .order_by(ChunkCulture.chunk_id)
     )
 
     result = session.execute(stmt).fetchall()
-    return [(row.imagery_density,) for row in result]
+    return [(row.imagery_lexicon_density,) for row in result]
 
 
 def fetch_emotion_curve_full(session: Session, run_id: str) -> List[Tuple[int, float, float, float, float]]:

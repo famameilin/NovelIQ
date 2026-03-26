@@ -19,7 +19,7 @@
 修改时间: 2026-03-26
 修改者: TraeAI
 任务: 简化文化指标系统
-修改内容: 修复 culture_rows 类型注解，从 7 元组改为 2 元组 (chunk_id, imagery_density)
+修改内容: 修复 culture_rows 类型注解，从 7 元组改为 2 元组 (chunk_id, imagery_lexicon_density)
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def run_preprocess(
     logger.info(f"inserted {total_chunks} chunks into db (run_id={run_id})")
 
     style_rows: List[ChunkStyleData] = []
-    culture_rows: List[Tuple[int, float]] = []
+    culture_rows: List[Tuple[int, float | None]] = []
 
     for idx, chunk in enumerate(all_chunks):
         if total_chunks > 1:

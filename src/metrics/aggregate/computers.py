@@ -18,8 +18,6 @@ Aggregate Metrics 指标计算模块
 """
 
 from __future__ import annotations
-
-import statistics
 from collections import Counter
 from typing import Any, Dict
 
@@ -205,5 +203,5 @@ def compute_traditional_culture_metrics(
     return {
         "idiom_density": compute_idiom_density(texts),
         "classical_sentence_ratio": compute_classical_sentence_ratio(texts),
-        "imagery_density": statistics.mean(culture_data.imagery_densities) if culture_data.imagery_densities else None,
+        "imagery_density": compute_imagery_density(texts),
     }
