@@ -220,40 +220,26 @@ python -m src.api.main --port 8001
 
 #### POST /api/novels/{id}/analyze
 
-启动分析任务。
+启动或继续分析任务。
 
 **请求体** (JSON):
 ```json
 {
-  "task_id": null,
-  "skip_preprocess": false,
-  "skip_annotate": false,
-  "skip_aggregate": false,
-  "skip_topic_model": false,
-  "skip_diagnose": false,
-  "num_topics": 25,
-  "max_chars": 2000,
-  "overlap": 200
+  "task_id": null
 }
 ```
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| task_id | string | null | 指定任务ID，多任务时必须提供 |
-| skip_preprocess | bool | false | 跳过预处理阶段 |
-| skip_annotate | bool | false | 跳过标注阶段 |
-| skip_aggregate | bool | false | 跳过聚合阶段 |
-| skip_topic_model | bool | false | 跳过主题建模 |
-| skip_diagnose | bool | false | 跳过云端诊断 |
-| num_topics | int | 25 | 主题数量 |
-| max_chars | int | 2000 | 每个chunk最大字符数 |
-| overlap | int | 200 | 相邻chunk重叠字符数 |
+| task_id | string | null | 指定任务ID，用于继续失败的任务或多任务时必须提供 |
 
 **响应示例**:
 ```json
 {
   "novel_id": "10960c77",
-  "task_id": "a1b2c3d4"
+  "task_id": "a1b2c3d4",
+  "status": "pending",
+  "message": "分析任务已启动"
 }
 ```
 
@@ -264,7 +250,8 @@ python -m src.api.main --port 8001
 | 任务情况 | 行为 |
 |---------|------|
 | 无任务 | 创建新任务 |
-| 单个任务（任何状态） | 返回该任务 |
+| 单个任务（pending/running） | 返回该任务 |
+| 单个任务（failed） | 重新运行该任务 |
 | 1个running + 其他failed | 返回running任务 |
 | 多个completed | ❌ 报错，要求指定task_id |
 | 多个running | ❌ 报错，要求指定task_id |
