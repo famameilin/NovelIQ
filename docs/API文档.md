@@ -908,7 +908,7 @@ GET /api/novels/10960c77/metrics/culture-stats?task_id=a1b2c3d4
 **新增字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| imagery_density | float | 古典意象词密度（山水、月色、梅兰竹菊等） |
+| imagery_density | float | 整书级古典意象字符密度（按全文字符占比统计，不受 chunk 切分影响） |
 
 ---
 
@@ -974,6 +974,18 @@ log/results/
   }
 }
 ```
+
+其中 `chunk_cultures` 的单项结构为：
+
+```json
+{
+  "chunk_id": 0,
+  "imagery_lexicon_density": 0.18
+}
+```
+
+- `imagery_lexicon_density`：chunk 级意象词表命中密度
+- `aggregate_metrics.culture_stats.imagery_density`：整书级古典意象字符密度
 
 ---
 

@@ -3,11 +3,16 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分protocols.py
 说明: 分块数据协议接口
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: 简化文化指标系统
+修改内容: 修复 insert_chunk_culture 参数类型为 Sequence[Tuple[int, float]]
 """
 
 from __future__ import annotations
 
-from typing import Any, List, Protocol, Sequence, Tuple, runtime_checkable
+from typing import Any, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 from src.chunking.chunker import Chunk
 
@@ -56,12 +61,12 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_chunk_culture(self, rows: Sequence[Tuple[int, float, float, float, float, float, float]]) -> None:
+    def insert_chunk_culture(self, rows: Sequence[Tuple[int, Optional[float]]]) -> None:
         """
         插入分块文化数据
 
         Args:
-            rows: 文化数据行 (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density)
+            rows: 文化数据行 (chunk_id, imagery_lexicon_density)
         """
         ...
 

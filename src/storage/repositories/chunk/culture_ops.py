@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分chunk_repository.py
 说明: 分块文化数据操作
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: 简化文化指标系统
+修改内容: 删除低价值词表密度字段，只保留 imagery_lexicon_density
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from src.storage.models import ChunkCulture
 def insert_chunk_culture(
     session: Session,
     run_id: str,
-    rows: Iterable[Tuple[int, float, float, float, float, float, float]],
+    rows: Iterable[Tuple[int, float | None]],
 ) -> None:
     """
     插入分块文化数据
@@ -26,18 +31,13 @@ def insert_chunk_culture(
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
-        rows: 文化数据行 (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density)
+        rows: 文化数据行 (chunk_id, imagery_lexicon_density)
     """
     session.execute(delete(ChunkCulture).where(ChunkCulture.run_id == run_id))
     culture_rows = [
         {
             "chunk_id": row[0],
-            "confucian_density": row[1],
-            "taoist_density": row[2],
-            "buddhist_density": row[3],
-            "folk_density": row[4],
-            "allusion_density": row[5],
-            "imagery_density": row[6],
+            "imagery_lexicon_density": row[1],
             "run_id": run_id,
         }
         for row in rows
@@ -46,9 +46,7 @@ def insert_chunk_culture(
         session.bulk_insert_mappings(ChunkCulture, culture_rows)  # type: ignore[arg-type]
 
 
-def fetch_chunk_cultures_full(
-    session: Session, run_id: str
-) -> List[Tuple[int, float, float, float, float, float, float]]:
+def fetch_chunk_cultures_full(session: Session, run_id: str) -> List[Tuple[int, float | None]]:
     """
     获取完整的分块文化数据
 
@@ -57,16 +55,11 @@ def fetch_chunk_cultures_full(
         run_id: 运行ID
 
     Returns:
-        (chunk_id, confucian_density, taoist_density, buddhist_density, folk_density, allusion_density, imagery_density) 元组列表
+        (chunk_id, imagery_lexicon_density) 元组列表
     """
     stmt = select(
         ChunkCulture.chunk_id,
-        ChunkCulture.confucian_density,
-        ChunkCulture.taoist_density,
-        ChunkCulture.buddhist_density,
-        ChunkCulture.folk_density,
-        ChunkCulture.allusion_density,
-        ChunkCulture.imagery_density,
+        ChunkCulture.imagery_lexicon_density,
     ).where(ChunkCulture.run_id == run_id)
     result = session.execute(stmt)
     return [tuple(row) for row in result.fetchall()]

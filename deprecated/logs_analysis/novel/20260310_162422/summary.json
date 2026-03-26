@@ -1,0 +1,35 @@
+{
+  "novel_id": "novel",
+  "analysis_id": "20260310_162422",
+  "total_time": 1.7754125595092773,
+  "stages": [
+    {
+      "name": "preprocess",
+      "success": true,
+      "elapsed": 1.6954584121704102,
+      "skipped": false,
+      "error": null
+    },
+    {
+      "name": "annotate",
+      "success": true,
+      "elapsed": 0.0,
+      "skipped": true,
+      "error": null
+    },
+    {
+      "name": "aggregate",
+      "success": true,
+      "elapsed": 0.024434328079223633,
+      "skipped": false,
+      "error": null
+    },
+    {
+      "name": "diagnose",
+      "success": false,
+      "elapsed": 0.0015211105346679688,
+      "skipped": false,
+      "error": "OpenAI.__init__() got an unexpected keyword argument 'timeout_s'"
+    }
+  ]
+}

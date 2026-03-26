@@ -71,13 +71,14 @@ class TextData:
 
 @dataclass
 class CultureData:
-    """文化数据"""
+    """文化数据
 
-    confucian_densities: List[float]
-    taoist_densities: List[float]
-    buddhist_densities: List[float]
-    folk_densities: List[float]
-    allusion_densities: List[float]
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 简化文化指标系统
+    修改内容: 删除低价值词表密度字段，只保留 imagery_densities
+    """
+
     imagery_densities: List[float]
 
 

@@ -306,7 +306,9 @@ def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
     ]
 
 
-def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None) -> list:
+def _fetch_chunk_annotations(
+    run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None
+) -> list:
     """
     获取分块标注数据
 
@@ -387,7 +389,9 @@ def _fetch_chunk_annotations(run_id: str, annotation_repo: AnnotationRepository,
     return result
 
 
-def _fetch_character_relations(run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None) -> list:
+def _fetch_character_relations(
+    run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None
+) -> list:
     """
     获取角色关系数据
 
@@ -435,9 +439,7 @@ def _fetch_character_relations(run_id: str, annotation_repo: AnnotationRepositor
     return list(seen.values())
 
 
-def _fetch_hierarchical_relations(
-    novel_id: str, run_id: str, entity_repo: EntityRepository
-) -> list:
+def _fetch_hierarchical_relations(novel_id: str, run_id: str, entity_repo: EntityRepository) -> list:
     """
     获取层级关系数据（father_of, son_of等）
 
@@ -497,16 +499,17 @@ def _fetch_chunk_cultures(run_id: str, chunk_repo: ChunkRepository) -> list:
     修改者: TraeAI
     任务: refactor-routes-use-repository
     修改内容: 重构为使用 ChunkRepository
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 简化文化指标系统
+    修改内容: 只返回 imagery_lexicon_density
     """
     rows = chunk_repo.fetch_chunk_cultures_full(run_id)
     return [
         ChunkCulture(
             chunk_id=row[0],
-            confucian_density=row[1],
-            taoist_density=row[2],
-            buddhist_density=row[3],
-            folk_density=row[4],
-            allusion_density=row[5],
+            imagery_lexicon_density=row[1],
         )
         for row in rows
     ]

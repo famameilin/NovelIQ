@@ -15,6 +15,11 @@
 修改者: TraeAI
 任务: storage-layer-decoupling
 修改内容: 移除向后兼容代码，只保留 Repository 模式
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: 简化文化指标系统
+修改内容: 修复 culture_rows 类型注解，从 7 元组改为 2 元组 (chunk_id, imagery_lexicon_density)
 """
 
 from __future__ import annotations
@@ -111,7 +116,7 @@ def run_preprocess(
     logger.info(f"inserted {total_chunks} chunks into db (run_id={run_id})")
 
     style_rows: List[ChunkStyleData] = []
-    culture_rows: List[Tuple[int, float, float, float, float, float, float]] = []
+    culture_rows: List[Tuple[int, float | None]] = []
 
     for idx, chunk in enumerate(all_chunks):
         if total_chunks > 1:
@@ -130,7 +135,6 @@ def run_preprocess(
         culture_data = _compute_chunk_culture_metrics(
             chunk,
             tokens,
-            cast(Dict, lexicons.get("culture", {})),
             cast(List[str], lexicons.get("imagery", [])),
         )
         culture_rows.append(culture_data)

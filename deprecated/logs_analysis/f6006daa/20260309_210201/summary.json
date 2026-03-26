@@ -1,0 +1,8 @@
+{
+  "novel_id": "f6006daa",
+  "analysis_id": "20260309_210201",
+  "task_id": "b4b81b83",
+  "total_time": 20.97031331062317,
+  "status": "failed",
+  "error": "UNIQUE constraint failed: chunks.chunk_id"
+}

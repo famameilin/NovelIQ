@@ -1,0 +1,35 @@
+{
+  "novel_id": "novel",
+  "analysis_id": "20260309_170114",
+  "total_time": 0.12555193901062012,
+  "stages": [
+    {
+      "name": "preprocess",
+      "success": true,
+      "elapsed": 0.022580385208129883,
+      "skipped": false,
+      "error": null
+    },
+    {
+      "name": "annotate",
+      "success": true,
+      "elapsed": 0.0,
+      "skipped": true,
+      "error": null
+    },
+    {
+      "name": "aggregate",
+      "success": true,
+      "elapsed": 0.027204036712646484,
+      "skipped": false,
+      "error": null
+    },
+    {
+      "name": "diagnose",
+      "success": true,
+      "elapsed": 0.020041942596435547,
+      "skipped": false,
+      "error": null
+    }
+  ]
+}
