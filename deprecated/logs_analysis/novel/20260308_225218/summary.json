@@ -1,0 +1,21 @@
+{
+  "novel_id": "novel",
+  "analysis_id": "20260308_225218",
+  "total_time": 0.04929184913635254,
+  "stages": [
+    {
+      "name": "preprocess",
+      "success": true,
+      "elapsed": 0.0,
+      "skipped": true,
+      "error": null
+    },
+    {
+      "name": "annotate",
+      "success": false,
+      "elapsed": 0.0020132064819335938,
+      "skipped": false,
+      "error": "annotate requires chunks data. Run preprocess first."
+    }
+  ]
+}
