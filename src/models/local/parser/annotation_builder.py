@@ -59,6 +59,48 @@ def make_empty_annotation() -> ChunkAnnotation:
     )
 
 
+_ROLE_FUNCTION_PRIORITY = {
+    "主体": 6,
+    "客体": 5,
+    "帮助者": 4,
+    "反对者": 3,
+    "发送者": 2,
+    "接收者": 1,
+    "其他": 0,
+}
+
+
+def _deduplicate_characters(characters: list[CharacterSnapshot]) -> list[CharacterSnapshot]:
+    """
+    角色去重：同一人物只保留一条记录
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: fix-duplicate-characters-in-chunk
+    说明: 当同一人物出现多次时，按角色功能优先级选择保留哪条记录
+
+    去重规则：
+    1. 按角色功能优先级选择：主体 > 客体 > 帮助者 > 反对者 > 发送者 > 接收者
+    2. 优先级相同时，保留第一条记录
+    """
+    if not characters:
+        return characters
+
+    seen: dict[str, CharacterSnapshot] = {}
+    for char in characters:
+        if not char.name:
+            continue
+        if char.name not in seen:
+            seen[char.name] = char
+        else:
+            existing_priority = _ROLE_FUNCTION_PRIORITY.get(seen[char.name].role_function, 0)
+            current_priority = _ROLE_FUNCTION_PRIORITY.get(char.role_function, 0)
+            if current_priority > existing_priority:
+                seen[char.name] = char
+
+    return list(seen.values())
+
+
 def _parse_characters(data: dict[str, Any]) -> list[CharacterSnapshot]:
     """
     解析角色快照列表
@@ -66,6 +108,11 @@ def _parse_characters(data: dict[str, Any]) -> list[CharacterSnapshot]:
     创建时间: 2026-03-17
     创建者: TraeAI
     任务: code-quality-refactor - 提取build_annotation中的字符处理逻辑
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-duplicate-characters-in-chunk
+    修改内容: 添加去重逻辑，同一人物只保留一条记录
     """
     characters = []
     for c in data.get("characters", []):
@@ -93,7 +140,7 @@ def _parse_characters(data: dict[str, Any]) -> list[CharacterSnapshot]:
                 emotion_score=emotion_score,
             )
         )
-    return characters
+    return _deduplicate_characters(characters)
 
 
 def _parse_relations(data: dict[str, Any]) -> list[RelationChangeSnapshot]:
