@@ -148,17 +148,18 @@ def save_disambiguation_interaction(
         prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
 
         # 构建响应内容
-        if hasattr(result, 'alias_map'):
+        if hasattr(result, 'merge_target_map'):
             # ExtendedDisambigResult
             response_dict = {
-                "alias_map": result.alias_map,
+                "merge_target_map": result.merge_target_map,
+                "common_name_map": result.common_name_map if hasattr(result, 'common_name_map') else {},
                 "entity_types": result.entity_types if hasattr(result, 'entity_types') else {},
                 "entity_relations": result.entity_relations if hasattr(result, 'entity_relations') else [],
             }
         elif isinstance(result, dict):
-            response_dict = {"alias_map": result, "entity_types": {}, "entity_relations": []}
+            response_dict = {"merge_target_map": result, "common_name_map": {}, "entity_types": {}, "entity_relations": []}
         else:
-            response_dict = {"alias_map": {}, "entity_types": {}, "entity_relations": []}
+            response_dict = {"merge_target_map": {}, "common_name_map": {}, "entity_types": {}, "entity_relations": []}
         response_text = json.dumps(response_dict, ensure_ascii=False)
 
         is_cloud = client.is_cloud_api() if hasattr(client, 'is_cloud_api') else False

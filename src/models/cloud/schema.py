@@ -19,7 +19,7 @@ class DisambiguationAliasMap(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    alias_map: Dict[str, str] = Field(
+    merge_target_map: Dict[str, str] = Field(
         default_factory=dict,
         description="人名到规范名的映射，key 为候选人名，value 为规范名",
     )
