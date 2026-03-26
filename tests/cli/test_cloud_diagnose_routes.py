@@ -78,7 +78,6 @@ class TestCloudDiagnose:
                 question_density=0.0,
                 sensory_density=0.0,
                 metaphor_density=0.0,
-                cultural_density=0.0,
                 function_word_vector="{}",
                 category_density_combat=0.0,
                 category_density_body=0.0,

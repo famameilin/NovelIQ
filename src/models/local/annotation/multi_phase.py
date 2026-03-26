@@ -336,7 +336,7 @@ def annotate_chunk_serial(
     if extracted_dialogues:
         logger.debug("annotate_chunk_serial: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
         known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-        speaker_lengths, attribution, dialogues, tones = compute_dialogue_lengths_with_llm(
+        result_tuple = compute_dialogue_lengths_with_llm(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -345,6 +345,10 @@ def annotate_chunk_serial(
             known_characters=known_characters,
             return_tones=True,
         )
+        speaker_lengths = result_tuple[0]
+        attribution = result_tuple[1]
+        dialogues = result_tuple[2]
+        tones = result_tuple[3] if len(result_tuple) > 3 else None
         dialogue_lengths = speaker_lengths
         dialogue_speakers = attribution
         dialogue_tones = tones

@@ -116,7 +116,9 @@ class ForeshadowingResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    has_foreshadowing: bool
+    has_foreshadowing: bool = Field(
+        description="当前文本块是否存在伏笔元素。这是单个 chunk 的存在性判断，不表示全书伏笔兑现程度。"
+    )
     foreshadowing_type: str | None = None
     anchor_text: str = ""
     anchor_reason: str = ""
@@ -303,7 +305,9 @@ class ChunkAnnotation(BaseModel):
     event_type: str
     pivot_moment: bool
     cliffhanger: bool
-    has_foreshadowing: bool
+    has_foreshadowing: bool = Field(
+        description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
+    )
     foreshadowing_type: str | None = None
     foreshadowing_desc: str = ""
     characters: list[CharacterSnapshot] = Field(default_factory=list)

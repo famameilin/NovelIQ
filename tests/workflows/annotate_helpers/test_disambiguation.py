@@ -68,7 +68,13 @@ def test_run_final_disambiguation_uses_alias_map_values_and_only_unresolved_cand
         patch.object(
             disambig_mod,
             "fetch_all_character_names",
-            return_value=["masked_person", "bai_zhi", "monkey", "hou_fei_bai", "lin_li_guo"],
+            return_value=[
+                {"name": "masked_person", "count": 3},
+                {"name": "bai_zhi", "count": 5},
+                {"name": "monkey", "count": 2},
+                {"name": "hou_fei_bai", "count": 4},
+                {"name": "lin_li_guo", "count": 1},
+            ],
         ),
         patch.object(disambig_mod, "build_context_sentences", return_value={}),
         patch.object(disambig_mod, "_retry_disambig", side_effect=_fake_retry),
@@ -85,7 +91,7 @@ def test_run_final_disambiguation_uses_alias_map_values_and_only_unresolved_cand
         )
 
     assert set(captured["existing_names"]) == {"bai_zhi", "hou_fei_bai"}
-    assert captured["candidates"] == ["lin_li_guo"]
+    assert captured["candidates"] == [{"name": "lin_li_guo", "count": 1}]
 
 
 def test_run_final_disambiguation_skips_model_call_when_no_unresolved_candidates() -> None:
@@ -107,7 +113,16 @@ def test_run_final_disambiguation_skips_model_call_when_no_unresolved_candidates
     with (
         patch.object(disambig_mod, "_load_disambig_checkpoint", return_value=(None, None)),
         patch.object(disambig_mod, "_load_disambig_states", return_value=None),
-        patch.object(disambig_mod, "fetch_all_character_names", return_value=["masked_person", "bai_zhi", "monkey", "hou_fei_bai"]),
+        patch.object(
+            disambig_mod,
+            "fetch_all_character_names",
+            return_value=[
+                {"name": "masked_person", "count": 3},
+                {"name": "bai_zhi", "count": 5},
+                {"name": "monkey", "count": 2},
+                {"name": "hou_fei_bai", "count": 4},
+            ],
+        ),
         patch.object(disambig_mod, "_retry_disambig", retry_mock),
         patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(disambig_mod, "_save_disambig_checkpoint", return_value=None),
@@ -229,7 +244,14 @@ def test_run_final_disambiguation_passes_common_name_display_map_to_repository()
     with (
         patch.object(disambig_mod, "_load_disambig_checkpoint", return_value=(None, None)),
         patch.object(disambig_mod, "_load_disambig_states", return_value=None),
-        patch.object(disambig_mod, "fetch_all_character_names", return_value=["伯安", "贺伯安"]),
+        patch.object(
+            disambig_mod,
+            "fetch_all_character_names",
+            return_value=[
+                {"name": "伯安", "count": 7},
+                {"name": "贺伯安", "count": 3},
+            ],
+        ),
         patch.object(disambig_mod, "build_context_sentences", return_value={}),
         patch.object(disambig_mod, "_retry_disambig", side_effect=_fake_retry),
         patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),
@@ -276,7 +298,14 @@ def test_run_final_disambiguation_does_not_promote_common_name_for_review_candid
     with (
         patch.object(disambig_mod, "_load_disambig_checkpoint", return_value=(None, None)),
         patch.object(disambig_mod, "_load_disambig_states", return_value=state_snapshot),
-        patch.object(disambig_mod, "fetch_all_character_names", return_value=["伯安", "贺伯安"]),
+        patch.object(
+            disambig_mod,
+            "fetch_all_character_names",
+            return_value=[
+                {"name": "伯安", "count": 7},
+                {"name": "贺伯安", "count": 3},
+            ],
+        ),
         patch.object(disambig_mod, "build_context_sentences", return_value={}),
         patch.object(disambig_mod, "_retry_disambig", side_effect=_fake_retry),
         patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),

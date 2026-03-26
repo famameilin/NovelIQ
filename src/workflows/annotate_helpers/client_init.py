@@ -23,6 +23,7 @@ from src.config import TaskModelConfig, TaskType, settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
+from src.models.disambiguation_types import NameCountCandidate
 from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.local.disambiguation import ExtendedDisambigResult
 
@@ -45,7 +46,7 @@ class _NoopDisambiguationClient:
 
     def disambiguate_characters(
         self,
-        candidates: list[str] | list[dict[str, int]],
+        candidates: list[str] | list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
         rag_hint: str | None = None,
@@ -103,7 +104,10 @@ def _init_annotation_clients(
     full_disambig_client: DisambiguationLike | None = None,
 ) -> tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端"""
-    annotation_client = annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger)
+    annotation_client = cast(
+        AnnotationLike,
+        annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger),
+    )
 
     cloud_annotation_client: AnnotationLike | None = None
     cloud_fallback_enabled = settings.analysis.cloud_annotation_fallback_enabled

@@ -94,7 +94,7 @@ class TestAnnotate:
 
     def _create_chunks(self, chunk_count: int) -> None:
         chunk_repo = ChunkRepository(self.db_session)
-        chunks = [Chunk(index=i, start=0, end=10, text=f"寮犱笁鍦ㄦ祴璇曟枃鏈瑊i}涓鍔?) for i in range(chunk_count)]
+        chunks = [Chunk(index=i, start=0, end=10, text=f"测试文本{i}") for i in range(chunk_count)]
         chunk_repo.insert_chunks(self.run_id, chunks)
 
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
@@ -210,7 +210,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            merge_target_map={"寮犱笁涓?: "寮犱笁"},
+            merge_target_map={"张三三": "张三"},
             entity_types={},
             entity_relations=[]
         )
@@ -227,7 +227,7 @@ class TestAnnotate:
         assert success == 2
 
         self.db_session.execute(
-            text("INSERT INTO chunk_characters (chunk_id, name, role_function, action, action_type, emotion_score, run_id) VALUES (1, '寮犱笁涓?, '鍏朵粬', 'test', '鍏朵粬', 'neutral', :run_id)"),
+            text("INSERT INTO chunk_characters (chunk_id, name, role_function, action, action_type, emotion_score, run_id) VALUES (1, '张三三', '其他', 'test', '其他', 'neutral', :run_id)"),
             {"run_id": self.run_id},
         )
         self.db_session.commit()

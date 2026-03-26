@@ -28,6 +28,7 @@ import re
 from typing import cast
 
 from src.config import settings
+from src.models.disambiguation_types import NameCountCandidate
 
 from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
 
@@ -180,7 +181,7 @@ def _build_dynamic_system_prompt() -> str:
 
 
 def build_disambiguate_messages(
-    candidates: list[str] | list[dict[str, int]],
+    candidates: list[str] | list[NameCountCandidate],
     context_sentences: dict[str, str] | None = None,
     existing_names: list[str] | None = None,
     rag_hint: str | None = None,
@@ -210,7 +211,7 @@ def build_disambiguate_messages(
     lines = []
 
     if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[dict[str, int]], candidates)
+        dict_candidates = cast(list[NameCountCandidate], candidates)
         for item in dict_candidates:
             name = str(item["name"])
             count = item.get("count", 0)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.annotation import MultiPhaseAnnotationResult
 from src.models.local.disambiguation import ExtendedDisambigResult
 
@@ -66,7 +67,7 @@ class DisambiguationLike(Protocol):
 
     def disambiguate_characters(
         self,
-        candidates: list[str] | list[dict[str, int]],
+        candidates: list[str] | list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
         rag_hint: str | None = None,
