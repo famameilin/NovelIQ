@@ -182,10 +182,28 @@ def test_build_display_name_map_promotes_common_name_for_merged_cluster() -> Non
     display_name_map = disambig_mod._build_display_name_map(
         alias_map={"伯安": "伯安", "贺伯安": "伯安"},
         common_name_map={"贺伯安": "贺伯安"},
+        state_snapshot={
+            "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
+            "贺伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
+        },
     )
 
     assert display_name_map["伯安"] == "贺伯安"
     assert display_name_map["贺伯安"] == "贺伯安"
+
+
+def test_build_display_name_map_skips_common_name_for_non_high_confidence_alias() -> None:
+    display_name_map = disambig_mod._build_display_name_map(
+        alias_map={"伯安": "伯安", "贺伯安": "伯安"},
+        common_name_map={"贺伯安": "贺伯安"},
+        state_snapshot={
+            "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
+            "贺伯安": {"state": "review", "confidence": "medium", "canonical": "伯安"},
+        },
+    )
+
+    assert display_name_map["伯安"] == "伯安"
+    assert display_name_map["贺伯安"] == "伯安"
 
 
 def test_run_final_disambiguation_passes_common_name_display_map_to_repository() -> None:
@@ -228,6 +246,53 @@ def test_run_final_disambiguation_passes_common_name_display_map_to_repository()
 
     assert captured["alias_map"] == {"伯安": "伯安", "贺伯安": "伯安"}
     assert captured["display_name_map"] == {"伯安": "贺伯安", "贺伯安": "贺伯安"}
+
+
+def test_run_final_disambiguation_does_not_promote_common_name_for_review_candidate() -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_retry(client, candidates, context_sentences, existing_names, stage_name, run_id=None):
+        return ExtendedDisambigResult(
+            merge_target_map={"贺伯安": "伯安"},
+            entity_types={},
+            entity_relations=[],
+            common_name_map={"贺伯安": "贺伯安"},
+            alias_confidence={"贺伯安": "medium"},
+        )
+
+    class _DummyAnnRepo:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def update_character_names(self, run_id, alias_map, novel_id=None, display_name_map=None):
+            captured["alias_map"] = dict(alias_map)
+            captured["display_name_map"] = dict(display_name_map or {})
+
+    state_snapshot = {
+        "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
+        "贺伯安": {"state": "review", "confidence": "medium", "canonical": "伯安"},
+    }
+
+    with (
+        patch.object(disambig_mod, "_load_disambig_checkpoint", return_value=(None, None)),
+        patch.object(disambig_mod, "_load_disambig_states", return_value=state_snapshot),
+        patch.object(disambig_mod, "fetch_all_character_names", return_value=["伯安", "贺伯安"]),
+        patch.object(disambig_mod, "build_context_sentences", return_value={}),
+        patch.object(disambig_mod, "_retry_disambig", side_effect=_fake_retry),
+        patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),
+        patch.object(disambig_mod, "_save_disambig_checkpoint", return_value=None),
+    ):
+        disambig_mod._run_final_disambiguation(
+            conn=None,
+            alias_map={"伯安": "伯安", "贺伯安": "伯安"},
+            full_disambig_client=MagicMock(),
+            alias_keywords=["alias", "name"],
+            novel_id="novel-1",
+            run_id="run-1",
+        )
+
+    assert captured["alias_map"] == {"伯安": "伯安", "贺伯安": "伯安"}
+    assert captured["display_name_map"] == {"伯安": "伯安", "贺伯安": "伯安"}
 
 
 def test_extract_new_names_from_db_uses_combined_character_sources() -> None:

@@ -10,6 +10,11 @@
 修改者: TraeAI
 任务: entity-type-relation-extraction
 修改内容: 新增 ExtendedDisambigResult 数据类和 build_extended_result_from_response 函数
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: disambiguation-evidence-grading
+修改内容: 添加 evidence_sources 字段，支持证据来源追踪
 """
 
 from __future__ import annotations
@@ -34,6 +39,11 @@ class ExtendedDisambigResult:
     修改者: TraeAI
     任务: fix/disambig-thinking-save
     修改内容: 添加 _thinking_content 字段保存 thinking 内容
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: disambiguation-evidence-grading
+    修改内容: 添加 evidence_sources 字段，支持证据来源追踪
     """
 
     merge_target_map: Dict[str, str]
@@ -41,6 +51,7 @@ class ExtendedDisambigResult:
     entity_relations: List[Dict[str, str]]
     common_name_map: Dict[str, str] = field(default_factory=dict)
     alias_confidence: Dict[str, str] = field(default_factory=dict)
+    evidence_sources: Dict[str, List[str]] = field(default_factory=dict)
     _thinking_content: str | None = None
 
 
@@ -120,6 +131,11 @@ def build_extended_result_from_response(
     修改者: TraeAI
     任务: fix/disambig-thinking-save
     修改内容: 复制 _thinking_content 到 ExtendedDisambigResult
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: disambiguation-evidence-grading
+    修改内容: 提取 evidence_sources 字段
     """
     alias_map = build_result_from_response(response_data, candidates)
     common_name_map = build_common_name_map_from_response(response_data, candidates)
@@ -136,17 +152,26 @@ def build_extended_result_from_response(
     for name in name_list:
         alias_confidence[name] = str(response_data.alias_confidence.get(name, "medium"))
 
+    evidence_sources: Dict[str, List[str]] = {}
+    for name in name_list:
+        sources = response_data.evidence_sources.get(name, [])
+        evidence_sources[name] = list(sources) if sources else ["原文例句"]
+
     entity_types = dict(response_data.entity_types)
 
     entity_relations: List[Dict[str, str]] = []
     for rel in response_data.entity_relations:
-        entity_relations.append({
-            "from": rel.from_entity,
-            "to": rel.to_entity,
-            "type": rel.type,
-        })
+        entity_relations.append(
+            {
+                "from": rel.from_entity,
+                "to": rel.to_entity,
+                "type": rel.type,
+            }
+        )
 
-    thinking_content = getattr(response_data, "_thinking_content", None) or getattr(response_data, "thinking_content", None)
+    thinking_content = getattr(response_data, "_thinking_content", None) or getattr(
+        response_data, "thinking_content", None
+    )
 
     return ExtendedDisambigResult(
         merge_target_map=alias_map,
@@ -154,5 +179,6 @@ def build_extended_result_from_response(
         entity_relations=entity_relations,
         common_name_map=common_name_map,
         alias_confidence=alias_confidence,
+        evidence_sources=evidence_sources,
         _thinking_content=thinking_content,
     )

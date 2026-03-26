@@ -16,6 +16,11 @@
 任务: fix-hardcoded-relation-types
 修改内容: 移除硬编码的 VALID_HIERARCHICAL_RELATION_TYPES，改为从配置动态读取
 
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: disambiguation-evidence-grading
+修改内容: 添加置信度校验逻辑，根据证据来源约束置信度输出
+
 说明: 本模块包含人名消歧相关的辅助函数。
 """
 
@@ -50,6 +55,55 @@ DISAMBIG_STATE_RESOLVED = "resolved"
 DISAMBIG_STATE_REVIEW = "review"
 DISAMBIG_STATE_UNRESOLVED = "unresolved"
 
+STRONG_EVIDENCE_TYPES = {"原文例句", "身份线索"}
+WEAK_EVIDENCE_TYPE = "前文摘要-弱证据"
+
+
+def validate_confidence_with_evidence(
+    result: ExtendedDisambigResult,
+    existing_names: list[str] | None = None,
+) -> ExtendedDisambigResult:
+    """
+    根据证据来源校验置信度
+
+    创建时间: 2026-03-26
+    创建者: TraeAI
+    任务: disambiguation-evidence-grading
+    说明: 实现证据分级约束规则
+
+    规则：
+    1. 仅【前文摘要-弱证据】支持的判断，alias_confidence 最高为 medium
+    2. 若 merge_target_map 指向已有角色，但证据唯一来源是弱证据，禁止合并
+
+    Args:
+        result: 消歧结果
+        existing_names: 已存在的角色名列表
+
+    Returns:
+        校验后的消歧结果
+    """
+    existing_set = set(existing_names) if existing_names else set()
+
+    for name, canonical in result.merge_target_map.items():
+        evidence_types = set(result.evidence_sources.get(name, []))
+        has_strong_evidence = bool(evidence_types & STRONG_EVIDENCE_TYPES)
+        only_weak_evidence = evidence_types == {WEAK_EVIDENCE_TYPE} or (evidence_types and not has_strong_evidence)
+
+        current_confidence = result.alias_confidence.get(name, DISAMBIG_CONFIDENCE_MEDIUM)
+
+        if only_weak_evidence and current_confidence == DISAMBIG_CONFIDENCE_HIGH:
+            logger.debug(f"Downgrading confidence for '{name}' from high to medium due to weak evidence only")
+            result.alias_confidence[name] = DISAMBIG_CONFIDENCE_MEDIUM
+
+        is_merging_to_existing = canonical in existing_set and canonical != name
+        if is_merging_to_existing and only_weak_evidence:
+            logger.info(f"Preventing merge of '{name}' to existing character '{canonical}' due to weak evidence only")
+            result.merge_target_map[name] = name
+            result.alias_confidence[name] = DISAMBIG_CONFIDENCE_MEDIUM
+
+    return result
+
+
 DisambigStateSnapshot = dict[str, dict[str, str]]
 
 
@@ -62,6 +116,7 @@ class DisambiguationMaxRetriesExceededError(Exception):
     任务: 修复导入错误
     说明: 从 phase.py 移动到 disambiguation.py，与消歧逻辑放在一起
     """
+
     pass
 
 
@@ -115,6 +170,7 @@ def _merge_relations(
 ) -> list[dict[str, str]]:
     """合并两批关系并去重。"""
     return _dedupe_relations((first or []) + (second or []))
+
 
 def _extract_retryable_relations(skipped_relations: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     """Extract retryable relations from skipped results for checkpoint recovery."""
@@ -200,7 +256,9 @@ def _load_disambig_checkpoint(conn, run_id: str) -> tuple[dict[str, str] | None,
         if result:
             alias_map = json.loads(result[0]) if result[0] else {}
             entity_relations = json.loads(result[1]) if result[1] else None
-            logger.info(f"disambig checkpoint loaded: {len(alias_map)} entries, relations={len(entity_relations) if entity_relations else 0}")
+            logger.info(
+                f"disambig checkpoint loaded: {len(alias_map)} entries, relations={len(entity_relations) if entity_relations else 0}"
+            )
             return alias_map, entity_relations
     except Exception as e:
         logger.warning(f"failed to load disambig checkpoint: {e}")
@@ -284,8 +342,8 @@ def _save_disambiguation_interaction(
                     "merge_target_map": result.merge_target_map,
                     "common_name_map": result.common_name_map if hasattr(result, "common_name_map") else {},
                     "alias_confidence": result.alias_confidence if hasattr(result, "alias_confidence") else {},
-                    "entity_types": result.entity_types if hasattr(result, 'entity_types') else {},
-                    "entity_relations": result.entity_relations if hasattr(result, 'entity_relations') else [],
+                    "entity_types": result.entity_types if hasattr(result, "entity_types") else {},
+                    "entity_relations": result.entity_relations if hasattr(result, "entity_relations") else [],
                 }
             elif isinstance(result, dict):
                 response_dict = {
@@ -539,6 +597,7 @@ def _build_alias_and_state_updates(
 def _build_display_name_map(
     alias_map: dict[str, str],
     common_name_map: dict[str, str] | None,
+    state_snapshot: DisambigStateSnapshot | None = None,
 ) -> dict[str, str]:
     """Build a cluster-level display-name map from merge targets and common names."""
     if not alias_map:
@@ -553,15 +612,19 @@ def _build_display_name_map(
     for name, display_name in (common_name_map or {}).items():
         if not display_name:
             continue
+        if state_snapshot:
+            state = state_snapshot.get(name, {})
+            if (
+                state.get("state") != DISAMBIG_STATE_RESOLVED
+                or state.get("confidence") != DISAMBIG_CONFIDENCE_HIGH
+            ):
+                continue
         merge_target = alias_map.get(name, name)
         if merge_target == display_name and merge_target in display_by_cluster:
             continue
         display_by_cluster[merge_target] = display_name
 
-    return {
-        name: display_by_cluster.get(alias_map.get(name, name), alias_map.get(name, name))
-        for name in all_names
-    }
+    return {name: display_by_cluster.get(alias_map.get(name, name), alias_map.get(name, name)) for name in all_names}
 
 
 def _extract_names_from_candidates(candidates: list[str] | list[dict[str, int]]) -> list[str]:
@@ -673,6 +736,8 @@ def _run_incremental_disambiguation(
         run_id=run_id,
     )
 
+    result = validate_confidence_with_evidence(result, existing_names)
+
     previous_alias_map = dict(alias_map)
     state_snapshot = _load_disambig_states(conn, run_id)
     alias_updates, merged_state_snapshot = _build_alias_and_state_updates(result, alias_map, state_snapshot)
@@ -751,6 +816,7 @@ def _run_final_disambiguation(
             stage_name="final disambiguation",
             run_id=run_id,
         )
+        result = validate_confidence_with_evidence(result, existing_names)
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(
@@ -768,7 +834,7 @@ def _run_final_disambiguation(
     if alias_map != previous_alias_map:
         logger.info(f"final disambiguation completed: {len(alias_map)} entries")
 
-    display_name_map = _build_display_name_map(alias_map, result.common_name_map)
+    display_name_map = _build_display_name_map(alias_map, result.common_name_map, state_snapshot)
 
     # 1. 先创建实体
     if alias_map:
@@ -932,35 +998,43 @@ def _process_entity_relations(
         to_name = alias_map.get(raw_to_name, raw_to_name) if raw_to_name else None
 
         if not from_name or not to_name or not rel_type:
-            skipped_relations.append({
-                "relation": rel,
-                "reason": "missing_fields",
-            })
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "missing_fields",
+                }
+            )
             continue
 
         if rel_type not in valid_relation_types:
             logger.warning(f"无效的关系类型: {rel_type}, 跳过关系 {rel}")
-            skipped_relations.append({
-                "relation": rel,
-                "reason": "invalid_relation_type",
-            })
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "invalid_relation_type",
+                }
+            )
             continue
 
         from_entity_id = entity_repo.get_entity_id_by_name(novel_id, from_name, run_id)
         to_entity_id = entity_repo.get_entity_id_by_name(novel_id, to_name, run_id)
 
         if from_entity_id is None:
-            skipped_relations.append({
-                "relation": rel,
-                "reason": "from_entity_not_found",
-            })
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "from_entity_not_found",
+                }
+            )
             continue
 
         if to_entity_id is None:
-            skipped_relations.append({
-                "relation": rel,
-                "reason": "to_entity_not_found",
-            })
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "to_entity_not_found",
+                }
+            )
             continue
 
         try:
@@ -975,10 +1049,12 @@ def _process_entity_relations(
             success_count += 1
         except Exception as e:
             logger.error(f"插入关系失败: {rel}, 错误: {e}")
-            skipped_relations.append({
-                "relation": rel,
-                "reason": f"insert_error: {str(e)}",
-            })
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": f"insert_error: {str(e)}",
+                }
+            )
 
     if skipped_relations:
         logger.warning(
@@ -987,4 +1063,3 @@ def _process_entity_relations(
         )
 
     return success_count, skipped_relations
-
