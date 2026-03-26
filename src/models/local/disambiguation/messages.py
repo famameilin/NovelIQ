@@ -15,14 +15,73 @@
 修改者: TraeAI
 任务: prompt-consolidation
 修改内容: 使用占位符替换动态构建 prompt
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: disambiguation-evidence-grading
+修改内容: 添加证据来源标注功能，区分原文例句、身份线索、前文摘要
 """
 
 from __future__ import annotations
 
+import re
 from typing import Dict, List, cast
 
 from src.config import settings
 from ..prompts import DISAMBIGUATE_SYSTEM_PROMPT, ANONYMOUS_DISAMBIG_SYSTEM_PROMPT
+
+
+_EVIDENCE_MARKERS = {
+    "前文总结": "前文摘要-弱证据",
+    "自报身份": "身份线索",
+    "身份提示": "身份线索",
+    "被点名": "身份线索",
+    "外貌描述": "身份线索",
+}
+
+_EVIDENCE_MARKER_PATTERN = re.compile(r"【(前文总结|自报身份|身份提示|被点名|外貌描述)】")
+
+
+def _extract_evidence_types_from_context(context: str) -> List[str]:
+    """
+    从上下文字符串中提取证据类型
+
+    创建时间: 2026-03-26
+    创建者: TraeAI
+    任务: disambiguation-evidence-grading
+    说明: 解析上下文中的证据标记，返回证据类型列表
+
+    Args:
+        context: 上下文字符串，可能包含【前文总结】【身份提示】等标记
+
+    Returns:
+        证据类型列表，如 ["原文例句", "身份线索"]
+    """
+    evidence_types: List[str] = []
+
+    matches = _EVIDENCE_MARKER_PATTERN.findall(context)
+    for match in matches:
+        evidence_type = _EVIDENCE_MARKERS.get(match)
+        if evidence_type and evidence_type not in evidence_types:
+            evidence_types.append(evidence_type)
+
+    if context and not evidence_types:
+        evidence_types.append("原文例句")
+
+    return evidence_types
+
+
+def _format_evidence_annotation(evidence_types: List[str]) -> str:
+    """
+    格式化证据来源标注
+
+    创建时间: 2026-03-26
+    创建者: TraeAI
+    任务: disambiguation-evidence-grading
+    """
+    if not evidence_types:
+        return ""
+    return "【证据来源：" + "、".join(evidence_types) + "】"
 
 
 _RELATION_TYPE_DESCRIPTIONS: Dict[str, str] = {
@@ -115,6 +174,11 @@ def build_disambiguate_messages(
     创建者: TraeAI
     任务: fix-hardcoded-relation-types
     修改内容: 使用动态生成的系统 prompt，包含配置中的关系类型
+
+    修改时间: 2026-03-26
+    创建者: TraeAI
+    任务: disambiguation-evidence-grading
+    修改内容: 添加证据来源标注，区分原文例句、身份线索、前文摘要
     """
     lines = []
 
@@ -124,16 +188,20 @@ def build_disambiguate_messages(
             name = str(item["name"])
             count = item.get("count", 0)
             ctx = context_sentences.get(name, "") if context_sentences else ""
+            evidence_types = _extract_evidence_types_from_context(ctx)
+            evidence_annotation = _format_evidence_annotation(evidence_types)
             if ctx:
-                lines.append(f"- {name}（次数：{count}，参考：{ctx}）")
+                lines.append(f"- {name}（次数：{count}，{evidence_annotation}，参考：{ctx}）")
             else:
                 lines.append(f"- {name}（次数：{count}）")
     else:
         str_candidates = cast(List[str], candidates)
         for name in str_candidates:
             ctx = context_sentences.get(name, "") if context_sentences else ""
+            evidence_types = _extract_evidence_types_from_context(ctx)
+            evidence_annotation = _format_evidence_annotation(evidence_types)
             if ctx:
-                lines.append(f"- {name}（参考：{ctx}）")
+                lines.append(f"- {name}（{evidence_annotation}，参考：{ctx}）")
             else:
                 lines.append(f"- {name}")
 
@@ -144,6 +212,11 @@ def build_disambiguate_messages(
         "\n\n【置信度输出要求】请在 JSON 中额外输出 alias_confidence 字段，"
         "key 为候选名字，value 仅允许 low|medium|high。"
         "high 表示证据充分，medium 表示倾向但证据不足，low 表示无法确认。"
+    )
+    system_prompt += (
+        "\n\n【证据来源输出要求】请在 JSON 中额外输出 evidence_sources 字段，"
+        'key 为候选名字，value 为证据来源列表（如 ["原文例句", "身份线索"]）。'
+        "请根据候选人名列表中标注的证据来源填写。"
     )
     if existing_names:
         anchor_str = "、".join(existing_names)
