@@ -60,6 +60,6 @@ def fetch_chunk_cultures_full(session: Session, run_id: str) -> List[Tuple[int, 
     stmt = select(
         ChunkCulture.chunk_id,
         ChunkCulture.imagery_lexicon_density,
-    ).where(ChunkCulture.run_id == run_id)
+    ).where(ChunkCulture.run_id == run_id).order_by(ChunkCulture.chunk_id)
     result = session.execute(stmt)
     return [tuple(row) for row in result.fetchall()]
