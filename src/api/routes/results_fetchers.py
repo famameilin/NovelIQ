@@ -286,21 +286,26 @@ def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
     修改者: TraeAI
     任务: refactor-routes-use-repository
     修改内容: 重构为使用 ChunkRepository
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: fix-pause-density-d-value-equality
+    修改内容: 使用字段名访问替代数字索引，避免索引错位问题
     """
     rows = chunk_repo.fetch_chunk_styles_full(run_id)
     return [
         ChunkStyle(
-            chunk_id=row[0],
-            mtld=row[1],
-            ttr=row[2],
-            avg_sent_len=row[3],
-            d_value=row[4],
-            pause_density=row[5],
-            fight_density=row[6],
-            dialogue_ratio=row[7],
-            sensory_density=row[8],
-            metaphor_density=row[9],
-            cultural_density=row[10],
+            chunk_id=row.chunk_id,
+            mtld=row.mtld,
+            ttr=row.ttr,
+            avg_sent_len=row.avg_sent_len,
+            d_value=row.d_value,
+            pause_density=row.pause_density,
+            fight_density=row.fight_density,
+            dialogue_ratio=row.dialogue_ratio,
+            sensory_density=row.sensory_density,
+            metaphor_density=row.metaphor_density,
+            cultural_density=row.cultural_density,
         )
         for row in rows
     ]
