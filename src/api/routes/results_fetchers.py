@@ -152,6 +152,11 @@ def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> lis
     修改者: TraeAI
     任务: refactor-routes-use-repository
     修改内容: 重构为使用 AnnotationRepository
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-role-function-aggregation
+    修改内容: 统计 role_function 频次，取众数而非首次出现的值
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
 
@@ -176,21 +181,25 @@ def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> lis
         if canonical not in merged:
             merged[canonical] = {
                 "count": 1,
-                "role_function": role_function,
+                "role_function_counts": {role_function: 1},
                 "weighted_score": emotion_score,
             }
         else:
             merged[canonical]["count"] += 1
             merged[canonical]["weighted_score"] += emotion_score
+            rf_counts = merged[canonical]["role_function_counts"]
+            rf_counts[role_function] = rf_counts.get(role_function, 0) + 1
 
     result = []
     for name, data in merged.items():
         avg_score = data["weighted_score"] / data["count"] if data["count"] > 0 else 0
+        rf_counts = data["role_function_counts"]
+        majority_role = max(rf_counts, key=rf_counts.get)
         result.append(
             CharacterStats(
                 name=name,
                 appearance_count=int(data["count"]),
-                role_function=str(data["role_function"]) or "unknown",
+                role_function=majority_role,
                 avg_emotion_score=avg_score,
             )
         )
