@@ -108,6 +108,6 @@ def fetch_chunk_styles_full(
         ChunkStyle.metaphor_density,
         ChunkStyle.cultural_density,
         ChunkStyle.function_word_vector,
-    ).where(ChunkStyle.run_id == run_id)
+    ).where(ChunkStyle.run_id == run_id).order_by(ChunkStyle.chunk_id)
     result = session.execute(stmt)
     return [tuple(row) for row in result.fetchall()]
