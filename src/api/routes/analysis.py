@@ -173,9 +173,26 @@ async def get_analysis_status(
     if task_id:
         task_info = task_manager.get_task(task_id)
         if task_info is None:
-            novel_service.get_task(task_id)
+            from src.storage.db import get_session_factory
+            from src.storage.repositories import RunRepository
+            from src.storage.id_mapping import task_id_to_run_id
+            session_factory = get_session_factory()
+            with session_factory() as session:
+                run_id = task_id_to_run_id(task_id, session.connection())
+                run_repo = RunRepository(session)
+                run = run_repo.get_run(run_id)
+                if run:
+                    status = run["status"]
+                    if status == "completed":
+                        task_status = TaskStatus.COMPLETED
+                    elif status == "failed":
+                        task_status = TaskStatus.FAILED
+                    else:
+                        task_status = TaskStatus.RUNNING
+                else:
+                    task_status = TaskStatus.PENDING
             return StatusResponse(
-                novel_id=novel_id, task_id=task_id, status=TaskStatus.COMPLETED, progress=100.0, stage="completed"
+                novel_id=novel_id, task_id=task_id, status=task_status, progress=100.0 if task_status == TaskStatus.COMPLETED else 0.0, stage="completed" if task_status == TaskStatus.COMPLETED else "unknown"
             )
         return StatusResponse(
             novel_id=novel_id,
