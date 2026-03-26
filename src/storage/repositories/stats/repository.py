@@ -113,7 +113,7 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         """获取节奏曲线数据"""
         return chunks.fetch_rhythm_curve(self.session, run_id)
 
-    def fetch_chunk_culture(self, run_id: str) -> List[Tuple[float, float, float, float, float, float]]:
+    def fetch_chunk_culture(self, run_id: str) -> List[Tuple[float | None]]:
         """获取分块文化数据"""
         return chunks.fetch_chunk_culture(self.session, run_id)
 
