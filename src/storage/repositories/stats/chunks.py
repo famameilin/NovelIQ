@@ -134,7 +134,7 @@ def fetch_rhythm_curve(session: Session, run_id: str) -> List[Tuple[float]]:
     return [(row.tension_composite,) for row in result]
 
 
-def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float, float, float, float, float, float]]:
+def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float | None]]:
     """
     获取分块文化数据
 
@@ -143,16 +143,15 @@ def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float, floa
         run_id: 运行ID
 
     Returns:
-        (confucian_density, taoist_density, buddhist_density, folk_density,
-         allusion_density, imagery_density) 元组列表
+        (imagery_density,) 元组列表
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 简化文化指标系统
+    修改内容: 删除低价值词表密度字段，只返回 imagery_density
     """
     stmt = (
         select(
-            ChunkCulture.confucian_density,
-            ChunkCulture.taoist_density,
-            ChunkCulture.buddhist_density,
-            ChunkCulture.folk_density,
-            ChunkCulture.allusion_density,
             ChunkCulture.imagery_density,
         )
         .where(ChunkCulture.run_id == run_id)
@@ -160,17 +159,7 @@ def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float, floa
     )
 
     result = session.execute(stmt).fetchall()
-    return [
-        (
-            row.confucian_density,
-            row.taoist_density,
-            row.buddhist_density,
-            row.folk_density,
-            row.allusion_density,
-            row.imagery_density,
-        )
-        for row in result
-    ]
+    return [(row.imagery_density,) for row in result]
 
 
 def fetch_emotion_curve_full(session: Session, run_id: str) -> List[Tuple[int, float, float, float, float]]:

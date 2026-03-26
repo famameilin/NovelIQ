@@ -27,7 +27,6 @@ from src.lexicons.loader import load_lexicon
 from src.metrics.style_metrics import (
     dialogue_ratio,
     function_word_distribution,
-    lexicon_density,
     metaphor_density,
     mtld,
     parse_semantic_category_lexicon,
@@ -47,6 +46,11 @@ def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> Dict[str, Union[List
     创建者: TraeAI
     任务: refactor-analysis-layer-functions
     说明: 从 run_preprocess 中提取，负责加载所有需要的词典
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 简化文化指标系统
+    修改内容: 删除文化词表加载，只保留 imagery 词表
     """
     lexicons: Dict[str, Union[List[str], Dict[str, List[str]]]] = {}
 
@@ -55,15 +59,6 @@ def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> Dict[str, Union[List
     except FileNotFoundError:
         lexicons["sensory"] = []
         logger.warning("sensory lexicon not found")
-
-    culture_lexicons: Dict[str, List[str]] = {}
-    for lexicon_name in ["confucian", "dao", "buddhism", "folk", "allusion"]:
-        try:
-            culture_lexicons[lexicon_name] = load_lexicon(lexicon_name, lexicon_dir)
-        except FileNotFoundError:
-            culture_lexicons[lexicon_name] = []
-            logger.warning(f"{lexicon_name} lexicon not found")
-    lexicons["culture"] = culture_lexicons
 
     try:
         lexicons["function_words"] = load_lexicon("function_words", lexicon_dir)
@@ -156,9 +151,8 @@ def _compute_chunk_style_metrics(
 def _compute_chunk_culture_metrics(
     chunk: Chunk,
     tokens: List[str],
-    culture_lexicons: dict,
     imagery_terms: List[str],
-) -> Tuple[int, float, float, float, float, float, float]:
+) -> Tuple[int, float]:
     """
     计算单个chunk的文化指标
 
@@ -166,28 +160,17 @@ def _compute_chunk_culture_metrics(
     创建者: TraeAI
     任务: refactor-analysis-layer-functions
     说明: 从 run_preprocess 中提取，负责计算chunk的文化指标
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 简化文化指标系统
+    修改内容: 删除低价值词表密度计算，只保留 imagery_density
     """
     from src.metrics.style_metrics import imagery_density
 
-    confucian_val = (
-        lexicon_density(tokens, culture_lexicons["confucian"], text=chunk.text) if culture_lexicons["confucian"] else 0.0
-    )
-    dao_val = lexicon_density(tokens, culture_lexicons["dao"], text=chunk.text) if culture_lexicons["dao"] else 0.0
-    buddhism_val = (
-        lexicon_density(tokens, culture_lexicons["buddhism"], text=chunk.text) if culture_lexicons["buddhism"] else 0.0
-    )
-    folk_val = lexicon_density(tokens, culture_lexicons["folk"], text=chunk.text) if culture_lexicons["folk"] else 0.0
-    allusion_val = (
-        lexicon_density(tokens, culture_lexicons["allusion"], text=chunk.text) if culture_lexicons["allusion"] else 0.0
-    )
     imagery_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else 0.0
 
     return (
         chunk.index,
-        confucian_val,
-        dao_val,
-        buddhism_val,
-        folk_val,
-        allusion_val,
         imagery_val,
     )

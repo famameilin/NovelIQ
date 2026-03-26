@@ -33,7 +33,7 @@ def _convert_narrative_structure(
     鍒涘缓鏃堕棿: 2026-03-13
     鍒涘缓鑰? TraeAI
     浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗗彊浜嬬粨鏋勭粺璁¤浆鎹€?    """
+    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗗彊浜嬬粨鏋勭粺璁¤浆鎹€?"""
     if not result.narrative_structure:
         return None
 
@@ -61,7 +61,7 @@ def _convert_emotion_stats(
     鍒涘缓鏃堕棿: 2026-03-13
     鍒涘缓鑰? TraeAI
     浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗘儏鎰熺粺璁¤浆鎹€?    """
+    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗘儏鎰熺粺璁¤浆鎹€?"""
     if not result.emotion_curve:
         return None
 
@@ -86,7 +86,7 @@ def _convert_character_stats(
     鍒涘缓鏃堕棿: 2026-03-13
     鍒涘缓鑰? TraeAI
     浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗕汉鐗╃粺璁¤浆鎹€?    """
+    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗕汉鐗╃粺璁¤浆鎹€?"""
     if not result.character_relations:
         return None
 
@@ -121,7 +121,7 @@ def _convert_style_stats(
     鍒涘缓鏃堕棿: 2026-03-13
     鍒涘缓鑰? TraeAI
     浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗛鏍肩粺璁¤浆鎹€?    """
+    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗛鏍肩粺璁¤浆鎹€?"""
     if not result.language_style:
         return None
 
@@ -161,16 +161,11 @@ def _convert_culture_stats(
     鍒涘缓鏃堕棿: 2026-03-13
     鍒涘缓鑰? TraeAI
     浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗘枃鍖栫粺璁¤浆鎹€?    """
+    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗘枃鍖栫粺璁¤浆鎹€?"""
     if not result.traditional_culture:
         return None
 
     return CultureStats(
-        confucian_density=result.traditional_culture.get("confucian_density"),
-        taoist_density=result.traditional_culture.get("taoist_density"),
-        buddhist_density=result.traditional_culture.get("buddhist_density"),
-        folk_density=result.traditional_culture.get("folk_density"),
-        allusion_density=result.traditional_culture.get("allusion_density"),
         idiom_density=result.traditional_culture.get("idiom_density"),
         classical_sentence_ratio=result.traditional_culture.get("classical_sentence_ratio"),
         imagery_density=_default_float(result.traditional_culture.get("imagery_density")),
@@ -191,7 +186,7 @@ def _convert_aggregate_result(
     淇敼鏃堕棿: 2026-03-13
     淇敼鑰? TraeAI
     浠诲姟: refactor-api-layer-functions
-    閲嶆瀯璇存槑: 灏嗗師鏈夐€昏緫鎷嗗垎涓?涓嫭绔嬬殑杞崲鍑芥暟锛屾彁楂樹唬鐮佸彲璇绘€у拰鍙淮鎶ゆ€с€?    """
+    閲嶆瀯璇存槑: 灏嗗師鏈夐€昏緫鎷嗗垎涓?涓嫭绔嬬殑杞崲鍑芥暟锛屾彁楂樹唬鐮佸彲璇绘€у拰鍙淮鎶ゆ€с€?"""
     narrative_structure = _convert_narrative_structure(result)
     emotion_stats = _convert_emotion_stats(result)
     character_stats = _convert_character_stats(result)
