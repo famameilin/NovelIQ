@@ -597,6 +597,7 @@ def _build_alias_and_state_updates(
 def _build_display_name_map(
     alias_map: dict[str, str],
     common_name_map: dict[str, str] | None,
+    state_snapshot: DisambigStateSnapshot | None = None,
 ) -> dict[str, str]:
     """Build a cluster-level display-name map from merge targets and common names."""
     if not alias_map:
@@ -611,6 +612,13 @@ def _build_display_name_map(
     for name, display_name in (common_name_map or {}).items():
         if not display_name:
             continue
+        if state_snapshot:
+            state = state_snapshot.get(name, {})
+            if (
+                state.get("state") != DISAMBIG_STATE_RESOLVED
+                or state.get("confidence") != DISAMBIG_CONFIDENCE_HIGH
+            ):
+                continue
         merge_target = alias_map.get(name, name)
         if merge_target == display_name and merge_target in display_by_cluster:
             continue
@@ -826,7 +834,7 @@ def _run_final_disambiguation(
     if alias_map != previous_alias_map:
         logger.info(f"final disambiguation completed: {len(alias_map)} entries")
 
-    display_name_map = _build_display_name_map(alias_map, result.common_name_map)
+    display_name_map = _build_display_name_map(alias_map, result.common_name_map, state_snapshot)
 
     # 1. 先创建实体
     if alias_map:

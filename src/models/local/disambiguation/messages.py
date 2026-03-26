@@ -40,6 +40,33 @@ _EVIDENCE_MARKERS = {
 }
 
 _EVIDENCE_MARKER_PATTERN = re.compile(r"【(前文总结|自报身份|身份提示|被点名|外貌描述)】")
+_EVIDENCE_PREFIXES = tuple(f"【{marker}】" for marker in _EVIDENCE_MARKERS)
+
+
+def _has_original_sentence_content(context: str) -> bool:
+    remaining = context.strip()
+    if not remaining:
+        return False
+
+    if remaining.startswith("【前文总结】"):
+        _, separator, tail = remaining.partition("\n")
+        if not separator:
+            return False
+        remaining = tail.strip()
+        if not remaining:
+            return False
+
+    for segment in remaining.split(" | "):
+        normalized = segment.strip()
+        if not normalized:
+            continue
+
+        if normalized.startswith(_EVIDENCE_PREFIXES):
+            continue
+
+        return True
+
+    return False
 
 
 def _extract_evidence_types_from_context(context: str) -> List[str]:
@@ -65,7 +92,7 @@ def _extract_evidence_types_from_context(context: str) -> List[str]:
         if evidence_type and evidence_type not in evidence_types:
             evidence_types.append(evidence_type)
 
-    if context and not evidence_types:
+    if context and _has_original_sentence_content(context):
         evidence_types.append("原文例句")
 
     return evidence_types
