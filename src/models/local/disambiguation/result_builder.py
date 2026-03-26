@@ -36,9 +36,10 @@ class ExtendedDisambigResult:
     修改内容: 添加 _thinking_content 字段保存 thinking 内容
     """
 
-    alias_map: Dict[str, str]
+    merge_target_map: Dict[str, str]
     entity_types: Dict[str, str]
     entity_relations: List[Dict[str, str]]
+    common_name_map: Dict[str, str] = field(default_factory=dict)
     alias_confidence: Dict[str, str] = field(default_factory=dict)
     _thinking_content: str | None = None
 
@@ -69,10 +70,37 @@ def build_result_from_response(
 
     result: dict[str, str] = {}
     for name in name_list:
-        if name in response_data.alias_map:
-            result[name] = str(response_data.alias_map[name])
+        if name in response_data.merge_target_map:
+            result[name] = str(response_data.merge_target_map[name])
         else:
             result[name] = name
+    return result
+
+
+def build_common_name_map_from_response(
+    response_data: DisambiguateResponseModel,
+    candidates: List[str] | List[Dict[str, int]],
+) -> Dict[str, str]:
+    """
+    从响应中构建 common_name_map，并确保 value 保持在候选列表内。
+    """
+    name_list: list[str] = []
+    if candidates and isinstance(candidates[0], dict):
+        dict_candidates = cast(list[dict[str, int]], candidates)
+        name_list = [str(c["name"]) for c in dict_candidates]
+    else:
+        str_candidates = cast(list[str], candidates)
+        name_list = list(str_candidates)
+
+    candidate_names = set(name_list)
+    result: dict[str, str] = {}
+    for name in name_list:
+        common_name = response_data.common_name_map.get(name)
+        if isinstance(common_name, str) and common_name in candidate_names:
+            result[name] = common_name
+            continue
+
+        result[name] = name
     return result
 
 
@@ -94,6 +122,7 @@ def build_extended_result_from_response(
     修改内容: 复制 _thinking_content 到 ExtendedDisambigResult
     """
     alias_map = build_result_from_response(response_data, candidates)
+    common_name_map = build_common_name_map_from_response(response_data, candidates)
 
     name_list: list[str] = []
     if candidates and isinstance(candidates[0], dict):
@@ -120,9 +149,10 @@ def build_extended_result_from_response(
     thinking_content = getattr(response_data, "_thinking_content", None) or getattr(response_data, "thinking_content", None)
 
     return ExtendedDisambigResult(
-        alias_map=alias_map,
+        merge_target_map=alias_map,
         entity_types=entity_types,
         entity_relations=entity_relations,
+        common_name_map=common_name_map,
         alias_confidence=alias_confidence,
         _thinking_content=thinking_content,
     )

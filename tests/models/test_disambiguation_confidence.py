@@ -6,7 +6,7 @@ from src.models.local.schema import DisambiguateResponseModel
 
 def test_disambiguate_response_model_accepts_alias_confidence() -> None:
     response = DisambiguateResponseModel(
-        alias_map={"monkey": "hou_fei_bai"},
+        merge_target_map={"monkey": "hou_fei_bai"},
         alias_confidence={"monkey": "high"},
         entity_types={},
         entity_relations=[],
@@ -16,7 +16,7 @@ def test_disambiguate_response_model_accepts_alias_confidence() -> None:
 
 def test_build_extended_result_defaults_confidence_to_medium() -> None:
     response = DisambiguateResponseModel(
-        alias_map={"monkey": "hou_fei_bai"},
+        merge_target_map={"monkey": "hou_fei_bai"},
         entity_types={},
         entity_relations=[],
     )

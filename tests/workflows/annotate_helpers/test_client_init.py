@@ -105,5 +105,5 @@ def test_init_annotation_clients_uses_noop_fallback_for_lightweight_annotation_s
 
     incremental_result = incremental_client.disambiguate_characters(candidates=["阿甲"])
     full_result = full_client.disambiguate_characters(candidates=["阿乙"])
-    assert incremental_result.alias_map == {}
-    assert full_result.alias_map == {}
+    assert incremental_result.merge_target_map == {}
+    assert full_result.merge_target_map == {}

@@ -253,9 +253,13 @@ class DisambiguateResponseModel(BaseModel):
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    alias_map: dict[str, str] = Field(
+    merge_target_map: dict[str, str] = Field(
         default_factory=dict,
-        description="人名到标准名的映射，key为原名，value为标准名",
+        description="候选名到归并目标的映射，value 可指向知识库已有角色名或候选列表内名字",
+    )
+    common_name_map: dict[str, str] = Field(
+        default_factory=dict,
+        description="候选名到候选列表内常用名的映射，value 必须来自候选人名列表",
     )
     alias_confidence: dict[str, DisambigConfidence] = Field(
         default_factory=dict,
