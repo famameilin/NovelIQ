@@ -19,6 +19,11 @@
 任务: code-quality-refactor - 拆分chunk_repository.py
 修改内容: 将 ChunkStyleData 数据类移至 chunk/style_data.py
 修改内容: 将 style/culture/topic 操作移至子模块
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: 简化文化指标系统
+修改内容: 修复 fetch_chunk_cultures_full 返回类型为 List[Tuple[int, float]]
 """
 
 from __future__ import annotations
@@ -145,7 +150,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
         return fetch_chunk_styles_full(self.session, run_id)
 
-    def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float, float, float]]:
+    def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float]]:
         return fetch_chunk_cultures_full(self.session, run_id)
 
     def fetch_chunk_topics_agg(self, run_id: str) -> List[Tuple[int, float]]:
