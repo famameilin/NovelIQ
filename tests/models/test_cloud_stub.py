@@ -1,4 +1,4 @@
-﻿import json
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -8,6 +8,10 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import TaskModelConfig
 from src.models.cloud.client import ConfiguredCloudModelClient, NullCloudModelClient
+
+
+def _candidates(*names: str) -> list[dict[str, int | str]]:
+    return [{"name": name, "count": 1} for name in names]
 
 
 def create_mock_stream_response(content: str):
@@ -68,14 +72,14 @@ class TestCloudStub(unittest.TestCase):
 
         with patch.object(client._disambiguation_client, "disambiguate_characters", return_value=fake_result) as mock_disambiguate:
             result = client.disambiguate_characters(
-                candidates=["zhangsan", "alias_a"],
+                candidates=_candidates("zhangsan", "alias_a"),
                 context_sentences={"alias_a": "alias_a smiled"},
                 existing_names=["zhangsan"],
             )
 
         self.assertEqual(result, expected_alias_map)
         mock_disambiguate.assert_called_once_with(
-            candidates=["zhangsan", "alias_a"],
+            candidates=_candidates("zhangsan", "alias_a"),
             context_sentences={"alias_a": "alias_a smiled"},
             existing_names=["zhangsan"],
         )

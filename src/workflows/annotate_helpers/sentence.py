@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy import text
@@ -67,7 +67,7 @@ def annotate_dialogue_structure(sentence: str) -> str:
 
 def build_context_sentences(
     conn,
-    candidates: list[str] | list[NameCountCandidate],
+    candidates: list[NameCountCandidate],
     alias_keywords: list[str] | None = None,
     prev_chunks: int = ANNOTATION_CONFIG.prev_chunks,
     run_id: str | None = None,
@@ -78,12 +78,7 @@ def build_context_sentences(
     if alias_keywords is None:
         alias_keywords = ["某", "名", "号", "就是", "称号", "全名"]
 
-    if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], candidates)
-        name_list = [c["name"] for c in dict_candidates]
-    else:
-        str_candidates = cast(list[str], candidates)
-        name_list = list(str_candidates)
+    name_list = [candidate["name"] for candidate in candidates]
 
     result = _build_sentence_pool(conn, name_list, alias_keywords, run_id)
     _add_prev_summaries(conn, result, name_list, prev_chunks, run_id)

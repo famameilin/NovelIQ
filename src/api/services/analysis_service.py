@@ -60,7 +60,7 @@ class AnalysisService:
     ):
         self.novel_service = novel_service
         self.task_manager = task_manager
-        self.session_factory = session_factory or SessionFactory(novel_service.upload_dir)
+        self.session_factory = session_factory or SessionFactory()
 
     async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
@@ -148,7 +148,7 @@ class AnalysisService:
         logger.info(f"Task ID: {task_id}")
         logger.info(f"Log directory: {analysis_logger.log_dir}")
 
-        db_session = self.session_factory.get_session(task_id, init_tables=True)
+        db_session = self.session_factory.get_session(init_tables=True)
         conn = db_session.connection
 
         run_repo = RunRepository(conn)

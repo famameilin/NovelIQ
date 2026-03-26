@@ -24,14 +24,13 @@ def _store_annotation_results(
     任务: refactor-analysis-layer-functions
     说明: 从 run_annotate 中提取，负责存储单个chunk的标注结果
     """
-    from src.storage.operations import (
+    from deprecated.storage.operations.annotation_ops import (
         insert_chunk_annotation,
         insert_chunk_characters,
         insert_chunk_dialogues,
         insert_chunk_relations,
-        insert_chunk_summary,
-        insert_character_appearances,
     )
+    from deprecated.storage.operations.stats_ops import insert_character_appearances, insert_chunk_summary
 
     insert_chunk_annotation(conn, chunk_id, annotation)
 

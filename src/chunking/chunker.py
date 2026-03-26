@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import re
-import warnings as _warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -539,15 +538,3 @@ def chunk_documents(
 
     return _reindex(all_chunks)
 
-
-# 向后兼容别名（已废弃，请使用 split_by_chapters）
-def _detect_chapters_wrapper(text: str):
-    """向后兼容包装器（已废弃）"""
-    _warnings.warn(
-        "detect_chapters is deprecated. Use split_by_chapters instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return split_by_chapters(text)
-
-detect_chapters = _detect_chapters_wrapper

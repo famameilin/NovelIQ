@@ -46,7 +46,7 @@ from src.api.routes.results_fetchers import (
 )
 from src.api.services.novel_service import NovelService
 from src.config import settings
-from src.metrics.aggregate_metrics import aggregate_all_metrics
+from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -333,8 +333,8 @@ def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> tuple[
     """
     from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
 
-    session_factory = SessionFactory(novel_service.upload_dir)
-    db_session = session_factory.get_session(task_id)
+    session_factory = SessionFactory()
+    db_session = session_factory.get_session()
     try:
         # 将task_id转换为run_id
         run_id = task_id_to_run_id(task_id, db_session.connection)

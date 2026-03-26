@@ -26,7 +26,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.metrics.aggregate_metrics import aggregate_all_metrics
+from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from src.workflows.curve_metrics import (
     compute_emotion_curve,

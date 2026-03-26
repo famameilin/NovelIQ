@@ -4,6 +4,10 @@ from src.models.local.disambiguation import build_extended_result_from_response
 from src.models.local.schema import DisambiguateResponseModel
 
 
+def _candidates(*names: str) -> list[dict[str, int | str]]:
+    return [{"name": name, "count": 1} for name in names]
+
+
 def test_disambiguate_response_model_accepts_alias_confidence() -> None:
     response = DisambiguateResponseModel(
         merge_target_map={"monkey": "hou_fei_bai"},
@@ -20,6 +24,6 @@ def test_build_extended_result_defaults_confidence_to_medium() -> None:
         entity_types={},
         entity_relations=[],
     )
-    result = build_extended_result_from_response(response, ["monkey", "abacus"])
+    result = build_extended_result_from_response(response, _candidates("monkey", "abacus"))
     assert result.alias_confidence["monkey"] == "medium"
     assert result.alias_confidence["abacus"] == "medium"

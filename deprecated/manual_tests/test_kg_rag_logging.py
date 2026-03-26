@@ -46,8 +46,8 @@ def main():
     logger.info("测试知识图谱和 RAG 模块日志")
     logger.info("=" * 60)
 
-    session_factory = SessionFactory(Path(tmp.name))
-    db_session = session_factory.get_session("test_run", init_tables=True)
+    session_factory = SessionFactory()
+    db_session = session_factory.get_session(init_tables=True)
     conn = db_session.connection
     run_id = "test_run"
 
