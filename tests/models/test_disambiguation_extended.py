@@ -33,6 +33,16 @@ class TestExtendedDisambigResult(unittest.TestCase):
         self.assertEqual(result.entity_types, {})
         self.assertEqual(result.entity_relations, [])
 
+    def test_evidence_sources_field(self) -> None:
+        result = ExtendedDisambigResult(
+            merge_target_map={"贺重明": "伯安"},
+            entity_types={"伯安": "character"},
+            entity_relations=[],
+            evidence_sources={"贺重明": ["原文例句", "身份线索"]},
+        )
+
+        self.assertEqual(result.evidence_sources["贺重明"], ["原文例句", "身份线索"])
+
 
 class TestBuildExtendedResultFromResponse(unittest.TestCase):
     def test_basic_parsing(self) -> None:
@@ -128,6 +138,33 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
         self.assertEqual(result.merge_target_map["贺伯安"], "伯安")
         self.assertEqual(result.common_name_map["贺伯安"], "贺伯安")
+
+    def test_evidence_sources_extraction(self) -> None:
+        response = DisambiguateResponseModel(
+            merge_target_map={"贺重明": "伯安", "灰衣人": "伯安"},
+            entity_types={"伯安": "character"},
+            entity_relations=[],
+            evidence_sources={
+                "贺重明": ["原文例句", "身份线索"],
+                "灰衣人": ["前文摘要-弱证据"],
+            },
+        )
+
+        result = build_extended_result_from_response(response, ["贺重明", "灰衣人"])
+
+        self.assertEqual(result.evidence_sources["贺重明"], ["原文例句", "身份线索"])
+        self.assertEqual(result.evidence_sources["灰衣人"], ["前文摘要-弱证据"])
+
+    def test_evidence_sources_default_to_original_text(self) -> None:
+        response = DisambiguateResponseModel(
+            merge_target_map={"伯安": "伯安"},
+            entity_types={"伯安": "character"},
+            entity_relations=[],
+        )
+
+        result = build_extended_result_from_response(response, ["伯安"])
+
+        self.assertEqual(result.evidence_sources["伯安"], ["原文例句"])
 
 
 class TestHierarchicalRelationModel(unittest.TestCase):
