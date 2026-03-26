@@ -19,6 +19,50 @@ from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.api.services.analysis_service import AnalysisService
 from src.api.routes.novels import get_novel_service
+from src.api.exceptions import AnalysisError
+from src.storage.db import get_session_factory
+from src.storage.repositories import RunRepository
+from src.storage.id_mapping import task_id_to_run_id
+
+
+_STATUS_MAP: Dict[str, TaskStatus] = {
+    "completed": TaskStatus.COMPLETED,
+    "running": TaskStatus.RUNNING,
+    "pending": TaskStatus.PENDING,
+    "failed": TaskStatus.FAILED,
+}
+
+
+def _map_status_to_task_status(status: str) -> TaskStatus:
+    """
+    将数据库状态字符串映射为TaskStatus枚举
+
+    创建时间: 2026-03-26
+    创建者: TraeAI
+    任务: 修复代码异味，提取重复的状态映射逻辑
+    """
+    return _STATUS_MAP.get(status, TaskStatus.PENDING)
+
+
+def _get_task_status_from_db(task_id: str) -> TaskStatus:
+    """
+    从数据库获取任务状态
+
+    创建时间: 2026-03-26
+    创建者: TraeAI
+    任务: 修复代码异味，提取数据库查询逻辑
+
+    当任务不在内存中时，从数据库查询状态
+    返回: TaskStatus枚举值
+    """
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run_id = task_id_to_run_id(task_id, session.connection())
+        run_repo = RunRepository(session)
+        run = run_repo.get_run(run_id)
+        if run:
+            return _map_status_to_task_status(run["status"])
+        return TaskStatus.PENDING
 
 router = APIRouter(prefix="/novels", tags=["analysis"])
 
@@ -164,35 +208,31 @@ async def get_analysis_status(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> StatusResponse:
     """
-    2026-03-12: Claude修改，添加task_id参数支持
-    - task_id非必须，但有多个task时必须提供
-    - 使用和analyze一样的多任务判断逻辑
-    """
-    from src.api.exceptions import AnalysisError
+    查询分析任务状态
 
+    创建时间: 2026-03-12
+    创建者: Claude
+    任务: 添加task_id参数支持
+    说明: task_id非必须，但有多个task时必须提供
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 修复代码异味
+    修改内容:
+    - 移除函数内导入，使用模块顶部导入
+    - 提取状态映射逻辑为辅助函数
+    - 提取数据库查询逻辑为辅助函数
+    """
     if task_id:
         task_info = task_manager.get_task(task_id)
         if task_info is None:
-            from src.storage.db import get_session_factory
-            from src.storage.repositories import RunRepository
-            from src.storage.id_mapping import task_id_to_run_id
-            session_factory = get_session_factory()
-            with session_factory() as session:
-                run_id = task_id_to_run_id(task_id, session.connection())
-                run_repo = RunRepository(session)
-                run = run_repo.get_run(run_id)
-                if run:
-                    status = run["status"]
-                    if status == "completed":
-                        task_status = TaskStatus.COMPLETED
-                    elif status == "failed":
-                        task_status = TaskStatus.FAILED
-                    else:
-                        task_status = TaskStatus.RUNNING
-                else:
-                    task_status = TaskStatus.PENDING
+            task_status = _get_task_status_from_db(task_id)
             return StatusResponse(
-                novel_id=novel_id, task_id=task_id, status=task_status, progress=100.0 if task_status == TaskStatus.COMPLETED else 0.0, stage="completed" if task_status == TaskStatus.COMPLETED else "unknown"
+                novel_id=novel_id,
+                task_id=task_id,
+                status=task_status,
+                progress=100.0 if task_status == TaskStatus.COMPLETED else 0.0,
+                stage="completed" if task_status == TaskStatus.COMPLETED else "unknown",
             )
         return StatusResponse(
             novel_id=novel_id,
@@ -216,16 +256,11 @@ async def get_analysis_status(
 
     task_info = task_manager.get_task(task_id)
     if task_info is None:
-        status_map = {
-            "completed": TaskStatus.COMPLETED,
-            "running": TaskStatus.RUNNING,
-            "pending": TaskStatus.PENDING,
-            "failed": TaskStatus.FAILED,
-        }
+        mapped_status = _map_status_to_task_status(task_status)
         return StatusResponse(
             novel_id=novel_id,
             task_id=task_id,
-            status=status_map.get(task_status, TaskStatus.PENDING),
+            status=mapped_status,
             progress=100.0 if task_status == "completed" else 0.0,
             stage=task_status,
         )
