@@ -17,8 +17,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator, Optional
 
 from sqlalchemy.orm import Session
 
@@ -114,7 +114,7 @@ class DatabaseSession:
         """检查是否在事务中"""
         return self._in_transaction
 
-    def __enter__(self) -> "DatabaseSession":
+    def __enter__(self) -> DatabaseSession:
         """进入上下文管理器"""
         return self
 
@@ -162,7 +162,7 @@ class SessionFactory:
 
     def get_session(
         self,
-        identifier: Optional[str] = None,
+        identifier: str | None = None,
         init_tables: bool = False,
         auto_close: bool = True,
     ) -> DatabaseSession:
@@ -247,7 +247,7 @@ class SessionFactory:
     @contextmanager
     def session_context(
         self,
-        identifier: Optional[str] = None,
+        identifier: str | None = None,
         init_tables: bool = False,
     ) -> Generator[DatabaseSession, None, None]:
         """

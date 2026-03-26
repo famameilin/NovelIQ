@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import List, Tuple
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -40,7 +39,7 @@ def run_topic_model(
     top_n: int = 5,
     force: bool = False,
     cache_path: Path | None = None,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """
     执行主题建模流程
 
@@ -114,7 +113,7 @@ def run_topic_model(
     logger.info(f"LDA model trained with {topic_model.num_topics} topics")
     logger.info(f"Model trained. Inferring topics for {total_chunks} chunks...")
 
-    topic_rows: List[Tuple[int, int, float]] = []
+    topic_rows: list[tuple[int, int, float]] = []
     for idx, tokens in enumerate(tokenized_docs):
         if not tokens:
             continue

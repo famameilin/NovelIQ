@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 from loguru import logger
 
@@ -110,7 +110,7 @@ def log_prompt_response(
     content_clean: str,
     thinking_content: str | None,
     extraction: Any,
-    messages: List[dict],
+    messages: list[dict],
     text: str,
     prev_summary: str | None,
     model: str,

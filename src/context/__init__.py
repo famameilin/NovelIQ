@@ -12,8 +12,8 @@ from .global_context import (
 )
 from .rolling_memory import (
     format_rolling_memory_for_prompt,
-    get_prev_tail_text,
     get_next_text,
+    get_prev_tail_text,
 )
 
 __all__ = [

@@ -18,7 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any
+
 from loguru import logger
 
 from src.api.models.responses import TaskStatus
@@ -30,10 +31,10 @@ class TaskInfo:
     novel_id: str
     status: TaskStatus = TaskStatus.PENDING
     progress: float = 0.0
-    stage: Optional[str] = None
-    error: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    stage: str | None = None
+    error: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     result: Any = None
 
 
@@ -47,7 +48,7 @@ class TaskManager:
         logger.info(f"Task created: {task_id} for novel {novel_id}")
         return task
 
-    def get_task(self, task_id: str) -> Optional[TaskInfo]:
+    def get_task(self, task_id: str) -> TaskInfo | None:
         return self._tasks.get(task_id)
 
     def get_tasks_by_novel(self, novel_id: str) -> list[TaskInfo]:
@@ -61,7 +62,7 @@ class TaskManager:
                     setattr(task, key, value)
             logger.debug(f"Task updated: {task_id} - {kwargs}")
 
-    def complete_task(self, task_id: str, success: bool = True, error: Optional[str] = None) -> None:
+    def complete_task(self, task_id: str, success: bool = True, error: str | None = None) -> None:
         if task_id not in self._tasks:
             return
 
@@ -83,7 +84,7 @@ class TaskManager:
             return True
         return False
 
-    def list_tasks(self, status: Optional[TaskStatus] = None) -> list[TaskInfo]:
+    def list_tasks(self, status: TaskStatus | None = None) -> list[TaskInfo]:
         tasks = list(self._tasks.values())
         if status:
             tasks = [t for t in tasks if t.status == status]

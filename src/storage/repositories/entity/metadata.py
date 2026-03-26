@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, select
 
@@ -56,7 +56,7 @@ def fetch_active_entities(
     current_chunk_id: int,
     lookback: int = 10,
     run_id: str | None = None,
-) -> List[Tuple[int, str, str, str, str, int]]:
+) -> list[tuple[int, str, str, str, str, int]]:
     """
     获取活跃实体
 
@@ -87,14 +87,14 @@ def fetch_active_entities(
     return [tuple(row) for row in result.fetchall()]
 
 
-def fetch_distinct_characters(session: Session, run_id: str) -> List[Tuple[str]]:
+def fetch_distinct_characters(session: Session, run_id: str) -> list[tuple[str]]:
     """获取所有不重复的角色名"""
     stmt = select(ChunkCharacter.name).where(ChunkCharacter.run_id == run_id).distinct()
     result = session.execute(stmt)
     return [(row[0],) for row in result.fetchall()]
 
 
-def fetch_character_metadata_sequence(session: Session, run_id: str) -> List[Tuple[str, int, str, str]]:
+def fetch_character_metadata_sequence(session: Session, run_id: str) -> list[tuple[str, int, str, str]]:
     """
     获取角色元数据序列（按 chunk_id 排序）
 
@@ -115,7 +115,7 @@ def fetch_character_metadata_sequence(session: Session, run_id: str) -> List[Tup
     return [tuple(row) for row in result.fetchall()]
 
 
-def fetch_relation_sequence(session: Session, run_id: str) -> List[Tuple[str, str, str, str, int]]:
+def fetch_relation_sequence(session: Session, run_id: str) -> list[tuple[str, str, str, str, int]]:
     """
     获取关系序列（按 chunk_id 排序）
 
@@ -164,7 +164,7 @@ def fetch_snapshots_by_chunk(
     start_chunk: int,
     end_chunk: int,
     run_id: str | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """获取指定分块范围内的快照"""
     conditions = [
         EntitySnapshot.novel_id == novel_id,
@@ -196,7 +196,7 @@ def fetch_recent_snapshots(
     novel_id: str,
     run_id: str | None = None,
     limit: int = 10,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """获取最近的快照"""
     conditions = [EntitySnapshot.novel_id == novel_id]
     if run_id is not None:

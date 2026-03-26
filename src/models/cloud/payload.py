@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.config import settings
-
 
 """
 创建时间: 2025-03-11
@@ -137,7 +136,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     return payload
 
 
-def _fetch_pivot_blocks(conn: Session, run_id: str, limit: int = 20) -> List[Any]:
+def _fetch_pivot_blocks(conn: Session, run_id: str, limit: int = 20) -> list[Any]:
     """
     获取转折点块
 
@@ -164,7 +163,7 @@ def _fetch_pivot_blocks(conn: Session, run_id: str, limit: int = 20) -> List[Any
     return list(result.fetchall())
 
 
-def _fetch_pivot_moments(conn: Session, run_id: str, limit: int = 10) -> List[Any]:
+def _fetch_pivot_moments(conn: Session, run_id: str, limit: int = 10) -> list[Any]:
     """
     获取高潮时刻
 
@@ -191,7 +190,7 @@ def _fetch_pivot_moments(conn: Session, run_id: str, limit: int = 10) -> List[An
     return list(result.fetchall())
 
 
-def _fetch_high_tension_chunks(conn: Session, run_id: str, limit: int = 10) -> List[Any]:
+def _fetch_high_tension_chunks(conn: Session, run_id: str, limit: int = 10) -> list[Any]:
     """
     获取高张力块
 
@@ -218,7 +217,7 @@ def _fetch_high_tension_chunks(conn: Session, run_id: str, limit: int = 10) -> L
     return list(result.fetchall())
 
 
-def _fetch_relation_changes(conn: Session, run_id: str, limit: int = 50) -> List[Any]:
+def _fetch_relation_changes(conn: Session, run_id: str, limit: int = 50) -> list[Any]:
     """
     获取关系变化
 
@@ -242,7 +241,7 @@ def _fetch_relation_changes(conn: Session, run_id: str, limit: int = 50) -> List
     return list(result.fetchall())
 
 
-def _fetch_foreshadowing_chunks(conn: Session, run_id: str, limit: int = 30) -> List[Any]:
+def _fetch_foreshadowing_chunks(conn: Session, run_id: str, limit: int = 30) -> list[Any]:
     """
     获取伏笔块
 
@@ -290,7 +289,7 @@ def _fetch_first_last_chunk_summary(conn: Session, run_id: str, max_chars: int =
     return first_text, last_text
 
 
-def _fetch_topic_words(conn: Session, run_id: str, top_n: int = 10) -> List[dict]:
+def _fetch_topic_words(conn: Session, run_id: str, top_n: int = 10) -> list[dict]:
     """
     获取主题词
 

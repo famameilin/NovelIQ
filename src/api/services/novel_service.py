@@ -14,16 +14,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import uuid
-import aiofiles
 import os
+import uuid
+from pathlib import Path
+
+import aiofiles
 from loguru import logger
 
-from src.api.exceptions import InvalidFileError, FileStorageError, NovelNotFoundError
+from src.api.exceptions import FileStorageError, InvalidFileError, NovelNotFoundError
 from src.storage.db import get_session_factory
-from src.storage.repositories import RunRepository
 from src.storage.id_mapping import generate_task_id
+from src.storage.repositories import RunRepository
 
 
 class NovelService:
@@ -86,7 +87,7 @@ class NovelService:
             async with aiofiles.open(file_path, "wb") as f:
                 await f.write(file_content)
         except Exception as e:
-            raise FileStorageError(f"文件保存失败: {e}")
+            raise FileStorageError(f"文件保存失败: {e}") from e
 
         self._novels[novel_id] = {
             "novel_id": novel_id,
@@ -331,8 +332,9 @@ class NovelService:
         修改内容: 使用get_run_by_run_id_prefix替代get_run_by_task_id
         """
         # 从数据库中查找对应的 run_id（task_id 是 run_id 的前8位）
-        from src.storage.db import get_engine
         from sqlalchemy.orm import sessionmaker
+
+        from src.storage.db import get_engine
 
         engine = get_engine()
         Session = sessionmaker(bind=engine)

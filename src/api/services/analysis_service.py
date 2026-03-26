@@ -33,23 +33,22 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
 import asyncio
 import time
+from pathlib import Path
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.config import settings
-from src.config.analysis_logger import AnalysisLogger
+from src.api.exceptions import AnalysisError
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import TaskStatus
-from src.api.services.task_manager import TaskManager
 from src.api.services.novel_service import NovelService
-from src.api.exceptions import AnalysisError
+from src.api.services.task_manager import TaskManager
+from src.config import settings
+from src.config.analysis_logger import AnalysisLogger
+from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
 from src.storage.session import SessionFactory
-from src.storage.repositories import RunRepository, ChunkRepository, AnnotationRepository, StatsRepository
 
 
 class AnalysisService:
@@ -63,7 +62,7 @@ class AnalysisService:
         self.task_manager = task_manager
         self.session_factory = session_factory or SessionFactory(novel_service.upload_dir)
 
-    async def start_analysis(self, novel_id: str, request: Optional[AnalyzeRequest] = None) -> str:
+    async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
 
         if request and request.task_id:
@@ -100,7 +99,7 @@ class AnalysisService:
 
         return task_id
 
-    async def start_reanalysis(self, novel_id: str, request: Optional[ReanalyzeRequest] = None) -> str:
+    async def start_reanalysis(self, novel_id: str, request: ReanalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
 
         task_id = self.novel_service.create_task(novel_id)
@@ -354,7 +353,7 @@ class AnalysisService:
                 }
             )
 
-    def _build_reanalysis_skip_stages(self, request: Optional[ReanalyzeRequest]) -> dict[str, bool]:
+    def _build_reanalysis_skip_stages(self, request: ReanalyzeRequest | None) -> dict[str, bool]:
         return {
             "skip_preprocess": not (request.force_preprocess if request else True),
             "skip_annotate": not (request.force_annotate if request else True),
@@ -363,7 +362,7 @@ class AnalysisService:
             "skip_diagnose": not (request.force_diagnose if request else True),
         }
 
-    async def _run_analysis(self, task_id: str, novel: dict, request: Optional[AnalyzeRequest]) -> None:
+    async def _run_analysis(self, task_id: str, novel: dict, request: AnalyzeRequest | None) -> None:
         start_time = time.time()
         analysis_logger: AnalysisLogger | None = None
         session: Session | None = None
@@ -417,7 +416,7 @@ class AnalysisService:
             if session:
                 session.close()
 
-    async def _run_reanalysis(self, task_id: str, novel: dict, request: Optional[ReanalyzeRequest]) -> None:
+    async def _run_reanalysis(self, task_id: str, novel: dict, request: ReanalyzeRequest | None) -> None:
         start_time = time.time()
         analysis_logger: AnalysisLogger | None = None
         session: Session | None = None
@@ -510,13 +509,13 @@ class AnalysisService:
         run_topic_model(run_id=run_id, session=session, num_topics=num_topics)
 
     def _run_diagnose(self, run_id: str, session: Session, analysis_logger: AnalysisLogger | None) -> None:
-        from src.workflows import run_diagnose
         from src.models.cloud import ConfiguredCloudModelClient
+        from src.workflows import run_diagnose
 
         diagnose_client = ConfiguredCloudModelClient(analysis_logger=analysis_logger)
         run_diagnose(run_id=run_id, session=session, analysis_logger=analysis_logger, client=diagnose_client)
 
-    def get_task_status(self, task_id: str) -> Optional[dict]:
+    def get_task_status(self, task_id: str) -> dict | None:
         task = self.task_manager.get_task(task_id)
         if not task:
             return None

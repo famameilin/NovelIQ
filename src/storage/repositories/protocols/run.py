@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -32,7 +32,7 @@ class RunRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
         """
         获取运行记录
 
@@ -54,7 +54,7 @@ class RunRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_latest_run(self, novel_id: str) -> Optional[Dict[str, Any]]:
+    def get_latest_run(self, novel_id: str) -> dict[str, Any] | None:
         """
         获取指定小说的最新运行记录
 

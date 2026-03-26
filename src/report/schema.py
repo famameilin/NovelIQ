@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 from src.models.cloud.schema import CloudAnalysis
 
@@ -25,7 +25,7 @@ class ReportMeta:
 @dataclass(frozen=True)
 class DimensionSummary:
     name: str
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
     notes: str | None = None
 
     def validate(self) -> None:
@@ -43,8 +43,8 @@ class DimensionSummary:
 @dataclass(frozen=True)
 class ChartSeries:
     name: str
-    x: List[float] = field(default_factory=list)
-    y: List[float] = field(default_factory=list)
+    x: list[float] = field(default_factory=list)
+    y: list[float] = field(default_factory=list)
 
     def validate(self) -> None:
         if len(self.x) != len(self.y):
@@ -62,7 +62,7 @@ class ChartSeries:
 class ChartData:
     title: str
     kind: str
-    series: List[ChartSeries] = field(default_factory=list)
+    series: list[ChartSeries] = field(default_factory=list)
 
     def validate(self) -> None:
         if not self.title:
@@ -83,8 +83,8 @@ class ChartData:
 @dataclass(frozen=True)
 class ReportPayload:
     meta: ReportMeta
-    dimensions: List[DimensionSummary] = field(default_factory=list)
-    charts: List[ChartData] = field(default_factory=list)
+    dimensions: list[DimensionSummary] = field(default_factory=list)
+    charts: list[ChartData] = field(default_factory=list)
     cloud_analysis: CloudAnalysis | None = None
 
     def validate(self) -> None:

@@ -15,8 +15,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def insert_global_stats(session: Session, run_id: str, stats: Iterable[Tuple[str, float]]) -> None:
+def insert_global_stats(session: Session, run_id: str, stats: Iterable[tuple[str, float]]) -> None:
     """
     插入全局统计数据
 
@@ -60,7 +61,7 @@ def insert_global_stats(session: Session, run_id: str, stats: Iterable[Tuple[str
     session.commit()
 
 
-def fetch_global_stats(session: Session, run_id: str) -> List[Tuple[str, float]]:
+def fetch_global_stats(session: Session, run_id: str) -> list[tuple[str, float]]:
     """
     获取全局统计数据
 
@@ -76,7 +77,7 @@ def fetch_global_stats(session: Session, run_id: str) -> List[Tuple[str, float]]
     return [(row.stat_name, row.stat_value) for row in result.fetchall()]
 
 
-def fetch_global_stats_dict(session: Session, run_id: str) -> Dict[str, float]:
+def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float]:
     """
     获取全局统计数据字典
 
@@ -144,7 +145,7 @@ def insert_token_usage(
     return token_usage.id
 
 
-def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> Dict[str, Any]:
+def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
     """
     获取 token 使用统计
 
@@ -166,7 +167,7 @@ def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> Dic
     }
 
 
-def _fetch_usage_summary(session: Session, run_id: str, novel_id: str) -> Dict[str, Any]:
+def _fetch_usage_summary(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
     """获取使用量摘要"""
     stmt = select(
         func.count().label("call_count"),
@@ -193,7 +194,7 @@ def _fetch_usage_summary(session: Session, run_id: str, novel_id: str) -> Dict[s
     }
 
 
-def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> Dict[str, Any]:
+def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
     """按任务类型获取使用量"""
     stmt = (
         select(
@@ -212,7 +213,7 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> Dict[s
     return {row.task_type: {"call_count": row.count, "total_tokens": row.total} for row in result}
 
 
-def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> Dict[str, Any]:
+def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
     """按模型获取使用量"""
     stmt = (
         select(
@@ -268,7 +269,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
     session.commit()
 
 
-def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> Optional[Dict[str, Any]]:
+def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
     """
     获取云端分析结果
 
@@ -373,7 +374,7 @@ def insert_global_context(
     session.commit()
 
 
-def fetch_global_context(session: Session, run_id: str, novel_id: str) -> Optional[Tuple[str, str, str, str]]:
+def fetch_global_context(session: Session, run_id: str, novel_id: str) -> tuple[str, str, str, str] | None:
     """
     获取全局上下文
 
@@ -428,7 +429,7 @@ def update_global_context(session: Session, run_id: str, novel_id: str, **kwargs
     session.commit()
 
 
-def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> Optional[str]:
+def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | None:
     """
     获取小说标题
 

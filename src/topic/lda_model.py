@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from gensim.corpora import Dictionary
 from gensim.models import LdaModel
@@ -43,7 +43,7 @@ class LDAConfig:
             self.minimum_probability = settings.topic_model.common.minimum_probability
 
     @classmethod
-    def for_single_book(cls) -> "LDAConfig":
+    def for_single_book(cls) -> LDAConfig:
         return cls(
             num_topics=settings.topic_model.single_book.num_topics,
             passes=settings.topic_model.single_book.passes,
@@ -51,7 +51,7 @@ class LDAConfig:
         )
 
     @classmethod
-    def for_multi_book(cls) -> "LDAConfig":
+    def for_multi_book(cls) -> LDAConfig:
         return cls(
             num_topics=settings.topic_model.multi_book.num_topics,
             passes=settings.topic_model.multi_book.passes,
@@ -65,7 +65,7 @@ class LDATrainer:
 
     def train(
         self,
-        tokenized_docs: List[List[str]],
+        tokenized_docs: list[list[str]],
         filter_extremes: bool = True,
         no_below: int | None = None,
         no_above: float | None = None,
@@ -131,9 +131,9 @@ class LDATrainer:
 
 def infer_document_topics(
     topic_model: TopicModel,
-    doc_tokens: List[str],
+    doc_tokens: list[str],
     top_n: int = 5,
-) -> List[TopicResult]:
+) -> list[TopicResult]:
     return topic_model.infer_document_topics(doc_tokens, top_n)
 
 
@@ -141,7 +141,7 @@ def get_topic_words(
     topic_model: TopicModel,
     topic_id: int,
     top_n: int = 15,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     words = topic_model.get_topic_words(topic_id, top_n)
     return [{"word": w.word, "weight": w.weight} for w in words]
 
@@ -149,6 +149,6 @@ def get_topic_words(
 def get_all_topic_words(
     topic_model: TopicModel,
     top_n: int = 15,
-) -> Dict[int, List[Dict[str, Any]]]:
+) -> dict[int, list[dict[str, Any]]]:
     all_topics = topic_model.get_all_topics(top_n)
     return {topic_id: [{"word": w.word, "weight": w.weight} for w in words] for topic_id, words in all_topics.items()}

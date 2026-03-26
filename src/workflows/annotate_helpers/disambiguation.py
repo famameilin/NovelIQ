@@ -627,7 +627,7 @@ def _build_display_name_map(
     return {name: display_by_cluster.get(alias_map.get(name, name), alias_map.get(name, name)) for name in all_names}
 
 
-def _extract_names_from_candidates(candidates: list[str] | list[dict[str, int]]) -> list[str]:
+def _extract_names_from_candidates(candidates: list[str] | list[dict[str, str | int]]) -> list[str]:
     names: list[str] = []
     if candidates and isinstance(candidates[0], dict):
         names = [str(item.get("name", "")) for item in candidates]
@@ -637,12 +637,12 @@ def _extract_names_from_candidates(candidates: list[str] | list[dict[str, int]])
 
 
 def _build_candidate_payload_by_names(
-    all_names: list[str] | list[dict[str, int]],
+    all_names: list[str] | list[dict[str, str | int]],
     candidate_names: list[str],
-) -> list[str] | list[dict[str, int]]:
+) -> list[str] | list[dict[str, str | int]]:
     if all_names and isinstance(all_names[0], dict):
         names_set = set(candidate_names)
-        payload: list[dict[str, int]] = []
+        payload: list[dict[str, str | int]] = []
         for item in all_names:
             name = str(item.get("name", ""))
             if name in names_set:
@@ -652,7 +652,7 @@ def _build_candidate_payload_by_names(
 
 
 def _collect_final_disambiguation_candidates(
-    all_names: list[str] | list[dict[str, int]],
+    all_names: list[str] | list[dict[str, str | int]],
     alias_map: dict[str, str],
     state_snapshot: DisambigStateSnapshot | None = None,
 ) -> list[str]:

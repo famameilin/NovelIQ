@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Set, Tuple
 
 from src.metrics.text_utils import tokenize_words
 
@@ -174,8 +174,8 @@ _SENSORY_STOP: frozenset[str] = frozenset(
 )
 
 
-def read_lexicon(path: Path) -> Set[str]:
-    items: Set[str] = set()
+def read_lexicon(path: Path) -> set[str]:
+    items: set[str] = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         value = line.strip()
         if not value or value.startswith("#"):
@@ -188,15 +188,15 @@ def write_lexicon(path: Path, items: Iterable[str]) -> None:
     path.write_text("\n".join(items) + "\n", encoding="utf-8")
 
 
-def collect_tokens(texts: Iterable[str]) -> List[str]:
-    tokens: List[str] = []
+def collect_tokens(texts: Iterable[str]) -> list[str]:
+    tokens: list[str] = []
     for text in texts:
         tokens.extend(tokenize_words(text))
     return tokens
 
 
-def collect_fallback_terms(texts: Iterable[str]) -> List[str]:
-    terms: List[str] = []
+def collect_fallback_terms(texts: Iterable[str]) -> list[str]:
+    terms: list[str] = []
     pattern = re.compile(r"[\u4e00-\u9fff]{2,4}")
     for text in texts:
         terms.extend(pattern.findall(text))
@@ -209,12 +209,12 @@ def is_chinese_term(term: str) -> bool:
 
 def pick_candidates(
     freq: Counter[str],
-    existing: Set[str],
+    existing: set[str],
     predicate,
     limit: int,
     min_freq: int,
-) -> List[str]:
-    candidates: List[Tuple[str, int]] = []
+) -> list[str]:
+    candidates: list[tuple[str, int]] = []
     for term, count in freq.items():
         if count < min_freq:
             continue
@@ -234,7 +234,7 @@ def pick_candidates(
 def _collect_and_clean_tokens(
     texts: Iterable[str],
     stopwords: frozenset[str],
-) -> Tuple[List[str], str]:
+) -> tuple[list[str], str]:
     """
     创建时间: 2026-03-13
     创建者: TraeAI
@@ -252,13 +252,13 @@ def _collect_and_clean_tokens(
 
 def _extract_proper_nouns(
     freq: Counter[str],
-    existing: Set[str],
+    existing: set[str],
     stopword_substrings: tuple[str, ...],
     title_suffixes: tuple[str, ...],
     place_suffixes: tuple[str, ...],
     artifact_suffixes: tuple[str, ...],
     title_only: frozenset[str],
-) -> List[str]:
+) -> list[str]:
     """
     创建时间: 2026-03-13
     创建者: TraeAI
@@ -291,10 +291,10 @@ def _extract_proper_nouns(
 
 def _extract_combat_terms(
     freq: Counter[str],
-    existing: Set[str],
+    existing: set[str],
     combat_stems: tuple[str, ...],
     stopword_substrings: tuple[str, ...],
-) -> List[str]:
+) -> list[str]:
     """
     创建时间: 2026-03-13
     创建者: TraeAI
@@ -312,11 +312,11 @@ def _extract_combat_terms(
 
 def _extract_sensory_terms(
     freq: Counter[str],
-    existing: Set[str],
+    existing: set[str],
     sensory_stems: tuple[str, ...],
     stopword_substrings: tuple[str, ...],
     sensory_stop: frozenset[str],
-) -> List[str]:
+) -> list[str]:
     """
     创建时间: 2026-03-13
     创建者: TraeAI
@@ -339,9 +339,9 @@ def _extract_sensory_terms(
 
 def _extract_semantic_terms(
     full_text: str,
-    existing: Set[str],
+    existing: set[str],
     semantic_stems: tuple[str, ...],
-) -> List[str]:
+) -> list[str]:
     """
     创建时间: 2026-03-13
     创建者: TraeAI
@@ -351,7 +351,7 @@ def _extract_semantic_terms(
     return [stem for stem in semantic_stems if stem in full_text and stem not in existing]
 
 
-def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> Dict[str, List[str]]:
+def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> dict[str, list[str]]:
     """
     创建时间: 2026-03-13
     创建者: TraeAI
@@ -369,7 +369,7 @@ def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> Dict[str, List[s
         "sensory": read_lexicon(lexicon_dir / "sensory.txt"),
         "semantic_category": read_lexicon(lexicon_dir / "semantic_category.txt"),
     }
-    additions: Dict[str, List[str]] = {}
+    additions: dict[str, list[str]] = {}
     additions["proper_nouns"] = _extract_proper_nouns(
         freq,
         lexicons["proper_nouns"],
@@ -400,7 +400,7 @@ def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> Dict[str, List[s
     return additions
 
 
-def apply_updates(additions: Dict[str, List[str]], lexicon_dir: Path) -> None:
+def apply_updates(additions: dict[str, list[str]], lexicon_dir: Path) -> None:
     for name, new_terms in additions.items():
         if not new_terms:
             continue
@@ -410,7 +410,7 @@ def apply_updates(additions: Dict[str, List[str]], lexicon_dir: Path) -> None:
         write_lexicon(path, merged)
 
 
-def update_lexicons_from_texts(texts: Iterable[str], lexicon_dir: Path, apply: bool = True) -> Dict[str, List[str]]:
+def update_lexicons_from_texts(texts: Iterable[str], lexicon_dir: Path, apply: bool = True) -> dict[str, list[str]]:
     additions = expand_lexicons(texts, lexicon_dir)
     if apply:
         apply_updates(additions, lexicon_dir)

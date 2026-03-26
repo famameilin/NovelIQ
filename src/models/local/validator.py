@@ -174,8 +174,8 @@ def generate_anonymous_name(chunk_id: int, index: int) -> str:
 
 
 def replace_invalid_names_with_anonymous(
-    annotation: "ChunkAnnotation", invalid_names: list[str], chunk_id: int
-) -> "ChunkAnnotation":
+    annotation: ChunkAnnotation, invalid_names: list[str], chunk_id: int
+) -> ChunkAnnotation:
     if not invalid_names:
         return annotation
 
@@ -212,7 +212,7 @@ def replace_invalid_names_with_anonymous(
 
     new_dialogues: list[DialogueSnapshot] = []
     for dialogue in annotation.dialogues:
-        new_speaker = name_mapping.get(dialogue.speaker, dialogue.speaker)
+        new_speaker = name_mapping.get(dialogue.speaker, dialogue.speaker) if dialogue.speaker else dialogue.speaker
         new_dialogues.append(
             DialogueSnapshot(
                 speaker=new_speaker,

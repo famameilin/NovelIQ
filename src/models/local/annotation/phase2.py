@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 
 def _save_interaction(
-    client: "AnnotationClient",
+    client: AnnotationClient,
     run_id: str | None,
     chunk_id: int | None,
     phase: str,
@@ -115,14 +115,14 @@ def _save_interaction(
 
 
 def _do_phase2(
-    client: "AnnotationClient",
+    client: AnnotationClient,
     messages: list[dict],
     text: str,
     prev_chunk_summary: str | None,
     chunk_id: int | None,
     run_id: str | None = None,
     attempt_number: int = 1,
-) -> "ForeshadowingResult":
+) -> ForeshadowingResult:
     """
     执行Phase2单次调用
 
@@ -176,7 +176,7 @@ def _do_phase2(
 
 
 def annotate_chunk_phase2(
-    client: "AnnotationClient",
+    client: AnnotationClient,
     text: str,
     prev_chunk_summary: str | None = None,
     chunk_id: int | None = None,
@@ -186,10 +186,10 @@ def annotate_chunk_phase2(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
-    cloud_client: "AnnotationClient | None" = None,
+    cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
-) -> "ForeshadowingResult | None":
+) -> ForeshadowingResult | None:
     """
     第二次调用：伏笔分析（带独立重试机制）
 
@@ -243,7 +243,7 @@ def annotate_chunk_phase2(
         exception_type=Phase2MaxRetriesExceededError,
     )
 
-    def operation(local_client: "AnnotationClient", retry_messages: list[dict] | None = None) -> "ForeshadowingResult":
+    def operation(local_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ForeshadowingResult:
         """执行单次Phase2调用"""
         msgs = retry_messages if retry_messages else messages
         return _do_phase2(local_client, msgs, text, prev_chunk_summary, chunk_id, run_id, handler.state.attempt)

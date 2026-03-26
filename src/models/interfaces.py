@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from src.models.local.annotation import MultiPhaseAnnotationResult
 from src.models.local.disambiguation import ExtendedDisambigResult
@@ -35,7 +35,7 @@ class AnnotationLike(Protocol):
         self,
         text: str,
         prev_summary: str | None = None,
-        alias_map: Dict[str, str] | None = None,
+        alias_map: dict[str, str] | None = None,
         chunk_id: int | None = None,
         global_context: str | None = None,
         prev_chunk_text: str | None = None,
@@ -43,9 +43,9 @@ class AnnotationLike(Protocol):
         rag_evidence: str | None = None,
         known_aliases: str | None = None,
         next_chunk_text: str | None = None,
-        cloud_client: "AnnotationLike | None" = None,
+        cloud_client: AnnotationLike | None = None,
         run_id: str | None = None,
-        character_appearances: List[dict] | None = None,
+        character_appearances: list[dict] | None = None,
     ) -> MultiPhaseAnnotationResult:
         ...
 
@@ -66,9 +66,9 @@ class DisambiguationLike(Protocol):
 
     def disambiguate_characters(
         self,
-        candidates: List[str] | List[Dict[str, int]],
-        context_sentences: Dict[str, str] | None = None,
-        existing_names: List[str] | None = None,
+        candidates: list[str] | list[dict[str, int]],
+        context_sentences: dict[str, str] | None = None,
+        existing_names: list[str] | None = None,
         rag_hint: str | None = None,
     ) -> ExtendedDisambigResult:
         ...

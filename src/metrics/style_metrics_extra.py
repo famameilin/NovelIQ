@@ -18,13 +18,11 @@ import re
 import statistics
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Set
 
 import jieba
 
 from .lexicon_metrics import count_mixed_hits
 from .text_utils import tokenize_words
-
 
 CLASSICAL_PATTERNS = [
     r"之[^\s]{0,3}[者也乎哉]",
@@ -124,10 +122,10 @@ CLASSICAL_IMAGERY = {
     "影",
 }
 
-IDIOM_SET: Set[str] = set()
+IDIOM_SET: set[str] = set()
 
 
-def _load_idiom_set() -> Set[str]:
+def _load_idiom_set() -> set[str]:
     global IDIOM_SET
     if IDIOM_SET:
         return IDIOM_SET
@@ -195,14 +193,14 @@ def _load_idiom_set() -> Set[str]:
 
 
 def compute_idiom_density(
-    texts: List[str],
+    texts: list[str],
 ) -> float:
     if not texts:
         return 0.0
 
     idioms = _load_idiom_set()
 
-    all_words: List[str] = []
+    all_words: list[str] = []
     idiom_count = 0
 
     for text in texts:
@@ -220,7 +218,7 @@ def compute_idiom_density(
 
 
 def compute_classical_sentence_ratio(
-    texts: List[str],
+    texts: list[str],
 ) -> float:
     if not texts:
         return 0.0
@@ -244,7 +242,7 @@ def compute_classical_sentence_ratio(
 
 
 def compute_vocab_breadth(
-    all_tokens: List[str],
+    all_tokens: list[str],
 ) -> float:
     if not all_tokens:
         return 0.0
@@ -256,12 +254,12 @@ def compute_vocab_breadth(
 
 
 def compute_avg_word_len(
-    texts: List[str],
+    texts: list[str],
 ) -> float:
     if not texts:
         return 0.0
 
-    all_words: List[str] = []
+    all_words: list[str] = []
     for text in texts:
         words = list(jieba.cut(text))
         all_words.extend([w for w in words if w.strip()])
@@ -276,7 +274,7 @@ def compute_avg_word_len(
 
 
 def compute_sent_len_std(
-    texts: List[str],
+    texts: list[str],
 ) -> float:
     if not texts:
         return 0.0
@@ -298,14 +296,14 @@ def compute_sent_len_std(
 
 
 def compute_function_word_vector(
-    texts: List[str],
-) -> Dict[str, float]:
+    texts: list[str],
+) -> dict[str, float]:
     if not texts:
-        return {word: 0.0 for word in FUNCTION_WORDS}
+        return dict.fromkeys(FUNCTION_WORDS, 0.0)
 
     total_chars = sum(len(text) for text in texts)
     if total_chars == 0:
-        return {word: 0.0 for word in FUNCTION_WORDS}
+        return dict.fromkeys(FUNCTION_WORDS, 0.0)
 
     all_chars = []
     for text in texts:
@@ -316,7 +314,7 @@ def compute_function_word_vector(
     return {word: counts.get(word, 0) / total_chars for word in FUNCTION_WORDS}
 
 
-def _load_semantic_categories() -> Dict[str, List[str]]:
+def _load_semantic_categories() -> dict[str, list[str]]:
     """
     加载语义类别词表
 
@@ -337,8 +335,8 @@ def _load_semantic_categories() -> Dict[str, List[str]]:
 
 
 def compute_category_density(
-    texts: List[str],
-) -> Dict[str, float]:
+    texts: list[str],
+) -> dict[str, float]:
     """
     计算语义类别密度
 
@@ -350,10 +348,10 @@ def compute_category_density(
     category_terms = _load_semantic_categories()
 
     if not texts:
-        return {category: 0.0 for category in category_terms.keys()}
+        return dict.fromkeys(category_terms.keys(), 0.0)
 
     total_tokens = 0
-    category_hits = {category: 0 for category in category_terms.keys()}
+    category_hits = dict.fromkeys(category_terms.keys(), 0)
 
     for text in texts:
         if not text:
@@ -371,7 +369,7 @@ def compute_category_density(
             category_hits[category] += count_mixed_hits(text, tokens, terms)
 
     if total_tokens == 0:
-        return {category: 0.0 for category in category_terms.keys()}
+        return dict.fromkeys(category_terms.keys(), 0.0)
 
     result = {}
     for category, hit_count in category_hits.items():
@@ -381,7 +379,7 @@ def compute_category_density(
 
 
 def compute_imagery_density(
-    texts: List[str],
+    texts: list[str],
 ) -> float:
     if not texts:
         return 0.0

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Dict, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 
-def term_counts(text: str, terms: Iterable[str]) -> Dict[str, int]:
-    counts: Dict[str, int] = {}
+def term_counts(text: str, terms: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
     if not text:
         return counts
     for term in terms:
@@ -37,8 +37,8 @@ def _is_phrase_term(term: str) -> bool:
         return True
     return len(cleaned) >= 2
 
-def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequence[str]) -> Dict[str, int]:
-    counts: Dict[str, int] = defaultdict(int)
+def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequence[str]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
     if not text:
         return counts
 
@@ -85,7 +85,7 @@ def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequen
 
     return counts
 
-def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) -> Dict[str, int]:
+def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) -> dict[str, int]:
     if not terms:
         return {}
 

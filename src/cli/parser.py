@@ -26,22 +26,20 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import List
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.cli.workflow import run_full_workflow
 from src.config import setup_logging
 from src.storage.db import get_session
-from src.storage.repositories import RunRepository
 from src.storage.id_mapping import generate_task_id
-from src.workflows.diagnose import run_cloud_diagnose
-from src.workflows.preprocess import run_preprocess
-from src.workflows.annotate import run_annotate
+from src.storage.repositories import RunRepository
 from src.workflows.aggregate import run_aggregate
-from src.workflows.diagnose import run_diagnose
+from src.workflows.annotate import run_annotate
+from src.workflows.diagnose import run_cloud_diagnose, run_diagnose
+from src.workflows.preprocess import run_preprocess
 from src.workflows.topic import run_topic_model
-from src.cli.workflow import run_full_workflow
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -105,7 +103,7 @@ def _create_run_id(session: Session, novel_id: str, source_path: Path, title: st
     )
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     setup_logging(verbose=not args.debug, debug=args.debug)

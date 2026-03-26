@@ -12,7 +12,8 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
+from collections.abc import Sequence
+from typing import Any, Protocol, runtime_checkable
 
 from src.chunking.chunker import Chunk
 
@@ -34,7 +35,7 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def fetch_chunk_texts(self) -> List[Tuple[int, str]]:
+    def fetch_chunk_texts(self) -> list[tuple[int, str]]:
         """
         获取所有分块文本
 
@@ -43,7 +44,7 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def fetch_chunk_styles(self) -> List[Tuple[int, float, float, float]]:
+    def fetch_chunk_styles(self) -> list[tuple[int, float, float, float]]:
         """
         获取分块风格数据
 
@@ -61,7 +62,7 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_chunk_culture(self, rows: Sequence[Tuple[int, Optional[float]]]) -> None:
+    def insert_chunk_culture(self, rows: Sequence[tuple[int, float | None]]) -> None:
         """
         插入分块文化数据
 
@@ -70,7 +71,7 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_chunk_topics(self, rows: Sequence[Tuple[int, int, float]]) -> None:
+    def insert_chunk_topics(self, rows: Sequence[tuple[int, int, float]]) -> None:
         """
         插入分块主题数据
 

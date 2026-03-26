@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Set
 
 import jieba
 from loguru import logger
@@ -36,7 +35,7 @@ class TopicPreprocessor:
         self._stopwords_path = stopwords_path or _default_stopwords_path()
         self._user_dict_path = user_dict_path
         self._min_word_len = min_word_len
-        self._stopwords: Set[str] = set()
+        self._stopwords: set[str] = set()
         self._initialized = False
 
     def _ensure_initialized(self) -> None:
@@ -60,7 +59,7 @@ class TopicPreprocessor:
             jieba.load_userdict(str(self._user_dict_path))
             logger.debug("加载jieba用户词典: {}", self._user_dict_path)
 
-    def tokenize(self, text: str) -> List[str]:
+    def tokenize(self, text: str) -> list[str]:
         self._ensure_initialized()
         if not text or not text.strip():
             return []
@@ -75,9 +74,9 @@ class TopicPreprocessor:
         ]
         return filtered
 
-    def preprocess_documents(self, documents: List[str]) -> List[List[str]]:
+    def preprocess_documents(self, documents: list[str]) -> list[list[str]]:
         self._ensure_initialized()
-        results: List[List[str]] = []
+        results: list[list[str]] = []
         for i, doc in enumerate(documents):
             tokens = self.tokenize(doc)
             results.append(tokens)
@@ -86,12 +85,12 @@ class TopicPreprocessor:
         logger.info("预处理完成: 文档数={}", len(documents))
         return results
 
-    def add_stopwords(self, words: List[str]) -> None:
+    def add_stopwords(self, words: list[str]) -> None:
         self._ensure_initialized()
         for word in words:
             self._stopwords.add(word)
 
     @property
-    def stopwords(self) -> Set[str]:
+    def stopwords(self) -> set[str]:
         self._ensure_initialized()
         return self._stopwords.copy()

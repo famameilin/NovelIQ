@@ -17,7 +17,7 @@ DisambiguationClient 模块
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
@@ -50,10 +50,10 @@ class DisambiguationClient(BaseModelClient):
         config: TaskModelConfig | None = None,
         client: Any | None = None,
         analysis_logger: AnalysisLogger | None = None,
-        token_usage_callback: Optional[TokenUsageCallback] = None,
-        novel_id: Optional[str] = None,
-        instructor_client_factory: Optional[Any] = None,
-        session: Optional[Any] = None,
+        token_usage_callback: TokenUsageCallback | None = None,
+        novel_id: str | None = None,
+        instructor_client_factory: Any | None = None,
+        session: Any | None = None,
     ) -> None:
         super().__init__(
             task_type=task_type,
@@ -68,9 +68,9 @@ class DisambiguationClient(BaseModelClient):
 
     def disambiguate_characters(
         self,
-        candidates: List[str] | List[Dict[str, int]],
-        context_sentences: Dict[str, str] | None = None,
-        existing_names: List[str] | None = None,
+        candidates: list[str] | list[dict[str, int]],
+        context_sentences: dict[str, str] | None = None,
+        existing_names: list[str] | None = None,
         rag_hint: str | None = None,
     ) -> ExtendedDisambigResult:
         if not candidates:
@@ -126,11 +126,11 @@ class DisambiguationClient(BaseModelClient):
 
     def disambiguate_anonymous(
         self,
-        anonymous_names: List[str],
-        anonymous_contexts: Dict[str, str],
-        existing_names: List[str] | None = None,
-        existing_contexts: Dict[str, str] | None = None,
-    ) -> Dict[str, str]:
+        anonymous_names: list[str],
+        anonymous_contexts: dict[str, str],
+        existing_names: list[str] | None = None,
+        existing_contexts: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         if not anonymous_names:
             return {}
 

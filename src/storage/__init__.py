@@ -13,14 +13,7 @@
 修改内容: 更新导出以适配 SQLAlchemy Session 管理
 """
 
-from .session import (
-    DatabaseSession,
-    SessionFactory,
-    get_db_session,
-    get_session_from_run_id,
-    get_session_from_task_id,
-)
-
+from .chunk_index import read_chunk_index, write_chunk_index
 from .repositories import (
     AnnotationRepository,
     BaseRepository,
@@ -31,8 +24,13 @@ from .repositories import (
     RunRepository,
     StatsRepository,
 )
-
-from .chunk_index import read_chunk_index, write_chunk_index
+from .session import (
+    DatabaseSession,
+    SessionFactory,
+    get_db_session,
+    get_session_from_run_id,
+    get_session_from_task_id,
+)
 
 __all__ = [
     "AnnotationRepository",

@@ -215,7 +215,7 @@ def annotate_chunk_parallel(
         if extracted_dialogues:
             logger.debug("annotate_chunk_parallel: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
             known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-            speaker_lengths, attribution, dialogues, tones = compute_dialogue_lengths_with_llm(
+            result_tuple = compute_dialogue_lengths_with_llm(
                 client=annotation_client,
                 text=text,
                 alias_map=alias_map,
@@ -224,9 +224,10 @@ def annotate_chunk_parallel(
                 known_characters=known_characters,
                 return_tones=True,
             )
-            dialogue_lengths = speaker_lengths
-            dialogue_speakers = attribution
-            dialogue_tones = tones
+            dialogue_lengths = result_tuple[0]
+            dialogue_speakers = result_tuple[1]
+            dialogues = result_tuple[2]
+            dialogue_tones = result_tuple[3] if len(result_tuple) > 3 else None
             logger.debug("annotate_chunk_parallel: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, dialogue_tones, chunk_id)
 
     if foreshadowing and validate_foreshadowing_result(foreshadowing, text):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pickle
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from loguru import logger
@@ -27,6 +27,7 @@ from loguru import logger
 
 if TYPE_CHECKING:
     import networkx as nx
+
     from src.models.local.embedding import EmbeddingClient
     from src.storage.repositories import EntityRepository
 
@@ -34,16 +35,16 @@ if TYPE_CHECKING:
 @dataclass
 class RAGResult:
     level1_hit: bool = False
-    level2_candidates: List[str] = field(default_factory=list)
-    level3_evidence: List[str] = field(default_factory=list)
-    canonical_name: Optional[str] = None
-    used_levels: List[int] = field(default_factory=list)
+    level2_candidates: list[str] = field(default_factory=list)
+    level3_evidence: list[str] = field(default_factory=list)
+    canonical_name: str | None = None
+    used_levels: list[int] = field(default_factory=list)
 
 
 class Level1ExactMatch:
     def __init__(
         self,
-        entity_repo: "EntityRepository",
+        entity_repo: EntityRepository,
         novel_id: str = "default",
         run_id: str | None = None,
     ):
@@ -51,7 +52,7 @@ class Level1ExactMatch:
         self._novel_id = novel_id
         self._run_id = run_id
 
-    def query(self, alias: str) -> Optional[str]:
+    def query(self, alias: str) -> str | None:
         entity = self._entity_repo.fetch_entity_by_alias(
             self._novel_id,
             alias,
@@ -63,7 +64,7 @@ class Level1ExactMatch:
             return canonical
         return None
 
-    def get_all_known_aliases(self) -> Dict[str, str]:
+    def get_all_known_aliases(self) -> dict[str, str]:
         alias_rows = self._entity_repo.fetch_all_aliases_with_canonical(
             self._novel_id,
             self._run_id,
@@ -77,17 +78,17 @@ class Level1ExactMatch:
 
 
 class Level2GraphConstraint:
-    def __init__(self, G: Optional["nx.Graph"] = None):
+    def __init__(self, G: nx.Graph | None = None):
         self._graph = G
 
-    def set_graph(self, G: "nx.Graph") -> None:
+    def set_graph(self, G: nx.Graph) -> None:
         self._graph = G
 
     def get_active_candidates(
         self,
         current_chunk: int,
         lookback: int = 10,
-    ) -> List[str]:
+    ) -> list[str]:
         if self._graph is None:
             return []
 
@@ -109,12 +110,12 @@ class Level2GraphConstraint:
         logger.debug(f"Level2 graph constraint: {len(candidates)} active candidates")
         return candidates
 
-    def get_node_aliases(self, node_name: str) -> List[str]:
+    def get_node_aliases(self, node_name: str) -> list[str]:
         if self._graph is None or node_name not in self._graph.nodes:
             return []
         return self._graph.nodes[node_name].get("aliases", [])
 
-    def get_all_known_aliases(self) -> Dict[str, str]:
+    def get_all_known_aliases(self) -> dict[str, str]:
         if self._graph is None:
             return {}
 
@@ -130,10 +131,10 @@ class Level2GraphConstraint:
 class Level3VectorEvidence:
     def __init__(
         self,
-        entity_repo: "EntityRepository",
+        entity_repo: EntityRepository,
         novel_id: str = "default",
         run_id: str | None = None,
-        embedding_client: Optional["EmbeddingClient"] = None,
+        embedding_client: EmbeddingClient | None = None,
         similarity_threshold: float = 0.7,
         top_k: int = 3,
     ):
@@ -145,7 +146,7 @@ class Level3VectorEvidence:
         self._top_k = top_k
         self._available = embedding_client is not None
 
-    def set_embedding_client(self, client: "EmbeddingClient") -> None:
+    def set_embedding_client(self, client: EmbeddingClient) -> None:
         self._embedding_client = client
         self._available = True
 
@@ -155,7 +156,7 @@ class Level3VectorEvidence:
     def search_similar_entities(
         self,
         query_text: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         if not self.is_available():
             return []
 
@@ -174,7 +175,7 @@ class Level3VectorEvidence:
             self._run_id,
         )
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for row in entity_rows:
             entity_id, canonical, description, embedding_blob = row
             if embedding_blob is None:
@@ -195,7 +196,7 @@ class Level3VectorEvidence:
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results[: self._top_k]
 
-    def _compute_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+    def _compute_similarity(self, vec1: list[float], vec2: list[float]) -> float:
         arr1 = np.array(vec1)
         arr2 = np.array(vec2)
         dot_product = np.dot(arr1, arr2)
@@ -209,11 +210,11 @@ class Level3VectorEvidence:
 class RAGRetriever:
     def __init__(
         self,
-        entity_repo: "EntityRepository",
+        entity_repo: EntityRepository,
         novel_id: str = "default",
         run_id: str | None = None,
-        graph: Optional["nx.Graph"] = None,
-        embedding_client: Optional["EmbeddingClient"] = None,
+        graph: nx.Graph | None = None,
+        embedding_client: EmbeddingClient | None = None,
         similarity_threshold: float = 0.7,
         lookback_chunks: int = 10,
     ):
@@ -230,17 +231,17 @@ class RAGRetriever:
         self._run_id = run_id
         self._lookback_chunks = lookback_chunks
 
-    def set_graph(self, graph: "nx.Graph") -> None:
+    def set_graph(self, graph: nx.Graph) -> None:
         self._level2.set_graph(graph)
 
-    def set_embedding_client(self, client: "EmbeddingClient") -> None:
+    def set_embedding_client(self, client: EmbeddingClient) -> None:
         self._level3.set_embedding_client(client)
 
     def retrieve(
         self,
         alias: str,
-        context_sentence: Optional[str] = None,
-        current_chunk: Optional[int] = None,
+        context_sentence: str | None = None,
+        current_chunk: int | None = None,
     ) -> RAGResult:
         logger.debug(f"RAG retrieve: alias='{alias}', chunk={current_chunk}")
         result = RAGResult()
@@ -272,7 +273,7 @@ class RAGRetriever:
 
         return result
 
-    def get_known_aliases(self) -> Dict[str, str]:
+    def get_known_aliases(self) -> dict[str, str]:
         aliases = self._level1.get_all_known_aliases()
         if not aliases:
             aliases = self._level2.get_all_known_aliases()

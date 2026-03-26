@@ -18,7 +18,7 @@ class LoggingConfig:
     console_log_file: Path | None = None
 
     @classmethod
-    def from_file(cls, path: Path | None = None) -> "LoggingConfig":
+    def from_file(cls, path: Path | None = None) -> LoggingConfig:
         config_path = path or Path("config/logging_config.json")
         data = json.loads(config_path.read_text(encoding="utf-8"))
         log_file = data.get("log_file")

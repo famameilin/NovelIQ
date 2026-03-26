@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
 
 from .chunker import Chunk
 
 
 @dataclass(frozen=True)
 class ChunkIndex:
-    chunks: List[Chunk]
+    chunks: list[Chunk]
 
     def total(self) -> int:
         return len(self.chunks)
@@ -26,7 +25,7 @@ class ChunkIndex:
                 raise ValueError("chunk range is invalid")
 
 
-def build_chunk_index(chunks: List[Chunk]) -> ChunkIndex:
+def build_chunk_index(chunks: list[Chunk]) -> ChunkIndex:
     reindexed = [
         Chunk(
             index=idx,

@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
 
 
 @dataclass(frozen=True)
@@ -64,7 +63,7 @@ class ChunkStyleData:
 
     def to_tuple(
         self,
-    ) -> Tuple[
+    ) -> tuple[
         int,
         float,
         float,

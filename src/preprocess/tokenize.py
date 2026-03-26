@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Set
 
 from loguru import logger
 
@@ -34,7 +33,7 @@ class Tokenizer:
         self._user_dict_path = user_dict_path
         self._stopwords_path = stopwords_path
         self._min_word_len = min_word_len
-        self._stopwords: Set[str] = set()
+        self._stopwords: set[str] = set()
         self._jieba = None
         self._load_jieba()
         self._load_stopwords()
@@ -58,8 +57,8 @@ class Tokenizer:
             logger.warning("停用词文件不存在: {}", self._stopwords_path)
             return
         try:
-            with open(self._stopwords_path, "r", encoding="utf-8") as f:
-                self._stopwords = set(line.strip() for line in f if line.strip())
+            with open(self._stopwords_path, encoding="utf-8") as f:
+                self._stopwords = {line.strip() for line in f if line.strip()}
             logger.debug("加载停用词: 数量={}", len(self._stopwords))
         except Exception as e:
             logger.warning("加载停用词失败: {}", e)
@@ -78,7 +77,7 @@ class Tokenizer:
             self._jieba.load_userdict(str(self._user_dict_path))
             logger.debug("加载jieba用户词典: {}", self._user_dict_path)
 
-    def tokenize(self, text: str, filter_stopwords: bool = False) -> List[str]:
+    def tokenize(self, text: str, filter_stopwords: bool = False) -> list[str]:
         if not text or not text.strip():
             return []
         if self._jieba:
@@ -99,12 +98,12 @@ class Tokenizer:
             result.append(token)
         return result
 
-    def add_stopwords(self, words: List[str]) -> None:
+    def add_stopwords(self, words: list[str]) -> None:
         for word in words:
             self._stopwords.add(word)
 
     @property
-    def stopwords(self) -> Set[str]:
+    def stopwords(self) -> set[str]:
         return self._stopwords.copy()
 
     @property
@@ -130,5 +129,5 @@ def get_tokenizer(
     return _tokenizer
 
 
-def tokenize(text: str, filter_stopwords: bool = False) -> List[str]:
+def tokenize(text: str, filter_stopwords: bool = False) -> list[str]:
     return get_tokenizer().tokenize(text, filter_stopwords=filter_stopwords)

@@ -27,16 +27,16 @@ from .schemas import (
     APISettings,
     ChunkingSettings,
     DatabaseSettings,
+    DiagnosisSettings,
     LoggingSettings,
     MetricsSettings,
     ModelsSettings,
     PathSettings,
     PromptSettings,
     RAGSettings,
-    TopicModelSettings,
-    DiagnosisSettings,
-    ThinkingSettings,
     StreamingSettings,
+    ThinkingSettings,
+    TopicModelSettings,
     _parse_analysis_settings,
     _parse_api_settings,
     _parse_chunking_settings,
@@ -48,9 +48,9 @@ from .schemas import (
     _parse_path_settings,
     _parse_prompt_settings,
     _parse_rag_settings,
-    _parse_topic_model_settings,
-    _parse_thinking_settings,
     _parse_streaming_settings,
+    _parse_thinking_settings,
+    _parse_topic_model_settings,
 )
 
 
@@ -84,7 +84,7 @@ class Settings:
     prompts: PromptSettings = field(default_factory=PromptSettings)
 
     @classmethod
-    def from_json(cls, path: Path | None = None) -> "Settings":
+    def from_json(cls, path: Path | None = None) -> Settings:
         """从JSON文件加载配置"""
         config_path = path or Path("config/settings.json")
         if not config_path.exists():
@@ -93,7 +93,7 @@ class Settings:
         return cls._parse_from_dict(data)
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         """从环境变量加载配置（覆盖JSON配置）"""
         base = cls.from_json()
         if os.getenv("CHUNK_MAX_CHARS"):
@@ -114,7 +114,7 @@ class Settings:
         return base
 
     @classmethod
-    def _parse_from_dict(cls, data: dict[str, Any]) -> "Settings":
+    def _parse_from_dict(cls, data: dict[str, Any]) -> Settings:
         """从字典解析配置"""
         return cls(
             models=_parse_models_settings(data.get("models")),

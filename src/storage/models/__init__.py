@@ -17,34 +17,34 @@
 本模块统一导出所有 ORM 模型和 Base 类。
 """
 
-from src.storage.models.base import Base
-from src.storage.models.core import AnalysisRun, DisambigCheckpoint
-from src.storage.models.chunk import Chunk, ChunkStyle, ChunkCulture, ChunkTopic, ChunkEmbedding
+from src.storage.models.analysis import (
+    ChunkSummary,
+    CloudAnalysis,
+    EmotionCurve,
+    GlobalContext,
+    GlobalStats,
+    RhythmCurve,
+)
 from src.storage.models.annotation import (
+    CharacterAppearance,
     ChunkAnnotation,
     ChunkCharacter,
-    ChunkRelation,
     ChunkDialogue,
     ChunkForeshadowing,
-    CharacterAppearance,
+    ChunkRelation,
 )
+from src.storage.models.base import Base
+from src.storage.models.chunk import Chunk, ChunkCulture, ChunkEmbedding, ChunkStyle, ChunkTopic
+from src.storage.models.core import AnalysisRun, DisambigCheckpoint
 from src.storage.models.entity import (
     Entity,
     EntityAlias,
+    EntityRegistry,
     EntityRelation,
     EntitySnapshot,
-    EntityRegistry,
 )
-from src.storage.models.analysis import (
-    CloudAnalysis,
-    EmotionCurve,
-    RhythmCurve,
-    GlobalStats,
-    GlobalContext,
-    ChunkSummary,
-)
-from src.storage.models.rag import TokenUsage, GraphStorage
 from src.storage.models.model_interaction import ModelInteraction
+from src.storage.models.rag import GraphStorage, TokenUsage
 
 EMBEDDING_DIM = 1536
 

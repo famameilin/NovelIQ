@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from loguru import logger
@@ -27,33 +27,33 @@ from sqlalchemy.orm import Session
 
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ResultsWriteResponse
-from src.api.routes.results_fetchers import (
-    _fetch_emotion_curve,
-    _fetch_rhythm_curve,
-    _fetch_characters,
-    _fetch_topics,
-    _fetch_diagnosis,
-    _fetch_chunk_styles,
-    _fetch_chunk_annotations,
-    _fetch_character_relations,
-    _fetch_hierarchical_relations,
-    _fetch_global_stats,
-    _fetch_chunk_cultures,
-    _fetch_novel_name,
-    _fetch_token_usage_stats,
-)
+from src.api.routes.novels import get_novel_service
 from src.api.routes.results_converters import _convert_aggregate_result
+from src.api.routes.results_fetchers import (
+    _fetch_character_relations,
+    _fetch_characters,
+    _fetch_chunk_annotations,
+    _fetch_chunk_cultures,
+    _fetch_chunk_styles,
+    _fetch_diagnosis,
+    _fetch_emotion_curve,
+    _fetch_global_stats,
+    _fetch_hierarchical_relations,
+    _fetch_novel_name,
+    _fetch_rhythm_curve,
+    _fetch_token_usage_stats,
+    _fetch_topics,
+)
 from src.api.services.novel_service import NovelService
 from src.config import settings
 from src.metrics.aggregate_metrics import aggregate_all_metrics
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
-    StatsRepository,
     EntityRepository,
+    StatsRepository,
 )
 from src.storage.session import SessionFactory
-from src.api.routes.novels import get_novel_service
 
 router = APIRouter(prefix="/novels", tags=["results"])
 
@@ -148,8 +148,8 @@ async def get_results(
     """
     # 从数据库查询运行记录
     from src.storage.db import get_session_factory
-    from src.storage.repositories import RunRepository
     from src.storage.id_mapping import task_id_to_run_id
+    from src.storage.repositories import RunRepository
 
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -189,7 +189,7 @@ def _fetch_all_results_data(
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
     entity_repo: EntityRepository,
-) -> Tuple[Dict[str, Any], List[str], Optional[str]]:
+) -> tuple[dict[str, Any], list[str], str | None]:
     """
     2026-03-13: TraeAI创建，任务refactor-api-layer-functions
     获取所有分析结果数据，返回数据字典、缺失字段列表和小说名称
@@ -212,7 +212,7 @@ def _fetch_all_results_data(
     任务: fix-character-alias-inconsistency
     修改内容: 获取 alias_map 并传递给子函数，实现人物外号归一化
     """
-    missing_fields: List[str] = []
+    missing_fields: list[str] = []
 
     # 获取别名映射表，用于人物外号归一化
     alias_map = annotation_repo.fetch_alias_map(run_id)
@@ -286,7 +286,7 @@ def _fetch_all_results_data(
 
 
 def _build_results_response(
-    file_path: str, novel_id: str, novel_name: Optional[str], missing_fields: List[str]
+    file_path: str, novel_id: str, novel_name: str | None, missing_fields: list[str]
 ) -> ResultsWriteResponse:
     """
     2026-03-13: TraeAI创建，任务refactor-api-layer-functions
@@ -302,7 +302,7 @@ def _build_results_response(
     )
 
 
-def _write_results_to_file(task_id: str, data: Dict[str, Any]) -> str:
+def _write_results_to_file(task_id: str, data: dict[str, Any]) -> str:
     results_dir = settings.paths.results_dir
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -316,7 +316,7 @@ def _write_results_to_file(task_id: str, data: Dict[str, Any]) -> str:
     return str(file_path)
 
 
-def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> Tuple[Optional[Session], Optional[str]]:
+def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> tuple[Session | None, str | None]:
     """
     2026-03-14: TraeAI创建，任务refactor-routes-use-repository
     从 task_id 获取数据库连接和 run_id
@@ -331,7 +331,7 @@ def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> Tuple[
     任务: API接口参数统一优化
     修改内容: 将task_id转换为run_id返回，处理无效task_id情况
     """
-    from src.storage.id_mapping import task_id_to_run_id, TaskIDNotFoundError
+    from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
 
     session_factory = SessionFactory(novel_service.upload_dir)
     db_session = session_factory.get_session(task_id)

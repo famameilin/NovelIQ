@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
 
 from loguru import logger
 
@@ -38,7 +37,7 @@ from src.metrics.style_metrics import (
 from src.storage.repositories import ChunkStyleData
 
 
-def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> Dict[str, Union[List[str], Dict[str, List[str]]]]:
+def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> dict[str, list[str] | dict[str, list[str]]]:
     """
     加载所有词典用于预处理
 
@@ -52,7 +51,7 @@ def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> Dict[str, Union[List
     任务: 简化文化指标系统
     修改内容: 删除文化词表加载，只保留 imagery 词表
     """
-    lexicons: Dict[str, Union[List[str], Dict[str, List[str]]]] = {}
+    lexicons: dict[str, list[str] | dict[str, list[str]]] = {}
 
     try:
         lexicons["sensory"] = load_lexicon("sensory", lexicon_dir)
@@ -84,9 +83,9 @@ def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> Dict[str, Union[List
 
 def _compute_chunk_style_metrics(
     chunk: Chunk,
-    tokens: List[str],
-    sensory_terms: List[str],
-    function_words: List[str],
+    tokens: list[str],
+    sensory_terms: list[str],
+    function_words: list[str],
     semantic_categories: dict,
 ) -> ChunkStyleData:
     """
@@ -149,9 +148,9 @@ def _compute_chunk_style_metrics(
 
 def _compute_chunk_culture_metrics(
     chunk: Chunk,
-    tokens: List[str],
-    imagery_terms: List[str],
-) -> Tuple[int, float | None]:
+    tokens: list[str],
+    imagery_terms: list[str],
+) -> tuple[int, float | None]:
     """
     计算单个chunk的文化指标
 

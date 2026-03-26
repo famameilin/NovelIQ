@@ -9,8 +9,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 

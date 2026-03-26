@@ -15,7 +15,7 @@
 - 移除 diagnosis_client 导入（已移动到 src/models/diagnosis.py）
 """
 
-from .base import CloudModelClient, NullCloudModelClient, make_empty_analysis, TokenUsageCallback
+from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
 from .client import ConfiguredCloudModelClient
 from .payload import build_diagnosis_payload
 from .schema import CloudAnalysis

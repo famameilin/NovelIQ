@@ -14,8 +14,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, NoReturn, Type, TypeVar
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, NoReturn, TypeVar
 
 from loguru import logger
 
@@ -41,7 +42,7 @@ class RetryConfig:
     chunk_id: int | None = None
 
 
-class AnnotationRetryHandler(Generic[T]):
+class AnnotationRetryHandler[T]:
     """
     标注重试处理器
 
@@ -61,7 +62,7 @@ class AnnotationRetryHandler(Generic[T]):
         config: RetryConfig,
         local_client: Any,
         cloud_client: Any | None = None,
-        exception_type: Type[Exception] | None = None,
+        exception_type: type[Exception] | None = None,
     ) -> None:
         self.config = config
         self.local_client = local_client

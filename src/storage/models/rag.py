@@ -11,9 +11,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from sqlalchemy import Index, Integer, String, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -33,15 +31,15 @@ class TokenUsage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     novel_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    chunk_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     call_type: Mapped[str] = mapped_column(String(50), nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[str] = mapped_column(String(50), nullable=False)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -70,9 +68,9 @@ class GraphStorage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     graph_name: Mapped[str] = mapped_column(String(255), nullable=False)
     graph_json: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 

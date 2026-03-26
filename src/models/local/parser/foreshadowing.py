@@ -9,12 +9,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
-from ..schema import ForeshadowingResult, ForeshadowingType, ForeshadowingConfidence
+from ..schema import ForeshadowingConfidence, ForeshadowingResult, ForeshadowingType
 
 
-def parse_foreshadowing_result(data: Dict[str, Any]) -> ForeshadowingResult:
+def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     """
     解析伏笔分析结果
 

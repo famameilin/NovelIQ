@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -80,7 +80,7 @@ def _fetch_relations(
     entity_id: int | None = None,
     is_active_only: bool = False,
     run_id: str | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     辅助函数：统一查询实体关系的 ORM 逻辑
     """
@@ -133,7 +133,7 @@ def fetch_relations_for_entity(
     entity_id: int,
     novel_id: str | None = None,
     run_id: str | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """获取实体的所有关系"""
     return _fetch_relations(
         session=session,
@@ -149,7 +149,7 @@ def fetch_active_relations(
     novel_id: str,
     entity_id: int | None = None,
     run_id: str | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """获取活跃关系"""
     return _fetch_relations(
         session=session,
@@ -171,7 +171,7 @@ def fetch_hierarchical_relations_with_names(
     session: Session,
     novel_id: str,
     run_id: str | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     获取层级关系（带实体名称）
 

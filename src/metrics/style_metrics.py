@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
 
 from src.config import settings
 
@@ -16,7 +16,7 @@ SHORT_CHUNK_TOKEN_THRESHOLD = 12
 SHORT_CHUNK_MIN_POSITIVE_DENSITY = 1e-4
 
 
-def load_function_words(file_path: Path | str | None = None) -> List[str]:
+def load_function_words(file_path: Path | str | None = None) -> list[str]:
     if file_path is None:
         file_path = FUNCTION_WORDS_PATH
     else:
@@ -24,8 +24,8 @@ def load_function_words(file_path: Path | str | None = None) -> List[str]:
     if not file_path.exists():
         raise FileNotFoundError(f"虚词词典文件不存在: {file_path}")
 
-    words: List[str] = []
-    with open(file_path, "r", encoding="utf-8") as f:
+    words: list[str] = []
+    with open(file_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):
@@ -47,13 +47,13 @@ SEMANTIC_CATEGORY_MAPPING = {
 }
 
 
-def parse_semantic_category_lexicon(file_path: str) -> Dict[str, List[str]]:
-    categories: Dict[str, List[str]] = {}
+def parse_semantic_category_lexicon(file_path: str) -> dict[str, list[str]]:
+    categories: dict[str, list[str]] = {}
     current_category: str | None = None
-    current_terms: List[str] = []
+    current_terms: list[str] = []
     pattern = re.compile(r"#\s*={5,}\s*(\d+)\.\s*(.+?)\s*={5,}")
 
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -122,7 +122,7 @@ def word_frequency_breadth(tokens: Sequence[str], coverage: float = 0.9) -> floa
     if coverage <= 0 or coverage >= 1:
         raise ValueError("coverage must be between 0 and 1")
 
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for token in tokens:
         counts[token] = counts.get(token, 0) + 1
 
@@ -135,13 +135,13 @@ def word_frequency_breadth(tokens: Sequence[str], coverage: float = 0.9) -> floa
     return (total - cumulative) / total
 
 
-def function_word_distribution(tokens: Sequence[str], function_words: Iterable[str]) -> Dict[str, float]:
+def function_word_distribution(tokens: Sequence[str], function_words: Iterable[str]) -> dict[str, float]:
     total = len(tokens)
     if total == 0:
         return {}
 
     function_set = {word for word in function_words if word}
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for token in tokens:
         if token in function_set:
             counts[token] = counts.get(token, 0) + 1
@@ -149,7 +149,7 @@ def function_word_distribution(tokens: Sequence[str], function_words: Iterable[s
     return {token: count / total for token, count in counts.items()}
 
 
-def sentence_length_stats(text: str) -> Dict[str, float]:
+def sentence_length_stats(text: str) -> dict[str, float]:
     sentences = split_sentences(text)
     if not sentences:
         return {"avg_sent_len": 0.0, "sent_len_std": 0.0, "d_value": 0.0}
@@ -211,13 +211,13 @@ def semantic_category_density(text: str, terms: Iterable[str]) -> float:
     return lexicon_density(tokens, terms, text=text)
 
 
-def semantic_category_densities(text: str, category_terms: Dict[str, List[str]]) -> Dict[str, float]:
+def semantic_category_densities(text: str, category_terms: dict[str, list[str]]) -> dict[str, float]:
     tokens = tokenize_words(text)
     total_tokens = len(tokens)
     if total_tokens == 0:
-        return {key: 0.0 for key in category_terms.keys()}
+        return dict.fromkeys(category_terms.keys(), 0.0)
 
-    densities: Dict[str, float] = {}
+    densities: dict[str, float] = {}
     for category, terms in category_terms.items():
         if not terms:
             densities[category] = 0.0

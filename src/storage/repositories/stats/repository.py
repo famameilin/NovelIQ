@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
 from src.storage.repositories.base import BaseRepository
@@ -23,7 +24,7 @@ from src.storage.repositories.base import BaseRepository
 from . import chunks, graphs, metrics, runs, summaries
 
 
-class StatsRepository(BaseRepository[Dict[str, Any]]):
+class StatsRepository(BaseRepository[dict[str, Any]]):
     """
     统计数据 Repository
 
@@ -43,15 +44,15 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
 
     # ==================== metrics 模块方法 ====================
 
-    def insert_global_stats(self, run_id: str, stats: Iterable[Tuple[str, float]]) -> None:
+    def insert_global_stats(self, run_id: str, stats: Iterable[tuple[str, float]]) -> None:
         """插入全局统计数据"""
         return metrics.insert_global_stats(self.session, run_id, stats)
 
-    def fetch_global_stats(self, run_id: str) -> List[Tuple[str, float]]:
+    def fetch_global_stats(self, run_id: str) -> list[tuple[str, float]]:
         """获取全局统计数据"""
         return metrics.fetch_global_stats(self.session, run_id)
 
-    def fetch_global_stats_dict(self, run_id: str) -> Dict[str, float]:
+    def fetch_global_stats_dict(self, run_id: str) -> dict[str, float]:
         """获取全局统计数据字典"""
         return metrics.fetch_global_stats_dict(self.session, run_id)
 
@@ -64,16 +65,16 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         model: str,
         prompt_tokens: int,
         total_tokens: int,
-        completion_tokens: Optional[int] = None,
-        chunk_id: Optional[int] = None,
-    ) -> Optional[int]:
+        completion_tokens: int | None = None,
+        chunk_id: int | None = None,
+    ) -> int | None:
         """插入 token 使用记录"""
         return metrics.insert_token_usage(
             self.session, run_id, novel_id, task_type, call_type, model,
             prompt_tokens, total_tokens, completion_tokens, chunk_id
         )
 
-    def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> Dict[str, Any]:
+    def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> dict[str, Any]:
         """获取 token 使用统计"""
         return metrics.fetch_token_usage_stats(self.session, run_id, novel_id)
 
@@ -97,35 +98,35 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
 
     # ==================== chunks 模块方法 ====================
 
-    def insert_emotion_curve(self, run_id: str, rows: Iterable[Tuple[int, float, float, float, float]]) -> None:
+    def insert_emotion_curve(self, run_id: str, rows: Iterable[tuple[int, float, float, float, float]]) -> None:
         """插入情绪曲线数据"""
         return chunks.insert_emotion_curve(self.session, run_id, rows)
 
-    def insert_rhythm_curve(self, run_id: str, rows: Iterable[Tuple[int, float, float]]) -> None:
+    def insert_rhythm_curve(self, run_id: str, rows: Iterable[tuple[int, float, float]]) -> None:
         """插入节奏曲线数据"""
         return chunks.insert_rhythm_curve(self.session, run_id, rows)
 
-    def fetch_emotion_curve(self, run_id: str) -> List[Tuple[float, float, float]]:
+    def fetch_emotion_curve(self, run_id: str) -> list[tuple[float, float, float]]:
         """获取情绪曲线数据"""
         return chunks.fetch_emotion_curve(self.session, run_id)
 
-    def fetch_rhythm_curve(self, run_id: str) -> List[Tuple[float]]:
+    def fetch_rhythm_curve(self, run_id: str) -> list[tuple[float]]:
         """获取节奏曲线数据"""
         return chunks.fetch_rhythm_curve(self.session, run_id)
 
-    def fetch_chunk_culture(self, run_id: str) -> List[Tuple[float | None]]:
+    def fetch_chunk_culture(self, run_id: str) -> list[tuple[float | None]]:
         """获取分块文化数据"""
         return chunks.fetch_chunk_culture(self.session, run_id)
 
-    def fetch_emotion_curve_full(self, run_id: str) -> List[Tuple[int, float, float, float, float]]:
+    def fetch_emotion_curve_full(self, run_id: str) -> list[tuple[int, float, float, float, float]]:
         """获取情绪曲线完整数据（包含 chunk_id）"""
         return chunks.fetch_emotion_curve_full(self.session, run_id)
 
-    def fetch_rhythm_curve_full(self, run_id: str) -> List[Tuple[int, float, float]]:
+    def fetch_rhythm_curve_full(self, run_id: str) -> list[tuple[int, float, float]]:
         """获取节奏曲线完整数据（包含 chunk_id）"""
         return chunks.fetch_rhythm_curve_full(self.session, run_id)
 
-    def fetch_emotion_densities(self, run_id: str) -> List[Tuple[float, float]]:
+    def fetch_emotion_densities(self, run_id: str) -> list[tuple[float, float]]:
         """获取情绪密度数据"""
         return chunks.fetch_emotion_densities(self.session, run_id)
 
@@ -135,7 +136,7 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         """插入云端分析结果"""
         return metrics.insert_cloud_analysis(self.session, run_id, analysis)
 
-    def fetch_cloud_analysis(self, novel_id: str, run_id: str) -> Optional[Dict[str, Any]]:
+    def fetch_cloud_analysis(self, novel_id: str, run_id: str) -> dict[str, Any] | None:
         """获取云端分析结果"""
         return metrics.fetch_cloud_analysis(self.session, novel_id, run_id)
 
@@ -145,14 +146,14 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         novel_id: str,
         core_characters: str,
         world_setting: str,
-        novel_title: Optional[str] = None,
+        novel_title: str | None = None,
     ) -> None:
         """插入全局上下文"""
         return metrics.insert_global_context(
             self.session, run_id, novel_id, core_characters, world_setting, novel_title
         )
 
-    def fetch_global_context(self, run_id: str, novel_id: str) -> Optional[Tuple[str, str, str, str]]:
+    def fetch_global_context(self, run_id: str, novel_id: str) -> tuple[str, str, str, str] | None:
         """获取全局上下文"""
         return metrics.fetch_global_context(self.session, run_id, novel_id)
 
@@ -160,7 +161,7 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         """更新全局上下文"""
         return metrics.update_global_context(self.session, run_id, novel_id, **kwargs)
 
-    def fetch_novel_title(self, novel_id: str, run_id: str) -> Optional[str]:
+    def fetch_novel_title(self, novel_id: str, run_id: str) -> str | None:
         """获取小说标题"""
         return metrics.fetch_novel_title(self.session, novel_id, run_id)
 
@@ -190,6 +191,6 @@ class StatsRepository(BaseRepository[Dict[str, Any]]):
         """保存图数据到数据库"""
         return graphs.save_graph(self.session, run_id, graph_name, graph_json)
 
-    def load_graph(self, run_id: str, graph_name: str) -> Optional[str]:
+    def load_graph(self, run_id: str, graph_name: str) -> str | None:
         """从数据库加载图数据"""
         return graphs.load_graph(self.session, run_id, graph_name)

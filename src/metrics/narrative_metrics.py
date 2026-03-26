@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Dict, List
 
 from src.config import settings
 
 
-def find_global_peak(scores: List[float]) -> int:
+def find_global_peak(scores: list[float]) -> int:
     if not scores:
         return 0
     return max(range(len(scores)), key=lambda i: scores[i])
 
 
-def find_valley_before_peak(scores: List[float], peak_idx: int) -> int:
+def find_valley_before_peak(scores: list[float], peak_idx: int) -> int:
     if peak_idx == 0:
         return 0
     before_peak = scores[:peak_idx]
@@ -21,11 +20,11 @@ def find_valley_before_peak(scores: List[float], peak_idx: int) -> int:
     return min(range(len(before_peak)), key=lambda i: before_peak[i])
 
 
-def find_local_peaks(scores: List[float], total_chunks: int) -> List[int]:
+def find_local_peaks(scores: list[float], total_chunks: int) -> list[int]:
     if not scores or total_chunks == 0:
         return []
     min_distance = max(10, int(total_chunks * 0.05))
-    peaks: List[int] = []
+    peaks: list[int] = []
     for i in range(1, len(scores) - 1):
         if scores[i] > scores[i - 1] and scores[i] > scores[i + 1]:
             if not peaks or (i - peaks[-1]) >= min_distance:
@@ -34,8 +33,8 @@ def find_local_peaks(scores: List[float], total_chunks: int) -> List[int]:
 
 
 def compute_three_act_ratio_by_tension(
-    tension_composite_scores: List[float],
-) -> Dict[str, float]:
+    tension_composite_scores: list[float],
+) -> dict[str, float]:
     if not tension_composite_scores:
         return {"act1_ratio": 0.0, "act2_ratio": 0.0, "act3_ratio": 0.0}
 
@@ -59,14 +58,14 @@ def compute_three_act_ratio_by_tension(
 
 
 def compute_three_act_ratio(
-    event_types: List[str],
-) -> Dict[str, float]:
+    event_types: list[str],
+) -> dict[str, float]:
     return {"act1_ratio": 0.0, "act2_ratio": 0.0, "act3_ratio": 0.0}
 
 
 def compute_climax_spacing(
-    chunk_ids: List[int],
-    tension_composite_scores: List[float],
+    chunk_ids: list[int],
+    tension_composite_scores: list[float],
 ) -> float:
     if not chunk_ids or not tension_composite_scores:
         return 0.0
@@ -87,8 +86,8 @@ def compute_climax_spacing(
 
 
 def compute_middle_collapse_index(
-    chunk_ids: List[int],
-    tension_composite_scores: List[float],
+    chunk_ids: list[int],
+    tension_composite_scores: list[float],
 ) -> float:
     if not chunk_ids or not tension_composite_scores:
         return 0.0
@@ -119,11 +118,11 @@ def compute_middle_collapse_index(
 
 
 def compute_event_density(
-    event_types: List[str],
-) -> Dict[str, float]:
+    event_types: list[str],
+) -> dict[str, float]:
     valid_types = ["冲突", "铺垫", "转折"]
     if not event_types:
-        return {et: 0.0 for et in valid_types}
+        return dict.fromkeys(valid_types, 0.0)
 
     counts = Counter(et for et in event_types if et in valid_types)
     total = len(event_types)
@@ -132,7 +131,7 @@ def compute_event_density(
 
 
 def compute_cliffhanger_rate(
-    cliffhangers: List[int],
+    cliffhangers: list[int],
 ) -> float:
     if not cliffhangers:
         return 0.0

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
-from typing import List
 
 
-def split_sentences(text: str) -> List[str]:
+def split_sentences(text: str) -> list[str]:
     if not text:
         return []
     parts = re.split(r"[。！？!?]+|\n+", text)
@@ -41,7 +40,7 @@ def dialogue_length(text: str) -> int:
     return total
 
 
-def tokenize_words(text: str) -> List[str]:
+def tokenize_words(text: str) -> list[str]:
     from src.preprocess.tokenize import tokenize
 
     return tokenize(text)

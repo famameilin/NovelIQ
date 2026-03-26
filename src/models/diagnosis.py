@@ -15,16 +15,15 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from loguru import logger
 from pydantic import BaseModel
 
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
-from src.models.local.base import BaseModelClient, TokenUsageCallback
-
 from src.models.cloud.schema import CloudAnalysis
+from src.models.local.base import BaseModelClient, TokenUsageCallback
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -45,9 +44,9 @@ class DiagnosisClient(BaseModelClient):
         config: TaskModelConfig | None = None,
         client: Any | None = None,
         analysis_logger: AnalysisLogger | None = None,
-        token_usage_callback: Optional[TokenUsageCallback] = None,
-        novel_id: Optional[str] = None,
-        session: Optional[Any] = None,
+        token_usage_callback: TokenUsageCallback | None = None,
+        novel_id: str | None = None,
+        session: Any | None = None,
     ) -> None:
         super().__init__(
             task_type="diagnosis",
@@ -102,7 +101,7 @@ class DiagnosisClient(BaseModelClient):
             pass_attempt_number=True,
         )
 
-    def _build_json_schema(self, response_model: Type[T]) -> dict[str, Any]:
+    def _build_json_schema(self, response_model: type[T]) -> dict[str, Any]:
         schema = response_model.model_json_schema()
         return {
             "type": "json_schema",
@@ -113,7 +112,7 @@ class DiagnosisClient(BaseModelClient):
             },
         }
 
-    def _parse_structured_response(self, response: Any, response_model: Type[T]) -> T:
+    def _parse_structured_response(self, response: Any, response_model: type[T]) -> T:
         if not response.choices:
             raise ValueError("Empty response from API")
 
@@ -124,7 +123,7 @@ class DiagnosisClient(BaseModelClient):
         try:
             json_data = json.loads(content)
         except json.JSONDecodeError:
-            raise ValueError(f"Failed to parse JSON from response: {content[:200]}")
+            raise ValueError(f"Failed to parse JSON from response: {content[:200]}") from None
 
         return response_model.model_validate(json_data)
 
@@ -181,7 +180,7 @@ class DiagnosisClient(BaseModelClient):
     def _diagnose_once(
         self,
         payload: dict,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         novel_id: Any,
         run_id: str | None = None,
         attempt_number: int = 1,
@@ -275,7 +274,6 @@ class DiagnosisClient(BaseModelClient):
         final_result = self._finalize_result(result, novel_id)
 
         if response:
-            novel_id_str = novel_id if isinstance(novel_id, str) else None
             self._record_token_usage(response, "diagnosis", chunk_id=None)
 
         if self._analysis_logger:
@@ -309,7 +307,7 @@ class DiagnosisClient(BaseModelClient):
             )
         return result
 
-    def _build_messages(self, payload: dict) -> List[Dict[str, str]]:
+    def _build_messages(self, payload: dict) -> list[dict[str, str]]:
         from src.config import settings
 
         prompt = json.dumps(payload, ensure_ascii=False)

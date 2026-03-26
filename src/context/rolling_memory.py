@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 def get_prev_tail_text(
-    chunk_repo: "ChunkRepository",
+    chunk_repo: ChunkRepository,
     run_id: str,
     chunk_id: int,
     tail_chars: int = 200,
@@ -45,7 +45,7 @@ def get_prev_tail_text(
 
 
 def get_next_text(
-    chunk_repo: "ChunkRepository",
+    chunk_repo: ChunkRepository,
     run_id: str,
     chunk_id: int,
 ) -> str | None:

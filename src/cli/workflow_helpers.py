@@ -32,21 +32,21 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.workflows.aggregate import run_aggregate
-from src.workflows.annotate import run_annotate
-from src.workflows.diagnose import run_diagnose
-from src.workflows.preprocess import run_preprocess
 from src.config.analysis_logger import AnalysisLogger
 from src.ingest.reader import ingest_path
 from src.models.cloud import ConfiguredCloudModelClient
 from src.storage.db import get_session
-from src.storage.repositories import RunRepository, ChunkRepository, AnnotationRepository, StatsRepository
 from src.storage.id_mapping import generate_task_id
+from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
+from src.workflows.aggregate import run_aggregate
+from src.workflows.annotate import run_annotate
+from src.workflows.diagnose import run_diagnose
+from src.workflows.preprocess import run_preprocess
 
 if TYPE_CHECKING:
     pass
@@ -209,7 +209,7 @@ def _execute_diagnose_stage(
 
 
 def _log_workflow_summary(
-    results: List[StageResult],
+    results: list[StageResult],
     total_elapsed: float,
     analysis_logger: AnalysisLogger,
     novel_id: str,
@@ -259,7 +259,7 @@ class WorkflowInitResult:
         run_id: str,
         session: Session,
         analysis_logger: AnalysisLogger,
-        stages: List[tuple],
+        stages: list[tuple],
         total_stages: int,
     ) -> None:
         self.novel_id = novel_id
@@ -352,11 +352,11 @@ def _execute_stages(
     init_result: WorkflowInitResult,
     source_path: Path,
     metadata_path: Path | None,
-    cloud_client: "ConfiguredCloudModelClient | None",
+    cloud_client: ConfiguredCloudModelClient | None,
     annotate_client: Any = None,
     incremental_disambig_client: Any = None,
     full_disambig_client: Any = None,
-) -> List[StageResult]:
+) -> list[StageResult]:
     """
     执行所有阶段
 
@@ -365,7 +365,7 @@ def _execute_stages(
     任务: storage-layer-decoupling
     修改内容: 添加 incremental_disambig_client 和 full_disambig_client 参数，支持测试注入 mock
     """
-    results: List[StageResult] = []
+    results: list[StageResult] = []
     current_stage = 0
 
     for stage_name, enabled in init_result.stages:

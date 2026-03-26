@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Union
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -19,7 +19,7 @@ class DisambiguationAliasMap(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    merge_target_map: Dict[str, str] = Field(
+    merge_target_map: dict[str, str] = Field(
         default_factory=dict,
         description="人名到规范名的映射，key 为候选人名，value 为规范名",
     )
@@ -39,9 +39,9 @@ class CloudAnalysis(BaseModel):
 
     novel_id: str | None = None
     foreshadow_rate: float | None = Field(default=None, ge=0, le=1)
-    arc_scores: Union[List[float], Dict[str, float]] = Field(default_factory=list)
+    arc_scores: list[float] | dict[str, float] = Field(default_factory=list)
     narrative_type: str | None = None
-    topic_labels: List[str] = Field(default_factory=list)
+    topic_labels: list[str] = Field(default_factory=list)
     diagnosis: str | None = None
     value_logic_type: ValueLogicType | str | None = None
     value_logic_reason: str | None = None
@@ -63,7 +63,7 @@ class CloudAnalysis(BaseModel):
         return v
 
     def to_dict(self) -> dict:
-        arc_scores_value: Union[List[float], Dict[str, float]]
+        arc_scores_value: list[float] | dict[str, float]
         if isinstance(self.arc_scores, dict):
             arc_scores_value = dict(self.arc_scores)
         else:

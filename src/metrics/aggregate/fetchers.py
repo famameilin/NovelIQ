@@ -16,7 +16,7 @@ Aggregate Metrics 数据提取模块
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from .types import (
     AnnotationData,
@@ -25,8 +25,8 @@ from .types import (
     DialogueData,
     EmotionData,
     RelationData,
-    TextData,
     TensionData,
+    TextData,
     map_emotion_score,
 )
 
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 
 def fetch_annotation_data(
-    annotation_repo: "AnnotationRepository",
+    annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> AnnotationData:
     """提取 chunk_annotation 表数据"""
@@ -55,7 +55,7 @@ def fetch_annotation_data(
 
 
 def fetch_emotion_data(
-    stats_repo: "StatsRepository",
+    stats_repo: StatsRepository,
     run_id: str,
 ) -> EmotionData:
     """提取 emotion_curve 表数据"""
@@ -74,7 +74,7 @@ def fetch_emotion_data(
 
 
 def fetch_character_data(
-    annotation_repo: "AnnotationRepository",
+    annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> CharacterData:
     """提取 chunk_characters 表数据"""
@@ -87,13 +87,13 @@ def fetch_character_data(
         characters.append((name, role_function, emotion_score))
 
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
-    char_emotion_map: dict[str, List[float]] = {}
+    char_emotion_map: dict[str, list[float]] = {}
     for name, score_raw in char_emotion_rows:
         if name not in char_emotion_map:
             char_emotion_map[name] = []
         score = float(map_emotion_score(score_raw))
         char_emotion_map[name].append(score)
-    char_emotion_scores = [(name, scores) for name, scores in char_emotion_map.items()]
+    char_emotion_scores = list(char_emotion_map.items())
 
     protagonist_name = None
     for name, role, _ in characters:
@@ -109,7 +109,7 @@ def fetch_character_data(
 
 
 def fetch_relation_data(
-    annotation_repo: "AnnotationRepository",
+    annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> RelationData:
     """提取 chunk_relations 表数据"""
@@ -123,13 +123,13 @@ def fetch_relation_data(
 
 
 def fetch_text_data(
-    chunk_repo: "ChunkRepository",
+    chunk_repo: ChunkRepository,
     run_id: str,
 ) -> TextData:
     """提取 chunks 表文本数据"""
     texts = chunk_repo.fetch_all_chunk_texts(run_id)
 
-    all_tokens: List[str] = []
+    all_tokens: list[str] = []
     for text in texts:
         tokens = re.findall(r"[\u4e00-\u9fa5]+|[a-zA-Z]+", text)
         all_tokens.extend(tokens)
@@ -138,7 +138,7 @@ def fetch_text_data(
 
 
 def fetch_culture_data(
-    stats_repo: "StatsRepository",
+    stats_repo: StatsRepository,
     run_id: str,
 ) -> CultureData:
     """
@@ -157,7 +157,7 @@ def fetch_culture_data(
 
 
 def fetch_tension_data(
-    stats_repo: "StatsRepository",
+    stats_repo: StatsRepository,
     run_id: str,
 ) -> TensionData:
     """提取 rhythm_curve 表的 tension_composite 数据"""
@@ -167,7 +167,7 @@ def fetch_tension_data(
 
 
 def fetch_dialogue_data(
-    annotation_repo: "AnnotationRepository",
+    annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> DialogueData:
     """

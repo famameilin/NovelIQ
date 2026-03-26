@@ -5,10 +5,10 @@
 说明: 提供模型交互记录的增删改查操作
 """
 
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 
 from src.storage.models import ModelInteraction
 from src.storage.repositories.base import BaseRepository
@@ -26,21 +26,21 @@ class ModelInteractionRepository(BaseRepository):
     def save_interaction(
         self,
         run_id: str,
-        chunk_id: Optional[int],
+        chunk_id: int | None,
         interaction_type: str,
-        phase: Optional[str],
+        phase: str | None,
         attempt_number: int,
-        model_name: Optional[str],
-        model_provider: Optional[str],
+        model_name: str | None,
+        model_provider: str | None,
         prompt: str,
         response: str,
-        thinking: Optional[str] = None,
-        response_chars: Optional[int] = None,
-        thinking_chars: Optional[int] = None,
+        thinking: str | None = None,
+        response_chars: int | None = None,
+        thinking_chars: int | None = None,
         has_thinking: bool = False,
         status: str = "success",
-        error_message: Optional[str] = None,
-        duration_ms: Optional[int] = None,
+        error_message: str | None = None,
+        duration_ms: int | None = None,
     ) -> ModelInteraction:
         """
         保存模型交互记录
@@ -93,8 +93,8 @@ class ModelInteractionRepository(BaseRepository):
         self,
         run_id: str,
         chunk_id: int,
-        interaction_type: Optional[str] = None,
-    ) -> List[ModelInteraction]:
+        interaction_type: str | None = None,
+    ) -> list[ModelInteraction]:
         """
         获取指定 chunk 的所有交互记录
 
@@ -118,8 +118,8 @@ class ModelInteractionRepository(BaseRepository):
     def get_interactions_by_run(
         self,
         run_id: str,
-        interaction_type: Optional[str] = None,
-    ) -> List[ModelInteraction]:
+        interaction_type: str | None = None,
+    ) -> list[ModelInteraction]:
         """
         获取指定 run 的所有交互记录
 
@@ -143,7 +143,7 @@ class ModelInteractionRepository(BaseRepository):
         run_id: str,
         chunk_id: int,
         interaction_type: str,
-    ) -> Optional[ModelInteraction]:
+    ) -> ModelInteraction | None:
         """
         获取指定 chunk 的最新交互记录
 
@@ -170,7 +170,7 @@ class ModelInteractionRepository(BaseRepository):
     def get_interaction_stats(
         self,
         run_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         获取交互统计信息
 

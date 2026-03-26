@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+from collections.abc import Iterable
 
 from .lexicon_metrics import count_token_hits
 from .text_utils import tokenize_words
 
 
-def lexical_sentiment_density(text: str, pos_terms: Iterable[str], neg_terms: Iterable[str]) -> Dict[str, float]:
+def lexical_sentiment_density(text: str, pos_terms: Iterable[str], neg_terms: Iterable[str]) -> dict[str, float]:
     if not text:
         return {"pos_density": 0.0, "neg_density": 0.0, "net_density": 0.0}
     tokens = tokenize_words(text)
@@ -26,12 +26,12 @@ def pos_neg_ratio(text: str, pos_terms: Iterable[str], neg_terms: Iterable[str])
     return pos / max(neg, 1)
 
 
-def moving_average(values: List[float], window: int) -> List[float]:
+def moving_average(values: list[float], window: int) -> list[float]:
     if window <= 0:
         raise ValueError("window must be positive")
     if not values:
         return []
-    result: List[float] = []
+    result: list[float] = []
     for idx in range(len(values)):
         start = max(0, idx - window + 1)
         segment = values[start : idx + 1]

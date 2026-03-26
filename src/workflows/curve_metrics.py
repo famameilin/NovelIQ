@@ -16,13 +16,11 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import List, Tuple
 
 from loguru import logger
 from sqlalchemy import text as sql_text
 
 from src.lexicons.loader import load_lexicon
-
 
 EVENT_TYPE_SCORES = {
     "高潮": 1.0,
@@ -52,10 +50,10 @@ def load_all_lexicons(lexicon_dir: Path) -> dict:
 
 
 def compute_emotion_curve(
-    chunk_texts: List[Tuple[int, str]],
-    pos_terms: List[str],
-    neg_terms: List[str],
-) -> Tuple[List[Tuple[int, float, float, float, float]], List[float]]:
+    chunk_texts: list[tuple[int, str]],
+    pos_terms: list[str],
+    neg_terms: list[str],
+) -> tuple[list[tuple[int, float, float, float, float]], list[float]]:
     """
     计算情感曲线
 
@@ -65,8 +63,8 @@ def compute_emotion_curve(
     """
     from src.metrics.emotion_metrics import lexical_sentiment_density, moving_average
 
-    emotion_rows: List[Tuple[int, float, float, float, float]] = []
-    raw_densities: List[float] = []
+    emotion_rows: list[tuple[int, float, float, float, float]] = []
+    raw_densities: list[float] = []
     for chunk_id, text in chunk_texts:
         result = lexical_sentiment_density(text, pos_terms, neg_terms)
         emotion_rows.append(
@@ -86,12 +84,12 @@ def compute_emotion_curve(
 
 
 def compute_tension_signals(
-    chunk_texts: List[Tuple[int, str]],
-    fight_terms: List[str],
+    chunk_texts: list[tuple[int, str]],
+    fight_terms: list[str],
     style_map: dict,
     annotation_map: dict,
-    raw_densities: List[float],
-) -> List[dict]:
+    raw_densities: list[float],
+) -> list[dict]:
     """
     计算张力信号
 
@@ -99,8 +97,8 @@ def compute_tension_signals(
     创建者: TraeAI
     任务: 预处理流程
     """
-    tension_signals: List[dict] = []
-    for chunk_id, text in chunk_texts:
+    tension_signals: list[dict] = []
+    for chunk_id, _text in chunk_texts:
         dialogue_val = 0.0
         sent_len_std = 0.0
         if chunk_id in style_map:
@@ -127,10 +125,10 @@ def compute_tension_signals(
 
 
 def compute_rhythm_curve(
-    chunk_texts: List[Tuple[int, str]],
-    fight_terms: List[str],
-    tension_composite_values: List[float],
-) -> List[Tuple[int, float, float]]:
+    chunk_texts: list[tuple[int, str]],
+    fight_terms: list[str],
+    tension_composite_values: list[float],
+) -> list[tuple[int, float, float]]:
     """
     计算节奏曲线
 
@@ -140,7 +138,7 @@ def compute_rhythm_curve(
     """
     from src.metrics.rhythm_metrics import tension_proxy
 
-    rhythm_rows: List[Tuple[int, float, float]] = []
+    rhythm_rows: list[tuple[int, float, float]] = []
     for idx, (chunk_id, text) in enumerate(chunk_texts):
         proxy = tension_proxy(text, fight_terms)
         proxy_score = sum(proxy.values()) / len(proxy) if proxy else 0.0
@@ -150,10 +148,10 @@ def compute_rhythm_curve(
 
 def compute_global_stats(
     conn,
-    raw_densities: List[float],
-    tension_composite_values: List[float],
-    chunk_texts: List[Tuple[int, str]],
-) -> List[Tuple[str, float]]:
+    raw_densities: list[float],
+    tension_composite_values: list[float],
+    chunk_texts: list[tuple[int, str]],
+) -> list[tuple[str, float]]:
     """
     计算全局统计
 
@@ -166,7 +164,7 @@ def compute_global_stats(
     任务: postgresql-migration
     修改内容: 使用 SQLAlchemy text() 包装 SQL 语句
     """
-    global_stats: List[Tuple[str, float]] = []
+    global_stats: list[tuple[str, float]] = []
     style_rows = conn.execute(sql_text("SELECT mtld, ttr, avg_sent_len FROM chunk_style")).fetchall()
     if style_rows:
         mtld_vals = [r[0] for r in style_rows if r[0] is not None]

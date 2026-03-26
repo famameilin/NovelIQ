@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -18,7 +18,7 @@ class StatsRepositoryProtocol(Protocol):
     管理小说分析统计数据的存储和检索。
     """
 
-    def get_character_stats(self, novel_id: str) -> List[Dict[str, Any]]:
+    def get_character_stats(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取角色统计数据
 
@@ -30,7 +30,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_relation_stats(self, novel_id: str) -> List[Dict[str, Any]]:
+    def get_relation_stats(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取关系统计数据
 
@@ -42,7 +42,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_dialogue_stats(self, novel_id: str) -> List[Dict[str, Any]]:
+    def get_dialogue_stats(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取对话统计数据
 
@@ -54,7 +54,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_summary_stats(self, novel_id: str) -> Dict[str, Any]:
+    def get_summary_stats(self, novel_id: str) -> dict[str, Any]:
         """
         获取摘要统计数据
 
@@ -66,7 +66,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def get_graph_data(self, novel_id: str) -> Dict[str, Any]:
+    def get_graph_data(self, novel_id: str) -> dict[str, Any]:
         """
         获取图表数据
 
@@ -78,7 +78,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def get_run_metrics(self, run_id: str) -> Dict[str, Any]:
+    def get_run_metrics(self, run_id: str) -> dict[str, Any]:
         """
         获取运行指标
 
@@ -90,7 +90,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def insert_character_stats(self, novel_id: str, stats: List[Dict[str, Any]]) -> None:
+    def insert_character_stats(self, novel_id: str, stats: list[dict[str, Any]]) -> None:
         """
         插入角色统计
 
@@ -100,7 +100,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def insert_relation_stats(self, novel_id: str, stats: List[Dict[str, Any]]) -> None:
+    def insert_relation_stats(self, novel_id: str, stats: list[dict[str, Any]]) -> None:
         """
         插入关系统计
 
@@ -110,7 +110,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def insert_dialogue_stats(self, novel_id: str, stats: List[Dict[str, Any]]) -> None:
+    def insert_dialogue_stats(self, novel_id: str, stats: list[dict[str, Any]]) -> None:
         """
         插入对话统计
 
@@ -120,7 +120,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def insert_summary_stats(self, novel_id: str, stats: Dict[str, Any]) -> None:
+    def insert_summary_stats(self, novel_id: str, stats: dict[str, Any]) -> None:
         """
         插入摘要统计
 
@@ -130,7 +130,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def insert_graph_data(self, novel_id: str, graph_data: Dict[str, Any]) -> None:
+    def insert_graph_data(self, novel_id: str, graph_data: dict[str, Any]) -> None:
         """
         插入图表数据
 
@@ -140,7 +140,7 @@ class StatsRepositoryProtocol(Protocol):
         """
         ...
     
-    def insert_run_metrics(self, run_id: str, metrics: Dict[str, Any]) -> None:
+    def insert_run_metrics(self, run_id: str, metrics: dict[str, Any]) -> None:
         """
         插入运行指标
 

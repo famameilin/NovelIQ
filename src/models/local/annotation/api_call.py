@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-def parse_annotation(content: str) -> "ChunkAnnotation":
+def parse_annotation(content: str) -> ChunkAnnotation:
     """
     解析标注结果
 
@@ -55,7 +55,7 @@ def parse_annotation(content: str) -> "ChunkAnnotation":
     return build_annotation(parsed)
 
 
-def extract_names_from_annotation(annotation: "ChunkAnnotation") -> list[str]:
+def extract_names_from_annotation(annotation: ChunkAnnotation) -> list[str]:
     """
     从标注结果中提取所有名字
 
@@ -80,11 +80,11 @@ def extract_names_from_annotation(annotation: "ChunkAnnotation") -> list[str]:
 
 
 def validate_annotation(
-    result: "ChunkAnnotation",
+    result: ChunkAnnotation,
     sources: dict,
     chunk_id: int | None,
     content_clean: str = "",
-) -> "ChunkAnnotation":
+) -> ChunkAnnotation:
     """
     验证标注结果中的人名是否在原文中出现
 
@@ -126,7 +126,7 @@ def execute_validation_retry_call(
     chunk_id: int | None,
     config: Any,
     parse_annotation_func: Any,
-) -> tuple["ChunkAnnotation", str]:
+) -> tuple[ChunkAnnotation, str]:
     """
     执行单次验证重试调用
 

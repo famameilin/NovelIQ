@@ -26,15 +26,15 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple, cast
+from typing import cast
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.chunking.chunker import chunk_documents
 from src.ingest.reader import ingest_path
-from src.preprocess.tokenize import tokenize
 from src.preprocess.cleaning import normalize_text
+from src.preprocess.tokenize import tokenize
 from src.storage.repositories import ChunkRepository, ChunkStyleData
 
 
@@ -46,7 +46,7 @@ def run_preprocess(
     cache_path: Path | None = None,
     max_chars: int = 2000,
     overlap: int = 200,
-) -> Tuple[int, int, float]:
+) -> tuple[int, int, float]:
     """
     执行预处理流程。
 
@@ -75,9 +75,9 @@ def run_preprocess(
         Tuple[int, int, float]: (总块数, 总字符数, 耗时)
     """
     from src.workflows.preprocess_helpers import (
-        _load_all_lexicons_for_preprocess,
-        _compute_chunk_style_metrics,
         _compute_chunk_culture_metrics,
+        _compute_chunk_style_metrics,
+        _load_all_lexicons_for_preprocess,
     )
 
     start_time = time.time()
@@ -96,7 +96,7 @@ def run_preprocess(
     lexicon_dir = Path("data/lexicons")
     lexicons = _load_all_lexicons_for_preprocess(lexicon_dir)
 
-    normalized_texts: List[str] = []
+    normalized_texts: list[str] = []
     for doc in docs:
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
@@ -115,8 +115,8 @@ def run_preprocess(
     chunk_repo.insert_chunks(run_id, all_chunks)
     logger.info(f"inserted {total_chunks} chunks into db (run_id={run_id})")
 
-    style_rows: List[ChunkStyleData] = []
-    culture_rows: List[Tuple[int, float | None]] = []
+    style_rows: list[ChunkStyleData] = []
+    culture_rows: list[tuple[int, float | None]] = []
 
     for idx, chunk in enumerate(all_chunks):
         if total_chunks > 1:
@@ -126,16 +126,16 @@ def run_preprocess(
         style_data = _compute_chunk_style_metrics(
             chunk,
             tokens,
-            cast(List[str], lexicons.get("sensory", [])),
-            cast(List[str], lexicons.get("function_words", [])),
-            cast(Dict, lexicons.get("semantic_categories", {})),
+            cast(list[str], lexicons.get("sensory", [])),
+            cast(list[str], lexicons.get("function_words", [])),
+            cast(dict, lexicons.get("semantic_categories", {})),
         )
         style_rows.append(style_data)
 
         culture_data = _compute_chunk_culture_metrics(
             chunk,
             tokens,
-            cast(List[str], lexicons.get("imagery", [])),
+            cast(list[str], lexicons.get("imagery", [])),
         )
         culture_rows.append(culture_data)
 

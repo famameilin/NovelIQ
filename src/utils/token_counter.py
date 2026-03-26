@@ -12,11 +12,8 @@ Token计数工具模块
 
 from __future__ import annotations
 
-from typing import Optional
-
 import tiktoken
 from loguru import logger
-
 
 # 默认编码器（cl100k_base是GPT-4和GPT-3.5-turbo使用的编码器）
 DEFAULT_ENCODING = "cl100k_base"
@@ -75,7 +72,7 @@ def _get_encoding_for_model(model_name: str) -> str:
     return DEFAULT_ENCODING
 
 
-def count_tokens(text: str, model: Optional[str] = None) -> int:
+def count_tokens(text: str, model: str | None = None) -> int:
     """
     计算文本的token数量
 
@@ -105,7 +102,7 @@ def count_tokens(text: str, model: Optional[str] = None) -> int:
         return sum(2 if ord(char) > 127 else 1 for char in text)
 
 
-def count_messages_tokens(messages: list[dict[str, str]], model: Optional[str] = None) -> int:
+def count_messages_tokens(messages: list[dict[str, str]], model: str | None = None) -> int:
     """
     计算消息列表的token数量
 

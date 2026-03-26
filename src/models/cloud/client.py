@@ -29,12 +29,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
-from src.models.disambiguation import DisambiguationClient
 from src.models.diagnosis import DiagnosisClient
+from src.models.disambiguation import DisambiguationClient
 
 from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
 from .schema import CloudAnalysis
@@ -53,8 +53,8 @@ class ConfiguredCloudModelClient(CloudModelClient):
         config: TaskModelConfig | None = None,
         client: Any | None = None,
         analysis_logger: AnalysisLogger | None = None,
-        token_usage_callback: Optional[TokenUsageCallback] = None,
-        novel_id: Optional[str] = None,
+        token_usage_callback: TokenUsageCallback | None = None,
+        novel_id: str | None = None,
     ) -> None:
         self._diagnosis_client = DiagnosisClient(
             config=config,
@@ -81,10 +81,10 @@ class ConfiguredCloudModelClient(CloudModelClient):
 
     def disambiguate_characters(
         self,
-        candidates: List[str],
-        context_sentences: Dict[str, str] | None = None,
-        existing_names: List[str] | None = None,
-    ) -> Dict[str, str]:
+        candidates: list[str],
+        context_sentences: dict[str, str] | None = None,
+        existing_names: list[str] | None = None,
+    ) -> dict[str, str]:
         result = self._disambiguation_client.disambiguate_characters(
             candidates=candidates,
             context_sentences=context_sentences,

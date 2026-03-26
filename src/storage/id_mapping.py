@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Union, Any
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
@@ -105,7 +105,7 @@ def task_id_to_run_id_pattern(task_id: str) -> str:
     return f"{task_id}%"
 
 
-def task_id_to_run_id(task_id: str, conn: "Union[Connection, Session]") -> str:
+def task_id_to_run_id(task_id: str, conn: Connection | Session) -> str:
     """
     将task_id转换为run_id
 
@@ -136,6 +136,7 @@ def task_id_to_run_id(task_id: str, conn: "Union[Connection, Session]") -> str:
 
     # 延迟导入避免循环依赖
     from sqlalchemy import select
+
     from src.storage.models.core import AnalysisRun
 
     pattern = task_id_to_run_id_pattern(task_id)

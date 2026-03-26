@@ -38,8 +38,8 @@ from .input_config import (
 )
 from .logging_config import LoggingConfig, setup_logging
 from .schemas import (
-    APISettings,
     AnalysisSettings,
+    APISettings,
     ChunkingSettings,
     CommonTopicSettings,
     DatabaseSettings,

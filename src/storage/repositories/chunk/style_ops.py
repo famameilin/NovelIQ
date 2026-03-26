@@ -12,7 +12,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Sequence, Tuple, Union, cast
+from collections.abc import Iterable, Sequence
+from typing import Any, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Row
@@ -24,7 +25,7 @@ from src.storage.repositories.chunk import ChunkStyleData
 
 def fetch_chunk_styles(
     session: Session, run_id: str
-) -> List[Tuple[int, float, float, float]]:
+) -> list[tuple[int, float, float, float]]:
     """
     获取分块风格数据
 
@@ -46,7 +47,7 @@ def fetch_chunk_styles(
 
 
 def insert_chunk_style(
-    session: Session, run_id: str, rows: Union[Iterable[ChunkStyleData], Iterable[Any]]
+    session: Session, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]
 ) -> None:
     """
     插入分块风格数据

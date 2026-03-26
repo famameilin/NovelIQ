@@ -9,13 +9,11 @@
 
 from __future__ import annotations
 
+# 导出各模块函数（供内部使用）
+from . import metadata, queries, relations
+
 # 导出主 Repository 类
 from .repository import EntityRepository
-
-# 导出各模块函数（供内部使用）
-from . import metadata
-from . import queries
-from . import relations
 
 __all__ = [
     "EntityRepository",

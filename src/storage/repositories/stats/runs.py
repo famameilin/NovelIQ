@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 
-from src.storage.models import Chunk, EmotionCurve, RhythmCurve, ChunkTopic, CloudAnalysis
+from src.storage.models import Chunk, ChunkTopic, CloudAnalysis, EmotionCurve, RhythmCurve
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

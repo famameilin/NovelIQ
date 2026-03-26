@@ -10,12 +10,13 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from src.config.analysis_logger import AnalysisLogger
+
     from ..schema import DisambiguateResponseModel
 
 
@@ -98,9 +99,9 @@ def log_disambiguate_response(
 
 def log_disambiguate_result(
     analysis_logger: AnalysisLogger | None,
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     response_data: DisambiguateResponseModel,
-    metadata: Dict[str, Any],
+    metadata: dict[str, Any],
 ) -> None:
     """
     统一记录消歧结果日志到 analysis_logger

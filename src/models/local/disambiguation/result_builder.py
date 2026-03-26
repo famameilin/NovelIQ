@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, cast
+from typing import cast
 
 from ..schema import DisambiguateResponseModel
 
@@ -46,19 +46,19 @@ class ExtendedDisambigResult:
     修改内容: 添加 evidence_sources 字段，支持证据来源追踪
     """
 
-    merge_target_map: Dict[str, str]
-    entity_types: Dict[str, str]
-    entity_relations: List[Dict[str, str]]
-    common_name_map: Dict[str, str] = field(default_factory=dict)
-    alias_confidence: Dict[str, str] = field(default_factory=dict)
-    evidence_sources: Dict[str, List[str]] = field(default_factory=dict)
+    merge_target_map: dict[str, str]
+    entity_types: dict[str, str]
+    entity_relations: list[dict[str, str]]
+    common_name_map: dict[str, str] = field(default_factory=dict)
+    alias_confidence: dict[str, str] = field(default_factory=dict)
+    evidence_sources: dict[str, list[str]] = field(default_factory=dict)
     _thinking_content: str | None = None
 
 
 def build_result_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: List[str] | List[Dict[str, int]],
-) -> Dict[str, str]:
+    candidates: list[str] | list[dict[str, int]],
+) -> dict[str, str]:
     """
     从 DisambiguateResponseModel 构建结果字典，确保所有候选名都有映射
 
@@ -90,8 +90,8 @@ def build_result_from_response(
 
 def build_common_name_map_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: List[str] | List[Dict[str, int]],
-) -> Dict[str, str]:
+    candidates: list[str] | list[dict[str, int]],
+) -> dict[str, str]:
     """
     从响应中构建 common_name_map，并确保 value 保持在候选列表内。
     """
@@ -117,7 +117,7 @@ def build_common_name_map_from_response(
 
 def build_extended_result_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: List[str] | List[Dict[str, int]],
+    candidates: list[str] | list[dict[str, int]],
 ) -> ExtendedDisambigResult:
     """
     从 DisambiguateResponseModel 构建扩展结果，包含别名映射、实体类型和实体关系
@@ -148,18 +148,18 @@ def build_extended_result_from_response(
         str_candidates = cast(list[str], candidates)
         name_list = list(str_candidates)
 
-    alias_confidence: Dict[str, str] = {}
+    alias_confidence: dict[str, str] = {}
     for name in name_list:
         alias_confidence[name] = str(response_data.alias_confidence.get(name, "medium"))
 
-    evidence_sources: Dict[str, List[str]] = {}
+    evidence_sources: dict[str, list[str]] = {}
     for name in name_list:
         sources = response_data.evidence_sources.get(name, [])
         evidence_sources[name] = list(sources) if sources else ["原文例句"]
 
     entity_types = dict(response_data.entity_types)
 
-    entity_relations: List[Dict[str, str]] = []
+    entity_relations: list[dict[str, str]] = []
     for rel in response_data.entity_relations:
         entity_relations.append(
             {

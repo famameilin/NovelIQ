@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+from typing import Any
 
-from src.metrics.aggregate_metrics import AggregateResult
 from src.api.models.responses import (
-    NarrativeStructureStats,
-    EmotionStats,
     CharacterStatsAggregate,
-    StyleStats,
     CultureStats,
+    EmotionStats,
+    NarrativeStructureStats,
+    StyleStats,
 )
+from src.metrics.aggregate_metrics import AggregateResult
 
 
 def _default_distribution(value: Any) -> dict[str, float]:
@@ -27,7 +27,7 @@ def _default_float(value: Any, default: float = 0.0) -> float:
 
 def _convert_narrative_structure(
     result: AggregateResult,
-) -> Optional[NarrativeStructureStats]:
+) -> NarrativeStructureStats | None:
     """
     杞崲鍙欎簨缁撴瀯缁熻鏁版嵁銆?
     鍒涘缓鏃堕棿: 2026-03-13
@@ -55,7 +55,7 @@ def _convert_narrative_structure(
 
 def _convert_emotion_stats(
     result: AggregateResult,
-) -> Optional[EmotionStats]:
+) -> EmotionStats | None:
     """
     杞崲鎯呮劅缁熻鏁版嵁銆?
     鍒涘缓鏃堕棿: 2026-03-13
@@ -80,7 +80,7 @@ def _convert_emotion_stats(
 
 def _convert_character_stats(
     result: AggregateResult,
-) -> Optional[CharacterStatsAggregate]:
+) -> CharacterStatsAggregate | None:
     """
     杞崲浜虹墿缁熻鏁版嵁銆?
     鍒涘缓鏃堕棿: 2026-03-13
@@ -115,7 +115,7 @@ def _convert_character_stats(
 
 def _convert_style_stats(
     result: AggregateResult,
-) -> Optional[StyleStats]:
+) -> StyleStats | None:
     """
     杞崲椋庢牸缁熻鏁版嵁銆?
     鍒涘缓鏃堕棿: 2026-03-13
@@ -155,7 +155,7 @@ def _convert_style_stats(
 
 def _convert_culture_stats(
     result: AggregateResult,
-) -> Optional[CultureStats]:
+) -> CultureStats | None:
     """
     杞崲鏂囧寲缁熻鏁版嵁銆?
     鍒涘缓鏃堕棿: 2026-03-13
@@ -174,12 +174,12 @@ def _convert_culture_stats(
 
 def _convert_aggregate_result(
     result: AggregateResult,
-) -> Tuple[
-    Optional[NarrativeStructureStats],
-    Optional[EmotionStats],
-    Optional[CharacterStatsAggregate],
-    Optional[StyleStats],
-    Optional[CultureStats],
+) -> tuple[
+    NarrativeStructureStats | None,
+    EmotionStats | None,
+    CharacterStatsAggregate | None,
+    StyleStats | None,
+    CultureStats | None,
 ]:
     """
     杞崲鑱氬悎缁撴灉涓哄搷搴旀ā鍨嬨€?

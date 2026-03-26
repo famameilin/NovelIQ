@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Tuple, Type
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -43,7 +44,7 @@ class RetryableOperation:
     def __init__(
         self,
         max_retries: int = 3,
-        retryable_exceptions: Tuple[Type[Exception], ...] = (ConnectionError, TimeoutError),
+        retryable_exceptions: tuple[type[Exception], ...] = (ConnectionError, TimeoutError),
         operation_name: str = "operation",
     ) -> None:
         self.max_retries = max_retries

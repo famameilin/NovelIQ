@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.metrics.aggregate_metrics import aggregate_all_metrics
+from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from src.workflows.curve_metrics import (
     compute_emotion_curve,
     compute_global_stats,
@@ -33,8 +35,6 @@ from src.workflows.curve_metrics import (
     compute_tension_signals,
     load_all_lexicons,
 )
-from src.metrics.aggregate_metrics import aggregate_all_metrics
-from src.storage.repositories import ChunkRepository, StatsRepository, AnnotationRepository
 
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
@@ -43,13 +43,13 @@ QUALITY_TARGETS = {
 }
 
 
-def _compute_tension_composite(signals: List[dict]) -> List[float]:
+def _compute_tension_composite(signals: list[dict]) -> list[float]:
     if not signals:
         return []
     keys = ["emotion_intensity", "dialogue_ratio", "sent_len_std", "event_score", "cliffhanger_score"]
     mins = {key: min(item.get(key, 0.0) for item in signals) for key in keys}
     maxs = {key: max(item.get(key, 0.0) for item in signals) for key in keys}
-    composites: List[float] = []
+    composites: list[float] = []
     for item in signals:
         total = 0.0
         for key in keys:
@@ -119,7 +119,7 @@ def _log_aggregate_results(agg_result) -> None:
                 logger.info(f"  {key}: {value}")
 
 
-def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkRepository) -> Dict[str, Any]:
+def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkRepository) -> dict[str, Any]:
     language_style = agg_result.language_style if isinstance(agg_result.language_style, dict) else {}
     traditional_culture = agg_result.traditional_culture if isinstance(agg_result.traditional_culture, dict) else {}
 
@@ -130,7 +130,7 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
     imagery_non_null = imagery_density is not None
 
     culture_rows = chunk_repo.fetch_chunk_cultures_full(run_id)
-    null_chunk_ids: List[int] = []
+    null_chunk_ids: list[int] = []
     for row in culture_rows:
         if not row:
             continue
@@ -149,7 +149,7 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
     }
 
 
-def _log_quality_gate_report(run_id: str, report: Dict[str, Any]) -> None:
+def _log_quality_gate_report(run_id: str, report: dict[str, Any]) -> None:
     tone_rate = float(report.get("tone_distribution_non_empty_rate", 0.0))
     imagery_rate = float(report.get("imagery_density_non_null_rate", 0.0))
     null_ratio = float(report.get("imagery_lexicon_null_chunk_ratio", 0.0))
@@ -178,7 +178,7 @@ def run_aggregate(
     run_id: str,
     session: Session,
     cache_path: Path | None = None,
-) -> Tuple[int, int, int]:
+) -> tuple[int, int, int]:
     """
     鎵ц鑱氬悎娴佺▼
 

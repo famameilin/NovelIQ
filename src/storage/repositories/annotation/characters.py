@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy import delete, func, select, update
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def fetch_alias_map(session: Session, run_id: str) -> Dict[str, str]:
+def fetch_alias_map(session: Session, run_id: str) -> dict[str, str]:
     """
     获取别名映射表
 
@@ -54,7 +54,7 @@ def fetch_all_character_names(
     session: Session,
     run_id: str,
     max_chunk_id: int | None = None,
-) -> List[Dict[str, str | int]]:
+) -> list[dict[str, str | int]]:
     """
     获取指定运行的所有角色名及出现频次
 
@@ -92,9 +92,9 @@ def fetch_all_character_names(
 def update_character_names(
     session: Session,
     run_id: str,
-    alias_map: Dict[str, str],
+    alias_map: dict[str, str],
     novel_id: str = "default",
-    display_name_map: Dict[str, str] | None = None,
+    display_name_map: dict[str, str] | None = None,
 ) -> None:
     """
     更新角色名称（消歧）
@@ -121,8 +121,8 @@ def update_character_names(
 
 def _resolve_final_character_name(
     name: str,
-    alias_map: Dict[str, str],
-    display_name_map: Dict[str, str] | None,
+    alias_map: dict[str, str],
+    display_name_map: dict[str, str] | None,
 ) -> str:
     """Resolve the persisted/output name for a merged character cluster."""
     merged_name = alias_map.get(name, name)
@@ -224,7 +224,7 @@ def _create_alias_mapping(
     session.execute(stmt)
 
 
-def apply_alias_corrections(session: Session, run_id: str, alias_map: Dict[str, str]) -> None:
+def apply_alias_corrections(session: Session, run_id: str, alias_map: dict[str, str]) -> None:
     """
     用最终消歧结果修正所有标注表里的错误名字
 
@@ -267,7 +267,7 @@ def apply_alias_corrections(session: Session, run_id: str, alias_map: Dict[str, 
 
 def fetch_character_appearances_for_chunks(
     session: Session, run_id: str, min_chunk_id: int, max_chunk_id: int
-) -> List[dict]:
+) -> list[dict]:
     """
     获取指定chunk_id范围内的所有角色出现记录
 

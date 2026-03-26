@@ -9,14 +9,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Set
+from collections.abc import Sequence
+from typing import Any
 
 from src.models.local.schema import (
-    ChunkAnnotation as ChunkAnnotationSchema,
     CharacterSnapshot,
     DialogueSnapshot,
     ForeshadowingResult,
     RelationChangeSnapshot,
+)
+from src.models.local.schema import (
+    ChunkAnnotation as ChunkAnnotationSchema,
 )
 from src.storage.repositories.base import BaseRepository
 
@@ -24,7 +27,7 @@ from src.storage.repositories.base import BaseRepository
 from . import characters, inserts, queries
 
 
-class AnnotationRepository(BaseRepository[Dict[str, Any]]):
+class AnnotationRepository(BaseRepository[dict[str, Any]]):
     """
     标注数据 Repository
 
@@ -70,47 +73,47 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
 
     # ==================== queries 模块方法 ====================
 
-    def fetch_chunk_annotations(self, run_id: str) -> List[Any]:
+    def fetch_chunk_annotations(self, run_id: str) -> list[Any]:
         """获取指定运行的所有分块标注"""
         return queries.fetch_chunk_annotations(self.session, run_id)
 
-    def fetch_chunk_annotations_full(self, run_id: str) -> List[Any]:
+    def fetch_chunk_annotations_full(self, run_id: str) -> list[Any]:
         """获取完整的分块标注数据（用于结果导出）"""
         return queries.fetch_chunk_annotations_full(self.session, run_id)
 
-    def fetch_chunk_characters_full(self, run_id: str) -> List[Any]:
+    def fetch_chunk_characters_full(self, run_id: str) -> list[Any]:
         """获取完整的分块角色数据"""
         return queries.fetch_chunk_characters_full(self.session, run_id)
 
-    def fetch_chunk_relations_full(self, run_id: str) -> List[Any]:
+    def fetch_chunk_relations_full(self, run_id: str) -> list[Any]:
         """获取完整的分块关系数据"""
         return queries.fetch_chunk_relations_full(self.session, run_id)
 
-    def fetch_chunk_dialogues_full(self, run_id: str) -> List[Any]:
+    def fetch_chunk_dialogues_full(self, run_id: str) -> list[Any]:
         """获取完整的分块对话数据"""
         return queries.fetch_chunk_dialogues_full(self.session, run_id)
 
-    def fetch_annotated_chunk_ids(self, run_id: str) -> Set[int]:
+    def fetch_annotated_chunk_ids(self, run_id: str) -> set[int]:
         """获取指定运行已标注的分块ID集合"""
         return queries.fetch_annotated_chunk_ids(self.session, run_id)
 
-    def fetch_full_annotations(self, run_id: str) -> List[Any]:
+    def fetch_full_annotations(self, run_id: str) -> list[Any]:
         """获取完整的分块标注数据"""
         return queries.fetch_full_annotations(self.session, run_id)
 
-    def fetch_characters_with_scores(self, run_id: str) -> List[Any]:
+    def fetch_characters_with_scores(self, run_id: str) -> list[Any]:
         """获取角色数据（含情绪分数）"""
         return queries.fetch_characters_with_scores(self.session, run_id)
 
-    def fetch_character_emotion_sequence(self, run_id: str) -> List[Any]:
+    def fetch_character_emotion_sequence(self, run_id: str) -> list[Any]:
         """获取角色情绪序列（按 chunk_id 排序）"""
         return queries.fetch_character_emotion_sequence(self.session, run_id)
 
-    def fetch_relations(self, run_id: str) -> List[Any]:
+    def fetch_relations(self, run_id: str) -> list[Any]:
         """获取角色关系（仅 from/to）"""
         return queries.fetch_relations(self.session, run_id)
 
-    def fetch_full_relations(self, run_id: str) -> List[Any]:
+    def fetch_full_relations(self, run_id: str) -> list[Any]:
         """获取完整角色关系"""
         return queries.fetch_full_relations(self.session, run_id)
 
@@ -134,20 +137,20 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
 
     # ==================== characters 模块方法 ====================
 
-    def fetch_alias_map(self, run_id: str) -> Dict[str, str]:
+    def fetch_alias_map(self, run_id: str) -> dict[str, str]:
         """获取别名映射表"""
         return characters.fetch_alias_map(self.session, run_id)
 
-    def fetch_all_character_names(self, run_id: str, max_chunk_id: int | None = None) -> List[Dict[str, str | int]]:
+    def fetch_all_character_names(self, run_id: str, max_chunk_id: int | None = None) -> list[dict[str, str | int]]:
         """获取指定运行的所有角色名及出现频次"""
         return characters.fetch_all_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
 
     def update_character_names(
         self,
         run_id: str,
-        alias_map: Dict[str, str],
+        alias_map: dict[str, str],
         novel_id: str = "default",
-        display_name_map: Dict[str, str] | None = None,
+        display_name_map: dict[str, str] | None = None,
     ) -> None:
         """更新角色名称（消歧）"""
         return characters.update_character_names(
@@ -158,6 +161,6 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
             display_name_map=display_name_map,
         )
 
-    def apply_alias_corrections(self, run_id: str, alias_map: Dict[str, str]) -> None:
+    def apply_alias_corrections(self, run_id: str, alias_map: dict[str, str]) -> None:
         """用最终消歧结果修正所有标注表里的错误名字"""
         return characters.apply_alias_corrections(self.session, run_id, alias_map)

@@ -19,9 +19,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from sqlalchemy import Float, ForeignKeyConstraint, Index, Integer, String, Text, ForeignKey
+from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -40,22 +38,22 @@ class CloudAnalysis(Base):
     __tablename__ = "cloud_analysis"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    novel_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    foreshadow_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    arc_scores: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    narrative_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    topic_labels: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    diagnosis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    value_logic_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    value_logic_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    power_stance_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    power_stance_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    common_people_dignity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    dignity_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    cultural_depth_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    cultural_depth_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    narrative_arc_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    novel_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    foreshadow_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arc_scores: Mapped[str | None] = mapped_column(Text, nullable=True)
+    narrative_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    topic_labels: Mapped[str | None] = mapped_column(Text, nullable=True)
+    diagnosis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_logic_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    value_logic_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    power_stance_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    power_stance_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    common_people_dignity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dignity_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cultural_depth_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cultural_depth_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    narrative_arc_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -86,10 +84,10 @@ class EmotionCurve(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    pos_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    neg_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    net_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    smoothed_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pos_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    neg_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_density: Mapped[float | None] = mapped_column(Float, nullable=True)
+    smoothed_density: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -127,8 +125,8 @@ class RhythmCurve(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    tension_proxy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    tension_composite: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tension_proxy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tension_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -166,7 +164,7 @@ class GlobalStats(Base):
     __tablename__ = "global_stats"
 
     stat_name: Mapped[str] = mapped_column(String(255), primary_key=True)
-    stat_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    stat_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), primary_key=True
     )
@@ -188,11 +186,11 @@ class GlobalContext(Base):
     __tablename__ = "global_context"
 
     novel_id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    novel_title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    core_characters: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    world_setting: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[Optional[str]] = mapped_column(
+    novel_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    core_characters: Mapped[str | None] = mapped_column(Text, nullable=True)
+    world_setting: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
 
@@ -220,8 +218,8 @@ class ChunkSummary(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
