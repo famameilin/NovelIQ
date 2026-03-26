@@ -144,14 +144,14 @@ class ChunkCulture(Base):
     修改时间: 2026-03-26
     修改者: TraeAI
     任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度字段，只保留 imagery_density
+    修改内容: 删除低价值词表密度字段，只保留 imagery_lexicon_density
     """
 
     __tablename__ = "chunk_culture"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    imagery_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    imagery_lexicon_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(

@@ -39,7 +39,7 @@ from src.storage.repositories import ChunkRepository, StatsRepository, Annotatio
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
     "imagery_density_non_null_rate": 1.0,
-    "culture_all_zero_chunk_ratio_max": 0.30,
+    "imagery_lexicon_null_chunk_ratio_max": 0.0,
 }
 
 
@@ -130,35 +130,35 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
     imagery_non_null = imagery_density is not None
 
     culture_rows = chunk_repo.fetch_chunk_cultures_full(run_id)
-    zero_chunk_ids: List[int] = []
+    null_chunk_ids: List[int] = []
     for row in culture_rows:
         if not row:
             continue
         chunk_id = int(row[0])
-        density_values = [float(value or 0.0) for value in row[1:]]
-        if density_values and all(value <= 0.0 for value in density_values):
-            zero_chunk_ids.append(chunk_id)
+        density_values = list(row[1:])
+        if density_values and any(value is None for value in density_values):
+            null_chunk_ids.append(chunk_id)
 
-    zero_ratio = (len(zero_chunk_ids) / len(culture_rows)) if culture_rows else 0.0
+    null_ratio = (len(null_chunk_ids) / len(culture_rows)) if culture_rows else 0.0
 
     return {
         "tone_distribution_non_empty_rate": 1.0 if tone_non_empty else 0.0,
         "imagery_density_non_null_rate": 1.0 if imagery_non_null else 0.0,
-        "culture_all_zero_chunk_ratio": zero_ratio,
-        "culture_all_zero_chunk_ids": zero_chunk_ids,
+        "imagery_lexicon_null_chunk_ratio": null_ratio,
+        "imagery_lexicon_null_chunk_ids": null_chunk_ids,
     }
 
 
 def _log_quality_gate_report(run_id: str, report: Dict[str, Any]) -> None:
     tone_rate = float(report.get("tone_distribution_non_empty_rate", 0.0))
     imagery_rate = float(report.get("imagery_density_non_null_rate", 0.0))
-    zero_ratio = float(report.get("culture_all_zero_chunk_ratio", 0.0))
-    zero_chunk_ids = report.get("culture_all_zero_chunk_ids", [])
+    null_ratio = float(report.get("imagery_lexicon_null_chunk_ratio", 0.0))
+    null_chunk_ids = report.get("imagery_lexicon_null_chunk_ids", [])
 
     logger.info("\n=== Aggregate Quality Gate ===")
     logger.info(f"tone_distribution_non_empty_rate={tone_rate:.0%}")
     logger.info(f"imagery_density_non_null_rate={imagery_rate:.0%}")
-    logger.info(f"culture_all_zero_chunk_ratio={zero_ratio:.2%}")
+    logger.info(f"imagery_lexicon_null_chunk_ratio={null_ratio:.2%}")
 
     if tone_rate < QUALITY_TARGETS["tone_distribution_non_empty_rate"]:
         logger.warning(f"[quality-gate] tone_distribution empty (run_id={run_id})")
@@ -166,12 +166,12 @@ def _log_quality_gate_report(run_id: str, report: Dict[str, Any]) -> None:
     if imagery_rate < QUALITY_TARGETS["imagery_density_non_null_rate"]:
         logger.warning(f"[quality-gate] imagery_density is null (run_id={run_id})")
 
-    if zero_ratio > QUALITY_TARGETS["culture_all_zero_chunk_ratio_max"]:
+    if null_ratio > QUALITY_TARGETS["imagery_lexicon_null_chunk_ratio_max"]:
         logger.warning(
-            f"[quality-gate] culture all-zero chunk ratio {zero_ratio * 100:.2f}% exceeds target "
-            f"{QUALITY_TARGETS['culture_all_zero_chunk_ratio_max'] * 100:.2f}% (run_id={run_id})"
+            f"[quality-gate] imagery lexicon null chunk ratio {null_ratio * 100:.2f}% exceeds target "
+            f"{QUALITY_TARGETS['imagery_lexicon_null_chunk_ratio_max'] * 100:.2f}% (run_id={run_id})"
         )
-        logger.warning(f"[quality-gate] all-zero chunk_ids={zero_chunk_ids}")
+        logger.warning(f"[quality-gate] imagery lexicon null chunk_ids={null_chunk_ids}")
 
 
 def run_aggregate(
