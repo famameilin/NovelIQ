@@ -100,7 +100,10 @@ class ChunkAnnotation(BaseModel):
     event_type: str | None = None
     pivot_moment: bool | None = None
     cliffhanger: bool | None = None
-    has_foreshadowing: bool | None = None
+    has_foreshadowing: bool | None = Field(
+        default=None,
+        description="当前 chunk 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔兑现率。",
+    )
     foreshadowing_type: str | None = None
     foreshadowing_desc: str | None = None
     characters: list[ChunkCharacter] = []
@@ -204,7 +207,10 @@ class TopicInfo(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
-    foreshadow_rate: float | None = None
+    foreshadow_rate: float | None = Field(
+        default=None,
+        description="伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示，取值范围 0-1。该值由 diagnosis 阶段整体评估，不应与 chunk_annotations.has_foreshadowing 的占比直接比较。",
+    )
     arc_scores: list[float] | dict[str, float] | None = None
     narrative_type: str | None = None
     topic_labels: list[str] | None = None

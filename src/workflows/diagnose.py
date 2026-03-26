@@ -107,7 +107,7 @@ def _log_diagnosis_results(result: CloudAnalysis) -> None:
     logger.info(f"Novel ID: {result.novel_id}")
     logger.info(f"Narrative Type: {result.narrative_type}")
     if result.foreshadow_rate is not None:
-        logger.info(f"Foreshadow Rate: {result.foreshadow_rate:.2%}")
+        logger.info(f"Foreshadow Payoff Rate: {result.foreshadow_rate:.2%}")
     if result.value_logic_type:
         logger.info(f"Value Logic Type: {result.value_logic_type}")
     if result.value_logic_reason:

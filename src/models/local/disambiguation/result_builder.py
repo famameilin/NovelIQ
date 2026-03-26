@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import cast
 
+from src.models.disambiguation_types import NameCountCandidate
+
 from ..schema import DisambiguateResponseModel
 
 
@@ -57,7 +59,7 @@ class ExtendedDisambigResult:
 
 def build_result_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: list[str] | list[dict[str, int]],
+    candidates: list[str] | list[NameCountCandidate],
 ) -> dict[str, str]:
     """
     从 DisambiguateResponseModel 构建结果字典，确保所有候选名都有映射
@@ -73,7 +75,7 @@ def build_result_from_response(
     """
     name_list: list[str] = []
     if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[dict[str, int]], candidates)
+        dict_candidates = cast(list[NameCountCandidate], candidates)
         name_list = [str(c["name"]) for c in dict_candidates]
     else:
         str_candidates = cast(list[str], candidates)
@@ -90,14 +92,14 @@ def build_result_from_response(
 
 def build_common_name_map_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: list[str] | list[dict[str, int]],
+    candidates: list[str] | list[NameCountCandidate],
 ) -> dict[str, str]:
     """
     从响应中构建 common_name_map，并确保 value 保持在候选列表内。
     """
     name_list: list[str] = []
     if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[dict[str, int]], candidates)
+        dict_candidates = cast(list[NameCountCandidate], candidates)
         name_list = [str(c["name"]) for c in dict_candidates]
     else:
         str_candidates = cast(list[str], candidates)
@@ -117,7 +119,7 @@ def build_common_name_map_from_response(
 
 def build_extended_result_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: list[str] | list[dict[str, int]],
+    candidates: list[str] | list[NameCountCandidate],
 ) -> ExtendedDisambigResult:
     """
     从 DisambiguateResponseModel 构建扩展结果，包含别名映射、实体类型和实体关系
@@ -142,7 +144,7 @@ def build_extended_result_from_response(
 
     name_list: list[str] = []
     if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[dict[str, int]], candidates)
+        dict_candidates = cast(list[NameCountCandidate], candidates)
         name_list = [str(c["name"]) for c in dict_candidates]
     else:
         str_candidates = cast(list[str], candidates)

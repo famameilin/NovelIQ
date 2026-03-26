@@ -118,7 +118,6 @@ def test_create_and_insert(db_session, mock_embedding) -> None:
                 question_density=0.02,
                 sensory_density=0.04,
                 metaphor_density=0.01,
-                cultural_density=0.0,
                 function_word_vector="{}",
                 category_density_combat=0.0,
                 category_density_body=0.0,
