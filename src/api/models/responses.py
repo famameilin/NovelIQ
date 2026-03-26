@@ -72,7 +72,6 @@ class ChunkStyle(BaseModel):
     dialogue_ratio: Optional[float] = None
     sensory_density: Optional[float] = None
     metaphor_density: Optional[float] = None
-    cultural_density: Optional[float] = None
 
 
 class ChunkCharacter(BaseModel):

@@ -97,7 +97,6 @@ class ChunkStyle(Base):
     question_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     sensory_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     metaphor_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    cultural_density: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     function_word_vector: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     category_density_combat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     category_density_body: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
