@@ -142,9 +142,21 @@ class AnnotationRepository(BaseRepository[Dict[str, Any]]):
         """获取指定运行的所有角色名及出现频次"""
         return characters.fetch_all_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
 
-    def update_character_names(self, run_id: str, alias_map: Dict[str, str], novel_id: str = "default") -> None:
+    def update_character_names(
+        self,
+        run_id: str,
+        alias_map: Dict[str, str],
+        novel_id: str = "default",
+        display_name_map: Dict[str, str] | None = None,
+    ) -> None:
         """更新角色名称（消歧）"""
-        return characters.update_character_names(self.session, run_id, alias_map, novel_id)
+        return characters.update_character_names(
+            self.session,
+            run_id,
+            alias_map,
+            novel_id,
+            display_name_map=display_name_map,
+        )
 
     def apply_alias_corrections(self, run_id: str, alias_map: Dict[str, str]) -> None:
         """用最终消歧结果修正所有标注表里的错误名字"""

@@ -1,7 +1,10 @@
 from fastapi.testclient import TestClient
 import tempfile
+from unittest.mock import MagicMock, patch
 
 from src.api.main import app
+from src.api.routes import analysis as analysis_mod
+from src.storage.id_mapping import TaskIDNotFoundError
 
 client = TestClient(app)
 
@@ -19,6 +22,21 @@ class TestAnalysis:
         data = response.json()
         assert data["status"] == "pending"
         assert data["progress"] == 0.0
+
+    def test_get_task_status_from_db_returns_pending_for_unknown_task_id(self):
+        """测试未知 task_id 查询状态时返回 pending"""
+        mock_session = MagicMock()
+        mock_session.__enter__.return_value = mock_session
+        mock_session.__exit__.return_value = None
+        mock_session.connection.return_value = MagicMock()
+
+        with (
+            patch.object(analysis_mod, "get_session_factory", return_value=lambda: mock_session),
+            patch.object(analysis_mod, "task_id_to_run_id", side_effect=TaskIDNotFoundError("not found")),
+        ):
+            status = analysis_mod._get_task_status_from_db("deadbeef")
+
+        assert status == analysis_mod.TaskStatus.PENDING
 
 
 class TestReanalysis:

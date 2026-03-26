@@ -64,7 +64,7 @@ class TestCloudStub(unittest.TestCase):
         client = ConfiguredCloudModelClient(config, client=mock_client)
 
         expected_alias_map = {"alias_a": "zhangsan"}
-        fake_result = MagicMock(alias_map=expected_alias_map)
+        fake_result = MagicMock(merge_target_map=expected_alias_map)
 
         with patch.object(client._disambiguation_client, "disambiguate_characters", return_value=fake_result) as mock_disambiguate:
             result = client.disambiguate_characters(

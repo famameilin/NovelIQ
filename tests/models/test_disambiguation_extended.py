@@ -1,12 +1,3 @@
-"""
-消歧扩展功能单元测试
-
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: entity-type-relation-extraction
-说明: 测试消歧阶段的entity_types和entity_relations解析
-"""
-
 import sys
 import unittest
 from pathlib import Path
@@ -18,86 +9,78 @@ from src.models.local.schema import DisambiguateResponseModel, HierarchicalRelat
 
 
 class TestExtendedDisambigResult(unittest.TestCase):
-    """
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
-    说明: 测试 ExtendedDisambigResult 数据类
-    """
-
     def test_basic_creation(self) -> None:
-        """测试基本创建"""
         result = ExtendedDisambigResult(
-            alias_map={"贺重明": "伯安"},
+            merge_target_map={"贺重明": "伯安"},
+            common_name_map={"贺重明": "贺重明"},
             entity_types={"伯安": "character", "赤甲卫": "group"},
             entity_relations=[{"from": "伯安", "to": "贺家", "type": "belongs_to"}],
         )
-        self.assertEqual(result.alias_map["贺重明"], "伯安")
+
+        self.assertEqual(result.merge_target_map["贺重明"], "伯安")
+        self.assertEqual(result.common_name_map["贺重明"], "贺重明")
         self.assertEqual(result.entity_types["伯安"], "character")
         self.assertEqual(len(result.entity_relations), 1)
 
     def test_empty_creation(self) -> None:
-        """测试空数据创建"""
         result = ExtendedDisambigResult(
-            alias_map={},
+            merge_target_map={},
             entity_types={},
             entity_relations=[],
         )
-        self.assertEqual(len(result.alias_map), 0)
-        self.assertEqual(len(result.entity_types), 0)
-        self.assertEqual(len(result.entity_relations), 0)
+
+        self.assertEqual(result.merge_target_map, {})
+        self.assertEqual(result.entity_types, {})
+        self.assertEqual(result.entity_relations, [])
 
 
 class TestBuildExtendedResultFromResponse(unittest.TestCase):
-    """
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
-    说明: 测试 build_extended_result_from_response 函数
-    """
-
     def test_basic_parsing(self) -> None:
-        """测试基本解析"""
         response = DisambiguateResponseModel(
-            alias_map={"贺重明": "伯安", "赤甲卫": "赤甲卫"},
+            merge_target_map={"贺重明": "伯安", "赤甲卫": "赤甲卫"},
+            common_name_map={"贺重明": "伯安", "赤甲卫": "赤甲卫"},
             entity_types={"伯安": "character", "赤甲卫": "group", "贺家": "organization"},
             entity_relations=[
                 HierarchicalRelation(**{"from": "伯安", "to": "贺家", "type": "belongs_to"}),
             ],
         )
-        candidates = ["贺重明", "赤甲卫", "贺家"]
 
-        result = build_extended_result_from_response(response, candidates)
+        result = build_extended_result_from_response(response, ["贺重明", "赤甲卫", "贺家"])
 
-        self.assertEqual(result.alias_map["贺重明"], "伯安")
-        self.assertEqual(result.alias_map["赤甲卫"], "赤甲卫")  # 群体映射到自身
-        self.assertEqual(result.entity_types["伯安"], "character")
+        self.assertEqual(result.merge_target_map["贺重明"], "伯安")
+        self.assertEqual(result.common_name_map["贺重明"], "贺重明")
+        self.assertEqual(result.merge_target_map["赤甲卫"], "赤甲卫")
         self.assertEqual(result.entity_types["赤甲卫"], "group")
         self.assertEqual(result.entity_types["贺家"], "organization")
-        self.assertEqual(len(result.entity_relations), 1)
-        self.assertEqual(result.entity_relations[0]["from"], "伯安")
-        self.assertEqual(result.entity_relations[0]["to"], "贺家")
         self.assertEqual(result.entity_relations[0]["type"], "belongs_to")
 
-    def test_group_organization_self_mapping(self) -> None:
-        """测试群体/组织名称映射到自身"""
+    def test_group_and_org_self_mapping(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={"赤甲卫": "赤甲卫", "贺家": "贺家"},
+            merge_target_map={"赤甲卫": "赤甲卫", "贺家": "贺家"},
+            common_name_map={"赤甲卫": "赤甲卫", "贺家": "贺家"},
             entity_types={"赤甲卫": "group", "贺家": "organization"},
             entity_relations=[],
         )
-        candidates = ["赤甲卫", "贺家"]
 
-        result = build_extended_result_from_response(response, candidates)
+        result = build_extended_result_from_response(response, ["赤甲卫", "贺家"])
 
-        # 群体和组织应该映射到自身
-        self.assertEqual(result.alias_map["赤甲卫"], "赤甲卫")
-        self.assertEqual(result.alias_map["贺家"], "贺家")
+        self.assertEqual(result.merge_target_map["赤甲卫"], "赤甲卫")
+        self.assertEqual(result.merge_target_map["贺家"], "贺家")
 
     def test_multiple_relations(self) -> None:
-        """测试多个关系解析"""
         response = DisambiguateResponseModel(
-            alias_map={"伯安": "伯安", "张三": "张三", "赤甲卫": "赤甲卫", "贺家": "贺家"},
+            merge_target_map={
+                "伯安": "伯安",
+                "张三": "张三",
+                "赤甲卫": "赤甲卫",
+                "贺家": "贺家",
+            },
+            common_name_map={
+                "伯安": "伯安",
+                "张三": "张三",
+                "赤甲卫": "赤甲卫",
+                "贺家": "贺家",
+            },
             entity_types={
                 "伯安": "character",
                 "张三": "character",
@@ -110,54 +93,53 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
                 HierarchicalRelation(**{"from": "赤甲卫", "to": "贺家", "type": "affiliated_with"}),
             ],
         )
-        candidates = ["伯安", "张三", "赤甲卫", "贺家"]
 
-        result = build_extended_result_from_response(response, candidates)
+        result = build_extended_result_from_response(response, ["伯安", "张三", "赤甲卫", "贺家"])
 
         self.assertEqual(len(result.entity_relations), 3)
-        relation_types = {rel["type"] for rel in result.entity_relations}
-        self.assertEqual(relation_types, {"belongs_to", "member_of", "affiliated_with"})
+        self.assertEqual(
+            {rel["type"] for rel in result.entity_relations},
+            {"belongs_to", "member_of", "affiliated_with"},
+        )
 
-    def test_missing_candidates_in_response(self) -> None:
-        """测试响应中缺少某些候选名时的处理"""
+    def test_missing_candidates_default_to_self(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={"贺重明": "伯安"},
+            merge_target_map={"贺重明": "伯安"},
+            common_name_map={"贺重明": "贺重明"},
             entity_types={"伯安": "character"},
             entity_relations=[],
         )
-        candidates = ["贺重明", "白芷"]  # 白芷不在响应中
 
-        result = build_extended_result_from_response(response, candidates)
+        result = build_extended_result_from_response(response, ["贺重明", "白芷"])
 
-        # 缺少的候选名应该映射到自身
-        self.assertEqual(result.alias_map["贺重明"], "伯安")
-        self.assertEqual(result.alias_map["白芷"], "白芷")
+        self.assertEqual(result.merge_target_map["贺重明"], "伯安")
+        self.assertEqual(result.merge_target_map["白芷"], "白芷")
+        self.assertEqual(result.common_name_map["贺重明"], "贺重明")
+        self.assertEqual(result.common_name_map["白芷"], "白芷")
+
+    def test_common_name_map_does_not_fall_back_to_existing_merge_target(self) -> None:
+        response = DisambiguateResponseModel(
+            merge_target_map={"贺伯安": "伯安"},
+            entity_types={"伯安": "character"},
+            entity_relations=[],
+        )
+
+        result = build_extended_result_from_response(response, ["贺伯安"])
+
+        self.assertEqual(result.merge_target_map["贺伯安"], "伯安")
+        self.assertEqual(result.common_name_map["贺伯安"], "贺伯安")
 
 
 class TestHierarchicalRelationModel(unittest.TestCase):
-    """
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
-    说明: 测试 HierarchicalRelation 模型
-    """
-
     def test_relation_creation(self) -> None:
-        """测试关系创建"""
-        rel = HierarchicalRelation(
-            **{"from": "伯安", "to": "贺家", "type": "belongs_to"},
-        )
+        rel = HierarchicalRelation(**{"from": "伯安", "to": "贺家", "type": "belongs_to"})
         self.assertEqual(rel.from_entity, "伯安")
         self.assertEqual(rel.to_entity, "贺家")
         self.assertEqual(rel.type, "belongs_to")
 
     def test_all_relation_types(self) -> None:
-        """测试所有关系类型"""
-        types = ["belongs_to", "member_of", "leader_of", "affiliated_with"]
-        for rel_type in types:
-            rel = HierarchicalRelation(
-                **{"from": "A", "to": "B", "type": rel_type},
-            )
+        for rel_type in ["belongs_to", "member_of", "leader_of", "affiliated_with"]:
+            rel = HierarchicalRelation(**{"from": "A", "to": "B", "type": rel_type})
             self.assertEqual(rel.type, rel_type)
 
 

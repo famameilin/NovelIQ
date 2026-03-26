@@ -1,24 +1,24 @@
-"""
-CLI annotate 模块测试
+﻿"""
+CLI annotate 妯″潡娴嬭瘯
 
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 测试标注流程
+鍒涘缓鏃堕棿: 2025-03-11
+鍒涘缓鑰? TraeAI
+浠诲姟: 娴嬭瘯鏍囨敞娴佺▼
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 使用 SessionFactory 替代 connect_db/create_tables，消除 DeprecationWarning
+淇敼鏃堕棿: 2026-03-15
+淇敼鑰? TraeAI
+浠诲姟: storage-layer-decoupling
+淇敼鍐呭: 浣跨敤 SessionFactory 鏇夸唬 connect_db/create_tables锛屾秷闄?DeprecationWarning
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 替换 ? 占位符，移除 sqlite3 导入
+淇敼鏃堕棿: 2026-03-15
+淇敼鑰? TraeAI
+浠诲姟: postgresql-migration
+淇敼鍐呭: 浣跨敤 SQLAlchemy text() 鏇挎崲 ? 鍗犱綅绗︼紝绉婚櫎 sqlite3 瀵煎叆
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration-cleanup
-修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
+淇敼鏃堕棿: 2026-03-15
+淇敼鑰? TraeAI
+浠诲姟: postgresql-migration-cleanup
+淇敼鍐呭: 鏀圭敤 PostgreSQL db_session fixture锛岀Щ闄?SessionFactory 渚濊禆
 """
 import sys
 import uuid
@@ -42,16 +42,16 @@ from src.models.local.disambiguation import ExtendedDisambigResult
 
 def create_mock_annotation() -> MultiPhaseAnnotationResult:
     """
-    创建模拟的 MultiPhaseAnnotationResult
+    鍒涘缓妯℃嫙鐨?MultiPhaseAnnotationResult
 
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - 修复测试以适应 MultiPhaseAnnotationResult 返回类型
+    淇敼鏃堕棿: 2026-03-18
+    淇敼鑰? TraeAI
+    浠诲姟: code-quality-refactor - 淇娴嬭瘯浠ラ€傚簲 MultiPhaseAnnotationResult 杩斿洖绫诲瀷
     """
     return MultiPhaseAnnotationResult(
         annotation=ChunkAnnotation(
             emotional_valence="neutral",
-            event_type="铺垫",
+            event_type="閾哄灚",
             pivot_moment=False,
             cliffhanger=False,
             has_foreshadowing=False,
@@ -59,27 +59,27 @@ def create_mock_annotation() -> MultiPhaseAnnotationResult:
             foreshadowing_desc="",
             characters=[
                 CharacterSnapshot(
-                    name="张三",
-                    role_function="主体",
-                    action="测试行为",
-                    action_type="其他",
+                    name="寮犱笁",
+                    role_function="涓讳綋",
+                    action="娴嬭瘯琛屼负",
+                    action_type="鍏朵粬",
                     emotion_score="neutral",
                 )
             ],
             relations=[
                 RelationChangeSnapshot(
-                    from_name="张三",
-                    to_name="李四",
-                    type="盟友",
-                    change="新建",
+                    from_name="寮犱笁",
+                    to_name="鏉庡洓",
+                    type="鐩熷弸",
+                    change="鏂板缓",
                 )
             ],
             dialogues=[],
         ),
         foreshadowing=None,
-        dialogue_lengths={"张三": 5},
-        dialogue_speakers={0: "张三"},
-        dialogues=[(1, "测试对话内容")],
+        dialogue_lengths={"寮犱笁": 5},
+        dialogue_speakers={0: "寮犱笁"},
+        dialogues=[(1, "娴嬭瘯瀵硅瘽鍐呭")],
     )
 
 
@@ -94,7 +94,7 @@ class TestAnnotate:
 
     def _create_chunks(self, chunk_count: int) -> None:
         chunk_repo = ChunkRepository(self.db_session)
-        chunks = [Chunk(index=i, start=0, end=10, text=f"张三在测试文本{i}中行动") for i in range(chunk_count)]
+        chunks = [Chunk(index=i, start=0, end=10, text=f"寮犱笁鍦ㄦ祴璇曟枃鏈瑊i}涓鍔?) for i in range(chunk_count)]
         chunk_repo.insert_chunks(self.run_id, chunks)
 
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
@@ -105,7 +105,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            alias_map={},
+            merge_target_map={},
             entity_types={},
             entity_relations=[]
         )
@@ -152,7 +152,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            alias_map={},
+            merge_target_map={},
             entity_types={},
             entity_relations=[]
         )
@@ -210,7 +210,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            alias_map={"张三丰": "张三"},
+            merge_target_map={"寮犱笁涓?: "寮犱笁"},
             entity_types={},
             entity_relations=[]
         )
@@ -227,7 +227,7 @@ class TestAnnotate:
         assert success == 2
 
         self.db_session.execute(
-            text("INSERT INTO chunk_characters (chunk_id, name, role_function, action, action_type, emotion_score, run_id) VALUES (1, '张三丰', '其他', 'test', '其他', 'neutral', :run_id)"),
+            text("INSERT INTO chunk_characters (chunk_id, name, role_function, action, action_type, emotion_score, run_id) VALUES (1, '寮犱笁涓?, '鍏朵粬', 'test', '鍏朵粬', 'neutral', :run_id)"),
             {"run_id": self.run_id},
         )
         self.db_session.commit()
@@ -245,4 +245,5 @@ class TestAnnotate:
                 {"run_id": self.run_id},
             )
         ]
-        assert "张三" in names
+        assert "寮犱笁" in names
+

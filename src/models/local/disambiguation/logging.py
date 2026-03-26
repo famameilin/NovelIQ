@@ -127,7 +127,7 @@ def log_disambiguate_result(
     if not analysis_logger:
         return
 
-    response_content = json.dumps(response_data.alias_map, ensure_ascii=False)
+    response_content = json.dumps(response_data.merge_target_map, ensure_ascii=False)
 
     # 添加 thinking_content 到 metadata（如果存在）
     thinking_content = getattr(response_data, "_thinking_content", None)

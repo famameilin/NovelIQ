@@ -74,7 +74,13 @@ class DisambiguationClient(BaseModelClient):
         rag_hint: str | None = None,
     ) -> ExtendedDisambigResult:
         if not candidates:
-            return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[], alias_confidence={})
+            return ExtendedDisambigResult(
+                merge_target_map={},
+                entity_types={},
+                entity_relations=[],
+                common_name_map={},
+                alias_confidence={},
+            )
 
         messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
         is_cloud = self._is_cloud_api()
@@ -98,7 +104,7 @@ class DisambiguationClient(BaseModelClient):
             )
             log_disambiguate_response(
                 "disambiguate_characters",
-                len(response.alias_map),
+                len(response.merge_target_map),
                 is_cloud,
                 self._novel_id,
             )
@@ -152,7 +158,7 @@ class DisambiguationClient(BaseModelClient):
             )
             log_disambiguate_response(
                 "disambiguate_anonymous",
-                len(response.alias_map),
+                len(response.merge_target_map),
                 is_cloud,
                 self._novel_id,
             )

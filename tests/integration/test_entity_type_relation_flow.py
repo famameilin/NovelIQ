@@ -11,7 +11,7 @@ class TestExtendedDisambigResultIntegration(unittest.TestCase):
         from src.models.local.disambiguation import ExtendedDisambigResult
 
         result = ExtendedDisambigResult(
-            alias_map={
+            merge_target_map={
                 "AliasA": "CharacterA",
                 "AliasB": "CharacterB",
                 "GroupA": "GroupA",
@@ -30,10 +30,10 @@ class TestExtendedDisambigResultIntegration(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(result.alias_map["AliasA"], "CharacterA")
-        self.assertEqual(result.alias_map["AliasB"], "CharacterB")
-        self.assertEqual(result.alias_map["GroupA"], "GroupA")
-        self.assertEqual(result.alias_map["OrgA"], "OrgA")
+        self.assertEqual(result.merge_target_map["AliasA"], "CharacterA")
+        self.assertEqual(result.merge_target_map["AliasB"], "CharacterB")
+        self.assertEqual(result.merge_target_map["GroupA"], "GroupA")
+        self.assertEqual(result.merge_target_map["OrgA"], "OrgA")
 
         self.assertEqual(result.entity_types["CharacterA"], "character")
         self.assertEqual(result.entity_types["CharacterB"], "character")

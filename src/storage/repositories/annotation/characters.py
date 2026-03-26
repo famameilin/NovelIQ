@@ -90,7 +90,11 @@ def fetch_all_character_names(
 
 
 def update_character_names(
-    session: Session, run_id: str, alias_map: Dict[str, str], novel_id: str = "default"
+    session: Session,
+    run_id: str,
+    alias_map: Dict[str, str],
+    novel_id: str = "default",
+    display_name_map: Dict[str, str] | None = None,
 ) -> None:
     """
     更新角色名称（消歧）
@@ -98,12 +102,14 @@ def update_character_names(
     将别名更新为规范名，并创建实体和别名映射记录。
     """
     canonical_to_entity_id: dict[str, int] = {}
-    for alias, canonical in alias_map.items():
-        if alias != canonical:
-            _update_character_names_in_tables(session, alias, canonical, run_id)
-        entity_id = _ensure_entity_exists(session, novel_id, canonical, canonical_to_entity_id, run_id)
+    all_names = sorted(set(alias_map.keys()) | set(alias_map.values()))
+    for name in all_names:
+        final_name = _resolve_final_character_name(name, alias_map, display_name_map)
+        if name != final_name:
+            _update_character_names_in_tables(session, name, final_name, run_id)
+        entity_id = _ensure_entity_exists(session, novel_id, final_name, canonical_to_entity_id, run_id)
         if entity_id is not None:
-            _create_alias_mapping(session, entity_id, alias, canonical, run_id)
+            _create_alias_mapping(session, entity_id, name, final_name, run_id)
     session.execute(
         delete(ChunkRelation).where(
             ChunkRelation.from_char == ChunkRelation.to_char,
@@ -111,6 +117,19 @@ def update_character_names(
         )
     )
     session.commit()
+
+
+def _resolve_final_character_name(
+    name: str,
+    alias_map: Dict[str, str],
+    display_name_map: Dict[str, str] | None,
+) -> str:
+    """Resolve the persisted/output name for a merged character cluster."""
+    merged_name = alias_map.get(name, name)
+    if not display_name_map:
+        return merged_name
+
+    return display_name_map.get(name) or display_name_map.get(merged_name) or merged_name
 
 
 def _update_character_names_in_tables(session: Session, alias: str, canonical: str, run_id: str) -> None:
@@ -134,6 +153,11 @@ def _update_character_names_in_tables(session: Session, alias: str, canonical: s
         update(ChunkDialogue)
         .where(ChunkDialogue.speaker == alias, ChunkDialogue.run_id == run_id)
         .values(speaker=canonical)
+    )
+    session.execute(
+        update(CharacterAppearance)
+        .where(CharacterAppearance.raw_name == alias, CharacterAppearance.run_id == run_id)
+        .values(raw_name=canonical)
     )
 
 

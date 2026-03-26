@@ -90,7 +90,7 @@ class ConfiguredCloudModelClient(CloudModelClient):
             context_sentences=context_sentences,
             existing_names=existing_names,
         )
-        return result.alias_map
+        return result.merge_target_map
 
 
 __all__ = [

@@ -22,7 +22,7 @@ from src.api.routes.novels import get_novel_service
 from src.api.exceptions import AnalysisError
 from src.storage.db import get_session_factory
 from src.storage.repositories import RunRepository
-from src.storage.id_mapping import task_id_to_run_id
+from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
 
 
 _STATUS_MAP: Dict[str, TaskStatus] = {
@@ -57,7 +57,10 @@ def _get_task_status_from_db(task_id: str) -> TaskStatus:
     """
     session_factory = get_session_factory()
     with session_factory() as session:
-        run_id = task_id_to_run_id(task_id, session.connection())
+        try:
+            run_id = task_id_to_run_id(task_id, session.connection())
+        except (TaskIDNotFoundError, ValueError):
+            return TaskStatus.PENDING
         run_repo = RunRepository(session)
         run = run_repo.get_run(run_id)
         if run:

@@ -281,15 +281,28 @@ def _save_disambiguation_interaction(
             if isinstance(result, ExtendedDisambigResult):
                 # ExtendedDisambigResult
                 response_dict = {
-                    "alias_map": result.alias_map,
+                    "merge_target_map": result.merge_target_map,
+                    "common_name_map": result.common_name_map if hasattr(result, "common_name_map") else {},
                     "alias_confidence": result.alias_confidence if hasattr(result, "alias_confidence") else {},
                     "entity_types": result.entity_types if hasattr(result, 'entity_types') else {},
                     "entity_relations": result.entity_relations if hasattr(result, 'entity_relations') else [],
                 }
             elif isinstance(result, dict):
-                response_dict = {"alias_map": result, "alias_confidence": {}, "entity_types": {}, "entity_relations": []}
+                response_dict = {
+                    "merge_target_map": result,
+                    "common_name_map": {},
+                    "alias_confidence": {},
+                    "entity_types": {},
+                    "entity_relations": [],
+                }
             else:
-                response_dict = {"alias_map": {}, "alias_confidence": {}, "entity_types": {}, "entity_relations": []}
+                response_dict = {
+                    "merge_target_map": {},
+                    "common_name_map": {},
+                    "alias_confidence": {},
+                    "entity_types": {},
+                    "entity_relations": [],
+                }
 
             response_text = json.dumps(response_dict, ensure_ascii=False)
 
@@ -484,7 +497,7 @@ def _build_alias_and_state_updates(
     alias_updates: dict[str, str] = {}
     state_updates: DisambigStateSnapshot = {}
 
-    for name, canonical in result.alias_map.items():
+    for name, canonical in result.merge_target_map.items():
         confidence = _normalize_disambig_confidence(result.alias_confidence.get(name))
         canonical_name = canonical or name
 
@@ -521,6 +534,34 @@ def _build_alias_and_state_updates(
 
     merged_snapshot.update(state_updates)
     return alias_updates, merged_snapshot
+
+
+def _build_display_name_map(
+    alias_map: dict[str, str],
+    common_name_map: dict[str, str] | None,
+) -> dict[str, str]:
+    """Build a cluster-level display-name map from merge targets and common names."""
+    if not alias_map:
+        return {}
+
+    display_by_cluster: dict[str, str] = {}
+    all_names = set(alias_map.keys()) | set(alias_map.values())
+    for name in all_names:
+        merge_target = alias_map.get(name, name)
+        display_by_cluster.setdefault(merge_target, merge_target)
+
+    for name, display_name in (common_name_map or {}).items():
+        if not display_name:
+            continue
+        merge_target = alias_map.get(name, name)
+        if merge_target == display_name and merge_target in display_by_cluster:
+            continue
+        display_by_cluster[merge_target] = display_name
+
+    return {
+        name: display_by_cluster.get(alias_map.get(name, name), alias_map.get(name, name))
+        for name in all_names
+    }
 
 
 def _extract_names_from_candidates(candidates: list[str] | list[dict[str, int]]) -> list[str]:
@@ -712,19 +753,32 @@ def _run_final_disambiguation(
         )
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
-        result = ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[], alias_confidence={})
+        result = ExtendedDisambigResult(
+            merge_target_map={},
+            entity_types={},
+            entity_relations=[],
+            common_name_map={},
+            alias_confidence={},
+        )
 
     previous_alias_map = dict(alias_map)
-    if result.alias_map:
+    if result.merge_target_map:
         alias_updates, state_snapshot = _build_alias_and_state_updates(result, alias_map, state_snapshot)
         alias_map.update(alias_updates)
     if alias_map != previous_alias_map:
         logger.info(f"final disambiguation completed: {len(alias_map)} entries")
 
+    display_name_map = _build_display_name_map(alias_map, result.common_name_map)
+
     # 1. 先创建实体
     if alias_map:
         ann_repo = AnnotationRepository(conn)
-        ann_repo.update_character_names(run_id, alias_map, novel_id=novel_id)
+        ann_repo.update_character_names(
+            run_id,
+            alias_map,
+            novel_id=novel_id,
+            display_name_map=display_name_map,
+        )
         logger.info(f"character names updated in annotations: {len(alias_map)} entries")
 
     # 2. 再保存关系（实体必须先创建）
