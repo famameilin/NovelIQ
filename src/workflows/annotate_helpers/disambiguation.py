@@ -29,12 +29,13 @@ from __future__ import annotations
 import json
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from sqlalchemy import text
 
 from src.config import settings
+from src.models.disambiguation_types import NameCountCandidate
 from src.models.interfaces import DisambiguationLike
 from src.models.local.disambiguation import ExtendedDisambigResult
 from src.storage.repositories import AnnotationRepository
@@ -404,7 +405,7 @@ def _save_disambiguation_interaction(
 
 def _retry_disambig(
     client: DisambiguationLike,
-    candidates: list[str] | list[dict],
+    candidates: list[str] | list[NameCountCandidate],
     context_sentences: dict[str, str],
     existing_names: list[str],
     stage_name: str,
@@ -479,7 +480,7 @@ def extract_new_names_from_db(
     alias_map: dict[str, str],
     run_id: str,
     current_chunk_id: int | None = None,
-) -> list[dict[str, int]]:
+) -> list[NameCountCandidate]:
     """
     从数据库中提取新出现的人名（带频次）
 
@@ -498,7 +499,7 @@ def extract_new_names_from_db(
     existing_names = set(alias_map.keys()) | set(alias_map.values()) if alias_map else set()
     all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)
 
-    candidates: list[dict[str, int]] = []
+    candidates: list[NameCountCandidate] = []
     for item in all_names:
         name = str(item.get("name", "")).strip()
         if not name or name in existing_names:
@@ -627,23 +628,26 @@ def _build_display_name_map(
     return {name: display_by_cluster.get(alias_map.get(name, name), alias_map.get(name, name)) for name in all_names}
 
 
-def _extract_names_from_candidates(candidates: list[str] | list[dict[str, str | int]]) -> list[str]:
+def _extract_names_from_candidates(candidates: list[str] | list[NameCountCandidate]) -> list[str]:
     names: list[str] = []
     if candidates and isinstance(candidates[0], dict):
-        names = [str(item.get("name", "")) for item in candidates]
+        dict_candidates = cast(list[NameCountCandidate], candidates)
+        names = [str(item.get("name", "")) for item in dict_candidates]
     else:
-        names = [str(item) for item in candidates]
+        str_candidates = cast(list[str], candidates)
+        names = [str(item) for item in str_candidates]
     return [name for name in names if name]
 
 
 def _build_candidate_payload_by_names(
-    all_names: list[str] | list[dict[str, str | int]],
+    all_names: list[str] | list[NameCountCandidate],
     candidate_names: list[str],
-) -> list[str] | list[dict[str, str | int]]:
+) -> list[str] | list[NameCountCandidate]:
     if all_names and isinstance(all_names[0], dict):
+        dict_candidates = cast(list[NameCountCandidate], all_names)
         names_set = set(candidate_names)
-        payload: list[dict[str, str | int]] = []
-        for item in all_names:
+        payload: list[NameCountCandidate] = []
+        for item in dict_candidates:
             name = str(item.get("name", ""))
             if name in names_set:
                 payload.append(item)
@@ -652,7 +656,7 @@ def _build_candidate_payload_by_names(
 
 
 def _collect_final_disambiguation_candidates(
-    all_names: list[str] | list[dict[str, str | int]],
+    all_names: list[str] | list[NameCountCandidate],
     alias_map: dict[str, str],
     state_snapshot: DisambigStateSnapshot | None = None,
 ) -> list[str]:
@@ -802,7 +806,18 @@ def _run_final_disambiguation(
     if not existing_names:
         return alias_map
 
-    all_names = fetch_all_character_names(conn, run_id)
+    raw_all_names = fetch_all_character_names(conn, run_id)
+    all_names: list[NameCountCandidate] = []
+    for item in raw_all_names:
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        raw_count = item.get("count", 0)
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            count = 0
+        all_names.append({"name": name, "count": count})
     candidates = _collect_final_disambiguation_candidates(all_names, alias_map, state_snapshot)
 
     if candidates:
