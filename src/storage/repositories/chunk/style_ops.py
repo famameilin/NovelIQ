@@ -3,13 +3,19 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分chunk_repository.py
 说明: 分块风格数据操作
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: fix-pause-density-d-value-equality
+修改内容: fetch_chunk_styles_full 返回 Row 对象而非元组，支持字段名访问，避免索引错位
 """
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Tuple, Union, cast
+from typing import Any, Iterable, List, Sequence, Tuple, Union, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from src.storage.models import ChunkStyle
@@ -63,25 +69,7 @@ def insert_chunk_style(
 
 def fetch_chunk_styles_full(
     session: Session, run_id: str
-) -> List[
-    Tuple[
-        int,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        float,
-        str,
-    ]
-]:
+) -> Sequence[Row]:
     """
     获取完整的分块风格数据
 
@@ -90,7 +78,12 @@ def fetch_chunk_styles_full(
         run_id: 运行ID
 
     Returns:
-        (chunk_id, mtld, ttr, avg_sent_len, sent_len_std, d_value, pause_density, fight_density, exclaim_density, dialogue_ratio, question_density, sensory_density, metaphor_density, cultural_density, function_word_vector) 元组列表
+        Row 对象序列，支持通过字段名访问（如 row.d_value, row.pause_density）
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: fix-pause-density-d-value-equality
+    修改内容: 返回 Row 对象而非元组，支持字段名访问，避免索引错位问题
     """
     stmt = select(
         ChunkStyle.chunk_id,
@@ -110,4 +103,4 @@ def fetch_chunk_styles_full(
         ChunkStyle.function_word_vector,
     ).where(ChunkStyle.run_id == run_id).order_by(ChunkStyle.chunk_id)
     result = session.execute(stmt)
-    return [tuple(row) for row in result.fetchall()]
+    return result.fetchall()

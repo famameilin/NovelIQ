@@ -24,6 +24,11 @@
 修改者: TraeAI
 任务: 简化文化指标系统
 修改内容: 修复 fetch_chunk_cultures_full 返回类型为 List[Tuple[int, float]]
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: fix-pause-density-d-value-equality
+修改内容: fetch_chunk_styles_full 返回 Sequence[Row] 支持字段名访问
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from __future__ import annotations
 from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from src.chunking.chunker import Chunk
@@ -147,7 +153,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
     def fetch_chunk_styles_full(
         self, run_id: str
-    ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
+    ) -> Sequence[Row]:
         return fetch_chunk_styles_full(self.session, run_id)
 
     def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float | None]]:
