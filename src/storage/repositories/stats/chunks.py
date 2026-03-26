@@ -9,18 +9,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, List, Tuple
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.storage.models import EmotionCurve, RhythmCurve, ChunkCulture
+from src.storage.models import ChunkCulture, EmotionCurve, RhythmCurve
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def insert_emotion_curve(session: Session, run_id: str, rows: Iterable[Tuple[int, float, float, float, float]]) -> None:
+def insert_emotion_curve(session: Session, run_id: str, rows: Iterable[tuple[int, float, float, float, float]]) -> None:
     """
     插入情绪曲线数据
 
@@ -58,7 +59,7 @@ def insert_emotion_curve(session: Session, run_id: str, rows: Iterable[Tuple[int
     session.commit()
 
 
-def insert_rhythm_curve(session: Session, run_id: str, rows: Iterable[Tuple[int, float, float]]) -> None:
+def insert_rhythm_curve(session: Session, run_id: str, rows: Iterable[tuple[int, float, float]]) -> None:
     """
     插入节奏曲线数据
 
@@ -92,7 +93,7 @@ def insert_rhythm_curve(session: Session, run_id: str, rows: Iterable[Tuple[int,
     session.commit()
 
 
-def fetch_emotion_curve(session: Session, run_id: str) -> List[Tuple[float, float, float]]:
+def fetch_emotion_curve(session: Session, run_id: str) -> list[tuple[float, float, float]]:
     """
     获取情绪曲线数据
 
@@ -117,7 +118,7 @@ def fetch_emotion_curve(session: Session, run_id: str) -> List[Tuple[float, floa
     return [(row.pos_density, row.neg_density, row.net_density) for row in result]
 
 
-def fetch_rhythm_curve(session: Session, run_id: str) -> List[Tuple[float]]:
+def fetch_rhythm_curve(session: Session, run_id: str) -> list[tuple[float]]:
     """
     获取节奏曲线数据
 
@@ -134,7 +135,7 @@ def fetch_rhythm_curve(session: Session, run_id: str) -> List[Tuple[float]]:
     return [(row.tension_composite,) for row in result]
 
 
-def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float | None]]:
+def fetch_chunk_culture(session: Session, run_id: str) -> list[tuple[float | None]]:
     """
     获取分块文化数据
 
@@ -162,7 +163,7 @@ def fetch_chunk_culture(session: Session, run_id: str) -> List[Tuple[float | Non
     return [(row.imagery_lexicon_density,) for row in result]
 
 
-def fetch_emotion_curve_full(session: Session, run_id: str) -> List[Tuple[int, float, float, float, float]]:
+def fetch_emotion_curve_full(session: Session, run_id: str) -> list[tuple[int, float, float, float, float]]:
     """
     获取情绪曲线完整数据
 
@@ -198,7 +199,7 @@ def fetch_emotion_curve_full(session: Session, run_id: str) -> List[Tuple[int, f
     ]
 
 
-def fetch_rhythm_curve_full(session: Session, run_id: str) -> List[Tuple[int, float, float]]:
+def fetch_rhythm_curve_full(session: Session, run_id: str) -> list[tuple[int, float, float]]:
     """
     获取节奏曲线完整数据
 
@@ -230,7 +231,7 @@ def fetch_rhythm_curve_full(session: Session, run_id: str) -> List[Tuple[int, fl
     ]
 
 
-def fetch_emotion_densities(session: Session, run_id: str) -> List[Tuple[float, float]]:
+def fetch_emotion_densities(session: Session, run_id: str) -> list[tuple[float, float]]:
     """
     获取情绪密度数据
 

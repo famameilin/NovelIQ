@@ -16,12 +16,11 @@ from __future__ import annotations
 
 import re
 import warnings as _warnings
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Set, Tuple
 
 from src.config import CHAPTER_PATTERN, PARAGRAPH_SPLIT, settings
 from src.models.local.embedding import EmbeddingClient
-
 
 # =============================================================================
 # 数据类型
@@ -38,7 +37,7 @@ class Chunk:
     chapter_title: str | None = None
 
 
-def _reindex(chunks: List[Chunk]) -> List[Chunk]:
+def _reindex(chunks: list[Chunk]) -> list[Chunk]:
     """重新索引 chunks"""
     return [
         Chunk(
@@ -87,9 +86,9 @@ def _is_onomatopoeia(text: str) -> bool:
     return False
 
 
-def _detect_onomatopoeia(paragraphs: List[Tuple[int, int, str]]) -> Set[int]:
+def _detect_onomatopoeia(paragraphs: list[tuple[int, int, str]]) -> set[int]:
     """检测拟声词段落索引"""
-    onomatopoeia_indices: Set[int] = set()
+    onomatopoeia_indices: set[int] = set()
     for i, (_, _, text) in enumerate(paragraphs):
         if _is_onomatopoeia(text):
             onomatopoeia_indices.add(i)
@@ -101,9 +100,9 @@ def _detect_onomatopoeia(paragraphs: List[Tuple[int, int, str]]) -> Set[int]:
 # =============================================================================
 
 
-def split_by_chapters(text: str) -> List[Tuple[str | None, str]]:
+def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
     """按章节分割文本"""
-    chapters: List[Tuple[str | None, str]] = []
+    chapters: list[tuple[str | None, str]] = []
     last_end = 0
     last_title: str | None = None
 
@@ -129,7 +128,7 @@ def chunk_text(
     overlap: int = 100,
     split_by_chapter: bool = True,
     use_semantic: bool = False,
-) -> List[Chunk]:
+) -> list[Chunk]:
     """
     将文本分割成块
 
@@ -158,7 +157,7 @@ def chunk_text(
     return _chunk_simple(text, max_chars, overlap)
 
 
-def _chunk_simple(text: str, max_chars: int, overlap: int) -> List[Chunk]:
+def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
     """简单分块（不按章节）"""
     chunks = []
     start = 0
@@ -189,7 +188,7 @@ def _chunk_simple(text: str, max_chars: int, overlap: int) -> List[Chunk]:
     return chunks
 
 
-def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> List[Chunk]:
+def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> list[Chunk]:
     """按章节分块"""
     chapters = split_by_chapters(text)
     chunks = []
@@ -250,7 +249,7 @@ class SemanticChunker:
         self._max_chars = settings.chunking.semantic_max_chars
         self._use_dynamic_threshold = settings.chunking.semantic_use_dynamic_threshold
 
-    def chunk_text_semantic(self, text: str) -> List[Chunk]:
+    def chunk_text_semantic(self, text: str) -> list[Chunk]:
         """基于语义相似度的文本分块"""
         if not text.strip():
             return []
@@ -265,7 +264,7 @@ class SemanticChunker:
 
         return _reindex(chunks)
 
-    def _split_into_paragraphs(self, text: str) -> List[Tuple[int, int, str]]:
+    def _split_into_paragraphs(self, text: str) -> list[tuple[int, int, str]]:
         """将文本分割成段落"""
         paragraphs = []
         start = 0
@@ -285,8 +284,8 @@ class SemanticChunker:
         return paragraphs
 
     def _compute_paragraph_embeddings(
-        self, paragraphs: List[Tuple[int, int, str]]
-    ) -> List[List[float]]:
+        self, paragraphs: list[tuple[int, int, str]]
+    ) -> list[list[float]]:
         """计算段落的嵌入向量"""
         if self._embedding_client is None:
             return []
@@ -295,9 +294,9 @@ class SemanticChunker:
 
     def _find_semantic_boundaries(
         self,
-        paragraphs: List[Tuple[int, int, str]],
-        embeddings: List[List[float]],
-    ) -> List[int]:
+        paragraphs: list[tuple[int, int, str]],
+        embeddings: list[list[float]],
+    ) -> list[int]:
         """找到语义边界
         
         修改时间: 2026-03-20
@@ -339,9 +338,9 @@ class SemanticChunker:
 
     def _compute_window_similarities(
         self,
-        embeddings: List[List[float]],
-        onomatopoeia_indices: Set[int],
-    ) -> List[float]:
+        embeddings: list[list[float]],
+        onomatopoeia_indices: set[int],
+    ) -> list[float]:
         """计算窗口相似度"""
         similarities = []
 
@@ -376,7 +375,7 @@ class SemanticChunker:
 
         return similarities
 
-    def _compute_dynamic_threshold(self, similarities: List[float]) -> float:
+    def _compute_dynamic_threshold(self, similarities: list[float]) -> float:
         """计算动态阈值"""
         import numpy as np
 
@@ -388,16 +387,16 @@ class SemanticChunker:
     def _create_chunks_from_boundaries(
         self,
         text: str,
-        paragraphs: List[Tuple[int, int, str]],
-        boundaries: List[int],
-    ) -> List[Chunk]:
+        paragraphs: list[tuple[int, int, str]],
+        boundaries: list[int],
+    ) -> list[Chunk]:
         """根据边界创建 chunks
 
         修改时间: 2026-03-20
         修改者: TraeAI
         任务: 添加超长 chunk 拆分逻辑，当 chunk 超过 max_chars 时按句子边界拆分
         """
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
 
         for i in range(len(boundaries) - 1):
             start_idx = boundaries[i]
@@ -450,7 +449,7 @@ class SemanticChunker:
 
         return chunks
 
-    def _split_long_chunk(self, text: str, start_pos: int) -> List[Chunk]:
+    def _split_long_chunk(self, text: str, start_pos: int) -> list[Chunk]:
         """拆分超长块
 
         创建时间: 2026-03-20
@@ -462,7 +461,7 @@ class SemanticChunker:
         - 保证每个子块不超过 max_chars
         - 如果无法找到合适的句子边界，则强制按字符分割
         """
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         offset = 0
 
         while offset < len(text):
@@ -507,7 +506,7 @@ def chunk_documents(
     overlap: int = 100,
     split_by_chapter: bool = True,
     use_semantic: bool = False,
-) -> List[Chunk]:
+) -> list[Chunk]:
     """
     分块多个文档
 

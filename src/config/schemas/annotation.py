@@ -16,7 +16,6 @@
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -53,15 +52,15 @@ class AnnotationConfig:
     lookback: int = 10
 
     # 验证配置
-    valid_role_functions: Optional[List[str]] = None
-    valid_action_types: Optional[List[str]] = None
-    valid_emotion_scores: Optional[List[str]] = None
-    valid_interpersonal_relation_types: Optional[List[str]] = None
-    valid_hierarchical_relation_types: Optional[List[str]] = None
-    valid_entity_types: Optional[List[str]] = None
-    valid_clue_types: Optional[List[str]] = None
-    valid_event_types: Optional[List[str]] = None
-    valid_foreshadowing_types: Optional[List[str]] = None
+    valid_role_functions: list[str] | None = None
+    valid_action_types: list[str] | None = None
+    valid_emotion_scores: list[str] | None = None
+    valid_interpersonal_relation_types: list[str] | None = None
+    valid_hierarchical_relation_types: list[str] | None = None
+    valid_entity_types: list[str] | None = None
+    valid_clue_types: list[str] | None = None
+    valid_event_types: list[str] | None = None
+    valid_foreshadowing_types: list[str] | None = None
 
     def __post_init__(self):
         # 由于frozen=True，使用object.__setattr__来设置默认值

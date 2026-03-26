@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from loguru import logger
-
 
 _active_file_handlers: dict[str, int] = {}
 
@@ -64,9 +63,9 @@ class AnalysisLogger:
 
     def log_prompt(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         response: str,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         chunk_id: int | None = None,
     ) -> None:
         """
@@ -89,9 +88,9 @@ class AnalysisLogger:
     def log_annotation(
         self,
         chunk_id: int,
-        annotation: Dict[str, Any],
+        annotation: dict[str, Any],
         raw_response: str,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         entry = {
             "timestamp": datetime.now().isoformat(),
@@ -102,11 +101,11 @@ class AnalysisLogger:
         }
         self._append_jsonl(self._annotation_file, entry)
 
-    def _append_jsonl(self, file_path: Path, entry: Dict[str, Any]) -> None:
+    def _append_jsonl(self, file_path: Path, entry: dict[str, Any]) -> None:
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def write_summary(self, summary: Dict[str, Any]) -> None:
+    def write_summary(self, summary: dict[str, Any]) -> None:
         summary_file = self._log_dir / "summary.json"
         summary_file.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 

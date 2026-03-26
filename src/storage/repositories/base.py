@@ -12,15 +12,14 @@
 
 from __future__ import annotations
 
-from abc import ABC
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from sqlalchemy.orm import Session
 
 T = TypeVar("T")
 
 
-class BaseRepository(ABC, Generic[T]):
+class BaseRepository[T]:
     """
     Repository 基类
 

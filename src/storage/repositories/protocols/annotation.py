@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -18,7 +18,7 @@ class AnnotationRepositoryProtocol(Protocol):
     管理小说标注数据的存储和检索。
     """
 
-    def get_annotations(self, novel_id: str) -> List[Dict[str, Any]]:
+    def get_annotations(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取所有标注
 
@@ -30,7 +30,7 @@ class AnnotationRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_annotation_by_chunk(self, novel_id: str, chunk_id: int) -> Dict[str, Any] | None:
+    def get_annotation_by_chunk(self, novel_id: str, chunk_id: int) -> dict[str, Any] | None:
         """
         按分块获取标注
 
@@ -43,7 +43,7 @@ class AnnotationRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_annotations(self, novel_id: str, annotations: List[Dict[str, Any]]) -> None:
+    def insert_annotations(self, novel_id: str, annotations: list[dict[str, Any]]) -> None:
         """
         批量插入标注
 

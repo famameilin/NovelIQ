@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any
 
 
 @dataclass
@@ -30,7 +30,7 @@ class LoggingSettings:
     rotation: str = "10 MB"
     retention: str = "7 days"
     compression: str = "zip"
-    modules: Dict[str, LoggingModuleSettings] = field(default_factory=dict)
+    modules: dict[str, LoggingModuleSettings] = field(default_factory=dict)
     third_party_level: str = "WARNING"
     json_parse_preview_chars: int = 200
 

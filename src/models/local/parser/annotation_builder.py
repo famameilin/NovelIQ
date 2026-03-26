@@ -15,19 +15,19 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from loguru import logger
 
 from src.config.schemas import ANNOTATION_CONFIG
 
 from ..schema import (
-    ChunkAnnotation,
-    CharacterSnapshot,
     CharacterAppearance,
-    RelationChangeSnapshot,
+    CharacterSnapshot,
+    ChunkAnnotation,
     ClueType,
     ForeshadowingType,
+    RelationChangeSnapshot,
 )
 
 _VALID_ROLE_FUNCTIONS = ANNOTATION_CONFIG.valid_role_functions or []
@@ -59,7 +59,7 @@ def make_empty_annotation() -> ChunkAnnotation:
     )
 
 
-def _parse_characters(data: Dict[str, Any]) -> List[CharacterSnapshot]:
+def _parse_characters(data: dict[str, Any]) -> list[CharacterSnapshot]:
     """
     解析角色快照列表
 
@@ -96,7 +96,7 @@ def _parse_characters(data: Dict[str, Any]) -> List[CharacterSnapshot]:
     return characters
 
 
-def _parse_relations(data: Dict[str, Any]) -> List[RelationChangeSnapshot]:
+def _parse_relations(data: dict[str, Any]) -> list[RelationChangeSnapshot]:
     """
     解析关系变化快照列表
 
@@ -129,7 +129,7 @@ def _parse_relations(data: Dict[str, Any]) -> List[RelationChangeSnapshot]:
     return relations
 
 
-def _parse_character_appearances(data: Dict[str, Any]) -> List[CharacterAppearance]:
+def _parse_character_appearances(data: dict[str, Any]) -> list[CharacterAppearance]:
     """
     解析角色出场信息列表
 
@@ -260,7 +260,7 @@ def _validate_and_log_summary(summary: str) -> str:
     return summary
 
 
-def build_annotation(data: Dict[str, Any]) -> ChunkAnnotation:
+def build_annotation(data: dict[str, Any]) -> ChunkAnnotation:
     """
     构建标注结果
 

@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter
-from typing import Dict, List, Optional, Tuple
 
 
 def compute_emotion_recovery_speed(
-    emotion_values: List[float],
+    emotion_values: list[float],
     threshold: float | None = None,
-) -> Optional[float]:
+) -> float | None:
     """Compute the average distance from a negative dip back toward baseline."""
     if not emotion_values:
         return None
@@ -37,8 +36,8 @@ def compute_emotion_recovery_speed(
 
 
 def compute_emotion_polarity_distribution(
-    emotional_valences: List[str],
-) -> Dict[str, float]:
+    emotional_valences: list[str],
+) -> dict[str, float]:
     """Compute positive, negative, and neutral valence ratios."""
     if not emotional_valences:
         return {"positive_ratio": 0.0, "negative_ratio": 0.0, "neutral_ratio": 0.0}
@@ -58,7 +57,7 @@ def compute_emotion_polarity_distribution(
 
 
 def compute_pivot_moment_density(
-    pivot_moments: List[int],
+    pivot_moments: list[int],
 ) -> float:
     if not pivot_moments:
         return 0.0
@@ -67,7 +66,7 @@ def compute_pivot_moment_density(
 
 
 def compute_lexical_emotion_trend(
-    emotion_values: List[float],
+    emotion_values: list[float],
 ) -> str:
     """Classify lexicon-based emotion trend as rising, falling, stable, or volatile."""
     if len(emotion_values) < 3:
@@ -95,7 +94,7 @@ def compute_lexical_emotion_trend(
 
 
 def compute_arc_delta(
-    character_emotion_scores: List[Tuple[str, List[float]]],
+    character_emotion_scores: list[tuple[str, list[float]]],
 ) -> float:
     if not character_emotion_scores:
         return 0.0
@@ -109,8 +108,8 @@ def compute_arc_delta(
 
 
 def compute_pos_neg_ratio(
-    pos_densities: List[float],
-    neg_densities: List[float],
+    pos_densities: list[float],
+    neg_densities: list[float],
 ) -> float:
     if not pos_densities and not neg_densities:
         return 0.0

@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Tuple
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -25,8 +25,9 @@ from src.models.interfaces import AnnotationLike, DisambiguationLike
 
 if TYPE_CHECKING:
     import networkx as nx
-    from src.rag import RAGRetriever
+
     from src.models.local.annotation import MultiPhaseAnnotationResult
+    from src.rag import RAGRetriever
 
 
 @dataclass
@@ -67,7 +68,7 @@ def _annotate_chunk(
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
     character_appearances: list[dict] | None = None,
-) -> "MultiPhaseAnnotationResult":
+) -> MultiPhaseAnnotationResult:
     """
     Chunk 标注函数
 
@@ -103,7 +104,7 @@ def _annotate_chunk(
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
-        raise ChunkAnnotationMaxRetriesExceededError(str(e))
+        raise ChunkAnnotationMaxRetriesExceededError(str(e)) from e
 
 
 class AnnotationPhaseResult:
@@ -115,8 +116,8 @@ class AnnotationPhaseResult:
         cloud_annotation_client: AnnotationLike | None,
         incremental_disambig_client: DisambiguationLike,
         full_disambig_client: DisambiguationLike,
-        rag_retriever: "RAGRetriever | None",
-        character_graph: "nx.Graph | None",
+        rag_retriever: RAGRetriever | None,
+        character_graph: nx.Graph | None,
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
@@ -149,7 +150,7 @@ def _init_annotation_phase_with_config(
     """初始化标注阶段（使用配置对象）"""
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
     from .context import _init_rag_retriever
-    from .sentence import _load_alias_keywords, _extract_and_save_global_context
+    from .sentence import _extract_and_save_global_context, _load_alias_keywords
 
     if not config.run_id:
         raise ValueError("run_id is required for annotation phase")
@@ -355,7 +356,7 @@ def _process_chunks_phase(
     run_id: str = "",
     novel_id: str = "",
     resume: bool = False,
-) -> Tuple[int, dict[str, str]]:
+) -> tuple[int, dict[str, str]]:
     """处理所有chunks阶段
 
     修改时间: 2026-03-19

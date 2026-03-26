@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -80,7 +80,7 @@ def insert_entity_alias(
     return row[0] if row else None
 
 
-def insert_entity_embedding(session: Session, entity_id: int, embedding: List[float]) -> None:
+def insert_entity_embedding(session: Session, entity_id: int, embedding: list[float]) -> None:
     """插入实体嵌入向量"""
     stmt = update(Entity).where(Entity.entity_id == entity_id).values(embedding_vector=embedding)
     session.execute(stmt)
@@ -92,7 +92,7 @@ def fetch_entity_by_canonical(
     novel_id: str,
     canonical: str,
     run_id: str | None = None,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """根据规范名获取实体"""
     conditions = [Entity.novel_id == novel_id, Entity.canonical == canonical]
     if run_id is not None:
@@ -124,7 +124,7 @@ def fetch_entity_by_alias(
     novel_id: str,
     alias: str,
     run_id: str | None = None,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """根据别名获取实体"""
     conditions = [Entity.novel_id == novel_id, EntityAlias.alias == alias]
     if run_id is not None:
@@ -164,7 +164,7 @@ def fetch_all_aliases_for_entity(
     session: Session,
     entity_id: int,
     run_id: str | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """获取实体的所有别名"""
     conditions = [EntityAlias.entity_id == entity_id]
     if run_id is not None:
@@ -207,7 +207,7 @@ def increment_alias_confirm(session: Session, entity_id: int, alias: str) -> Non
 
 def fetch_all_aliases_with_canonical(
     session: Session, novel_id: str, run_id: str | None = None
-) -> List[Tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """获取所有别名及其规范名映射"""
     conditions = [Entity.novel_id == novel_id]
     if run_id is not None:
@@ -225,7 +225,7 @@ def fetch_all_aliases_with_canonical(
 
 def fetch_entities_with_embeddings(
     session: Session, novel_id: str, run_id: str | None = None
-) -> List[Tuple[int, str, str, bytes | None]]:
+) -> list[tuple[int, str, str, bytes | None]]:
     """获取实体及其嵌入向量"""
     conditions = [
         Entity.novel_id == novel_id,

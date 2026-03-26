@@ -26,11 +26,11 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, Any
 
 from src.cli.workflow_helpers import (
-    _init_workflow,
     _execute_stages,
+    _init_workflow,
     _log_workflow_summary,
 )
 
@@ -56,11 +56,11 @@ def run_full_workflow(
     skip_aggregate: bool = False,
     skip_diagnose: bool = False,
     analysis_id: str | None = None,
-    cloud_client: "ConfiguredCloudModelClient | None" = None,
+    cloud_client: ConfiguredCloudModelClient | None = None,
     annotate_client: Any = None,
     incremental_disambig_client: Any = None,
     full_disambig_client: Any = None,
-) -> List[StageResult]:
+) -> list[StageResult]:
     """
     执行完整工作流
 

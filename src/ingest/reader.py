@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List
 
 
 @dataclass(frozen=True)
@@ -37,11 +37,11 @@ def load_metadata(path: Path | None) -> dict:
     return data
 
 
-def ingest_path(source_path: Path, metadata_path: Path | None = None) -> List[InputDocument]:
+def ingest_path(source_path: Path, metadata_path: Path | None = None) -> list[InputDocument]:
     if not source_path.exists():
         raise FileNotFoundError(source_path)
     metadata = load_metadata(metadata_path)
-    docs: List[InputDocument] = []
+    docs: list[InputDocument] = []
     if source_path.is_file():
         text = read_text_file(source_path)
         docs.append(_build_document(source_path, text, metadata))

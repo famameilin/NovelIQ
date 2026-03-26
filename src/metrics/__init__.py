@@ -2,27 +2,9 @@ from .aggregate_metrics import (
     AggregateResult,
     aggregate_all_metrics,
 )
-from .narrative_metrics import (
-    compute_cliffhanger_rate,
-    compute_climax_spacing,
-    compute_event_density,
-    compute_middle_collapse_index,
-    compute_three_act_ratio_by_tension,
-    find_global_peak,
-    find_local_peaks,
-    find_valley_before_peak,
-)
-from .emotion_metrics_extra import (
-    compute_arc_delta,
-    compute_emotion_polarity_distribution,
-    compute_emotion_recovery_speed,
-    compute_lexical_emotion_trend,
-    compute_pivot_moment_density,
-    compute_pos_neg_ratio,
-)
 from .character_metrics import (
-    PROPP_FUNCTIONS,
     GREIMAS_FUNCTIONS,
+    PROPP_FUNCTIONS,
     compute_antagonist_strength_gap,
     compute_average_clustering,
     compute_character_closeness_centrality,
@@ -37,6 +19,41 @@ from .character_metrics import (
     compute_relation_change_frequency,
     compute_relation_network_density,
 )
+from .emotion_metrics import lexical_sentiment_density, moving_average, pos_neg_ratio
+from .emotion_metrics_extra import (
+    compute_arc_delta,
+    compute_emotion_polarity_distribution,
+    compute_emotion_recovery_speed,
+    compute_lexical_emotion_trend,
+    compute_pivot_moment_density,
+    compute_pos_neg_ratio,
+)
+from .lexicon_metrics import count_hits, count_token_hits, density, term_counts, token_density
+from .narrative_metrics import (
+    compute_cliffhanger_rate,
+    compute_climax_spacing,
+    compute_event_density,
+    compute_middle_collapse_index,
+    compute_three_act_ratio_by_tension,
+    find_global_peak,
+    find_local_peaks,
+    find_valley_before_peak,
+)
+from .rhythm_metrics import tension_composite, tension_proxy
+from .style_metrics import (
+    average_word_length,
+    dialogue_ratio,
+    function_word_distribution,
+    lexicon_density,
+    metaphor_density,
+    mtld,
+    pause_density,
+    semantic_category_density,
+    sensory_density,
+    sentence_length_stats,
+    ttr,
+    word_frequency_breadth,
+)
 from .style_metrics_extra import (
     CLASSICAL_IMAGERY,
     CLASSICAL_PATTERNS,
@@ -50,23 +67,6 @@ from .style_metrics_extra import (
     compute_imagery_density,
     compute_sent_len_std,
     compute_vocab_breadth,
-)
-from .emotion_metrics import lexical_sentiment_density, moving_average, pos_neg_ratio
-from .lexicon_metrics import count_hits, count_token_hits, density, term_counts, token_density
-from .rhythm_metrics import tension_composite, tension_proxy
-from .style_metrics import (
-    average_word_length,
-    dialogue_ratio,
-    function_word_distribution,
-    lexicon_density,
-    metaphor_density,
-    mtld,
-    pause_density,
-    sentence_length_stats,
-    semantic_category_density,
-    sensory_density,
-    ttr,
-    word_frequency_breadth,
 )
 from .text_utils import dialogue_length, split_sentences, tokenize_words
 

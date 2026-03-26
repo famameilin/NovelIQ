@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List
 
 from src.chunking.chunker import Chunk
 from src.chunking.index import ChunkIndex, build_chunk_index
@@ -26,7 +25,7 @@ def read_chunk_index(path: Path) -> ChunkIndex:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):
         raise ValueError("chunk index must be a list")
-    chunks: List[Chunk] = []
+    chunks: list[Chunk] = []
     for item in data:
         chunks.append(
             Chunk(

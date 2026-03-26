@@ -18,7 +18,7 @@ AnnotationClient 模块
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -30,10 +30,16 @@ from src.models.local.schema import ChunkAnnotation
 from .local.annotation import (
     AnnotationContext,
     MultiPhaseAnnotationResult,
-    log_annotation_start as _log_annotation_start_impl,
     log_prompt_response,
-    parse_annotation as _parse_annotation_impl,
     process_annotation_response,
+)
+from .local.annotation import (
+    log_annotation_start as _log_annotation_start_impl,
+)
+from .local.annotation import (
+    parse_annotation as _parse_annotation_impl,
+)
+from .local.annotation import (
     validate_annotation as _validate_annotation_impl,
 )
 from .local.annotation.multi_phase import annotate_chunk_multi_phase as _annotate_chunk_multi_phase_impl
@@ -75,7 +81,7 @@ class AnnotationClient(BaseModelClient):
         self,
         text: str,
         prev_summary: str | None = None,
-        alias_map: Dict[str, str] | None = None,
+        alias_map: dict[str, str] | None = None,
         chunk_id: int | None = None,
         global_context: str | None = None,
         prev_chunk_text: str | None = None,
@@ -87,9 +93,9 @@ class AnnotationClient(BaseModelClient):
         main_characters: str | None = None,
         position_pct: float | None = None,
         chapter_id: int | None = None,
-        cloud_client: "AnnotationClient | None" = None,
+        cloud_client: AnnotationClient | None = None,
         run_id: str | None = None,
-        character_appearances: List[dict] | None = None,
+        character_appearances: list[dict] | None = None,
     ) -> MultiPhaseAnnotationResult:
         ctx = AnnotationContext(
             text=text,
@@ -134,10 +140,10 @@ class AnnotationClient(BaseModelClient):
 
     def _call_annotation_api(
         self,
-        messages: List[dict],
+        messages: list[dict],
         enable_thinking: bool,
         chunk_id: int | None,
-        response_model: Type[T] | None = None,
+        response_model: type[T] | None = None,
     ) -> Any:
         if not self._config.model:
             raise ValueError("model is required")
@@ -223,7 +229,7 @@ class AnnotationClient(BaseModelClient):
         content_clean: str,
         thinking_content: str | None,
         extraction: Any,
-        messages: List[dict],
+        messages: list[dict],
         text: str,
         prev_summary: str | None,
     ) -> None:

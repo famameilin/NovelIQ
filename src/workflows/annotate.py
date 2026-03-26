@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Tuple
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -26,7 +25,7 @@ from sqlalchemy.orm import Session
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.interfaces import AnnotationLike, DisambiguationLike
-from src.storage.repositories import ChunkRepository, AnnotationRepository
+from src.storage.repositories import AnnotationRepository, ChunkRepository
 
 
 def run_annotate(
@@ -42,7 +41,7 @@ def run_annotate(
     annotate_client: AnnotationLike | None = None,
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
-) -> Tuple[int, int, int]:
+) -> tuple[int, int, int]:
     """
     执行小说标注流程
 

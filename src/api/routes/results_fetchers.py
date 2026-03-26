@@ -20,36 +20,36 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 
-from src.config import settings
 from src.api.models.responses import (
-    EmotionCurvePoint,
-    RhythmCurvePoint,
+    CharacterRelation,
     CharacterStats,
-    TopicInfo,
-    DiagnosisResult,
-    ChunkStyle,
     ChunkAnnotation,
     ChunkCharacter,
-    ChunkRelation,
-    ChunkDialogue,
-    CharacterRelation,
-    HierarchicalRelation,
-    GlobalStats,
     ChunkCulture,
+    ChunkDialogue,
+    ChunkRelation,
+    ChunkStyle,
+    DiagnosisResult,
+    EmotionCurvePoint,
+    GlobalStats,
+    HierarchicalRelation,
+    RhythmCurvePoint,
+    TokenUsageByModel,
+    TokenUsageByTask,
     TokenUsageStats,
     TokenUsageSummary,
-    TokenUsageByTask,
-    TokenUsageByModel,
+    TopicInfo,
 )
+from src.config import settings
 from src.storage.repositories import (
-    StatsRepository,
     AnnotationRepository,
     ChunkRepository,
     EntityRepository,
+    StatsRepository,
 )
 
 
@@ -72,7 +72,7 @@ def _parse_json_field(value: Any) -> Any:
     return None
 
 
-def _parse_int_field(value: Any) -> Optional[int]:
+def _parse_int_field(value: Any) -> int | None:
     """解析整数字段，处理可能的异常
 
     创建时间: 2026-03-13
@@ -165,12 +165,12 @@ def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> lis
 
     rows = annotation_repo.fetch_characters_with_scores(run_id)
 
-    merged: Dict[str, Dict[str, Any]] = {}
+    merged: dict[str, dict[str, Any]] = {}
     for row in rows:
         name: str = str(row[0])
         canonical = alias_map.get(name, name)
         role_function: str = str(row[1]) if row[1] else "unknown"
-        emotion_raw: Optional[str] = str(row[2]) if row[2] else None
+        emotion_raw: str | None = str(row[2]) if row[2] else None
         emotion_score = emotion_score_mapping.get(emotion_raw, 0) if emotion_raw else 0
 
         if canonical not in merged:
@@ -225,7 +225,7 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
 
     if model_dir.exists():
         try:
-            from src.topic import LDATrainer, LDAConfig
+            from src.topic import LDAConfig, LDATrainer
 
             trainer = LDATrainer(LDAConfig())
             topic_model = trainer.load_model(model_dir)
@@ -336,31 +336,34 @@ def _fetch_chunk_annotations(
     relations_raw = annotation_repo.fetch_chunk_relations_full(run_id)
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
 
-    characters_by_chunk: Dict[int, List[ChunkCharacter]] = defaultdict(list)
+    characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
     for row in characters_raw:
         cid = row[0]
+        normalized_name = _normalize_name(str(row[1]), alias_map)
         characters_by_chunk[cid].append(
             ChunkCharacter(
-                name=_normalize_name(str(row[1]), alias_map),
+                name=normalized_name if normalized_name else str(row[1]),
                 role_function=str(row[2]) if row[2] else None,
                 action=str(row[3]) if row[3] else None,
                 emotion_score=str(row[4]) if row[4] else None,
             )
         )
 
-    relations_by_chunk: Dict[int, List[ChunkRelation]] = defaultdict(list)
+    relations_by_chunk: dict[int, list[ChunkRelation]] = defaultdict(list)
     for row in relations_raw:
         cid = row[0]
+        from_normalized = _normalize_name(str(row[1]), alias_map)
+        to_normalized = _normalize_name(str(row[2]), alias_map)
         relations_by_chunk[cid].append(
             ChunkRelation(
-                from_char=_normalize_name(str(row[1]), alias_map),
-                to_char=_normalize_name(str(row[2]), alias_map),
+                from_char=from_normalized if from_normalized else str(row[1]),
+                to_char=to_normalized if to_normalized else str(row[2]),
                 type=str(row[3]) if row[3] else "",
                 change=str(row[4]) if row[4] else "",
             )
         )
 
-    dialogues_by_chunk: Dict[int, List[ChunkDialogue]] = defaultdict(list)
+    dialogues_by_chunk: dict[int, list[ChunkDialogue]] = defaultdict(list)
     for row in dialogues_raw:
         cid = row[0]
         speaker = row[1] if row[1] else None
@@ -371,7 +374,7 @@ def _fetch_chunk_annotations(
             )
         )
 
-    result: List[ChunkAnnotation] = []
+    result: list[ChunkAnnotation] = []
     for row in annotations_raw:
         chunk_id = int(row[0])
         result.append(
@@ -422,11 +425,13 @@ def _fetch_character_relations(
     rows = annotation_repo.fetch_chunk_relations_full(run_id)
 
     # 去重：基于 chunk_id + from_char + to_char + type 去重，保留最后出现的记录
-    seen: Dict[tuple, CharacterRelation] = {}
+    seen: dict[tuple, CharacterRelation] = {}
     for row in rows:
         chunk_id = int(row[0])
-        from_char = _normalize_name(str(row[1]), alias_map)
-        to_char = _normalize_name(str(row[2]), alias_map)
+        from_normalized = _normalize_name(str(row[1]), alias_map)
+        to_normalized = _normalize_name(str(row[2]), alias_map)
+        from_char = from_normalized if from_normalized else str(row[1])
+        to_char = to_normalized if to_normalized else str(row[2])
         rel_type = str(row[3]) if row[3] else ""
         change = str(row[4]) if row[4] else ""
 
@@ -519,7 +524,7 @@ def _fetch_chunk_cultures(run_id: str, chunk_repo: ChunkRepository) -> list:
     ]
 
 
-def _fetch_novel_name(run_id: str, novel_id: str, stats_repo: StatsRepository) -> Optional[str]:
+def _fetch_novel_name(run_id: str, novel_id: str, stats_repo: StatsRepository) -> str | None:
     """
     获取小说名称
 

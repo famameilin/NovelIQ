@@ -19,8 +19,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -160,7 +160,7 @@ def run_cloud_diagnose(
     def cloud_stage(stage_payload: dict, outputs: dict) -> CloudAnalysis:
         return cloud_client.diagnose(stage_payload)
 
-    stages: List[Stage] = [Stage(name="cloud_diagnose", handler=cloud_stage)]
+    stages: list[Stage] = [Stage(name="cloud_diagnose", handler=cloud_stage)]
 
     if session is not None:
         stats_repo = StatsRepository(session)
@@ -233,7 +233,7 @@ def run_diagnose(
     def cloud_stage(stage_payload: dict, outputs: dict) -> CloudAnalysis:
         return cloud_client.diagnose(stage_payload)
 
-    stages: List[Stage] = [Stage(name="diagnose", handler=cloud_stage)]
+    stages: list[Stage] = [Stage(name="diagnose", handler=cloud_stage)]
 
     stats_repo = StatsRepository(session)
 

@@ -29,20 +29,19 @@ import socket
 import sys
 from contextlib import asynccontextmanager
 
-# 导入 config 模块会先加载 .env 文件
-from src.config import settings  # noqa: F401
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+# 导入 config 模块会先加载 .env 文件
+from src.config import settings  # noqa: F401
 from src.config.logging_config import setup_logging
 
 setup_logging(verbose=True, debug=False)
 
 # ruff: noqa: E402
-from src.api.routes import novels_router, analysis_router, results_router
 from src.api.middleware import register_exception_handlers
+from src.api.routes import analysis_router, novels_router, results_router
 
 
 @asynccontextmanager

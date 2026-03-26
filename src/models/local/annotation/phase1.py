@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 
 def _save_interaction(
-    client: "AnnotationClient",
+    client: AnnotationClient,
     run_id: str | None,
     chunk_id: int | None,
     phase: str,
@@ -125,10 +125,10 @@ def _save_interaction(
 
 
 def execute_phase1_call(
-    client: "AnnotationClient",
+    client: AnnotationClient,
     text: str,
     messages: list[dict],
-    alias_map: Dict[str, str] | None,
+    alias_map: dict[str, str] | None,
     active_entities: str | None,
     prev_chunk_text: str | None,
     next_chunk_text: str | None,
@@ -136,8 +136,8 @@ def execute_phase1_call(
     retry_messages: list[dict] | None = None,
     run_id: str | None = None,
     attempt_number: int = 1,
-    character_appearances: List[dict] | None = None,
-) -> tuple["ChunkAnnotation", str]:
+    character_appearances: list[dict] | None = None,
+) -> tuple[ChunkAnnotation, str]:
     """
     执行Phase1单次调用
 
@@ -208,18 +208,18 @@ def execute_phase1_call(
 
 
 def execute_phase1_with_retry(
-    client: "AnnotationClient",
+    client: AnnotationClient,
     text: str,
     messages: list[dict],
-    alias_map: Dict[str, str] | None,
+    alias_map: dict[str, str] | None,
     active_entities: str | None,
     prev_chunk_text: str | None,
     next_chunk_text: str | None,
     chunk_id: int | None,
-    cloud_client: "AnnotationClient | None",
+    cloud_client: AnnotationClient | None,
     run_id: str | None = None,
-    character_appearances: List[dict] | None = None,
-) -> "ChunkAnnotation":
+    character_appearances: list[dict] | None = None,
+) -> ChunkAnnotation:
     """
     执行Phase1带重试的调用
 
@@ -256,7 +256,7 @@ def execute_phase1_with_retry(
         exception_type=Phase1MaxRetriesExceededError,
     )
 
-    def operation(local_client: "AnnotationClient", retry_messages: list[dict] | None = None) -> "ChunkAnnotation":
+    def operation(local_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ChunkAnnotation:
         """执行单次Phase1调用"""
         result, _ = execute_phase1_call(
             local_client, text, messages, alias_map, active_entities,
@@ -282,9 +282,9 @@ def execute_phase1_with_retry(
 
 
 def annotate_chunk_phase1(
-    client: "AnnotationClient",
+    client: AnnotationClient,
     text: str,
-    alias_map: Dict[str, str] | None = None,
+    alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
     next_chunk_text: str | None = None,
@@ -293,10 +293,10 @@ def annotate_chunk_phase1(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    cloud_client: "AnnotationClient | None" = None,
+    cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    character_appearances: List[dict] | None = None,
-) -> "ChunkAnnotation":
+    character_appearances: list[dict] | None = None,
+) -> ChunkAnnotation:
     """
     第一次调用：基础标注（带独立重试机制）
 

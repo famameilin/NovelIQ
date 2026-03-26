@@ -33,7 +33,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.engine import Row
@@ -100,7 +101,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         ]
         self.session.bulk_save_objects(models)
 
-    def fetch_chunk_texts(self, run_id: str) -> List[Tuple[int, str]]:
+    def fetch_chunk_texts(self, run_id: str) -> list[tuple[int, str]]:
         """
         获取所有分块文本
 
@@ -114,26 +115,26 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         result = self.session.execute(stmt)
         return [(row[0], row[1]) for row in result.fetchall()]
 
-    def fetch_chunk_styles(self, run_id: str) -> List[Tuple[int, float, float, float]]:
+    def fetch_chunk_styles(self, run_id: str) -> list[tuple[int, float, float, float]]:
         return fetch_chunk_styles(self.session, run_id)
 
-    def insert_chunk_style(self, run_id: str, rows: Union[Iterable[ChunkStyleData], Iterable[Any]]) -> None:
+    def insert_chunk_style(self, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]) -> None:
         insert_chunk_style(self.session, run_id, rows)
 
     def insert_chunk_culture(
         self,
         run_id: str,
-        rows: Iterable[Tuple[int, float | None]],
+        rows: Iterable[tuple[int, float | None]],
     ) -> None:
         insert_chunk_culture(self.session, run_id, rows)
 
-    def insert_chunk_topics(self, run_id: str, rows: Iterable[Tuple[int, int, float]]) -> None:
+    def insert_chunk_topics(self, run_id: str, rows: Iterable[tuple[int, int, float]]) -> None:
         insert_chunk_topics(self.session, run_id, rows)
 
     def clear_chunk_topics(self, run_id: str) -> None:
         clear_chunk_topics(self.session, run_id)
 
-    def fetch_chunk_embedding(self, run_id: str, chunk_id: int) -> Optional[bytes]:
+    def fetch_chunk_embedding(self, run_id: str, chunk_id: int) -> bytes | None:
         """
         获取分块嵌入向量
 
@@ -156,13 +157,13 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     ) -> Sequence[Row]:
         return fetch_chunk_styles_full(self.session, run_id)
 
-    def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float | None]]:
+    def fetch_chunk_cultures_full(self, run_id: str) -> list[tuple[int, float | None]]:
         return fetch_chunk_cultures_full(self.session, run_id)
 
-    def fetch_chunk_topics_agg(self, run_id: str) -> List[Tuple[int, float]]:
+    def fetch_chunk_topics_agg(self, run_id: str) -> list[tuple[int, float]]:
         return fetch_chunk_topics_agg(self.session, run_id)
 
-    def fetch_chunk_counts(self, run_id: str) -> Tuple[int, int]:
+    def fetch_chunk_counts(self, run_id: str) -> tuple[int, int]:
         """
         获取分块统计
 
@@ -183,7 +184,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         total_chars = int(row[1]) if row[1] else 0
         return (total_chunks, total_chars)
 
-    def fetch_all_chunk_texts(self, run_id: str) -> List[str]:
+    def fetch_all_chunk_texts(self, run_id: str) -> list[str]:
         """
         获取指定运行的所有分块文本（仅文本）
 
@@ -222,7 +223,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         row = result.fetchone()
         return row[0] if row else 0
 
-    def fetch_prev_chunk_text(self, run_id: str, chunk_id: int) -> Optional[str]:
+    def fetch_prev_chunk_text(self, run_id: str, chunk_id: int) -> str | None:
         """
         获取上一个分块的文本
 
@@ -245,7 +246,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         row = result.fetchone()
         return row[0] if row else None
 
-    def fetch_next_chunk_text(self, run_id: str, chunk_id: int) -> Optional[str]:
+    def fetch_next_chunk_text(self, run_id: str, chunk_id: int) -> str | None:
         """
         获取下一个分块的文本
 

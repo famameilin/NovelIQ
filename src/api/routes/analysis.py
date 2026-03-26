@@ -1,31 +1,29 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from typing import Optional, List, Dict
 from loguru import logger
 
+from src.api.exceptions import AnalysisError
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import (
     AnalyzeResponse,
-    StatusResponse,
-    TaskStatus,
-    ReanalyzeResponse,
-    TaskListResponse,
-    TaskInfoResponse,
     BatchDeleteTasksRequest,
     BatchDeleteTasksResponse,
+    ReanalyzeResponse,
+    StatusResponse,
+    TaskInfoResponse,
+    TaskListResponse,
+    TaskStatus,
 )
+from src.api.routes.novels import get_novel_service
+from src.api.services.analysis_service import AnalysisService
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
-from src.api.services.analysis_service import AnalysisService
-from src.api.routes.novels import get_novel_service
-from src.api.exceptions import AnalysisError
 from src.storage.db import get_session_factory
-from src.storage.repositories import RunRepository
 from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
+from src.storage.repositories import RunRepository
 
-
-_STATUS_MAP: Dict[str, TaskStatus] = {
+_STATUS_MAP: dict[str, TaskStatus] = {
     "completed": TaskStatus.COMPLETED,
     "running": TaskStatus.RUNNING,
     "pending": TaskStatus.PENDING,
@@ -79,7 +77,7 @@ def get_task_manager() -> TaskManager:
 @router.post("/{novel_id}/analyze", response_model=AnalyzeResponse)
 async def start_analysis(
     novel_id: str,
-    request: Optional[AnalyzeRequest] = None,
+    request: AnalyzeRequest | None = None,
     novel_service: NovelService = Depends(get_novel_service),
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> AnalyzeResponse:
@@ -91,7 +89,7 @@ async def start_analysis(
 @router.post("/{novel_id}/reanalyze", response_model=ReanalyzeResponse)
 async def start_reanalysis(
     novel_id: str,
-    request: Optional[ReanalyzeRequest] = None,
+    request: ReanalyzeRequest | None = None,
     novel_service: NovelService = Depends(get_novel_service),
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> ReanalyzeResponse:
@@ -151,8 +149,8 @@ async def batch_delete_tasks(
     批量删除指定的分析任务。
     即使部分删除失败，也会继续处理其他任务。
     """
-    deleted_ids: List[str] = []
-    failed_ids: List[Dict[str, str]] = []
+    deleted_ids: list[str] = []
+    failed_ids: list[dict[str, str]] = []
 
     for task_id in request.task_ids:
         try:
@@ -206,7 +204,7 @@ async def batch_delete_tasks(
 @router.get("/{novel_id}/status", response_model=StatusResponse)
 async def get_analysis_status(
     novel_id: str,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
     novel_service: NovelService = Depends(get_novel_service),
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> StatusResponse:

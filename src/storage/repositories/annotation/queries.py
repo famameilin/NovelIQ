@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Set
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def fetch_chunk_annotations(session: Session, run_id: str) -> List[Any]:
+def fetch_chunk_annotations(session: Session, run_id: str) -> list[Any]:
     """
     获取指定运行的所有分块标注
 
@@ -41,7 +41,7 @@ def fetch_chunk_annotations(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_chunk_annotations_full(session: Session, run_id: str) -> List[Any]:
+def fetch_chunk_annotations_full(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块标注数据（用于结果导出）
 
@@ -67,7 +67,7 @@ def fetch_chunk_annotations_full(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_chunk_characters_full(session: Session, run_id: str) -> List[Any]:
+def fetch_chunk_characters_full(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块角色数据
 
@@ -89,7 +89,7 @@ def fetch_chunk_characters_full(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_chunk_relations_full(session: Session, run_id: str) -> List[Any]:
+def fetch_chunk_relations_full(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块关系数据
 
@@ -111,7 +111,7 @@ def fetch_chunk_relations_full(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_chunk_dialogues_full(session: Session, run_id: str) -> List[Any]:
+def fetch_chunk_dialogues_full(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块对话数据
 
@@ -132,7 +132,7 @@ def fetch_chunk_dialogues_full(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_annotated_chunk_ids(session: Session, run_id: str) -> Set[int]:
+def fetch_annotated_chunk_ids(session: Session, run_id: str) -> set[int]:
     """
     获取指定运行已标注的分块ID集合
 
@@ -144,7 +144,7 @@ def fetch_annotated_chunk_ids(session: Session, run_id: str) -> Set[int]:
     return {row[0] for row in result.fetchall()}
 
 
-def fetch_full_annotations(session: Session, run_id: str) -> List[Any]:
+def fetch_full_annotations(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块标注数据
 
@@ -166,7 +166,7 @@ def fetch_full_annotations(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_characters_with_scores(session: Session, run_id: str) -> List[Any]:
+def fetch_characters_with_scores(session: Session, run_id: str) -> list[Any]:
     """
     获取角色数据（含情绪分数）
 
@@ -182,7 +182,7 @@ def fetch_characters_with_scores(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_character_emotion_sequence(session: Session, run_id: str) -> List[Any]:
+def fetch_character_emotion_sequence(session: Session, run_id: str) -> list[Any]:
     """
     获取角色情绪序列（按 chunk_id 排序）
 
@@ -198,7 +198,7 @@ def fetch_character_emotion_sequence(session: Session, run_id: str) -> List[Any]
     return list(result.fetchall())
 
 
-def fetch_relations(session: Session, run_id: str) -> List[Any]:
+def fetch_relations(session: Session, run_id: str) -> list[Any]:
     """
     获取角色关系（仅 from/to）
 
@@ -212,7 +212,7 @@ def fetch_relations(session: Session, run_id: str) -> List[Any]:
     return list(result.fetchall())
 
 
-def fetch_full_relations(session: Session, run_id: str) -> List[Any]:
+def fetch_full_relations(session: Session, run_id: str) -> list[Any]:
     """
     获取完整角色关系
 

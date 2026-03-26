@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, cast
+from typing import cast
 
 from .json_utils import try_parse_json
 
@@ -19,7 +19,7 @@ class DisambiguationParseError(Exception):
     pass
 
 
-def parse_alias_map(content: str, candidates: List[str] | List[Dict[str, int]]) -> Dict[str, str]:
+def parse_alias_map(content: str, candidates: list[str] | list[dict[str, int]]) -> dict[str, str]:
     """
     解析消歧结果
 

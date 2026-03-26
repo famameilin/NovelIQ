@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+from collections.abc import Iterable
 
 from .lexicon_metrics import count_mixed_hits
 from .text_utils import dialogue_length, split_sentences, tokenize_words
 
 
-def tension_proxy(text: str, fight_terms: Iterable[str]) -> Dict[str, float]:
+def tension_proxy(text: str, fight_terms: Iterable[str]) -> dict[str, float]:
     """
     计算张力代理指标
 
@@ -46,13 +46,13 @@ def tension_proxy(text: str, fight_terms: Iterable[str]) -> Dict[str, float]:
     }
 
 
-def tension_composite(signals: List[Dict[str, float]]) -> List[float]:
+def tension_composite(signals: list[dict[str, float]]) -> list[float]:
     if not signals:
         return []
     keys = ["avg_sent_len", "fight_density", "exclaim_density", "dialogue_ratio", "question_density"]
     mins = {key: min(item.get(key, 0.0) for item in signals) for key in keys}
     maxs = {key: max(item.get(key, 0.0) for item in signals) for key in keys}
-    composites: List[float] = []
+    composites: list[float] = []
     for item in signals:
         total = 0.0
         for key in keys:
