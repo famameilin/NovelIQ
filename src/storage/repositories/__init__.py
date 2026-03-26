@@ -40,11 +40,11 @@
 修改内容: 更新导入路径
 """
 
-from .annotation_repository import AnnotationRepository
+from .annotation import AnnotationRepository
 from .base import BaseRepository, T
 from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
-from .entity_repository import EntityRepository
+from .entity import EntityRepository
 from .protocols import (
     AnnotationRepositoryProtocol,
     ChunkRepositoryProtocol,
@@ -54,7 +54,7 @@ from .protocols import (
     StatsRepositoryProtocol,
 )
 from .run_repository import RunRepository
-from .stats_repository import StatsRepository
+from .stats import StatsRepository
 
 __all__ = [
     "BaseRepository",

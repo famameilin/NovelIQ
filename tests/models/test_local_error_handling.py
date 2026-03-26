@@ -32,6 +32,10 @@ from src.models.local.annotation import Phase1MaxRetriesExceededError
 from src.models.local.schema import ForeshadowingResult
 
 
+def _candidates(*names: str) -> list[dict[str, int | str]]:
+    return [{"name": name, "count": 1} for name in names]
+
+
 def _create_foreshadowing_result() -> ForeshadowingResult:
     return ForeshadowingResult(
         has_foreshadowing=False,
@@ -166,7 +170,7 @@ class TestErrorHandling(unittest.TestCase):
             client=mock_client,
         )
         with self.assertRaises(ConnectionError):
-            client.disambiguate_characters(["张三"])
+            client.disambiguate_characters(_candidates("张三"))
 
     def test_annotate_without_model_raises_value_error(self) -> None:
         config = TaskModelConfig(base_url="http://test:8000/v1", model=None)

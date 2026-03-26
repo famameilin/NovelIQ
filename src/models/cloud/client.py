@@ -35,6 +35,7 @@ from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
 from src.models.diagnosis import DiagnosisClient
 from src.models.disambiguation import DisambiguationClient
+from src.models.disambiguation_types import NameCountCandidate
 
 from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
 from .schema import CloudAnalysis
@@ -81,7 +82,7 @@ class ConfiguredCloudModelClient(CloudModelClient):
 
     def disambiguate_characters(
         self,
-        candidates: list[str],
+        candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
     ) -> dict[str, str]:

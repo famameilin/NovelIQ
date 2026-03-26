@@ -105,39 +105,6 @@ class NovelService:
             raise NovelNotFoundError(f"小说不存在: {novel_id}")
         return self._novels[novel_id]
 
-    def get_db_path(self, novel_id: str) -> Path:
-        """
-        获取数据库路径（已废弃）
-
-        .. deprecated::
-            此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
-        """
-        import warnings
-
-        warnings.warn(
-            "get_db_path is deprecated. PostgreSQL uses a single database, file path is no longer needed.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        novel = self.get_novel(novel_id)
-        return Path(novel["file_path"]).with_suffix(".db")
-
-    def get_db_path_by_task_id(self, task_id: str) -> Path:
-        """
-        获取任务对应的数据库路径（已废弃）
-
-        .. deprecated::
-            此方法已废弃，PostgreSQL 使用单一数据库，不再需要文件路径。
-        """
-        import warnings
-
-        warnings.warn(
-            "get_db_path_by_task_id is deprecated. PostgreSQL uses a single database, file path is no longer needed.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.upload_dir / f"{task_id}.db"
-
     def get_run_by_task_id(self, task_id: str) -> dict | None:
         """获取任务对应的运行记录"""
         if task_id not in self._tasks:

@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.metrics.aggregate_metrics import AggregateResult, aggregate_all_metrics
+from src.metrics.aggregate import AggregateResult, aggregate_all_metrics
 from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
 
 

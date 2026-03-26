@@ -7,6 +7,10 @@ from src.models.interfaces import DisambiguationLike
 from src.workflows.annotate_helpers.client_init import _init_annotation_clients
 
 
+def _candidates(*names: str) -> list[dict[str, int | str]]:
+    return [{"name": name, "count": 1} for name in names]
+
+
 def test_init_annotation_clients_respects_explicit_disambiguation_clients() -> None:
     annotation_client = AnnotationClient(task_type="annotation")
     incremental_client = MagicMock(name="incremental_disambig_client")
@@ -103,7 +107,7 @@ def test_init_annotation_clients_uses_noop_fallback_for_lightweight_annotation_s
     assert isinstance(incremental_client, DisambiguationLike)
     assert isinstance(full_client, DisambiguationLike)
 
-    incremental_result = incremental_client.disambiguate_characters(candidates=["阿甲"])
-    full_result = full_client.disambiguate_characters(candidates=["阿乙"])
+    incremental_result = incremental_client.disambiguate_characters(candidates=_candidates("a_jia"))
+    full_result = full_client.disambiguate_characters(candidates=_candidates("a_yi"))
     assert incremental_result.merge_target_map == {}
     assert full_result.merge_target_map == {}

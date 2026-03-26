@@ -4,7 +4,7 @@ import unittest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import chunk_text, detect_chapters
+from src.chunking.chunker import chunk_text, split_by_chapters
 
 
 class TestChunking(unittest.TestCase):
@@ -16,11 +16,11 @@ class TestChunking(unittest.TestCase):
         self.assertEqual(chunks[0].start, 0)
         self.assertTrue(all(c.text for c in chunks))
 
-    def test_detect_chapters(self) -> None:
+    def test_split_by_chapters(self) -> None:
         text = "第1章 开始\n内容\n第2章 继续\n内容"
-        chapters = detect_chapters(text)
+        chapters = split_by_chapters(text)
         self.assertEqual(len(chapters), 2)
-        # 新 API 返回 (title, content) 元组
+        # API 返回 (title, content) 元组
         self.assertTrue(chapters[0][0].startswith("第1章"))
 
 

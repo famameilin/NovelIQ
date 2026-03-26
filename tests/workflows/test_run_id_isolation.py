@@ -14,6 +14,10 @@ from src.storage.repositories import (
 from src.workflows.annotate_helpers.sentence import build_context_sentences
 
 
+def _candidates(*names: str) -> list[dict[str, int | str]]:
+    return [{"name": name, "count": 1} for name in names]
+
+
 def _build_annotation(foreshadowing_desc: str) -> ChunkAnnotation:
     return ChunkAnnotation(
         emotional_valence="neutral",
@@ -40,15 +44,15 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
     chunk_repo.insert_chunks(
         run_1,
         [
-            Chunk(index=1, start=0, end=10, text="前文"),
-            Chunk(index=2, start=11, end=30, text="张三就是掌柜。"),
+            Chunk(index=1, start=0, end=10, text="prefix"),
+            Chunk(index=2, start=11, end=30, text="zhangsan 就是掌柜。"),
         ],
     )
     chunk_repo.insert_chunks(
         run_2,
         [
-            Chunk(index=99, start=0, end=10, text="run2前文"),
-            Chunk(index=100, start=11, end=30, text="张三是叛徒。"),
+            Chunk(index=99, start=0, end=10, text="run2-prefix"),
+            Chunk(index=100, start=11, end=30, text="zhangsan 是叛徒。"),
         ],
     )
 
@@ -56,12 +60,12 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
     ann_repo.insert_chunk_characters(
         run_1,
         2,
-        [CharacterSnapshot(name="张三", role_function="主体", action="说话", action_type="对话", emotion_score="neutral")],
+        [CharacterSnapshot(name="zhangsan", role_function="主体", action="说话", action_type="对话", emotion_score="neutral")],
     )
     ann_repo.insert_chunk_characters(
         run_2,
         100,
-        [CharacterSnapshot(name="张三", role_function="主体", action="说话", action_type="对话", emotion_score="neutral")],
+        [CharacterSnapshot(name="zhangsan", role_function="主体", action="说话", action_type="对话", emotion_score="neutral")],
     )
 
     stats_repo = StatsRepository(db_session)
@@ -70,18 +74,18 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
     stats_repo.insert_character_appearances(
         run_1,
         2,
-        [CharacterAppearance(raw_name="张三", identity_clue="run1-clue", clue_type="self_introduction")],
+        [CharacterAppearance(raw_name="zhangsan", identity_clue="run1-clue", clue_type="self_introduction")],
     )
     stats_repo.insert_character_appearances(
         run_2,
         100,
-        [CharacterAppearance(raw_name="张三", identity_clue="run2-clue", clue_type="self_introduction")],
+        [CharacterAppearance(raw_name="zhangsan", identity_clue="run2-clue", clue_type="self_introduction")],
     )
 
-    result = build_context_sentences(db_session, ["张三"], alias_keywords=["就是"], prev_chunks=1, run_id=run_1)
+    result = build_context_sentences(db_session, _candidates("zhangsan"), alias_keywords=["就是"], prev_chunks=1, run_id=run_1)
 
-    assert "张三" in result
-    context = result["张三"]
+    assert "zhangsan" in result
+    context = result["zhangsan"]
     assert "run1-summary" in context
     assert "run1-clue" in context
     assert "run2-summary" not in context

@@ -68,7 +68,7 @@ def _setup_token_usage_callback(
     任务: refactor-analysis-layer-functions
     说明: 从 run_annotate 中提取，负责设置token使用记录回调
     """
-    from src.storage.operations import insert_token_usage
+    from deprecated.storage.operations.stats_ops import insert_token_usage
 
     def _token_usage_callback(
         cb_novel_id: str,
