@@ -206,11 +206,6 @@ def sensory_density(text: str, terms: Iterable[str]) -> float:
     return lexicon_density(tokens, terms, text=text)
 
 
-def cultural_density(text: str, terms: Iterable[str]) -> float:
-    tokens = tokenize_words(text)
-    return lexicon_density(tokens, terms, text=text)
-
-
 def semantic_category_density(text: str, terms: Iterable[str]) -> float:
     tokens = tokenize_words(text)
     return lexicon_density(tokens, terms, text=text)

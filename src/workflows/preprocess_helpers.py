@@ -133,7 +133,6 @@ def _compute_chunk_style_metrics(
         question_density=0.0,
         sensory_density=sensory_val,
         metaphor_density=metaphor_val,
-        cultural_density=0.0,
         function_word_vector=fw_vector_json,
         category_density_combat=cat_densities.get("combat", 0.0),
         category_density_body=cat_densities.get("body", 0.0),

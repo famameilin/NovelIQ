@@ -99,7 +99,6 @@ def fetch_chunk_styles_full(
         ChunkStyle.question_density,
         ChunkStyle.sensory_density,
         ChunkStyle.metaphor_density,
-        ChunkStyle.cultural_density,
         ChunkStyle.function_word_vector,
     ).where(ChunkStyle.run_id == run_id).order_by(ChunkStyle.chunk_id)
     result = session.execute(stmt)

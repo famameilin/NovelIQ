@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分chunk_repository.py
 说明: 分块风格数据类
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: 删除 cultural_density 字段
+修改内容: 移除 cultural_density 字段
 """
 
 from __future__ import annotations
@@ -19,12 +24,17 @@ class ChunkStyleData:
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Repository 基类和 Protocol 接口定义
-    说明: 封装分块风格指标数据，    从 chunk_ops.py 迁移
+    说明: 封装分块风格指标数据，从 chunk_ops.py 迁移
 
     修改时间: 2026-03-18
     修改者: TraeAI
     任务: code-quality-refactor - 拆分chunk_repository.py
     修改内容: 移动到独立模块
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 删除 cultural_density 字段
+    修改内容: 移除 cultural_density 字段
     """
 
     chunk_id: int
@@ -40,7 +50,6 @@ class ChunkStyleData:
     question_density: float
     sensory_density: float
     metaphor_density: float
-    cultural_density: float
     function_word_vector: str
     category_density_combat: float
     category_density_body: float
@@ -56,31 +65,30 @@ class ChunkStyleData:
     def to_tuple(
         self,
     ) -> Tuple[
-        int,  # chunk_id
-        float,  # mtld
-        float,  # ttr
-        float,  # avg_sent_len
-        float,  # sent_len_std
-        float,  # d_value
-        float,  # pause_density
-        float,  # fight_density
-        float,  # exclaim_density
-        float,  # dialogue_ratio
-        float,  # question_density
-        float,  # sensory_density
-        float,  # metaphor_density
-        float,  # cultural_density
-        str,  # function_word_vector
-        float,  # category_density_combat
-        float,  # category_density_body
-        float,  # category_density_relation
-        float,  # category_density_faction
-        float,  # category_density_command
-        float,  # category_density_action
-        float,  # category_density_psychology
-        float,  # category_density_measure
-        float,  # category_density_emotion
-        float,  # category_density_color
+        int,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        str,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
+        float,
     ]:
         return (
             self.chunk_id,
@@ -96,7 +104,6 @@ class ChunkStyleData:
             self.question_density,
             self.sensory_density,
             self.metaphor_density,
-            self.cultural_density,
             self.function_word_vector,
             self.category_density_combat,
             self.category_density_body,
@@ -126,7 +133,6 @@ class ChunkStyleData:
             "question_density": self.question_density,
             "sensory_density": self.sensory_density,
             "metaphor_density": self.metaphor_density,
-            "cultural_density": self.cultural_density,
             "function_word_vector": self.function_word_vector,
             "category_density_combat": self.category_density_combat,
             "category_density_body": self.category_density_body,

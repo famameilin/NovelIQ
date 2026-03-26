@@ -56,7 +56,6 @@ from .lexicon_metrics import count_hits, count_token_hits, density, term_counts,
 from .rhythm_metrics import tension_composite, tension_proxy
 from .style_metrics import (
     average_word_length,
-    cultural_density,
     dialogue_ratio,
     function_word_distribution,
     lexicon_density,
@@ -115,7 +114,6 @@ __all__ = [
     "count_hits",
     "count_token_hits",
     "average_word_length",
-    "cultural_density",
     "density",
     "dialogue_length",
     "dialogue_ratio",
