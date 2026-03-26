@@ -208,7 +208,9 @@ def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> lis
     return result[: settings.api.query_limit]
 
 
-def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
+def _fetch_topics(
+    run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str, str] | None = None
+) -> list:
     """
     获取主题数据
 
@@ -226,6 +228,11 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
     修改者: TraeAI
     任务: fix-json-output-issues-v3
     修改内容: 添加空主题过滤逻辑，过滤掉主题词列表为空的主题
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-topics-alias-normalization
+    修改内容: 添加 alias_map 参数，对主题词应用别名归一化
     """
     rows = chunk_repo.fetch_chunk_topics_agg(run_id)
 
@@ -244,18 +251,21 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository) -> list:
         except Exception as e:
             logger.warning(f"Failed to load topic model: {e}")
 
-    # 过滤掉主题词列表为空的主题
     result: list[TopicInfo] = []
     for row in rows:
         topic_id = row[0]
         words: list[str] = topic_words_map.get(topic_id, [])
-        if words:  # 只保留非空主题
+        if alias_map:
+            words = [alias_map.get(w, w) for w in words]
+        if words:
             result.append(TopicInfo(topic_id=topic_id, words=words, weight=row[1]))
 
     return result
 
 
-def _fetch_diagnosis(run_id: str, novel_id: str, stats_repo: StatsRepository) -> DiagnosisResult | None:
+def _fetch_diagnosis(
+    run_id: str, novel_id: str, stats_repo: StatsRepository, alias_map: dict[str, str] | None = None
+) -> DiagnosisResult | None:
     """
     从数据库获取诊断结果
 
@@ -263,15 +273,23 @@ def _fetch_diagnosis(run_id: str, novel_id: str, stats_repo: StatsRepository) ->
     修改者: TraeAI
     任务: refactor-routes-use-repository
     修改内容: 重构为使用 StatsRepository
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-arc-scores-alias-inconsistency
+    修改内容: 添加 alias_map 参数，对 arc_scores 的人物名称进行归一化
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
 
     if not data:
         return None
 
+    arc_scores_raw = _parse_json_field(data.get("arc_scores"))
+    arc_scores_normalized = _normalize_arc_scores(arc_scores_raw, alias_map)
+
     return DiagnosisResult(
         foreshadow_rate=data.get("foreshadow_rate"),
-        arc_scores=_parse_json_field(data.get("arc_scores")),
+        arc_scores=arc_scores_normalized,
         narrative_type=data.get("narrative_type"),
         topic_labels=_parse_json_field(data.get("topic_labels")),
         diagnosis=data.get("diagnosis"),
@@ -285,6 +303,44 @@ def _fetch_diagnosis(run_id: str, novel_id: str, stats_repo: StatsRepository) ->
         cultural_depth_reason=data.get("cultural_depth_reason"),
         narrative_arc_type=data.get("narrative_arc_type"),
     )
+
+
+def _normalize_arc_scores(arc_scores: Any, alias_map: dict[str, str] | None) -> dict[str, float] | list[float]:
+    """
+    对 arc_scores 的人物名称进行归一化
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: fix-arc-scores-alias-inconsistency
+    说明: 将 arc_scores 中的人物绰号替换为规范名，保持与角色表一致
+
+    Args:
+        arc_scores: 原始 arc_scores 数据，可能是 dict 或 list
+        alias_map: 别名到规范名的映射字典
+
+    Returns:
+        归一化后的 arc_scores
+    """
+    if not arc_scores:
+        return arc_scores
+
+    if isinstance(arc_scores, list):
+        return arc_scores
+
+    if not isinstance(arc_scores, dict):
+        return arc_scores
+
+    if not alias_map:
+        return arc_scores
+
+    normalized: dict[str, float] = {}
+    for name, score in arc_scores.items():
+        if not isinstance(name, str):
+            continue
+        canonical_name = alias_map.get(name, name)
+        normalized[canonical_name] = score
+
+    return normalized
 
 
 def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
