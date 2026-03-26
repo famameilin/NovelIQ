@@ -93,6 +93,19 @@ class TestRhythmMetrics(unittest.TestCase):
         composite = tension_composite([result, result])
         self.assertEqual(len(composite), 2)
 
+    def test_tension_proxy_no_overlap_count(self) -> None:
+        """
+        修改时间: 2026-03-26
+        修改者: TraeAI
+        任务: 修复 fight_density 重叠计数问题
+        修改内容: 新增测试用例，验证重叠词不被重复计数
+        """
+        text = "仙道杀招"
+        result = tension_proxy(text, ["杀招", "道杀招", "仙道杀招"])
+        tokens = tokenize_words(text)
+        self.assertEqual(len(tokens), 2)
+        self.assertAlmostEqual(result["fight_density"], 1.0 / len(tokens), places=6)
+
 
 class TestStyleMetrics(unittest.TestCase):
     def test_sentence_length_stats(self) -> None:
