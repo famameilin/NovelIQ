@@ -1,4 +1,4 @@
-from .aggregate_metrics import (
+from .aggregate import (
     AggregateResult,
     aggregate_all_metrics,
 )

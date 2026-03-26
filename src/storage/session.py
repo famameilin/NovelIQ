@@ -125,11 +125,6 @@ class DatabaseSession:
         if self._auto_close:
             self.close()
 
-    def cursor(self):
-        """创建游标（兼容旧代码）"""
-        return self._session.connection()
-
-
 class SessionFactory:
     """
     会话工厂类，管理数据库会话
@@ -151,18 +146,14 @@ class SessionFactory:
             session.execute(text("SELECT * FROM chunks"))
     """
 
-    def __init__(self, base_dir=None):
+    def __init__(self):
         """
         初始化会话工厂
-
-        Args:
-            base_dir: 保留参数（向后兼容），不再使用
         """
         self._sessions: dict[str, DatabaseSession] = {}
 
     def get_session(
         self,
-        identifier: str | None = None,
         init_tables: bool = False,
         auto_close: bool = True,
     ) -> DatabaseSession:
@@ -170,7 +161,6 @@ class SessionFactory:
         获取数据库会话
 
         Args:
-            identifier: 任务标识符（保留参数，向后兼容）
             init_tables: 是否初始化表结构，默认 False
             auto_close: 是否自动关闭连接，默认 True
 
@@ -223,7 +213,7 @@ class SessionFactory:
         if identifier in self._sessions:
             return self._sessions[identifier]
 
-        session = self.get_session(identifier, init_tables=init_tables, auto_close=False)
+        session = self.get_session(init_tables=init_tables, auto_close=False)
         self._sessions[identifier] = session
         return session
 
@@ -247,20 +237,18 @@ class SessionFactory:
     @contextmanager
     def session_context(
         self,
-        identifier: str | None = None,
         init_tables: bool = False,
     ) -> Generator[DatabaseSession, None, None]:
         """
         上下文管理器方式获取会话
 
         Args:
-            identifier: 任务标识符（保留参数）
             init_tables: 是否初始化表结构
 
         Yields:
             DatabaseSession 实例
         """
-        session = self.get_session(identifier, init_tables=init_tables, auto_close=True)
+        session = self.get_session(init_tables=init_tables, auto_close=True)
         try:
             yield session
         finally:
@@ -298,7 +286,6 @@ def get_db_session(init_tables: bool = False) -> DatabaseSession:
 
 def get_session_from_run_id(
     run_id: str,
-    base_dir=None,
     init_tables: bool = False,
 ) -> DatabaseSession:
     """
@@ -316,7 +303,6 @@ def get_session_from_run_id(
 
     Args:
         run_id: 运行标识符
-        base_dir: 保留参数（向后兼容），不再使用
         init_tables: 是否初始化表结构，默认 False
 
     Returns:
@@ -328,7 +314,4 @@ def get_session_from_run_id(
             rows = cursor.fetchall()
     """
     factory = SessionFactory()
-    return factory.get_session(identifier=run_id, init_tables=init_tables, auto_close=True)
-
-
-get_session_from_task_id = get_session_from_run_id
+    return factory.get_session(init_tables=init_tables, auto_close=True)

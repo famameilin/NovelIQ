@@ -9,7 +9,7 @@ from src.api.models.responses import (
     NarrativeStructureStats,
     StyleStats,
 )
-from src.metrics.aggregate_metrics import AggregateResult
+from src.metrics.aggregate import AggregateResult
 
 
 def _default_distribution(value: Any) -> dict[str, float]:

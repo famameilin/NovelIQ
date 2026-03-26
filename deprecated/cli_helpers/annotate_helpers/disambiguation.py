@@ -45,7 +45,7 @@ def _run_incremental_disambiguation(
         build_context_sentences,
         extract_new_names_from_db,
     )
-    from src.storage.operations import update_character_names
+    from deprecated.storage.operations.annotation_ops import update_character_names
     from src.knowledge.graph import get_active_nodes_in_range
 
     if (current_idx + 1) % incremental_interval != 0:
@@ -103,7 +103,7 @@ def _run_final_disambiguation(
     说明: 从 run_annotate 中提取，负责执行最终人名消歧
     """
     from src.cli.annotate import _retry_disambig, build_context_sentences
-    from src.storage.operations import fetch_all_character_names, update_character_names
+    from deprecated.storage.operations.annotation_ops import fetch_all_character_names, update_character_names
 
     logger.info("collecting all character names for final disambiguation")
     all_names = fetch_all_character_names(conn)
@@ -149,7 +149,7 @@ def _run_anonymous_disambiguation(
     说明: 从 run_annotate 中提取，负责执行匿名占位名消歧
     """
     from src.cli.annotate import _retry_disambig_anonymous, build_anonymous_contexts, build_context_sentences
-    from src.storage.operations import update_character_names
+    from deprecated.storage.operations.annotation_ops import update_character_names
 
     anonymous_names = [name for name in alias_map.values() if re.match(r"^匿名_C\d+_\d+$", name)]
 

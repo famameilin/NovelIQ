@@ -29,7 +29,6 @@ from .session import (
     SessionFactory,
     get_db_session,
     get_session_from_run_id,
-    get_session_from_task_id,
 )
 
 __all__ = [
@@ -45,7 +44,6 @@ __all__ = [
     "StatsRepository",
     "get_db_session",
     "get_session_from_run_id",
-    "get_session_from_task_id",
     "read_chunk_index",
     "write_chunk_index",
 ]

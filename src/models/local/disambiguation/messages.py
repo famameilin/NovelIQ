@@ -1,31 +1,8 @@
-"""
-消歧消息构建模块
-
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-说明: 提取消歧消息构建逻辑
-
-修改时间: 2026-03-20
-修改者: TraeAI
-任务: fix-hardcoded-relation-types
-修改内容: 动态生成层级关系类型说明，从配置读取而非硬编码
-
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: prompt-consolidation
-修改内容: 使用占位符替换动态构建 prompt
-
-修改时间: 2026-03-26
-修改者: TraeAI
-任务: disambiguation-evidence-grading
-修改内容: 添加证据来源标注功能，区分原文例句、身份线索、前文摘要
-"""
+"""消歧消息构建模块。"""
 
 from __future__ import annotations
 
 import re
-from typing import cast
 
 from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
@@ -37,10 +14,10 @@ _EVIDENCE_MARKERS = {
     "自报身份": "身份线索",
     "身份提示": "身份线索",
     "被点名": "身份线索",
-    "外貌描述": "身份线索",
+    "外貌描写": "身份线索",
 }
 
-_EVIDENCE_MARKER_PATTERN = re.compile(r"【(前文总结|自报身份|身份提示|被点名|外貌描述)】")
+_EVIDENCE_MARKER_PATTERN = re.compile(r"【(前文总结|自报身份|身份提示|被点名|外貌描写)】")
 _EVIDENCE_PREFIXES = tuple(f"【{marker}】" for marker in _EVIDENCE_MARKERS)
 
 
@@ -61,30 +38,15 @@ def _has_original_sentence_content(context: str) -> bool:
         normalized = segment.strip()
         if not normalized:
             continue
-
         if normalized.startswith(_EVIDENCE_PREFIXES):
             continue
-
         return True
 
     return False
 
 
 def _extract_evidence_types_from_context(context: str) -> list[str]:
-    """
-    从上下文字符串中提取证据类型
-
-    创建时间: 2026-03-26
-    创建者: TraeAI
-    任务: disambiguation-evidence-grading
-    说明: 解析上下文中的证据标记，返回证据类型列表
-
-    Args:
-        context: 上下文字符串，可能包含【前文总结】【身份提示】等标记
-
-    Returns:
-        证据类型列表，如 ["原文例句", "身份线索"]
-    """
+    """从上下文字符串中提取证据类型。"""
     evidence_types: list[str] = []
 
     matches = _EVIDENCE_MARKER_PATTERN.findall(context)
@@ -100,13 +62,7 @@ def _extract_evidence_types_from_context(context: str) -> list[str]:
 
 
 def _format_evidence_annotation(evidence_types: list[str]) -> str:
-    """
-    格式化证据来源标注
-
-    创建时间: 2026-03-26
-    创建者: TraeAI
-    任务: disambiguation-evidence-grading
-    """
+    """格式化证据来源标注。"""
     if not evidence_types:
         return ""
     return "【证据来源：" + "、".join(evidence_types) + "】"
@@ -114,27 +70,20 @@ def _format_evidence_annotation(evidence_types: list[str]) -> str:
 
 _RELATION_TYPE_DESCRIPTIONS: dict[str, str] = {
     "belongs_to": "人物属于某组织（如 伯安 belongs_to 贺家）",
-    "member_of": "人物是某群体成员（如 张三 member_of 赤甲卫）",
-    "leader_of": "人物是某群体/组织领袖（如 贺重明 leader_of 贺家）",
-    "affiliated_with": "群体隶属于某组织（如 赤甲卫 affiliated_with 贺家）",
-    "father_of": "A是B的父亲（如 褚军 father_of 褚大山）",
-    "son_of": "A是B的儿子（如 褚大山 son_of 褚军）",
-    "parent_of": "A是B的父母（如 赵兰英 parent_of 伯安）",
-    "child_of": "A是B的子女（如 伯安 child_of 赵兰英）",
-    "sibling_of": "A是B的兄弟姐妹（如 伯安 sibling_of 贺重明）",
-    "spouse_of": "A是B的配偶（如 赵兰英 spouse_of 贺铮）",
+    "member_of": "人物是某群体成员（如 张三 member_of 赵甲卫）",
+    "leader_of": "人物是某群体或组织的首领（如 贺重明 leader_of 贺家）",
+    "affiliated_with": "群体隶属于某组织（如 赵甲卫 affiliated_with 贺家）",
+    "father_of": "A 是 B 的父亲（如 贺军 father_of 贺大山）",
+    "son_of": "A 是 B 的儿子（如 贺大山 son_of 贺军）",
+    "parent_of": "A 是 B 的父母（如 赵兰英 parent_of 伯安）",
+    "child_of": "A 是 B 的子女（如 伯安 child_of 赵兰英）",
+    "sibling_of": "A 是 B 的兄弟姐妹（如 伯安 sibling_of 贺重明）",
+    "spouse_of": "A 是 B 的配偶（如 赵兰英 spouse_of 贺铎）",
 }
 
 
 def _build_relation_types_section() -> str:
-    """
-    根据配置动态构建层级关系类型说明
-
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: fix-hardcoded-relation-types
-    说明: 从配置读取有效关系类型，动态生成说明文本
-    """
+    """根据配置动态构建层级关系类型说明。"""
     valid_types = settings.analysis.valid_hierarchical_relation_types
     lines = ["【层级关系类型说明】"]
     for rel_type in valid_types:
@@ -144,94 +93,38 @@ def _build_relation_types_section() -> str:
 
 
 def _build_relation_types_union() -> str:
-    """
-    构建关系类型的联合类型字符串（用于 JSON 格式说明）
-
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: fix-hardcoded-relation-types
-    """
+    """构建关系类型联合字符串，用于 JSON 格式说明。"""
     valid_types = settings.analysis.valid_hierarchical_relation_types
     return "|".join(valid_types)
 
 
 def _build_dynamic_system_prompt() -> str:
-    """
-    构建动态的系统 prompt，替换占位符
-
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: fix-hardcoded-relation-types
-    说明: 基于静态 prompt 模板，动态替换关系类型相关内容
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: prompt-consolidation
-    修改内容: 使用占位符 {{RELATION_TYPES_UNION}} 和 {{RELATION_TYPES_SECTION}}
-    """
+    """将动态关系类型填入系统提示词模板。"""
     base_prompt = DISAMBIGUATE_SYSTEM_PROMPT
-
-    relation_types_union = _build_relation_types_union()
-    base_prompt = base_prompt.replace("{{RELATION_TYPES_UNION}}", relation_types_union)
-
-    relation_types_section = _build_relation_types_section()
-    base_prompt = base_prompt.replace("{{RELATION_TYPES_SECTION}}", relation_types_section)
-
+    base_prompt = base_prompt.replace("{{RELATION_TYPES_UNION}}", _build_relation_types_union())
+    base_prompt = base_prompt.replace("{{RELATION_TYPES_SECTION}}", _build_relation_types_section())
     return base_prompt
 
 
 def build_disambiguate_messages(
-    candidates: list[str] | list[NameCountCandidate],
+    candidates: list[NameCountCandidate],
     context_sentences: dict[str, str] | None = None,
     existing_names: list[str] | None = None,
     rag_hint: str | None = None,
 ) -> list[dict[str, str]]:
-    """
-    构建消歧消息
+    """构建角色消歧消息，仅接受标准候选结构。"""
+    lines: list[str] = []
 
-    修改时间: 2026-03-12
-    创建者: TraeAI
-    修改内容: 支持 List[str] 和 List[Dict] 两种候选人名格式，Dict 格式包含频次信息
-
-    修改时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-    修改内容: 提取为独立模块函数
-
-    修改时间: 2026-03-20
-    创建者: TraeAI
-    任务: fix-hardcoded-relation-types
-    修改内容: 使用动态生成的系统 prompt，包含配置中的关系类型
-
-    修改时间: 2026-03-26
-    创建者: TraeAI
-    任务: disambiguation-evidence-grading
-    修改内容: 添加证据来源标注，区分原文例句、身份线索、前文摘要
-    """
-    lines = []
-
-    if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], candidates)
-        for item in dict_candidates:
-            name = str(item["name"])
-            count = item.get("count", 0)
-            ctx = context_sentences.get(name, "") if context_sentences else ""
-            evidence_types = _extract_evidence_types_from_context(ctx)
-            evidence_annotation = _format_evidence_annotation(evidence_types)
-            if ctx:
-                lines.append(f"- {name}（次数：{count}，{evidence_annotation}，参考：{ctx}）")
-            else:
-                lines.append(f"- {name}（次数：{count}）")
-    else:
-        str_candidates = cast(list[str], candidates)
-        for name in str_candidates:
-            ctx = context_sentences.get(name, "") if context_sentences else ""
-            evidence_types = _extract_evidence_types_from_context(ctx)
-            evidence_annotation = _format_evidence_annotation(evidence_types)
-            if ctx:
-                lines.append(f"- {name}（{evidence_annotation}，参考：{ctx}）")
-            else:
-                lines.append(f"- {name}")
+    for item in candidates:
+        name = str(item["name"])
+        count = int(item.get("count", 0))
+        ctx = context_sentences.get(name, "") if context_sentences else ""
+        evidence_types = _extract_evidence_types_from_context(ctx)
+        evidence_annotation = _format_evidence_annotation(evidence_types)
+        if ctx:
+            lines.append(f"- {name}（次数：{count}）{evidence_annotation}，参考：{ctx}")
+        else:
+            lines.append(f"- {name}（次数：{count}）")
 
     body = "\n".join(lines)
 
@@ -239,16 +132,20 @@ def build_disambiguate_messages(
     system_prompt += (
         "\n\n【置信度输出要求】请在 JSON 中额外输出 alias_confidence 字段，"
         "key 为候选名字，value 仅允许 low|medium|high。"
-        "high 表示证据充分，medium 表示倾向但证据不足，low 表示无法确认。"
+        "high 表示证据充分，medium 表示倾向如此但证据不足，low 表示无法确认。"
     )
     system_prompt += (
         "\n\n【证据来源输出要求】请在 JSON 中额外输出 evidence_sources 字段，"
         'key 为候选名字，value 为证据来源列表（如 ["原文例句", "身份线索"]）。'
         "请根据候选人名列表中标注的证据来源填写。"
     )
+
     if existing_names:
         anchor_str = "、".join(existing_names)
-        system_prompt += f"\n\n【已存在的角色】以下名字已在知识库中存在：[{anchor_str}]。如果你有充分证据认为候选人名与这些角色是同一人物，可以合并；如果证据不足，保持独立。"
+        system_prompt += (
+            f"\n\n【已存在的角色】以下名字已在知识库中存在：[{anchor_str}]。"
+            "如果你有充分证据认为候选人名与这些角色是同一人物，可以合并；如果证据不足，保持独立。"
+        )
 
     user_parts = [
         "以下候选人名可能是同一人物的不同称呼，也可能是不同人物。",
@@ -271,21 +168,14 @@ def build_anonymous_disambig_messages(
     existing_names: list[str] | None = None,
     existing_contexts: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
-    """
-    构建匿名消歧消息
-
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-    修改内容: 提取为独立模块函数
-    """
-    info_parts = []
+    """构建匿名人物消歧消息。"""
+    info_parts: list[str] = []
     for name in anonymous_names:
         ctx = anonymous_contexts.get(name, "无上下文")
         info_parts.append(f"【匿名人物】{name}\n上下文：\n{ctx}\n---")
     anonymous_info = "\n\n".join(info_parts)
 
-    existing_lines = []
+    existing_lines: list[str] = []
     if existing_names:
         for name in existing_names:
             ctx = existing_contexts.get(name, "") if existing_contexts else ""

@@ -36,7 +36,37 @@ from .types import (
     RelationData,
     TensionData,
     TextData,
+    map_emotion_score,
 )
+
+
+def aggregate_all_metrics(
+    run_id: str,
+    annotation_repo,
+    chunk_repo,
+    stats_repo,
+) -> AggregateResult:
+    """Aggregate all metric groups into a single result object."""
+    result = AggregateResult()
+
+    annotation_data = fetch_annotation_data(annotation_repo, run_id)
+    emotion_data = fetch_emotion_data(stats_repo, run_id)
+    char_data = fetch_character_data(annotation_repo, run_id)
+    relation_data = fetch_relation_data(annotation_repo, run_id)
+    text_data = fetch_text_data(chunk_repo, run_id)
+    culture_data = fetch_culture_data(stats_repo, run_id)
+    tension_data = fetch_tension_data(stats_repo, run_id)
+    dialogue_data = fetch_dialogue_data(annotation_repo, run_id)
+
+    total_chunks = chunk_repo.count_chunks(run_id) or 1
+
+    result.narrative_structure = compute_narrative_structure_metrics(annotation_data, tension_data)
+    result.emotion_curve = compute_emotion_curve_metrics(emotion_data, annotation_data, char_data)
+    result.character_relations = compute_character_relation_metrics(relation_data, char_data, total_chunks)
+    result.language_style = compute_language_style_metrics(text_data, dialogue_data.tones)
+    result.traditional_culture = compute_traditional_culture_metrics(culture_data, text_data.texts)
+
+    return result
 
 __all__ = [
     # types
@@ -49,6 +79,8 @@ __all__ = [
     "RelationData",
     "TensionData",
     "TextData",
+    "map_emotion_score",
+    "aggregate_all_metrics",
     # fetchers
     "fetch_annotation_data",
     "fetch_emotion_data",

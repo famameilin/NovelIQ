@@ -405,7 +405,7 @@ def _save_disambiguation_interaction(
 
 def _retry_disambig(
     client: DisambiguationLike,
-    candidates: list[str] | list[NameCountCandidate],
+    candidates: list[NameCountCandidate],
     context_sentences: dict[str, str],
     existing_names: list[str],
     stage_name: str,
@@ -628,35 +628,25 @@ def _build_display_name_map(
     return {name: display_by_cluster.get(alias_map.get(name, name), alias_map.get(name, name)) for name in all_names}
 
 
-def _extract_names_from_candidates(candidates: list[str] | list[NameCountCandidate]) -> list[str]:
-    names: list[str] = []
-    if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], candidates)
-        names = [str(item.get("name", "")) for item in dict_candidates]
-    else:
-        str_candidates = cast(list[str], candidates)
-        names = [str(item) for item in str_candidates]
-    return [name for name in names if name]
+def _extract_names_from_candidates(candidates: list[NameCountCandidate]) -> list[str]:
+    return [str(item.get("name", "")) for item in candidates if str(item.get("name", ""))]
 
 
 def _build_candidate_payload_by_names(
-    all_names: list[str] | list[NameCountCandidate],
+    all_names: list[NameCountCandidate],
     candidate_names: list[str],
-) -> list[str] | list[NameCountCandidate]:
-    if all_names and isinstance(all_names[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], all_names)
-        names_set = set(candidate_names)
-        payload: list[NameCountCandidate] = []
-        for item in dict_candidates:
-            name = str(item.get("name", ""))
-            if name in names_set:
-                payload.append(item)
-        return payload
-    return candidate_names
+) -> list[NameCountCandidate]:
+    names_set = set(candidate_names)
+    payload: list[NameCountCandidate] = []
+    for item in all_names:
+        name = str(item.get("name", ""))
+        if name in names_set:
+            payload.append(item)
+    return payload
 
 
 def _collect_final_disambiguation_candidates(
-    all_names: list[str] | list[NameCountCandidate],
+    all_names: list[NameCountCandidate],
     alias_map: dict[str, str],
     state_snapshot: DisambigStateSnapshot | None = None,
 ) -> list[str]:

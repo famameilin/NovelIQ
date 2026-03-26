@@ -1,4 +1,4 @@
-from src.metrics.aggregate_metrics import AggregateResult
+from src.metrics.aggregate import AggregateResult
 from src.workflows.aggregate import _build_quality_gate_report
 
 

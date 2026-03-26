@@ -20,8 +20,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import cast
-
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..schema import DisambiguateResponseModel
@@ -57,9 +55,13 @@ class ExtendedDisambigResult:
     _thinking_content: str | None = None
 
 
+def _candidate_names(candidates: list[NameCountCandidate]) -> list[str]:
+    return [str(candidate["name"]) for candidate in candidates]
+
+
 def build_result_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: list[str] | list[NameCountCandidate],
+    candidates: list[NameCountCandidate],
 ) -> dict[str, str]:
     """
     从 DisambiguateResponseModel 构建结果字典，确保所有候选名都有映射
@@ -73,13 +75,7 @@ def build_result_from_response(
     任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
     修改内容: 提取为独立模块函数
     """
-    name_list: list[str] = []
-    if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], candidates)
-        name_list = [str(c["name"]) for c in dict_candidates]
-    else:
-        str_candidates = cast(list[str], candidates)
-        name_list = list(str_candidates)
+    name_list = _candidate_names(candidates)
 
     result: dict[str, str] = {}
     for name in name_list:
@@ -92,19 +88,12 @@ def build_result_from_response(
 
 def build_common_name_map_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: list[str] | list[NameCountCandidate],
+    candidates: list[NameCountCandidate],
 ) -> dict[str, str]:
     """
     从响应中构建 common_name_map，并确保 value 保持在候选列表内。
     """
-    name_list: list[str] = []
-    if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], candidates)
-        name_list = [str(c["name"]) for c in dict_candidates]
-    else:
-        str_candidates = cast(list[str], candidates)
-        name_list = list(str_candidates)
-
+    name_list = _candidate_names(candidates)
     candidate_names = set(name_list)
     result: dict[str, str] = {}
     for name in name_list:
@@ -119,7 +108,7 @@ def build_common_name_map_from_response(
 
 def build_extended_result_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: list[str] | list[NameCountCandidate],
+    candidates: list[NameCountCandidate],
 ) -> ExtendedDisambigResult:
     """
     从 DisambiguateResponseModel 构建扩展结果，包含别名映射、实体类型和实体关系
@@ -142,13 +131,7 @@ def build_extended_result_from_response(
     alias_map = build_result_from_response(response_data, candidates)
     common_name_map = build_common_name_map_from_response(response_data, candidates)
 
-    name_list: list[str] = []
-    if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], candidates)
-        name_list = [str(c["name"]) for c in dict_candidates]
-    else:
-        str_candidates = cast(list[str], candidates)
-        name_list = list(str_candidates)
+    name_list = _candidate_names(candidates)
 
     alias_confidence: dict[str, str] = {}
     for name in name_list:

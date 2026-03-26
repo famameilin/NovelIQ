@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from src.models.disambiguation_types import NameCountCandidate
 
 from .json_utils import try_parse_json
@@ -21,7 +19,7 @@ class DisambiguationParseError(Exception):
     pass
 
 
-def parse_alias_map(content: str, candidates: list[str] | list[NameCountCandidate]) -> dict[str, str]:
+def parse_alias_map(content: str, candidates: list[NameCountCandidate]) -> dict[str, str]:
     """
     解析消歧结果
 
@@ -38,13 +36,7 @@ def parse_alias_map(content: str, candidates: list[str] | list[NameCountCandidat
     if not isinstance(alias_map, dict):
         raise DisambiguationParseError("disambiguate_characters alias_map not dict")
 
-    name_list: list[str] = []
-    if candidates and isinstance(candidates[0], dict):
-        dict_candidates = cast(list[NameCountCandidate], candidates)
-        name_list = [str(c["name"]) for c in dict_candidates]
-    else:
-        str_candidates = cast(list[str], candidates)
-        name_list = list(str_candidates)
+    name_list = [str(candidate["name"]) for candidate in candidates]
 
     result: dict[str, str] = {}
     for name in name_list:

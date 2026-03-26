@@ -1,5 +1,5 @@
 from src.api.routes.results_converters import _convert_culture_stats, _convert_style_stats
-from src.metrics.aggregate_metrics import AggregateResult
+from src.metrics.aggregate import AggregateResult
 
 
 def test_convert_style_stats_tone_distribution_default_empty_dict() -> None:

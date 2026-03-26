@@ -8,18 +8,22 @@ from src.models.local.disambiguation import ExtendedDisambigResult, build_extend
 from src.models.local.schema import DisambiguateResponseModel, HierarchicalRelation
 
 
+def _candidates(*names: str) -> list[dict[str, int | str]]:
+    return [{"name": name, "count": 1} for name in names]
+
+
 class TestExtendedDisambigResult(unittest.TestCase):
     def test_basic_creation(self) -> None:
         result = ExtendedDisambigResult(
-            merge_target_map={"贺重明": "伯安"},
-            common_name_map={"贺重明": "贺重明"},
-            entity_types={"伯安": "character", "赤甲卫": "group"},
-            entity_relations=[{"from": "伯安", "to": "贺家", "type": "belongs_to"}],
+            merge_target_map={"he_zhong_ming": "bo_an"},
+            common_name_map={"he_zhong_ming": "he_zhong_ming"},
+            entity_types={"bo_an": "character", "red_guard": "group"},
+            entity_relations=[{"from": "bo_an", "to": "he_family", "type": "belongs_to"}],
         )
 
-        self.assertEqual(result.merge_target_map["贺重明"], "伯安")
-        self.assertEqual(result.common_name_map["贺重明"], "贺重明")
-        self.assertEqual(result.entity_types["伯安"], "character")
+        self.assertEqual(result.merge_target_map["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.common_name_map["he_zhong_ming"], "he_zhong_ming")
+        self.assertEqual(result.entity_types["bo_an"], "character")
         self.assertEqual(len(result.entity_relations), 1)
 
     def test_empty_creation(self) -> None:
@@ -35,76 +39,76 @@ class TestExtendedDisambigResult(unittest.TestCase):
 
     def test_evidence_sources_field(self) -> None:
         result = ExtendedDisambigResult(
-            merge_target_map={"贺重明": "伯安"},
-            entity_types={"伯安": "character"},
+            merge_target_map={"he_zhong_ming": "bo_an"},
+            entity_types={"bo_an": "character"},
             entity_relations=[],
-            evidence_sources={"贺重明": ["原文例句", "身份线索"]},
+            evidence_sources={"he_zhong_ming": ["original_text", "identity_clue"]},
         )
 
-        self.assertEqual(result.evidence_sources["贺重明"], ["原文例句", "身份线索"])
+        self.assertEqual(result.evidence_sources["he_zhong_ming"], ["original_text", "identity_clue"])
 
 
 class TestBuildExtendedResultFromResponse(unittest.TestCase):
     def test_basic_parsing(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"贺重明": "伯安", "赤甲卫": "赤甲卫"},
-            common_name_map={"贺重明": "伯安", "赤甲卫": "赤甲卫"},
-            entity_types={"伯安": "character", "赤甲卫": "group", "贺家": "organization"},
+            merge_target_map={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},
+            common_name_map={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},
+            entity_types={"bo_an": "character", "red_guard": "group", "he_family": "organization"},
             entity_relations=[
-                HierarchicalRelation(**{"from": "伯安", "to": "贺家", "type": "belongs_to"}),
+                HierarchicalRelation(**{"from": "bo_an", "to": "he_family", "type": "belongs_to"}),
             ],
         )
 
-        result = build_extended_result_from_response(response, ["贺重明", "赤甲卫", "贺家"])
+        result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "red_guard", "he_family"))
 
-        self.assertEqual(result.merge_target_map["贺重明"], "伯安")
-        self.assertEqual(result.common_name_map["贺重明"], "贺重明")
-        self.assertEqual(result.merge_target_map["赤甲卫"], "赤甲卫")
-        self.assertEqual(result.entity_types["赤甲卫"], "group")
-        self.assertEqual(result.entity_types["贺家"], "organization")
+        self.assertEqual(result.merge_target_map["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.common_name_map["he_zhong_ming"], "he_zhong_ming")
+        self.assertEqual(result.merge_target_map["red_guard"], "red_guard")
+        self.assertEqual(result.entity_types["red_guard"], "group")
+        self.assertEqual(result.entity_types["he_family"], "organization")
         self.assertEqual(result.entity_relations[0]["type"], "belongs_to")
 
     def test_group_and_org_self_mapping(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"赤甲卫": "赤甲卫", "贺家": "贺家"},
-            common_name_map={"赤甲卫": "赤甲卫", "贺家": "贺家"},
-            entity_types={"赤甲卫": "group", "贺家": "organization"},
+            merge_target_map={"red_guard": "red_guard", "he_family": "he_family"},
+            common_name_map={"red_guard": "red_guard", "he_family": "he_family"},
+            entity_types={"red_guard": "group", "he_family": "organization"},
             entity_relations=[],
         )
 
-        result = build_extended_result_from_response(response, ["赤甲卫", "贺家"])
+        result = build_extended_result_from_response(response, _candidates("red_guard", "he_family"))
 
-        self.assertEqual(result.merge_target_map["赤甲卫"], "赤甲卫")
-        self.assertEqual(result.merge_target_map["贺家"], "贺家")
+        self.assertEqual(result.merge_target_map["red_guard"], "red_guard")
+        self.assertEqual(result.merge_target_map["he_family"], "he_family")
 
     def test_multiple_relations(self) -> None:
         response = DisambiguateResponseModel(
             merge_target_map={
-                "伯安": "伯安",
-                "张三": "张三",
-                "赤甲卫": "赤甲卫",
-                "贺家": "贺家",
+                "bo_an": "bo_an",
+                "zhang_san": "zhang_san",
+                "red_guard": "red_guard",
+                "he_family": "he_family",
             },
             common_name_map={
-                "伯安": "伯安",
-                "张三": "张三",
-                "赤甲卫": "赤甲卫",
-                "贺家": "贺家",
+                "bo_an": "bo_an",
+                "zhang_san": "zhang_san",
+                "red_guard": "red_guard",
+                "he_family": "he_family",
             },
             entity_types={
-                "伯安": "character",
-                "张三": "character",
-                "赤甲卫": "group",
-                "贺家": "organization",
+                "bo_an": "character",
+                "zhang_san": "character",
+                "red_guard": "group",
+                "he_family": "organization",
             },
             entity_relations=[
-                HierarchicalRelation(**{"from": "伯安", "to": "贺家", "type": "belongs_to"}),
-                HierarchicalRelation(**{"from": "张三", "to": "赤甲卫", "type": "member_of"}),
-                HierarchicalRelation(**{"from": "赤甲卫", "to": "贺家", "type": "affiliated_with"}),
+                HierarchicalRelation(**{"from": "bo_an", "to": "he_family", "type": "belongs_to"}),
+                HierarchicalRelation(**{"from": "zhang_san", "to": "red_guard", "type": "member_of"}),
+                HierarchicalRelation(**{"from": "red_guard", "to": "he_family", "type": "affiliated_with"}),
             ],
         )
 
-        result = build_extended_result_from_response(response, ["伯安", "张三", "赤甲卫", "贺家"])
+        result = build_extended_result_from_response(response, _candidates("bo_an", "zhang_san", "red_guard", "he_family"))
 
         self.assertEqual(len(result.entity_relations), 3)
         self.assertEqual(
@@ -114,64 +118,64 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
     def test_missing_candidates_default_to_self(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"贺重明": "伯安"},
-            common_name_map={"贺重明": "贺重明"},
-            entity_types={"伯安": "character"},
+            merge_target_map={"he_zhong_ming": "bo_an"},
+            common_name_map={"he_zhong_ming": "he_zhong_ming"},
+            entity_types={"bo_an": "character"},
             entity_relations=[],
         )
 
-        result = build_extended_result_from_response(response, ["贺重明", "白芷"])
+        result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "bai_zhi"))
 
-        self.assertEqual(result.merge_target_map["贺重明"], "伯安")
-        self.assertEqual(result.merge_target_map["白芷"], "白芷")
-        self.assertEqual(result.common_name_map["贺重明"], "贺重明")
-        self.assertEqual(result.common_name_map["白芷"], "白芷")
+        self.assertEqual(result.merge_target_map["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.merge_target_map["bai_zhi"], "bai_zhi")
+        self.assertEqual(result.common_name_map["he_zhong_ming"], "he_zhong_ming")
+        self.assertEqual(result.common_name_map["bai_zhi"], "bai_zhi")
 
     def test_common_name_map_does_not_fall_back_to_existing_merge_target(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"贺伯安": "伯安"},
-            entity_types={"伯安": "character"},
+            merge_target_map={"he_bo_an": "bo_an"},
+            entity_types={"bo_an": "character"},
             entity_relations=[],
         )
 
-        result = build_extended_result_from_response(response, ["贺伯安"])
+        result = build_extended_result_from_response(response, _candidates("he_bo_an"))
 
-        self.assertEqual(result.merge_target_map["贺伯安"], "伯安")
-        self.assertEqual(result.common_name_map["贺伯安"], "贺伯安")
+        self.assertEqual(result.merge_target_map["he_bo_an"], "bo_an")
+        self.assertEqual(result.common_name_map["he_bo_an"], "he_bo_an")
 
     def test_evidence_sources_extraction(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"贺重明": "伯安", "灰衣人": "伯安"},
-            entity_types={"伯安": "character"},
+            merge_target_map={"he_zhong_ming": "bo_an", "gray_man": "bo_an"},
+            entity_types={"bo_an": "character"},
             entity_relations=[],
             evidence_sources={
-                "贺重明": ["原文例句", "身份线索"],
-                "灰衣人": ["前文摘要-弱证据"],
+                "he_zhong_ming": ["original_text", "identity_clue"],
+                "gray_man": ["summary_only"],
             },
         )
 
-        result = build_extended_result_from_response(response, ["贺重明", "灰衣人"])
+        result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "gray_man"))
 
-        self.assertEqual(result.evidence_sources["贺重明"], ["原文例句", "身份线索"])
-        self.assertEqual(result.evidence_sources["灰衣人"], ["前文摘要-弱证据"])
+        self.assertEqual(result.evidence_sources["he_zhong_ming"], ["original_text", "identity_clue"])
+        self.assertEqual(result.evidence_sources["gray_man"], ["summary_only"])
 
     def test_evidence_sources_default_to_original_text(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"伯安": "伯安"},
-            entity_types={"伯安": "character"},
+            merge_target_map={"bo_an": "bo_an"},
+            entity_types={"bo_an": "character"},
             entity_relations=[],
         )
 
-        result = build_extended_result_from_response(response, ["伯安"])
+        result = build_extended_result_from_response(response, _candidates("bo_an"))
 
-        self.assertEqual(result.evidence_sources["伯安"], ["原文例句"])
+        self.assertEqual(result.evidence_sources["bo_an"], ["原文例句"])
 
 
 class TestHierarchicalRelationModel(unittest.TestCase):
     def test_relation_creation(self) -> None:
-        rel = HierarchicalRelation(**{"from": "伯安", "to": "贺家", "type": "belongs_to"})
-        self.assertEqual(rel.from_entity, "伯安")
-        self.assertEqual(rel.to_entity, "贺家")
+        rel = HierarchicalRelation(**{"from": "bo_an", "to": "he_family", "type": "belongs_to"})
+        self.assertEqual(rel.from_entity, "bo_an")
+        self.assertEqual(rel.to_entity, "he_family")
         self.assertEqual(rel.type, "belongs_to")
 
     def test_all_relation_types(self) -> None:

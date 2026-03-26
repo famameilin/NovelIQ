@@ -7,6 +7,10 @@ from src.models.local.disambiguation import ExtendedDisambigResult
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 
 
+def _candidates(*names: str) -> list[dict[str, int | str]]:
+    return [{"name": name, "count": 1} for name in names]
+
+
 class _FakeDisambigClient:
     def __init__(self) -> None:
         self._config = SimpleNamespace(model="test-model")
@@ -30,7 +34,7 @@ def test_retry_disambig_passes_existing_names_to_client_and_interaction_saver() 
     with patch.object(disambig_mod, "_save_disambiguation_interaction", side_effect=_fake_save):
         disambig_mod._retry_disambig(
             client=client,
-            candidates=["masked_person"],
+            candidates=_candidates("masked_person"),
             context_sentences={"masked_person": "identity reveal in scene"},
             existing_names=["bai_zhi", "hou_fei_bai"],
             stage_name="incremental disambiguation",
@@ -146,7 +150,7 @@ def test_collect_final_disambiguation_candidates_prefers_state_snapshot() -> Non
         "masked_person": {"state": "unresolved", "confidence": "low", "canonical": "bai_zhi"},
     }
     candidates = disambig_mod._collect_final_disambiguation_candidates(
-        all_names=["bai_zhi", "lin_li_guo", "masked_person"],
+        all_names=_candidates("bai_zhi", "lin_li_guo", "masked_person"),
         alias_map={"bai_zhi": "bai_zhi"},
         state_snapshot=snapshot,
     )
@@ -376,7 +380,7 @@ def test_save_disambiguation_interaction_rebuilds_prompt_with_existing_names() -
         disambig_mod._save_disambiguation_interaction(
             client=client,
             run_id="run-1",
-            candidates=["masked_person"],
+            candidates=_candidates("masked_person"),
             context_sentences={"masked_person": "scene"},
             existing_names=["bai_zhi"],
             result={"masked_person": "bai_zhi"},

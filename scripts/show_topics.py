@@ -5,7 +5,7 @@ sys.path.insert(0, 'e:/projects/python-projects/novel quantitative analysis')
 from src.topic.lda_model import LDATrainer, get_all_topic_words
 from src.topic.preprocessor import TopicPreprocessor
 from src.storage.schema import connect_db
-from src.storage.operations import fetch_chunk_texts
+from deprecated.storage.operations.chunk_ops import fetch_chunk_texts
 
 conn = connect_db(Path('output/人祖传_analysis.db'))
 text_tuples = fetch_chunk_texts(conn)

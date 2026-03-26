@@ -36,6 +36,7 @@ from loguru import logger
 
 from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
+from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.base import BaseModelClient
 
 from .schema import CloudAnalysis
@@ -51,7 +52,7 @@ class CloudModelClient:
 
     def disambiguate_characters(
         self,
-        candidates: list[str],
+        candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
     ) -> dict[str, str]:
@@ -66,11 +67,11 @@ class NullCloudModelClient(CloudModelClient):
 
     def disambiguate_characters(
         self,
-        candidates: list[str],
+        candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
     ) -> dict[str, str]:
-        return {name: name for name in candidates}
+        return {candidate["name"]: candidate["name"] for candidate in candidates}
 
 
 class BaseCloudModelClient(BaseModelClient):

@@ -14,6 +14,7 @@ from typing import Dict, List
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.cloud.client import CloudModelClient
+from src.models.disambiguation_types import NameCountCandidate
 from src.models.cloud.schema import CloudAnalysis
 from src.models.local.schema import (
     ChunkAnnotation,
@@ -99,12 +100,13 @@ class FakeLocalModelClient:
 
     def disambiguate_characters(
         self,
-        candidates: List[str],
+        candidates: List[NameCountCandidate],
         context_sentences: Dict[str, str] | None = None,
         existing_names: List[str] | None = None,
     ) -> Dict[str, str]:
         result = {}
-        for name in candidates:
+        for item in candidates:
+            name = item["name"]
             if name == "张三丰":
                 result[name] = "张三"
             else:

@@ -46,7 +46,7 @@ class _NoopDisambiguationClient:
 
     def disambiguate_characters(
         self,
-        candidates: list[str] | list[NameCountCandidate],
+        candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
         rag_hint: str | None = None,
