@@ -305,7 +305,6 @@ def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
             dialogue_ratio=row.dialogue_ratio,
             sensory_density=row.sensory_density,
             metaphor_density=row.metaphor_density,
-            cultural_density=row.cultural_density,
         )
         for row in rows
     ]
