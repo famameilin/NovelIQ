@@ -5,11 +5,19 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 提取标注构建相关逻辑
+
+修改时间: 2026-03-26
+修改者: TraeAI
+任务: disambiguation-evidence-grading
+修改内容: 添加摘要质量校验函数
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
+
+from loguru import logger
 
 from src.config.schemas import ANNOTATION_CONFIG
 
@@ -22,7 +30,6 @@ from ..schema import (
     ForeshadowingType,
 )
 
-# 使用配置类替代魔法字符串
 _VALID_ROLE_FUNCTIONS = ANNOTATION_CONFIG.valid_role_functions or []
 _VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types or []
 _VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores or []
@@ -31,6 +38,10 @@ _VALID_CLUE_TYPES = ANNOTATION_CONFIG.valid_clue_types or []
 _VALID_EMOTIONAL_VALENCES = ANNOTATION_CONFIG.valid_emotion_scores or []
 _VALID_EVENT_TYPES = ANNOTATION_CONFIG.valid_event_types or []
 _VALID_FORESHADOWING_TYPES = ANNOTATION_CONFIG.valid_foreshadowing_types or []
+
+_SUMMARY_MIN_LENGTH = 30
+_SUMMARY_MAX_LENGTH = 60
+_NAME_ADHESION_PATTERN = re.compile(r"(?:灰衣|白衣|黑衣|青衣|红衣|紫衣)人[\u4e00-\u9fa5]{2,}(?:近看|觉得|发现|看见)")
 
 
 def make_empty_annotation() -> ChunkAnnotation:
@@ -197,19 +208,78 @@ def _parse_foreshadowing_type(
     return None
 
 
+def validate_summary_quality(summary: str) -> tuple[bool, list[str]]:
+    """
+    校验摘要质量
+
+    创建时间: 2026-03-26
+    创建者: TraeAI
+    任务: disambiguation-evidence-grading
+    说明: 检查摘要长度和名字粘连问题
+
+    Args:
+        summary: 摘要文本
+
+    Returns:
+        (是否通过校验, 问题列表)
+    """
+    issues: list[str] = []
+
+    if not summary:
+        return True, issues
+
+    length = len(summary)
+    if length < _SUMMARY_MIN_LENGTH:
+        issues.append(f"摘要过短（{length}字），建议{_SUMMARY_MIN_LENGTH}-{_SUMMARY_MAX_LENGTH}字")
+    elif length > _SUMMARY_MAX_LENGTH:
+        issues.append(f"摘要过长（{length}字），建议{_SUMMARY_MIN_LENGTH}-{_SUMMARY_MAX_LENGTH}字")
+
+    adhesion_matches = _NAME_ADHESION_PATTERN.findall(summary)
+    if adhesion_matches:
+        issues.append(f"疑似名字粘连：{', '.join(adhesion_matches[:3])}")
+
+    return len(issues) == 0, issues
+
+
+def _validate_and_log_summary(summary: str) -> str:
+    """
+    校验摘要并记录日志
+
+    创建时间: 2026-03-26
+    创建者: TraeAI
+    任务: disambiguation-evidence-grading
+    说明: 校验摘要质量，有问题时记录警告日志
+    """
+    if not summary:
+        return summary
+
+    passed, issues = validate_summary_quality(summary)
+    if not passed:
+        logger.warning(f"摘要质量校验未通过: {'; '.join(issues)} | 摘要: {summary[:50]}...")
+
+    return summary
+
+
 def build_annotation(data: Dict[str, Any]) -> ChunkAnnotation:
     """
     构建标注结果
 
     修改时间: 2026-03-17
-    修改者: TraeAI
+    创建者: TraeAI
     任务: code-quality-refactor - 重构build_annotation
     修改内容:
     - 提取各字段解析逻辑到独立函数
     - 使用常量定义替代魔法字符串
     - 简化主函数逻辑
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: disambiguation-evidence-grading
+    修改内容: 添加摘要质量校验
     """
     has_foreshadowing = data.get("has_foreshadowing", False)
+    raw_summary = data.get("chunk_summary", "")
+    validated_summary = _validate_and_log_summary(raw_summary)
 
     return ChunkAnnotation(
         emotional_valence=_normalize_emotional_valence(data.get("emotional_valence", "neutral")),
@@ -224,5 +294,5 @@ def build_annotation(data: Dict[str, Any]) -> ChunkAnnotation:
         characters=_parse_characters(data),
         relations=_parse_relations(data),
         character_appearances=_parse_character_appearances(data),
-        chunk_summary=data.get("chunk_summary", ""),
+        chunk_summary=validated_summary,
     )
