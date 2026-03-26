@@ -73,7 +73,7 @@ class AnalysisService:
                 raise AnalysisError(f"任务 {specified_task_id} 不属于小说 {novel_id}")
             logger.info(f"Using specified task_id: {specified_task_id}")
 
-            if specified_task.get("status") == "pending":
+            if specified_task.get("status") in ("pending", "failed"):
                 asyncio.create_task(self._run_analysis(specified_task_id, novel, request))
 
             return specified_task_id
@@ -373,9 +373,9 @@ class AnalysisService:
                 task_id, novel
             )
 
-            num_topics = request.num_topics if request else 25
-            max_chars = request.max_chars if request else 2000
-            overlap = request.overlap if request else 200
+            num_topics = settings.topic_model.single_book.num_topics
+            max_chars = settings.chunking.max_chars
+            overlap = settings.chunking.overlap
 
             skip_stages = self._check_stage_completion_status(session, run_id)
 
