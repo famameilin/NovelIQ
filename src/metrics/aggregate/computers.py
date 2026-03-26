@@ -194,20 +194,16 @@ def compute_traditional_culture_metrics(
     culture_data: CultureData,
     texts: list[str],
 ) -> Dict[str, float | None]:
-    """计算传统文化聚合指标"""
+    """
+    计算传统文化聚合指标
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 简化文化指标系统
+    修改内容: 删除低价值词表密度指标，只保留 idiom_density、classical_sentence_ratio、imagery_density
+    """
     return {
         "idiom_density": compute_idiom_density(texts),
         "classical_sentence_ratio": compute_classical_sentence_ratio(texts),
-        "imagery_density": compute_imagery_density(texts),
-        "confucian_density": statistics.mean(culture_data.confucian_densities)
-        if culture_data.confucian_densities
-        else None,
-        "taoist_density": statistics.mean(culture_data.taoist_densities) if culture_data.taoist_densities else None,
-        "buddhist_density": statistics.mean(culture_data.buddhist_densities)
-        if culture_data.buddhist_densities
-        else None,
-        "folk_density": statistics.mean(culture_data.folk_densities) if culture_data.folk_densities else None,
-        "allusion_density": statistics.mean(culture_data.allusion_densities)
-        if culture_data.allusion_densities
-        else None,
+        "imagery_density": statistics.mean(culture_data.imagery_densities) if culture_data.imagery_densities else None,
     }

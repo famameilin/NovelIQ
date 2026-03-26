@@ -141,16 +141,18 @@ def fetch_culture_data(
     stats_repo: "StatsRepository",
     run_id: str,
 ) -> CultureData:
-    """提取 chunk_culture 表数据"""
+    """
+    提取 chunk_culture 表数据
+
+    修改时间: 2026-03-26
+    修改者: TraeAI
+    任务: 简化文化指标系统
+    修改内容: 只返回 imagery_densities
+    """
     culture_rows = stats_repo.fetch_chunk_culture(run_id)
 
     return CultureData(
-        confucian_densities=[row[0] for row in culture_rows if row[0] is not None],
-        taoist_densities=[row[1] for row in culture_rows if row[1] is not None],
-        buddhist_densities=[row[2] for row in culture_rows if row[2] is not None],
-        folk_densities=[row[3] for row in culture_rows if row[3] is not None],
-        allusion_densities=[row[4] for row in culture_rows if row[4] is not None],
-        imagery_densities=[row[5] for row in culture_rows if row[5] is not None],
+        imagery_densities=[row[0] for row in culture_rows if row[0] is not None],
     )
 
 

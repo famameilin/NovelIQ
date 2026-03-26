@@ -124,6 +124,7 @@ class HierarchicalRelation(BaseModel):
     创建者: TraeAI
     任务: 添加层级关系导出到JSON功能
     """
+
     rel_id: int
     rel_type: str
     first_chunk: Optional[int] = None
@@ -186,11 +187,6 @@ class StyleStats(BaseModel):
 
 
 class CultureStats(BaseModel):
-    confucian_density: Optional[float] = None
-    taoist_density: Optional[float] = None
-    buddhist_density: Optional[float] = None
-    folk_density: Optional[float] = None
-    allusion_density: Optional[float] = None
     idiom_density: Optional[float] = None
     classical_sentence_ratio: Optional[float] = None
     imagery_density: Optional[float] = None
@@ -198,11 +194,7 @@ class CultureStats(BaseModel):
 
 class ChunkCulture(BaseModel):
     chunk_id: int
-    confucian_density: Optional[float] = None
-    taoist_density: Optional[float] = None
-    buddhist_density: Optional[float] = None
-    folk_density: Optional[float] = None
-    allusion_density: Optional[float] = None
+    imagery_density: Optional[float] = None
 
 
 class TopicInfo(BaseModel):
@@ -304,6 +296,7 @@ class BatchDeleteNovelsRequest(BaseModel):
     创建者: TraeAI
     任务: 新增批量删除功能
     """
+
     novel_ids: List[str] = Field(..., description="要删除的小说ID列表")
 
 
@@ -315,6 +308,7 @@ class BatchDeleteNovelsResponse(BaseModel):
     创建者: TraeAI
     任务: 新增批量删除功能
     """
+
     success: bool
     message: str
     deleted_count: int
@@ -331,6 +325,7 @@ class BatchDeleteTasksRequest(BaseModel):
     创建者: TraeAI
     任务: 新增批量删除功能
     """
+
     task_ids: List[str] = Field(..., description="要删除的任务ID列表")
 
 
@@ -342,6 +337,7 @@ class BatchDeleteTasksResponse(BaseModel):
     创建者: TraeAI
     任务: 新增批量删除功能
     """
+
     success: bool
     message: str
     deleted_count: int

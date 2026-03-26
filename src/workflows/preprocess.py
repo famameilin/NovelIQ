@@ -130,7 +130,6 @@ def run_preprocess(
         culture_data = _compute_chunk_culture_metrics(
             chunk,
             tokens,
-            cast(Dict, lexicons.get("culture", {})),
             cast(List[str], lexicons.get("imagery", [])),
         )
         culture_rows.append(culture_data)

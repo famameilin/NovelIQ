@@ -112,7 +112,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def insert_chunk_culture(
         self,
         run_id: str,
-        rows: Iterable[Tuple[int, float, float, float, float, float, float]],
+        rows: Iterable[Tuple[int, float]],
     ) -> None:
         insert_chunk_culture(self.session, run_id, rows)
 
@@ -145,7 +145,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     ) -> List[Tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float, str]]:
         return fetch_chunk_styles_full(self.session, run_id)
 
-    def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float, float]]:
+    def fetch_chunk_cultures_full(self, run_id: str) -> List[Tuple[int, float, float, float, float, float, float, float]]:
         return fetch_chunk_cultures_full(self.session, run_id)
 
     def fetch_chunk_topics_agg(self, run_id: str) -> List[Tuple[int, float]]:
