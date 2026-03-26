@@ -1,5 +1,9 @@
-from src.metrics.aggregate.computers import compute_language_style_metrics
-from src.metrics.aggregate.types import TextData
+from src.metrics.aggregate.computers import (
+    compute_language_style_metrics,
+    compute_traditional_culture_metrics,
+)
+from src.metrics.aggregate.types import CultureData, TextData
+from src.metrics.style_metrics_extra import compute_imagery_density
 
 
 def test_compute_language_style_metrics_tone_distribution_sums_to_one() -> None:
@@ -79,3 +83,30 @@ def test_compute_language_style_metrics_category_density_hits_multi_char_terms()
     assert result["category_density_measure"] > 0.0
     assert result["category_density_emotion"] > 0.0
     assert result["category_density_color"] > 0.0
+
+
+def test_compute_traditional_culture_metrics_keeps_whole_text_imagery_density() -> None:
+    texts = ["风风风风", "风"]
+    culture_data = CultureData(imagery_densities=[0.0, 1.0])
+    expected = compute_imagery_density(texts)
+
+    result = compute_traditional_culture_metrics(culture_data, texts)
+
+    assert expected != 0.5
+    assert result["imagery_density"] == expected
+
+
+def test_compute_traditional_culture_metrics_is_invariant_to_chunk_splitting() -> None:
+    full_text = ["风月山水梅兰竹菊"]
+    split_text = ["风月", "山水", "梅兰", "竹菊"]
+
+    full_result = compute_traditional_culture_metrics(
+        CultureData(imagery_densities=[0.25]),
+        full_text,
+    )
+    split_result = compute_traditional_culture_metrics(
+        CultureData(imagery_densities=[1.0, 1.0, 1.0, 1.0]),
+        split_text,
+    )
+
+    assert full_result["imagery_density"] == split_result["imagery_density"]
