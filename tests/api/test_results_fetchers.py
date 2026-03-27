@@ -114,3 +114,20 @@ def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
     assert protagonist.protagonist_score is not None
     assert support.protagonist_score is not None
     assert protagonist.protagonist_score > support.protagonist_score
+
+
+def test_fetch_characters_returns_all_items_when_limit_is_none():
+    rows = []
+    rows.extend([("甲", "主体", "neutral")] * 3)
+    rows.extend([("乙", "客体", "neutral")] * 2)
+    rows.extend([("丙", "帮助者", "neutral")] * 1)
+
+    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
+
+    result = _fetch_characters(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        limit=None,
+    )
+
+    assert [char.name for char in result] == ["甲", "乙", "丙"]

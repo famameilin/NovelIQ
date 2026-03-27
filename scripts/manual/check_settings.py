@@ -1,10 +1,16 @@
-from src.config.settings import settings
-from dotenv import load_dotenv
-from pathlib import Path
 import os
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
+from src.config.settings import settings
 
 # Manually load .env to compare
-env_path = Path(__file__).parent.parent / ".env"
+env_path = project_root / ".env"
 load_dotenv(env_path)
 
 print(f"Env ANNOTATION_BASE_URL: {os.getenv('ANNOTATION_BASE_URL')}")

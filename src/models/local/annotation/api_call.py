@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from loguru import logger
 
 from src.models.local.parser import extract_thinking_unified, try_parse_json
-from src.models.local.validator import validate_names_in_sources
+from src.models.local.validator import (
+    validate_character_appearances_sync,
+    validate_chunk_annotation,
+    validate_names_in_sources,
+)
 
 from .context import NameValidationMaxRetriesExceededError
 
@@ -103,17 +107,21 @@ def validate_annotation(
     修改内容: 从 AnnotationClient 类方法提取为独立函数
     """
     names_in_result = extract_names_from_annotation(result)
-    invalid_names = validate_names_in_sources(names_in_result, sources)
+    invalid_names = set(validate_names_in_sources(names_in_result, sources))
+    invalid_names.update(validate_character_appearances_sync(result.character_appearances, result.characters))
+    _, dangling_names = validate_chunk_annotation(result, {character.name for character in result.characters})
+    invalid_names.update(dangling_names)
 
     if invalid_names:
+        invalid_names_sorted = sorted(invalid_names)
         logger.error(
             "annotate_chunk found invalid names: {} chunk_id={}",
-            invalid_names,
+            invalid_names_sorted,
             chunk_id,
         )
         raise NameValidationMaxRetriesExceededError(
-            f"名字验证失败: {invalid_names}",
-            invalid_names=invalid_names,
+            f"名字验证失败: {invalid_names_sorted}",
+            invalid_names=invalid_names_sorted,
             bad_output=content_clean,
         )
 

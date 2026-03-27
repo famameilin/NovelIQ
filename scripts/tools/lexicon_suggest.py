@@ -4,18 +4,18 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+repo_root = Path(__file__).resolve().parents[2]
+sys.path.append(str(repo_root))
 
-from src.chunking.chunker import chunk_text
-from src.ingest.reader import ingest_path
-from src.lexicons.suggest import apply_updates, expand_lexicons
+from src.chunking.chunker import chunk_text  # noqa: E402
+from src.ingest.reader import ingest_path  # noqa: E402
+from src.lexicons.suggest import apply_updates, expand_lexicons  # noqa: E402
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    repo_root = Path(__file__).resolve().parents[1]
     novel_dir = repo_root / "data" / "novel"
     docs = ingest_path(novel_dir)
     chunks = chunk_text(docs[0].text, max_chars=2000, overlap=200, split_by_chapter=True)

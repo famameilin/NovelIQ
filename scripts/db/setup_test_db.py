@@ -6,11 +6,13 @@
 """
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-load_dotenv()
+project_root = Path(__file__).resolve().parents[2]
+load_dotenv(project_root / ".env")
 
 TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -57,7 +59,7 @@ def setup_pgvector():
 
 def create_tables():
     """创建所有表"""
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, str(project_root))
     from src.storage.models import Base
 
     engine = create_engine(TEST_DB_URL, echo=False)

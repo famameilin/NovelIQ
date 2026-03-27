@@ -239,9 +239,10 @@ def _fetch_all_results_data(
         arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
         main_characters = diagnosis.main_characters
 
-    characters = _fetch_characters(run_id, annotation_repo, arc_scores, main_characters)
+    characters = _fetch_characters(run_id, annotation_repo, arc_scores, main_characters, limit=None)
     if not characters:
         missing_fields.append("characters")
+    valid_character_names = {character.name for character in characters}
 
     topics = _fetch_topics(run_id, chunk_repo, alias_map)
 
@@ -249,12 +250,27 @@ def _fetch_all_results_data(
     if not chunk_styles:
         missing_fields.append("chunk_styles")
 
-    chunk_annotations = _fetch_chunk_annotations(run_id, annotation_repo, alias_map)
+    chunk_annotations = _fetch_chunk_annotations(
+        run_id,
+        annotation_repo,
+        alias_map,
+        valid_character_names=valid_character_names,
+    )
     if not chunk_annotations:
         missing_fields.append("chunk_annotations")
 
-    character_relations = _fetch_character_relations(run_id, annotation_repo, alias_map)
-    hierarchical_relations = _fetch_hierarchical_relations(novel_id, run_id, entity_repo)
+    character_relations = _fetch_character_relations(
+        run_id,
+        annotation_repo,
+        alias_map,
+        valid_character_names=valid_character_names,
+    )
+    hierarchical_relations = _fetch_hierarchical_relations(
+        novel_id,
+        run_id,
+        entity_repo,
+        valid_character_names=valid_character_names,
+    )
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
 
     result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)

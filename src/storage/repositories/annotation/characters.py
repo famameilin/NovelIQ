@@ -58,35 +58,68 @@ def fetch_all_character_names(
     """
     获取指定运行的所有角色名及出现频次
 
-    同时从 chunk_characters 和 character_appearances 表获取名字，
-    确保外貌描述性称呼也能参与消歧。
+    只从 chunk_characters 表获取名字，确保只有有明确角色功能的人物才被视为正式角色。
+    character_appearances 表仅作为身份线索参考，不直接参与消歧候选。
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-character-dangling-reference
+    修改内容: 移除 character_appearances 的合并逻辑，统一角色定义
 
     Returns:
         [{"name": "角色名", "count": 频次}, ...] 列表
     """
-    stmt1 = select(ChunkCharacter.name, func.count().label("count")).where(ChunkCharacter.run_id == run_id)
-    stmt2 = select(CharacterAppearance.raw_name.label("name"), func.count().label("count")).where(
-        CharacterAppearance.run_id == run_id
-    )
+    stmt = select(ChunkCharacter.name, func.count().label("count")).where(ChunkCharacter.run_id == run_id)
     if max_chunk_id is not None:
-        stmt1 = stmt1.where(ChunkCharacter.chunk_id <= max_chunk_id)
-        stmt2 = stmt2.where(CharacterAppearance.chunk_id <= max_chunk_id)
-    stmt1 = stmt1.group_by(ChunkCharacter.name)
-    stmt2 = stmt2.group_by(CharacterAppearance.raw_name)
-    result1 = session.execute(stmt1).fetchall()
-    result2 = session.execute(stmt2).fetchall()
+        stmt = stmt.where(ChunkCharacter.chunk_id <= max_chunk_id)
+    stmt = stmt.group_by(ChunkCharacter.name)
+    result = session.execute(stmt).fetchall()
     name_counts: dict[str, int] = {}
-    for row in result1:
+    for row in result:
         name = row[0]
         count = row[1]
-        if name:
-            name_counts[name] = name_counts.get(name, 0) + count
-    for row in result2:
-        name = row[0]
-        count = row[1]
-        if name:
+        if name and isinstance(name, str):
             name_counts[name] = name_counts.get(name, 0) + count
     return [{"name": name, "count": count} for name, count in sorted(name_counts.items(), key=lambda x: -x[1])]
+
+
+def get_normalized_character_names(
+    session: Session,
+    run_id: str,
+    alias_map: dict[str, str] | None = None,
+) -> set[str]:
+    """
+    获取归一化后的角色名集合
+
+    基于 chunk_characters 表和 alias_map 计算归一化后的角色名集合。
+    只包含在 chunk_characters 中出现过的角色。
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: fix-character-dangling-reference
+    说明: 用于实体创建时验证名字有效性
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        alias_map: 别名到规范名的映射字典（可选）
+
+    Returns:
+        归一化后的角色名集合
+    """
+    raw_names: set[str] = set()
+    for item in fetch_all_character_names(session, run_id):
+        name = item["name"]
+        if isinstance(name, str):
+            raw_names.add(name)
+    if not alias_map:
+        return raw_names
+
+    normalized_names: set[str] = set()
+    for name in raw_names:
+        normalized_name = alias_map.get(name, name)
+        normalized_names.add(normalized_name)
+    return normalized_names
 
 
 def update_character_names(
@@ -100,13 +133,22 @@ def update_character_names(
     更新角色名称（消歧）
 
     将别名更新为规范名，并创建实体和别名映射记录。
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-character-dangling-reference
+    修改内容: 只为在 chunk_characters 中出现的名字创建实体，避免悬空引用
     """
+    valid_names = get_normalized_character_names(session, run_id, alias_map)
     canonical_to_entity_id: dict[str, int] = {}
     all_names = sorted(set(alias_map.keys()) | set(alias_map.values()))
     for name in all_names:
         final_name = _resolve_final_character_name(name, alias_map, display_name_map)
         if name != final_name:
             _update_character_names_in_tables(session, name, final_name, run_id)
+        if final_name not in valid_names:
+            logger.debug(f"跳过创建实体: {final_name} 不在 chunk_characters 中")
+            continue
         entity_id = _ensure_entity_exists(session, novel_id, final_name, canonical_to_entity_id, run_id)
         if entity_id is not None:
             _create_alias_mapping(session, entity_id, name, final_name, run_id)

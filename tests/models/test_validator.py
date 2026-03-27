@@ -7,10 +7,13 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.models.local.validator import (
     generate_anonymous_name,
     replace_invalid_names_with_anonymous,
+    validate_character_appearances_sync,
+    validate_chunk_annotation,
     validate_names_in_sources,
 )
 from src.models.local.prompts import build_retry_prompt
 from src.models.local.schema import (
+    CharacterAppearance,
     CharacterSnapshot,
     ChunkAnnotation,
     DialogueSnapshot,
@@ -238,6 +241,50 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
         self.assertEqual(result.characters[0].name, "匿名_C4_0")
         self.assertEqual(result.relations[0].from_name, "匿名_C4_0")
         self.assertEqual(result.dialogues[0].speaker, "匿名_C4_0")
+
+
+class TestCharacterConsistencyValidation(unittest.TestCase):
+    def test_validate_character_appearances_sync_reports_explicit_name_missing_from_characters(self) -> None:
+        missing = validate_character_appearances_sync(
+            [
+                CharacterAppearance(raw_name="赵哥", identity_clue="赤甲卫赵哥", clue_type="named_by_other"),
+                CharacterAppearance(raw_name="灰衣人", identity_clue="一个灰衣人", clue_type="appearance_desc"),
+            ],
+            [CharacterSnapshot(name="贺重明", role_function="主体", action="对话", action_type="对话", emotion_score="neutral")],
+        )
+
+        self.assertEqual(missing, ["赵哥"])
+
+    def test_validate_chunk_annotation_reports_relation_and_dialogue_names_not_in_characters(self) -> None:
+        annotation = ChunkAnnotation(
+            emotional_valence="neutral",
+            event_type="铺垫",
+            pivot_moment=False,
+            cliffhanger=False,
+            has_foreshadowing=False,
+            foreshadowing_type=None,
+            foreshadowing_desc="",
+            characters=[
+                CharacterSnapshot(
+                    name="贺重明",
+                    role_function="主体",
+                    action="对话",
+                    action_type="对话",
+                    emotion_score="neutral",
+                )
+            ],
+            relations=[
+                RelationChangeSnapshot(from_name="贺重明", to_name="赵哥", type="盟友", change="新建"),
+            ],
+            dialogues=[
+                DialogueSnapshot(speaker="赵哥"),
+            ],
+        )
+
+        is_valid, missing = validate_chunk_annotation(annotation, {"贺重明"})
+
+        self.assertFalse(is_valid)
+        self.assertEqual(missing, ["赵哥"])
 
 
 class TestBuildRetryPrompt(unittest.TestCase):

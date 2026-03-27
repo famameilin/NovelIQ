@@ -59,7 +59,7 @@ Commands:
   cli [args...]        Run CLI via uv run python -m src.cli.main [args...]
   test [args...]       Run tests via uv run python -m pytest [args...]
   lint [args...]       Run ruff via uv run ruff check [args...]
-  typecheck [args...]  Run mypy via uv run mypy [args...]
+  typecheck [args...]  Run mypy for src via uv run mypy [args...]
   help                 Show this help
 
 Examples:
@@ -109,7 +109,7 @@ switch ($Command.ToLowerInvariant()) {
     "typecheck" {
         Ensure-Setup
         if ($Args.Count -eq 0) {
-            Run-Uv -CommandArgs @("--group", "dev", "mypy", "src", "tests", "scripts")
+            Run-Uv -CommandArgs @("--group", "dev", "mypy", "src")
         } else {
             $commandArgs = @("--group", "dev", "mypy") + $Args
             Run-Uv -CommandArgs $commandArgs

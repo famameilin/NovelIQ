@@ -13,18 +13,18 @@ import sys
 from pathlib import Path
 
 # Add project root to Python path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from dotenv import load_dotenv
-from loguru import logger
-from sqlalchemy import text
+from dotenv import load_dotenv  # noqa: E402
+from loguru import logger  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 # Load env from root
 env_path = project_root / ".env"
 load_dotenv(env_path)
 
-from src.storage.db import get_engine
+from src.storage.db import get_engine  # noqa: E402
 
 
 def restore_foreign_key() -> None:

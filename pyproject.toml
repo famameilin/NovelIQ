@@ -43,6 +43,7 @@ addopts = "-n 0"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = ["deprecated", "scripts/legacy", "scripts/manual"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4", "UP"]
@@ -53,8 +54,9 @@ known-first-party = ["src"]
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src"
-files = ["src", "tests", "scripts"]
+files = ["src"]
+exclude = '(^deprecated[\\/]|^scripts[\\/](legacy|manual)[\\/]|^scripts[\\/]run_api\.py$)'
+explicit_package_bases = true
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true

@@ -137,6 +137,7 @@ class TestCloudDiagnose:
                 dialogues=[],
             )
             ann_repo.insert_chunk_annotation(self.run_id, i, annotation)
+            ann_repo.insert_chunk_characters(self.run_id, i, annotation.characters)
             if annotation.relations:
                 ann_repo.insert_chunk_relations(self.run_id, i, annotation.relations)
 
@@ -153,22 +154,9 @@ class TestCloudDiagnose:
         ann_repo = AnnotationRepository(self.db_session)
         ann_repo.update_character_names(
             self.run_id,
-            alias_map={"角色0": "伯安", "伯安": "伯安"},
+            alias_map={"角色0": "伯安"},
             novel_id=self.novel_id,
-            display_name_map={"角色0": "伯安", "伯安": "伯安"},
-        )
-        ann_repo.insert_chunk_characters(
-            self.run_id,
-            0,
-            [
-                CharacterSnapshot(
-                    name="伯安",
-                    role_function="主体",
-                    action="测试行为",
-                    action_type="其他",
-                    emotion_score="neutral",
-                )
-            ],
+            display_name_map={"角色0": "伯安"},
         )
         self.db_session.commit()
 
@@ -189,6 +177,7 @@ class TestCloudDiagnose:
         assert len(payload["pivot_moments"]) > 0
         assert len(payload["foreshadowing_list"]) > 0
         assert payload["alias_map"]["角色0"] == "伯安"
+        assert "伯安" not in payload["alias_map"]
         assert "伯安" in payload["common_character_names"]
 
     def test_fetch_pivot_blocks(self) -> None:
