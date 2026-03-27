@@ -18,7 +18,7 @@ class _FakeDisambigClient:
 
     def disambiguate_characters(self, candidates, context_sentences=None, existing_names=None, rag_hint=None):
         self.received_existing_names = existing_names
-        return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
+        return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 
     def is_cloud_api(self) -> bool:
         return False
@@ -55,7 +55,7 @@ def test_run_final_disambiguation_uses_alias_map_values_and_only_unresolved_cand
         captured["existing_names"] = existing_names
         captured["candidates"] = candidates
         captured["rag_hint"] = rag_hint
-        return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
+        return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 
     class _DummyAnnRepo:
         def __init__(self, conn):
@@ -155,7 +155,7 @@ def test_validate_confidence_with_evidence_promotes_unique_marker_merge() -> Non
         "赵兰英想起贺伯安脊椎处的白金火焰符号，怀里的婴孩脊椎处也有同样印记"
     )
     result = ExtendedDisambigResult(
-        alias_map={"婴儿": "婴儿"},
+        canonical_decisions={"婴儿": "婴儿"},
         entity_types={"婴儿": "character"},
         entity_relations=[],
         alias_confidence={"婴儿": "medium"},
@@ -164,14 +164,14 @@ def test_validate_confidence_with_evidence_promotes_unique_marker_merge() -> Non
 
     validated = disambig_mod.validate_confidence_with_evidence(result, ["贺伯安"], {"婴儿": context})
 
-    assert validated.alias_map["婴儿"] == "贺伯安"
+    assert validated.canonical_decisions["婴儿"] == "贺伯安"
     assert validated.alias_confidence["婴儿"] == "high"
 
 
 def test_validate_confidence_with_evidence_does_not_merge_on_suffix_only_anchor_match() -> None:
     context = "王伯安肩头旧伤发作，额间冷汗密布"
     result = ExtendedDisambigResult(
-        alias_map={"灰衣公子": "灰衣公子"},
+        canonical_decisions={"灰衣公子": "灰衣公子"},
         entity_types={"灰衣公子": "character"},
         entity_relations=[],
         alias_confidence={"灰衣公子": "medium"},
@@ -180,7 +180,7 @@ def test_validate_confidence_with_evidence_does_not_merge_on_suffix_only_anchor_
 
     validated = disambig_mod.validate_confidence_with_evidence(result, ["贺伯安"], {"灰衣公子": context})
 
-    assert validated.alias_map["灰衣公子"] == "灰衣公子"
+    assert validated.canonical_decisions["灰衣公子"] == "灰衣公子"
     assert validated.alias_confidence["灰衣公子"] == "medium"
 
 
@@ -216,7 +216,7 @@ def test_collect_final_disambiguation_candidates_rereviews_self_resolved_extensi
 
 def test_build_alias_and_state_updates_from_confidence() -> None:
     result = ExtendedDisambigResult(
-        alias_map={"monkey": "hou_fei_bai", "abacus": "bai_zhi", "gray_man": "bai_zhi"},
+        canonical_decisions={"monkey": "hou_fei_bai", "abacus": "bai_zhi", "gray_man": "bai_zhi"},
         entity_types={},
         entity_relations=[],
         alias_confidence={"monkey": "high", "abacus": "medium", "gray_man": "low"},
@@ -236,7 +236,7 @@ def test_build_alias_and_state_updates_from_confidence() -> None:
 
 def test_build_alias_and_state_updates_keeps_high_self_resolution_in_alias_map() -> None:
     result = ExtendedDisambigResult(
-        alias_map={"hou_zheng_de": "hou_zheng_de"},
+        canonical_decisions={"hou_zheng_de": "hou_zheng_de"},
         entity_types={},
         entity_relations=[],
         alias_confidence={"hou_zheng_de": "high"},
@@ -253,7 +253,7 @@ def test_build_alias_and_state_updates_keeps_high_self_resolution_in_alias_map()
 
 def test_build_alias_and_state_updates_does_not_revert_existing_alias_on_medium_or_low() -> None:
     result = ExtendedDisambigResult(
-        alias_map={"masked_person": "bai_zhi", "gray_man": "bai_zhi"},
+        canonical_decisions={"masked_person": "bai_zhi", "gray_man": "bai_zhi"},
         entity_types={},
         entity_relations=[],
         alias_confidence={"masked_person": "medium", "gray_man": "low"},
