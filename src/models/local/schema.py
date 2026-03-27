@@ -224,7 +224,7 @@ class HierarchicalRelation(BaseModel):
     说明: 用于存储实体间的层级关系（belongs_to, member_of等）
     """
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
     from_entity: str = Field(alias="from", description="源实体名称")
     to_entity: str = Field(alias="to", description="目标实体名称")
@@ -249,17 +249,18 @@ class DisambiguateResponseModel(BaseModel):
     修改者: TraeAI
     任务: fix/disambig-thinking-save
     修改内容: 新增 _thinking_content 字段保存 thinking 内容
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 简化消歧响应模型
+    修改内容: 删除 common_name_map 字段，将 merge_target_map 重命名为 alias_map
     """
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
-    merge_target_map: dict[str, str] = Field(
+    alias_map: dict[str, str] = Field(
         default_factory=dict,
-        description="候选名到归并目标的映射，value 可指向知识库已有角色名或候选列表内名字",
-    )
-    common_name_map: dict[str, str] = Field(
-        default_factory=dict,
-        description="候选名到候选列表内常用名的映射，value 必须来自候选人名列表",
+        description="别名到规范名的映射，规范名 = 常用名 = 出现次数最多的名字",
     )
     alias_confidence: dict[str, DisambigConfidence] = Field(
         default_factory=dict,

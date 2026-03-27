@@ -56,6 +56,9 @@ DISAMBIG_STATE_RESOLVED = "resolved"
 DISAMBIG_STATE_REVIEW = "review"
 DISAMBIG_STATE_UNRESOLVED = "unresolved"
 
+EXTENSION_REVIEW_MIN_GAP = 3
+EXTENSION_REVIEW_MIN_RATIO = 1.5
+
 STRONG_EVIDENCE_TYPES = {"原文例句", "身份线索"}
 WEAK_EVIDENCE_TYPE = "前文摘要-弱证据"
 
@@ -74,7 +77,12 @@ def validate_confidence_with_evidence(
 
     规则：
     1. 仅【前文摘要-弱证据】支持的判断，alias_confidence 最高为 medium
-    2. 若 merge_target_map 指向已有角色，但证据唯一来源是弱证据，禁止合并
+    2. 若 alias_map 指向已有角色，但证据唯一来源是弱证据，禁止合并
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 简化消歧响应模型
+    修改内容: 将 merge_target_map 改为 alias_map
 
     Args:
         result: 消歧结果
@@ -85,7 +93,7 @@ def validate_confidence_with_evidence(
     """
     existing_set = set(existing_names) if existing_names else set()
 
-    for name, canonical in result.merge_target_map.items():
+    for name, canonical in result.alias_map.items():
         evidence_types = set(result.evidence_sources.get(name, []))
         has_strong_evidence = bool(evidence_types & STRONG_EVIDENCE_TYPES)
         only_weak_evidence = evidence_types == {WEAK_EVIDENCE_TYPE} or (evidence_types and not has_strong_evidence)
@@ -99,7 +107,7 @@ def validate_confidence_with_evidence(
         is_merging_to_existing = canonical in existing_set and canonical != name
         if is_merging_to_existing and only_weak_evidence:
             logger.info(f"Preventing merge of '{name}' to existing character '{canonical}' due to weak evidence only")
-            result.merge_target_map[name] = name
+            result.alias_map[name] = name
             result.alias_confidence[name] = DISAMBIG_CONFIDENCE_MEDIUM
 
     return result
@@ -340,24 +348,21 @@ def _save_disambiguation_interaction(
             if isinstance(result, ExtendedDisambigResult):
                 # ExtendedDisambigResult
                 response_dict = {
-                    "merge_target_map": result.merge_target_map,
-                    "common_name_map": result.common_name_map if hasattr(result, "common_name_map") else {},
+                    "alias_map": result.alias_map,
                     "alias_confidence": result.alias_confidence if hasattr(result, "alias_confidence") else {},
                     "entity_types": result.entity_types if hasattr(result, "entity_types") else {},
                     "entity_relations": result.entity_relations if hasattr(result, "entity_relations") else [],
                 }
             elif isinstance(result, dict):
                 response_dict = {
-                    "merge_target_map": result,
-                    "common_name_map": {},
+                    "alias_map": result,
                     "alias_confidence": {},
                     "entity_types": {},
                     "entity_relations": [],
                 }
             else:
                 response_dict = {
-                    "merge_target_map": {},
-                    "common_name_map": {},
+                    "alias_map": {},
                     "alias_confidence": {},
                     "entity_types": {},
                     "entity_relations": [],
@@ -556,7 +561,7 @@ def _build_alias_and_state_updates(
     alias_updates: dict[str, str] = {}
     state_updates: DisambigStateSnapshot = {}
 
-    for name, canonical in result.merge_target_map.items():
+    for name, canonical in result.alias_map.items():
         confidence = _normalize_disambig_confidence(result.alias_confidence.get(name))
         canonical_name = canonical or name
 
@@ -592,39 +597,6 @@ def _build_alias_and_state_updates(
     return alias_updates, merged_snapshot
 
 
-def _build_display_name_map(
-    alias_map: dict[str, str],
-    common_name_map: dict[str, str] | None,
-    state_snapshot: DisambigStateSnapshot | None = None,
-) -> dict[str, str]:
-    """Build a cluster-level display-name map from merge targets and common names."""
-    if not alias_map:
-        return {}
-
-    display_by_cluster: dict[str, str] = {}
-    all_names = set(alias_map.keys()) | set(alias_map.values())
-    for name in all_names:
-        merge_target = alias_map.get(name, name)
-        display_by_cluster.setdefault(merge_target, merge_target)
-
-    for name, display_name in (common_name_map or {}).items():
-        if not display_name:
-            continue
-        if state_snapshot:
-            state = state_snapshot.get(name, {})
-            if (
-                state.get("state") != DISAMBIG_STATE_RESOLVED
-                or state.get("confidence") != DISAMBIG_CONFIDENCE_HIGH
-            ):
-                continue
-        merge_target = alias_map.get(name, name)
-        if merge_target == display_name and merge_target in display_by_cluster:
-            continue
-        display_by_cluster[merge_target] = display_name
-
-    return {name: display_by_cluster.get(alias_map.get(name, name), alias_map.get(name, name)) for name in all_names}
-
-
 def _extract_names_from_candidates(candidates: list[NameCountCandidate]) -> list[str]:
     return [str(item.get("name", "")) for item in candidates if str(item.get("name", ""))]
 
@@ -642,37 +614,117 @@ def _build_candidate_payload_by_names(
     return payload
 
 
+def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, int]:
+    """Build a name -> count lookup for final disambiguation heuristics."""
+    name_counts: dict[str, int] = {}
+    for item in all_names:
+        name = str(item.get("name", ""))
+        if not name:
+            continue
+        raw_count = item.get("count", 0)
+        try:
+            name_counts[name] = int(raw_count)
+        except (TypeError, ValueError):
+            name_counts[name] = 0
+    return name_counts
+
+
+def _is_self_resolved_leaf(name: str, alias_map: dict[str, str]) -> bool:
+    """
+    Whether the name is currently resolved to itself and not acting as another alias's canonical target.
+
+    This targets the "early self-mapped and then locked" case like 贺伯安 -> 贺伯安.
+    """
+    if alias_map.get(name, name) != name:
+        return False
+    return not any(alias != name and canonical == name for alias, canonical in alias_map.items())
+
+
+def _has_more_frequent_related_name(
+    name: str,
+    name_counts: dict[str, int],
+) -> bool:
+    """
+    判断名字是否存在更高频的相关称呼
+
+    典型场景：
+    - 贺伯安 / 伯安
+    - 小侯爷 / 侯爷
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: 修复 final candidate 收集逻辑
+    说明: 对“已 resolved 但可能只是早期自映射”的名字重新放入 final review
+    """
+    current_count = name_counts.get(name, 0)
+    if current_count <= 0:
+        return False
+
+    for candidate, candidate_count in name_counts.items():
+        if candidate == name:
+            continue
+        if candidate not in name:
+            continue
+        if candidate_count <= current_count:
+            continue
+        if candidate_count - current_count < EXTENSION_REVIEW_MIN_GAP:
+            continue
+        if candidate_count / current_count < EXTENSION_REVIEW_MIN_RATIO:
+            continue
+        return True
+    return False
+
+
 def _collect_final_disambiguation_candidates(
     all_names: list[NameCountCandidate],
     alias_map: dict[str, str],
     state_snapshot: DisambigStateSnapshot | None = None,
 ) -> list[str]:
     """
-    Build unresolved candidates for final disambiguation.
+    Build candidates for final disambiguation.
 
-    Prefer state-based filtering:
-    - skip state=resolved
-    - keep state=review/unresolved/unknown
+    创建时间: 2026-03-13
+    创建者: TraeAI
+    任务: 项目文件结构整理与拆解
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 修复 final candidate 收集逻辑
+    修改内容: 低频名和高频名扩展形式不再被"早期自映射"锁死，允许重新进入 final review
+
+    新规则：
+    - state=resolved 不再直接跳过
+    - 对于“自映射且没有其他别名指向它”的叶子节点，如果存在更高频的相关称呼，允许重新进入 final review
+    - state 只影响优先级，不直接决定"永不复审"
     """
     names = _extract_names_from_candidates(all_names)
+    name_counts = _build_name_count_lookup(all_names)
     candidates: list[str] = []
     seen: set[str] = set()
 
-    if state_snapshot:
-        for name in names:
+    for name in names:
+        if name in seen:
+            continue
+
+        needs_review = False
+
+        if state_snapshot:
             state = state_snapshot.get(name, {}).get("state")
-            if state == DISAMBIG_STATE_RESOLVED or name in seen:
-                continue
+
+            if state != DISAMBIG_STATE_RESOLVED:
+                needs_review = True
+            elif _is_self_resolved_leaf(name, alias_map) and _has_more_frequent_related_name(name, name_counts):
+                needs_review = True
+                logger.debug(f"Re-reviewing self-resolved leaf with stronger related name: {name}")
+        else:
+            known_names = set(alias_map.keys()) | set(alias_map.values())
+            if name not in known_names:
+                needs_review = True
+
+        if needs_review:
             candidates.append(name)
             seen.add(name)
-        return candidates
 
-    known_names = set(alias_map.keys()) | set(alias_map.values())
-    for name in names:
-        if name in known_names or name in seen:
-            continue
-        candidates.append(name)
-        seen.add(name)
     return candidates
 
 
@@ -822,30 +874,25 @@ def _run_final_disambiguation(
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(
-            merge_target_map={},
+            alias_map={},
             entity_types={},
             entity_relations=[],
-            common_name_map={},
             alias_confidence={},
         )
 
     previous_alias_map = dict(alias_map)
-    if result.merge_target_map:
+    if result.alias_map:
         alias_updates, state_snapshot = _build_alias_and_state_updates(result, alias_map, state_snapshot)
         alias_map.update(alias_updates)
     if alias_map != previous_alias_map:
         logger.info(f"final disambiguation completed: {len(alias_map)} entries")
 
-    display_name_map = _build_display_name_map(alias_map, result.common_name_map, state_snapshot)
-
-    # 1. 先创建实体
     if alias_map:
         ann_repo = AnnotationRepository(conn)
         ann_repo.update_character_names(
             run_id,
             alias_map,
             novel_id=novel_id,
-            display_name_map=display_name_map,
         )
         logger.info(f"character names updated in annotations: {len(alias_map)} entries")
 
