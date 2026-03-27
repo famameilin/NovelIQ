@@ -10,8 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from loguru import logger
 
-from src.config.logging_config import LoggingConfig, setup_logging
-
+from src.config.logging_config import LoggingConfig, setup_logging  # noqa: E402
 
 ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -107,7 +106,7 @@ def main() -> None:
 
     if is_port_in_use(args.port):
         print(f"\033[91m错误: 端口 {args.port} 已被占用，请使用其他端口或关闭占用该端口的进程。\033[0m")
-        print(f"提示: 使用 --port 参数指定其他端口，例如: python scripts/run_api.py --port 8001")
+        print("提示: 使用 --port 参数指定其他端口，例如: python scripts/run_api.py --port 8001")
         sys.exit(1)
 
     project_root = Path(__file__).resolve().parents[1]

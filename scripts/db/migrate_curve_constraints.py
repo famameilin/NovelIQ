@@ -14,7 +14,6 @@
 """
 
 import os
-import sys
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -113,7 +112,7 @@ def main() -> None:
     # 迁移主数据库
     db_url = os.getenv("DATABASE_URL")
     if db_url:
-        print(f"\n=== 迁移主数据库 ===")
+        print("\n=== 迁移主数据库 ===")
         print(f"连接数据库: {db_url.split('@')[1] if '@' in db_url else db_url}")
         engine = create_engine(db_url)
         print("\n--- 迁移 emotion_curve 表 ---")
@@ -124,7 +123,7 @@ def main() -> None:
     # 迁移测试数据库
     test_db_url = os.getenv("TEST_DATABASE_URL")
     if test_db_url:
-        print(f"\n=== 迁移测试数据库 ===")
+        print("\n=== 迁移测试数据库 ===")
         print(f"连接数据库: {test_db_url.split('@')[1] if '@' in test_db_url else test_db_url}")
         engine = create_engine(test_db_url)
         print("\n--- 迁移 emotion_curve 表 ---")

@@ -10,14 +10,17 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).parent.parent
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from src.utils.token_counter import count_tokens, count_messages_tokens
-
+from src.utils.token_counter import count_tokens  # noqa: E402
 
 LOCAL_INTERACTION_TYPES = [
     ("annotate", "phase1"),
@@ -28,11 +31,7 @@ LOCAL_INTERACTION_TYPES = [
 
 def estimate_from_db():
     """从数据库查询实际数据估算上下文窗口"""
-    import os
-    from dotenv import load_dotenv
     load_dotenv()
-    
-    from sqlalchemy import create_engine, text
     
     database_url = os.getenv("DATABASE_URL")
     if not database_url:

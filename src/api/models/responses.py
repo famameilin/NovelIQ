@@ -73,6 +73,7 @@ class CharacterStats(BaseModel):
       - 新增 dominant_role_ratio 字段
       - 新增 protagonist_score 字段
       - 新增 is_protagonist 字段
+
     """
 
     name: str
