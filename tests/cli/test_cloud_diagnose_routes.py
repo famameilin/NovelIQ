@@ -26,6 +26,7 @@
 修改内容: 移除 common_character_names 相关测试断言
 """
 
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -174,11 +175,30 @@ class TestCloudDiagnose:
         修改内容: 移除不存在的 display_name_map 参数
         """
         self._create_full_data(5)
-        ann_repo = AnnotationRepository(self.db_session)
-        ann_repo.update_character_names(
-            self.run_id,
-            alias_map={"角色0": "伯安"},
-            novel_id=self.novel_id,
+        state_payload = {
+            "discovered_names": ["角色0", "伯安"],
+            "known_canonical_names": ["伯安"],
+            "alias_merges": [["角色0", "伯安"]],
+            "review_status": [],
+            "pending_relations": [],
+            "version": 1,
+            "created_at": 1.0,
+            "updated_at": 1.0,
+        }
+        self.db_session.execute(
+            text(
+                """
+                INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at, entity_relations, disambig_states)
+                VALUES (:run_id, :alias_map, :updated_at, :entity_relations, :disambig_states)
+                """
+            ),
+            {
+                "run_id": self.run_id,
+                "alias_map": json.dumps(state_payload, ensure_ascii=False),
+                "updated_at": 1.0,
+                "entity_relations": None,
+                "disambig_states": None,
+            },
         )
         self.db_session.commit()
 
@@ -192,13 +212,14 @@ class TestCloudDiagnose:
         assert "foreshadowing_list" in payload
         assert "first_chapter_summary" in payload
         assert "last_chapter_summary" in payload
-        assert "alias_map" in payload
+        assert "known_characters" in payload
+        assert "alias_merges" in payload
 
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
         assert len(payload["foreshadowing_list"]) > 0
-        assert payload["alias_map"]["角色0"] == "伯安"
-        assert "伯安" not in payload["alias_map"]
+        assert payload["known_characters"] == ["伯安"]
+        assert payload["alias_merges"] == {"角色0": "伯安"}
 
     def test_fetch_pivot_blocks(self) -> None:
         self._create_full_data(5)
@@ -316,3 +337,18 @@ class TestCloudDiagnose:
         assert finalized.protagonist == "角色0"
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
+
+    def test_build_messages_uses_alias_merges(self) -> None:
+        client = object.__new__(DiagnosisClient)
+
+        messages = client._build_messages(
+            {
+                "novel_id": self.novel_id,
+                "known_characters": ["伯安"],
+                "alias_merges": {"角色0": "伯安"},
+            }
+        )
+
+        assert "alias_merges" in messages[0]["content"]
+        assert "known_characters" in messages[0]["content"]
+        assert '"角色0": "伯安"' in messages[0]["content"]

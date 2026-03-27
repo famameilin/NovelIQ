@@ -261,15 +261,15 @@ class DisambiguateResponseModel(BaseModel):
 
     修改时间: 2026-03-27
     修改者: TraeAI
-    任务: 简化消歧响应模型
-    修改内容: 删除 common_name_map 字段，将 merge_target_map 重命名为 alias_map
+    任务: disambiguation-state-three-layer
+    修改内容: 将 alias_map 重命名为 canonical_decisions，明确表达模型判断而非运行时状态
     """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
-    alias_map: dict[str, str] = Field(
+    canonical_decisions: dict[str, str] = Field(
         default_factory=dict,
-        description="别名到规范名的映射，规范名 = 常用名 = 出现次数最多的名字",
+        description="模型判断的规范名决策，key为候选名，value为规范名。允许自映射(A->A)表示独立角色。",
     )
     alias_confidence: dict[str, DisambigConfidence] = Field(
         default_factory=dict,

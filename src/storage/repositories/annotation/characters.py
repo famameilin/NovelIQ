@@ -122,6 +122,180 @@ def get_normalized_character_names(
     return normalized_names
 
 
+def ensure_canonical_entities(
+    session: Session,
+    run_id: str,
+    known_canonical_names: frozenset[str],
+    novel_id: str,
+) -> dict[str, int]:
+    """
+    只为 known_canonical_names 创建实体
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 从 update_character_names 拆分，只负责实体创建
+    
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        known_canonical_names: 规范角色名集合
+        novel_id: 小说ID
+    
+    Returns:
+        {canonical_name: entity_id} 映射
+    """
+    canonical_to_entity_id: dict[str, int] = {}
+    
+    for canonical in known_canonical_names:
+        stmt = select(Entity.entity_id).where(
+            Entity.novel_id == novel_id,
+            Entity.canonical == canonical,
+            Entity.run_id == run_id,
+        )
+        row = session.execute(stmt).fetchone()
+        if row:
+            canonical_to_entity_id[canonical] = row[0]
+            continue
+        
+        entity = Entity(
+            novel_id=novel_id,
+            canonical=canonical,
+            entity_type="character",
+            first_chunk=None,
+            last_chunk=None,
+            description=None,
+            confidence=1.0,
+            run_id=run_id,
+        )
+        session.add(entity)
+        session.flush()
+        if entity.entity_id is not None:
+            canonical_to_entity_id[canonical] = entity.entity_id
+    
+    session.commit()
+    logger.info(f"Ensured {len(canonical_to_entity_id)} canonical entities")
+    return canonical_to_entity_id
+
+
+def apply_alias_merges(
+    session: Session,
+    run_id: str,
+    alias_merges: dict[str, str],
+) -> None:
+    """
+    执行文本和关系归一化
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 从 update_character_names 拆分，只负责文本归一化
+    
+    只处理 alias != canonical 的映射
+    
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        alias_merges: 别名到规范名的映射（只包含 alias != canonical）
+    """
+    correction_count = 0
+    for alias, canonical in alias_merges.items():
+        if alias == canonical:
+            continue
+        
+        session.execute(
+            update(ChunkCharacter)
+            .where(ChunkCharacter.name == alias, ChunkCharacter.run_id == run_id)
+            .values(name=canonical)
+        )
+        
+        session.execute(
+            update(ChunkRelation)
+            .where(ChunkRelation.from_char == alias, ChunkRelation.run_id == run_id)
+            .values(from_char=canonical)
+        )
+        
+        session.execute(
+            update(ChunkRelation)
+            .where(ChunkRelation.to_char == alias, ChunkRelation.run_id == run_id)
+            .values(to_char=canonical)
+        )
+        
+        session.execute(
+            update(ChunkDialogue)
+            .where(ChunkDialogue.speaker == alias, ChunkDialogue.run_id == run_id)
+            .values(speaker=canonical)
+        )
+        
+        session.execute(
+            update(CharacterAppearance)
+            .where(CharacterAppearance.raw_name == alias, CharacterAppearance.run_id == run_id)
+            .values(raw_name=canonical)
+        )
+        
+        correction_count += 1
+    
+    session.execute(
+        delete(ChunkRelation).where(
+            ChunkRelation.from_char == ChunkRelation.to_char,
+            ChunkRelation.run_id == run_id,
+        )
+    )
+    
+    session.commit()
+    logger.info(f"Applied {correction_count} alias merges")
+
+
+def create_entity_alias_rows(
+    session: Session,
+    run_id: str,
+    alias_merges: dict[str, str],
+    novel_id: str,
+    canonical_to_entity_id: dict[str, int],
+) -> None:
+    """
+    创建 entity_aliases 记录
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 从 update_character_names 拆分，只负责别名记录创建
+    
+    只为 alias != canonical 的映射创建记录
+    
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        alias_merges: 别名到规范名的映射（只包含 alias != canonical）
+        novel_id: 小说ID
+        canonical_to_entity_id: 规范名到实体ID的映射
+    """
+    created_count = 0
+    
+    for alias, canonical in alias_merges.items():
+        if alias == canonical:
+            continue
+        
+        entity_id = canonical_to_entity_id.get(canonical)
+        if entity_id is None:
+            logger.warning(f"Entity not found for canonical '{canonical}', skipping alias '{alias}'")
+            continue
+        
+        stmt = insert(EntityAlias).values(
+            entity_id=entity_id,
+            alias=alias,
+            alias_type="disambiguation",
+            source_chunk=None,
+            confirm_count=1,
+            run_id=run_id,
+        ).on_conflict_do_nothing(constraint="uq_entity_aliases_entity_alias")
+        session.execute(stmt)
+        created_count += 1
+    
+    session.commit()
+    logger.info(f"Created {created_count} entity alias rows")
+
+
 def update_character_names(
     session: Session,
     run_id: str,
