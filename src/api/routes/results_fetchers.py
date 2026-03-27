@@ -113,6 +113,62 @@ def _normalize_name(name: str | None, alias_map: dict[str, str] | None) -> str |
     return name
 
 
+def _normalize_name_list(values: list[str] | None, alias_map: dict[str, str] | None) -> list[str] | None:
+    """
+    对名称列表应用别名归一化并去重，保持原有顺序
+
+    创建时间: 2026-03-27
+    创建者: Codex
+    任务: fix-topic-label-alias-normalization
+
+    Args:
+        values: 待归一化的名称列表
+        alias_map: 别名到规范名的映射字典
+
+    Returns:
+        归一化并去重后的名称列表
+    """
+    if not values:
+        return values
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized_value = alias_map.get(value, value) if alias_map else value
+        if normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        normalized.append(normalized_value)
+
+    return normalized
+
+
+def _normalize_text_by_alias_map(text: str | None, alias_map: dict[str, str] | None) -> str | None:
+    """
+    对自由文本中的人物别名做谨慎归一化
+
+    创建时间: 2026-03-27
+    创建者: Codex
+    任务: fix-diagnosis-text-alias-normalization
+
+    说明:
+        仅对 alias_map 中 alias != canonical 的条目做精确替换，
+        并按别名长度倒序处理，尽量避免较短别名误伤较长名称。
+    """
+    if not text or not alias_map:
+        return text
+
+    normalized_text = text
+    replacements = sorted(
+        ((alias, canonical) for alias, canonical in alias_map.items() if alias and canonical and alias != canonical),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    for alias, canonical in replacements:
+        normalized_text = normalized_text.replace(alias, canonical)
+    return normalized_text
+
+
 def _fetch_emotion_curve(run_id: str, stats_repo: StatsRepository) -> list:
     """
     获取情绪曲线数据
@@ -144,7 +200,12 @@ def _fetch_rhythm_curve(run_id: str, stats_repo: StatsRepository) -> list:
     return [RhythmCurvePoint(chunk_id=row[0], tension_proxy=row[1], tension_composite=row[2]) for row in rows]
 
 
-def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> list:
+def _fetch_characters(
+    run_id: str,
+    annotation_repo: AnnotationRepository,
+    arc_scores: dict[str, float] | None = None,
+    main_characters: list[str] | None = None,
+) -> list:
     """
     获取角色统计数据
 
@@ -157,6 +218,23 @@ def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> lis
     修改者: TraeAI
     任务: fix-role-function-aggregation
     修改内容: 统计 role_function 频次，取众数而非首次出现的值
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 扩展角色统计字段
+    修改内容:
+      - 将 role_function 改为 dominant_role_function
+      - 新增 role_function_distribution 字段
+      - 新增 dominant_role_ratio 字段
+      - protagonist_score 和 is_protagonist 暂时为 None（Task 7 会实现）
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: protagonist-score-fusion
+    修改内容:
+      - 增加 arc_scores 和 main_characters 参数
+      - 实现 protagonist_score 四维度融合计算
+      - 实现 is_protagonist 判定逻辑
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
 
@@ -194,18 +272,95 @@ def _fetch_characters(run_id: str, annotation_repo: AnnotationRepository) -> lis
     for name, data in merged.items():
         avg_score = data["weighted_score"] / data["count"] if data["count"] > 0 else 0
         rf_counts = data["role_function_counts"]
-        majority_role = max(rf_counts, key=rf_counts.get)
+        total_count = data["count"]
+        dominant_role = max(rf_counts, key=rf_counts.get)
+        dominant_count = rf_counts[dominant_role]
+        dominant_ratio = dominant_count / total_count if total_count > 0 else 0.0
+
         result.append(
             CharacterStats(
                 name=name,
-                appearance_count=int(data["count"]),
-                role_function=majority_role,
+                appearance_count=int(total_count),
+                dominant_role_function=dominant_role,
+                role_function_distribution=rf_counts,
+                dominant_role_ratio=dominant_ratio,
+                protagonist_score=None,
+                is_protagonist=None,
                 avg_emotion_score=avg_score,
             )
         )
 
     result.sort(key=lambda x: x.appearance_count, reverse=True)
+
+    if arc_scores is not None and main_characters is not None:
+        result = _calculate_protagonist_scores(result, arc_scores, main_characters)
+
     return result[: settings.api.query_limit]
+
+
+def _calculate_protagonist_scores(
+    characters: list[CharacterStats],
+    arc_scores: dict[str, float],
+    main_characters: list[str],
+) -> list[CharacterStats]:
+    """
+    计算主角评分并判定是否为主角
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: protagonist-score-fusion
+    说明: 四维度融合计算 protagonist_score，并判定 is_protagonist
+
+    Args:
+        characters: 角色统计列表（已按出场次数排序）
+        arc_scores: 角色弧线评分字典 {name: score}
+        main_characters: 主要角色名称列表
+
+    Returns:
+        更新了 protagonist_score 和 is_protagonist 的角色列表
+    """
+    if not characters:
+        return characters
+
+    max_appearance = max(c.appearance_count for c in characters)
+    max_arc_score = max(arc_scores.values()) if arc_scores else 0.0
+
+    for char in characters:
+        appearance_norm = char.appearance_count / max_appearance if max_appearance > 0 else 0.0
+
+        subject_count = char.role_function_distribution.get("主体", 0)
+        subject_ratio = subject_count / char.appearance_count if char.appearance_count > 0 else 0.0
+
+        arc_score = arc_scores.get(char.name, 0.0)
+        arc_norm = arc_score / max_arc_score if max_arc_score > 0 else 0.0
+
+        in_main_cast = 1.0 if char.name in main_characters else 0.0
+
+        protagonist_score = (
+            0.25 * appearance_norm
+            + 0.25 * subject_ratio
+            + 0.25 * arc_norm
+            + 0.25 * in_main_cast
+        )
+
+        char.protagonist_score = round(protagonist_score, 4)
+
+    top_character = max(
+        characters,
+        key=lambda item: (
+            item.protagonist_score if item.protagonist_score is not None else float("-inf"),
+            item.appearance_count,
+        ),
+    )
+    top_score = top_character.protagonist_score
+
+    for char in characters:
+        char.is_protagonist = False
+
+    if top_score is not None and top_score >= 0.6:
+        top_character.is_protagonist = True
+
+    return characters
 
 
 def _fetch_topics(
@@ -255,8 +410,7 @@ def _fetch_topics(
     for row in rows:
         topic_id = row[0]
         words: list[str] = topic_words_map.get(topic_id, [])
-        if alias_map:
-            words = [alias_map.get(w, w) for w in words]
+        words = _normalize_name_list(words, alias_map) or []
         if words:
             result.append(TopicInfo(topic_id=topic_id, words=words, weight=row[1]))
 
@@ -278,6 +432,11 @@ def _fetch_diagnosis(
     修改者: TraeAI
     任务: fix-arc-scores-alias-inconsistency
     修改内容: 添加 alias_map 参数，对 arc_scores 的人物名称进行归一化
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: add-protagonist-fields-to-diagnosis
+    修改内容: 添加 protagonist、main_characters、core_cast 字段的解析和别名归一化
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
 
@@ -286,22 +445,42 @@ def _fetch_diagnosis(
 
     arc_scores_raw = _parse_json_field(data.get("arc_scores"))
     arc_scores_normalized = _normalize_arc_scores(arc_scores_raw, alias_map)
+    topic_labels_raw = _parse_json_field(data.get("topic_labels"))
+    topic_labels_normalized = (
+        _normalize_name_list(topic_labels_raw, alias_map) if isinstance(topic_labels_raw, list) else topic_labels_raw
+    )
+
+    protagonist_raw = data.get("protagonist")
+    protagonist_normalized = _normalize_name(protagonist_raw, alias_map)
+
+    main_characters_raw = _parse_json_field(data.get("main_characters"))
+    main_characters_normalized = (
+        _normalize_name_list(main_characters_raw, alias_map) if isinstance(main_characters_raw, list) else main_characters_raw
+    )
+
+    core_cast_raw = _parse_json_field(data.get("core_cast"))
+    core_cast_normalized = (
+        _normalize_name_list(core_cast_raw, alias_map) if isinstance(core_cast_raw, list) else core_cast_raw
+    )
 
     return DiagnosisResult(
         foreshadow_rate=data.get("foreshadow_rate"),
         arc_scores=arc_scores_normalized,
         narrative_type=data.get("narrative_type"),
-        topic_labels=_parse_json_field(data.get("topic_labels")),
-        diagnosis=data.get("diagnosis"),
+        topic_labels=topic_labels_normalized,
+        diagnosis=_normalize_text_by_alias_map(data.get("diagnosis"), alias_map),
         value_logic_type=data.get("value_logic_type"),
-        value_logic_reason=data.get("value_logic_reason"),
+        value_logic_reason=_normalize_text_by_alias_map(data.get("value_logic_reason"), alias_map),
         power_stance_score=_parse_int_field(data.get("power_stance_score")),
-        power_stance_reason=data.get("power_stance_reason"),
+        power_stance_reason=_normalize_text_by_alias_map(data.get("power_stance_reason"), alias_map),
         common_people_dignity=_parse_int_field(data.get("common_people_dignity")),
-        dignity_reason=data.get("dignity_reason"),
+        dignity_reason=_normalize_text_by_alias_map(data.get("dignity_reason"), alias_map),
         cultural_depth_score=data.get("cultural_depth_score"),
-        cultural_depth_reason=data.get("cultural_depth_reason"),
+        cultural_depth_reason=_normalize_text_by_alias_map(data.get("cultural_depth_reason"), alias_map),
         narrative_arc_type=data.get("narrative_arc_type"),
+        protagonist=protagonist_normalized,
+        main_characters=main_characters_normalized,
+        core_cast=core_cast_normalized,
     )
 
 

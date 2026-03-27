@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.config import settings
+from src.storage.repositories.annotation.characters import fetch_alias_map, fetch_all_character_names
 
 """
 创建时间: 2025-03-11
@@ -121,6 +122,8 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "first_chapter_summary": first_summary,
         "last_chapter_summary": last_summary,
         "topic_words": topic_words,
+        "alias_map": _fetch_alias_map(conn, effective_run_id),
+        "common_character_names": _fetch_common_character_names(conn, effective_run_id),
     }
 
     logger.info(
@@ -323,3 +326,17 @@ def _fetch_topic_words(conn: Session, run_id: str, top_n: int = 10) -> list[dict
             }
         )
     return result_list
+
+
+def _fetch_alias_map(conn: Session, run_id: str) -> dict[str, str]:
+    if not run_id:
+        return {}
+    return fetch_alias_map(conn, run_id)
+
+
+def _fetch_common_character_names(conn: Session, run_id: str) -> list[str]:
+    if not run_id:
+        return []
+
+    names = fetch_all_character_names(conn, run_id)
+    return [str(item["name"]) for item in names if item.get("name")]
