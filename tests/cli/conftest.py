@@ -29,11 +29,14 @@ class FakeClient(CloudModelClient):
         return CloudAnalysis(
             novel_id=payload.get("novel_id"),
             foreshadow_rate=0.1,
-            arc_scores=[0.1],
+            arc_scores={"角色0": 8.5, "角色1": 7.0},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
+            protagonist="角色0",
+            main_characters=["角色0", "角色1"],
+            core_cast=["角色0", "角色1"],
         )
 
 

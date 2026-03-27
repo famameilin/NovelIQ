@@ -56,9 +56,32 @@ class RhythmCurvePoint(BaseModel):
 
 
 class CharacterStats(BaseModel):
+    """
+    角色统计模型
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: 扩展角色统计字段
+    说明: 初始模型包含 name, appearance_count, role_function, avg_emotion_score
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 扩展角色统计字段
+    修改内容:
+      - 将 role_function 重命名为 dominant_role_function
+      - 新增 role_function_distribution 字段
+      - 新增 dominant_role_ratio 字段
+      - 新增 protagonist_score 字段
+      - 新增 is_protagonist 字段
+    """
+
     name: str
     appearance_count: int
-    role_function: str
+    dominant_role_function: str
+    role_function_distribution: dict[str, int] = Field(default_factory=dict)
+    dominant_role_ratio: float = 0.0
+    protagonist_score: float | None = None
+    is_protagonist: bool | None = None
     avg_emotion_score: float | None = None
 
 
@@ -224,6 +247,9 @@ class DiagnosisResult(BaseModel):
     cultural_depth_score: int | None = None
     cultural_depth_reason: str | None = None
     narrative_arc_type: str | None = None
+    protagonist: str | None = None
+    main_characters: list[str] | None = None
+    core_cast: list[str] | None = None
 
 
 class NovelResultsResponse(BaseModel):

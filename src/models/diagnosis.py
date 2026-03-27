@@ -304,6 +304,9 @@ class DiagnosisClient(BaseModelClient):
                 cultural_depth_score=result.cultural_depth_score,
                 cultural_depth_reason=result.cultural_depth_reason,
                 narrative_arc_type=result.narrative_arc_type,
+                protagonist=result.protagonist,
+                main_characters=result.main_characters,
+                core_cast=result.core_cast,
             )
         return result
 
@@ -312,6 +315,21 @@ class DiagnosisClient(BaseModelClient):
 
         prompt = json.dumps(payload, ensure_ascii=False)
         system_prompt = settings.prompts.diagnose
+        common_character_names = payload.get("common_character_names") or []
+        alias_map = payload.get("alias_map") or {}
+
+        if common_character_names or alias_map:
+            naming_rules = [
+                "Naming rules:",
+                "Use the common character names as the only normalized names across all output fields.",
+                "Common names are the most frequently used names in the text, not necessarily formal full names.",
+                "When alias_map provides an alias mapping, always rewrite the alias to its mapped common name before reasoning or output.",
+                "Apply this consistently in arc_scores, topic_labels, diagnosis, value_logic_reason, power_stance_reason, dignity_reason, and cultural_depth_reason.",
+                f"common_character_names={json.dumps(common_character_names, ensure_ascii=False)}",
+                f"alias_map={json.dumps(alias_map, ensure_ascii=False)}",
+            ]
+            system_prompt = f"{system_prompt}\n\n" + "\n".join(naming_rules)
+
         return [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},

@@ -32,12 +32,15 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.workflows.diagnose import run_diagnose
 from src.models.cloud import build_diagnosis_payload
+from src.models.cloud.schema import CloudAnalysis
+from src.models.diagnosis import DiagnosisClient
 from src.storage.repositories import (
     ChunkRepository,
     ChunkStyleData,
     RunRepository,
     AnnotationRepository,
     DiagnosisRepository,
+    StatsRepository,
 )
 from src.chunking.chunker import Chunk
 from src.models.local.schema import (
@@ -147,6 +150,27 @@ class TestCloudDiagnose:
         修改内容: 添加run_id参数
         """
         self._create_full_data(5)
+        ann_repo = AnnotationRepository(self.db_session)
+        ann_repo.update_character_names(
+            self.run_id,
+            alias_map={"角色0": "伯安", "伯安": "伯安"},
+            novel_id=self.novel_id,
+            display_name_map={"角色0": "伯安", "伯安": "伯安"},
+        )
+        ann_repo.insert_chunk_characters(
+            self.run_id,
+            0,
+            [
+                CharacterSnapshot(
+                    name="伯安",
+                    role_function="主体",
+                    action="测试行为",
+                    action_type="其他",
+                    emotion_score="neutral",
+                )
+            ],
+        )
+        self.db_session.commit()
 
         payload = build_diagnosis_payload(self.db_session, self.novel_id, self.run_id)
 
@@ -158,10 +182,14 @@ class TestCloudDiagnose:
         assert "foreshadowing_list" in payload
         assert "first_chapter_summary" in payload
         assert "last_chapter_summary" in payload
+        assert "alias_map" in payload
+        assert "common_character_names" in payload
 
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
         assert len(payload["foreshadowing_list"]) > 0
+        assert payload["alias_map"]["角色0"] == "伯安"
+        assert "伯安" in payload["common_character_names"]
 
     def test_fetch_pivot_blocks(self) -> None:
         self._create_full_data(5)
@@ -240,10 +268,42 @@ class TestCloudDiagnose:
         )
         rows = self.db_session.execute(
             text(
-                "SELECT novel_id, narrative_type, foreshadow_rate, narrative_arc_type "
+                "SELECT novel_id, narrative_type, foreshadow_rate, narrative_arc_type, protagonist, main_characters, core_cast "
                 "FROM cloud_analysis WHERE run_id = :run_id"
             ),
             {"run_id": self.run_id},
         ).fetchall()
         assert len(rows) > 0
         assert rows[0][3] == "白手起家"
+        assert rows[0][4] == "角色0"
+        assert "角色0" in rows[0][5]
+        assert "角色1" in rows[0][6]
+
+        stats_repo = StatsRepository(self.db_session)
+        fetched = stats_repo.fetch_cloud_analysis(self.novel_id, self.run_id)
+        assert fetched is not None
+        assert fetched["protagonist"] == "角色0"
+        assert fetched["main_characters"] is not None
+        assert fetched["core_cast"] is not None
+
+    def test_finalize_result_preserves_character_fields(self) -> None:
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_rate=0.1,
+            arc_scores={"角色0": 8.5},
+            narrative_type="三幕",
+            topic_labels=["成长"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            protagonist="角色0",
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
+        )
+
+        finalized = client._finalize_result(result, "fixed-novel")
+
+        assert finalized.novel_id == "fixed-novel"
+        assert finalized.protagonist == "角色0"
+        assert finalized.main_characters == ["角色0"]
+        assert finalized.core_cast == ["角色0", "角色1"]
