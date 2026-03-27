@@ -4,7 +4,11 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.local.disambiguation import ExtendedDisambigResult, build_extended_result_from_response
+from src.models.local.disambiguation import (
+    EvidenceProfile,
+    ExtendedDisambigResult,
+    build_extended_result_from_response,
+)
 from src.models.local.schema import DisambiguateResponseModel, HierarchicalRelation
 
 
@@ -35,15 +39,23 @@ class TestExtendedDisambigResult(unittest.TestCase):
         self.assertEqual(result.entity_types, {})
         self.assertEqual(result.entity_relations, [])
 
-    def test_evidence_sources_field(self) -> None:
+    def test_evidence_profiles_field(self) -> None:
         result = ExtendedDisambigResult(
             alias_map={"he_zhong_ming": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
-            evidence_sources={"he_zhong_ming": ["original_text", "identity_clue"]},
+            evidence_profiles={
+                "he_zhong_ming": EvidenceProfile(
+                    has_original_sentence=True,
+                    has_identity_clue=True,
+                    has_summary=False,
+                    strong_signals=["identity_reveal"],
+                    strength="strong",
+                )
+            },
         )
 
-        self.assertEqual(result.evidence_sources["he_zhong_ming"], ["original_text", "identity_clue"])
+        self.assertEqual(result.evidence_profiles["he_zhong_ming"].strength, "strong")
 
 
 class TestBuildExtendedResultFromResponse(unittest.TestCase):
@@ -117,23 +129,26 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
         self.assertEqual(result.alias_map["he_zhong_ming"], "bo_an")
         self.assertEqual(result.alias_map["bai_zhi"], "bai_zhi")
 
-    def test_evidence_sources_extraction(self) -> None:
+    def test_evidence_profiles_are_derived_from_context(self) -> None:
         response = DisambiguateResponseModel(
             alias_map={"he_zhong_ming": "bo_an", "gray_man": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
-            evidence_sources={
-                "he_zhong_ming": ["original_text", "identity_clue"],
-                "gray_man": ["summary_only"],
+        )
+
+        result = build_extended_result_from_response(
+            response,
+            _candidates("he_zhong_ming", "gray_man"),
+            {
+                "he_zhong_ming": "贺重明的真实身份是伯安 | 【身份提示】贺重明其实就是伯安",
+                "gray_man": "【前文总结】灰衣人伯安现身",
             },
         )
 
-        result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "gray_man"))
+        self.assertEqual(result.evidence_profiles["he_zhong_ming"].strength, "strong")
+        self.assertEqual(result.evidence_profiles["gray_man"].strength, "weak")
 
-        self.assertEqual(result.evidence_sources["he_zhong_ming"], ["original_text", "identity_clue"])
-        self.assertEqual(result.evidence_sources["gray_man"], ["summary_only"])
-
-    def test_evidence_sources_default_to_original_text(self) -> None:
+    def test_missing_context_produces_weak_evidence_profile(self) -> None:
         response = DisambiguateResponseModel(
             alias_map={"bo_an": "bo_an"},
             entity_types={"bo_an": "character"},
@@ -142,7 +157,7 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
         result = build_extended_result_from_response(response, _candidates("bo_an"))
 
-        self.assertEqual(result.evidence_sources["bo_an"], ["原文例句"])
+        self.assertEqual(result.evidence_profiles["bo_an"].strength, "weak")
 
 
 class TestHierarchicalRelationModel(unittest.TestCase):

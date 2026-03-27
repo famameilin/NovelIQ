@@ -115,7 +115,16 @@ class AnnotationConfig:
             object.__setattr__(
                 self,
                 "valid_clue_types",
-                ["none", "self_introduction", "named_by_other", "alias_revealed", "appearance_desc"]
+                [
+                    "none",
+                    "self_introduction",
+                    "named_by_other",
+                    "alias_revealed",
+                    "appearance_desc",
+                    "unique_body_marker",
+                    "kinship_identity",
+                    "naming_scene",
+                ]
             )
         if self.valid_event_types is None:
             object.__setattr__(
