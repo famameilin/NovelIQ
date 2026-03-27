@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
+from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
 
 
 def test_apply_disambiguation_decisions_keeps_uncertain_self_map_in_review() -> None:
@@ -53,10 +54,10 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
     )
 
     with (
-        patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),
-        patch.object(disambig_mod, "fetch_all_character_names", return_value=[]),
-        patch.object(disambig_mod, "_process_entity_relations", return_value=(1, [])) as process_mock,
-        patch.object(disambig_mod, "_save_disambig_checkpoint_state", return_value=None),
+        patch.object(pipeline_mod, "AnnotationRepository", _DummyAnnRepo),
+        patch.object(pipeline_mod, "fetch_all_character_names", return_value=[]),
+        patch.object(pipeline_mod, "_process_entity_relations", return_value=(1, [])) as process_mock,
+        patch.object(pipeline_mod, "_save_disambig_checkpoint_state", return_value=None),
     ):
         new_state = disambig_mod._run_final_disambiguation_with_state(
             conn=None,
@@ -86,15 +87,15 @@ def test_run_final_disambiguation_with_state_skips_known_canonical_without_revie
     )
 
     with (
-        patch.object(disambig_mod, "AnnotationRepository", MagicMock()),
+        patch.object(pipeline_mod, "AnnotationRepository", MagicMock()),
         patch.object(
-            disambig_mod,
+            pipeline_mod,
             "fetch_all_character_names",
             return_value=[{"name": "hou_fei_bai", "count": 12}],
         ),
-        patch.object(disambig_mod, "_retry_disambig") as retry_mock,
-        patch.object(disambig_mod, "_process_entity_relations", return_value=(0, [])),
-        patch.object(disambig_mod, "_save_disambig_checkpoint_state", return_value=None),
+        patch.object(pipeline_mod, "_retry_disambig") as retry_mock,
+        patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_mod, "_save_disambig_checkpoint_state", return_value=None),
     ):
         new_state = disambig_mod._run_final_disambiguation_with_state(
             conn=None,

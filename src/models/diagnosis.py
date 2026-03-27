@@ -14,6 +14,11 @@
 修改者: TraeAI
 任务: 简化 diagnosis payload
 修改内容: _build_messages 方法移除 common_character_names 相关逻辑，只使用 alias_map
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: 创建统一的模型交互记录接口
+修改内容: 使用 record_model_interaction 替代内联保存逻辑
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from pydantic import BaseModel
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
 from src.models.cloud.schema import CloudAnalysis
+from src.models.interactions import record_model_interaction
 from src.models.local.base import BaseModelClient, TokenUsageCallback
 
 T = TypeVar("T", bound=BaseModel)
@@ -205,39 +211,23 @@ class DiagnosisClient(BaseModelClient):
         duration_ms = int((time.time() - start_time) * 1000)
 
         if run_id and response:
-            try:
-                from src.storage.db import get_session_factory
-                from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
+            message = response.choices[0].message
+            content_clean, thinking_content = self._extract_response_content(message)
 
-                Session = get_session_factory()
-                session = Session()
-                try:
-                    repo = ModelInteractionRepository(session)
-                    message = response.choices[0].message
-                    content_clean, thinking_content = self._extract_response_content(message)
-                    prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-
-                    repo.save_interaction(
-                        run_id=run_id,
-                        chunk_id=None,
-                        interaction_type="diagnose",
-                        phase="diagnose",
-                        attempt_number=attempt_number,
-                        model_name=self._config.model,
-                        model_provider="cloud" if self.is_cloud_api() else "local",
-                        prompt=prompt_text,
-                        response=content_clean,
-                        thinking=thinking_content,
-                        response_chars=len(content_clean),
-                        thinking_chars=len(thinking_content) if thinking_content else 0,
-                        has_thinking=bool(thinking_content and thinking_content.strip()),
-                        status="success",
-                        duration_ms=duration_ms,
-                    )
-                finally:
-                    session.close()
-            except Exception as e:
-                logger.warning(f"Failed to save diagnose interaction: {e}")
+            record_model_interaction(
+                run_id=run_id,
+                chunk_id=None,
+                interaction_type="diagnose",
+                phase="diagnose",
+                attempt_number=attempt_number,
+                messages=messages,
+                response_text=content_clean,
+                thinking_content=thinking_content,
+                duration_ms=duration_ms,
+                model_name=self._config.model,
+                model_provider="cloud" if self.is_cloud_api() else "local",
+                session=self._session,
+            )
 
         if self._analysis_logger and response:
             message = response.choices[0].message
