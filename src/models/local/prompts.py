@@ -27,7 +27,12 @@ DISAMBIGUATE_SYSTEM_PROMPT = settings.prompts.disambiguate
 ANONYMOUS_DISAMBIG_SYSTEM_PROMPT = settings.prompts.anonymous_disambig
 
 
-def build_retry_prompt(original_user_prompt: str, bad_output: str, invalid_names: list[str]) -> str:
+def build_retry_prompt(
+    original_user_prompt: str,
+    bad_output: str,
+    invalid_names: list[str],
+    validation_details: dict[str, list[str]] | None = None,
+) -> str:
     """
     构建重试 prompt
 
@@ -44,10 +49,29 @@ def build_retry_prompt(original_user_prompt: str, bad_output: str, invalid_names
         重试 prompt
     """
     invalid_names_str = "、".join(invalid_names)
+    sections: list[str] = []
+    details = validation_details or {}
+
+    hallucinated_names = details.get("hallucinated_names") or []
+    dangling_names = details.get("dangling_names") or []
+
+    if hallucinated_names:
+        sections.append(
+            f"上次输出中以下名字未在文本或可用上下文中出现：{'、'.join(hallucinated_names)}"
+        )
+    if dangling_names:
+        sections.append(
+            "上次输出中以下名字出现在 relations 或 dialogues 中，"
+            f"但没有写入 characters：{'、'.join(dangling_names)}"
+        )
+    if not sections:
+        sections.append(f"上次输出中以下名字需要修正：{invalid_names_str}")
+
+    sections_text = "\n".join(sections)
     return f"""{original_user_prompt}
 
 【上次输出有误，请重新标注】
-上次输出中以下名字未在文本中出现，属于捏造：{invalid_names_str}
+{sections_text}
 上次的错误输出：
 {bad_output}
 

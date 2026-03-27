@@ -63,8 +63,11 @@
 若摘要中出现名字粘连或歧义，会自动降权该摘要的可靠性。
 
 ### characters
-只记录本块中有实际行为或台词的人物，旁白提及不算。
-- name：使用别名表中的正式名，若无正式名用原文称呼
+只记录本块中有实际行为、台词，或被当前事件直接作用到的人物。
+仅被旁白提及、仅作为身份线索出现的人物，不写入 characters。
+- name：使用人物当前已知的常用名
+- 如果别名表中已有映射，使用箭头右侧的常用名
+- 如果没有映射，使用原文中最稳定、最常用的称呼
 - role_function：【主体|客体|发送者|接收者|帮助者|反对者】
 - action：一个动词短语，本块中最重要的一个行为
 - emotion_score：五档枚举，见下方说明
@@ -86,6 +89,9 @@
 
 ### character_appearances
 记录本块中出现的身份线索，用于后续人名消解。
+允许 character_appearances 中的人名不出现在 characters。
+- raw_name：保留原文实际出现的称呼，不做归一化
+- identity_clue：描述该称呼对应的身份线索
 clue_type 为 none 时不输出该条记录。
 
 【identity_clue 格式要求 - 必须使用完整句式】
@@ -193,7 +199,7 @@ clue_type 为 none 时不输出该条记录。
   "chunk_summary": "50字以内的核心事件摘要",
   "characters": [
     {
-      "name": "正式名或原文称呼",
+      "name": "常用名或原文称呼",
       "role_function": "主体|客体|发送者|接收者|帮助者|反对者",
       "action": "核心行为动词短语",
       "emotion_score": "strong_positive|mild_positive|neutral|mild_negative|strong_negative"
@@ -243,8 +249,8 @@ clue_type 为 none 时不输出该条记录。
 - 头衔（如"队长"、"长老"）不作为独立实体记录，仅在 identity_clue 中提及
 
 【人名格式规则】
-1. characters[].name  必须使用人物的正式名/本名
-2. 如果提供了【人物别名对照表】，必须使用对照表中的正式名
+1. characters[].name  必须使用人物当前已知的常用名
+2. 如果提供了【人物别名对照表】，必须使用对照表箭头右侧的常用名
 3. 如人物在文本中无任何称呼，使用「匿名_C{chunk_id}_{序号}」作为占位名
 
 【严格限制】
