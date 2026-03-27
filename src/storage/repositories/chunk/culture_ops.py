@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from typing import Any, cast
+
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapper, Session
 
 from src.storage.models import ChunkCulture
 
@@ -43,7 +45,7 @@ def insert_chunk_culture(
         for row in rows
     ]
     if culture_rows:
-        session.bulk_insert_mappings(ChunkCulture, culture_rows)  # type: ignore[arg-type]
+        session.bulk_insert_mappings(cast(Mapper[Any], ChunkCulture), culture_rows)
 
 
 def fetch_chunk_cultures_full(session: Session, run_id: str) -> list[tuple[int, float | None]]:

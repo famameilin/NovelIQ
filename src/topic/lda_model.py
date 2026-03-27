@@ -15,14 +15,14 @@ from .schema import TopicModel, TopicResult
 
 @dataclass
 class LDAConfig:
-    num_topics: int = None  # type: ignore
-    passes: int = None  # type: ignore
-    iterations: int = None  # type: ignore
-    alpha: str = None  # type: ignore
-    eta: str = None  # type: ignore
-    random_state: int = None  # type: ignore
-    chunksize: int = None  # type: ignore
-    minimum_probability: float = None  # type: ignore
+    num_topics: int | None = None
+    passes: int | None = None
+    iterations: int | None = None
+    alpha: str | None = None
+    eta: str | None = None
+    random_state: int | None = None
+    chunksize: int | None = None
+    minimum_probability: float | None = None
 
     def __post_init__(self) -> None:
         if self.num_topics is None:
@@ -104,6 +104,7 @@ class LDATrainer:
             minimum_probability=self._config.minimum_probability,
         )
         logger.info("LDA训练完成")
+        assert self._config.num_topics is not None
         return TopicModel(
             num_topics=self._config.num_topics,
             dictionary=dictionary,

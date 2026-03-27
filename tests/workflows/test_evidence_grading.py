@@ -24,7 +24,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
     def test_weak_evidence_downgrades_high_to_medium(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"灰衣人": "伯安"},
+            canonical_decisions={"灰衣人": "伯安"},
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"灰衣人": DISAMBIG_CONFIDENCE_HIGH},
@@ -37,7 +37,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
     def test_strong_evidence_keeps_high(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"贺重明": "伯安"},
+            canonical_decisions={"贺重明": "伯安"},
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"贺重明": DISAMBIG_CONFIDENCE_HIGH},
@@ -50,7 +50,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
     def test_weak_evidence_prevents_merge_to_existing_character(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"灰衣人": "伯安"},
+            canonical_decisions={"灰衣人": "伯安"},
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"灰衣人": DISAMBIG_CONFIDENCE_HIGH},
@@ -59,12 +59,12 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
         validated = validate_confidence_with_evidence(result, ["伯安"])
 
-        self.assertEqual(validated.alias_map["灰衣人"], "灰衣人")
+        self.assertEqual(validated.canonical_decisions["灰衣人"], "灰衣人")
         self.assertEqual(validated.alias_confidence["灰衣人"], DISAMBIG_CONFIDENCE_MEDIUM)
 
     def test_strong_evidence_allows_merge_to_existing_character(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"贺重明": "伯安"},
+            canonical_decisions={"贺重明": "伯安"},
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"贺重明": DISAMBIG_CONFIDENCE_HIGH},
@@ -73,12 +73,12 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
         validated = validate_confidence_with_evidence(result, ["伯安"])
 
-        self.assertEqual(validated.alias_map["贺重明"], "伯安")
+        self.assertEqual(validated.canonical_decisions["贺重明"], "伯安")
         self.assertEqual(validated.alias_confidence["贺重明"], DISAMBIG_CONFIDENCE_HIGH)
 
     def test_mixed_evidence_keeps_high(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"贺重明": "伯安"},
+            canonical_decisions={"贺重明": "伯安"},
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"贺重明": DISAMBIG_CONFIDENCE_HIGH},
@@ -91,7 +91,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
     def test_empty_context_downgrades_high_to_medium(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"伯安": "伯安"},
+            canonical_decisions={"伯安": "伯安"},
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"伯安": DISAMBIG_CONFIDENCE_HIGH},
@@ -104,7 +104,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
     def test_self_mapping_not_affected_by_weak_evidence(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"灰衣人": "灰衣人"},
+            canonical_decisions={"灰衣人": "灰衣人"},
             entity_types={"灰衣人": "character"},
             entity_relations=[],
             alias_confidence={"灰衣人": DISAMBIG_CONFIDENCE_HIGH},
@@ -113,7 +113,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
         validated = validate_confidence_with_evidence(result, ["伯安"])
 
-        self.assertEqual(validated.alias_map["灰衣人"], "灰衣人")
+        self.assertEqual(validated.canonical_decisions["灰衣人"], "灰衣人")
 
     def test_strong_unique_marker_promotes_self_mapping_to_existing_character(self) -> None:
         context = (
@@ -121,7 +121,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
             "赵兰英想起贺伯安脊椎处的白金火焰符号，怀里的婴孩脊椎处也有同样印记"
         )
         result = ExtendedDisambigResult(
-            alias_map={"婴儿": "婴儿"},
+            canonical_decisions={"婴儿": "婴儿"},
             entity_types={"婴儿": "character"},
             entity_relations=[],
             alias_confidence={"婴儿": DISAMBIG_CONFIDENCE_MEDIUM},
@@ -130,7 +130,7 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
         validated = validate_confidence_with_evidence(result, ["贺伯安"], {"婴儿": context})
 
-        self.assertEqual(validated.alias_map["婴儿"], "贺伯安")
+        self.assertEqual(validated.canonical_decisions["婴儿"], "贺伯安")
         self.assertEqual(validated.alias_confidence["婴儿"], DISAMBIG_CONFIDENCE_HIGH)
 
 

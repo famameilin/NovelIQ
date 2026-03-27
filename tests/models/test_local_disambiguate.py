@@ -51,18 +51,18 @@ class TestLocalDisambiguate(unittest.TestCase):
 
     def test_disambiguate_characters_returns_alias_map(self) -> None:
         client = self._make_client(
-            DisambiguateResponseModel(alias_map={"third_brother": "zhang_san", "young_master_zhang": "zhang_san"})
+            DisambiguateResponseModel(canonical_decisions={"third_brother": "zhang_san", "young_master_zhang": "zhang_san"})
         )
 
         result = client.disambiguate_characters(_candidates("zhang_san", "third_brother", "young_master_zhang"))
 
         self.assertIsInstance(result, ExtendedDisambigResult)
-        self.assertEqual(result.alias_map["third_brother"], "zhang_san")
-        self.assertEqual(result.alias_map["young_master_zhang"], "zhang_san")
+        self.assertEqual(result.canonical_decisions["third_brother"], "zhang_san")
+        self.assertEqual(result.canonical_decisions["young_master_zhang"], "zhang_san")
 
     def test_disambiguate_characters_with_context_sentences(self) -> None:
         client = self._make_client(
-            DisambiguateResponseModel(alias_map={"monkey": "hou_fei_bai"})
+            DisambiguateResponseModel(canonical_decisions={"monkey": "hou_fei_bai"})
         )
 
         result = client.disambiguate_characters(
@@ -71,7 +71,7 @@ class TestLocalDisambiguate(unittest.TestCase):
         )
 
         self.assertIsInstance(result, ExtendedDisambigResult)
-        self.assertEqual(result.alias_map["monkey"], "hou_fei_bai")
+        self.assertEqual(result.canonical_decisions["monkey"], "hou_fei_bai")
 
     def test_disambiguate_characters_empty_candidates_returns_empty(self) -> None:
         config = TaskModelConfig(
@@ -88,10 +88,10 @@ class TestLocalDisambiguate(unittest.TestCase):
         result = client.disambiguate_characters([])
 
         self.assertIsInstance(result, ExtendedDisambigResult)
-        self.assertEqual(result.alias_map, {})
+        self.assertEqual(result.canonical_decisions, {})
 
     def test_disambiguate_characters_with_existing_names(self) -> None:
-        client = self._make_client(DisambiguateResponseModel(alias_map={}))
+        client = self._make_client(DisambiguateResponseModel(canonical_decisions={}))
         result = client.disambiguate_characters(_candidates("zhang_san"), existing_names=["li_si", "wang_wu"])
         self.assertIsInstance(result, ExtendedDisambigResult)
 
