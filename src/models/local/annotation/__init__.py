@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+from src.config.constants import PHASE_MAX_RETRIES
 from src.models.local.annotation.api_call import (
     execute_validation_retry_call,
     extract_names_from_annotation,
@@ -31,7 +32,6 @@ from src.models.local.annotation.api_call import (
     validate_annotation,
 )
 from src.models.local.annotation.context import (
-    PHASE_MAX_RETRIES,
     AnnotationContext,
     MultiPhaseAnnotationResult,
     NameValidationMaxRetriesExceededError,

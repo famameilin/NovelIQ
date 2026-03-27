@@ -13,6 +13,11 @@
 修改者: TraeAI
 任务: 添加模型交互记录保存
 修改内容: 添加 save_model_interaction 工具函数
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: 创建统一的模型交互记录接口
+修改内容: 使用 record_model_interaction 替代本地 _save_interaction 函数
 """
 
 from __future__ import annotations
@@ -20,98 +25,16 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
+from src.config.constants import PHASE_MAX_RETRIES
+from src.models.interactions import record_model_interaction
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import ForeshadowingResult
 
-from .context import PHASE_MAX_RETRIES, Phase2MaxRetriesExceededError
+from .context import Phase2MaxRetriesExceededError
 from .messages import _build_foreshadowing_messages
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-
-
-def _save_interaction(
-    client: AnnotationClient,
-    run_id: str | None,
-    chunk_id: int | None,
-    phase: str,
-    attempt_number: int,
-    messages: list[dict],
-    content_clean: str,
-    thinking_content: str | None,
-    duration_ms: int,
-    is_cloud: bool,
-) -> None:
-    """
-    保存模型交互记录
-
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 添加模型交互记录保存
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 使用 client 的 _session 属性保存交互记录
-    修改内容: 优先使用 client._session，如果没有则创建新 session
-    """
-    if not run_id:
-        return
-
-    try:
-        from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
-
-        prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-
-        # 优先使用 client 的 _session
-        if hasattr(client, '_session') and client._session is not None:
-            repo = ModelInteractionRepository(client._session)
-            repo.save_interaction(
-                run_id=run_id,
-                chunk_id=chunk_id,
-                interaction_type="annotate",
-                phase=phase,
-                attempt_number=attempt_number,
-                model_name=client._config.model if hasattr(client._config, 'model') else None,
-                model_provider="cloud" if is_cloud else "local",
-                prompt=prompt_text,
-                response=content_clean,
-                thinking=thinking_content,
-                response_chars=len(content_clean),
-                thinking_chars=len(thinking_content) if thinking_content else 0,
-                has_thinking=bool(thinking_content and thinking_content.strip()),
-                status="success",
-                duration_ms=duration_ms,
-            )
-        else:
-            # 没有 _session，创建新 session
-            from src.storage.db import get_session_factory
-            Session = get_session_factory()
-            session = Session()
-            try:
-                repo = ModelInteractionRepository(session)
-                repo.save_interaction(
-                    run_id=run_id,
-                    chunk_id=chunk_id,
-                    interaction_type="annotate",
-                    phase=phase,
-                    attempt_number=attempt_number,
-                    model_name=client._config.model if hasattr(client._config, 'model') else None,
-                    model_provider="cloud" if is_cloud else "local",
-                    prompt=prompt_text,
-                    response=content_clean,
-                    thinking=thinking_content,
-                    response_chars=len(content_clean),
-                    thinking_chars=len(thinking_content) if thinking_content else 0,
-                    has_thinking=bool(thinking_content and thinking_content.strip()),
-                    status="success",
-                    duration_ms=duration_ms,
-                )
-            finally:
-                session.close()
-    except Exception as e:
-        logger.warning(f"Failed to save model interaction: {e}")
 
 
 def _do_phase2(
@@ -152,18 +75,19 @@ def _do_phase2(
 
     duration_ms = int((time.time() - start_time) * 1000)
 
-    # 保存交互记录
-    _save_interaction(
-        client=client,
+    record_model_interaction(
         run_id=run_id,
         chunk_id=chunk_id,
+        interaction_type="annotate",
         phase="phase2",
         attempt_number=attempt_number,
         messages=messages,
-        content_clean=content_clean,
+        response_text=content_clean,
         thinking_content=thinking_content,
         duration_ms=duration_ms,
-        is_cloud=is_cloud,
+        model_name=client._config.model if hasattr(client._config, 'model') else None,
+        model_provider="cloud" if is_cloud else "local",
+        session=client._session if hasattr(client, '_session') else None,
     )
 
     client._log_prompt_response(

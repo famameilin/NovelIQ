@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: 标注上下文数据类和异常定义
+
+修改时间: 2026-03-28
+修改者: TraeAI
+任务: consolidate-codebase-architecture
+修改内容: 从 constants 导入 PHASE_MAX_RETRIES，移除本地重复定义
 """
 
 from __future__ import annotations
@@ -154,6 +159,3 @@ class MultiPhaseAnnotationResult:
     dialogue_speakers: dict[int, str] | None = None
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
-
-
-PHASE_MAX_RETRIES = 3

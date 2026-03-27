@@ -8,10 +8,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-
-from sqlalchemy import delete, func, select
 from typing import Any, cast
 
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Mapper, Session
 
 from src.storage.models import ChunkTopic
