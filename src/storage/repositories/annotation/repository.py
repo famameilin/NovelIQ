@@ -162,3 +162,34 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
     def apply_alias_corrections(self, run_id: str, alias_map: dict[str, str]) -> None:
         """用最终消歧结果修正所有标注表里的错误名字"""
         return characters.apply_alias_corrections(self.session, run_id, alias_map)
+
+    def ensure_canonical_entities(
+        self,
+        run_id: str,
+        known_canonical_names: frozenset[str],
+        novel_id: str,
+    ) -> dict[str, int]:
+        return characters.ensure_canonical_entities(
+            self.session,
+            run_id,
+            known_canonical_names,
+            novel_id,
+        )
+
+    def apply_alias_merges(self, run_id: str, alias_merges: dict[str, str]) -> None:
+        return characters.apply_alias_merges(self.session, run_id, alias_merges)
+
+    def create_entity_alias_rows(
+        self,
+        run_id: str,
+        alias_merges: dict[str, str],
+        novel_id: str,
+        canonical_to_entity_id: dict[str, int],
+    ) -> None:
+        return characters.create_entity_alias_rows(
+            self.session,
+            run_id,
+            alias_merges,
+            novel_id,
+            canonical_to_entity_id,
+        )
