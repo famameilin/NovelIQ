@@ -109,5 +109,5 @@ def test_init_annotation_clients_uses_noop_fallback_for_lightweight_annotation_s
 
     incremental_result = incremental_client.disambiguate_characters(candidates=_candidates("a_jia"))
     full_result = full_client.disambiguate_characters(candidates=_candidates("a_yi"))
-    assert incremental_result.alias_map == {}
-    assert full_result.alias_map == {}
+    assert incremental_result.canonical_decisions == {}
+    assert full_result.canonical_decisions == {}

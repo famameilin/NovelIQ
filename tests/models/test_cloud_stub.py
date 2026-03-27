@@ -67,8 +67,8 @@ class TestCloudStub(unittest.TestCase):
         config = TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k")
         client = ConfiguredCloudModelClient(config, client=mock_client)
 
-        expected_alias_map = {"alias_a": "zhangsan"}
-        fake_result = MagicMock(alias_map=expected_alias_map)
+        expected_canonical_decisions = {"alias_a": "zhangsan"}
+        fake_result = MagicMock(canonical_decisions=expected_canonical_decisions)
 
         with patch.object(client._disambiguation_client, "disambiguate_characters", return_value=fake_result) as mock_disambiguate:
             result = client.disambiguate_characters(
@@ -77,11 +77,12 @@ class TestCloudStub(unittest.TestCase):
                 existing_names=["zhangsan"],
             )
 
-        self.assertEqual(result, expected_alias_map)
+        self.assertEqual(result, expected_canonical_decisions)
         mock_disambiguate.assert_called_once_with(
             candidates=_candidates("zhangsan", "alias_a"),
             context_sentences={"alias_a": "alias_a smiled"},
             existing_names=["zhangsan"],
+            rag_hint=None,
         )
 
 

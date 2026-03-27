@@ -13,7 +13,7 @@ def _candidates(*names: str) -> list[dict[str, int | str]]:
 
 def test_disambiguate_response_model_accepts_alias_confidence() -> None:
     response = DisambiguateResponseModel(
-        alias_map={"monkey": "hou_fei_bai"},
+        canonical_decisions={"monkey": "hou_fei_bai"},
         alias_confidence={"monkey": "high"},
         entity_types={},
         entity_relations=[],
@@ -23,7 +23,7 @@ def test_disambiguate_response_model_accepts_alias_confidence() -> None:
 
 def test_build_extended_result_defaults_confidence_to_medium() -> None:
     response = DisambiguateResponseModel(
-        alias_map={"monkey": "hou_fei_bai"},
+        canonical_decisions={"monkey": "hou_fei_bai"},
         entity_types={},
         entity_relations=[],
     )

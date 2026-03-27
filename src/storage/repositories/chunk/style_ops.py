@@ -17,7 +17,7 @@ from typing import Any, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Row
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapper, Session
 
 from src.storage.models import ChunkStyle
 from src.storage.repositories.chunk import ChunkStyleData
@@ -65,7 +65,7 @@ def insert_chunk_style(
         else:
             style_rows.append(cast(dict, row))
     if style_rows:
-        session.bulk_insert_mappings(ChunkStyle, style_rows)  # type: ignore[arg-type]
+        session.bulk_insert_mappings(cast(Mapper[Any], ChunkStyle), style_rows)
 
 
 def fetch_chunk_styles_full(

@@ -19,29 +19,29 @@ def _candidates(*names: str) -> list[dict[str, int | str]]:
 class TestExtendedDisambigResult(unittest.TestCase):
     def test_basic_creation(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"he_zhong_ming": "bo_an"},
+            canonical_decisions={"he_zhong_ming": "bo_an"},
             entity_types={"bo_an": "character", "red_guard": "group"},
             entity_relations=[{"from": "bo_an", "to": "he_family", "type": "belongs_to"}],
         )
 
-        self.assertEqual(result.alias_map["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.canonical_decisions["he_zhong_ming"], "bo_an")
         self.assertEqual(result.entity_types["bo_an"], "character")
         self.assertEqual(len(result.entity_relations), 1)
 
     def test_empty_creation(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={},
+            canonical_decisions={},
             entity_types={},
             entity_relations=[],
         )
 
-        self.assertEqual(result.alias_map, {})
+        self.assertEqual(result.canonical_decisions, {})
         self.assertEqual(result.entity_types, {})
         self.assertEqual(result.entity_relations, [])
 
     def test_evidence_profiles_field(self) -> None:
         result = ExtendedDisambigResult(
-            alias_map={"he_zhong_ming": "bo_an"},
+            canonical_decisions={"he_zhong_ming": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
             evidence_profiles={
@@ -61,7 +61,7 @@ class TestExtendedDisambigResult(unittest.TestCase):
 class TestBuildExtendedResultFromResponse(unittest.TestCase):
     def test_basic_parsing(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},
+            canonical_decisions={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},
             entity_types={"bo_an": "character", "red_guard": "group", "he_family": "organization"},
             entity_relations=[
                 HierarchicalRelation(**{"from": "bo_an", "to": "he_family", "type": "belongs_to"}),
@@ -70,27 +70,27 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
         result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "red_guard", "he_family"))
 
-        self.assertEqual(result.alias_map["he_zhong_ming"], "bo_an")
-        self.assertEqual(result.alias_map["red_guard"], "red_guard")
+        self.assertEqual(result.canonical_decisions["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.canonical_decisions["red_guard"], "red_guard")
         self.assertEqual(result.entity_types["red_guard"], "group")
         self.assertEqual(result.entity_types["he_family"], "organization")
         self.assertEqual(result.entity_relations[0]["type"], "belongs_to")
 
     def test_group_and_org_self_mapping(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={"red_guard": "red_guard", "he_family": "he_family"},
+            canonical_decisions={"red_guard": "red_guard", "he_family": "he_family"},
             entity_types={"red_guard": "group", "he_family": "organization"},
             entity_relations=[],
         )
 
         result = build_extended_result_from_response(response, _candidates("red_guard", "he_family"))
 
-        self.assertEqual(result.alias_map["red_guard"], "red_guard")
-        self.assertEqual(result.alias_map["he_family"], "he_family")
+        self.assertEqual(result.canonical_decisions["red_guard"], "red_guard")
+        self.assertEqual(result.canonical_decisions["he_family"], "he_family")
 
     def test_multiple_relations(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={
+            canonical_decisions={
                 "bo_an": "bo_an",
                 "zhang_san": "zhang_san",
                 "red_guard": "red_guard",
@@ -119,19 +119,19 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
     def test_missing_candidates_default_to_self(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={"he_zhong_ming": "bo_an"},
+            canonical_decisions={"he_zhong_ming": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
         )
 
         result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "bai_zhi"))
 
-        self.assertEqual(result.alias_map["he_zhong_ming"], "bo_an")
-        self.assertEqual(result.alias_map["bai_zhi"], "bai_zhi")
+        self.assertEqual(result.canonical_decisions["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.canonical_decisions["bai_zhi"], "bai_zhi")
 
     def test_evidence_profiles_are_derived_from_context(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={"he_zhong_ming": "bo_an", "gray_man": "bo_an"},
+            canonical_decisions={"he_zhong_ming": "bo_an", "gray_man": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
         )
@@ -150,7 +150,7 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
     def test_missing_context_produces_weak_evidence_profile(self) -> None:
         response = DisambiguateResponseModel(
-            alias_map={"bo_an": "bo_an"},
+            canonical_decisions={"bo_an": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
         )

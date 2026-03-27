@@ -77,7 +77,16 @@ class TestAnnotationConfig(unittest.TestCase):
 
     def test_valid_clue_types(self) -> None:
         """测试线索类型常量"""
-        expected = ["none", "self_introduction", "named_by_other", "alias_revealed", "appearance_desc"]
+        expected = [
+            "none",
+            "self_introduction",
+            "named_by_other",
+            "alias_revealed",
+            "appearance_desc",
+            "unique_body_marker",
+            "kinship_identity",
+            "naming_scene",
+        ]
         self.assertEqual(
             ANNOTATION_CONFIG.valid_clue_types,
             expected

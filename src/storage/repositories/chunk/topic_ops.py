@@ -10,7 +10,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
+from typing import Any, cast
+
+from sqlalchemy.orm import Mapper, Session
 
 from src.storage.models import ChunkTopic
 
@@ -36,7 +38,7 @@ def insert_chunk_topics(
         for row in rows
     ]
     if topic_rows:
-        session.bulk_insert_mappings(ChunkTopic, topic_rows)  # type: ignore[arg-type]
+        session.bulk_insert_mappings(cast(Mapper[Any], ChunkTopic), topic_rows)
 
 
 def clear_chunk_topics(session: Session, run_id: str) -> None:

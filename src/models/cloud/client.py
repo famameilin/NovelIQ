@@ -93,7 +93,7 @@ class ConfiguredCloudModelClient(CloudModelClient):
             existing_names=existing_names,
             rag_hint=rag_hint,
         )
-        return result.alias_map
+        return result.canonical_decisions
 
 
 __all__ = [

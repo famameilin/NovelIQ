@@ -145,7 +145,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         Returns:
             嵌入向量字节，不存在则返回 None
         """
-        stmt = select(ChunkEmbedding.embedding).where(  # type: ignore[attr-defined]
+        stmt = select(ChunkEmbedding.embedding_vector).where(
             ChunkEmbedding.run_id == run_id, ChunkEmbedding.chunk_id == chunk_id
         )
         result = self.session.execute(stmt)
