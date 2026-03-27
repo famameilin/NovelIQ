@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-
 from typing import Any, cast
 
 from sqlalchemy import delete, select

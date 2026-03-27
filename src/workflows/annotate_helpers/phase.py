@@ -22,6 +22,7 @@ from loguru import logger
 
 from src.config.analysis_logger import AnalysisLogger
 from src.models.interfaces import AnnotationLike, DisambiguationLike
+from src.models.local.disambiguation import DisambiguationState
 
 if TYPE_CHECKING:
     import networkx as nx
@@ -266,12 +267,12 @@ def _process_single_chunk(
     idx: int,
     total_chunks: int,
     phase_result: AnnotationPhaseResult,
-    alias_map: dict[str, str],
+    state: DisambiguationState,
     use_context_enhancement: bool,
     incremental_interval: int,
     run_id: str = "",
     novel_id: str = "",
-) -> dict[str, str]:
+) -> DisambiguationState:
     """处理单个chunk
 
     修改时间: 2026-03-18
@@ -288,12 +289,19 @@ def _process_single_chunk(
     修改者: TraeAI
     任务: fix-phase3-not-called
     修改内容: 在 _process_single_chunk 中调用 phase3 计算对话长度，而不是在 storage 中
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: disambiguation-state-three-layer
+    修改内容: 使用 DisambiguationState 替代 alias_map，使用 _run_incremental_disambiguation_with_state
     """
     from .context import _prepare_chunk_context
-    from .disambiguation import _run_incremental_disambiguation
+    from .disambiguation import _run_incremental_disambiguation_with_state
     from .storage import _store_annotation_results
 
     logger.info(f"Annotating chunk {idx + 1}/{total_chunks}")
+
+    alias_map = state.get_alias_merges_dict()
 
     ctx = _prepare_chunk_context(
         conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.rag_retriever, run_id=run_id
@@ -331,9 +339,9 @@ def _process_single_chunk(
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 
-    alias_map = _run_incremental_disambiguation(
+    state = _run_incremental_disambiguation_with_state(
         conn,
-        alias_map,
+        state,
         phase_result.incremental_disambig_client,
         phase_result.alias_keywords,
         novel_id,
@@ -343,7 +351,7 @@ def _process_single_chunk(
         incremental_interval,
     )
 
-    return alias_map
+    return state
 
 
 def _process_chunks_phase(
@@ -356,25 +364,31 @@ def _process_chunks_phase(
     run_id: str = "",
     novel_id: str = "",
     resume: bool = False,
-) -> tuple[int, dict[str, str]]:
+) -> tuple[int, DisambiguationState]:
     """处理所有chunks阶段
 
     修改时间: 2026-03-19
     修改者: TraeAI
     任务: fix-entity-relations-not-saved
     修改内容: 添加 resume 参数，支持从 checkpoint 恢复 alias_map
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: disambiguation-state-three-layer
+    修改内容: 使用 _load_disambig_checkpoint_state 替代 _load_disambig_checkpoint，返回 DisambiguationState
     """
-    from .disambiguation import DisambiguationMaxRetriesExceededError, _load_disambig_checkpoint
+    from .disambiguation import DisambiguationMaxRetriesExceededError, _load_disambig_checkpoint_state
 
     success_count = 0
 
-    # 如果是恢复模式，尝试从 checkpoint 加载 alias_map
-    alias_map: dict[str, str] = {}
+    state: DisambiguationState = DisambiguationState.empty()
     if resume and run_id:
-        loaded_alias_map, _ = _load_disambig_checkpoint(conn, run_id)
-        if loaded_alias_map:
-            alias_map = loaded_alias_map
-            logger.info(f"resumed from checkpoint: {len(alias_map)} alias entries")
+        state = _load_disambig_checkpoint_state(conn, run_id)
+        if state.discovered_names:
+            logger.info(
+                f"resumed from checkpoint: {len(state.discovered_names)} discovered, "
+                f"{len(state.known_canonical_names)} canonicals, {len(state.alias_merges)} merges"
+            )
 
     total_chunks = len(all_chunks)
 
@@ -384,14 +398,14 @@ def _process_chunks_phase(
             continue
 
         try:
-            alias_map = _process_single_chunk(
+            state = _process_single_chunk(
                 conn,
                 chunk_id,
                 chunk_text,
                 idx,
                 total_chunks,
                 phase_result,
-                alias_map,
+                state,
                 use_context_enhancement,
                 incremental_interval,
                 run_id=run_id,
@@ -405,22 +419,28 @@ def _process_chunks_phase(
             logger.error(f"disambiguation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
             raise
 
-    return success_count, alias_map
+    return success_count, state
 
 
 def _run_disambiguation_phase(
     conn,
-    alias_map: dict[str, str],
+    state: DisambiguationState,
     phase_result: AnnotationPhaseResult,
     novel_id: str,
     use_rag: bool,
     run_id: str = "",
-) -> dict[str, str]:
-    """执行消歧阶段"""
-    from .disambiguation import _run_final_disambiguation
+) -> DisambiguationState:
+    """执行消歧阶段
 
-    alias_map = _run_final_disambiguation(
-        conn, alias_map, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: disambiguation-state-three-layer
+    修改内容: 使用 DisambiguationState 替代 alias_map，使用 _run_final_disambiguation_with_state
+    """
+    from .disambiguation import _run_final_disambiguation_with_state
+
+    state = _run_final_disambiguation_with_state(
+        conn, state, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id
     )
 
-    return alias_map
+    return state

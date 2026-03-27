@@ -18,11 +18,17 @@
 修改者: TraeAI
 任务: parallel-three-phase
 修改内容: 并行模式扩展为三阶段并行（Phase1+Phase2并行，Phase3在Phase1后执行）
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: refactor-multi-phase-extract-private-functions
+修改内容: 提取私有函数减少重复代码，简化主函数为调度函数
 """
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -37,6 +43,197 @@ from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_te
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+    from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
+
+
+@dataclass
+class _Phase3Result:
+    """Phase3 执行结果
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    """
+
+    dialogue_lengths: dict[str, int] | None = None
+    dialogue_speakers: dict[int, str] | None = None
+    dialogues: list[tuple[int, str]] | None = None
+    dialogue_tones: dict[int, str] | None = None
+
+
+def _run_phase1(
+    client: AnnotationClient,
+    text: str,
+    alias_map: dict[str, str] | None,
+    chunk_id: int | None,
+    prev_chunk_text: str | None,
+    next_chunk_text: str | None,
+    novel_title: str | None,
+    main_characters: str | None,
+    position_pct: float | None,
+    chapter_id: int | None,
+    active_entities: str | None,
+    cloud_client: AnnotationClient | None,
+    run_id: str | None,
+    character_appearances: list[dict] | None,
+) -> ChunkAnnotation:
+    """执行 Phase1 基础标注
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    """
+    return annotate_chunk_phase1(
+        client=client,
+        text=text,
+        alias_map=alias_map,
+        chunk_id=chunk_id,
+        prev_chunk_text=prev_chunk_text,
+        next_chunk_text=next_chunk_text,
+        novel_title=novel_title,
+        main_characters=main_characters,
+        position_pct=position_pct,
+        chapter_id=chapter_id,
+        active_entities=active_entities,
+        cloud_client=cloud_client,
+        run_id=run_id,
+        character_appearances=character_appearances,
+    )
+
+
+def _run_phase2(
+    client: AnnotationClient,
+    text: str,
+    chunk_id: int | None,
+    prev_chunk_text: str | None,
+    next_chunk_text: str | None,
+    novel_title: str | None,
+    main_characters: str | None,
+    position_pct: float | None,
+    chapter_id: int | None,
+    cloud_client: AnnotationClient | None,
+    run_id: str | None,
+    rag_retriever: Any | None,
+) -> ForeshadowingResult | None:
+    """执行 Phase2 伏笔分析
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    """
+    return annotate_chunk_phase2(
+        client=client,
+        text=text,
+        chunk_id=chunk_id,
+        prev_chunk_text=prev_chunk_text,
+        next_chunk_text=next_chunk_text,
+        novel_title=novel_title,
+        main_characters=main_characters,
+        position_pct=position_pct,
+        chapter_id=chapter_id,
+        cloud_client=cloud_client,
+        run_id=run_id,
+        rag_retriever=rag_retriever,
+    )
+
+
+def _run_phase3_if_needed(
+    client: AnnotationClient,
+    text: str,
+    alias_map: dict[str, str] | None,
+    chunk_id: int | None,
+    run_id: str | None,
+    known_characters: list[str] | None,
+) -> _Phase3Result:
+    """根据条件执行 Phase3 对话归属判断
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    """
+    result = _Phase3Result()
+
+    extracted_dialogues = extract_dialogues_from_text(text)
+    if not extracted_dialogues:
+        return result
+
+    logger.debug(
+        "Phase3: text_has_dialogues=True count={} chunk_id={}",
+        len(extracted_dialogues),
+        chunk_id,
+    )
+
+    result_tuple = compute_dialogue_lengths_with_llm(
+        client=client,
+        text=text,
+        alias_map=alias_map,
+        chunk_id=chunk_id,
+        run_id=run_id,
+        known_characters=known_characters,
+        return_tones=True,
+    )
+
+    result.dialogue_lengths = result_tuple[0]
+    result.dialogue_speakers = result_tuple[1]
+    result.dialogues = result_tuple[2]
+    result.dialogue_tones = result_tuple[3] if len(result_tuple) > 3 else None
+
+    logger.debug(
+        "Phase3: dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} chunk_id={}",
+        result.dialogue_lengths,
+        result.dialogue_speakers,
+        result.dialogues,
+        result.dialogue_tones,
+        chunk_id,
+    )
+
+    return result
+
+
+def _normalize_foreshadowing_result(
+    foreshadowing: ForeshadowingResult | None,
+    text: str,
+    chunk_id: int | None,
+) -> ForeshadowingResult | None:
+    """归一化伏笔结果，校验失败则返回 None
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    """
+    if not foreshadowing:
+        return None
+
+    if not validate_foreshadowing_result(foreshadowing, text):
+        return None
+
+    logger.debug(
+        "Foreshadowing found chunk_id={} type={}",
+        chunk_id,
+        foreshadowing.foreshadowing_type,
+    )
+    return foreshadowing
+
+
+def _build_multi_phase_result(
+    annotation: ChunkAnnotation,
+    foreshadowing: ForeshadowingResult | None,
+    phase3_result: _Phase3Result,
+) -> MultiPhaseAnnotationResult:
+    """构建多阶段标注结果
+
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    """
+    return MultiPhaseAnnotationResult(
+        annotation=annotation,
+        foreshadowing=foreshadowing,
+        dialogue_lengths=phase3_result.dialogue_lengths,
+        dialogue_speakers=phase3_result.dialogue_speakers,
+        dialogues=phase3_result.dialogues,
+        dialogue_tones=phase3_result.dialogue_tones,
+    )
 
 
 def annotate_chunk_multi_phase(
@@ -95,11 +292,11 @@ def annotate_chunk_multi_phase(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
-            active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
             character_appearances=character_appearances,
             rag_retriever=rag_retriever,
+            active_entities=active_entities,
         )
     else:
         return annotate_chunk_serial(
@@ -113,11 +310,11 @@ def annotate_chunk_multi_phase(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
-            active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
             character_appearances=character_appearances,
             rag_retriever=rag_retriever,
+            active_entities=active_entities,
         )
 
 
@@ -164,16 +361,18 @@ def annotate_chunk_parallel(
     修改者: TraeAI
     任务: parallel-three-phase
     修改内容: 扩展为三阶段并行：Phase1+Phase2 并行，Phase3 在 Phase1 完成后执行
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    修改内容: 提取私有函数，简化为调度函数
     """
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
-    annotation_client = client
-    cloud_annotation_client = cloud_client
-
     with ThreadPoolExecutor(max_workers=3) as executor:
         phase1_future = executor.submit(
-            annotate_chunk_phase1,
-            client=annotation_client,
+            _run_phase1,
+            client=client,
             text=text,
             alias_map=alias_map,
             chunk_id=chunk_id,
@@ -184,13 +383,13 @@ def annotate_chunk_parallel(
             position_pct=position_pct,
             chapter_id=chapter_id,
             active_entities=active_entities,
-            cloud_client=cloud_annotation_client,
+            cloud_client=cloud_client,
             run_id=run_id,
             character_appearances=character_appearances,
         )
         phase2_future = executor.submit(
-            annotate_chunk_phase2,
-            client=annotation_client,
+            _run_phase2,
+            client=client,
             text=text,
             chunk_id=chunk_id,
             prev_chunk_text=prev_chunk_text,
@@ -199,7 +398,7 @@ def annotate_chunk_parallel(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
-            cloud_client=cloud_annotation_client,
+            cloud_client=cloud_client,
             run_id=run_id,
             rag_retriever=rag_retriever,
         )
@@ -207,40 +406,31 @@ def annotate_chunk_parallel(
         annotation = phase1_future.result()
         foreshadowing = phase2_future.result()
 
-        dialogue_lengths = None
-        dialogue_speakers = None
-        dialogues = None
-        dialogue_tones = None
-        extracted_dialogues = extract_dialogues_from_text(text)
-        if extracted_dialogues:
-            logger.debug("annotate_chunk_parallel: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
-            known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-            result_tuple = compute_dialogue_lengths_with_llm(
-                client=annotation_client,
-                text=text,
-                alias_map=alias_map,
-                chunk_id=chunk_id,
-                run_id=run_id,
-                known_characters=known_characters,
-                return_tones=True,
-            )
-            dialogue_lengths = result_tuple[0]
-            dialogue_speakers = result_tuple[1]
-            dialogues = result_tuple[2]
-            dialogue_tones = result_tuple[3] if len(result_tuple) > 3 else None
-            logger.debug("annotate_chunk_parallel: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, dialogue_tones, chunk_id)
-
-    if foreshadowing and validate_foreshadowing_result(foreshadowing, text):
-        logger.debug(
-            "annotate_chunk_parallel found foreshadowing chunk_id={} type={}",
-            chunk_id,
-            foreshadowing.foreshadowing_type,
+        known_characters = (
+            [c.name for c in annotation.characters] if annotation.characters else None
         )
-    else:
-        foreshadowing = None
+        phase3_result = _run_phase3_if_needed(
+            client=client,
+            text=text,
+            alias_map=alias_map,
+            chunk_id=chunk_id,
+            run_id=run_id,
+            known_characters=known_characters,
+        )
+
+    normalized_foreshadowing = _normalize_foreshadowing_result(
+        foreshadowing=foreshadowing,
+        text=text,
+        chunk_id=chunk_id,
+    )
 
     logger.debug("annotate_chunk_parallel complete chunk_id={}", chunk_id)
-    return MultiPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing, dialogue_lengths=dialogue_lengths, dialogue_speakers=dialogue_speakers, dialogues=dialogues, dialogue_tones=dialogue_tones)
+
+    return _build_multi_phase_result(
+        annotation=annotation,
+        foreshadowing=normalized_foreshadowing,
+        phase3_result=phase3_result,
+    )
 
 
 def annotate_chunk_serial(
@@ -281,14 +471,16 @@ def annotate_chunk_serial(
     修改者: TraeAI
     任务: fix-validate-names-from-character-appearances
     修改内容: 添加 character_appearances 参数传递
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: refactor-multi-phase-extract-private-functions
+    修改内容: 提取私有函数，简化为调度函数
     """
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
 
-    annotation_client = client
-    cloud_annotation_client = cloud_client
-
-    annotation = annotate_chunk_phase1(
-        client=annotation_client,
+    annotation = _run_phase1(
+        client=client,
         text=text,
         alias_map=alias_map,
         chunk_id=chunk_id,
@@ -299,13 +491,13 @@ def annotate_chunk_serial(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
-        cloud_client=cloud_annotation_client,
+        cloud_client=cloud_client,
         run_id=run_id,
         character_appearances=character_appearances,
     )
 
-    foreshadowing = annotate_chunk_phase2(
-        client=annotation_client,
+    foreshadowing = _run_phase2(
+        client=client,
         text=text,
         chunk_id=chunk_id,
         prev_chunk_text=prev_chunk_text,
@@ -314,45 +506,33 @@ def annotate_chunk_serial(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
-        cloud_client=cloud_annotation_client,
+        cloud_client=cloud_client,
         run_id=run_id,
         rag_retriever=rag_retriever,
     )
 
-    if foreshadowing and validate_foreshadowing_result(foreshadowing, text):
-        logger.debug(
-            "annotate_chunk_serial found foreshadowing chunk_id={} type={}",
-            chunk_id,
-            foreshadowing.foreshadowing_type,
-        )
-    else:
-        foreshadowing = None
+    normalized_foreshadowing = _normalize_foreshadowing_result(
+        foreshadowing=foreshadowing,
+        text=text,
+        chunk_id=chunk_id,
+    )
 
-    dialogue_lengths = None
-    dialogue_speakers = None
-    dialogues = None
-    dialogue_tones = None
-    extracted_dialogues = extract_dialogues_from_text(text)
-    if extracted_dialogues:
-        logger.debug("annotate_chunk_serial: phase3 text_has_dialogues=True count={} chunk_id={}", len(extracted_dialogues), chunk_id)
-        known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-        result_tuple = compute_dialogue_lengths_with_llm(
-            client=client,
-            text=text,
-            alias_map=alias_map,
-            chunk_id=chunk_id,
-            run_id=run_id,
-            known_characters=known_characters,
-            return_tones=True,
-        )
-        speaker_lengths = result_tuple[0]
-        attribution = result_tuple[1]
-        dialogues = result_tuple[2]
-        tones = result_tuple[3] if len(result_tuple) > 3 else None
-        dialogue_lengths = speaker_lengths
-        dialogue_speakers = attribution
-        dialogue_tones = tones
-        logger.debug("annotate_chunk_serial: phase3 dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} chunk_id={}", dialogue_lengths, dialogue_speakers, dialogues, dialogue_tones, chunk_id)
+    known_characters = (
+        [c.name for c in annotation.characters] if annotation.characters else None
+    )
+    phase3_result = _run_phase3_if_needed(
+        client=client,
+        text=text,
+        alias_map=alias_map,
+        chunk_id=chunk_id,
+        run_id=run_id,
+        known_characters=known_characters,
+    )
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)
-    return MultiPhaseAnnotationResult(annotation=annotation, foreshadowing=foreshadowing, dialogue_lengths=dialogue_lengths, dialogue_speakers=dialogue_speakers, dialogues=dialogues, dialogue_tones=dialogue_tones)
+
+    return _build_multi_phase_result(
+        annotation=annotation,
+        foreshadowing=normalized_foreshadowing,
+        phase3_result=phase3_result,
+    )

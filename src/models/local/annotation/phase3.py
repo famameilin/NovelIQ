@@ -21,6 +21,16 @@
 修改者: TraeAI
 任务: refactor-dialogue-attribution-pipeline
 修改内容: 重构对话提取函数，返回 QuoteCandidate 列表，提取上下文
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: 创建统一的模型交互记录接口
+修改内容: 使用 record_model_interaction 替代本地 _save_interaction 函数
+
+修改时间: 2026-03-28
+修改者: TraeAI
+任务: consolidate-codebase-architecture
+修改内容: 从 constants 导入 PHASE3_MAX_RETRIES，移除本地重复定义
 """
 
 from __future__ import annotations
@@ -32,15 +42,14 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
+from src.config.constants import PHASE3_MAX_RETRIES
+from src.models.interactions import record_model_interaction
 from src.models.local.annotation.context import DialogueAttributionError
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import DialogueAttributionResult, DialogueRecord, QuoteCandidate
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-
-
-PHASE3_MAX_RETRIES = 3
 
 
 def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[QuoteCandidate]:
@@ -107,53 +116,6 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
                 )
             )
     return candidates
-
-
-def _save_interaction(
-    client: AnnotationClient,
-    run_id: str | None,
-    chunk_id: int | None,
-    phase: str,
-    attempt_number: int,
-    messages: list[dict],
-    content_clean: str,
-    thinking_content: str | None,
-    duration_ms: int,
-    is_cloud: bool,
-) -> None:
-    """
-    保存模型交互记录
-
-    创建时间: 2026-03-21
-    创建者: TraeAI
-    任务: refactor-phase3-to-annotation-layer
-    说明: 与 phase1/phase2 保持一致的交互记录保存逻辑
-    """
-    if not run_id:
-        return
-
-    try:
-        from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
-
-        prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-
-        if client._session is not None:
-            repo = ModelInteractionRepository(client._session)
-            repo.save_interaction(
-                run_id=run_id,
-                chunk_id=chunk_id,
-                interaction_type="dialogue_attribution",
-                phase=phase,
-                attempt_number=attempt_number,
-                model_name=client._config.model,
-                model_provider="cloud" if is_cloud else "local",
-                prompt=prompt_text,
-                response=content_clean,
-                thinking=thinking_content,
-                duration_ms=duration_ms,
-            )
-    except Exception as e:
-        logger.warning(f"Failed to save phase3 interaction: {e}")
 
 
 def attribute_dialogues_with_llm(
@@ -253,17 +215,19 @@ def attribute_dialogues_with_llm(
         duration_ms = int((time.time() - start_time) * 1000)
         content_clean = str(parsed.model_dump())
 
-        _save_interaction(
-            client=current_client,
+        record_model_interaction(
             run_id=run_id,
             chunk_id=chunk_id,
+            interaction_type="dialogue_attribution",
             phase="phase3",
             attempt_number=1,
             messages=messages,
-            content_clean=content_clean,
+            response_text=content_clean,
             thinking_content=None,
             duration_ms=duration_ms,
-            is_cloud=is_cloud,
+            model_name=current_client._config.model,
+            model_provider="cloud" if is_cloud else "local",
+            session=current_client._session,
         )
 
         logger.info(
