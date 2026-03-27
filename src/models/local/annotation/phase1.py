@@ -273,7 +273,8 @@ def execute_phase1_with_retry(
             retry_prompt = build_retry_prompt(
                 original_user_prompt,
                 handler.state.last_bad_output,
-                handler.state.last_invalid_names
+                handler.state.last_invalid_names,
+                handler.state.last_validation_details,
             )
             return messages[:-1] + [{"role": "user", "content": retry_prompt}]
         return messages

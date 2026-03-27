@@ -187,7 +187,7 @@ def build_anonymous_disambig_messages(
 
     user_content = f"""以下匿名占位名需要识别真实身份。
 
-【已知正式名】
+【已知常用名】
 {existing_str}
 
 {anonymous_info}
