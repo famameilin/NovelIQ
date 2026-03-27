@@ -64,9 +64,10 @@ VALID_DISAMBIG_CONFIDENCE = {
     DISAMBIG_CONFIDENCE_HIGH,
 }
 
-DISAMBIG_STATE_RESOLVED = "resolved"
-DISAMBIG_STATE_REVIEW = "review"
-DISAMBIG_STATE_UNRESOLVED = "unresolved"
+_DisambigStateLiteral = Literal["resolved", "review", "unresolved"]
+DISAMBIG_STATE_RESOLVED: _DisambigStateLiteral = "resolved"
+DISAMBIG_STATE_REVIEW: _DisambigStateLiteral = "review"
+DISAMBIG_STATE_UNRESOLVED: _DisambigStateLiteral = "unresolved"
 
 EXTENSION_REVIEW_MIN_GAP = 3
 EXTENSION_REVIEW_MIN_RATIO = 1.5
@@ -119,8 +120,9 @@ def apply_disambiguation_decisions(
             )
             if is_confirmed_canonical:
                 new_known_canonical.add(name)
+            status_value = DISAMBIG_STATE_RESOLVED if is_confirmed_canonical else DISAMBIG_STATE_REVIEW
             new_review_status[name] = NameReviewState(
-                status=DISAMBIG_STATE_RESOLVED if is_confirmed_canonical else DISAMBIG_STATE_REVIEW,
+                status=status_value,
                 confidence=confidence,
                 proposed_canonical=name,
                 evidence_strength=evidence_strength,
@@ -131,8 +133,9 @@ def apply_disambiguation_decisions(
 
             new_alias_merges.append((name, canonical))
 
+            status_value = DISAMBIG_STATE_RESOLVED if confidence == DISAMBIG_CONFIDENCE_HIGH else DISAMBIG_STATE_REVIEW
             new_review_status[name] = NameReviewState(
-                status=DISAMBIG_STATE_RESOLVED if confidence == DISAMBIG_CONFIDENCE_HIGH else DISAMBIG_STATE_REVIEW,
+                status=status_value,
                 confidence=confidence,
                 proposed_canonical=canonical,
                 evidence_strength=evidence_strength,
@@ -885,6 +888,7 @@ def _build_alias_and_state_updates(
             and previous_canonical != canonical_name
         )
 
+        state: _DisambigStateLiteral
         if confidence == DISAMBIG_CONFIDENCE_HIGH and not resolved_conflict:
             state = DISAMBIG_STATE_RESOLVED
             alias_updates[name] = canonical_name
@@ -1620,22 +1624,38 @@ def _process_entity_relations(
         to_entity_id = entity_repo.get_entity_id_by_name(novel_id, to_name, run_id)
 
         if from_entity_id is None:
-            skipped_relations.append(
-                {
-                    "relation": rel,
-                    "reason": "from_entity_not_found",
-                }
+            from_entity_type = entity_types.get(from_name, "character")
+            from_entity_id = entity_repo.insert_entity(
+                novel_id=novel_id,
+                canonical=from_name,
+                entity_type=from_entity_type,
+                run_id=run_id,
             )
-            continue
+            if from_entity_id is None:
+                skipped_relations.append(
+                    {
+                        "relation": rel,
+                        "reason": "from_entity_creation_failed",
+                    }
+                )
+                continue
 
         if to_entity_id is None:
-            skipped_relations.append(
-                {
-                    "relation": rel,
-                    "reason": "to_entity_not_found",
-                }
+            to_entity_type = entity_types.get(to_name, "character")
+            to_entity_id = entity_repo.insert_entity(
+                novel_id=novel_id,
+                canonical=to_name,
+                entity_type=to_entity_type,
+                run_id=run_id,
             )
-            continue
+            if to_entity_id is None:
+                skipped_relations.append(
+                    {
+                        "relation": rel,
+                        "reason": "to_entity_creation_failed",
+                    }
+                )
+                continue
 
         try:
             entity_repo.insert_entity_relation(
