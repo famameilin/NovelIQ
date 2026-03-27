@@ -31,6 +31,7 @@ class RetryState:
     last_error: Exception | None = None
     last_invalid_names: list[str] | None = None
     last_bad_output: str = ""
+    last_validation_details: dict[str, list[str]] | None = None
 
 
 @dataclass
@@ -127,6 +128,7 @@ class AnnotationRetryHandler[T]:
         if hasattr(error, "invalid_names"):
             self.state.last_invalid_names = error.invalid_names
             self.state.last_bad_output = getattr(error, "bad_output", "")
+            self.state.last_validation_details = getattr(error, "validation_details", None)
 
         logger.error(
             "{} attempt {}/{} failed: {} chunk_id={}",

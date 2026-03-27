@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from src.models.local.disambiguation.messages import _extract_evidence_types_from_context
+from src.models.local.disambiguation.messages import (
+    _extract_evidence_types_from_context,
+    build_anonymous_disambig_messages,
+)
 
 
 def test_extract_evidence_types_keeps_original_sentence_for_mixed_summary_context() -> None:
@@ -33,3 +36,16 @@ def test_extract_evidence_types_keeps_original_sentence_after_multiple_summaries
     evidence_types = _extract_evidence_types_from_context(context)
 
     assert evidence_types == ["前文摘要-弱证据", "原文例句"]
+
+
+def test_build_anonymous_disambig_messages_uses_common_name_label() -> None:
+    messages = build_anonymous_disambig_messages(
+        anonymous_names=["匿名_C1_0"],
+        anonymous_contexts={"匿名_C1_0": "上下文"},
+        existing_names=["伯安", "周凤兰"],
+    )
+
+    assert len(messages) == 2
+    assert "【已知常用名】" in messages[1]["content"]
+    assert "伯安" in messages[1]["content"]
+    assert "周凤兰" in messages[1]["content"]

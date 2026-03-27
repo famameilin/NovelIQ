@@ -18,7 +18,6 @@ from loguru import logger
 
 from src.models.local.parser import extract_thinking_unified, try_parse_json
 from src.models.local.validator import (
-    validate_character_appearances_sync,
     validate_chunk_annotation,
     validate_names_in_sources,
 )
@@ -105,15 +104,24 @@ def validate_annotation(
     创建者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 从 AnnotationClient 类方法提取为独立函数
+
+    修改时间: 2026-03-27
+    修改者: Codex
+    任务: fix-character-appearance-validation-conflict
+    修改内容: 将“来源不存在”和“relations/dialogues 悬空引用”分开校验，
+        不再要求 character_appearances 中的名字强制同步到 characters
     """
     names_in_result = extract_names_from_annotation(result)
-    invalid_names = set(validate_names_in_sources(names_in_result, sources))
-    invalid_names.update(validate_character_appearances_sync(result.character_appearances, result.characters))
+    hallucinated_names = set(validate_names_in_sources(names_in_result, sources))
     _, dangling_names = validate_chunk_annotation(result, {character.name for character in result.characters})
-    invalid_names.update(dangling_names)
+    invalid_names = hallucinated_names | set(dangling_names)
 
     if invalid_names:
         invalid_names_sorted = sorted(invalid_names)
+        validation_details = {
+            "hallucinated_names": sorted(hallucinated_names),
+            "dangling_names": sorted(set(dangling_names)),
+        }
         logger.error(
             "annotate_chunk found invalid names: {} chunk_id={}",
             invalid_names_sorted,
@@ -123,6 +131,7 @@ def validate_annotation(
             f"名字验证失败: {invalid_names_sorted}",
             invalid_names=invalid_names_sorted,
             bad_output=content_clean,
+            validation_details=validation_details,
         )
 
     return result

@@ -80,10 +80,17 @@ class NameValidationMaxRetriesExceededError(Exception):
     修改内容: 添加 invalid_names 和 bad_output 属性
     """
 
-    def __init__(self, message: str, invalid_names: list[str] | None = None, bad_output: str = ""):
+    def __init__(
+        self,
+        message: str,
+        invalid_names: list[str] | None = None,
+        bad_output: str = "",
+        validation_details: dict[str, list[str]] | None = None,
+    ):
         super().__init__(message)
         self.invalid_names = invalid_names
         self.bad_output = bad_output
+        self.validation_details = validation_details or {}
 
 
 class Phase2MaxRetriesExceededError(Exception):

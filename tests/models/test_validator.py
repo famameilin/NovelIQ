@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.models.local.annotation.api_call import validate_annotation
 from src.models.local.validator import (
     generate_anonymous_name,
     replace_invalid_names_with_anonymous,
@@ -255,6 +256,48 @@ class TestCharacterConsistencyValidation(unittest.TestCase):
 
         self.assertEqual(missing, ["赵哥"])
 
+    def test_validate_annotation_allows_character_appearance_name_without_character_snapshot(self) -> None:
+        annotation = ChunkAnnotation(
+            emotional_valence="neutral",
+            event_type="铺垫",
+            pivot_moment=False,
+            cliffhanger=False,
+            has_foreshadowing=False,
+            foreshadowing_type=None,
+            foreshadowing_desc="",
+            characters=[
+                CharacterSnapshot(
+                    name="贺铮",
+                    role_function="主体",
+                    action="下令",
+                    action_type="决策",
+                    emotion_score="neutral",
+                )
+            ],
+            relations=[],
+            dialogues=[],
+            character_appearances=[
+                CharacterAppearance(
+                    raw_name="侯正德",
+                    identity_clue="侯正德是侯飞白的父亲",
+                    clue_type="named_by_other",
+                )
+            ],
+            chunk_summary="贺铮下令传唤侯正德。",
+        )
+        sources = {
+            "text": "贺铮下令把侯正德叫来。",
+            "prev_chunk_text": "",
+            "active_entities": [],
+            "alias_map": {},
+            "next_chunk_text": "",
+            "character_appearances": [],
+        }
+
+        result = validate_annotation(annotation, sources, chunk_id=15, content_clean="{}")
+
+        self.assertEqual(result, annotation)
+
     def test_validate_chunk_annotation_reports_relation_and_dialogue_names_not_in_characters(self) -> None:
         annotation = ChunkAnnotation(
             emotional_valence="neutral",
@@ -307,6 +350,21 @@ class TestBuildRetryPrompt(unittest.TestCase):
             invalid_names=["王五"],
         )
         self.assertIn("王五", prompt)
+
+    def test_prompt_uses_validation_categories_when_provided(self) -> None:
+        prompt = build_retry_prompt(
+            original_user_prompt="原始 prompt",
+            bad_output="错误输出",
+            invalid_names=["张三", "李四"],
+            validation_details={
+                "hallucinated_names": ["张三"],
+                "dangling_names": ["李四"],
+            },
+        )
+
+        self.assertIn("以下名字未在文本或可用上下文中出现：张三", prompt)
+        self.assertIn("以下名字出现在 relations 或 dialogues 中，但没有写入 characters：李四", prompt)
+        self.assertNotIn("属于捏造", prompt)
 
 
 if __name__ == "__main__":
