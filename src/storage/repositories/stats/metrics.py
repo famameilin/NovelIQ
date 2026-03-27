@@ -247,12 +247,16 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
     else:
         arc_scores_json = json.dumps(list(analysis.arc_scores), ensure_ascii=False)
 
+    topic_labels_json = json.dumps(list(analysis.topic_labels), ensure_ascii=False)
+    main_characters_json = json.dumps(list(analysis.main_characters), ensure_ascii=False)
+    core_cast_json = json.dumps(list(analysis.core_cast), ensure_ascii=False)
+
     cloud_analysis = CloudAnalysis(
         novel_id=analysis.novel_id,
         foreshadow_rate=analysis.foreshadow_rate,
         arc_scores=arc_scores_json,
         narrative_type=analysis.narrative_type,
-        topic_labels=json.dumps(list(analysis.topic_labels), ensure_ascii=False),
+        topic_labels=topic_labels_json,
         diagnosis=analysis.diagnosis,
         value_logic_type=analysis.value_logic_type,
         value_logic_reason=analysis.value_logic_reason,
@@ -263,6 +267,9 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
         cultural_depth_score=analysis.cultural_depth_score,
         cultural_depth_reason=analysis.cultural_depth_reason,
         narrative_arc_type=analysis.narrative_arc_type,
+        protagonist=analysis.protagonist,
+        main_characters=main_characters_json,
+        core_cast=core_cast_json,
         run_id=run_id,
     )
     session.add(cloud_analysis)
@@ -325,6 +332,9 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
         "cultural_depth_score": result.cultural_depth_score,
         "cultural_depth_reason": result.cultural_depth_reason,
         "narrative_arc_type": result.narrative_arc_type,
+        "protagonist": result.protagonist,
+        "main_characters": result.main_characters,
+        "core_cast": result.core_cast,
         "run_id": result.run_id,
     }
 

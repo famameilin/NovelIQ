@@ -211,10 +211,14 @@ def _fetch_all_results_data(
     修改者: TraeAI
     任务: fix-character-alias-inconsistency
     修改内容: 获取 alias_map 并传递给子函数，实现人物外号归一化
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: protagonist-score-fusion
+    修改内容: 先获取 diagnosis，从中提取 arc_scores 和 main_characters 传递给 _fetch_characters
     """
     missing_fields: list[str] = []
 
-    # 获取别名映射表，用于人物外号归一化
     alias_map = annotation_repo.fetch_alias_map(run_id)
 
     emotion_curve = _fetch_emotion_curve(run_id, stats_repo)
@@ -225,15 +229,21 @@ def _fetch_all_results_data(
     if not rhythm_curve:
         missing_fields.append("rhythm_curve")
 
-    characters = _fetch_characters(run_id, annotation_repo)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    if not diagnosis:
+        missing_fields.append("diagnosis")
+
+    arc_scores: dict[str, float] | None = None
+    main_characters: list[str] | None = None
+    if diagnosis:
+        arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
+        main_characters = diagnosis.main_characters
+
+    characters = _fetch_characters(run_id, annotation_repo, arc_scores, main_characters)
     if not characters:
         missing_fields.append("characters")
 
     topics = _fetch_topics(run_id, chunk_repo, alias_map)
-
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
-    if not diagnosis:
-        missing_fields.append("diagnosis")
 
     chunk_styles = _fetch_chunk_styles(run_id, chunk_repo)
     if not chunk_styles:
@@ -383,12 +393,31 @@ async def get_characters(
     task_id: str = Query(..., description="分析任务ID"),
     novel_service: NovelService = Depends(get_novel_service),
 ):
+    """
+    获取角色统计数据
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: protagonist-score-fusion
+    修改内容: 先获取 diagnosis，传递 arc_scores 和 main_characters 给 _fetch_characters
+    """
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
     if conn is None or run_id is None:
         return []
     try:
         annotation_repo = AnnotationRepository(conn)
-        return _fetch_characters(run_id, annotation_repo)
+        stats_repo = StatsRepository(conn)
+
+        alias_map = annotation_repo.fetch_alias_map(run_id)
+        diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+
+        arc_scores: dict[str, float] | None = None
+        main_characters: list[str] | None = None
+        if diagnosis:
+            arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
+            main_characters = diagnosis.main_characters
+
+        return _fetch_characters(run_id, annotation_repo, arc_scores, main_characters)
     finally:
         conn.close()
 
@@ -404,7 +433,9 @@ async def get_topics(
         return []
     try:
         chunk_repo = ChunkRepository(conn)
-        return _fetch_topics(run_id, chunk_repo)
+        annotation_repo = AnnotationRepository(conn)
+        alias_map = annotation_repo.fetch_alias_map(run_id)
+        return _fetch_topics(run_id, chunk_repo, alias_map)
     finally:
         conn.close()
 

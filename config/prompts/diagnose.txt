@@ -16,7 +16,10 @@
   "value_logic_reason": "判断依据...",
   "cultural_depth_score": 3,
   "cultural_depth_reason": "判断依据...",
-  "narrative_arc_type": "白手起家"
+  "narrative_arc_type": "白手起家",
+  "protagonist": "人物名1",
+  "main_characters": ["人物名1", "人物名2", "人物名3"],
+  "core_cast": ["人物名1", "人物名2", "人物名3"]
 }
 
 字段说明：
@@ -54,12 +57,19 @@
   5分：传统文化词汇作为核心叙事逻辑，是故事推进的关键要素
 - cultural_depth_reason: 评分说明(字符串，需引用具体段落或情节作为依据)
 
+主角判定（必须输出以下三个字段）：
+- protagonist: 主角姓名（单选，必须是 arc_scores 中得分最高的人物）
+- main_characters: 主要人物列表（最多 5 人，按 arc_scores 降序排列）
+- core_cast: 核心角色列表（最多 10 人，包含所有有弧线的角色）
+
 重要约束：
 1. value_logic_type 只能是「善义有价值」「强者为王」「混合型」三者之一，不允许其他值
 2. power_stance_score、common_people_dignity、cultural_depth_score 必须是整数，不允许小数
 3. 所有九个字段都必须输出，不能缺失
 4. narrative_arc_type 只能是六种原型之一，不允许其他值
 5. arc_scores 必须是字典格式，Key为人物名称
+6. protagonist 必须是 arc_scores 中存在的人物名
+7. main_characters 和 core_cast 中的人物名必须与 arc_scores 的 key 一致
 
 主题命名规则：
 输入中的topic_words字段包含LDA分析出的主题词列表。

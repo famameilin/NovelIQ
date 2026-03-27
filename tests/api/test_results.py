@@ -9,6 +9,7 @@
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.api.routes import results as results_mod
 
 client = TestClient(app)
 
@@ -53,6 +54,43 @@ class TestResults:
         response = client.get("/api/novels/nonexistent/topics?task_id=nonexistent")
         assert response.status_code == 200
         assert response.json() == []
+
+    def test_get_topics_passes_alias_map(self, monkeypatch):
+        captured = {}
+
+        class _DummyConn:
+            def close(self):
+                return None
+
+        class _DummyAnnotationRepo:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def fetch_alias_map(self, run_id):
+                assert run_id == "run-1"
+                return {"二妈妈": "柳婉儿"}
+
+        monkeypatch.setattr(results_mod, "_get_session_and_run_id", lambda task_id, novel_service: (_DummyConn(), "run-1"))
+        monkeypatch.setattr(results_mod, "ChunkRepository", lambda conn: "chunk-repo")
+        monkeypatch.setattr(results_mod, "AnnotationRepository", _DummyAnnotationRepo)
+
+        def _fake_fetch_topics(run_id, chunk_repo, alias_map=None):
+            captured["run_id"] = run_id
+            captured["chunk_repo"] = chunk_repo
+            captured["alias_map"] = dict(alias_map or {})
+            return [{"topic_id": 1, "words": ["柳婉儿"], "weight": 0.8}]
+
+        monkeypatch.setattr(results_mod, "_fetch_topics", _fake_fetch_topics)
+
+        response = client.get("/api/novels/demo/topics?task_id=demo123")
+
+        assert response.status_code == 200
+        assert response.json() == [{"topic_id": 1, "words": ["柳婉儿"], "weight": 0.8}]
+        assert captured == {
+            "run_id": "run-1",
+            "chunk_repo": "chunk-repo",
+            "alias_map": {"二妈妈": "柳婉儿"},
+        }
 
     def test_get_diagnosis_not_found(self):
         """测试获取不存在任务的诊断结果 - 返回空数据"""

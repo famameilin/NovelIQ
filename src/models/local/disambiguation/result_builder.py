@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..schema import DisambiguateResponseModel
@@ -55,13 +56,15 @@ class ExtendedDisambigResult:
     _thinking_content: str | None = None
 
 
-def _candidate_names(candidates: list[NameCountCandidate]) -> list[str]:
-    return [str(candidate["name"]) for candidate in candidates]
+def _candidate_names(candidates: list[NameCountCandidate] | list[str]) -> list[str]:
+    if candidates and isinstance(candidates[0], str):
+        return [str(name) for name in candidates]
+    return [str(candidate["name"]) for candidate in candidates]  # type: ignore[index]
 
 
 def build_result_from_response(
     response_data: DisambiguateResponseModel,
-    candidates: list[NameCountCandidate],
+    candidates: list[NameCountCandidate] | list[str],
 ) -> dict[str, str]:
     """
     从 DisambiguateResponseModel 构建结果字典，确保所有候选名都有映射
@@ -74,6 +77,11 @@ def build_result_from_response(
     修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
     修改内容: 提取为独立模块函数
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-type-errors
+    修改内容: 支持 list[str] 类型参数，用于匿名消歧场景
     """
     name_list = _candidate_names(candidates)
 

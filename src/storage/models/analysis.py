@@ -33,6 +33,10 @@ class CloudAnalysis(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储云端模型的分析结果
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    修改内容: 新增 protagonist, main_characters, core_cast 三个字段用于存储角色信息
     """
 
     __tablename__ = "cloud_analysis"
@@ -53,6 +57,9 @@ class CloudAnalysis(Base):
     cultural_depth_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cultural_depth_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     narrative_arc_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    protagonist: Mapped[str | None] = mapped_column(Text, nullable=True)
+    main_characters: Mapped[str | None] = mapped_column(Text, nullable=True)
+    core_cast: Mapped[str | None] = mapped_column(Text, nullable=True)
     run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
