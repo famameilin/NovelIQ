@@ -117,7 +117,7 @@ class DisambiguationClient(BaseModelClient):
             }
             log_disambiguate_result(self._analysis_logger, messages, response, metadata)
 
-            result = build_extended_result_from_response(response, candidates)
+            result = build_extended_result_from_response(response, candidates, context_sentences)
             return result
         except Exception as e:
             from loguru import logger

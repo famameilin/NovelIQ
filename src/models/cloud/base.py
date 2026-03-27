@@ -55,6 +55,7 @@ class CloudModelClient:
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
+        rag_hint: str | None = None,
     ) -> dict[str, str]:
         raise NotImplementedError
 
@@ -70,6 +71,7 @@ class NullCloudModelClient(CloudModelClient):
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
+        rag_hint: str | None = None,
     ) -> dict[str, str]:
         return {candidate["name"]: candidate["name"] for candidate in candidates}
 
