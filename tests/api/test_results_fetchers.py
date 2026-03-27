@@ -1,6 +1,7 @@
 from src.api.routes.results_fetchers import (
     _fetch_characters,
     _fetch_diagnosis,
+    _normalize_arc_scores,
     _normalize_name_list,
     _normalize_text_by_alias_map,
 )
@@ -48,6 +49,43 @@ def test_normalize_text_by_alias_map_rewrites_aliases_to_common_names():
     assert _normalize_text_by_alias_map(text, alias_map) == (
         "\u4faf\u98de\u767d\u5e2e\u4e86\u67f3\u5a49\u513f\uff0c"
         "\u6797\u7acb\u679c\u8fd8\u5728\u65c1\u8fb9\u770b\u7740\u67f3\u5a49\u513f\u3002"
+    )
+
+
+def test_normalize_text_by_alias_map_skips_embedded_suffixes_in_longer_names():
+    text = "\u738b\u4f2f\u5b89\u770b\u89c1\u4e86\u4f2f\u5b89\uff0c\u4f46\u6ca1\u7406\u4f1a\u963f\u4f2f\u5b89\u3002"
+    alias_map = {
+        "\u4f2f\u5b89": "\u8d3a\u4f2f\u5b89",
+    }
+
+    assert _normalize_text_by_alias_map(text, alias_map) == (
+        "\u738b\u4f2f\u5b89\u770b\u89c1\u4e86\u8d3a\u4f2f\u5b89\uff0c"
+        "\u4f46\u6ca1\u7406\u4f1a\u963f\u4f2f\u5b89\u3002"
+    )
+
+
+def test_normalize_text_by_alias_map_skips_embedded_title_aliases():
+    text = "\u6797\u5bb6\u5927\u5c11\u7237\u56de\u5e9c\uff0c\u8001\u795e\u4ed9\u63d0\u70b9\u4ed6\u795e\u4ed9\u6765\u4e86\u3002"
+    alias_map = {
+        "\u5927\u5c11\u7237": "\u8d3a\u4f2f\u5b89",
+        "\u795e\u4ed9": "\u5f20\u9053\u9675",
+    }
+
+    assert _normalize_text_by_alias_map(text, alias_map) == (
+        "\u6797\u5bb6\u5927\u5c11\u7237\u56de\u5e9c\uff0c"
+        "\u8001\u795e\u4ed9\u63d0\u70b9\u4ed6\u5f20\u9053\u9675\u6765\u4e86\u3002"
+    )
+
+
+def test_normalize_text_by_alias_map_rewrites_standalone_title_aliases():
+    text = "\u5927\u5c11\u7237\u56de\u5e9c\uff0c\u548c\u795e\u4ed9\u90fd\u6765\u4e86\u3002"
+    alias_map = {
+        "\u5927\u5c11\u7237": "\u8d3a\u4f2f\u5b89",
+        "\u795e\u4ed9": "\u5f20\u9053\u9675",
+    }
+
+    assert _normalize_text_by_alias_map(text, alias_map) == (
+        "\u8d3a\u4f2f\u5b89\u56de\u5e9c\uff0c\u548c\u5f20\u9053\u9675\u90fd\u6765\u4e86\u3002"
     )
 
 
@@ -131,3 +169,16 @@ def test_fetch_characters_returns_all_items_when_limit_is_none():
     )
 
     assert [char.name for char in result] == ["甲", "乙", "丙"]
+
+
+def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
+    arc_scores = {"monkey": 6.5, "hou_fei_bai": 8.0, "abacus": 4.0}
+    alias_map = {
+        "monkey": "hou_fei_bai",
+        "abacus": "lin_li_guo",
+    }
+
+    assert _normalize_arc_scores(arc_scores, alias_map) == {
+        "hou_fei_bai": 8.0,
+        "lin_li_guo": 4.0,
+    }

@@ -322,14 +322,16 @@ class DiagnosisClient(BaseModelClient):
 
         prompt = json.dumps(payload, ensure_ascii=False)
         system_prompt = settings.prompts.diagnose
-        alias_map = payload.get("alias_map") or {}
+        alias_merges = payload.get("alias_merges") or {}
+        known_characters = payload.get("known_characters") or []
 
-        if alias_map:
+        if alias_merges:
             naming_rules = [
                 "Naming rules:",
-                "When alias_map provides an alias mapping, always rewrite the alias to its mapped common name before reasoning or output.",
+                "When alias_merges provides an alias mapping, always rewrite the alias to its canonical character name before reasoning or output.",
                 "Apply this consistently in arc_scores, topic_labels, diagnosis, value_logic_reason, power_stance_reason, dignity_reason, and cultural_depth_reason.",
-                f"alias_map={json.dumps(alias_map, ensure_ascii=False)}",
+                f"known_characters={json.dumps(known_characters, ensure_ascii=False)}",
+                f"alias_merges={json.dumps(alias_merges, ensure_ascii=False)}",
             ]
             system_prompt = f"{system_prompt}\n\n" + "\n".join(naming_rules)
 

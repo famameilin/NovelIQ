@@ -127,13 +127,13 @@ def log_disambiguate_result(
 
     修改时间: 2026-03-27
     修改者: TraeAI
-    任务: 简化消歧响应模型
-    修改内容: 将 merge_target_map 改为 alias_map
+    任务: disambiguation-state-three-layer
+    修改内容: 将 alias_map 改为 canonical_decisions
     """
     if not analysis_logger:
         return
 
-    response_content = json.dumps(response_data.alias_map, ensure_ascii=False)
+    response_content = json.dumps(response_data.canonical_decisions, ensure_ascii=False)
 
     # 添加 thinking_content 到 metadata（如果存在）
     thinking_content = getattr(response_data, "_thinking_content", None)

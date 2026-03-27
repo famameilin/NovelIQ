@@ -7,7 +7,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.repositories.annotation.characters import fetch_alias_map
 
 """
 创建时间: 2025-03-11
@@ -27,6 +26,11 @@ from src.storage.repositories.annotation.characters import fetch_alias_map
 修改者: TraeAI
 任务: 简化 diagnosis payload
 修改内容: 移除 common_character_names 字段，只保留 alias_map
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: disambiguation-state-three-layer
+修改内容: 将 alias_map 改为 known_characters 和 alias_merges 两项
 """
 
 
@@ -38,6 +42,11 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     修改者: TraeAI
     任务: 修复run_id过滤BUG
     修改内容: 添加run_id参数，确保只获取当前运行的数据
+    
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: disambiguation-state-three-layer
+    修改内容: 将 alias_map 改为 known_characters 和 alias_merges 两项
     """
     logger.info(
         "[云端模型] 构建诊断payload开始: novel_id=%s run_id=%s",
@@ -45,7 +54,6 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         run_id,
     )
 
-    # 如果没有run_id，使用空字符串（保持向后兼容，但会返回空结果）
     effective_run_id = run_id or ""
 
     pivot_blocks = []
@@ -118,6 +126,8 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     topic_words = _fetch_topic_words(conn, effective_run_id, top_n=settings.diagnosis.topic_words_top_n)
     logger.info("[云端模型] 获取topic_words: count=%d", len(topic_words))
 
+    known_characters, alias_merges = _fetch_character_disambig_data(conn, effective_run_id)
+
     payload = {
         "novel_id": novel_id,
         "pivot_blocks": pivot_blocks,
@@ -128,17 +138,20 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "first_chapter_summary": first_summary,
         "last_chapter_summary": last_summary,
         "topic_words": topic_words,
-        "alias_map": _fetch_alias_map(conn, effective_run_id),
+        "known_characters": known_characters,
+        "alias_merges": alias_merges,
     }
 
     logger.info(
-        "[云端模型] 诊断payload构建完成: pivot_blocks=%d pivot_moments=%d high_tension=%d relations=%d foreshadowing=%d topic_words=%d",
+        "[云端模型] 诊断payload构建完成: pivot_blocks=%d pivot_moments=%d high_tension=%d relations=%d foreshadowing=%d topic_words=%d known_characters=%d alias_merges=%d",
         len(pivot_blocks),
         len(pivot_moments),
         len(high_tension),
         len(relations),
         len(foreshadowing),
         len(topic_words),
+        len(known_characters),
+        len(alias_merges),
     )
 
     return payload
@@ -332,7 +345,51 @@ def _fetch_topic_words(conn: Session, run_id: str, top_n: int = 10) -> list[dict
     return result_list
 
 
-def _fetch_alias_map(conn: Session, run_id: str) -> dict[str, str]:
+def _fetch_character_disambig_data(conn: Session, run_id: str) -> tuple[list[str], dict[str, str]]:
+    """
+    获取角色消歧数据（known_characters 和 alias_merges）
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 分离获取 known_characters 和 alias_merges
+    
+    Returns:
+        (known_characters, alias_merges):
+            known_characters: 规范角色名列表
+            alias_merges: 别名到规范名的映射（只包含 alias != canonical）
+    """
     if not run_id:
-        return {}
-    return fetch_alias_map(conn, run_id)
+        return [], {}
+    
+    result = conn.execute(
+        text(
+            """
+            SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id
+            """
+        ),
+        {"run_id": run_id},
+    ).fetchone()
+    
+    if not result or not result[0]:
+        return [], {}
+    
+    import json
+
+    raw_data = json.loads(result[0])
+    if not isinstance(raw_data, dict):
+        return [], {}
+
+    known_canonical_names = raw_data.get("known_canonical_names")
+    alias_merges_list = raw_data.get("alias_merges")
+    if not isinstance(known_canonical_names, list) or not isinstance(alias_merges_list, list):
+        return [], {}
+
+    alias_merges_dict = {
+        str(alias): str(canonical)
+        for alias, canonical in alias_merges_list
+        if isinstance(alias, str) and isinstance(canonical, str) and alias != canonical
+    }
+    return [str(name) for name in known_canonical_names if isinstance(name, str)], alias_merges_dict
+
+    return [], {}

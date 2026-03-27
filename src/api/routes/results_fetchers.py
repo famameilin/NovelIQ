@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -158,15 +159,117 @@ def _normalize_text_by_alias_map(text: str | None, alias_map: dict[str, str] | N
     if not text or not alias_map:
         return text
 
-    normalized_text = text
     replacements = sorted(
         ((alias, canonical) for alias, canonical in alias_map.items() if alias and canonical and alias != canonical),
         key=lambda item: len(item[0]),
         reverse=True,
     )
+    if not replacements:
+        return text
+
+    protected_ranges: list[tuple[int, int]] = []
+    accepted_matches: list[tuple[int, int, str]] = []
+    text_length = len(text)
+    title_alias_suffixes = (
+        "少爷",
+        "公子",
+        "小姐",
+        "夫人",
+        "先生",
+        "姑娘",
+        "掌柜",
+        "神仙",
+        "妈妈",
+        "老爷",
+        "师父",
+        "师傅",
+        "少奶奶",
+        "太太",
+        "娘子",
+    )
+    allowed_prev_cjk_chars = set(
+        "和与跟同向对被把将在从给替为由因叫喊说问看听见让请帮陪等"
+        "着了过来去到朝往是像比并而又也还就便都正仍尚将把被令使"
+        "他她它你我伊其"
+    )
+    likely_name_prefix_chars = set(
+        "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
+        "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳鲍史唐"
+        "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元顾孟平黄"
+        "和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董"
+        "梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林钟徐邱骆高夏蔡田樊胡凌"
+        "霍虞万支柯昝管卢莫经房裘缪干解应宗丁宣贲邓郁单杭洪包诸左石崔吉"
+        "钮龚程嵇邢滑裴陆荣翁荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌"
+        "焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘厉戎祖武符刘景"
+        "詹束龙叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴郁"
+        "胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕"
+        "冀郏浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居"
+        "衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖融冷"
+        "訾辛阚那简饶空曾沙养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公仉督"
+        "岳帅缑亢况郈有琴归海晋楚闫法汝鄢涂钦岳帅亓官"
+        "阿老小大"
+    )
+
+    def _range_overlaps(start: int, end: int) -> bool:
+        return any(start < existing_end and end > existing_start for existing_start, existing_end in protected_ranges)
+
+    def _is_ascii_alias(value: str) -> bool:
+        return bool(re.search(r"[A-Za-z0-9_]", value))
+
+    def _is_cjk_char(char: str) -> bool:
+        return bool(char) and bool(re.match(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", char))
+
+    def _is_ascii_word_char(char: str) -> bool:
+        return bool(char) and bool(re.match(r"[A-Za-z0-9_]", char))
+
+    def _looks_like_title_alias(value: str) -> bool:
+        return any(value.endswith(suffix) for suffix in title_alias_suffixes)
+
+    def _is_safe_match(value: str, start: int, end: int) -> bool:
+        prev_char = text[start - 1] if start > 0 else ""
+        next_char = text[end] if end < text_length else ""
+        left_boundary = not prev_char or (not _is_cjk_char(prev_char) and not _is_ascii_word_char(prev_char))
+        right_boundary = not next_char or (not _is_cjk_char(next_char) and not _is_ascii_word_char(next_char))
+
+        if _is_ascii_alias(value):
+            return left_boundary and right_boundary
+
+        if _looks_like_title_alias(value):
+            if left_boundary or right_boundary:
+                return True
+            return prev_char in allowed_prev_cjk_chars
+
+        if len(value) <= 2 and prev_char in likely_name_prefix_chars:
+            return False
+
+        return True
+
     for alias, canonical in replacements:
-        normalized_text = normalized_text.replace(alias, canonical)
-    return normalized_text
+        search_start = 0
+        while True:
+            match_start = text.find(alias, search_start)
+            if match_start < 0:
+                break
+            match_end = match_start + len(alias)
+            if not _range_overlaps(match_start, match_end) and _is_safe_match(alias, match_start, match_end):
+                accepted_matches.append((match_start, match_end, canonical))
+                protected_ranges.append((match_start, match_end))
+            search_start = match_start + 1
+
+    if not accepted_matches:
+        return text
+
+    segments: list[str] = []
+    cursor = 0
+    accepted_matches.sort(key=lambda item: item[0])
+    for match_start, match_end, canonical in accepted_matches:
+        if cursor < match_start:
+            segments.append(text[cursor:match_start])
+        segments.append(canonical)
+        cursor = match_end
+    if cursor < text_length:
+        segments.append(text[cursor:])
+    return "".join(segments)
 
 
 def _fetch_emotion_curve(run_id: str, stats_repo: StatsRepository) -> list:
@@ -519,8 +622,13 @@ def _normalize_arc_scores(arc_scores: Any, alias_map: dict[str, str] | None) -> 
     for name, score in arc_scores.items():
         if not isinstance(name, str):
             continue
+        try:
+            normalized_score = float(score)
+        except (TypeError, ValueError):
+            continue
         canonical_name = alias_map.get(name, name)
-        normalized[canonical_name] = score
+        previous = normalized.get(canonical_name)
+        normalized[canonical_name] = normalized_score if previous is None else max(previous, normalized_score)
 
     return normalized
 
@@ -882,3 +990,82 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
     except Exception as e:
         logger.warning(f"Failed to fetch token usage stats: {e}")
         return TokenUsageStats()
+
+
+def _fetch_known_characters(run_id: str, annotation_repo: AnnotationRepository) -> list[str]:
+    """
+    获取已知角色列表（规范名）
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 从 entities 表或 checkpoint 获取规范角色名列表
+    
+    Args:
+        run_id: 运行ID
+        annotation_repo: 注解仓库
+    
+    Returns:
+        规范角色名列表
+    """
+    from sqlalchemy import text
+    
+    result = annotation_repo.session.execute(
+        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
+        {"run_id": run_id},
+    ).fetchone()
+    
+    if result and result[0]:
+        import json
+        raw_data = json.loads(result[0])
+        
+        if isinstance(raw_data, dict):
+            if "known_canonical_names" in raw_data:
+                return raw_data.get("known_canonical_names", [])
+            
+            old_alias_map = raw_data
+            return list(set(old_alias_map.values()))
+    
+    return []
+
+
+def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository) -> dict[str, str]:
+    """
+    获取别名映射（只包含 alias != canonical）
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 从 entity_aliases 或 checkpoint 获取真实别名映射
+    
+    Args:
+        run_id: 运行ID
+        annotation_repo: 注解仓库
+    
+    Returns:
+        别名到规范名的映射（只包含 alias != canonical）
+    """
+    from sqlalchemy import text
+    
+    result = annotation_repo.session.execute(
+        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
+        {"run_id": run_id},
+    ).fetchone()
+    
+    if result and result[0]:
+        import json
+        raw_data = json.loads(result[0])
+        
+        if isinstance(raw_data, dict):
+            if "alias_merges" in raw_data:
+                alias_merges_list = raw_data.get("alias_merges", [])
+                return {alias: canonical for alias, canonical in alias_merges_list if alias != canonical}
+            
+            old_alias_map = raw_data
+            return {
+                alias: canonical
+                for alias, canonical in old_alias_map.items()
+                if alias != canonical
+            }
+    
+    return {}

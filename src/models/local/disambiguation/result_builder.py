@@ -45,15 +45,20 @@ class ExtendedDisambigResult:
     修改时间: 2026-03-26
     修改者: TraeAI
     任务: disambiguation-evidence-grading
-    修改内容: 添加 evidence_sources 字段，支持证据来源追踪
+    修改内容: 添加 evidence_sources 字段。支持证据来源追踪
 
     修改时间: 2026-03-27
     修改者: TraeAI
     任务: 简化消歧响应模型
     修改内容: 删除 common_name_map 字段，将 merge_target_map 重命名为 alias_map
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: disambiguation-state-three-layer
+    修改内容: 将 alias_map 重命名为 canonical_decisions，明确表达模型判断而非运行时状态
     """
 
-    alias_map: dict[str, str]
+    canonical_decisions: dict[str, str]
     entity_types: dict[str, str]
     entity_relations: list[dict[str, str]]
     alias_confidence: dict[str, str] = field(default_factory=dict)
@@ -91,14 +96,14 @@ def build_result_from_response(
     修改时间: 2026-03-27
     修改者: TraeAI
     任务: 简化消歧响应模型
-    修改内容: 将 merge_target_map 改为 alias_map
+    修改内容: 将 alias_map 改为 canonical_decisions
     """
     name_list = _candidate_names(candidates)
 
     result: dict[str, str] = {}
     for name in name_list:
-        if name in response_data.alias_map:
-            result[name] = str(response_data.alias_map[name])
+        if name in response_data.canonical_decisions:
+            result[name] = str(response_data.canonical_decisions[name])
         else:
             result[name] = name
     return result
@@ -129,24 +134,20 @@ def build_extended_result_from_response(
 
     修改时间: 2026-03-27
     修改者: TraeAI
-    任务: 简化消歧响应模型
-    修改内容: 删除 common_name_map 相关逻辑，将 merge_target_map 改为 alias_map
+    任务: disambiguation-state-three-layer
+    修改内容: 将 alias_map 改为 canonical_decisions，明确表达模型判断而非运行时状态
     """
-    alias_map = build_result_from_response(response_data, candidates)
-
+    canonical_decisions = build_result_from_response(response_data, candidates)
     name_list = _candidate_names(candidates)
 
     alias_confidence: dict[str, str] = {}
     for name in name_list:
         alias_confidence[name] = str(response_data.alias_confidence.get(name, "medium"))
-
     evidence_profiles: dict[str, EvidenceProfile] = {}
     for name in name_list:
         context = context_sentences.get(name, "") if context_sentences else ""
         evidence_profiles[name] = build_evidence_profile(context)
-
     entity_types = dict(response_data.entity_types)
-
     entity_relations: list[dict[str, str]] = []
     for rel in response_data.entity_relations:
         entity_relations.append(
@@ -156,13 +157,11 @@ def build_extended_result_from_response(
                 "type": rel.type,
             }
         )
-
     thinking_content = getattr(response_data, "_thinking_content", None) or getattr(
         response_data, "thinking_content", None
     )
-
     return ExtendedDisambigResult(
-        alias_map=alias_map,
+        canonical_decisions=canonical_decisions,
         entity_types=entity_types,
         entity_relations=entity_relations,
         alias_confidence=alias_confidence,

@@ -10,6 +10,11 @@ DisambiguationClient 模块
 任务: unify-model-client-architecture
 修改内容: 移动到 src/models/disambiguation.py（统一客户端架构）
 
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: disambiguation-state-three-layer
+修改内容: 将 alias_map 改为 canonical_decisions
+
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
 - 核心逻辑委托给 src.models.local.disambiguation 子模块
@@ -76,15 +81,12 @@ class DisambiguationClient(BaseModelClient):
     ) -> ExtendedDisambigResult:
         if not candidates:
             return ExtendedDisambigResult(
-                alias_map={},
+                canonical_decisions={},
                 entity_types={},
                 entity_relations=[],
                 alias_confidence={},
             )
-
-        messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
         is_cloud = self._is_cloud_api()
-
         log_disambiguate_start(
             "disambiguate_characters",
             len(candidates),
@@ -94,7 +96,7 @@ class DisambiguationClient(BaseModelClient):
             self._config.model,
             self._config.thinking_enabled,
         )
-
+        messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
         try:
             response = call_disambiguate_api(
                 client=self,
@@ -104,11 +106,10 @@ class DisambiguationClient(BaseModelClient):
             )
             log_disambiguate_response(
                 "disambiguate_characters",
-                len(response.alias_map),
+                len(response.canonical_decisions),
                 is_cloud,
                 self._novel_id,
             )
-
             metadata = {
                 "model": self._config.model,
                 "task_type": self._task_type,
@@ -121,6 +122,7 @@ class DisambiguationClient(BaseModelClient):
             return result
         except Exception as e:
             from loguru import logger
+
             logger.error("disambiguate_characters unexpected error: {}", str(e))
             raise
 
@@ -158,7 +160,7 @@ class DisambiguationClient(BaseModelClient):
             )
             log_disambiguate_response(
                 "disambiguate_anonymous",
-                len(response.alias_map),
+                len(response.canonical_decisions),
                 is_cloud,
                 self._novel_id,
             )
@@ -175,6 +177,7 @@ class DisambiguationClient(BaseModelClient):
             return result
         except Exception as e:
             from loguru import logger
+
             logger.error("disambiguate_anonymous unexpected error: {}", str(e))
             raise
 

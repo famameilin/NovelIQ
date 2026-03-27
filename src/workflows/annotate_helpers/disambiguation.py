@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from sqlalchemy import text
@@ -37,7 +37,13 @@ from sqlalchemy import text
 from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interfaces import DisambiguationLike
-from src.models.local.disambiguation import ExtendedDisambigResult, build_existing_character_hint
+from src.models.local.disambiguation import (
+    DisambiguationState,
+    ExtendedDisambigResult,
+    NameReviewState,
+    build_existing_character_hint,
+    validate_state_invariants,
+)
 from src.models.local.disambiguation.evidence import (
     EVIDENCE_SIGNAL_APPEARANCE_ONLY,
     EVIDENCE_STRENGTH_STRONG,
@@ -66,6 +72,119 @@ EXTENSION_REVIEW_MIN_GAP = 3
 EXTENSION_REVIEW_MIN_RATIO = 1.5
 
 _MERGE_CONTEXT_GAP = 3
+
+
+def apply_disambiguation_decisions(
+    state: DisambiguationState,
+    result: ExtendedDisambigResult,
+) -> DisambiguationState:
+    """
+    将模型决策应用到状态
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 将 canonical_decisions 分流到三层状态
+    
+    处理逻辑：
+    1. A -> A 自映射：加入 discovered_names 和 known_canonical_names，不写入 alias_merges
+    2. A -> B 别名合并：A、B 加入 discovered_names，B 加入 known_canonical_names，写入 alias_merges[A] = B
+    3. canonical 被撤销时：更新 alias_merges 和 review_status 中的引用
+    
+    Args:
+        state: 当前消歧状态
+        result: 模型输出结果（包含 canonical_decisions）
+    
+    Returns:
+        更新后的新状态实例
+    """
+    new_discovered = set(state.discovered_names)
+    new_known_canonical = set(state.known_canonical_names)
+    new_alias_merges: list[tuple[str, str]] = list(state.alias_merges)
+    new_review_status: dict[str, NameReviewState] = dict(state.review_status)
+
+    for name, canonical in result.canonical_decisions.items():
+        new_discovered.add(name)
+
+        raw_confidence = result.alias_confidence.get(name, "medium")
+        confidence = _normalize_disambig_confidence(raw_confidence)
+        evidence_profile = result.evidence_profiles.get(name)
+        evidence_strength = _normalize_evidence_strength(
+            evidence_profile.strength if evidence_profile else None
+        )
+
+        if name == canonical:
+            is_confirmed_canonical = (
+                confidence == DISAMBIG_CONFIDENCE_HIGH and evidence_strength in ("mixed", "strong")
+            )
+            if is_confirmed_canonical:
+                new_known_canonical.add(name)
+            new_review_status[name] = NameReviewState(
+                status=DISAMBIG_STATE_RESOLVED if is_confirmed_canonical else DISAMBIG_STATE_REVIEW,
+                confidence=confidence,
+                proposed_canonical=name,
+                evidence_strength=evidence_strength,
+            )
+        else:
+            new_discovered.add(canonical)
+            new_known_canonical.add(canonical)
+
+            new_alias_merges.append((name, canonical))
+
+            new_review_status[name] = NameReviewState(
+                status=DISAMBIG_STATE_RESOLVED if confidence == DISAMBIG_CONFIDENCE_HIGH else DISAMBIG_STATE_REVIEW,
+                confidence=confidence,
+                proposed_canonical=canonical,
+                evidence_strength=evidence_strength,
+            )
+    
+    old_canonicals = state.known_canonical_names
+    new_canonicals = frozenset(new_known_canonical)
+    demoted_canonicals = old_canonicals - new_canonicals
+    
+    if demoted_canonicals:
+        logger.info(f"Canonical demotion detected: {demoted_canonicals}")
+        
+        canonical_replacement: dict[str, str] = {}
+        for demoted in demoted_canonicals:
+            for alias, target in result.canonical_decisions.items():
+                if alias == demoted and target != demoted:
+                    canonical_replacement[demoted] = target
+                    break
+        
+        for demoted, new_target in canonical_replacement.items():
+            for i, (alias, target) in enumerate(new_alias_merges):
+                if target == demoted:
+                    new_alias_merges[i] = (alias, new_target)
+                    logger.debug(f"Updated alias_merges: {alias} -> {new_target} (was {demoted})")
+        
+        for name, review in list(new_review_status.items()):
+            if review.proposed_canonical in demoted_canonicals:
+                new_target = canonical_replacement.get(review.proposed_canonical, name)
+                new_review_status[name] = NameReviewState(
+                    status="review",
+                    confidence=review.confidence,
+                    proposed_canonical=new_target,
+                    evidence_strength=review.evidence_strength,
+                )
+    
+    final_alias_merges: list[tuple[str, str]] = []
+    seen_aliases: set[str] = set()
+    for alias, target in new_alias_merges:
+        if alias != target and alias not in seen_aliases:
+            final_alias_merges.append((alias, target))
+            seen_aliases.add(alias)
+    
+    new_state = state.with_updates(
+        discovered_names=frozenset(new_discovered),
+        known_canonical_names=frozenset(new_known_canonical),
+        alias_merges=frozenset(final_alias_merges),
+        review_status=tuple(new_review_status.items()),
+    )
+    
+    validate_state_invariants(new_state)
+    
+    return new_state
 
 
 def _name_variants_for_matching(name: str) -> set[str]:
@@ -121,7 +240,7 @@ def _apply_strong_evidence_merge_override(
         name,
         target,
     )
-    result.alias_map[name] = target
+    result.canonical_decisions[name] = target
     result.alias_confidence[name] = DISAMBIG_CONFIDENCE_HIGH
 
 
@@ -156,9 +275,9 @@ def validate_confidence_with_evidence(
     """
     existing_set = set(existing_names) if existing_names else set()
 
-    for name, canonical in result.alias_map.items():
+    for name, canonical in result.canonical_decisions.items():
         _apply_strong_evidence_merge_override(name, result, existing_names, context_sentences)
-        canonical = result.alias_map.get(name, canonical)
+        canonical = result.canonical_decisions.get(name, canonical)
         profile = result.evidence_profiles.get(name)
         only_weak_evidence = _has_only_weak_evidence(profile)
 
@@ -171,7 +290,7 @@ def validate_confidence_with_evidence(
         is_merging_to_existing = canonical in existing_set and canonical != name
         if is_merging_to_existing and only_weak_evidence:
             logger.info(f"Preventing merge of '{name}' to existing character '{canonical}' due to weak evidence only")
-            result.alias_map[name] = name
+            result.canonical_decisions[name] = name
             result.alias_confidence[name] = DISAMBIG_CONFIDENCE_MEDIUM
 
     return result
@@ -266,6 +385,89 @@ def _extract_retryable_relations(skipped_relations: list[dict[str, Any]] | None)
     return _dedupe_relations(retryable)
 
 
+def _save_disambig_checkpoint_state(
+    conn,
+    run_id: str,
+    state: DisambiguationState,
+) -> None:
+    """
+    保存消歧检查点（新格式）
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 保存完整的 DisambiguationState 到数据库
+    """
+    try:
+        state_dict = state.to_dict()
+        params = {
+            "run_id": run_id,
+            "alias_map": json.dumps(state_dict),
+            "updated_at": time.time(),
+            "entity_relations": json.dumps(list(state.pending_relations)) if state.pending_relations else None,
+            "disambig_states": None,
+        }
+        conn.execute(
+            text("""
+            INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at, entity_relations, disambig_states)
+            VALUES (:run_id, :alias_map, :updated_at, :entity_relations, :disambig_states)
+            ON CONFLICT (run_id) DO UPDATE SET
+                alias_map = EXCLUDED.alias_map,
+                updated_at = EXCLUDED.updated_at,
+                entity_relations = EXCLUDED.entity_relations,
+                disambig_states = EXCLUDED.disambig_states
+        """),
+            params,
+        )
+        conn.commit()
+        logger.debug(
+            f"disambig checkpoint saved: {len(state.discovered_names)} discovered, "
+            f"{len(state.known_canonical_names)} canonicals, {len(state.alias_merges)} merges"
+        )
+    except Exception as e:
+        logger.error(f"failed to save disambig checkpoint: {e}")
+        raise
+
+
+def _load_disambig_checkpoint_state(conn, run_id: str) -> DisambiguationState:
+    """
+    加载消歧检查点（新格式）
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 从数据库加载完整的 DisambiguationState
+    
+    Returns:
+        DisambiguationState: 完整的消歧状态，如果不存在或格式无效则返回空状态
+    """
+    try:
+        result = conn.execute(
+            text("SELECT alias_map, entity_relations FROM disambig_checkpoint WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        ).fetchone()
+
+        if result and result[0]:
+            raw_data = json.loads(result[0])
+
+            if isinstance(raw_data, dict) and "discovered_names" in raw_data and "known_canonical_names" in raw_data:
+                state = DisambiguationState.from_dict(raw_data)
+                logger.info(
+                    f"disambig checkpoint loaded (new format): "
+                    f"{len(state.discovered_names)} discovered, "
+                    f"{len(state.known_canonical_names)} canonicals, "
+                    f"{len(state.alias_merges)} merges"
+                )
+                return state
+
+            logger.warning("disambig checkpoint format is invalid for three-layer state: run_id={}", run_id)
+            return DisambiguationState.empty()
+    except Exception as e:
+        logger.warning(f"failed to load disambig checkpoint: {e}")
+
+    return DisambiguationState.empty()
+
+
 def _save_disambig_checkpoint(
     conn,
     run_id: str,
@@ -274,13 +476,19 @@ def _save_disambig_checkpoint(
     disambig_states: DisambigStateSnapshot | None = None,
 ) -> None:
     """
-    保存消歧检查点
+    保存消歧检查点（旧格式兼容层）
 
     修改时间: 2026-03-20
     修改者: TraeAI
     任务: fix-postgresql-transaction-error
     修改内容: 简化代码，依赖正确的表结构
+    
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: disambiguation-state-three-layer
+    修改内容: 标记为废弃，建议使用 _save_disambig_checkpoint_state
     """
+    logger.warning("_save_disambig_checkpoint is deprecated, use _save_disambig_checkpoint_state instead")
     try:
         params = {
             "run_id": run_id,
@@ -310,16 +518,22 @@ def _save_disambig_checkpoint(
 
 def _load_disambig_checkpoint(conn, run_id: str) -> tuple[dict[str, str] | None, list[dict[str, str]] | None]:
     """
-    加载消歧检查点
+    加载消歧检查点（旧格式兼容层）
 
     修改时间: 2026-03-20
     修改者: TraeAI
     任务: fix-postgresql-transaction-error
     修改内容: 简化代码，依赖正确的表结构
+    
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: disambiguation-state-three-layer
+    修改内容: 标记为废弃，建议使用 _load_disambig_checkpoint_state
 
     Returns:
         (alias_map, entity_relations): 别名映射和关系数据
     """
+    logger.warning("_load_disambig_checkpoint is deprecated, use _load_disambig_checkpoint_state instead")
     try:
         result = conn.execute(
             text("SELECT alias_map, entity_relations FROM disambig_checkpoint WHERE run_id = :run_id"),
@@ -411,9 +625,8 @@ def _save_disambiguation_interaction(
 
             # 构建响应内容
             if isinstance(result, ExtendedDisambigResult):
-                # ExtendedDisambigResult
                 response_dict = {
-                    "alias_map": result.alias_map,
+                    "canonical_decisions": result.canonical_decisions,
                     "alias_confidence": result.alias_confidence if hasattr(result, "alias_confidence") else {},
                     "entity_types": result.entity_types if hasattr(result, "entity_types") else {},
                     "entity_relations": result.entity_relations if hasattr(result, "entity_relations") else [],
@@ -430,7 +643,7 @@ def _save_disambiguation_interaction(
                 }
             elif isinstance(result, dict):
                 response_dict = {
-                    "alias_map": result,
+                    "canonical_decisions": result,
                     "alias_confidence": {},
                     "entity_types": {},
                     "entity_relations": [],
@@ -438,7 +651,7 @@ def _save_disambiguation_interaction(
                 }
             else:
                 response_dict = {
-                    "alias_map": {},
+                    "canonical_decisions": {},
                     "alias_confidence": {},
                     "entity_types": {},
                     "entity_relations": [],
@@ -600,17 +813,26 @@ def extract_new_names_from_db(
     return candidates
 
 
-def _normalize_disambig_confidence(confidence: Any) -> str:
+def _normalize_disambig_confidence(confidence: Any) -> Literal["low", "medium", "high"]:
     if isinstance(confidence, str):
         normalized = confidence.lower().strip()
         if normalized in VALID_DISAMBIG_CONFIDENCE:
-            return normalized
-    return DISAMBIG_CONFIDENCE_MEDIUM
+            return normalized  # type: ignore[return-value]
+    return "medium"
+
+
+def _normalize_evidence_strength(strength: Any) -> Literal["weak", "mixed", "strong"] | None:
+    if isinstance(strength, str):
+        normalized = strength.lower().strip()
+        if normalized in ("weak", "mixed", "strong"):
+            return normalized  # type: ignore[return-value]
+    return None
 
 
 def _ensure_state_snapshot_has_known_names(
     alias_map: dict[str, str],
     state_snapshot: DisambigStateSnapshot | None,
+    known_canonical_names: set[str] | frozenset[str] | None = None,
 ) -> DisambigStateSnapshot:
     snapshot: DisambigStateSnapshot = dict(state_snapshot or {})
     for alias, canonical in alias_map.items():
@@ -622,6 +844,15 @@ def _ensure_state_snapshot_has_known_names(
                 "canonical": canonical,
             },
         )
+        snapshot.setdefault(
+            canonical,
+            {
+                "state": DISAMBIG_STATE_RESOLVED,
+                "confidence": DISAMBIG_CONFIDENCE_HIGH,
+                "canonical": canonical,
+            },
+        )
+    for canonical in known_canonical_names or set():
         snapshot.setdefault(
             canonical,
             {
@@ -642,7 +873,7 @@ def _build_alias_and_state_updates(
     alias_updates: dict[str, str] = {}
     state_updates: DisambigStateSnapshot = {}
 
-    for name, canonical in result.alias_map.items():
+    for name, canonical in result.canonical_decisions.items():
         confidence = _normalize_disambig_confidence(result.alias_confidence.get(name))
         canonical_name = canonical or name
 
@@ -827,6 +1058,82 @@ def _collect_final_disambiguation_candidates(
     return candidates
 
 
+def _run_incremental_disambiguation_with_state(
+    conn,
+    state: DisambiguationState,
+    incremental_disambig_client: DisambiguationLike,
+    alias_keywords: list[str],
+    novel_id: str,
+    run_id: str,
+    chunk_id: int,
+    current_idx: int,
+    checkpoint_interval: int,
+) -> DisambiguationState:
+    """
+    执行增量消歧（使用新的三层状态）
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 使用 DisambiguationState 替代 alias_map
+    
+    流程：
+    1. 从 DB 抓候选名
+    2. 用 discovered_names 判断哪些是真新名字
+    3. 调模型得到 canonical_decisions
+    4. 走 evidence validation
+    5. state = apply_disambiguation_decisions(state, result)
+    6. 保存 checkpoint
+    """
+    if (current_idx + 1) % checkpoint_interval != 0:
+        return state
+    
+    alias_map_dict = state.get_alias_merges_dict()
+    new_names = extract_new_names_from_db(conn, alias_map_dict, run_id, current_chunk_id=chunk_id)
+    
+    truly_new_names: list[NameCountCandidate] = [
+        name for name in new_names if name["name"] not in state.discovered_names
+    ]
+    
+    if not truly_new_names:
+        return state
+    
+    context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
+    existing_names = list(state.known_canonical_names)
+    
+    result = _retry_disambig(
+        incremental_disambig_client,
+        truly_new_names,
+        context_sentences,
+        existing_names,
+        stage_name="incremental disambiguation",
+        run_id=run_id,
+    )
+    
+    result = validate_confidence_with_evidence(result, existing_names, context_sentences)
+    
+    new_state = apply_disambiguation_decisions(state, result)
+    
+    if new_state != state:
+        logger.debug(
+            f"DisambiguationState updated: "
+            f"{len(new_state.discovered_names)} discovered, "
+            f"{len(new_state.known_canonical_names)} canonicals, "
+            f"{len(new_state.alias_merges)} merges"
+        )
+        
+        new_relations = _normalize_relations_with_alias_map(
+            result.entity_relations, new_state.get_alias_merges_dict()
+        )
+        merged_relations = _merge_relations(list(new_state.pending_relations), new_relations)
+        
+        new_state = new_state.with_updates(pending_relations=tuple(merged_relations))
+        
+        _save_disambig_checkpoint_state(conn, run_id, new_state)
+    
+    return new_state
+
+
 def _run_incremental_disambiguation(
     conn,
     alias_map: dict[str, str],
@@ -975,14 +1282,14 @@ def _run_final_disambiguation(
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(
-            alias_map={},
+            canonical_decisions={},
             entity_types={},
             entity_relations=[],
             alias_confidence={},
         )
 
     previous_alias_map = dict(alias_map)
-    if result.alias_map:
+    if result.canonical_decisions:
         alias_updates, state_snapshot = _build_alias_and_state_updates(result, alias_map, state_snapshot)
         alias_map.update(alias_updates)
     if alias_map != previous_alias_map:
@@ -1024,6 +1331,149 @@ def _run_final_disambiguation(
     )
 
     return alias_map
+
+
+def _run_final_disambiguation_with_state(
+    conn,
+    state: DisambiguationState,
+    full_disambig_client: DisambiguationLike,
+    alias_keywords: list[str],
+    novel_id: str,
+    run_id: str,
+) -> DisambiguationState:
+    """
+    执行最终消歧（使用新的三层状态）
+    
+    创建时间: 2026-03-27
+    创建者: TraeAI
+    任务: disambiguation-state-three-layer
+    说明: 使用 DisambiguationState 替代 alias_map
+    
+    流程：
+    1. 从 checkpoint 加载 state（已在外部完成）
+    2. 用 review_status 决定复审候选
+    3. 调模型
+    4. state = apply_disambiguation_decisions(state, result)
+    5. 落库：
+       - 用 known_canonical_names 建实体
+       - 用 alias_merges 执行名字修正
+       - 用 pending_relations + alias_merges 归一化关系
+    6. 保存最终 checkpoint
+    """
+    pending_relations = list(state.pending_relations)
+    if pending_relations:
+        logger.info(f"Found {len(pending_relations)} pending relations from checkpoint, will process them")
+    
+    existing_names = list(state.known_canonical_names)
+    
+    if not existing_names:
+        return state
+    
+    raw_all_names = fetch_all_character_names(conn, run_id)
+    all_names: list[NameCountCandidate] = []
+    for item in raw_all_names:
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        raw_count = item.get("count", 0)
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            count = 0
+        all_names.append({"name": name, "count": count})
+    
+    review_status_dict = state.get_review_status_dict()
+    alias_map_dict = state.get_alias_merges_dict()
+    state_snapshot_for_candidates: DisambigStateSnapshot = {
+        name: {
+            "state": review.status,
+            "confidence": review.confidence,
+            "canonical": review.proposed_canonical or name,
+        }
+        for name, review in review_status_dict.items()
+    }
+    state_snapshot_for_candidates = _ensure_state_snapshot_has_known_names(
+        alias_map_dict,
+        state_snapshot_for_candidates,
+        state.known_canonical_names,
+    )
+    candidates = _collect_final_disambiguation_candidates(all_names, alias_map_dict, state_snapshot_for_candidates)
+    
+    if candidates:
+        candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
+        context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+        rag_hint = _build_existing_character_hint_from_db(conn, all_names, existing_names, alias_keywords, run_id)
+        result = _retry_disambig(
+            full_disambig_client,
+            candidate_payload,
+            context_sentences,
+            existing_names,
+            stage_name="final disambiguation",
+            run_id=run_id,
+            rag_hint=rag_hint,
+        )
+        result = validate_confidence_with_evidence(result, existing_names, context_sentences)
+    else:
+        logger.info("final disambiguation skipped: no unresolved candidates")
+        result = ExtendedDisambigResult(
+            canonical_decisions={},
+            entity_types={},
+            entity_relations=[],
+            alias_confidence={},
+        )
+    
+    new_state = state
+    if result.canonical_decisions:
+        new_state = apply_disambiguation_decisions(state, result)
+    
+    if new_state != state:
+        logger.info(
+            f"Final disambiguation completed: "
+            f"{len(new_state.discovered_names)} discovered, "
+            f"{len(new_state.known_canonical_names)} canonicals, "
+            f"{len(new_state.alias_merges)} merges"
+        )
+    
+    ann_repo = AnnotationRepository(conn)
+    canonical_to_entity_id = ann_repo.ensure_canonical_entities(
+        run_id,
+        new_state.known_canonical_names,
+        novel_id=novel_id,
+    )
+    ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
+    ann_repo.create_entity_alias_rows(
+        run_id,
+        new_state.get_alias_merges_dict(),
+        novel_id=novel_id,
+        canonical_to_entity_id=canonical_to_entity_id,
+    )
+    logger.info(
+        "Stateful final disambiguation persisted: {} canonicals, {} merges",
+        len(new_state.known_canonical_names),
+        len(new_state.alias_merges),
+    )
+    
+    final_relations = _normalize_relations_with_alias_map(
+        result.entity_relations, new_state.get_alias_merges_dict()
+    )
+    relations_to_process = _merge_relations(pending_relations, final_relations)
+    retryable_relations: list[dict[str, str]] = []
+    if relations_to_process:
+        success_count, skipped = _process_entity_relations(
+            conn, novel_id, run_id, relations_to_process, result.entity_types, new_state.get_alias_merges_dict()
+        )
+        logger.info(f"Final disambig: processed {success_count} hierarchical relations")
+        retryable_relations = _extract_retryable_relations(skipped)
+        if retryable_relations:
+            logger.warning(
+                "Final disambig: {} relations left for retry, kept in checkpoint",
+                len(retryable_relations),
+            )
+    
+    new_state = new_state.with_updates(pending_relations=tuple(retryable_relations))
+    _save_disambig_checkpoint_state(conn, run_id, new_state)
+    
+    return new_state
 
 
 def detect_cycle_in_relations(
