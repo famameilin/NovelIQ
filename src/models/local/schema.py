@@ -13,7 +13,16 @@ DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
 RelationChange = Literal["强化", "弱化", "新建", "断裂", "无变化"]
-ClueType = Literal["none", "self_introduction", "named_by_other", "alias_revealed", "appearance_desc"]
+ClueType = Literal[
+    "none",
+    "self_introduction",
+    "named_by_other",
+    "alias_revealed",
+    "appearance_desc",
+    "unique_body_marker",
+    "kinship_identity",
+    "naming_scene",
+]
 ActionType = Literal["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
 
 

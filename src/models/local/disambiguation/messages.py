@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
+from .evidence import build_evidence_profile, format_evidence_profile
+
+if TYPE_CHECKING:
+    from .evidence import EvidenceProfile
 
 _EVIDENCE_MARKERS = {
     "前文总结": "前文摘要-弱证据",
@@ -15,9 +20,12 @@ _EVIDENCE_MARKERS = {
     "身份提示": "身份线索",
     "被点名": "身份线索",
     "外貌描写": "身份线索",
+    "独特标记": "身份线索",
+    "亲缘身份": "身份线索",
+    "命名场景": "身份线索",
 }
 
-_EVIDENCE_MARKER_PATTERN = re.compile(r"【(前文总结|自报身份|身份提示|被点名|外貌描写)】")
+_EVIDENCE_MARKER_PATTERN = re.compile(r"【(前文总结|自报身份|身份提示|被点名|外貌描写|独特标记|亲缘身份|命名场景)】")
 _EVIDENCE_PREFIXES = tuple(f"【{marker}】" for marker in _EVIDENCE_MARKERS)
 
 
@@ -66,6 +74,40 @@ def _format_evidence_annotation(evidence_types: list[str]) -> str:
     if not evidence_types:
         return ""
     return "【证据来源：" + "、".join(evidence_types) + "】"
+
+
+def _format_candidate_block(name: str, count: int, context: str, evidence_profile: EvidenceProfile) -> str:
+    """构建更结构化的候选项描述。"""
+
+    lines = [
+        f"- 候选称呼：{name}",
+        f"  次数：{count}",
+        f"  {format_evidence_profile(evidence_profile)}",
+    ]
+    if context:
+        lines.append(f"  参考上下文：{context}")
+    return "\n".join(lines)
+
+
+def build_existing_character_hint(
+    existing_names: list[str] | None,
+    existing_context_sentences: dict[str, str] | None = None,
+) -> str | None:
+    """构建已有角色锚点提示。"""
+
+    if not existing_names:
+        return None
+
+    lines = ["【已存在角色锚点】"]
+    for name in existing_names:
+        context = (existing_context_sentences or {}).get(name, "").strip()
+        evidence_profile = build_evidence_profile(context)
+        lines.append(f"- {name}")
+        lines.append(f"  {format_evidence_profile(evidence_profile)}")
+        if context:
+            lines.append(f"  参考上下文：{context}")
+
+    return "\n".join(lines)
 
 
 _RELATION_TYPE_DESCRIPTIONS: dict[str, str] = {
@@ -119,12 +161,14 @@ def build_disambiguate_messages(
         name = str(item["name"])
         count = int(item.get("count", 0))
         ctx = context_sentences.get(name, "") if context_sentences else ""
+        evidence_profile = build_evidence_profile(ctx)
         evidence_types = _extract_evidence_types_from_context(ctx)
         evidence_annotation = _format_evidence_annotation(evidence_types)
-        if ctx:
-            lines.append(f"- {name}（次数：{count}）{evidence_annotation}，参考：{ctx}")
+        profile_block = _format_candidate_block(name, count, ctx, evidence_profile)
+        if evidence_annotation:
+            lines.append(profile_block + f"\n  {evidence_annotation}")
         else:
-            lines.append(f"- {name}（次数：{count}）")
+            lines.append(profile_block)
 
     body = "\n".join(lines)
 
@@ -133,11 +177,6 @@ def build_disambiguate_messages(
         "\n\n【置信度输出要求】请在 JSON 中额外输出 alias_confidence 字段，"
         "key 为候选名字，value 仅允许 low|medium|high。"
         "high 表示证据充分，medium 表示倾向如此但证据不足，low 表示无法确认。"
-    )
-    system_prompt += (
-        "\n\n【证据来源输出要求】请在 JSON 中额外输出 evidence_sources 字段，"
-        'key 为候选名字，value 为证据来源列表（如 ["原文例句", "身份线索"]）。'
-        "请根据候选人名列表中标注的证据来源填写。"
     )
 
     if existing_names:
