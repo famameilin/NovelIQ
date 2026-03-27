@@ -37,7 +37,13 @@ from sqlalchemy import text
 from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interfaces import DisambiguationLike
-from src.models.local.disambiguation import ExtendedDisambigResult
+from src.models.local.disambiguation import ExtendedDisambigResult, build_existing_character_hint
+from src.models.local.disambiguation.evidence import (
+    EVIDENCE_SIGNAL_APPEARANCE_ONLY,
+    EVIDENCE_STRENGTH_STRONG,
+    EVIDENCE_STRENGTH_WEAK,
+    EvidenceProfile,
+)
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
@@ -59,13 +65,70 @@ DISAMBIG_STATE_UNRESOLVED = "unresolved"
 EXTENSION_REVIEW_MIN_GAP = 3
 EXTENSION_REVIEW_MIN_RATIO = 1.5
 
-STRONG_EVIDENCE_TYPES = {"原文例句", "身份线索"}
-WEAK_EVIDENCE_TYPE = "前文摘要-弱证据"
+_MERGE_CONTEXT_GAP = 3
+
+
+def _name_variants_for_matching(name: str) -> set[str]:
+    return {name} if name else set()
+
+
+def _find_existing_name_mentions(context: str, existing_names: list[str] | None) -> list[str]:
+    if not context or not existing_names:
+        return []
+
+    matches: list[str] = []
+    for existing_name in existing_names:
+        if any(variant in context for variant in _name_variants_for_matching(existing_name)):
+            matches.append(existing_name)
+    return matches
+
+
+def _has_only_weak_evidence(profile: EvidenceProfile | None) -> bool:
+    if profile is None:
+        return False
+    return profile.strength == EVIDENCE_STRENGTH_WEAK and not profile.has_original_sentence and not profile.has_identity_clue
+
+
+def _has_strong_merge_signal(profile: EvidenceProfile | None) -> bool:
+    if profile is None:
+        return False
+    if profile.strength != EVIDENCE_STRENGTH_STRONG:
+        return False
+    return any(signal != EVIDENCE_SIGNAL_APPEARANCE_ONLY for signal in profile.strong_signals)
+
+
+def _apply_strong_evidence_merge_override(
+    name: str,
+    result: ExtendedDisambigResult,
+    existing_names: list[str] | None,
+    context_sentences: dict[str, str] | None,
+) -> None:
+    profile = result.evidence_profiles.get(name)
+    if not _has_strong_merge_signal(profile):
+        return
+
+    context = context_sentences.get(name, "") if context_sentences else ""
+    matched_existing_names = _find_existing_name_mentions(context, existing_names)
+    if len(matched_existing_names) != 1:
+        return
+
+    target = matched_existing_names[0]
+    if target == name:
+        return
+
+    logger.info(
+        "Promoting strong-evidence self-mapping '{}' -> '{}' based on unique anchor mention in context",
+        name,
+        target,
+    )
+    result.alias_map[name] = target
+    result.alias_confidence[name] = DISAMBIG_CONFIDENCE_HIGH
 
 
 def validate_confidence_with_evidence(
     result: ExtendedDisambigResult,
     existing_names: list[str] | None = None,
+    context_sentences: dict[str, str] | None = None,
 ) -> ExtendedDisambigResult:
     """
     根据证据来源校验置信度
@@ -94,9 +157,10 @@ def validate_confidence_with_evidence(
     existing_set = set(existing_names) if existing_names else set()
 
     for name, canonical in result.alias_map.items():
-        evidence_types = set(result.evidence_sources.get(name, []))
-        has_strong_evidence = bool(evidence_types & STRONG_EVIDENCE_TYPES)
-        only_weak_evidence = evidence_types == {WEAK_EVIDENCE_TYPE} or (evidence_types and not has_strong_evidence)
+        _apply_strong_evidence_merge_override(name, result, existing_names, context_sentences)
+        canonical = result.alias_map.get(name, canonical)
+        profile = result.evidence_profiles.get(name)
+        only_weak_evidence = _has_only_weak_evidence(profile)
 
         current_confidence = result.alias_confidence.get(name, DISAMBIG_CONFIDENCE_MEDIUM)
 
@@ -313,6 +377,7 @@ def _save_disambiguation_interaction(
     candidates: list,
     context_sentences: dict,
     existing_names: list[str] | None,
+    rag_hint: str | None,
     result: Any,
     stage_name: str,
     attempt_number: int,
@@ -341,7 +406,7 @@ def _save_disambiguation_interaction(
             repo = ModelInteractionRepository(session)
 
             # 构建消息
-            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, None)
+            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
             prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
 
             # 构建响应内容
@@ -352,6 +417,16 @@ def _save_disambiguation_interaction(
                     "alias_confidence": result.alias_confidence if hasattr(result, "alias_confidence") else {},
                     "entity_types": result.entity_types if hasattr(result, "entity_types") else {},
                     "entity_relations": result.entity_relations if hasattr(result, "entity_relations") else [],
+                    "evidence_profiles": {
+                        name: {
+                            "has_original_sentence": profile.has_original_sentence,
+                            "has_identity_clue": profile.has_identity_clue,
+                            "has_summary": profile.has_summary,
+                            "strong_signals": list(profile.strong_signals),
+                            "strength": profile.strength,
+                        }
+                        for name, profile in getattr(result, "evidence_profiles", {}).items()
+                    },
                 }
             elif isinstance(result, dict):
                 response_dict = {
@@ -359,6 +434,7 @@ def _save_disambiguation_interaction(
                     "alias_confidence": {},
                     "entity_types": {},
                     "entity_relations": [],
+                    "evidence_profiles": {},
                 }
             else:
                 response_dict = {
@@ -366,6 +442,7 @@ def _save_disambiguation_interaction(
                     "alias_confidence": {},
                     "entity_types": {},
                     "entity_relations": [],
+                    "evidence_profiles": {},
                 }
 
             response_text = json.dumps(response_dict, ensure_ascii=False)
@@ -415,6 +492,7 @@ def _retry_disambig(
     existing_names: list[str],
     stage_name: str,
     run_id: str | None = None,
+    rag_hint: str | None = None,
 ) -> Any:
     """
     带重试的消歧调用
@@ -438,6 +516,7 @@ def _retry_disambig(
                 candidates=candidates,
                 context_sentences=context_sentences,
                 existing_names=existing_names if existing_names else None,
+                rag_hint=rag_hint,
             )
             duration_ms = int((time.time() - start_time) * 1000)
 
@@ -448,6 +527,7 @@ def _retry_disambig(
                 candidates=candidates,
                 context_sentences=context_sentences,
                 existing_names=existing_names,
+                rag_hint=rag_hint,
                 result=result,
                 stage_name=stage_name,
                 attempt_number=attempt,
@@ -466,6 +546,7 @@ def _retry_disambig(
                 candidates=candidates,
                 context_sentences=context_sentences,
                 existing_names=existing_names,
+                rag_hint=rag_hint,
                 result={"error": str(e)},
                 stage_name=stage_name,
                 attempt_number=attempt,
@@ -575,8 +656,7 @@ def _build_alias_and_state_updates(
 
         if confidence == DISAMBIG_CONFIDENCE_HIGH and not resolved_conflict:
             state = DISAMBIG_STATE_RESOLVED
-            if name != canonical_name:
-                alias_updates[name] = canonical_name
+            alias_updates[name] = canonical_name
             state_updates[canonical_name] = {
                 "state": DISAMBIG_STATE_RESOLVED,
                 "confidence": DISAMBIG_CONFIDENCE_HIGH,
@@ -584,8 +664,12 @@ def _build_alias_and_state_updates(
             }
         elif confidence == DISAMBIG_CONFIDENCE_MEDIUM or resolved_conflict:
             state = DISAMBIG_STATE_REVIEW
+            if not has_existing_alias_resolution:
+                alias_updates[name] = name
         else:
             state = DISAMBIG_STATE_UNRESOLVED
+            if not has_existing_alias_resolution:
+                alias_updates[name] = name
 
         state_updates[name] = {
             "state": state,
@@ -612,6 +696,21 @@ def _build_candidate_payload_by_names(
         if name in names_set:
             payload.append(item)
     return payload
+
+
+def _build_existing_character_hint_from_db(
+    conn,
+    all_names: list[NameCountCandidate],
+    existing_names: list[str],
+    alias_keywords: list[str],
+    run_id: str,
+) -> str | None:
+    existing_payload = _build_candidate_payload_by_names(all_names, existing_names)
+    if not existing_payload:
+        return None
+
+    existing_context_sentences = build_context_sentences(conn, existing_payload, alias_keywords, run_id=run_id)
+    return build_existing_character_hint(existing_names, existing_context_sentences)
 
 
 def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, int]:
@@ -779,7 +878,7 @@ def _run_incremental_disambiguation(
         run_id=run_id,
     )
 
-    result = validate_confidence_with_evidence(result, existing_names)
+    result = validate_confidence_with_evidence(result, existing_names, context_sentences)
 
     previous_alias_map = dict(alias_map)
     state_snapshot = _load_disambig_states(conn, run_id)
@@ -862,6 +961,7 @@ def _run_final_disambiguation(
     if candidates:
         candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+        rag_hint = _build_existing_character_hint_from_db(conn, all_names, existing_names, alias_keywords, run_id)
         result = _retry_disambig(
             full_disambig_client,
             candidate_payload,
@@ -869,8 +969,9 @@ def _run_final_disambiguation(
             existing_names,
             stage_name="final disambiguation",
             run_id=run_id,
+            rag_hint=rag_hint,
         )
-        result = validate_confidence_with_evidence(result, existing_names)
+        result = validate_confidence_with_evidence(result, existing_names, context_sentences)
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(

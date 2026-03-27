@@ -279,6 +279,9 @@ def _add_identity_clues(
         "alias_revealed": "身份提示",
         "named_by_other": "被点名",
         "appearance_desc": "外貌描述",
+        "unique_body_marker": "独特标记",
+        "kinship_identity": "亲缘身份",
+        "naming_scene": "命名场景",
     }
 
     for raw_name, clue, clue_type in appearances:

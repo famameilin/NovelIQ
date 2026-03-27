@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..schema import DisambiguateResponseModel
+from .evidence import EvidenceProfile, build_evidence_profile
 
 
 @dataclass
@@ -56,7 +57,7 @@ class ExtendedDisambigResult:
     entity_types: dict[str, str]
     entity_relations: list[dict[str, str]]
     alias_confidence: dict[str, str] = field(default_factory=dict)
-    evidence_sources: dict[str, list[str]] = field(default_factory=dict)
+    evidence_profiles: dict[str, EvidenceProfile] = field(default_factory=dict)
     _thinking_content: str | None = None
 
 
@@ -106,6 +107,7 @@ def build_result_from_response(
 def build_extended_result_from_response(
     response_data: DisambiguateResponseModel,
     candidates: list[NameCountCandidate],
+    context_sentences: dict[str, str] | None = None,
 ) -> ExtendedDisambigResult:
     """
     从 DisambiguateResponseModel 构建扩展结果，包含别名映射、实体类型和实体关系
@@ -138,10 +140,10 @@ def build_extended_result_from_response(
     for name in name_list:
         alias_confidence[name] = str(response_data.alias_confidence.get(name, "medium"))
 
-    evidence_sources: dict[str, list[str]] = {}
+    evidence_profiles: dict[str, EvidenceProfile] = {}
     for name in name_list:
-        sources = response_data.evidence_sources.get(name, [])
-        evidence_sources[name] = list(sources) if sources else ["原文例句"]
+        context = context_sentences.get(name, "") if context_sentences else ""
+        evidence_profiles[name] = build_evidence_profile(context)
 
     entity_types = dict(response_data.entity_types)
 
@@ -164,6 +166,6 @@ def build_extended_result_from_response(
         entity_types=entity_types,
         entity_relations=entity_relations,
         alias_confidence=alias_confidence,
-        evidence_sources=evidence_sources,
+        evidence_profiles=evidence_profiles,
         _thinking_content=thinking_content,
     )
