@@ -827,15 +827,17 @@ def _fetch_character_relations(
             )
             continue
 
-        # 使用 (chunk_id, from_char, to_char, type) 作为去重键
-        key = (chunk_id, from_char, to_char, rel_type)
-        seen[key] = CharacterRelation(
-            chunk_id=chunk_id,
-            from_char=from_char,
-            to_char=to_char,
-            type=rel_type,
-            change=change,
-        )
+        # 使用 (from_char, to_char, type) 作为去重键，跨chunk去重
+        # 保留首次出现的 chunk_id
+        key = (from_char, to_char, rel_type)
+        if key not in seen:
+            seen[key] = CharacterRelation(
+                chunk_id=chunk_id,
+                from_char=from_char,
+                to_char=to_char,
+                type=rel_type,
+                change=change,
+            )
 
     return list(seen.values())
 
