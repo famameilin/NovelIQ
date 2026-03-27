@@ -106,6 +106,7 @@ class FakeLocalModelClient:
         candidates: List[NameCountCandidate],
         context_sentences: Dict[str, str] | None = None,
         existing_names: List[str] | None = None,
+        rag_hint: str | None = None,
     ) -> Dict[str, str]:
         result = {}
         for item in candidates:

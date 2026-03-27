@@ -85,11 +85,13 @@ class ConfiguredCloudModelClient(CloudModelClient):
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
+        rag_hint: str | None = None,
     ) -> dict[str, str]:
         result = self._disambiguation_client.disambiguate_characters(
             candidates=candidates,
             context_sentences=context_sentences,
             existing_names=existing_names,
+            rag_hint=rag_hint,
         )
         return result.alias_map
 
