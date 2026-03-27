@@ -127,7 +127,6 @@ def update_character_names(
     run_id: str,
     alias_map: dict[str, str],
     novel_id: str = "default",
-    display_name_map: dict[str, str] | None = None,
 ) -> None:
     """
     更新角色名称（消歧）
@@ -138,12 +137,17 @@ def update_character_names(
     修改者: TraeAI
     任务: fix-character-dangling-reference
     修改内容: 只为在 chunk_characters 中出现的名字创建实体，避免悬空引用
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: remove-display-name-map
+    修改内容: 删除 display_name_map 参数，规范名即常用名
     """
     valid_names = get_normalized_character_names(session, run_id, alias_map)
     canonical_to_entity_id: dict[str, int] = {}
     all_names = sorted(set(alias_map.keys()) | set(alias_map.values()))
     for name in all_names:
-        final_name = _resolve_final_character_name(name, alias_map, display_name_map)
+        final_name = _resolve_final_character_name(name, alias_map)
         if name != final_name:
             _update_character_names_in_tables(session, name, final_name, run_id)
         if final_name not in valid_names:
@@ -164,14 +168,16 @@ def update_character_names(
 def _resolve_final_character_name(
     name: str,
     alias_map: dict[str, str],
-    display_name_map: dict[str, str] | None,
 ) -> str:
-    """Resolve the persisted/output name for a merged character cluster."""
-    merged_name = alias_map.get(name, name)
-    if not display_name_map:
-        return merged_name
+    """
+    解析最终角色名
 
-    return display_name_map.get(name) or display_name_map.get(merged_name) or merged_name
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: remove-display-name-map
+    修改内容: 简化函数，规范名即常用名，直接使用 alias_map
+    """
+    return alias_map.get(name, name)
 
 
 def _update_character_names_in_tables(session: Session, alias: str, canonical: str, run_id: str) -> None:
