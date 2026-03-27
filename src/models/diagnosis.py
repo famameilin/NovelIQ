@@ -9,6 +9,11 @@
 修改者: TraeAI
 任务: unify-model-client-architecture
 修改内容: 创建统一的 DiagnosisClient，替代 cloud/diagnosis_client.py
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: 简化 diagnosis payload
+修改内容: _build_messages 方法移除 common_character_names 相关逻辑，只使用 alias_map
 """
 
 from __future__ import annotations
@@ -138,7 +143,9 @@ class DiagnosisClient(BaseModelClient):
         chunk_count = 0
 
         if is_cloud:
-            print(f"[Stream] Starting diagnosis API call with model={request_params.get('model', 'unknown')}", flush=True)
+            print(
+                f"[Stream] Starting diagnosis API call with model={request_params.get('model', 'unknown')}", flush=True
+            )
 
         for chunk in self._client.chat.completions.create(**request_params):
             chunk_count += 1
@@ -315,17 +322,13 @@ class DiagnosisClient(BaseModelClient):
 
         prompt = json.dumps(payload, ensure_ascii=False)
         system_prompt = settings.prompts.diagnose
-        common_character_names = payload.get("common_character_names") or []
         alias_map = payload.get("alias_map") or {}
 
-        if common_character_names or alias_map:
+        if alias_map:
             naming_rules = [
                 "Naming rules:",
-                "Use the common character names as the only normalized names across all output fields.",
-                "Common names are the most frequently used names in the text, not necessarily formal full names.",
                 "When alias_map provides an alias mapping, always rewrite the alias to its mapped common name before reasoning or output.",
                 "Apply this consistently in arc_scores, topic_labels, diagnosis, value_logic_reason, power_stance_reason, dignity_reason, and cultural_depth_reason.",
-                f"common_character_names={json.dumps(common_character_names, ensure_ascii=False)}",
                 f"alias_map={json.dumps(alias_map, ensure_ascii=False)}",
             ]
             system_prompt = f"{system_prompt}\n\n" + "\n".join(naming_rules)

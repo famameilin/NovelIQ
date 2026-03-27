@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.repositories.annotation.characters import fetch_alias_map, fetch_all_character_names
+from src.storage.repositories.annotation.characters import fetch_alias_map
 
 """
 创建时间: 2025-03-11
@@ -21,7 +21,13 @@ from src.storage.repositories.annotation.characters import fetch_alias_map, fetc
 修改时间: 2026-03-15
 修改者: TraeAI
 任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 包装 SQL 语句，"""
+修改内容: 使用 SQLAlchemy text() 包装 SQL 语句
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: 简化 diagnosis payload
+修改内容: 移除 common_character_names 字段，只保留 alias_map
+"""
 
 
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
@@ -123,7 +129,6 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "last_chapter_summary": last_summary,
         "topic_words": topic_words,
         "alias_map": _fetch_alias_map(conn, effective_run_id),
-        "common_character_names": _fetch_common_character_names(conn, effective_run_id),
     }
 
     logger.info(
@@ -281,8 +286,7 @@ def _fetch_first_last_chunk_summary(conn: Session, run_id: str, max_chars: int =
     修改内容: 添加run_id过滤条件
     """
     result = conn.execute(
-        text("SELECT chunk_id, text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"),
-        {"run_id": run_id}
+        text("SELECT chunk_id, text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"), {"run_id": run_id}
     )
     chunks = result.fetchall()
     if not chunks:
@@ -311,7 +315,7 @@ def _fetch_topic_words(conn: Session, run_id: str, top_n: int = 10) -> list[dict
             ORDER BY total_weight DESC
             """
         ),
-        {"run_id": run_id}
+        {"run_id": run_id},
     )
     topic_weights = result.fetchall()
     if not topic_weights:
@@ -332,11 +336,3 @@ def _fetch_alias_map(conn: Session, run_id: str) -> dict[str, str]:
     if not run_id:
         return {}
     return fetch_alias_map(conn, run_id)
-
-
-def _fetch_common_character_names(conn: Session, run_id: str) -> list[str]:
-    if not run_id:
-        return []
-
-    names = fetch_all_character_names(conn, run_id)
-    return [str(item["name"]) for item in names if item.get("name")]
