@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.models.local.disambiguation import ExtendedDisambigResult
+from src.models.local.disambiguation import ExtendedDisambigResult, build_evidence_profile
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 
 
@@ -26,10 +26,11 @@ class _FakeDisambigClient:
 
 def test_retry_disambig_passes_existing_names_to_client_and_interaction_saver() -> None:
     client = _FakeDisambigClient()
-    captured: dict[str, list[str] | None] = {}
+    captured: dict[str, object] = {}
 
     def _fake_save(*args, **kwargs):
         captured["existing_names"] = kwargs.get("existing_names")
+        captured["rag_hint"] = kwargs.get("rag_hint")
 
     with patch.object(disambig_mod, "_save_disambiguation_interaction", side_effect=_fake_save):
         disambig_mod._retry_disambig(
@@ -39,18 +40,21 @@ def test_retry_disambig_passes_existing_names_to_client_and_interaction_saver() 
             existing_names=["bai_zhi", "hou_fei_bai"],
             stage_name="incremental disambiguation",
             run_id="run-1",
+            rag_hint="anchor hint",
         )
 
     assert client.received_existing_names == ["bai_zhi", "hou_fei_bai"]
     assert captured["existing_names"] == ["bai_zhi", "hou_fei_bai"]
+    assert captured["rag_hint"] == "anchor hint"
 
 
 def test_run_final_disambiguation_uses_alias_map_values_and_only_unresolved_candidates() -> None:
     captured: dict[str, object] = {}
 
-    def _fake_retry(client, candidates, context_sentences, existing_names, stage_name, run_id=None):
+    def _fake_retry(client, candidates, context_sentences, existing_names, stage_name, run_id=None, rag_hint=None):
         captured["existing_names"] = existing_names
         captured["candidates"] = candidates
+        captured["rag_hint"] = rag_hint
         return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
 
     class _DummyAnnRepo:
@@ -80,7 +84,7 @@ def test_run_final_disambiguation_uses_alias_map_values_and_only_unresolved_cand
                 {"name": "lin_li_guo", "count": 1},
             ],
         ),
-        patch.object(disambig_mod, "build_context_sentences", return_value={}),
+        patch.object(disambig_mod, "build_context_sentences", side_effect=[{}, {"bai_zhi": "scene", "hou_fei_bai": "scene"}]),
         patch.object(disambig_mod, "_retry_disambig", side_effect=_fake_retry),
         patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(disambig_mod, "_save_disambig_checkpoint", return_value=None),
@@ -96,6 +100,7 @@ def test_run_final_disambiguation_uses_alias_map_values_and_only_unresolved_cand
 
     assert set(captured["existing_names"]) == {"bai_zhi", "hou_fei_bai"}
     assert captured["candidates"] == [{"name": "lin_li_guo", "count": 1}]
+    assert "已存在角色锚点" in str(captured["rag_hint"])
 
 
 def test_run_final_disambiguation_skips_model_call_when_no_unresolved_candidates() -> None:
@@ -144,6 +149,41 @@ def test_run_final_disambiguation_skips_model_call_when_no_unresolved_candidates
     retry_mock.assert_not_called()
 
 
+def test_validate_confidence_with_evidence_promotes_unique_marker_merge() -> None:
+    context = (
+        "【前文总结】贺伯安为救同伴被火焰吞噬昏迷\n"
+        "赵兰英想起贺伯安脊椎处的白金火焰符号，怀里的婴孩脊椎处也有同样印记"
+    )
+    result = ExtendedDisambigResult(
+        alias_map={"婴儿": "婴儿"},
+        entity_types={"婴儿": "character"},
+        entity_relations=[],
+        alias_confidence={"婴儿": "medium"},
+        evidence_profiles={"婴儿": build_evidence_profile(context)},
+    )
+
+    validated = disambig_mod.validate_confidence_with_evidence(result, ["贺伯安"], {"婴儿": context})
+
+    assert validated.alias_map["婴儿"] == "贺伯安"
+    assert validated.alias_confidence["婴儿"] == "high"
+
+
+def test_validate_confidence_with_evidence_does_not_merge_on_suffix_only_anchor_match() -> None:
+    context = "王伯安肩头旧伤发作，额间冷汗密布"
+    result = ExtendedDisambigResult(
+        alias_map={"灰衣公子": "灰衣公子"},
+        entity_types={"灰衣公子": "character"},
+        entity_relations=[],
+        alias_confidence={"灰衣公子": "medium"},
+        evidence_profiles={"灰衣公子": build_evidence_profile(context)},
+    )
+
+    validated = disambig_mod.validate_confidence_with_evidence(result, ["贺伯安"], {"灰衣公子": context})
+
+    assert validated.alias_map["灰衣公子"] == "灰衣公子"
+    assert validated.alias_confidence["灰衣公子"] == "medium"
+
+
 def test_collect_final_disambiguation_candidates_prefers_state_snapshot() -> None:
     snapshot = {
         "bai_zhi": {"state": "resolved", "confidence": "high", "canonical": "bai_zhi"},
@@ -187,11 +227,28 @@ def test_build_alias_and_state_updates_from_confidence() -> None:
         state_snapshot=None,
     )
     assert alias_updates["monkey"] == "hou_fei_bai"
-    assert "abacus" not in alias_updates
-    assert "gray_man" not in alias_updates
+    assert alias_updates["abacus"] == "abacus"
+    assert alias_updates["gray_man"] == "gray_man"
     assert snapshot["monkey"]["state"] == disambig_mod.DISAMBIG_STATE_RESOLVED
     assert snapshot["abacus"]["state"] == disambig_mod.DISAMBIG_STATE_REVIEW
     assert snapshot["gray_man"]["state"] == disambig_mod.DISAMBIG_STATE_UNRESOLVED
+
+
+def test_build_alias_and_state_updates_keeps_high_self_resolution_in_alias_map() -> None:
+    result = ExtendedDisambigResult(
+        alias_map={"hou_zheng_de": "hou_zheng_de"},
+        entity_types={},
+        entity_relations=[],
+        alias_confidence={"hou_zheng_de": "high"},
+    )
+    alias_updates, snapshot = disambig_mod._build_alias_and_state_updates(
+        result=result,
+        alias_map={},
+        state_snapshot=None,
+    )
+
+    assert alias_updates["hou_zheng_de"] == "hou_zheng_de"
+    assert snapshot["hou_zheng_de"]["state"] == disambig_mod.DISAMBIG_STATE_RESOLVED
 
 
 def test_build_alias_and_state_updates_does_not_revert_existing_alias_on_medium_or_low() -> None:
@@ -269,6 +326,7 @@ def test_save_disambiguation_interaction_rebuilds_prompt_with_existing_names() -
             candidates=_candidates("masked_person"),
             context_sentences={"masked_person": "scene"},
             existing_names=["bai_zhi"],
+            rag_hint="anchor hint",
             result={"masked_person": "bai_zhi"},
             stage_name="final disambiguation",
             attempt_number=1,
