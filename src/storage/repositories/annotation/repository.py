@@ -150,7 +150,6 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         run_id: str,
         alias_map: dict[str, str],
         novel_id: str = "default",
-        display_name_map: dict[str, str] | None = None,
     ) -> None:
         """更新角色名称（消歧）"""
         return characters.update_character_names(
@@ -158,7 +157,6 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
             run_id,
             alias_map,
             novel_id,
-            display_name_map=display_name_map,
         )
 
     def apply_alias_corrections(self, run_id: str, alias_map: dict[str, str]) -> None:

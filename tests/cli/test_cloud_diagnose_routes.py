@@ -19,37 +19,42 @@
 修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
+
+修改时间: 2026-03-27
+修改者: TraeAI
+任务: 简化 diagnosis payload
+修改内容: 移除 common_character_names 相关测试断言
 """
+
 import sys
 import uuid
 from pathlib import Path
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.workflows.diagnose import run_diagnose
+from conftest import FakeClient
+
+from src.chunking.chunker import Chunk
 from src.models.cloud import build_diagnosis_payload
 from src.models.cloud.schema import CloudAnalysis
 from src.models.diagnosis import DiagnosisClient
-from src.storage.repositories import (
-    ChunkRepository,
-    ChunkStyleData,
-    RunRepository,
-    AnnotationRepository,
-    DiagnosisRepository,
-    StatsRepository,
-)
-from src.chunking.chunker import Chunk
 from src.models.local.schema import (
-    ChunkAnnotation,
     CharacterSnapshot,
+    ChunkAnnotation,
     RelationChangeSnapshot,
 )
-
-from conftest import FakeClient
+from src.storage.repositories import (
+    AnnotationRepository,
+    ChunkRepository,
+    ChunkStyleData,
+    DiagnosisRepository,
+    RunRepository,
+    StatsRepository,
+)
+from src.workflows.diagnose import run_diagnose
 
 
 class TestCloudDiagnose:
@@ -63,7 +68,9 @@ class TestCloudDiagnose:
 
     def _create_full_data(self, chunk_count: int = 5) -> None:
         chunk_repo = ChunkRepository(self.db_session)
-        chunks = [Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。") for i in range(chunk_count)]
+        chunks = [
+            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。") for i in range(chunk_count)
+        ]
         chunk_repo.insert_chunks(self.run_id, chunks)
 
         style_rows = [
@@ -99,11 +106,22 @@ class TestCloudDiagnose:
 
         for i in range(chunk_count):
             self.db_session.execute(
-                text("INSERT INTO emotion_curve (chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :run_id)"),
-                {"chunk_id": i, "pos": 0.1, "neg": 0.05, "net": 0.05 + i * 0.01, "smoothed": 0.05, "run_id": self.run_id},
+                text(
+                    "INSERT INTO emotion_curve (chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :run_id)"
+                ),
+                {
+                    "chunk_id": i,
+                    "pos": 0.1,
+                    "neg": 0.05,
+                    "net": 0.05 + i * 0.01,
+                    "smoothed": 0.05,
+                    "run_id": self.run_id,
+                },
             )
             self.db_session.execute(
-                text("INSERT INTO rhythm_curve (chunk_id, tension_proxy, tension_composite, run_id) VALUES (:chunk_id, :proxy, :composite, :run_id)"),
+                text(
+                    "INSERT INTO rhythm_curve (chunk_id, tension_proxy, tension_composite, run_id) VALUES (:chunk_id, :proxy, :composite, :run_id)"
+                ),
                 {"chunk_id": i, "proxy": 0.5, "composite": 0.5, "run_id": self.run_id},
             )
 
@@ -149,6 +167,11 @@ class TestCloudDiagnose:
         修改者: TraeAI
         任务: 修复run_id过滤BUG
         修改内容: 添加run_id参数
+
+        修改时间: 2026-03-27
+        修改者: TraeAI
+        任务: 简化 diagnosis payload
+        修改内容: 移除不存在的 display_name_map 参数
         """
         self._create_full_data(5)
         ann_repo = AnnotationRepository(self.db_session)
@@ -156,7 +179,6 @@ class TestCloudDiagnose:
             self.run_id,
             alias_map={"角色0": "伯安"},
             novel_id=self.novel_id,
-            display_name_map={"角色0": "伯安"},
         )
         self.db_session.commit()
 
@@ -171,14 +193,12 @@ class TestCloudDiagnose:
         assert "first_chapter_summary" in payload
         assert "last_chapter_summary" in payload
         assert "alias_map" in payload
-        assert "common_character_names" in payload
 
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
         assert len(payload["foreshadowing_list"]) > 0
         assert payload["alias_map"]["角色0"] == "伯安"
         assert "伯安" not in payload["alias_map"]
-        assert "伯安" in payload["common_character_names"]
 
     def test_fetch_pivot_blocks(self) -> None:
         self._create_full_data(5)
