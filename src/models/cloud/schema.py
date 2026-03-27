@@ -15,11 +15,16 @@ class DisambiguationAliasMap(BaseModel):
     创建者: TraeAI
     任务: 重构云端消歧客户端集成 Instructor
     说明: 用于 Instructor 结构化输出的响应模型
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 简化消歧响应模型
+    修改内容: 将 merge_target_map 重命名为 alias_map
     """
 
     model_config = ConfigDict(frozen=True)
 
-    merge_target_map: dict[str, str] = Field(
+    alias_map: dict[str, str] = Field(
         default_factory=dict,
         description="人名到规范名的映射，key 为候选人名，value 为规范名",
     )

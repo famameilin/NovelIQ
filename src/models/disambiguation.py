@@ -76,10 +76,9 @@ class DisambiguationClient(BaseModelClient):
     ) -> ExtendedDisambigResult:
         if not candidates:
             return ExtendedDisambigResult(
-                merge_target_map={},
+                alias_map={},
                 entity_types={},
                 entity_relations=[],
-                common_name_map={},
                 alias_confidence={},
             )
 
@@ -105,7 +104,7 @@ class DisambiguationClient(BaseModelClient):
             )
             log_disambiguate_response(
                 "disambiguate_characters",
-                len(response.merge_target_map),
+                len(response.alias_map),
                 is_cloud,
                 self._novel_id,
             )
@@ -159,7 +158,7 @@ class DisambiguationClient(BaseModelClient):
             )
             log_disambiguate_response(
                 "disambiguate_anonymous",
-                len(response.merge_target_map),
+                len(response.alias_map),
                 is_cloud,
                 self._novel_id,
             )

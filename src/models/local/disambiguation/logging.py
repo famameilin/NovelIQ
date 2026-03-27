@@ -124,11 +124,16 @@ def log_disambiguate_result(
     修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
     修改内容: 提取为独立模块函数
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 简化消歧响应模型
+    修改内容: 将 merge_target_map 改为 alias_map
     """
     if not analysis_logger:
         return
 
-    response_content = json.dumps(response_data.merge_target_map, ensure_ascii=False)
+    response_content = json.dumps(response_data.alias_map, ensure_ascii=False)
 
     # 添加 thinking_content 到 metadata（如果存在）
     thinking_content = getattr(response_data, "_thinking_content", None)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 CLI annotate 妯″潡娴嬭瘯
 
 鍒涘缓鏃堕棿: 2025-03-11
@@ -105,7 +105,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            merge_target_map={},
+            alias_map={},
             entity_types={},
             entity_relations=[]
         )
@@ -152,7 +152,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            merge_target_map={},
+            alias_map={},
             entity_types={},
             entity_relations=[]
         )
@@ -210,7 +210,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            merge_target_map={"张三三": "张三"},
+            alias_map={"张三三": "张三"},
             entity_types={},
             entity_relations=[]
         )

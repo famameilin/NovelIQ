@@ -51,7 +51,7 @@ class _NoopDisambiguationClient:
         existing_names: list[str] | None = None,
         rag_hint: str | None = None,
     ) -> ExtendedDisambigResult:
-        return ExtendedDisambigResult(merge_target_map={}, entity_types={}, entity_relations=[])
+        return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
 
     def is_cloud_api(self) -> bool:
         return False
