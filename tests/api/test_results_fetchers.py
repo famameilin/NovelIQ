@@ -1,10 +1,19 @@
 from src.api.routes.results_fetchers import (
     _fetch_characters,
     _fetch_diagnosis,
+    _fetch_character_relations,
     _normalize_arc_scores,
     _normalize_name_list,
     _normalize_text_by_alias_map,
 )
+
+
+class _DummyAnnotationRepo2:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetch_chunk_relations_full(self, run_id):
+        return self._rows
 
 
 class _DummyStatsRepo:
@@ -182,3 +191,47 @@ def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
         "hou_fei_bai": 8.0,
         "lin_li_guo": 4.0,
     }
+
+
+def test_fetch_character_relations_deduplicates_across_chunks():
+    rows = [
+        (1, "贺伯安", "二妈妈", "家族", "强化"),
+        (2, "贺伯安", "二妈妈", "家族", "强化"),
+        (3, "贺伯安", "二妈妈", "家族", "强化"),
+        (4, "贺伯安", "林立果", "盟友", "新建"),
+        (5, "贺伯安", "林立果", "盟友", "强化"),
+    ]
+
+    annotation_repo = _DummyAnnotationRepo2(rows)
+    result = _fetch_character_relations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+    )
+
+    assert len(result) == 2
+
+    rel1 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "二妈妈")
+    assert rel1.chunk_id == 1
+    assert rel1.type == "家族"
+    assert rel1.change == "强化"
+
+    rel2 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "林立果")
+    assert rel2.chunk_id == 4
+    assert rel2.type == "盟友"
+
+
+def test_fetch_character_relations_preserves_first_chunk_id():
+    rows = [
+        (5, "张三", "李四", "朋友", "新建"),
+        (10, "张三", "李四", "朋友", "强化"),
+        (15, "张三", "李四", "朋友", "强化"),
+    ]
+
+    annotation_repo = _DummyAnnotationRepo2(rows)
+    result = _fetch_character_relations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+    )
+
+    assert len(result) == 1
+    assert result[0].chunk_id == 5
