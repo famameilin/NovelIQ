@@ -205,6 +205,7 @@ def _fetch_characters(
     annotation_repo: AnnotationRepository,
     arc_scores: dict[str, float] | None = None,
     main_characters: list[str] | None = None,
+    limit: int | None = settings.api.query_limit,
 ) -> list:
     """
     获取角色统计数据
@@ -295,7 +296,9 @@ def _fetch_characters(
     if arc_scores is not None and main_characters is not None:
         result = _calculate_protagonist_scores(result, arc_scores, main_characters)
 
-    return result[: settings.api.query_limit]
+    if limit is None:
+        return result
+    return result[:limit]
 
 
 def _calculate_protagonist_scores(
@@ -555,7 +558,10 @@ def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
 
 
 def _fetch_chunk_annotations(
-    run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None
+    run_id: str,
+    annotation_repo: AnnotationRepository,
+    alias_map: dict[str, str] | None = None,
+    valid_character_names: set[str] | None = None,
 ) -> list:
     """
     获取分块标注数据
@@ -584,9 +590,13 @@ def _fetch_chunk_annotations(
     for row in characters_raw:
         cid = row[0]
         normalized_name = _normalize_name(str(row[1]), alias_map)
+        character_name = normalized_name if normalized_name else str(row[1])
+        if valid_character_names is not None and character_name not in valid_character_names:
+            logger.warning("跳过分块角色中的悬空引用: chunk_id={}, name={}", cid, character_name)
+            continue
         characters_by_chunk[cid].append(
             ChunkCharacter(
-                name=normalized_name if normalized_name else str(row[1]),
+                name=character_name,
                 role_function=str(row[2]) if row[2] else None,
                 action=str(row[3]) if row[3] else None,
                 emotion_score=str(row[4]) if row[4] else None,
@@ -598,10 +608,22 @@ def _fetch_chunk_annotations(
         cid = row[0]
         from_normalized = _normalize_name(str(row[1]), alias_map)
         to_normalized = _normalize_name(str(row[2]), alias_map)
+        from_char = from_normalized if from_normalized else str(row[1])
+        to_char = to_normalized if to_normalized else str(row[2])
+        if valid_character_names is not None and (
+            from_char not in valid_character_names or to_char not in valid_character_names
+        ):
+            logger.warning(
+                "跳过分块关系中的悬空引用: chunk_id={}, from_char={}, to_char={}",
+                cid,
+                from_char,
+                to_char,
+            )
+            continue
         relations_by_chunk[cid].append(
             ChunkRelation(
-                from_char=from_normalized if from_normalized else str(row[1]),
-                to_char=to_normalized if to_normalized else str(row[2]),
+                from_char=from_char,
+                to_char=to_char,
                 type=str(row[3]) if row[3] else "",
                 change=str(row[4]) if row[4] else "",
             )
@@ -611,9 +633,13 @@ def _fetch_chunk_annotations(
     for row in dialogues_raw:
         cid = row[0]
         speaker = row[1] if row[1] else None
+        normalized_speaker = _normalize_name(speaker, alias_map)
+        if normalized_speaker and valid_character_names is not None and normalized_speaker not in valid_character_names:
+            logger.warning("将分块对话中的悬空 speaker 置空: chunk_id={}, speaker={}", cid, normalized_speaker)
+            normalized_speaker = None
         dialogues_by_chunk[cid].append(
             ChunkDialogue(
-                speaker=_normalize_name(speaker, alias_map),
+                speaker=normalized_speaker,
                 length=int(row[2]) if row[2] is not None else None,
             )
         )
@@ -641,7 +667,10 @@ def _fetch_chunk_annotations(
 
 
 def _fetch_character_relations(
-    run_id: str, annotation_repo: AnnotationRepository, alias_map: dict[str, str] | None = None
+    run_id: str,
+    annotation_repo: AnnotationRepository,
+    alias_map: dict[str, str] | None = None,
+    valid_character_names: set[str] | None = None,
 ) -> list:
     """
     获取角色关系数据
@@ -678,6 +707,17 @@ def _fetch_character_relations(
         to_char = to_normalized if to_normalized else str(row[2])
         rel_type = str(row[3]) if row[3] else ""
         change = str(row[4]) if row[4] else ""
+        if valid_character_names is not None and (
+            from_char not in valid_character_names or to_char not in valid_character_names
+        ):
+            logger.warning(
+                "跳过悬空引用的角色关系: chunk_id={}, from_char={}, to_char={}, type={}",
+                chunk_id,
+                from_char,
+                to_char,
+                rel_type,
+            )
+            continue
 
         # 使用 (chunk_id, from_char, to_char, type) 作为去重键
         key = (chunk_id, from_char, to_char, rel_type)
@@ -692,7 +732,12 @@ def _fetch_character_relations(
     return list(seen.values())
 
 
-def _fetch_hierarchical_relations(novel_id: str, run_id: str, entity_repo: EntityRepository) -> list:
+def _fetch_hierarchical_relations(
+    novel_id: str,
+    run_id: str,
+    entity_repo: EntityRepository,
+    valid_character_names: set[str] | None = None,
+) -> list:
     """
     获取层级关系数据（father_of, son_of等）
 
@@ -700,19 +745,37 @@ def _fetch_hierarchical_relations(novel_id: str, run_id: str, entity_repo: Entit
     创建者: TraeAI
     任务: 添加层级关系导出到JSON功能
     说明: 从entity_relations表中获取层级关系类型
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: fix-character-dangling-reference
+    修改内容: 添加 valid_character_names 参数，过滤悬空引用的关系
     """
     relations = entity_repo.fetch_hierarchical_relations_with_names(novel_id, run_id)
-    return [
-        HierarchicalRelation(
-            rel_id=rel["rel_id"],
-            rel_type=rel["rel_type"],
-            first_chunk=rel["first_chunk"],
-            last_chunk=rel["last_chunk"],
-            from_entity=rel["from_entity"],
-            to_entity=rel["to_entity"],
+    result = []
+    for rel in relations:
+        from_entity = rel["from_entity"]
+        to_entity = rel["to_entity"]
+        if valid_character_names is not None:
+            if from_entity not in valid_character_names or to_entity not in valid_character_names:
+                logger.warning(
+                    f"跳过悬空引用的层级关系: rel_id={rel['rel_id']}, "
+                    f"from_entity={from_entity}, to_entity={to_entity}"
+                )
+                continue
+        result.append(
+            HierarchicalRelation(
+                rel_id=rel["rel_id"],
+                rel_type=rel["rel_type"],
+                first_chunk=rel["first_chunk"],
+                last_chunk=rel["last_chunk"],
+                from_entity=from_entity,
+                to_entity=to_entity,
+            )
         )
-        for rel in relations
-    ]
+    return result
+
+
 
 
 def _fetch_global_stats(run_id: str, stats_repo: StatsRepository, chunk_repo: ChunkRepository) -> GlobalStats | None:

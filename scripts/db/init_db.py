@@ -1,0 +1,18 @@
+import os
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
+from src.storage.db import init_db  # noqa: E402
+
+# Load env from root
+env_path = project_root / ".env"
+load_dotenv(env_path)
+
+print(f"Initializing database using: {os.getenv('DATABASE_URL')}")
+init_db()
+print("Database initialized.")

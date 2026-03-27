@@ -570,7 +570,8 @@ def _build_alias_and_state_updates(
 
         if confidence == DISAMBIG_CONFIDENCE_HIGH and not resolved_conflict:
             state = DISAMBIG_STATE_RESOLVED
-            alias_updates[name] = canonical_name
+            if name != canonical_name:
+                alias_updates[name] = canonical_name
             state_updates[canonical_name] = {
                 "state": DISAMBIG_STATE_RESOLVED,
                 "confidence": DISAMBIG_CONFIDENCE_HIGH,
@@ -578,12 +579,8 @@ def _build_alias_and_state_updates(
             }
         elif confidence == DISAMBIG_CONFIDENCE_MEDIUM or resolved_conflict:
             state = DISAMBIG_STATE_REVIEW
-            if not has_existing_alias_resolution:
-                alias_updates[name] = name
         else:
             state = DISAMBIG_STATE_UNRESOLVED
-            if not has_existing_alias_resolution:
-                alias_updates[name] = name
 
         state_updates[name] = {
             "state": state,

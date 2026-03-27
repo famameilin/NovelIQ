@@ -12,23 +12,23 @@
 from __future__ import annotations
 
 import os
-import sys
 import shutil
+import sys
 from pathlib import Path
 
 # Add project root to Python path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from dotenv import load_dotenv
-from loguru import logger
-from sqlalchemy import text
+from dotenv import load_dotenv  # noqa: E402
+from loguru import logger  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 # Load env from root
 env_path = project_root / ".env"
 load_dotenv(env_path)
 
-from src.storage.db import get_engine
+from src.storage.db import get_engine  # noqa: E402
 
 
 def clear_database() -> None:
@@ -75,7 +75,7 @@ def clear_database() -> None:
         with conn.begin():
             for table in tables:
                 try:
-                    result = conn.execute(text(f"DELETE FROM {table}"))
+                    conn.execute(text(f"DELETE FROM {table}"))
                     logger.info(f"Cleared table: {table}")
                 except Exception as e:
                     logger.warning(f"Failed to clear table {table}: {e}")

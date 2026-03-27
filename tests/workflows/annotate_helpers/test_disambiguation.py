@@ -170,8 +170,8 @@ def test_build_alias_and_state_updates_from_confidence() -> None:
         state_snapshot=None,
     )
     assert alias_updates["monkey"] == "hou_fei_bai"
-    assert alias_updates["abacus"] == "abacus"
-    assert alias_updates["gray_man"] == "gray_man"
+    assert "abacus" not in alias_updates
+    assert "gray_man" not in alias_updates
     assert snapshot["monkey"]["state"] == disambig_mod.DISAMBIG_STATE_RESOLVED
     assert snapshot["abacus"]["state"] == disambig_mod.DISAMBIG_STATE_REVIEW
     assert snapshot["gray_man"]["state"] == disambig_mod.DISAMBIG_STATE_UNRESOLVED
