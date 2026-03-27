@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -18,7 +18,7 @@ class _FakeDisambigClient:
 
     def disambiguate_characters(self, candidates, context_sentences=None, existing_names=None, rag_hint=None):
         self.received_existing_names = existing_names
-        return ExtendedDisambigResult(merge_target_map={}, entity_types={}, entity_relations=[])
+        return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
 
     def is_cloud_api(self) -> bool:
         return False
@@ -51,13 +51,13 @@ def test_run_final_disambiguation_uses_alias_map_values_and_only_unresolved_cand
     def _fake_retry(client, candidates, context_sentences, existing_names, stage_name, run_id=None):
         captured["existing_names"] = existing_names
         captured["candidates"] = candidates
-        return ExtendedDisambigResult(merge_target_map={}, entity_types={}, entity_relations=[])
+        return ExtendedDisambigResult(alias_map={}, entity_types={}, entity_relations=[])
 
     class _DummyAnnRepo:
         def __init__(self, conn):
             self.conn = conn
 
-        def update_character_names(self, run_id, alias_map, novel_id=None, display_name_map=None):
+        def update_character_names(self, run_id, alias_map, novel_id=None):
             return None
 
     alias_map = {
@@ -103,13 +103,14 @@ def test_run_final_disambiguation_skips_model_call_when_no_unresolved_candidates
         def __init__(self, conn):
             self.conn = conn
 
-        def update_character_names(self, run_id, alias_map, novel_id=None, display_name_map=None):
+        def update_character_names(self, run_id, alias_map, novel_id=None):
             return None
 
     alias_map = {
         "masked_person": "bai_zhi",
         "bai_zhi": "bai_zhi",
         "monkey": "hou_fei_bai",
+        "hou_fei_bai": "hou_fei_bai",
     }
 
     retry_mock = MagicMock()
@@ -121,10 +122,10 @@ def test_run_final_disambiguation_skips_model_call_when_no_unresolved_candidates
             disambig_mod,
             "fetch_all_character_names",
             return_value=[
-                {"name": "masked_person", "count": 3},
-                {"name": "bai_zhi", "count": 5},
-                {"name": "monkey", "count": 2},
-                {"name": "hou_fei_bai", "count": 4},
+                {"name": "masked_person", "count": 10},
+                {"name": "bai_zhi", "count": 10},
+                {"name": "monkey", "count": 10},
+                {"name": "hou_fei_bai", "count": 10},
             ],
         ),
         patch.object(disambig_mod, "_retry_disambig", retry_mock),
@@ -154,12 +155,28 @@ def test_collect_final_disambiguation_candidates_prefers_state_snapshot() -> Non
         alias_map={"bai_zhi": "bai_zhi"},
         state_snapshot=snapshot,
     )
-    assert candidates == ["lin_li_guo", "masked_person"]
+    assert set(candidates) == {"lin_li_guo", "masked_person"}
+
+
+def test_collect_final_disambiguation_candidates_rereviews_self_resolved_extension_name() -> None:
+    snapshot = {
+        "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
+        "贺伯安": {"state": "resolved", "confidence": "high", "canonical": "贺伯安"},
+    }
+    candidates = disambig_mod._collect_final_disambiguation_candidates(
+        all_names=[
+            {"name": "伯安", "count": 33},
+            {"name": "贺伯安", "count": 8},
+        ],
+        alias_map={"伯安": "伯安", "贺伯安": "贺伯安"},
+        state_snapshot=snapshot,
+    )
+    assert candidates == ["贺伯安"]
 
 
 def test_build_alias_and_state_updates_from_confidence() -> None:
     result = ExtendedDisambigResult(
-        merge_target_map={"monkey": "hou_fei_bai", "abacus": "bai_zhi", "gray_man": "bai_zhi"},
+        alias_map={"monkey": "hou_fei_bai", "abacus": "bai_zhi", "gray_man": "bai_zhi"},
         entity_types={},
         entity_relations=[],
         alias_confidence={"monkey": "high", "abacus": "medium", "gray_man": "low"},
@@ -179,7 +196,7 @@ def test_build_alias_and_state_updates_from_confidence() -> None:
 
 def test_build_alias_and_state_updates_does_not_revert_existing_alias_on_medium_or_low() -> None:
     result = ExtendedDisambigResult(
-        merge_target_map={"masked_person": "bai_zhi", "gray_man": "bai_zhi"},
+        alias_map={"masked_person": "bai_zhi", "gray_man": "bai_zhi"},
         entity_types={},
         entity_relations=[],
         alias_confidence={"masked_person": "medium", "gray_man": "low"},
@@ -195,137 +212,6 @@ def test_build_alias_and_state_updates_does_not_revert_existing_alias_on_medium_
     assert snapshot["gray_man"]["state"] == disambig_mod.DISAMBIG_STATE_UNRESOLVED
     assert snapshot["masked_person"]["canonical"] == "bai_zhi"
     assert snapshot["gray_man"]["canonical"] == "bai_zhi"
-
-
-def test_build_display_name_map_promotes_common_name_for_merged_cluster() -> None:
-    display_name_map = disambig_mod._build_display_name_map(
-        alias_map={"伯安": "伯安", "贺伯安": "伯安"},
-        common_name_map={"贺伯安": "贺伯安"},
-        state_snapshot={
-            "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
-            "贺伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
-        },
-    )
-
-    assert display_name_map["伯安"] == "贺伯安"
-    assert display_name_map["贺伯安"] == "贺伯安"
-
-
-def test_build_display_name_map_skips_common_name_for_non_high_confidence_alias() -> None:
-    display_name_map = disambig_mod._build_display_name_map(
-        alias_map={"伯安": "伯安", "贺伯安": "伯安"},
-        common_name_map={"贺伯安": "贺伯安"},
-        state_snapshot={
-            "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
-            "贺伯安": {"state": "review", "confidence": "medium", "canonical": "伯安"},
-        },
-    )
-
-    assert display_name_map["伯安"] == "伯安"
-    assert display_name_map["贺伯安"] == "伯安"
-
-
-def test_run_final_disambiguation_passes_common_name_display_map_to_repository() -> None:
-    captured: dict[str, object] = {}
-
-    def _fake_retry(client, candidates, context_sentences, existing_names, stage_name, run_id=None):
-        return ExtendedDisambigResult(
-            merge_target_map={"贺伯安": "伯安"},
-            entity_types={},
-            entity_relations=[],
-            common_name_map={"贺伯安": "贺伯安"},
-            alias_confidence={"贺伯安": "high"},
-        )
-
-    class _DummyAnnRepo:
-        def __init__(self, conn):
-            self.conn = conn
-
-        def update_character_names(self, run_id, alias_map, novel_id=None, display_name_map=None):
-            captured["alias_map"] = dict(alias_map)
-            captured["display_name_map"] = dict(display_name_map or {})
-
-    with (
-        patch.object(disambig_mod, "_load_disambig_checkpoint", return_value=(None, None)),
-        patch.object(disambig_mod, "_load_disambig_states", return_value=None),
-        patch.object(
-            disambig_mod,
-            "fetch_all_character_names",
-            return_value=[
-                {"name": "伯安", "count": 7},
-                {"name": "贺伯安", "count": 3},
-            ],
-        ),
-        patch.object(disambig_mod, "build_context_sentences", return_value={}),
-        patch.object(disambig_mod, "_retry_disambig", side_effect=_fake_retry),
-        patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),
-        patch.object(disambig_mod, "_save_disambig_checkpoint", return_value=None),
-    ):
-        disambig_mod._run_final_disambiguation(
-            conn=None,
-            alias_map={"伯安": "伯安"},
-            full_disambig_client=MagicMock(),
-            alias_keywords=["alias", "name"],
-            novel_id="novel-1",
-            run_id="run-1",
-        )
-
-    assert captured["alias_map"] == {"伯安": "伯安", "贺伯安": "伯安"}
-    assert captured["display_name_map"] == {"伯安": "贺伯安", "贺伯安": "贺伯安"}
-
-
-def test_run_final_disambiguation_does_not_promote_common_name_for_review_candidate() -> None:
-    captured: dict[str, object] = {}
-
-    def _fake_retry(client, candidates, context_sentences, existing_names, stage_name, run_id=None):
-        return ExtendedDisambigResult(
-            merge_target_map={"贺伯安": "伯安"},
-            entity_types={},
-            entity_relations=[],
-            common_name_map={"贺伯安": "贺伯安"},
-            alias_confidence={"贺伯安": "medium"},
-        )
-
-    class _DummyAnnRepo:
-        def __init__(self, conn):
-            self.conn = conn
-
-        def update_character_names(self, run_id, alias_map, novel_id=None, display_name_map=None):
-            captured["alias_map"] = dict(alias_map)
-            captured["display_name_map"] = dict(display_name_map or {})
-
-    state_snapshot = {
-        "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
-        "贺伯安": {"state": "review", "confidence": "medium", "canonical": "伯安"},
-    }
-
-    with (
-        patch.object(disambig_mod, "_load_disambig_checkpoint", return_value=(None, None)),
-        patch.object(disambig_mod, "_load_disambig_states", return_value=state_snapshot),
-        patch.object(
-            disambig_mod,
-            "fetch_all_character_names",
-            return_value=[
-                {"name": "伯安", "count": 7},
-                {"name": "贺伯安", "count": 3},
-            ],
-        ),
-        patch.object(disambig_mod, "build_context_sentences", return_value={}),
-        patch.object(disambig_mod, "_retry_disambig", side_effect=_fake_retry),
-        patch.object(disambig_mod, "AnnotationRepository", _DummyAnnRepo),
-        patch.object(disambig_mod, "_save_disambig_checkpoint", return_value=None),
-    ):
-        disambig_mod._run_final_disambiguation(
-            conn=None,
-            alias_map={"伯安": "伯安", "贺伯安": "伯安"},
-            full_disambig_client=MagicMock(),
-            alias_keywords=["alias", "name"],
-            novel_id="novel-1",
-            run_id="run-1",
-        )
-
-    assert captured["alias_map"] == {"伯安": "伯安", "贺伯安": "伯安"}
-    assert captured["display_name_map"] == {"伯安": "伯安", "贺伯安": "伯安"}
 
 
 def test_extract_new_names_from_db_uses_combined_character_sources() -> None:
