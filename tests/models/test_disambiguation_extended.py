@@ -15,31 +15,29 @@ def _candidates(*names: str) -> list[dict[str, int | str]]:
 class TestExtendedDisambigResult(unittest.TestCase):
     def test_basic_creation(self) -> None:
         result = ExtendedDisambigResult(
-            merge_target_map={"he_zhong_ming": "bo_an"},
-            common_name_map={"he_zhong_ming": "he_zhong_ming"},
+            alias_map={"he_zhong_ming": "bo_an"},
             entity_types={"bo_an": "character", "red_guard": "group"},
             entity_relations=[{"from": "bo_an", "to": "he_family", "type": "belongs_to"}],
         )
 
-        self.assertEqual(result.merge_target_map["he_zhong_ming"], "bo_an")
-        self.assertEqual(result.common_name_map["he_zhong_ming"], "he_zhong_ming")
+        self.assertEqual(result.alias_map["he_zhong_ming"], "bo_an")
         self.assertEqual(result.entity_types["bo_an"], "character")
         self.assertEqual(len(result.entity_relations), 1)
 
     def test_empty_creation(self) -> None:
         result = ExtendedDisambigResult(
-            merge_target_map={},
+            alias_map={},
             entity_types={},
             entity_relations=[],
         )
 
-        self.assertEqual(result.merge_target_map, {})
+        self.assertEqual(result.alias_map, {})
         self.assertEqual(result.entity_types, {})
         self.assertEqual(result.entity_relations, [])
 
     def test_evidence_sources_field(self) -> None:
         result = ExtendedDisambigResult(
-            merge_target_map={"he_zhong_ming": "bo_an"},
+            alias_map={"he_zhong_ming": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
             evidence_sources={"he_zhong_ming": ["original_text", "identity_clue"]},
@@ -51,8 +49,7 @@ class TestExtendedDisambigResult(unittest.TestCase):
 class TestBuildExtendedResultFromResponse(unittest.TestCase):
     def test_basic_parsing(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},
-            common_name_map={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},
+            alias_map={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},
             entity_types={"bo_an": "character", "red_guard": "group", "he_family": "organization"},
             entity_relations=[
                 HierarchicalRelation(**{"from": "bo_an", "to": "he_family", "type": "belongs_to"}),
@@ -61,35 +58,27 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
         result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "red_guard", "he_family"))
 
-        self.assertEqual(result.merge_target_map["he_zhong_ming"], "bo_an")
-        self.assertEqual(result.common_name_map["he_zhong_ming"], "he_zhong_ming")
-        self.assertEqual(result.merge_target_map["red_guard"], "red_guard")
+        self.assertEqual(result.alias_map["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.alias_map["red_guard"], "red_guard")
         self.assertEqual(result.entity_types["red_guard"], "group")
         self.assertEqual(result.entity_types["he_family"], "organization")
         self.assertEqual(result.entity_relations[0]["type"], "belongs_to")
 
     def test_group_and_org_self_mapping(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"red_guard": "red_guard", "he_family": "he_family"},
-            common_name_map={"red_guard": "red_guard", "he_family": "he_family"},
+            alias_map={"red_guard": "red_guard", "he_family": "he_family"},
             entity_types={"red_guard": "group", "he_family": "organization"},
             entity_relations=[],
         )
 
         result = build_extended_result_from_response(response, _candidates("red_guard", "he_family"))
 
-        self.assertEqual(result.merge_target_map["red_guard"], "red_guard")
-        self.assertEqual(result.merge_target_map["he_family"], "he_family")
+        self.assertEqual(result.alias_map["red_guard"], "red_guard")
+        self.assertEqual(result.alias_map["he_family"], "he_family")
 
     def test_multiple_relations(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={
-                "bo_an": "bo_an",
-                "zhang_san": "zhang_san",
-                "red_guard": "red_guard",
-                "he_family": "he_family",
-            },
-            common_name_map={
+            alias_map={
                 "bo_an": "bo_an",
                 "zhang_san": "zhang_san",
                 "red_guard": "red_guard",
@@ -118,34 +107,19 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
     def test_missing_candidates_default_to_self(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"he_zhong_ming": "bo_an"},
-            common_name_map={"he_zhong_ming": "he_zhong_ming"},
+            alias_map={"he_zhong_ming": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
         )
 
         result = build_extended_result_from_response(response, _candidates("he_zhong_ming", "bai_zhi"))
 
-        self.assertEqual(result.merge_target_map["he_zhong_ming"], "bo_an")
-        self.assertEqual(result.merge_target_map["bai_zhi"], "bai_zhi")
-        self.assertEqual(result.common_name_map["he_zhong_ming"], "he_zhong_ming")
-        self.assertEqual(result.common_name_map["bai_zhi"], "bai_zhi")
-
-    def test_common_name_map_does_not_fall_back_to_existing_merge_target(self) -> None:
-        response = DisambiguateResponseModel(
-            merge_target_map={"he_bo_an": "bo_an"},
-            entity_types={"bo_an": "character"},
-            entity_relations=[],
-        )
-
-        result = build_extended_result_from_response(response, _candidates("he_bo_an"))
-
-        self.assertEqual(result.merge_target_map["he_bo_an"], "bo_an")
-        self.assertEqual(result.common_name_map["he_bo_an"], "he_bo_an")
+        self.assertEqual(result.alias_map["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.alias_map["bai_zhi"], "bai_zhi")
 
     def test_evidence_sources_extraction(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"he_zhong_ming": "bo_an", "gray_man": "bo_an"},
+            alias_map={"he_zhong_ming": "bo_an", "gray_man": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
             evidence_sources={
@@ -161,7 +135,7 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
 
     def test_evidence_sources_default_to_original_text(self) -> None:
         response = DisambiguateResponseModel(
-            merge_target_map={"bo_an": "bo_an"},
+            alias_map={"bo_an": "bo_an"},
             entity_types={"bo_an": "character"},
             entity_relations=[],
         )

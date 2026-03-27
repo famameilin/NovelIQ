@@ -45,12 +45,16 @@ class ExtendedDisambigResult:
     修改者: TraeAI
     任务: disambiguation-evidence-grading
     修改内容: 添加 evidence_sources 字段，支持证据来源追踪
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 简化消歧响应模型
+    修改内容: 删除 common_name_map 字段，将 merge_target_map 重命名为 alias_map
     """
 
-    merge_target_map: dict[str, str]
+    alias_map: dict[str, str]
     entity_types: dict[str, str]
     entity_relations: list[dict[str, str]]
-    common_name_map: dict[str, str] = field(default_factory=dict)
     alias_confidence: dict[str, str] = field(default_factory=dict)
     evidence_sources: dict[str, list[str]] = field(default_factory=dict)
     _thinking_content: str | None = None
@@ -82,35 +86,20 @@ def build_result_from_response(
     修改者: TraeAI
     任务: fix-type-errors
     修改内容: 支持 list[str] 类型参数，用于匿名消歧场景
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 简化消歧响应模型
+    修改内容: 将 merge_target_map 改为 alias_map
     """
     name_list = _candidate_names(candidates)
 
     result: dict[str, str] = {}
     for name in name_list:
-        if name in response_data.merge_target_map:
-            result[name] = str(response_data.merge_target_map[name])
+        if name in response_data.alias_map:
+            result[name] = str(response_data.alias_map[name])
         else:
             result[name] = name
-    return result
-
-
-def build_common_name_map_from_response(
-    response_data: DisambiguateResponseModel,
-    candidates: list[NameCountCandidate],
-) -> dict[str, str]:
-    """
-    从响应中构建 common_name_map，并确保 value 保持在候选列表内。
-    """
-    name_list = _candidate_names(candidates)
-    candidate_names = set(name_list)
-    result: dict[str, str] = {}
-    for name in name_list:
-        common_name = response_data.common_name_map.get(name)
-        if isinstance(common_name, str) and common_name in candidate_names:
-            result[name] = common_name
-            continue
-
-        result[name] = name
     return result
 
 
@@ -135,9 +124,13 @@ def build_extended_result_from_response(
     修改者: TraeAI
     任务: disambiguation-evidence-grading
     修改内容: 提取 evidence_sources 字段
+
+    修改时间: 2026-03-27
+    修改者: TraeAI
+    任务: 简化消歧响应模型
+    修改内容: 删除 common_name_map 相关逻辑，将 merge_target_map 改为 alias_map
     """
     alias_map = build_result_from_response(response_data, candidates)
-    common_name_map = build_common_name_map_from_response(response_data, candidates)
 
     name_list = _candidate_names(candidates)
 
@@ -167,10 +160,9 @@ def build_extended_result_from_response(
     )
 
     return ExtendedDisambigResult(
-        merge_target_map=alias_map,
+        alias_map=alias_map,
         entity_types=entity_types,
         entity_relations=entity_relations,
-        common_name_map=common_name_map,
         alias_confidence=alias_confidence,
         evidence_sources=evidence_sources,
         _thinking_content=thinking_content,
