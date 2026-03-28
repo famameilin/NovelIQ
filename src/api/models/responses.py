@@ -175,6 +175,15 @@ class GlobalStats(BaseModel):
 
 
 class NarrativeStructureStats(BaseModel):
+    """
+    叙事结构统计模型
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: 叙事时间轴功能设计评估
+    修改内容: 新增多高潮剖面字段 (climax_count, climax_positions, climax_heights, peak_escalation, dominant_climax_pos)
+    """
+
     act1_ratio: float | None = None
     act2_ratio: float | None = None
     act3_ratio: float | None = None
@@ -182,6 +191,11 @@ class NarrativeStructureStats(BaseModel):
     middle_collapse_index: float | None = None
     event_density: dict[str, float] | None = None
     cliffhanger_rate: float | None = None
+    climax_count: int | None = None
+    climax_positions: list[float] | None = None
+    climax_heights: list[float] | None = None
+    peak_escalation: str | None = None
+    dominant_climax_pos: float | None = None
 
 
 class EmotionStats(BaseModel):

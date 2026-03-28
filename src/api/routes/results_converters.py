@@ -50,6 +50,11 @@ def _convert_narrative_structure(
         middle_collapse_index=result.narrative_structure.get("middle_collapse_index"),
         event_density=event_density if event_density else None,
         cliffhanger_rate=result.narrative_structure.get("cliffhanger_rate"),
+        climax_count=result.narrative_structure.get("climax_count"),
+        climax_positions=result.narrative_structure.get("climax_positions"),
+        climax_heights=result.narrative_structure.get("climax_heights"),
+        peak_escalation=result.narrative_structure.get("peak_escalation"),
+        dominant_climax_pos=result.narrative_structure.get("dominant_climax_pos"),
     )
 
 
