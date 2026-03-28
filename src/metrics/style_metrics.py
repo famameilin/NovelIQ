@@ -6,6 +6,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from src.config import settings
+from src.config.constants import SEMANTIC_CATEGORY_MAPPING
 
 from .lexicon_metrics import count_mixed_hits, count_token_hits
 from .text_utils import dialogue_length, split_sentences, tokenize_words
@@ -31,20 +32,6 @@ def load_function_words(file_path: Path | str | None = None) -> list[str]:
             if line and not line.startswith("#"):
                 words.append(line)
     return words
-
-
-SEMANTIC_CATEGORY_MAPPING = {
-    "武功武器类": "combat",
-    "身体部件类": "body",
-    "人物关系类": "relation",
-    "门派派系类": "faction",
-    "使令动词类": "command",
-    "动作动词类": "action",
-    "心理动词类": "psychology",
-    "度量形容词类": "measure",
-    "情绪形容词类": "emotion",
-    "色彩形容词类": "color",
-}
 
 
 def parse_semantic_category_lexicon(file_path: str) -> dict[str, list[str]]:

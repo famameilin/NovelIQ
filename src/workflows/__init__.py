@@ -3,15 +3,20 @@
 创建者: TraeAI
 任务: refactor-module-coupling
 说明: workflows 模块入口，包含核心业务逻辑，供 API 和 CLI 共同调用
+
+修改时间: 2026-03-28
+修改者: TraeAI
+任务: consolidate-codebase-architecture
+修改内容: EVENT_TYPE_SCORES 改为从 src.config.constants 导入
 """
 
+from src.config.constants import EVENT_TYPE_SCORES
 from src.workflows.aggregate import run_aggregate
 from src.workflows.annotate import run_annotate
 from src.workflows.annotate_helpers.sentence import (
     build_context_sentences,
 )
 from src.workflows.curve_metrics import (
-    EVENT_TYPE_SCORES,
     compute_emotion_curve,
     compute_global_stats,
     compute_rhythm_curve,

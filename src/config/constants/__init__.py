@@ -41,11 +41,13 @@ THREE_ACT_MAPPING: dict[str, str] = {
 }
 
 PROPP_FUNCTIONS: set[str] = {
-    "protagonist",
-    "antagonist",
-    "helper",
-    "mentor",
-    "other",
+    "主体",
+    "客体",
+    "发送者",
+    "接收者",
+    "帮助者",
+    "反对者",
+    "其他",
 }
 
 CLASSICAL_PATTERNS: list[str] = [

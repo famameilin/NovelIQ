@@ -1,10 +1,20 @@
+"""
+Metrics 模块入口
+
+修改时间: 2026-03-28
+修改者: TraeAI
+任务: consolidate-codebase-architecture
+修改内容: PROPP_FUNCTIONS, CLASSICAL_PATTERNS 改为从 src.config.constants 导入
+"""
+
+from src.config.constants import CLASSICAL_PATTERNS, PROPP_FUNCTIONS
+
 from .aggregate import (
     AggregateResult,
     aggregate_all_metrics,
 )
 from .character_metrics import (
     GREIMAS_FUNCTIONS,
-    PROPP_FUNCTIONS,
     compute_antagonist_strength_gap,
     compute_average_clustering,
     compute_character_closeness_centrality,
@@ -56,7 +66,6 @@ from .style_metrics import (
 )
 from .style_metrics_extra import (
     CLASSICAL_IMAGERY,
-    CLASSICAL_PATTERNS,
     FUNCTION_WORDS,
     SEMANTIC_CATEGORY_KEYS,
     compute_avg_word_len,
