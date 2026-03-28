@@ -245,6 +245,9 @@ def replace_invalid_names_with_anonymous(
         new_dialogues.append(
             DialogueSnapshot(
                 speaker=new_speaker,
+                content=dialogue.content if hasattr(dialogue, 'content') else "",
+                tone=dialogue.tone if hasattr(dialogue, 'tone') else None,
+                evidence=dialogue.evidence if hasattr(dialogue, 'evidence') else "",
             )
         )
 

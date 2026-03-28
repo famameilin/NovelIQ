@@ -41,6 +41,7 @@ from .emotion_metrics_extra import (
 from .lexicon_metrics import count_hits, count_token_hits, density, term_counts, token_density
 from .narrative_metrics import (
     compute_cliffhanger_rate,
+    compute_climax_profile,
     compute_climax_spacing,
     compute_event_density,
     compute_middle_collapse_index,
@@ -99,6 +100,7 @@ __all__ = [
     "compute_character_function_coverage",
     "compute_classical_sentence_ratio",
     "compute_cliffhanger_rate",
+    "compute_climax_profile",
     "compute_climax_spacing",
     "compute_clustering_coefficient",
     "compute_emotion_polarity_distribution",

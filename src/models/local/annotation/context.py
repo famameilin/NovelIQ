@@ -151,6 +151,11 @@ class MultiPhaseAnnotationResult:
     修改者: TraeAI
     任务: fix-tone-distribution-semantic-error
     修改内容: 添加 dialogue_tones 字段存储对话语气类型
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 添加 dialogue_evidences 字段存储对话判断依据
     """
 
     annotation: ChunkAnnotation
@@ -159,3 +164,4 @@ class MultiPhaseAnnotationResult:
     dialogue_speakers: dict[int, str] | None = None
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
+    dialogue_evidences: dict[int, str] | None = None
