@@ -28,6 +28,10 @@
 3. 添加 _parse_response 方法（解析JSON响应）
 4. 统一 reasoning_effort 处理逻辑
 
+修改时间: 2026-03-29
+修改者: TraeAI
+修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
+
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
@@ -242,7 +246,13 @@ class BaseModelClient:
         }
 
     def _build_thinking_params(self, enable_thinking: bool) -> tuple[str, dict[str, bool]]:
-        """Build thinking parameters for cloud/local providers."""
+        """
+        Build thinking parameters for cloud/local providers.
+
+        修改时间: 2026-03-29
+        修改者: TraeAI
+        修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
+        """
         if enable_thinking:
             return "medium", {"think": True}
         return "none", {"think": False}
