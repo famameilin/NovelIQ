@@ -30,8 +30,8 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         def __init__(self, conn) -> None:
             self.conn = conn
 
-        def ensure_canonical_entities(self, run_id, known_canonical_names, novel_id=None):
-            captured["ensure"] = (run_id, set(known_canonical_names), novel_id)
+        def ensure_canonical_entities(self, run_id, known_canonical_names, novel_id=None, entity_types=None):
+            captured["ensure"] = (run_id, set(known_canonical_names), novel_id, entity_types)
             return {name: index for index, name in enumerate(sorted(known_canonical_names), start=1)}
 
         def apply_alias_merges(self, run_id, alias_merges):
@@ -69,7 +69,7 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         )
 
     assert new_state.known_canonical_names == state.known_canonical_names
-    assert captured["ensure"] == ("run-1", {"bai_zhi", "hou_fei_bai"}, "novel-1")
+    assert captured["ensure"] == ("run-1", {"bai_zhi", "hou_fei_bai"}, "novel-1", {})
     assert captured["merges"] == ("run-1", {})
     assert captured["alias_rows"] == (
         "run-1",
