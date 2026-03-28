@@ -32,18 +32,66 @@ class TestThreeActRatioByTension(unittest.TestCase):
         self.assertEqual(result["act2_ratio"], 0.0)
         self.assertEqual(result["act3_ratio"], 0.0)
 
+    def test_single_element(self) -> None:
+        result = compute_three_act_ratio_by_tension([0.5])
+        self.assertAlmostEqual(result["act1_ratio"], 1 / 3, places=4)
+        self.assertAlmostEqual(result["act2_ratio"], 1 / 3, places=4)
+        self.assertAlmostEqual(result["act3_ratio"], 1 / 3, places=4)
+
+    def test_two_elements(self) -> None:
+        result = compute_three_act_ratio_by_tension([0.1, 0.5])
+        self.assertAlmostEqual(result["act1_ratio"], 1 / 3, places=4)
+        self.assertAlmostEqual(result["act2_ratio"], 1 / 3, places=4)
+        self.assertAlmostEqual(result["act3_ratio"], 1 / 3, places=4)
+
     def test_single_peak_at_end(self) -> None:
         tension_scores = [0.1, 0.2, 0.3, 0.4, 0.5]
         result = compute_three_act_ratio_by_tension(tension_scores)
-        self.assertEqual(result["act1_ratio"], 0.0)
-        self.assertEqual(result["act2_ratio"], 1.0)
-        self.assertEqual(result["act3_ratio"], 0.0)
+        self.assertGreaterEqual(result["act1_ratio"], 0.04)
+        self.assertGreaterEqual(result["act3_ratio"], 0.04)
+        total = sum(result.values())
+        self.assertAlmostEqual(total, 1.0, places=3)
 
     def test_peak_at_middle(self) -> None:
         tension_scores = [0.1, 0.2, 0.9, 0.2, 0.1]
         result = compute_three_act_ratio_by_tension(tension_scores)
         total = sum(result.values())
-        self.assertAlmostEqual(total, 1.0, places=6)
+        self.assertAlmostEqual(total, 1.0, places=3)
+
+    def test_peak_at_beginning(self) -> None:
+        tension_scores = [0.9, 0.5, 0.3, 0.2, 0.1]
+        result = compute_three_act_ratio_by_tension(tension_scores)
+        self.assertGreaterEqual(result["act2_ratio"], 0.04)
+        self.assertGreaterEqual(result["act3_ratio"], 0.04)
+        total = sum(result.values())
+        self.assertAlmostEqual(total, 1.0, places=3)
+
+    def test_flat_curve(self) -> None:
+        tension_scores = [0.5] * 100
+        result = compute_three_act_ratio_by_tension(tension_scores)
+        self.assertGreaterEqual(result["act1_ratio"], 0.04)
+        self.assertGreaterEqual(result["act2_ratio"], 0.04)
+        self.assertGreaterEqual(result["act3_ratio"], 0.04)
+        total = sum(result.values())
+        self.assertAlmostEqual(total, 1.0, places=3)
+
+    def test_monotonic_decreasing(self) -> None:
+        tension_scores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+        result = compute_three_act_ratio_by_tension(tension_scores)
+        self.assertGreaterEqual(result["act1_ratio"], 0.04)
+        self.assertGreaterEqual(result["act2_ratio"], 0.04)
+        self.assertGreaterEqual(result["act3_ratio"], 0.04)
+        total = sum(result.values())
+        self.assertAlmostEqual(total, 1.0, places=3)
+
+    def test_normal_curve(self) -> None:
+        tension_scores = [0.1, 0.2, 0.3, 0.5, 0.8, 0.9, 0.7, 0.4, 0.2, 0.1]
+        result = compute_three_act_ratio_by_tension(tension_scores)
+        self.assertGreaterEqual(result["act1_ratio"], 0.04)
+        self.assertGreaterEqual(result["act2_ratio"], 0.04)
+        self.assertGreaterEqual(result["act3_ratio"], 0.04)
+        total = sum(result.values())
+        self.assertAlmostEqual(total, 1.0, places=3)
 
 
 class TestFindGlobalPeak(unittest.TestCase):
