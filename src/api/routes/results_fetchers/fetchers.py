@@ -410,6 +410,8 @@ def _fetch_chunk_annotations(
         if normalized_speaker and valid_character_names is not None and normalized_speaker not in valid_character_names:
             logger.warning("将分块对话中的悬空 speaker 置空: chunk_id={}, speaker={}", cid, normalized_speaker)
             normalized_speaker = None
+        if normalized_speaker is None:
+            continue
         dialogues_by_chunk[cid].append(
             ChunkDialogue(
                 speaker=normalized_speaker,
