@@ -13,7 +13,7 @@
 
 请输出 JSON 格式：
 {
-  "alias_map": {
+  "canonical_decisions": {
     "匿名_C1_0": "真实名",
     ...
   }
@@ -36,7 +36,7 @@
 
 输出：
 {
-  "alias_map": {
+  "canonical_decisions": {
     "匿名_C1_0": "伯安"
   }
 }

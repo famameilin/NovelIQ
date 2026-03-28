@@ -12,14 +12,16 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.models import Chunk, ChunkAnnotation, ChunkRelation, EntitySnapshot
+from src.storage.models import Chunk, ChunkAnnotation, ChunkRelation, ChunkTopic, EntitySnapshot
 from src.storage.models.analysis import EmotionCurve
+from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.base import BaseRepository
 
 
@@ -210,11 +212,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if max_chars is None:
             max_chars = settings.diagnosis.first_last_max_chars
 
-        stmt = (
-            select(Chunk.chunk_id, Chunk.text)
-            .where(Chunk.run_id == run_id)
-            .order_by(Chunk.chunk_id)
-        )
+        stmt = select(Chunk.chunk_id, Chunk.text).where(Chunk.run_id == run_id).order_by(Chunk.chunk_id)
 
         result = self.session.execute(stmt)
         chunks = result.fetchall()
@@ -350,6 +348,115 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             }
             for row in result
         ]
+
+    def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
+        """
+        获取主题词
+
+        创建时间: 2026-03-27
+        创建者: TraeAI
+        任务: 诊断数据获取逻辑收敛到 DiagnosisRepository
+        说明: 从 payload.py 迁移，获取按权重排序的主题词列表
+
+        Args:
+            run_id: 运行ID
+            top_n: 返回数量限制
+
+        Returns:
+            包含 topic_id 和 weight 的字典列表
+        """
+        if top_n is None:
+            top_n = settings.diagnosis.topic_words_top_n
+
+        stmt = (
+            select(
+                ChunkTopic.topic_id,
+                func.sum(ChunkTopic.topic_weight).label("total_weight"),
+            )
+            .where(ChunkTopic.run_id == run_id)
+            .group_by(ChunkTopic.topic_id)
+            .order_by(func.sum(ChunkTopic.topic_weight).desc())
+        )
+
+        result = self.session.execute(stmt)
+        rows = result.fetchall()[:top_n]
+        return [
+            {
+                "topic_id": row.topic_id,
+                "weight": round(row.total_weight, 4) if row.total_weight else 0.0,
+            }
+            for row in rows
+        ]
+
+    def fetch_character_disambig_data(self, run_id: str) -> tuple[list[str], dict[str, str]]:
+        """
+        获取角色消歧数据（known_characters 和 alias_merges）
+
+        创建时间: 2026-03-27
+        创建者: TraeAI
+        任务: 诊断数据获取逻辑收敛到 DiagnosisRepository
+        说明: 从 payload.py 迁移，分离获取 known_characters 和 alias_merges
+
+        修改时间: 2026-03-28
+        修改者: TraeAI
+        任务: consolidate-codebase-architecture
+        修改内容: 禁止静默吞异常，数据格式错误时抛出 ValueError
+
+        Args:
+            run_id: 运行ID
+
+        Returns:
+            (known_characters, alias_merges):
+                known_characters: 规范角色名列表
+                alias_merges: 别名到规范名的映射（只包含 alias != canonical）
+
+        Raises:
+            ValueError: checkpoint 数据格式无效
+        """
+        if not run_id:
+            return [], {}
+
+        stmt = select(DisambigCheckpoint.alias_map).where(DisambigCheckpoint.run_id == run_id)
+
+        result = self.session.execute(stmt).fetchone()
+
+        if not result or not result.alias_map:
+            return [], {}
+
+        raw_data = json.loads(result.alias_map)
+        if not isinstance(raw_data, dict):
+            raise ValueError(
+                f"Invalid checkpoint data format for run_id={run_id}: "
+                f"expected dict, got {type(raw_data).__name__}"
+            )
+
+        known_canonical_names = raw_data.get("known_canonical_names")
+        alias_merges_list = raw_data.get("alias_merges")
+
+        if known_canonical_names is None and alias_merges_list is None:
+            raise ValueError(
+                f"Missing required fields in checkpoint data for run_id={run_id}: "
+                "'known_canonical_names' and 'alias_merges'"
+            )
+
+        if known_canonical_names is not None and not isinstance(known_canonical_names, list):
+            raise ValueError(
+                f"Invalid 'known_canonical_names' format for run_id={run_id}: "
+                f"expected list, got {type(known_canonical_names).__name__}"
+            )
+
+        if alias_merges_list is not None and not isinstance(alias_merges_list, list):
+            raise ValueError(
+                f"Invalid 'alias_merges' format for run_id={run_id}: "
+                f"expected list, got {type(alias_merges_list).__name__}"
+            )
+
+        alias_merges_dict = {
+            str(alias): str(canonical)
+            for alias, canonical in (alias_merges_list or [])
+            if isinstance(alias, str) and isinstance(canonical, str) and alias != canonical
+        }
+        return [str(name) for name in (known_canonical_names or []) if isinstance(name, str)], alias_merges_dict
 
     def fetch_recent_snapshots(
         self,
