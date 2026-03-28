@@ -324,24 +324,46 @@ def compute_dialogue_lengths_with_llm(
     known_characters: list[str] | None = None,
     return_tones: bool = False,
     return_evidences: bool = False,
+    return_identity_clues: bool = False,
 ) -> tuple[dict[str, int], dict[int, str], list[tuple[int, str]]] | tuple[
     dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]
-] | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]]:
+] | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]] | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str], dict[int, str | None]]:
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
 
-    修改时间: 2026-03-23
+    创建时间: 2026-03-20
+    创建者: TraeAI
+    任务: analyze-dialogue-length-zero
+    说明: 调用 LLM 根据上下文判断每段对话的说话者
+
+    修改时间: 2026-03-20
     修改者: TraeAI
-    任务: return-attribution-for-storage
-    修改内容: 返回 attribution mapping 供 storage 使用
+    任务: fix-dialogue-attribution-parsing
+    修改内容: 使用正确的 API 调用方式，直接解析 LLM 返回的 JSON 为 DialogueAttributionResult
+
+    修改时间: 2026-03-21
+    修改者: TraeAI
+    任务: refactor-phase3-to-annotation-layer
+    修改内容: 迁移到 models/local/annotation/phase3.py，添加 chunk_id 和 run_id 参数支持交互记录保存
+
+    修改时间: 2026-03-22
+    修改者: TraeAI
+    任务: fix-phase3-speaker-alias-mapping
+    修改内容: known_characters 改为可选参数，支持 None 让 LLM 自由判断说话者
 
     修改时间: 2026-03-23
     修改者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
     修改内容: 
-    - 添加 known_characters 参数
-    - 使用新的 attribute_dialogues_with_llm 函数
-    - 只处理 is_dialogue=True 的记录
+    - 接收 QuoteCandidate 列表替代 tuple 列表
+    - 返回 DialogueRecord 列表替代 dict
+    - 添加失败重试机制
+    - 添加后处理验证
+
+    修改时间: 2026-03-23
+    修改者: TraeAI
+    任务: return-attribution-for-storage
+    修改内容: 返回 attribution mapping 供 storage 使用
 
     修改时间: 2026-03-25
     修改者: TraeAI
@@ -353,9 +375,17 @@ def compute_dialogue_lengths_with_llm(
     任务: fix-unknown-speaker-context
     修改内容: 返回 dialogue_evidences 字典存储对话判断依据
 
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: add-identity-clue-to-dialogue-record
+    修改内容: 添加 return_identity_clues 参数，返回 dialogue_identity_clues 字典存储身份线索
+
     Returns:
-        tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]]: 
-            ({说话者: 总长度}, {dialogue_idx: 说话者}, [(dialogue_idx, content), ...], {dialogue_idx: tone, ...}, {dialogue_idx: evidence, ...})
+        根据 return_tones/return_evidences/return_identity_clues 参数返回不同长度的元组:
+        - 默认: ({说话者: 总长度}, {dialogue_idx: 说话者}, [(dialogue_idx, content), ...])
+        - return_tones: (+ {dialogue_idx: tone, ...})
+        - return_evidences: (+ {dialogue_idx: evidence, ...})
+        - return_identity_clues: (+ {dialogue_idx: identity_clue, ...})
     """
     logger.info(
         f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}"
@@ -363,6 +393,8 @@ def compute_dialogue_lengths_with_llm(
 
     if not text:
         logger.info("compute_dialogue_lengths_with_llm: early return - text_empty=True")
+        if return_identity_clues:
+            return ({}, {}, [], {}, {}, {})
         if return_evidences:
             return ({}, {}, [], {}, {})
         if return_tones:
@@ -372,6 +404,8 @@ def compute_dialogue_lengths_with_llm(
     candidates = extract_dialogues_from_text(text)
     logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(candidates)} candidates")
     if not candidates:
+        if return_identity_clues:
+            return ({}, {}, [], {}, {}, {})
         if return_evidences:
             return ({}, {}, [], {}, {})
         if return_tones:
@@ -394,6 +428,7 @@ def compute_dialogue_lengths_with_llm(
     dialogues: list[tuple[int, str]] = []
     dialogue_tones: dict[int, str] = {}
     dialogue_evidences: dict[int, str] = {}
+    dialogue_identity_clues: dict[int, str | None] = {}
     seen_indices: set[int] = set()
 
     candidate_map = {c.index: c.content for c in candidates}
@@ -422,12 +457,17 @@ def compute_dialogue_lengths_with_llm(
         if record.evidence:
             dialogue_evidences[record.index] = record.evidence
 
+        if record.identity_clue:
+            dialogue_identity_clues[record.index] = record.identity_clue
+
         if record.speaker and record.speaker != "未知":
             canonical = alias_map.get(record.speaker, record.speaker) if alias_map else record.speaker
             speaker_lengths[canonical] = speaker_lengths.get(canonical, 0) + len(content)
             canonical_attribution[record.index] = canonical
 
     logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
+    if return_identity_clues:
+        return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones, dialogue_evidences, dialogue_identity_clues)
     if return_evidences:
         return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones, dialogue_evidences)
     if return_tones:
