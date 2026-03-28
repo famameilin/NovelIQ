@@ -13,6 +13,11 @@
 - 重命名 valid_relation_types 为 valid_interpersonal_relation_types
 - 新增 valid_hierarchical_relation_types（层级关系类型）
 - 新增 valid_entity_types（实体类型）
+
+修改时间: 2026-03-28
+修改者: TraeAI
+任务: fix-relation-type-annotation
+修改内容: 新增"友情"关系类型，解决童年玩伴被误标为"家族"的问题
 """
 
 from dataclasses import dataclass
@@ -86,7 +91,7 @@ class AnnotationConfig:
             object.__setattr__(
                 self,
                 "valid_interpersonal_relation_types",
-                ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
+                ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
             )
         if self.valid_hierarchical_relation_types is None:
             object.__setattr__(

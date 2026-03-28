@@ -26,7 +26,7 @@ class TestAnnotationConfig(unittest.TestCase):
 
     def test_valid_interpersonal_relation_types(self) -> None:
         """测试人际关系类型常量"""
-        expected = ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
+        expected = ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
         self.assertEqual(
             ANNOTATION_CONFIG.valid_interpersonal_relation_types,
             expected
