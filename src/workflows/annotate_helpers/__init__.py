@@ -11,7 +11,7 @@
 子模块说明：
 - client_init.py: 客户端初始化相关
 - context.py: 上下文管理
-- disambiguation.py: 消歧相关函数
+- disambiguation.py: 消歧相关函数（已拆分为 disambiguation 子包）
 - storage.py: 结果存储相关
 - phase.py: 阶段管理
 - sentence.py: 例句构建相关
@@ -27,8 +27,8 @@ from .context import (
     _prepare_chunk_context,
 )
 from .disambiguation import (
-    _run_final_disambiguation,
-    _run_incremental_disambiguation,
+    _run_final_disambiguation_with_state,
+    _run_incremental_disambiguation_with_state,
 )
 from .phase import (
     AnnotationPhaseResult,
@@ -55,8 +55,8 @@ __all__ = [
     "_init_rag_retriever",
     "_prepare_chunk_context",
     "_store_annotation_results",
-    "_run_incremental_disambiguation",
-    "_run_final_disambiguation",
+    "_run_incremental_disambiguation_with_state",
+    "_run_final_disambiguation_with_state",
     "_init_annotation_phase",
     "_process_single_chunk",
     "_process_chunks_phase",

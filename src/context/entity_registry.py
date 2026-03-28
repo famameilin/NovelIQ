@@ -17,17 +17,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from src.config.constants import EMOTION_SCORE_MAPPING
+
 if TYPE_CHECKING:
     from src.storage.repositories import EntityRepository
-
-
-EMOTION_SCORE_MAPPING: dict[str, int] = {
-    "strong_positive": 2,
-    "mild_positive": 1,
-    "neutral": 0,
-    "mild_negative": -1,
-    "strong_negative": -2,
-}
 
 
 def _convert_emotion_score(score: Any) -> int:
