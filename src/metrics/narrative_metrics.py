@@ -35,25 +35,53 @@ def find_local_peaks(scores: list[float], total_chunks: int) -> list[int]:
 def compute_three_act_ratio_by_tension(
     tension_composite_scores: list[float],
 ) -> dict[str, float]:
+    """
+    计算三幕比例
+
+    创建时间: 2026-03-13
+    创建者: TraeAI
+    任务: 预处理流程
+    说明: 基于 Freytag 金字塔理论，通过张力峰值位置确定三幕边界
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: 叙事时间轴功能设计评估
+    修改内容: 增加边界保护（最小比例 5%）+ 归一化，处理单调序列、峰在开头/结尾等退化场景
+
+    理论依据:
+    - Act1 = 开始 → 峰前谷底（铺垫期，张力积累前的平静）
+    - Act2 = 谷底 → 全局峰值（上升期+高潮，张力爬坡）
+    - Act3 = 峰值 → 结束（收束期）
+    - 典型黄金比例: 25%–50%–25%
+    """
     if not tension_composite_scores:
         return {"act1_ratio": 0.0, "act2_ratio": 0.0, "act3_ratio": 0.0}
 
     total = len(tension_composite_scores)
+    if total < 3:
+        return {"act1_ratio": 1 / 3, "act2_ratio": 1 / 3, "act3_ratio": 1 / 3}
+
     peak_idx = find_global_peak(tension_composite_scores)
     valley_idx = find_valley_before_peak(tension_composite_scores, peak_idx)
 
-    act1 = valley_idx / total
+    act1_raw = valley_idx / total
     if peak_idx == total - 1:
-        act2 = (total - valley_idx) / total
-        act3 = 0.0
+        act2_raw = (total - valley_idx) / total
+        act3_raw = 0.0
     else:
-        act2 = (peak_idx - valley_idx) / total
-        act3 = (total - peak_idx) / total
+        act2_raw = (peak_idx - valley_idx) / total
+        act3_raw = (total - peak_idx) / total
 
+    MIN_RATIO = 0.05
+    act1 = max(act1_raw, MIN_RATIO)
+    act2 = max(act2_raw, MIN_RATIO)
+    act3 = max(act3_raw, MIN_RATIO)
+
+    total_ratio = act1 + act2 + act3
     return {
-        "act1_ratio": act1,
-        "act2_ratio": act2,
-        "act3_ratio": act3,
+        "act1_ratio": round(act1 / total_ratio, 4),
+        "act2_ratio": round(act2 / total_ratio, 4),
+        "act3_ratio": round(act3 / total_ratio, 4),
     }
 
 
@@ -137,3 +165,77 @@ def compute_cliffhanger_rate(
         return 0.0
 
     return sum(cliffhangers) / len(cliffhangers)
+
+
+def compute_climax_profile(
+    tension_composite_scores: list[float],
+) -> dict:
+    """
+    计算多高潮剖面
+
+    创建时间: 2026-03-28
+    创建者: TraeAI
+    任务: 叙事时间轴功能设计评估
+    说明: 在 climax_interval 的基础上增加分布信息，作为三幕比例的补充指标
+
+    返回字段:
+    - climax_count: 高潮数量
+    - climax_positions: 各高潮位于全书的百分比位置
+    - climax_heights: 各高潮的张力值（归一化）
+    - peak_escalation: 是否逐步升级（ascending/descending/flat）
+    - dominant_climax_pos: 最强高潮的位置百分比
+    """
+    if not tension_composite_scores:
+        return {
+            "climax_count": 0,
+            "climax_positions": [],
+            "climax_heights": [],
+            "peak_escalation": None,
+            "dominant_climax_pos": None,
+        }
+
+    total = len(tension_composite_scores)
+    peaks = find_local_peaks(tension_composite_scores, total)
+
+    if not peaks:
+        return {
+            "climax_count": 0,
+            "climax_positions": [],
+            "climax_heights": [],
+            "peak_escalation": None,
+            "dominant_climax_pos": None,
+        }
+
+    max_val = max(tension_composite_scores)
+    if max_val == 0:
+        max_val = 1.0
+
+    positions = [round(p / total, 3) for p in peaks]
+    heights = [round(tension_composite_scores[p] / max_val, 3) for p in peaks]
+
+    escalation = None
+    if len(heights) >= 3:
+        xs = list(range(len(heights)))
+        mean_x = sum(xs) / len(xs)
+        mean_y = sum(heights) / len(heights)
+        numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, heights))
+        denominator = sum((x - mean_x) ** 2 for x in xs)
+        if denominator > 0:
+            slope = numerator / denominator
+            if slope > 0.05:
+                escalation = "ascending"
+            elif slope < -0.05:
+                escalation = "descending"
+            else:
+                escalation = "flat"
+
+    dominant_idx = heights.index(max(heights))
+    dominant_pos = positions[dominant_idx]
+
+    return {
+        "climax_count": len(peaks),
+        "climax_positions": positions,
+        "climax_heights": heights,
+        "peak_escalation": escalation,
+        "dominant_climax_pos": dominant_pos,
+    }

@@ -44,6 +44,7 @@ from ..emotion_metrics_extra import (
 )
 from ..narrative_metrics import (
     compute_cliffhanger_rate,
+    compute_climax_profile,
     compute_climax_spacing,
     compute_event_density,
     compute_middle_collapse_index,
@@ -98,7 +99,15 @@ def compute_narrative_structure_metrics(
     annotation_data: AnnotationData,
     tension_data: TensionData,
 ) -> dict[str, Any]:
-    """计算叙事结构聚合指标"""
+    """
+    计算叙事结构聚合指标
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: 叙事时间轴功能设计评估
+    修改内容: 增加 compute_climax_profile 多高潮剖面指标
+    """
+    climax_profile = compute_climax_profile(tension_data.tension_composite_scores)
     return {
         **compute_three_act_ratio_by_tension(tension_data.tension_composite_scores),
         "climax_spacing": compute_climax_spacing(annotation_data.chunk_ids, tension_data.tension_composite_scores),
@@ -107,6 +116,11 @@ def compute_narrative_structure_metrics(
         ),
         "cliffhanger_rate": compute_cliffhanger_rate(annotation_data.cliffhangers),
         **{f"event_density_{k}": v for k, v in compute_event_density(annotation_data.event_types).items()},
+        "climax_count": climax_profile["climax_count"],
+        "climax_positions": climax_profile["climax_positions"],
+        "climax_heights": climax_profile["climax_heights"],
+        "peak_escalation": climax_profile["peak_escalation"],
+        "dominant_climax_pos": climax_profile["dominant_climax_pos"],
     }
 
 
