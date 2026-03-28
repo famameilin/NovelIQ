@@ -21,17 +21,10 @@ from pathlib import Path
 
 import jieba
 
+from src.config.constants import CLASSICAL_PATTERNS
+
 from .lexicon_metrics import count_mixed_hits
 from .text_utils import tokenize_words
-
-CLASSICAL_PATTERNS = [
-    r"之[^\s]{0,3}[者也乎哉]",
-    r"[岂宁庸]不[^\s]{0,5}[耶乎哉]",
-    r"[乃则]若[^\s]{0,5}[者也]",
-    r"[因遂乃]即[^\s]{0,5}[者也乎]",
-    r"何[^\s]{0,3}[耶乎哉兮]",
-    r"[呜噫嗟夫][^\s]{0,3}[哉兮也]",
-]
 
 FUNCTION_WORDS = {
     "之",

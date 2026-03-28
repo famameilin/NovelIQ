@@ -126,6 +126,21 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         """
         return queries.get_entity_id_by_name(self.session, novel_id, name, run_id)
 
+    def fetch_all_canonical_names(
+        self,
+        novel_id: str,
+        run_id: str,
+    ) -> set[str]:
+        """
+        获取指定小说和运行的所有实体规范名
+
+        创建时间: 2026-03-28
+        创建者: TraeAI
+        任务: fix-hierarchical-relation-filter
+        说明: 用于层级关系验证，确保消歧阶段创建的实体不被错误过滤
+        """
+        return queries.fetch_all_canonical_names(self.session, novel_id, run_id)
+
     # ==================== relations 模块方法 ====================
 
     def insert_entity_relation(

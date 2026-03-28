@@ -277,3 +277,32 @@ def get_entity_id_by_name(
         return entity["entity_id"]
 
     return None
+
+
+def fetch_all_canonical_names(
+    session: Session,
+    novel_id: str,
+    run_id: str,
+) -> set[str]:
+    """
+    获取指定小说和运行的所有实体规范名
+
+    创建时间: 2026-03-28
+    创建者: TraeAI
+    任务: fix-hierarchical-relation-filter
+    说明: 用于层级关系验证，确保消歧阶段创建的实体不被错误过滤
+
+    Args:
+        session: 数据库会话
+        novel_id: 小说ID
+        run_id: 运行ID
+
+    Returns:
+        实体规范名集合
+    """
+    stmt = select(Entity.canonical).where(
+        Entity.novel_id == novel_id,
+        Entity.run_id == run_id,
+    )
+    result = session.execute(stmt)
+    return {row[0] for row in result.fetchall()}

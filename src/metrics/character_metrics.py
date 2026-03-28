@@ -5,16 +5,7 @@ from collections import Counter
 import networkx as nx
 
 from src.config import settings
-
-PROPP_FUNCTIONS = {
-    "主体",
-    "客体",
-    "发送者",
-    "接收者",
-    "帮助者",
-    "反对者",
-    "其他",
-}
+from src.config.constants import PROPP_FUNCTIONS
 
 GREIMAS_FUNCTIONS = {
     "主体",
