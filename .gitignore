@@ -161,7 +161,7 @@ test_token_usage.py
 重明传.json
 
 # Deprecated - 废弃代码保留历史记录
-# deprecated/
+deprecated/
 
 # Tests 根目录文件不上传（子目录保留）
 /tests/*.py

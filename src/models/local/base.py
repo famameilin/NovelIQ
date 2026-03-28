@@ -281,11 +281,13 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        reasoning_effort, extra_body = self._build_thinking_params(enable_thinking)
-        if self.is_cloud_api():
-            request_params["reasoning_effort"] = reasoning_effort
+        # Ollama 本地API支持 reasoning_effort 参数
+        if enable_thinking:
+            request_params["reasoning_effort"] = "medium"
+            request_params["extra_body"] = {"think": True}
         else:
-            request_params["extra_body"] = extra_body
+            request_params["reasoning_effort"] = "none"
+            request_params["extra_body"] = {"think": False}
 
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
@@ -442,13 +444,13 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        reasoning_effort, extra_body = self._build_thinking_params(enable_thinking)
-        if self.is_cloud_api():
-            # Cloud providers use reasoning_effort.
-            request_params["reasoning_effort"] = reasoning_effort
+        # Ollama 本地API支持 reasoning_effort 参数
+        if enable_thinking:
+            request_params["reasoning_effort"] = "medium"
+            request_params["extra_body"] = {"think": True}
         else:
-            # Local providers (e.g. Ollama) use extra_body.think.
-            request_params["extra_body"] = extra_body
+            request_params["reasoning_effort"] = "none"
+            request_params["extra_body"] = {"think": False}
         return request_params
 
     def _extract_response_content(self, message) -> tuple[str, str | None]:

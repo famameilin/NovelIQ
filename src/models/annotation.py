@@ -160,10 +160,13 @@ class AnnotationClient(BaseModelClient):
             "top_p": self._config.top_p,
         }
 
+        # Ollama 本地API支持 reasoning_effort 参数
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
+            request_params["extra_body"] = {"think": True}
         else:
             request_params["reasoning_effort"] = "none"
+            request_params["extra_body"] = {"think": False}
 
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)

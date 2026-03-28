@@ -1,8 +1,0 @@
-{
-  "novel_id": "58af049d",
-  "analysis_id": "58af049d_v1",
-  "task_id": "3fb085e1",
-  "total_time": 19.879350423812866,
-  "status": "failed",
-  "error": "no such table: graph_storage"
-}
