@@ -65,10 +65,16 @@ def load_character_bundle(
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
+    entity_repo: EntityRepository,
     alias_map: dict[str, str],
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
     """
     加载角色相关数据
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-hierarchical-relation-filter
+    修改内容: 添加 entity_repo 参数，将 entities 表中的实体也加入 valid_character_names
 
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
@@ -89,6 +95,9 @@ def load_character_bundle(
     if not characters:
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
+
+    entity_names = entity_repo.fetch_all_canonical_names(novel_id, run_id)
+    valid_character_names = valid_character_names | entity_names
 
     return characters, arc_scores, main_characters, valid_character_names, missing_fields
 
@@ -243,7 +252,7 @@ def fetch_all_results_data(
     emotion_curve, rhythm_curve, missing_fields = load_core_results(run_id, stats_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, alias_map
+        run_id, novel_id, stats_repo, annotation_repo, entity_repo, alias_map
     )
     missing_fields.extend(char_missing)
 

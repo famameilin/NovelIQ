@@ -127,6 +127,7 @@ def ensure_canonical_entities(
     run_id: str,
     known_canonical_names: frozenset[str],
     novel_id: str,
+    entity_types: dict[str, str] | None = None,
 ) -> dict[str, int]:
     """
     只为 known_canonical_names 创建实体
@@ -136,11 +137,17 @@ def ensure_canonical_entities(
     任务: disambiguation-state-three-layer
     说明: 从 update_character_names 拆分，只负责实体创建
     
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-hierarchical-relation-filter
+    修改内容: 添加 entity_types 参数，支持设置正确的实体类型
+    
     Args:
         session: 数据库会话
         run_id: 运行ID
         known_canonical_names: 规范角色名集合
         novel_id: 小说ID
+        entity_types: 实体类型映射（可选），key为实体名，value为类型
     
     Returns:
         {canonical_name: entity_id} 映射
@@ -148,7 +155,7 @@ def ensure_canonical_entities(
     canonical_to_entity_id: dict[str, int] = {}
     
     for canonical in known_canonical_names:
-        stmt = select(Entity.entity_id).where(
+        stmt = select(Entity.entity_id, Entity.entity_type).where(
             Entity.novel_id == novel_id,
             Entity.canonical == canonical,
             Entity.run_id == run_id,
@@ -156,12 +163,24 @@ def ensure_canonical_entities(
         row = session.execute(stmt).fetchone()
         if row:
             canonical_to_entity_id[canonical] = row[0]
+            if entity_types and canonical in entity_types:
+                desired_type = entity_types[canonical]
+                if row[1] != desired_type:
+                    session.execute(
+                        update(Entity)
+                        .where(Entity.entity_id == row[0])
+                        .values(entity_type=desired_type)
+                    )
             continue
+        
+        entity_type = "character"
+        if entity_types and canonical in entity_types:
+            entity_type = entity_types[canonical]
         
         entity = Entity(
             novel_id=novel_id,
             canonical=canonical,
-            entity_type="character",
+            entity_type=entity_type,
             first_chunk=None,
             last_chunk=None,
             description=None,

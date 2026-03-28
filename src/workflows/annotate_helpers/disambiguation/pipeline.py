@@ -384,6 +384,7 @@ def _run_final_disambiguation_with_state(
         run_id,
         new_state.known_canonical_names,
         novel_id=novel_id,
+        entity_types=result.entity_types if result else None,
     )
     ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
     ann_repo.create_entity_alias_rows(
