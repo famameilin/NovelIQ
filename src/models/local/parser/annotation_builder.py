@@ -27,6 +27,7 @@ from ..schema import (
     ChunkAnnotation,
     ClueType,
     ForeshadowingType,
+    LocationAppearance,
     RelationChangeSnapshot,
 )
 
@@ -208,6 +209,37 @@ def _parse_character_appearances(data: dict[str, Any]) -> list[CharacterAppearan
     return appearances
 
 
+def _parse_location_appearances(data: dict[str, Any]) -> list[LocationAppearance]:
+    """
+    解析地点出场信息列表
+
+    创建时间: 2026-03-28
+    创建者: TraeAI
+    任务: implement-location-entity-type
+    说明: 从 Phase1 标注结果中提取地点信息
+    """
+    appearances = []
+    for loc in data.get("location_appearances", []):
+        if not isinstance(loc, dict):
+            continue
+
+        raw_name = loc.get("raw_name", "")
+        if not raw_name:
+            continue
+
+        location_type = loc.get("location_type")
+        if location_type not in ("room", "building", "area"):
+            location_type = None
+
+        appearances.append(
+            LocationAppearance(
+                raw_name=raw_name,
+                location_type=location_type,
+            )
+        )
+    return appearances
+
+
 def _normalize_emotional_valence(valence: Any) -> str:
     """
     标准化情感倾向值
@@ -341,5 +373,6 @@ def build_annotation(data: dict[str, Any]) -> ChunkAnnotation:
         characters=_parse_characters(data),
         relations=_parse_relations(data),
         character_appearances=_parse_character_appearances(data),
+        location_appearances=_parse_location_appearances(data),
         chunk_summary=validated_summary,
     )
