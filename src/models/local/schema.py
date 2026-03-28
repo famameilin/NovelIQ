@@ -101,6 +101,11 @@ class DialogueSnapshot(BaseModel):
     修改者: TraeAI
     任务: fix-tone-distribution-semantic-error
     修改内容: 添加 tone 字段存储对话语气类型
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 添加 evidence 字段，便于追溯未知说话者的判断依据
     """
 
     model_config = ConfigDict(frozen=True)
@@ -108,6 +113,7 @@ class DialogueSnapshot(BaseModel):
     speaker: str | None = None
     content: str = ""
     tone: str | None = None
+    evidence: str = ""
 
 
 class ForeshadowingResult(BaseModel):
