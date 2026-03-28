@@ -90,6 +90,39 @@ def _extract_retryable_relations(skipped_relations: list[dict[str, Any]] | None)
     return _dedupe_relations(retryable)
 
 
+_INVERSE_RELATION_PAIRS: dict[str, str] = {
+    "child_of": "parent_of",
+    "parent_of": "child_of",
+    "father_of": "son_of",
+    "son_of": "father_of",
+    "sibling_of": "sibling_of",
+    "spouse_of": "spouse_of",
+}
+
+
+def _is_valid_inverse_pair(relations: list[dict[str, str]], from_node: str, to_node: str) -> bool:
+    """
+    检查两个节点之间的双向关系是否是合法的互逆关系对
+
+    例如：A child_of B 和 B parent_of A 是合法的互逆关系对
+    """
+    forward_types: set[str] = set()
+    backward_types: set[str] = set()
+
+    for rel in relations:
+        if rel["from"] == from_node and rel["to"] == to_node:
+            forward_types.add(rel["type"])
+        elif rel["from"] == to_node and rel["to"] == from_node:
+            backward_types.add(rel["type"])
+
+    for fwd_type in forward_types:
+        expected_inverse = _INVERSE_RELATION_PAIRS.get(fwd_type)
+        if expected_inverse and expected_inverse in backward_types:
+            return True
+
+    return False
+
+
 def detect_cycle_in_relations(
     relations: list[dict[str, str]],
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[list[str]]]:
@@ -97,6 +130,12 @@ def detect_cycle_in_relations(
     检测关系中的循环依赖
 
     使用 DFS 检测有向图中的循环。
+    注意：合法的双向关系（如 child_of/parent_of）不算作循环。
+
+    创建时间: 2026-03-28
+    创建者: TraeAI
+    任务: fix-cycle-detection-bug
+    修改内容: 区分合法双向关系和矛盾循环
 
     Args:
         relations: 关系列表，每个关系包含 from, to, type 字段
@@ -126,6 +165,8 @@ def detect_cycle_in_relations(
                 if dfs(neighbor, path + [node]):
                     return True
             elif neighbor in rec_stack:
+                if _is_valid_inverse_pair(relations, neighbor, node):
+                    continue
                 cycle_start = path.index(neighbor) if neighbor in path else 0
                 full_cycle = path[cycle_start:] + [node, neighbor]
                 cycle_nodes.update(full_cycle)
