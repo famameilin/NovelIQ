@@ -293,6 +293,12 @@ clue_type 为 none 时不输出该条记录。
       "raw_name": "组织名称",
       "organization_type": "organization"
     }
+  ],
+  "location_appearances": [
+    {
+      "raw_name": "地点名称",
+      "location_type": "room|building|area"
+    }
   ]
 }
 
@@ -316,7 +322,13 @@ clue_type 为 none 时不输出该条记录。
 - 含有独特身体标记、亲缘身份、命名场景的人物线索必须优先记录到 character_appearances
 - 群体名称（如"赤甲卫"、"禁军"）记录到 group_appearances
 - 组织名称（如"贺家"、"玄天道宗"）记录到 organization_appearances
+- 地点名称（如"产房"、"厅堂"、"贺府"、"院子"）记录到 location_appearances
 - 头衔（如"队长"、"长老"）不作为独立实体记录，仅在 identity_clue 中提及
+
+【地点类型识别规则】
+- room（房间类）：产房、卧房、厅堂、厢房、书房、厨房、灵兽棚等
+- building（建筑类）：府邸、宅院、宫殿、庙宇、楼阁、贺府等
+- area（区域类）：院子、花园、街道、城门、广场等
 
 【人名格式规则】
 1. characters[].name  必须使用人物当前已知的常用名

@@ -24,6 +24,23 @@ ClueType = Literal[
     "naming_scene",
 ]
 ActionType = Literal["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
+LocationType = Literal["room", "building", "area"]
+
+
+class LocationAppearance(BaseModel):
+    """
+    地点出场信息数据结构
+
+    创建时间: 2026-03-28
+    创建者: TraeAI
+    任务: implement-location-entity-type
+    说明: 用于 Phase1 标注阶段识别的地点信息
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    raw_name: str
+    location_type: LocationType | None = None
 
 
 class CharacterAppearance(BaseModel):
@@ -330,6 +347,7 @@ class ChunkAnnotation(BaseModel):
     relations: list[RelationChangeSnapshot] = Field(default_factory=list)
     dialogues: list[DialogueSnapshot] = Field(default_factory=list)
     character_appearances: list[CharacterAppearance] = Field(default_factory=list)
+    location_appearances: list[LocationAppearance] = Field(default_factory=list)
     chunk_summary: str = ""
     dialogue_lengths: list[int] | None = Field(default=None)
 
@@ -374,6 +392,13 @@ class ChunkAnnotation(BaseModel):
                     "clue_type": ca.clue_type,
                 }
                 for ca in self.character_appearances
+            ],
+            "location_appearances": [
+                {
+                    "raw_name": loc.raw_name,
+                    "location_type": loc.location_type,
+                }
+                for loc in self.location_appearances
             ],
             "chunk_summary": self.chunk_summary,
             "dialogue_lengths": self.dialogue_lengths,

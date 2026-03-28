@@ -1,0 +1,27 @@
+feat: 添加 Location 实体类型支持 (Phase1 标注阶段)
+
+问题背景:
+- "产房"等地点名词被错误识别为角色
+- Phase1 标注阶段没有 location_appearances 字段
+
+本次修改:
+1. 新增数据模型
+   - src/storage/models/location.py: LocationAppearance, ChunkLocation
+   
+2. 新增存储层
+   - src/storage/repositories/annotation/locations.py: save_chunk_locations(), fetch_chunk_locations()
+   
+3. 更新 Phase1 提示词
+   - config/prompts/phase1.txt: 添加 location_appearances 字段定义
+   - 添加地点识别规则（房间类、建筑类、区域类）
+   
+4. 更新输出解析
+   - src/models/local/schema.py: LocationAppearance 模型
+   - src/models/local/parser/annotation_builder.py: _parse_location_appearances()
+
+测试结果:
+- ruff check src/ 通过
+- mypy src/ 通过
+- pytest tests/ -v 662 passed
+
+任务: implement-location-entity-type

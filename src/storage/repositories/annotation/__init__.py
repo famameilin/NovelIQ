@@ -9,15 +9,14 @@
 
 from __future__ import annotations
 
-# 导出各模块函数（供内部使用）
-from . import characters, inserts, queries
+from . import characters, inserts, locations, queries
 
-# 导出主 Repository 类
 from .repository import AnnotationRepository
 
 __all__ = [
     "AnnotationRepository",
     "characters",
     "inserts",
+    "locations",
     "queries",
 ]
