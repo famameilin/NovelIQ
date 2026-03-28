@@ -113,6 +113,11 @@ def insert_chunk_dialogues(
     修改者: TraeAI
     任务: fix-tone-distribution-semantic-error
     修改内容: 从 dialogue.tone 字段获取语气类型并保存到数据库
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 保存 content 和 evidence 字段，便于追溯未知说话者的上下文
     """
     records: list[ChunkDialogue] = []
     for idx, dialogue in enumerate(dialogues):
@@ -123,6 +128,8 @@ def insert_chunk_dialogues(
                 speaker=dialogue.speaker,
                 length=length,
                 tone=dialogue.tone,
+                content=dialogue.content,
+                evidence=dialogue.evidence,
                 run_id=run_id,
             )
         )
