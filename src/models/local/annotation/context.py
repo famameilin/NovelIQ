@@ -8,6 +8,11 @@
 修改者: TraeAI
 任务: consolidate-codebase-architecture
 修改内容: 从 constants 导入 PHASE_MAX_RETRIES，移除本地重复定义
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: remove-unused-annotation-fields
+修改内容: 移除 character_appearances 字段
 """
 
 from __future__ import annotations
@@ -35,10 +40,10 @@ class AnnotationContext:
     任务: 统一字段命名，添加 run_id 支持
     修改内容: 移除 prev_tail_text 和 next_preview，统一使用 prev_chunk_text 和 next_chunk_text，添加 run_id
 
-    修改时间: 2026-03-21
+    修改时间: 2026-03-29
     修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 添加 character_appearances 字段
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 character_appearances 字段
     """
 
     text: str
@@ -57,7 +62,6 @@ class AnnotationContext:
     chapter_id: int | None = None
     cloud_client: AnnotationClient | None = None
     run_id: str | None = None
-    character_appearances: list[dict] | None = None
 
 
 class Phase1MaxRetriesExceededError(Exception):
@@ -156,6 +160,11 @@ class MultiPhaseAnnotationResult:
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 添加 dialogue_evidences 字段存储对话判断依据
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 添加 dialogue_identity_clues 字段存储身份线索
     """
 
     annotation: ChunkAnnotation
@@ -165,3 +174,4 @@ class MultiPhaseAnnotationResult:
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
     dialogue_evidences: dict[int, str] | None = None
+    dialogue_identity_clues: dict[int, str | None] | None = None

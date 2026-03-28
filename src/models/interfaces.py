@@ -46,7 +46,6 @@ class AnnotationLike(Protocol):
         next_chunk_text: str | None = None,
         cloud_client: AnnotationLike | None = None,
         run_id: str | None = None,
-        character_appearances: list[dict] | None = None,
     ) -> MultiPhaseAnnotationResult:
         ...
 

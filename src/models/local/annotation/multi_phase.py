@@ -4,11 +4,6 @@
 任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: 多阶段标注逻辑（并行和串行模式）
 
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: fix-validate-names-from-character-appearances
-修改内容: 添加 character_appearances 参数支持
-
 修改时间: 2026-03-22
 修改者: TraeAI
 任务: rename-two-phase-to-multi-phase
@@ -23,6 +18,11 @@
 修改者: TraeAI
 任务: refactor-multi-phase-extract-private-functions
 修改内容: 提取私有函数减少重复代码，简化主函数为调度函数
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: remove-unused-annotation-fields
+修改内容: 移除 character_appearances 参数
 """
 
 from __future__ import annotations
@@ -58,6 +58,11 @@ class _Phase3Result:
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 添加 dialogue_evidences 字段存储对话判断依据
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 添加 dialogue_identity_clues 字段存储身份线索
     """
 
     dialogue_lengths: dict[str, int] | None = None
@@ -65,6 +70,7 @@ class _Phase3Result:
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
     dialogue_evidences: dict[int, str] | None = None
+    dialogue_identity_clues: dict[int, str | None] | None = None
 
 
 def _run_phase1(
@@ -81,7 +87,6 @@ def _run_phase1(
     active_entities: str | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
-    character_appearances: list[dict] | None,
 ) -> ChunkAnnotation:
     """执行 Phase1 基础标注
 
@@ -103,7 +108,6 @@ def _run_phase1(
         active_entities=active_entities,
         cloud_client=cloud_client,
         run_id=run_id,
-        character_appearances=character_appearances,
     )
 
 
@@ -161,6 +165,11 @@ def _run_phase3_if_needed(
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 启用 return_evidences=True 返回对话判断依据
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 启用 return_identity_clues=True 返回身份线索
     """
     result = _Phase3Result()
 
@@ -183,6 +192,7 @@ def _run_phase3_if_needed(
         known_characters=known_characters,
         return_tones=True,
         return_evidences=True,
+        return_identity_clues=True,
     )
 
     result.dialogue_lengths = result_tuple[0]
@@ -190,6 +200,7 @@ def _run_phase3_if_needed(
     result.dialogues = result_tuple[2]
     result.dialogue_tones = result_tuple[3] if len(result_tuple) > 3 else None
     result.dialogue_evidences = result_tuple[4] if len(result_tuple) > 4 else None
+    result.dialogue_identity_clues = result_tuple[5] if len(result_tuple) > 5 else None
 
     logger.debug(
         "Phase3: dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} dialogue_evidences={} chunk_id={}",
@@ -244,6 +255,11 @@ def _build_multi_phase_result(
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 添加 dialogue_evidences 字段
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 添加 dialogue_identity_clues 字段
     """
     return MultiPhaseAnnotationResult(
         annotation=annotation,
@@ -253,6 +269,7 @@ def _build_multi_phase_result(
         dialogues=phase3_result.dialogues,
         dialogue_tones=phase3_result.dialogue_tones,
         dialogue_evidences=phase3_result.dialogue_evidences,
+        dialogue_identity_clues=phase3_result.dialogue_identity_clues,
     )
 
 
@@ -274,7 +291,6 @@ def annotate_chunk_multi_phase(
     chapter_id: int | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    character_appearances: list[dict] | None = None,
     rag_retriever: Any | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
@@ -288,15 +304,15 @@ def annotate_chunk_multi_phase(
     修改者: TraeAI
     任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text，添加 run_id 支持
 
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 添加 character_appearances 参数支持
-
     修改时间: 2026-03-22
     修改者: TraeAI
     任务: rename-two-phase-to-multi-phase
     修改内容: 重命名为 annotate_chunk_multi_phase
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 character_appearances 参数
     """
     parallel = settings.analysis.multi_phase_annotation.parallel
 
@@ -314,7 +330,6 @@ def annotate_chunk_multi_phase(
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
-            character_appearances=character_appearances,
             rag_retriever=rag_retriever,
             active_entities=active_entities,
         )
@@ -332,7 +347,6 @@ def annotate_chunk_multi_phase(
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
-            character_appearances=character_appearances,
             rag_retriever=rag_retriever,
             active_entities=active_entities,
         )
@@ -352,7 +366,6 @@ def annotate_chunk_parallel(
     active_entities: str | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    character_appearances: list[dict] | None = None,
     rag_retriever: Any | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
@@ -372,11 +385,6 @@ def annotate_chunk_parallel(
     任务: 添加 run_id 支持
     修改内容: 添加 run_id 参数传递
 
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 添加 character_appearances 参数传递
-
     修改时间: 2026-03-22
     修改者: TraeAI
     任务: parallel-three-phase
@@ -386,6 +394,11 @@ def annotate_chunk_parallel(
     修改者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
     修改内容: 提取私有函数，简化为调度函数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 character_appearances 参数
     """
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
@@ -405,7 +418,6 @@ def annotate_chunk_parallel(
             active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
-            character_appearances=character_appearances,
         )
         phase2_future = executor.submit(
             _run_phase2,
@@ -467,7 +479,6 @@ def annotate_chunk_serial(
     active_entities: str | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    character_appearances: list[dict] | None = None,
     rag_retriever: Any | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
@@ -487,15 +498,15 @@ def annotate_chunk_serial(
     任务: 添加 run_id 支持
     修改内容: 添加 run_id 参数传递
 
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 添加 character_appearances 参数传递
-
     修改时间: 2026-03-27
     修改者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
     修改内容: 提取私有函数，简化为调度函数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 character_appearances 参数
     """
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
 
@@ -513,7 +524,6 @@ def annotate_chunk_serial(
         active_entities=active_entities,
         cloud_client=cloud_client,
         run_id=run_id,
-        character_appearances=character_appearances,
     )
 
     foreshadowing = _run_phase2(

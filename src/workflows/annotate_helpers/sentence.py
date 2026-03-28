@@ -260,32 +260,29 @@ def _add_identity_clues(
     name_list: list[str],
     run_id: str,
 ) -> None:
-    """添加身份线索"""
+    """添加身份线索
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 从 chunk_dialogues 表获取 Phase 3 提取的身份线索，替代 character_appearances 表
+    """
     if not name_list:
         return
 
-    appearances = conn.execute(
+    dialogues = conn.execute(
         text("""
-            SELECT raw_name, identity_clue, clue_type 
-            FROM character_appearances 
-            WHERE raw_name = ANY(:names)
+            SELECT speaker, identity_clue 
+            FROM chunk_dialogues 
+            WHERE speaker = ANY(:names)
+              AND identity_clue IS NOT NULL
+              AND identity_clue != ''
               AND run_id = :run_id
         """),
         {"names": name_list, "run_id": run_id},
     ).fetchall()
 
-    clue_type_labels = {
-        "self_introduction": "自报身份",
-        "alias_revealed": "身份提示",
-        "named_by_other": "被点名",
-        "appearance_desc": "外貌描述",
-        "unique_body_marker": "独特标记",
-        "kinship_identity": "亲缘身份",
-        "naming_scene": "命名场景",
-    }
-
-    for raw_name, clue, clue_type in appearances:
-        if raw_name in result and clue_type in clue_type_labels:
-            label = clue_type_labels[clue_type]
-            result[raw_name] += f" | 【{label}】{clue}"
+    for speaker, clue in dialogues:
+        if speaker in result and clue:
+            result[speaker] += f" | 【身份线索】{clue}"
 

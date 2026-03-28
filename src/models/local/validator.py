@@ -19,6 +19,11 @@
 修改者: TraeAI
 任务: fix-character-dangling-reference
 修改内容: 新增 validate_character_appearances_sync 和 validate_chunk_annotation 校验函数
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: remove-unused-annotation-fields
+修改内容: 移除 relations、character_appearances、chunk_summary 相关验证逻辑
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from src.models.local.schema import ChunkAnnotation
 
-from src.models.local.schema import CharacterSnapshot, DialogueSnapshot, RelationChangeSnapshot
+from src.models.local.schema import CharacterSnapshot, DialogueSnapshot
 
 _ANONYMOUS_NAME_PATTERN = re.compile(r"^匿名_C\d+_\d+$")
 
@@ -226,19 +231,6 @@ def replace_invalid_names_with_anonymous(
             )
         )
 
-    new_relations: list[RelationChangeSnapshot] = []
-    for relation in annotation.relations:
-        new_from = name_mapping.get(relation.from_name, relation.from_name)
-        new_to = name_mapping.get(relation.to_name, relation.to_name)
-        new_relations.append(
-            RelationChangeSnapshot(
-                from_name=new_from,
-                to_name=new_to,
-                type=relation.type,
-                change=relation.change,
-            )
-        )
-
     new_dialogues: list[DialogueSnapshot] = []
     for dialogue in annotation.dialogues:
         new_speaker = name_mapping.get(dialogue.speaker, dialogue.speaker) if dialogue.speaker else dialogue.speaker
@@ -260,10 +252,7 @@ def replace_invalid_names_with_anonymous(
         foreshadowing_type=annotation.foreshadowing_type,
         foreshadowing_desc=annotation.foreshadowing_desc,
         characters=new_characters,
-        relations=new_relations,
         dialogues=new_dialogues,
-        character_appearances=annotation.character_appearances,
-        chunk_summary=annotation.chunk_summary,
     )
 
 
@@ -341,7 +330,12 @@ def validate_chunk_annotation(
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: fix-character-dangling-reference
-    说明: 检查 characters, relations, dialogues 中引用的角色是否都在 existing_characters 中
+    说明: 检查 characters, dialogues 中引用的角色是否都在 existing_characters 中
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 relations 验证逻辑
 
     Args:
         annotation: Chunk 标注数据
@@ -355,7 +349,6 @@ def validate_chunk_annotation(
     logger.debug(
         f"[validate_chunk_annotation] 开始校验 chunk_id={getattr(annotation, 'chunk_id', 'unknown')}, "
         f"characters_count={len(annotation.characters)}, "
-        f"relations_count={len(annotation.relations)}, "
         f"dialogues_count={len(annotation.dialogues)}"
     )
 
@@ -364,18 +357,6 @@ def validate_chunk_annotation(
             missing_names.add(char.name)
             logger.debug(
                 f"[validate_chunk_annotation] 发现缺失角色: {char.name} (在 characters 中)"
-            )
-
-    for rel in annotation.relations:
-        if rel.from_name and rel.from_name not in existing_characters:
-            missing_names.add(rel.from_name)
-            logger.debug(
-                f"[validate_chunk_annotation] 发现缺失角色: {rel.from_name} (在 relations.from_name 中)"
-            )
-        if rel.to_name and rel.to_name not in existing_characters:
-            missing_names.add(rel.to_name)
-            logger.debug(
-                f"[validate_chunk_annotation] 发现缺失角色: {rel.to_name} (在 relations.to_name 中)"
             )
 
     for dialogue in annotation.dialogues:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import text
 
 from src.chunking.chunker import Chunk
-from src.models.local.schema import CharacterAppearance, CharacterSnapshot, ChunkAnnotation
+from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, DialogueSnapshot
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -28,9 +28,7 @@ def _build_annotation(foreshadowing_desc: str) -> ChunkAnnotation:
         foreshadowing_type="causal",
         foreshadowing_desc=foreshadowing_desc,
         characters=[],
-        relations=[],
         dialogues=[],
-        character_appearances=[],
         chunk_summary="",
     )
 
@@ -71,15 +69,18 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
     stats_repo = StatsRepository(db_session)
     stats_repo.insert_chunk_summary(run_1, 1, "run1-summary")
     stats_repo.insert_chunk_summary(run_2, 99, "run2-summary")
-    stats_repo.insert_character_appearances(
+
+    ann_repo.insert_chunk_dialogues(
         run_1,
         2,
-        [CharacterAppearance(raw_name="zhangsan", identity_clue="run1-clue", clue_type="self_introduction")],
+        [DialogueSnapshot(speaker="zhangsan", content="test", identity_clue="run1-clue")],
+        [10],
     )
-    stats_repo.insert_character_appearances(
+    ann_repo.insert_chunk_dialogues(
         run_2,
         100,
-        [CharacterAppearance(raw_name="zhangsan", identity_clue="run2-clue", clue_type="self_introduction")],
+        [DialogueSnapshot(speaker="zhangsan", content="test", identity_clue="run2-clue")],
+        [10],
     )
 
     result = build_context_sentences(db_session, _candidates("zhangsan"), alias_keywords=["就是"], prev_chunks=1, run_id=run_1)

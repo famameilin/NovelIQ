@@ -123,6 +123,11 @@ class DialogueSnapshot(BaseModel):
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 添加 evidence 字段，便于追溯未知说话者的判断依据
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 添加 identity_clue 字段，存储 Phase 3 提取的身份线索
     """
 
     model_config = ConfigDict(frozen=True)
@@ -131,6 +136,7 @@ class DialogueSnapshot(BaseModel):
     content: str = ""
     tone: str | None = None
     evidence: str = ""
+    identity_clue: str | None = None
 
 
 class ForeshadowingResult(BaseModel):
@@ -192,6 +198,11 @@ class DialogueRecord(BaseModel):
     创建者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
     说明: 用于存储 LLM 判断后的对话结果，包含是否为对话、说话者、语气等信息
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: add-identity-clue-to-dialogue-record
+    修改内容: 添加 identity_clue 字段，用于存储对话中提取的身份线索
     """
 
     model_config = ConfigDict(frozen=True)
@@ -203,6 +214,7 @@ class DialogueRecord(BaseModel):
     tone: str | None = Field(default=None, description="语气：强硬/温和/讽刺/恳求/命令/恐惧/惊慌")
     is_inner_monologue: bool = Field(default=False, description="是否为内心独白")
     evidence: str = Field(default="", description="判断依据（用于调试）")
+    identity_clue: str | None = Field(default=None, description="身份线索（如自报身份、称呼关系、别名揭示等）")
 
 
 class DialogueAttribution(BaseModel):
@@ -330,6 +342,11 @@ class ChunkAnnotation(BaseModel):
     修改者: TraeAI
     任务: parallel-three-phase
     修改内容: 添加 dialogue_lengths 字段支持三阶段并行模式
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 relations、character_appearances、chunk_summary 字段
     """
 
     model_config = ConfigDict(frozen=False)
@@ -344,11 +361,8 @@ class ChunkAnnotation(BaseModel):
     foreshadowing_type: str | None = None
     foreshadowing_desc: str = ""
     characters: list[CharacterSnapshot] = Field(default_factory=list)
-    relations: list[RelationChangeSnapshot] = Field(default_factory=list)
     dialogues: list[DialogueSnapshot] = Field(default_factory=list)
-    character_appearances: list[CharacterAppearance] = Field(default_factory=list)
     location_appearances: list[LocationAppearance] = Field(default_factory=list)
-    chunk_summary: str = ""
     dialogue_lengths: list[int] | None = Field(default=None)
 
     def to_dict(self) -> dict:
@@ -370,28 +384,11 @@ class ChunkAnnotation(BaseModel):
                 }
                 for c in self.characters
             ],
-            "relations": [
-                {
-                    "from": r.from_name,
-                    "to": r.to_name,
-                    "type": r.type,
-                    "change": r.change,
-                }
-                for r in self.relations
-            ],
             "dialogues": [
                 {
                     "speaker": d.speaker,
                 }
                 for d in self.dialogues
-            ],
-            "character_appearances": [
-                {
-                    "raw_name": ca.raw_name,
-                    "identity_clue": ca.identity_clue,
-                    "clue_type": ca.clue_type,
-                }
-                for ca in self.character_appearances
             ],
             "location_appearances": [
                 {
@@ -400,6 +397,5 @@ class ChunkAnnotation(BaseModel):
                 }
                 for loc in self.location_appearances
             ],
-            "chunk_summary": self.chunk_summary,
             "dialogue_lengths": self.dialogue_lengths,
         }

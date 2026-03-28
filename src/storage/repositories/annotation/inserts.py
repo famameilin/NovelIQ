@@ -118,6 +118,11 @@ def insert_chunk_dialogues(
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 保存 content 和 evidence 字段，便于追溯未知说话者的上下文
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 保存 identity_clue 字段，存储 Phase 3 提取的身份线索
     """
     records: list[ChunkDialogue] = []
     for idx, dialogue in enumerate(dialogues):
@@ -130,6 +135,7 @@ def insert_chunk_dialogues(
                 tone=dialogue.tone,
                 content=dialogue.content,
                 evidence=dialogue.evidence,
+                identity_clue=dialogue.identity_clue,
                 run_id=run_id,
             )
         )

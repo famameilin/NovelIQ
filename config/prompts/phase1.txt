@@ -9,10 +9,7 @@
 2. 事件类型（event_type）
 3. 是否为情节转折点（pivot_moment）
 4. 是否以悬念结尾（cliffhanger）
-5. 本块核心事件摘要（chunk_summary）
-6. 出场人物快照（characters）
-7. 人物关系变化（relations）
-9. 人名线索记录（character_appearances）
+5. 出场人物快照（characters）
 
 ## 各字段判断标准
 
@@ -46,22 +43,6 @@
 - 危机在高峰处中断
 - 读者强烈想知道下一步
 
-### chunk_summary
-30-60字，只写核心事件和涉及人物，不写氛围和心理，供下一块使用，要求信息密度高。
-
-【摘要生成规则】
-1. 必须包含"谁做了什么"
-2. 若出现两人，尽量用完整主谓宾结构
-3. 禁止名字直接并列粘连（如"灰衣人伯安近看单薄"）
-4. 推荐写法：
-   - 好：伯安近看那位灰衣人，觉得对方身形单薄
-   - 好：灰衣人前来应聘教习，伯安因此留意对方
-   - 不好：灰衣人伯安近看单薄（名字粘连，歧义）
-
-【摘要用途说明】
-摘要将用于后续消歧的证据来源之一，但仅作为【前文摘要-弱证据】。
-若摘要中出现名字粘连或歧义，会自动降权该摘要的可靠性。
-
 ### characters
 只记录本块中有实际行为、台词，或被当前事件直接作用到的人物。
 仅被旁白提及、仅作为身份线索出现的人物，不写入 characters。
@@ -83,45 +64,6 @@
 - mild_negative：轻微的不安/失落/担忧/疲惫
 - strong_negative：明显的愤怒/悲伤/恐惧/绝望
 
-### relations
-只记录本块中发生实质变化的关系，无变化不填。
-- change 为「无变化」时不输出该条记录
-
-### character_appearances
-记录本块中出现的身份线索，用于后续人名消解。
-允许 character_appearances 中的人名不出现在 characters。
-- raw_name：保留原文实际出现的称呼，不做归一化
-- identity_clue：描述该称呼对应的身份线索
-clue_type 为 none 时不输出该条记录。
-
-【重要限制】
-- 只提取 <Current_Chunk> 中出现的身份线索
-- <Next_Chunk> 仅供理解上下文使用，禁止提取其中的身份线索
-- 对话中的代词（他、她、它）必须明确指代对象后才能记录，禁止猜测性关联
-
-【identity_clue 格式要求 - 必须使用完整句式】
-必须使用主谓宾完整的句式，避免歧义：
-- ✅ "伯安是贺铮之子"（主语+是+宾语，明确）
-- ✅ "此人是贺家大少爷，名为伯安"
-- ✅ "赵兰英给孩子取名伯安，寓意一世长安"
-- ❌ "贺重明之子"（歧义：是贺重明的儿子，还是孩子叫贺重明？）
-- ❌ "贺家少爷"（缺少主语，不知是谁）
-
-各类型格式模板：
-- self_introduction: "X自称是Y的儿子/女儿/弟子"
-- named_by_other: "Z给X取名为Y" 或 "Z称X为Y"
-- alias_revealed: "X的真实身份是Y" 或 "X其实就是Y"
-- appearance_desc: "X的外貌是...，身份是Y"
-- unique_body_marker: "X的身体/脊椎/眉心/手臂等位置有独特标记..."
-- kinship_identity: "X是Y之子/女" 或 "X是Y所生"
-- naming_scene: "Z给刚出生的X取名为Y"
-
-【强制抽取规则】
-- 若原文出现胎记、纹身、印记、符号、特殊伤痕、特殊骨骼/瞳色/发色等可稳定识别身份的独特身体特征，必须写入 character_appearances，clue_type 使用 unique_body_marker
-- 若原文出现明确亲缘身份句（如"X是Y之子"、"X为Y所生"），必须写入 character_appearances，clue_type 使用 kinship_identity
-- 若原文出现取名/命名场景，必须写入 character_appearances，clue_type 使用 naming_scene
-- 不允许把上述强线索只写进 chunk_summary 而不写入 character_appearances
-
 ===USER_TEMPLATE===
 <全局背景>
 书名：{novel_title}
@@ -136,10 +78,6 @@ clue_type 为 none 时不输出该条记录。
 <活跃实体状态>
 {active_entities}
 </活跃实体状态>
-
-<角色出场线索>
-{character_appearances}
-</角色出场线索>
 
 <Previous_Chunk>
 {prev_chunk_text}
@@ -190,15 +128,10 @@ clue_type 为 none 时不输出该条记录。
   "event_type": "冲突",
   "pivot_moment": false,
   "cliffhanger": false,
-  "chunk_summary": "赵云飞以灵力压制李明，李明隐忍暗中盘算",
   "characters": [
     {"name": "赵云飞", "role_function": "反对者", "action": "以灵力压制李明", "emotion_score": "mild_negative"},
     {"name": "李明", "role_function": "主体", "action": "跪地承受压力并暗中盘算", "emotion_score": "mild_negative"}
-  ],
-  "relations": [
-    {"from": "赵云飞", "to": "李明", "type": "敌对", "change": "强化"}
-  ],
-  "character_appearances": []
+  ]
 }
 
 ---EXAMPLE_2_USER---
@@ -234,17 +167,11 @@ clue_type 为 none 时不输出该条记录。
   "event_type": "铺垫",
   "pivot_moment": false,
   "cliffhanger": false,
-  "chunk_summary": "伯安召集侯飞白、褚大山密谋计划，三人情同手足",
   "characters": [
     {"name": "伯安", "role_function": "主体", "action": "召集伙伴商量计划", "emotion_score": "mild_positive"},
     {"name": "侯飞白", "role_function": "帮助者", "action": "兴奋响应伯安的号召", "emotion_score": "mild_positive"},
     {"name": "褚大山", "role_function": "帮助者", "action": "点头表示听从伯安", "emotion_score": "mild_positive"}
-  ],
-  "relations": [
-    {"from": "侯飞白", "to": "伯安", "type": "友情", "change": "强化"},
-    {"from": "褚大山", "to": "伯安", "type": "友情", "change": "强化"}
-  ],
-  "character_appearances": []
+  ]
 }
 
 ===FORMAT===
@@ -256,29 +183,12 @@ clue_type 为 none 时不输出该条记录。
   "event_type": "冲突|铺垫|转折",
   "pivot_moment": true|false,
   "cliffhanger": true|false,
-  "chunk_summary": "50字以内的核心事件摘要",
   "characters": [
     {
       "name": "常用名或原文称呼",
       "role_function": "主体|客体|发送者|接收者|帮助者|反对者",
       "action": "核心行为动词短语",
       "emotion_score": "strong_positive|mild_positive|neutral|mild_negative|strong_negative"
-    }
-  ],
-  "relations": [
-    {
-      "from": "人物A",
-      "to": "人物B",
-      "type": "师徒|敌对|盟友|爱慕|家族|利益|主从|友情",
-      "change": "强化|弱化|新建|断裂"
-    }
-  ],
-  "character_appearances": [
-    {
-      "raw_name": "原文出现的名称",
-      "identity_clue": "身份线索内容",
-      "affiliation_hint": "所属组织/群体名称（如贺家、赤甲卫等，无则为空字符串）",
-      "clue_type": "self_introduction|named_by_other|alias_revealed|appearance_desc|unique_body_marker|kinship_identity|naming_scene"
     }
   ],
   "group_appearances": [
@@ -302,28 +212,10 @@ clue_type 为 none 时不输出该条记录。
   ]
 }
 
-【关系类型判断规则】
-- 家族：仅限有明确血缘关系（父子、母女、兄弟、姐妹等）或婚姻关系
-- 友情：朋友、玩伴、同学、发小等非血缘亲密关系
-- 盟友：因共同目标、利益结成的合作关系
-- 敌对：有实质性伤害意图或敌对行为，非打闹/教育场景
-- 主从：明显的主仆、上下级关系（如主人与下属、首领与成员）
-- 师徒：明确的师徒传承关系
-- 爱慕：恋爱、暗恋、倾慕关系
-- 利益：因利益交换形成的关系
-
-【重要区分】
-- 下属的子女与主人的子女是「友情」关系，非「家族」
-- 同一环境中长大的玩伴是「友情」关系，非「家族」
-- 家族内部的打闹、告状、教育仍判断为「家族」关系
-
 【实体分类处理规则】
-- 人物名称（如"伯安"、"贺重明"）记录到 character_appearances
-- 含有独特身体标记、亲缘身份、命名场景的人物线索必须优先记录到 character_appearances
 - 群体名称（如"赤甲卫"、"禁军"）记录到 group_appearances
 - 组织名称（如"贺家"、"玄天道宗"）记录到 organization_appearances
 - 地点名称（如"产房"、"厅堂"、"贺府"、"院子"）记录到 location_appearances
-- 头衔（如"队长"、"长老"）不作为独立实体记录，仅在 identity_clue 中提及
 
 【地点类型识别规则】
 - room（房间类）：产房、卧房、厅堂、厢房、书房、厨房、灵兽棚等
@@ -338,5 +230,3 @@ clue_type 为 none 时不输出该条记录。
 【严格限制】
 - characters[].name 必须是文本中逐字出现的词语
 - 禁止使用任何文本中未出现的描述性词语作为名字
-- relations[].from 和 relations[].to 同上规则
-- chunk_summary 必须包含出场人名

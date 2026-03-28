@@ -34,7 +34,6 @@ def _build_annotation_messages_v2(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    character_appearances: list[dict] | None = None,
 ) -> list[dict]:
     """
     构建第一次调用（基础标注）的messages
@@ -42,6 +41,11 @@ def _build_annotation_messages_v2(
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: refactor-phase1-identity-extraction
+    修改内容: 移除 character_appearances 参数
     """
     messages = [{"role": "system", "content": SYSTEM_PROMPT_V2}]
 
@@ -64,19 +68,6 @@ def _build_annotation_messages_v2(
 
     active_entities_str = active_entities or "[]"
 
-    appearance_lines: list[str] = []
-    if character_appearances:
-        seen: set[str] = set()
-        for appearance in character_appearances:
-            raw_name = appearance.get("raw_name") if isinstance(appearance, dict) else None
-            if not raw_name or raw_name in seen:
-                continue
-            seen.add(raw_name)
-            appearance_lines.append(f"- {raw_name}")
-            if len(appearance_lines) >= 20:
-                break
-    character_appearances_str = "\n".join(appearance_lines) if appearance_lines else "[]"
-
     user_content = USER_TEMPLATE_V2.format(
         novel_title=novel_title or "未知",
         main_characters=main_characters or "",
@@ -84,7 +75,6 @@ def _build_annotation_messages_v2(
         chapter_id=chapter_id or 0,
         alias_map=alias_map_str,
         active_entities=active_entities_str,
-        character_appearances=character_appearances_str,
         prev_chunk_text=prev_chunk_text or "（无前文）",
         chunk_text=text,
         next_chunk_text=next_chunk_text or "（无后文）",
