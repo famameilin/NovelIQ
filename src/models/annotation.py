@@ -10,6 +10,7 @@ AnnotationClient 模块
 - 2026-03-16: 集成 Instructor 实现结构化输出
 - 2026-03-18: 拆分核心逻辑到 annotation/ 子包，简化此类
 - 2026-03-23: 移动到 src/models/annotation.py（统一客户端架构）
+- 2026-03-29: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
 
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
