@@ -17,9 +17,16 @@ from src.config.constants import EMOTION_SCORE_MAPPING
 
 @dataclass
 class AggregateResult:
-    """聚合结果数据类"""
+    """聚合结果数据类
 
-    narrative_structure: dict[str, float] = field(default_factory=dict)
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix/three-act-ratio-boundary-protection
+    修改内容: narrative_structure 类型从 dict[str, float] 改为 dict[str, Any]，
+              以支持多高潮剖面指标（climax_count: int, climax_positions: list, etc.）
+    """
+
+    narrative_structure: dict[str, Any] = field(default_factory=dict)
     emotion_curve: dict[str, Any] = field(default_factory=dict)
     character_relations: dict[str, Any] = field(default_factory=dict)
     language_style: dict[str, Any] = field(default_factory=dict)

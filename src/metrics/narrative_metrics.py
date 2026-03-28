@@ -218,7 +218,7 @@ def compute_climax_profile(
         xs = list(range(len(heights)))
         mean_x = sum(xs) / len(xs)
         mean_y = sum(heights) / len(heights)
-        numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, heights))
+        numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, heights, strict=True))
         denominator = sum((x - mean_x) ** 2 for x in xs)
         if denominator > 0:
             slope = numerator / denominator
