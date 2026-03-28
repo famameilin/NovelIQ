@@ -41,6 +41,7 @@ def _store_annotation_results(
     dialogue_speakers: dict[int, str] | None = None,
     dialogues: list[tuple[int, str]] | None = None,
     dialogue_tones: dict[int, str] | None = None,
+    dialogue_evidences: dict[int, str] | None = None,
 ) -> None:
     """存储标注结果
 
@@ -77,6 +78,11 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: fix-tone-distribution-semantic-error
     修改内容: 添加 dialogue_tones 参数，传递对话语气类型
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 添加 dialogue_evidences 参数，传递对话判断依据
     """
     from src.models.local.schema import DialogueSnapshot
     from src.storage.repositories import AnnotationRepository, StatsRepository
@@ -124,7 +130,8 @@ def _store_annotation_results(
         for dialogue_idx, content in dialogues:
             speaker = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
             tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
-            effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content, tone=tone))
+            evidence = dialogue_evidences.get(dialogue_idx) if dialogue_evidences else None
+            effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content, tone=tone, evidence=evidence or ""))
         lengths = [len(content) for _, content in dialogues]
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)
 

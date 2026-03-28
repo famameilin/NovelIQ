@@ -323,9 +323,10 @@ def compute_dialogue_lengths_with_llm(
     run_id: str | None = None,
     known_characters: list[str] | None = None,
     return_tones: bool = False,
+    return_evidences: bool = False,
 ) -> tuple[dict[str, int], dict[int, str], list[tuple[int, str]]] | tuple[
     dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]
-]:
+] | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]]:
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
 
@@ -347,9 +348,14 @@ def compute_dialogue_lengths_with_llm(
     任务: fix-tone-distribution-semantic-error
     修改内容: 返回 dialogue_tones 字典存储对话语气类型
 
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 返回 dialogue_evidences 字典存储对话判断依据
+
     Returns:
-        tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]]: 
-            ({说话者: 总长度}, {dialogue_idx: 说话者}, [(dialogue_idx, content), ...], {dialogue_idx: tone, ...})
+        tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]]: 
+            ({说话者: 总长度}, {dialogue_idx: 说话者}, [(dialogue_idx, content), ...], {dialogue_idx: tone, ...}, {dialogue_idx: evidence, ...})
     """
     logger.info(
         f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}"
@@ -357,6 +363,8 @@ def compute_dialogue_lengths_with_llm(
 
     if not text:
         logger.info("compute_dialogue_lengths_with_llm: early return - text_empty=True")
+        if return_evidences:
+            return ({}, {}, [], {}, {})
         if return_tones:
             return ({}, {}, [], {})
         return ({}, {}, [])
@@ -364,6 +372,8 @@ def compute_dialogue_lengths_with_llm(
     candidates = extract_dialogues_from_text(text)
     logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(candidates)} candidates")
     if not candidates:
+        if return_evidences:
+            return ({}, {}, [], {}, {})
         if return_tones:
             return ({}, {}, [], {})
         return ({}, {}, [])
@@ -383,6 +393,7 @@ def compute_dialogue_lengths_with_llm(
     canonical_attribution: dict[int, str] = {}
     dialogues: list[tuple[int, str]] = []
     dialogue_tones: dict[int, str] = {}
+    dialogue_evidences: dict[int, str] = {}
     seen_indices: set[int] = set()
 
     candidate_map = {c.index: c.content for c in candidates}
@@ -408,12 +419,17 @@ def compute_dialogue_lengths_with_llm(
         if record.tone:
             dialogue_tones[record.index] = record.tone
 
+        if record.evidence:
+            dialogue_evidences[record.index] = record.evidence
+
         if record.speaker and record.speaker != "未知":
             canonical = alias_map.get(record.speaker, record.speaker) if alias_map else record.speaker
             speaker_lengths[canonical] = speaker_lengths.get(canonical, 0) + len(content)
             canonical_attribution[record.index] = canonical
 
     logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
+    if return_evidences:
+        return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones, dialogue_evidences)
     if return_tones:
         return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones)
     return (speaker_lengths, canonical_attribution, dialogues)

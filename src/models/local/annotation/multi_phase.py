@@ -53,12 +53,18 @@ class _Phase3Result:
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 添加 dialogue_evidences 字段存储对话判断依据
     """
 
     dialogue_lengths: dict[str, int] | None = None
     dialogue_speakers: dict[int, str] | None = None
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
+    dialogue_evidences: dict[int, str] | None = None
 
 
 def _run_phase1(
@@ -150,6 +156,11 @@ def _run_phase3_if_needed(
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 启用 return_evidences=True 返回对话判断依据
     """
     result = _Phase3Result()
 
@@ -171,19 +182,22 @@ def _run_phase3_if_needed(
         run_id=run_id,
         known_characters=known_characters,
         return_tones=True,
+        return_evidences=True,
     )
 
     result.dialogue_lengths = result_tuple[0]
     result.dialogue_speakers = result_tuple[1]
     result.dialogues = result_tuple[2]
     result.dialogue_tones = result_tuple[3] if len(result_tuple) > 3 else None
+    result.dialogue_evidences = result_tuple[4] if len(result_tuple) > 4 else None
 
     logger.debug(
-        "Phase3: dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} chunk_id={}",
+        "Phase3: dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} dialogue_evidences={} chunk_id={}",
         result.dialogue_lengths,
         result.dialogue_speakers,
         result.dialogues,
         result.dialogue_tones,
+        result.dialogue_evidences,
         chunk_id,
     )
 
@@ -225,6 +239,11 @@ def _build_multi_phase_result(
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
+
+    修改时间: 2026-03-28
+    修改者: TraeAI
+    任务: fix-unknown-speaker-context
+    修改内容: 添加 dialogue_evidences 字段
     """
     return MultiPhaseAnnotationResult(
         annotation=annotation,
@@ -233,6 +252,7 @@ def _build_multi_phase_result(
         dialogue_speakers=phase3_result.dialogue_speakers,
         dialogues=phase3_result.dialogues,
         dialogue_tones=phase3_result.dialogue_tones,
+        dialogue_evidences=phase3_result.dialogue_evidences,
     )
 
 
