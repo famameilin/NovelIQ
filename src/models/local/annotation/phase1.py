@@ -14,15 +14,15 @@
 任务: 添加模型交互记录保存
 修改内容: 添加 save_model_interaction 工具函数
 
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: fix-validate-names-from-character-appearances
-修改内容: 添加 character_appearances 参数支持
-
 修改时间: 2026-03-27
 修改者: TraeAI
 任务: 创建统一的模型交互记录接口
 修改内容: 使用 record_model_interaction 替代本地 _save_interaction 函数
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: remove-unused-annotation-fields
+修改内容: 移除 character_appearances 参数
 """
 
 from __future__ import annotations
@@ -56,14 +56,13 @@ def execute_phase1_call(
     retry_messages: list[dict] | None = None,
     run_id: str | None = None,
     attempt_number: int = 1,
-    character_appearances: list[dict] | None = None,
 ) -> tuple[ChunkAnnotation, str]:
     """
     执行Phase1单次调用
 
     创建时间: 2026-03-17
     创建者: TraeAI
-    任务: code-quality-refactor - 提取_do_phase1方法
+    任务: code-quality-refactor - 提取_do_phase1_method
     说明: 从_annotate_chunk_phase1中提取的内嵌函数
 
     修改时间: 2026-03-19
@@ -71,10 +70,10 @@ def execute_phase1_call(
     任务: 添加模型交互记录保存
     修改内容: 添加 run_id 和 attempt_number 参数，保存交互记录
 
-    修改时间: 2026-03-21
+    修改时间: 2026-03-29
     修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 添加 character_appearances 参数支持
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 character_appearances 参数
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -118,7 +117,6 @@ def execute_phase1_call(
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
         "next_chunk_text": next_chunk_text or "",
-        "character_appearances": character_appearances or [],
     }
 
     result = client._validate_annotation(result, sources, chunk_id, content_clean)
@@ -139,7 +137,6 @@ def execute_phase1_with_retry(
     chunk_id: int | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None = None,
-    character_appearances: list[dict] | None = None,
 ) -> ChunkAnnotation:
     """
     执行Phase1带重试的调用
@@ -158,10 +155,10 @@ def execute_phase1_with_retry(
     任务: 添加模型交互记录保存
     修改内容: 添加 run_id 参数，传递 attempt_number
 
-    修改时间: 2026-03-21
+    修改时间: 2026-03-29
     修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 添加 character_appearances 参数支持
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 character_appearances 参数
     """
     from src.models.local.schema import ChunkAnnotation
 
@@ -183,7 +180,6 @@ def execute_phase1_with_retry(
             local_client, text, messages, alias_map, active_entities,
             prev_chunk_text, next_chunk_text, chunk_id, retry_messages,
             run_id=run_id, attempt_number=handler.state.attempt,
-            character_appearances=character_appearances,
         )
         return result
 
@@ -217,7 +213,6 @@ def annotate_chunk_phase1(
     active_entities: str | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    character_appearances: list[dict] | None = None,
 ) -> ChunkAnnotation:
     """
     第一次调用：基础标注（带独立重试机制）
@@ -238,10 +233,10 @@ def annotate_chunk_phase1(
     任务: 添加模型交互记录保存
     修改内容: 添加 run_id 参数传递
 
-    修改时间: 2026-03-21
+    修改时间: 2026-03-29
     修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 添加 character_appearances 参数支持
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 character_appearances 参数
     """
     messages = _build_annotation_messages_v2(
         text=text,
@@ -254,7 +249,6 @@ def annotate_chunk_phase1(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
-        character_appearances=character_appearances,
     )
 
     return execute_phase1_with_retry(
@@ -268,5 +262,4 @@ def annotate_chunk_phase1(
         chunk_id=chunk_id,
         cloud_client=cloud_client,
         run_id=run_id,
-        character_appearances=character_appearances,
     )
