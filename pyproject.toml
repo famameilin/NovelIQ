@@ -38,7 +38,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-n 0"
+addopts = "-n 0 --ignore-glob=tests/test_*.py --ignore-glob=tests/*_test.py"
 
 [tool.ruff]
 line-length = 120

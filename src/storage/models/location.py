@@ -9,26 +9,10 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
-from pydantic import BaseModel
-from sqlalchemy import Integer, String, Text, ForeignKey, Index
+from sqlalchemy import ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
-
-
-class LocationAppearance(BaseModel):
-    """
-    地点出现记录（Phase1 输出格式）
-
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: implement-location-entity-type
-    """
-
-    raw_name: str
-    location_type: Literal["room", "building", "area"] | None = None
 
 
 class ChunkLocation(Base):
