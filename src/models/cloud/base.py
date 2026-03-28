@@ -25,6 +25,10 @@
 1. BaseCloudModelClient 继承自 BaseModelClient（src.models.local.base）
 2. 移除重复的方法实现，使用继承的通用方法
 3. 保留云端特定的 thinking_enabled 配置处理
+
+修改时间: 2026-03-29
+修改者: TraeAI
+修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
 """
 
 from __future__ import annotations
@@ -128,8 +132,9 @@ class BaseCloudModelClient(BaseModelClient):
         任务: Phase 2 - 统一客户端基类
         说明: 云端专用版本，使用 reasoning_effort 参数
 
-        注意: 此方法覆盖父类方法，因为云端只使用 reasoning_effort，
-              不需要像本地模型那样使用 extra_body={"think": true/false}
+        修改时间: 2026-03-29
+        修改者: TraeAI
+        修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
         """
         request_params: dict[str, Any] = {
             "model": self._config.model,
@@ -139,6 +144,10 @@ class BaseCloudModelClient(BaseModelClient):
         thinking_enabled = self._config.thinking_enabled
         if thinking_enabled:
             request_params["reasoning_effort"] = "medium"
+            request_params["extra_body"] = {"think": True}
+        else:
+            request_params["reasoning_effort"] = "none"
+            request_params["extra_body"] = {"think": False}
 
         return request_params
 
