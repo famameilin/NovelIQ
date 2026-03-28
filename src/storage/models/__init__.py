@@ -43,7 +43,7 @@ from src.storage.models.entity import (
     EntityRelation,
     EntitySnapshot,
 )
-from src.storage.models.location import ChunkLocation, LocationAppearance
+from src.storage.models.location import ChunkLocation
 from src.storage.models.model_interaction import ModelInteraction
 from src.storage.models.rag import GraphStorage, TokenUsage
 
@@ -80,5 +80,4 @@ __all__ = [
     "ModelInteraction",
     "EMBEDDING_DIM",
     "ChunkLocation",
-    "LocationAppearance",
 ]

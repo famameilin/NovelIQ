@@ -163,8 +163,9 @@ test_token_usage.py
 # Deprecated - 废弃代码保留历史记录
 deprecated/
 
-# Tests 根目录文件不上传（子目录保留）
+# Tests 根目录测试文件不上传（显式保留 conftest.py）
 /tests/*.py
+!/tests/conftest.py
 
 # LDA Topic Models - 训练好的模型文件
 /models/
