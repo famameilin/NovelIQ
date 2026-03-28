@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.config.constants import EMOTION_SCORE_MAPPING
+
 
 @dataclass
 class AggregateResult:
@@ -100,16 +102,6 @@ class DialogueData:
     """
 
     tones: list[str]
-
-
-# 情绪分数映射
-EMOTION_SCORE_MAPPING = {
-    "strong_positive": 2,
-    "mild_positive": 1,
-    "neutral": 0,
-    "mild_negative": -1,
-    "strong_negative": -2,
-}
 
 
 def map_emotion_score(score_raw: str | None) -> int:

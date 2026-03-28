@@ -20,15 +20,8 @@ from pathlib import Path
 from loguru import logger
 from sqlalchemy import text as sql_text
 
+from src.config.constants import EVENT_TYPE_SCORES
 from src.lexicons.loader import load_lexicon
-
-EVENT_TYPE_SCORES = {
-    "高潮": 1.0,
-    "冲突": 0.8,
-    "转折": 0.6,
-    "铺垫": 0.4,
-    "日常": 0.2,
-}
 
 
 def load_all_lexicons(lexicon_dir: Path) -> dict:
