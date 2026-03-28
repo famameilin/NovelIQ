@@ -168,12 +168,14 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         run_id: str,
         known_canonical_names: frozenset[str],
         novel_id: str,
+        entity_types: dict[str, str] | None = None,
     ) -> dict[str, int]:
         return characters.ensure_canonical_entities(
             self.session,
             run_id,
             known_canonical_names,
             novel_id,
+            entity_types,
         )
 
     def apply_alias_merges(self, run_id: str, alias_merges: dict[str, str]) -> None:
