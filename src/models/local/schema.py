@@ -13,6 +13,7 @@ DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
 RelationChange = Literal["强化", "弱化", "新建", "断裂", "无变化"]
+ProjectionStatus = Literal["pending", "projected", "failed"]
 ClueType = Literal[
     "none",
     "self_introduction",
@@ -98,6 +99,13 @@ class RelationChangeSnapshot(BaseModel):
     to_name: str
     type: str
     change: str
+    evidence: str
+    confidence: float
+    source_model: str | None = None
+    projection_status: ProjectionStatus = "pending"
+    projected_at: str | None = None
+    projection_error: str | None = None
+    directionality: str = "directed"
 
 
 class DialogueSnapshot(BaseModel):

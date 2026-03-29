@@ -21,12 +21,11 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from src.config.analysis_logger import AnalysisLogger
+from src.config.schemas.annotation import ANNOTATION_CONFIG
 from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.local.disambiguation import DisambiguationState
 
 if TYPE_CHECKING:
-    import networkx as nx
-
     from src.models.local.annotation import MultiPhaseAnnotationResult
     from src.rag import RAGRetriever
 
@@ -117,7 +116,6 @@ class AnnotationPhaseResult:
         incremental_disambig_client: DisambiguationLike,
         full_disambig_client: DisambiguationLike,
         rag_retriever: RAGRetriever | None,
-        character_graph: nx.Graph | None,
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
@@ -127,7 +125,6 @@ class AnnotationPhaseResult:
         self.incremental_disambig_client = incremental_disambig_client
         self.full_disambig_client = full_disambig_client
         self.rag_retriever = rag_retriever
-        self.character_graph = character_graph
         self.alias_keywords = alias_keywords
         self.global_context_str = global_context_str
         self.alias_map = alias_map
@@ -184,7 +181,7 @@ def _init_annotation_phase_with_config(
     alias_keywords = _load_alias_keywords()
     token_usage_callback = getattr(annotation_client, "_token_usage_callback", None)
 
-    rag_retriever, character_graph, _ = _init_rag_retriever(
+    rag_retriever, _ = _init_rag_retriever(
         config.conn,
         config.novel_id,
         config.use_rag,
@@ -210,7 +207,6 @@ def _init_annotation_phase_with_config(
         incremental_disambig_client=incremental_client,
         full_disambig_client=full_client,
         rag_retriever=rag_retriever,
-        character_graph=character_graph,
         alias_keywords=alias_keywords,
         global_context_str=global_context_str,
         alias_map={},
@@ -269,6 +265,7 @@ def _process_single_chunk(
     state: DisambiguationState,
     use_context_enhancement: bool,
     incremental_interval: int,
+    projection_interval: int,
     run_id: str = "",
     novel_id: str = "",
 ) -> DisambiguationState:
@@ -296,6 +293,7 @@ def _process_single_chunk(
     """
     from .context import _prepare_chunk_context
     from .disambiguation import _run_incremental_disambiguation_with_state
+    from .disambiguation.checkpoint import _save_disambig_checkpoint_state
     from .storage import _store_annotation_results
 
     logger.info(f"Annotating chunk {idx + 1}/{total_chunks}")
@@ -334,6 +332,7 @@ def _process_single_chunk(
         dialogue_tones=annotation_result.dialogue_tones,
         dialogue_evidences=annotation_result.dialogue_evidences,
         dialogue_identity_clues=annotation_result.dialogue_identity_clues,
+        relations=annotation_result.relations,
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 
@@ -347,6 +346,14 @@ def _process_single_chunk(
         chunk_id,
         idx,
         incremental_interval,
+    )
+
+    _save_disambig_checkpoint_state(
+        conn,
+        run_id,
+        state,
+        last_annotated_chunk=chunk_id,
+        projection_interval=projection_interval,
     )
 
     return state
@@ -376,12 +383,17 @@ def _process_chunks_phase(
     修改内容: 使用 _load_disambig_checkpoint_state 替代 _load_disambig_checkpoint，返回 DisambiguationState
     """
     from .disambiguation import DisambiguationMaxRetriesExceededError, _load_disambig_checkpoint_state
+    from .disambiguation.checkpoint import load_disambig_checkpoint_metadata
+    from .graph_projection import project_graph_tables
 
     success_count = 0
 
+    projection_interval = max(1, ANNOTATION_CONFIG.checkpoint_interval)
     state: DisambiguationState = DisambiguationState.empty()
     if resume and run_id:
         state = _load_disambig_checkpoint_state(conn, run_id)
+        checkpoint_meta = load_disambig_checkpoint_metadata(conn, run_id)
+        projection_interval = max(1, checkpoint_meta.get("projection_interval") or projection_interval)
         if state.discovered_names:
             logger.info(
                 f"resumed from checkpoint: {len(state.discovered_names)} discovered, "
@@ -406,16 +418,23 @@ def _process_chunks_phase(
                 state,
                 use_context_enhancement,
                 incremental_interval,
+                projection_interval,
                 run_id=run_id,
                 novel_id=novel_id,
             )
             success_count += 1
+            if run_id and success_count % projection_interval == 0:
+                project_graph_tables(run_id, to_chunk=chunk_id, session=conn)
         except ChunkAnnotationMaxRetriesExceededError as e:
             logger.error(f"chunk annotation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
             raise
         except DisambiguationMaxRetriesExceededError as e:
             logger.error(f"disambiguation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
             raise
+
+    if run_id and all_chunks:
+        final_chunk_id = all_chunks[-1][0]
+        project_graph_tables(run_id, to_chunk=final_chunk_id, session=conn)
 
     return success_count, state
 

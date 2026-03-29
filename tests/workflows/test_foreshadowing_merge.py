@@ -10,14 +10,14 @@
 修改内容: 移除 relations、character_appearances、chunk_summary 字段
 """
 import sys
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.schema import (
-    ChunkAnnotation,
     CharacterSnapshot,
+    ChunkAnnotation,
     ForeshadowingResult,
 )
 

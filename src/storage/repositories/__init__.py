@@ -45,6 +45,7 @@ from .base import BaseRepository, T
 from .chunk_repository import ChunkRepository, ChunkStyleData
 from .diagnosis_repository import DiagnosisRepository
 from .entity import EntityRepository
+from .graph import GraphRepository
 from .protocols import (
     AnnotationRepositoryProtocol,
     ChunkRepositoryProtocol,
@@ -70,6 +71,7 @@ __all__ = [
     "EntityRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
     "EntityRepository",
+    "GraphRepository",
     "DiagnosisRepository",
     "StatsRepository",
 ]

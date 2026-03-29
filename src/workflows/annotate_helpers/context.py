@@ -23,8 +23,6 @@ from src.config.schemas import ANNOTATION_CONFIG
 from src.models.local.embedding import EmbeddingClient
 
 if TYPE_CHECKING:
-    import networkx as nx
-
     from src.rag import RAGRetriever
 
 
@@ -63,19 +61,17 @@ def _init_rag_retriever(
     resume: bool,
     token_usage_callback,
     run_id: str | None = None,
-) -> tuple[RAGRetriever | None, nx.Graph | None, EmbeddingClient | None]:
+) -> tuple[RAGRetriever | None, EmbeddingClient | None]:
     """初始化RAG检索器"""
     if not use_rag or not settings.rag.enabled:
-        return None, None, None
+        return None, None
 
-    from src.knowledge import load_graph_from_db
     from src.rag import RAGRetriever
-    from src.storage.repositories import EntityRepository
+    from src.storage.repositories import EntityRepository, GraphRepository
 
     logger.info("initializing RAG retriever")
 
     embedding_client: EmbeddingClient | None = None
-    character_graph: nx.Graph | None = None
 
     try:
         embedding_client = EmbeddingClient(
@@ -85,25 +81,19 @@ def _init_rag_retriever(
     except Exception as e:
         logger.warning(f"embedding client initialization failed: {e}")
 
-    if resume:
-        from src.storage.repositories import StatsRepository
-        stats_repo = StatsRepository(conn)
-        character_graph = load_graph_from_db(stats_repo, run_id or "default", "character_graph")
-        if character_graph:
-            logger.info(f"loaded existing graph: {character_graph.number_of_nodes()} nodes")
-
     entity_repo = EntityRepository(conn)
+    graph_repo = GraphRepository(conn)
     rag_retriever = RAGRetriever(
         entity_repo=entity_repo,
         novel_id=novel_id,
         run_id=run_id,
-        graph=character_graph,
+        graph_repo=graph_repo,
         embedding_client=embedding_client if settings.rag.embedding_enabled else None,
         similarity_threshold=settings.rag.similarity_threshold,
         lookback_chunks=settings.rag.lookback_chunks,
     )
 
-    return rag_retriever, character_graph, embedding_client
+    return rag_retriever, embedding_client
 
 
 def _prepare_chunk_context(
@@ -122,11 +112,8 @@ def _prepare_chunk_context(
     任务: refactor-phase1-identity-extraction
     修改内容: 移除 character_appearances 数据获取（已迁移至 Phase 3）
     """
-    from src.context import (
-        format_entities_for_prompt,
-        get_active_entities,
-    )
-    from src.storage.repositories import ChunkRepository, EntityRepository
+    from src.context import format_entities_for_prompt, get_active_entities
+    from src.storage.repositories import ChunkRepository, GraphRepository
 
     context = ChunkContext()
 
@@ -142,10 +129,10 @@ def _prepare_chunk_context(
         )
     else:
         chunk_repo = ChunkRepository(conn)
-        entity_repo = EntityRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
-        active_entities = get_active_entities(entity_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
+        graph_repo = GraphRepository(conn)
+        active_entities = get_active_entities(graph_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
         if active_entities:
             context.active_entities_str = format_entities_for_prompt(active_entities)
 

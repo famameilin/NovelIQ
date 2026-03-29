@@ -16,8 +16,8 @@
 浠诲姟: postgresql-migration-cleanup
 淇敼鍐呭: 鏀圭敤 PostgreSQL db_session fixture锛岀Щ闄?SQLite 渚濊禆
 """
-import sys
 import json
+import sys
 import uuid
 from pathlib import Path
 
@@ -177,16 +177,16 @@ class TestAliasOperations:
         )
         assert alias_id > 0
 
-    def test_fetch_entity_by_alias(self):
+    def test_get_entity_id_by_alias_name(self):
         self.entity_repo.insert_entity_alias(
             entity_id=self.entity_id,
             alias="閭ｄ汉",
             run_id=self.run_id,
             alias_type="pronoun",
         )
-        entity = self.entity_repo.fetch_entity_by_alias(self.novel_id, "閭ｄ汉", self.run_id)
-        assert entity is not None
-        assert entity["canonical"] == "鏉庣巹"
+        entity_id = self.entity_repo.get_entity_id_by_name(self.novel_id, "閭ｄ汉", self.run_id)
+        assert entity_id == self.entity_id
+
 
     def test_increment_alias_confirm(self):
         self.entity_repo.insert_entity_alias(
@@ -195,8 +195,11 @@ class TestAliasOperations:
             run_id=self.run_id,
         )
         self.entity_repo.increment_alias_confirm(self.entity_id, "閭ｄ汉")
-        entity = self.entity_repo.fetch_entity_by_alias(self.novel_id, "閭ｄ汉", self.run_id)
-        assert entity["confirm_count"] == 2
+        aliases = self.entity_repo.fetch_all_aliases_for_entity(self.entity_id, self.run_id)
+        target = next((a for a in aliases if a["alias"] == "閭ｄ汉"), None)
+        assert target is not None
+        assert target["confirm_count"] == 2
+
 
     def test_fetch_all_aliases_for_entity(self):
         self.entity_repo.insert_entity_alias(self.entity_id, "閭ｄ汉", self.run_id, "pronoun")

@@ -1,0 +1,358 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from loguru import logger
+
+from src.models.local.disambiguation import DisambiguationState
+from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
+from src.storage.repositories import GraphRepository, RunRepository
+from src.workflows.annotate_helpers.disambiguation.checkpoint import (
+    _load_disambig_checkpoint_state,
+    _save_disambig_checkpoint_state,
+    load_disambig_checkpoint_metadata,
+)
+
+PENDING_RETRY_LIMIT = 200
+
+
+def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases: dict[str, str]) -> str | None:
+    if raw_name is None:
+        return None
+    name = raw_name.strip()
+    if not name:
+        return None
+    return alias_map.get(name) or graph_aliases.get(name) or name
+
+
+
+def _fetch_pending_relations(
+    session,
+    run_id: str,
+    to_chunk: int | None,
+    limit: int = PENDING_RETRY_LIMIT,
+) -> list[ChunkRelation]:
+    query = session.query(ChunkRelation).filter(ChunkRelation.run_id == run_id).filter(
+        ChunkRelation.projection_status == "pending"
+    )
+    if to_chunk is not None:
+        query = query.filter(ChunkRelation.chunk_id <= to_chunk)
+    return list(query.order_by(ChunkRelation.chunk_id, ChunkRelation.id).limit(limit).all())
+
+
+
+def _merge_relations_for_projection(
+    window_relations: list[ChunkRelation],
+    retry_relations: list[ChunkRelation],
+) -> list[ChunkRelation]:
+    seen: set[int] = set()
+    merged: list[ChunkRelation] = []
+    for relation in [*window_relations, *retry_relations]:
+        if relation.id is None or relation.id in seen:
+            continue
+        seen.add(relation.id)
+        merged.append(relation)
+    return merged
+
+
+
+def project_graph_tables(
+    run_id: str,
+    from_chunk: int | None = None,
+    to_chunk: int | None = None,
+    session=None,
+    rebuild: bool = False,
+) -> None:
+    if session is None:
+        raise ValueError("session is required for project_graph_tables")
+
+    run_repo = RunRepository(session)
+    if run_repo.get_run(run_id) is None:
+        raise ValueError(f"run not found: {run_id}")
+
+    graph_repo = GraphRepository(session)
+    state: DisambiguationState = _load_disambig_checkpoint_state(session, run_id)
+    checkpoint_meta = load_disambig_checkpoint_metadata(session, run_id)
+    if rebuild:
+        logger.info("graph projection rebuild requested run_id={} to_chunk={}", run_id, to_chunk)
+        graph_repo.reset_graph_tables(run_id)
+        from_chunk = 0
+    elif from_chunk is None:
+        from_chunk = (checkpoint_meta.get("last_projected_chunk") or -1) + 1
+
+    chunk_characters = list(
+        (
+            session.query(ChunkCharacter)
+            .filter(ChunkCharacter.run_id == run_id)
+            .filter(ChunkCharacter.chunk_id >= from_chunk)
+            .filter(ChunkCharacter.chunk_id <= to_chunk)
+            if to_chunk is not None
+            else session.query(ChunkCharacter)
+            .filter(ChunkCharacter.run_id == run_id)
+            .filter(ChunkCharacter.chunk_id >= from_chunk)
+        )
+        .order_by(ChunkCharacter.chunk_id, ChunkCharacter.id)
+        .all()
+    )
+    chunk_dialogues = list(
+        (
+            session.query(ChunkDialogue)
+            .filter(ChunkDialogue.run_id == run_id)
+            .filter(ChunkDialogue.chunk_id >= from_chunk)
+            .filter(ChunkDialogue.chunk_id <= to_chunk)
+            if to_chunk is not None
+            else session.query(ChunkDialogue)
+            .filter(ChunkDialogue.run_id == run_id)
+            .filter(ChunkDialogue.chunk_id >= from_chunk)
+        )
+        .order_by(ChunkDialogue.chunk_id, ChunkDialogue.id)
+        .all()
+    )
+    window_relations = list(
+        (
+            session.query(ChunkRelation)
+            .filter(ChunkRelation.run_id == run_id)
+            .filter(ChunkRelation.chunk_id >= from_chunk)
+            .filter(ChunkRelation.chunk_id <= to_chunk)
+            if to_chunk is not None
+            else session.query(ChunkRelation)
+            .filter(ChunkRelation.run_id == run_id)
+            .filter(ChunkRelation.chunk_id >= from_chunk)
+        )
+        .order_by(ChunkRelation.chunk_id, ChunkRelation.id)
+        .all()
+    )
+    retry_relations = _fetch_pending_relations(session, run_id, to_chunk=to_chunk)
+    chunk_relations = _merge_relations_for_projection(window_relations, retry_relations)
+
+    alias_map = state.get_alias_merges_dict()
+    graph_alias_map = graph_repo.fetch_alias_map(run_id)
+
+    for row in chunk_characters:
+        resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)
+        if resolved_name is None:
+            continue
+        entity = graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name=resolved_name,
+            entity_type="character",
+            first_seen_chunk=row.chunk_id,
+            last_seen_chunk=row.chunk_id,
+            primary_role_function=row.role_function,
+            last_emotion_score=row.emotion_score,
+            source_confidence=1.0,
+        )
+        if entity.entity_id is None:
+            continue
+        graph_repo.upsert_alias(
+            run_id=run_id,
+            entity_id=entity.entity_id,
+            alias=resolved_name,
+            source_chunk_id=row.chunk_id,
+            evidence=row.action,
+            confidence=1.0,
+            source_type="chunk_character",
+            is_primary=True,
+        )
+        graph_alias_map[resolved_name] = resolved_name
+        if row.name and row.name != resolved_name:
+            graph_repo.upsert_alias(
+                run_id=run_id,
+                entity_id=entity.entity_id,
+                alias=row.name,
+                source_chunk_id=row.chunk_id,
+                evidence=row.action,
+                confidence=0.9,
+                source_type="disambiguation",
+                is_primary=False,
+            )
+            graph_alias_map[row.name] = resolved_name
+
+    for row in chunk_dialogues:
+        resolved_name = _resolve_name(row.speaker, alias_map, graph_alias_map)
+        if resolved_name is None:
+            continue
+        entity = graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name=resolved_name,
+            entity_type="character",
+            first_seen_chunk=row.chunk_id,
+            last_seen_chunk=row.chunk_id,
+            source_confidence=0.8,
+        )
+        if entity.entity_id is None:
+            continue
+        graph_repo.upsert_alias(
+            run_id=run_id,
+            entity_id=entity.entity_id,
+            alias=resolved_name,
+            source_chunk_id=row.chunk_id,
+            evidence=row.evidence or row.content,
+            confidence=0.8,
+            source_type="dialogue",
+            is_primary=resolved_name == row.speaker,
+        )
+        graph_alias_map[resolved_name] = resolved_name
+        if row.speaker and row.speaker != resolved_name:
+            graph_repo.upsert_alias(
+                run_id=run_id,
+                entity_id=entity.entity_id,
+                alias=row.speaker,
+                source_chunk_id=row.chunk_id,
+                evidence=row.evidence or row.content,
+                confidence=0.8,
+                source_type="dialogue",
+                is_primary=False,
+            )
+            graph_alias_map[row.speaker] = resolved_name
+
+    affected_pairs: set[tuple[int, int]] = set()
+    last_projected_chunk = checkpoint_meta.get("last_projected_chunk")
+    if to_chunk is not None:
+        last_projected_chunk = max(last_projected_chunk or to_chunk, to_chunk)
+    else:
+        projected_rows = [*chunk_characters, *chunk_dialogues, *window_relations]
+        if projected_rows:
+            max_window_chunk = max(item.chunk_id for item in projected_rows)
+            last_projected_chunk = max(last_projected_chunk or max_window_chunk, max_window_chunk)
+
+    projected_count = 0
+    pending_count = 0
+    failed_count = 0
+
+    for relation in chunk_relations:
+        resolved_from = _resolve_name(relation.from_char, alias_map, graph_alias_map)
+        resolved_to = _resolve_name(relation.to_char, alias_map, graph_alias_map)
+        if resolved_from is None or resolved_to is None:
+            relation.projection_status = "pending"
+            relation.projection_error = "unresolved endpoint"
+            relation.projected_at = None
+            pending_count += 1
+            continue
+        if resolved_from == resolved_to:
+            relation.projection_status = "failed"
+            relation.projection_error = "self relation"
+            relation.projected_at = None
+            failed_count += 1
+            continue
+
+        from_entity = graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name=resolved_from,
+            entity_type="character",
+            first_seen_chunk=relation.chunk_id,
+            last_seen_chunk=relation.chunk_id,
+            source_confidence=relation.confidence,
+        )
+        to_entity = graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name=resolved_to,
+            entity_type="character",
+            first_seen_chunk=relation.chunk_id,
+            last_seen_chunk=relation.chunk_id,
+            source_confidence=relation.confidence,
+        )
+        if from_entity.entity_id is None or to_entity.entity_id is None:
+            relation.projection_status = "failed"
+            relation.projection_error = "entity upsert failed"
+            relation.projected_at = None
+            failed_count += 1
+            continue
+
+        graph_repo.upsert_alias(
+            run_id=run_id,
+            entity_id=from_entity.entity_id,
+            alias=resolved_from,
+            source_chunk_id=relation.chunk_id,
+            evidence=relation.evidence,
+            confidence=relation.confidence,
+            source_type="relation_projection",
+            is_primary=relation.from_char == resolved_from,
+        )
+        graph_alias_map[resolved_from] = resolved_from
+        if relation.from_char and relation.from_char != resolved_from:
+            graph_repo.upsert_alias(
+                run_id=run_id,
+                entity_id=from_entity.entity_id,
+                alias=relation.from_char,
+                source_chunk_id=relation.chunk_id,
+                evidence=relation.evidence,
+                confidence=relation.confidence,
+                source_type="relation_projection",
+                is_primary=False,
+            )
+            graph_alias_map[relation.from_char] = resolved_from
+
+        graph_repo.upsert_alias(
+            run_id=run_id,
+            entity_id=to_entity.entity_id,
+            alias=resolved_to,
+            source_chunk_id=relation.chunk_id,
+            evidence=relation.evidence,
+            confidence=relation.confidence,
+            source_type="relation_projection",
+            is_primary=relation.to_char == resolved_to,
+        )
+        graph_alias_map[resolved_to] = resolved_to
+        if relation.to_char and relation.to_char != resolved_to:
+            graph_repo.upsert_alias(
+                run_id=run_id,
+                entity_id=to_entity.entity_id,
+                alias=relation.to_char,
+                source_chunk_id=relation.chunk_id,
+                evidence=relation.evidence,
+                confidence=relation.confidence,
+                source_type="relation_projection",
+                is_primary=False,
+            )
+            graph_alias_map[relation.to_char] = resolved_to
+
+        event = graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=from_entity.entity_id,
+            to_entity_id=to_entity.entity_id,
+            relation_type=relation.type or "未知",
+            change_type=relation.change or "无变化",
+            chunk_id=relation.chunk_id,
+            evidence=relation.evidence,
+            confidence=relation.confidence,
+            source_relation_row_id=relation.id,
+            directionality="symmetric" if relation.type in {"盟友", "友情", "家族"} else "directed",
+        )
+        if event is None:
+            relation.projection_status = "failed"
+            relation.projection_error = "event insert failed"
+            relation.projected_at = None
+            failed_count += 1
+            continue
+
+        affected_pairs.add((from_entity.entity_id, to_entity.entity_id))
+        relation.projection_status = "projected"
+        relation.projected_at = datetime.now(UTC)
+        relation.projection_error = None
+        projected_count += 1
+
+    for from_entity_id, to_entity_id in affected_pairs:
+        graph_repo.refresh_current_relation(run_id, from_entity_id, to_entity_id)
+
+    _save_disambig_checkpoint_state(
+        session,
+        run_id,
+        state,
+        last_projected_chunk=last_projected_chunk,
+    )
+    session.commit()
+    logger.info(
+        "graph projection completed run_id={} from_chunk={} to_chunk={} rebuild={} window_relations={} retried_pending={} total_relations={} projected={} pending={} failed={} affected_pairs={}",
+        run_id,
+        from_chunk,
+        to_chunk,
+        rebuild,
+        len(window_relations),
+        max(0, len(chunk_relations) - len(window_relations)),
+        len(chunk_relations),
+        projected_count,
+        pending_count,
+        failed_count,
+        len(affected_pairs),
+    )

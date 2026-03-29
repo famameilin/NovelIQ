@@ -26,10 +26,9 @@ from loguru import logger
 """
 
 if TYPE_CHECKING:
-    import networkx as nx
-
     from src.models.local.embedding import EmbeddingClient
-    from src.storage.repositories import EntityRepository
+    from src.storage.repositories import EntityRepository, GraphRepository
+
 
 
 @dataclass
@@ -44,88 +43,51 @@ class RAGResult:
 class Level1ExactMatch:
     def __init__(
         self,
-        entity_repo: EntityRepository,
+        graph_repo: GraphRepository | None = None,
+        entity_repo: EntityRepository | None = None,
         novel_id: str = "default",
         run_id: str | None = None,
     ):
+        self._graph_repo = graph_repo
         self._entity_repo = entity_repo
         self._novel_id = novel_id
         self._run_id = run_id
 
     def query(self, alias: str) -> str | None:
-        entity = self._entity_repo.fetch_entity_by_alias(
-            self._novel_id,
-            alias,
-            self._run_id,
-        )
-        if entity:
-            canonical = entity.get("canonical")
-            logger.debug(f"Level1 exact match: '{alias}' -> '{canonical}'")
-            return canonical
-        return None
+        if self._graph_repo is None or self._run_id is None:
+            return None
+        canonical = self._graph_repo.fetch_alias_map(self._run_id).get(alias)
+        if canonical:
+            logger.debug(f"Level1 exact match(graph): '{alias}' -> '{canonical}'")
+        return canonical
 
     def get_all_known_aliases(self) -> dict[str, str]:
-        alias_rows = self._entity_repo.fetch_all_aliases_with_canonical(
-            self._novel_id,
-            self._run_id,
-        )
-        alias_map = {}
-        for row in alias_rows:
-            canonical, alias = row
-            alias_map[canonical] = canonical
-            alias_map[alias] = canonical
-        return alias_map
+        if self._graph_repo is None or self._run_id is None:
+            return {}
+        return self._graph_repo.fetch_alias_map(self._run_id)
+
 
 
 class Level2GraphConstraint:
-    def __init__(self, G: nx.Graph | None = None):
-        self._graph = G
-
-    def set_graph(self, G: nx.Graph) -> None:
-        self._graph = G
+    def __init__(self, graph_repo: GraphRepository | None = None, run_id: str | None = None):
+        self._graph_repo = graph_repo
+        self._run_id = run_id
 
     def get_active_candidates(
         self,
         current_chunk: int,
         lookback: int = 10,
     ) -> list[str]:
-        if self._graph is None:
+        if self._graph_repo is None or self._run_id is None:
             return []
-
-        start_chunk = max(0, current_chunk - lookback)
-        candidates = []
-
-        for node, attrs in self._graph.nodes(data=True):
-            active_chunks = attrs.get("active_chunks", [])
-            last_seen = attrs.get("last_seen")
-
-            if last_seen and start_chunk <= last_seen <= current_chunk:
-                candidates.append(node)
-            elif active_chunks:
-                for chunk_id in active_chunks:
-                    if start_chunk <= chunk_id <= current_chunk:
-                        candidates.append(node)
-                        break
-
-        logger.debug(f"Level2 graph constraint: {len(candidates)} active candidates")
-        return candidates
-
-    def get_node_aliases(self, node_name: str) -> list[str]:
-        if self._graph is None or node_name not in self._graph.nodes:
-            return []
-        return self._graph.nodes[node_name].get("aliases", [])
+        rows = self._graph_repo.fetch_active_entities(current_chunk, lookback, self._run_id)
+        return [str(row["name"]) for row in rows]
 
     def get_all_known_aliases(self) -> dict[str, str]:
-        if self._graph is None:
+        if self._graph_repo is None or self._run_id is None:
             return {}
+        return self._graph_repo.fetch_alias_map(self._run_id)
 
-        alias_map = {}
-        for node, attrs in self._graph.nodes(data=True):
-            canonical = attrs.get("canonical_name", node)
-            alias_map[canonical] = canonical
-            for alias in attrs.get("aliases", []):
-                alias_map[alias] = canonical
-        return alias_map
 
 
 class Level3VectorEvidence:
@@ -213,13 +175,20 @@ class RAGRetriever:
         entity_repo: EntityRepository,
         novel_id: str = "default",
         run_id: str | None = None,
-        graph: nx.Graph | None = None,
+        graph_repo: GraphRepository | None = None,
         embedding_client: EmbeddingClient | None = None,
         similarity_threshold: float = 0.7,
         lookback_chunks: int = 10,
     ):
-        self._level1 = Level1ExactMatch(entity_repo, novel_id, run_id)
-        self._level2 = Level2GraphConstraint(graph)
+
+        self._level1 = Level1ExactMatch(
+            graph_repo=graph_repo,
+            entity_repo=entity_repo,
+            novel_id=novel_id,
+            run_id=run_id,
+        )
+        self._level2 = Level2GraphConstraint(graph_repo=graph_repo, run_id=run_id)
+
         self._level3 = Level3VectorEvidence(
             entity_repo,
             novel_id,
@@ -227,12 +196,12 @@ class RAGRetriever:
             embedding_client,
             similarity_threshold,
         )
+
         self._novel_id = novel_id
         self._run_id = run_id
         self._lookback_chunks = lookback_chunks
 
-    def set_graph(self, graph: nx.Graph) -> None:
-        self._level2.set_graph(graph)
+
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
         self._level3.set_embedding_client(client)

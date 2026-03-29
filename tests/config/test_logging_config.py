@@ -1,11 +1,12 @@
 import sys
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from loguru import logger
+
 from src.config.logging_config import LoggingConfig, setup_logging
 
 

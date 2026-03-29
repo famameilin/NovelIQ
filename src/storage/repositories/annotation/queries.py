@@ -103,6 +103,13 @@ def fetch_chunk_relations_full(session: Session, run_id: str) -> list[Any]:
             ChunkRelation.to_char,
             ChunkRelation.type,
             ChunkRelation.change,
+            ChunkRelation.evidence,
+            ChunkRelation.confidence,
+            ChunkRelation.source_model,
+            ChunkRelation.projection_status,
+            ChunkRelation.projected_at,
+            ChunkRelation.projection_error,
+            ChunkRelation.id,
         )
         .where(ChunkRelation.run_id == run_id)
         .order_by(ChunkRelation.chunk_id)
@@ -224,9 +231,49 @@ def fetch_full_relations(session: Session, run_id: str) -> list[Any]:
         ChunkRelation.to_char,
         ChunkRelation.type,
         ChunkRelation.change,
+        ChunkRelation.evidence,
+        ChunkRelation.confidence,
     ).where(ChunkRelation.run_id == run_id)
     result = session.execute(stmt)
     return list(result.fetchall())
+
+
+def fetch_chunk_relations_window(
+    session: Session,
+    run_id: str,
+    from_chunk: int | None = None,
+    to_chunk: int | None = None,
+    projection_status: str | None = None,
+) -> list[Any]:
+    stmt = select(ChunkRelation).where(ChunkRelation.run_id == run_id)
+    if from_chunk is not None:
+        stmt = stmt.where(ChunkRelation.chunk_id >= from_chunk)
+    if to_chunk is not None:
+        stmt = stmt.where(ChunkRelation.chunk_id <= to_chunk)
+    if projection_status is not None:
+        stmt = stmt.where(ChunkRelation.projection_status == projection_status)
+    stmt = stmt.order_by(ChunkRelation.chunk_id, ChunkRelation.id)
+    return list(session.execute(stmt).scalars().all())
+
+
+
+def fetch_pending_chunk_relations(
+    session: Session,
+    run_id: str,
+    to_chunk: int | None = None,
+    limit: int = 200,
+) -> list[ChunkRelation]:
+    """获取待重试投影的关系（pending）。"""
+    stmt = select(ChunkRelation).where(
+        ChunkRelation.run_id == run_id,
+        ChunkRelation.projection_status == "pending",
+    )
+    if to_chunk is not None:
+        stmt = stmt.where(ChunkRelation.chunk_id <= to_chunk)
+    stmt = stmt.order_by(ChunkRelation.chunk_id, ChunkRelation.id)
+    if limit > 0:
+        stmt = stmt.limit(limit)
+    return list(session.execute(stmt).scalars().all())
 
 
 def has_annotations(session: Session, run_id: str) -> bool:

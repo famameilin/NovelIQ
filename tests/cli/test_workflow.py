@@ -11,20 +11,13 @@ CLI workflow 测试
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """
-import sys
 import uuid
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
-
-sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-from src.models.cloud.client import NullCloudModelClient
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
-from src.models.local.schema import ChunkAnnotation, CharacterSnapshot
-from src.storage.repositories import ChunkRepository, StatsRepository, RunRepository
+from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
+from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
 
 
 def _create_mock_clients() -> tuple:
@@ -119,10 +112,10 @@ class TestStageCompletion:
         assert stats_repo.has_aggregated_data(run_id)
 
 
-from src.storage.repositories import AnnotationRepository
 
 
 class TestWorkflowHelpers:
+
     """测试工作流辅助函数"""
 
     def test_check_stage_completion_preprocess(self, db_session):

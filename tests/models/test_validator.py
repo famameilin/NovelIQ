@@ -16,19 +16,19 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.local.validator import (
-    generate_anonymous_name,
-    replace_invalid_names_with_anonymous,
-    validate_character_appearances_sync,
-    validate_chunk_annotation,
-    validate_names_in_sources,
-)
 from src.models.local.prompts import build_retry_prompt
 from src.models.local.schema import (
     CharacterAppearance,
     CharacterSnapshot,
     ChunkAnnotation,
     DialogueSnapshot,
+)
+from src.models.local.validator import (
+    generate_anonymous_name,
+    replace_invalid_names_with_anonymous,
+    validate_character_appearances_sync,
+    validate_chunk_annotation,
+    validate_names_in_sources,
 )
 
 

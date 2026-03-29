@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.models.local.disambiguation import ExtendedDisambigResult, build_evidence_profile
 from src.workflows.annotate_helpers import disambiguation as disambig_mod

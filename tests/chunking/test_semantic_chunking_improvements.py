@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import (
-    SemanticChunker,
     Chunk,
-    _is_onomatopoeia,
+    SemanticChunker,
     _detect_onomatopoeia,
+    _is_onomatopoeia,
 )
 
 

@@ -29,9 +29,9 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.chunking.chunker import Chunk
 from src.storage.repositories import ChunkRepository, RunRepository
 from src.workflows.topic import run_topic_model
-from src.chunking.chunker import Chunk
 
 
 class TestTopicModel:

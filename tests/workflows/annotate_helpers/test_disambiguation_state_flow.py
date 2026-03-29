@@ -37,14 +37,6 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         def apply_alias_merges(self, run_id, alias_merges):
             captured["merges"] = (run_id, dict(alias_merges))
 
-        def create_entity_alias_rows(self, run_id, alias_merges, novel_id, canonical_to_entity_id):
-            captured["alias_rows"] = (
-                run_id,
-                dict(alias_merges),
-                novel_id,
-                dict(canonical_to_entity_id),
-            )
-
     state = DisambiguationState(
         discovered_names=frozenset({"bai_zhi", "hou_fei_bai"}),
         known_canonical_names=frozenset({"bai_zhi", "hou_fei_bai"}),
@@ -71,12 +63,6 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
     assert new_state.known_canonical_names == state.known_canonical_names
     assert captured["ensure"] == ("run-1", {"bai_zhi", "hou_fei_bai"}, "novel-1", {})
     assert captured["merges"] == ("run-1", {})
-    assert captured["alias_rows"] == (
-        "run-1",
-        {},
-        "novel-1",
-        {"bai_zhi": 1, "hou_fei_bai": 2},
-    )
     process_mock.assert_called_once()
 
 

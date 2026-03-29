@@ -8,20 +8,20 @@
 - 2026-03-19 TraeAI 初始创建
 """
 
-import pytest
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
+import pytest
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from src.api.middleware import (
-    convert_task_id_to_run_id,
-    convert_run_id_to_task_id,
     convert_response_data,
-    task_id_not_found_handler,
+    convert_run_id_to_task_id,
+    convert_task_id_to_run_id,
     id_mapping_error_handler,
+    task_id_not_found_handler,
 )
-from src.storage.id_mapping import TaskIDNotFoundError, IDMappingError
+from src.storage.id_mapping import IDMappingError, TaskIDNotFoundError
 
 
 class TestConvertTaskIDToRunID:

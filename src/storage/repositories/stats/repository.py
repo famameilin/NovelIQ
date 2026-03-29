@@ -21,7 +21,7 @@ from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
 from src.storage.repositories.base import BaseRepository
 
 # 导入各模块函数
-from . import chunks, graphs, metrics, runs, summaries
+from . import chunks, metrics, runs, summaries
 
 
 class StatsRepository(BaseRepository[dict[str, Any]]):
@@ -39,7 +39,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         - runs: 运行状态和完成度检查
         - chunks: 情绪曲线、节奏曲线、文化数据
         - summaries: 分块摘要、角色出场信息
-        - graphs: 图数据存储
+
     """
 
     # ==================== metrics 模块方法 ====================
@@ -185,12 +185,5 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """插入角色出场信息"""
         return summaries.insert_character_appearances(self.session, run_id, chunk_id, appearances)
 
-    # ==================== graphs 模块方法 ====================
 
-    def save_graph(self, run_id: str, graph_name: str, graph_json: str) -> None:
-        """保存图数据到数据库"""
-        return graphs.save_graph(self.session, run_id, graph_name, graph_json)
 
-    def load_graph(self, run_id: str, graph_name: str) -> str | None:
-        """从数据库加载图数据"""
-        return graphs.load_graph(self.session, run_id, graph_name)
