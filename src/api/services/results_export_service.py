@@ -32,6 +32,7 @@ from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
+    DiagnosisRepository,
     EntityRepository,
     StatsRepository,
 )
@@ -144,12 +145,12 @@ def load_aggregate_bundle(
     entity_repo: EntityRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
-) -> tuple[list, list, Any, list, Any, dict[str, Any]]:
+) -> tuple[list, list, Any, list, Any, dict[str, Any], dict[str, Any]]:
     """
     加载聚合统计数据
 
     Returns:
-        (character_relations, hierarchical_relations, global_stats, chunk_cultures, token_usage_stats, aggregate_metrics)
+        (character_relations, hierarchical_relations, global_stats, chunk_cultures, token_usage_stats, aggregate_metrics, graph_summary)
     """
     character_relations = _fetch_character_relations(
         run_id,
@@ -178,8 +179,17 @@ def load_aggregate_bundle(
     }
 
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
+    graph_summary = DiagnosisRepository(stats_repo.session).fetch_graph_summary(run_id)
 
-    return character_relations, hierarchical_relations, global_stats, chunk_cultures, token_usage_stats, aggregate_metrics
+    return (
+        character_relations,
+        hierarchical_relations,
+        global_stats,
+        chunk_cultures,
+        token_usage_stats,
+        aggregate_metrics,
+        graph_summary,
+    )
 
 
 def build_export_payload(
@@ -199,6 +209,7 @@ def build_export_payload(
     chunk_cultures: list,
     aggregate_metrics: dict[str, Any],
     token_usage_stats: Any,
+    graph_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     构建导出 payload
@@ -223,6 +234,8 @@ def build_export_payload(
         "chunk_cultures": [c.model_dump(exclude_none=True) for c in chunk_cultures],
         "aggregate_metrics": aggregate_metrics,
         "token_usage_stats": token_usage_stats.model_dump(exclude_none=True),
+        "graph_summary": graph_summary or {},
+        "graph_quality_report": (graph_summary or {}).get("quality", {}),
     }
 
 
@@ -265,7 +278,15 @@ def fetch_all_results_data(
     )
     missing_fields.extend(chunk_missing)
 
-    character_relations, hierarchical_relations, global_stats, chunk_cultures, token_usage_stats, aggregate_metrics = load_aggregate_bundle(
+    (
+        character_relations,
+        hierarchical_relations,
+        global_stats,
+        chunk_cultures,
+        token_usage_stats,
+        aggregate_metrics,
+        graph_summary,
+    ) = load_aggregate_bundle(
         run_id, novel_id, stats_repo, annotation_repo, chunk_repo, entity_repo, alias_map, valid_character_names
     )
 
@@ -288,6 +309,7 @@ def fetch_all_results_data(
         chunk_cultures=chunk_cultures,
         aggregate_metrics=aggregate_metrics,
         token_usage_stats=token_usage_stats,
+        graph_summary=graph_summary,
     )
 
     return results_data, missing_fields, novel_name

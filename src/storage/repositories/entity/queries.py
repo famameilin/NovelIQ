@@ -119,47 +119,6 @@ def fetch_entity_by_canonical(
     }
 
 
-def fetch_entity_by_alias(
-    session: Session,
-    novel_id: str,
-    alias: str,
-    run_id: str | None = None,
-) -> dict[str, Any] | None:
-    """根据别名获取实体"""
-    conditions = [Entity.novel_id == novel_id, EntityAlias.alias == alias]
-    if run_id is not None:
-        conditions.append(Entity.run_id == run_id)
-        conditions.append(EntityAlias.run_id == run_id)
-
-    stmt = (
-        select(Entity, EntityAlias.alias_type, EntityAlias.confirm_count)
-        .join(EntityAlias, Entity.entity_id == EntityAlias.entity_id)
-        .where(and_(*conditions))
-        .order_by(EntityAlias.confirm_count.desc())
-        .limit(1)
-    )
-    result = session.execute(stmt)
-    row = result.fetchone()
-
-    if row is None:
-        return None
-
-    entity, alias_type, confirm_count = row
-    return {
-        "entity_id": entity.entity_id,
-        "novel_id": entity.novel_id,
-        "canonical": entity.canonical,
-        "entity_type": entity.entity_type,
-        "first_chunk": entity.first_chunk,
-        "last_chunk": entity.last_chunk,
-        "description": entity.description,
-        "confidence": entity.confidence,
-        "alias_type": alias_type,
-        "confirm_count": confirm_count,
-        "run_id": entity.run_id,
-    }
-
-
 def fetch_all_aliases_for_entity(
     session: Session,
     entity_id: int,
@@ -203,24 +162,6 @@ def increment_alias_confirm(session: Session, entity_id: int, alias: str) -> Non
     )
     session.execute(stmt)
     session.commit()
-
-
-def fetch_all_aliases_with_canonical(
-    session: Session, novel_id: str, run_id: str | None = None
-) -> list[tuple[str, str]]:
-    """获取所有别名及其规范名映射"""
-    conditions = [Entity.novel_id == novel_id]
-    if run_id is not None:
-        conditions.append(Entity.run_id == run_id)
-        conditions.append(EntityAlias.run_id == run_id)
-
-    stmt = (
-        select(Entity.canonical, EntityAlias.alias)
-        .join(EntityAlias, Entity.entity_id == EntityAlias.entity_id)
-        .where(and_(*conditions))
-    )
-    result = session.execute(stmt)
-    return [tuple(row) for row in result.fetchall()]
 
 
 def fetch_entities_with_embeddings(
@@ -272,9 +213,21 @@ def get_entity_id_by_name(
     if entity is not None:
         return entity["entity_id"]
 
-    entity = fetch_entity_by_alias(session, novel_id, name, run_id)
-    if entity is not None:
-        return entity["entity_id"]
+    alias_conditions = [Entity.novel_id == novel_id, EntityAlias.alias == name]
+    if run_id is not None:
+        alias_conditions.append(Entity.run_id == run_id)
+        alias_conditions.append(EntityAlias.run_id == run_id)
+
+    alias_stmt = (
+        select(Entity.entity_id)
+        .join(EntityAlias, Entity.entity_id == EntityAlias.entity_id)
+        .where(and_(*alias_conditions))
+        .order_by(EntityAlias.confirm_count.desc())
+        .limit(1)
+    )
+    alias_row = session.execute(alias_stmt).fetchone()
+    if alias_row is not None:
+        return alias_row[0]
 
     return None
 

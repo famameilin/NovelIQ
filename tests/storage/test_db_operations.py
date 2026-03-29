@@ -22,8 +22,8 @@
 修改内容: 重命名测试文件，移除 sqlite 相关命名
 """
 import sys
-from pathlib import Path
 import uuid
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -35,11 +35,11 @@ from src.chunking.chunker import chunk_text
 from src.models.cloud.schema import CloudAnalysis
 from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
 from src.storage.repositories import (
-    ChunkRepository,
     AnnotationRepository,
-    StatsRepository,
-    RunRepository,
+    ChunkRepository,
     ChunkStyleData,
+    RunRepository,
+    StatsRepository,
 )
 
 
@@ -72,9 +72,8 @@ def test_create_and_insert(db_session, mock_embedding) -> None:
     chunk_repo = ChunkRepository(db_session)
     ann_repo = AnnotationRepository(db_session)
 
-    stats_repo = StatsRepository(db_session)
-
     chunk_repo.insert_chunks(run_id, chunks)
+
     ann_repo.insert_chunk_annotation(
         run_id,
         chunks[0].index,

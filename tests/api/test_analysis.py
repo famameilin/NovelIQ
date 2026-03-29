@@ -1,6 +1,7 @@
-from fastapi.testclient import TestClient
 import tempfile
 from unittest.mock import MagicMock, patch
+
+from fastapi.testclient import TestClient
 
 from src.api.main import app
 from src.api.routes import analysis as analysis_mod

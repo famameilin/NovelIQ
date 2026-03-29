@@ -93,6 +93,7 @@ def run_annotate(
         _process_chunks_phase,
         _run_disambiguation_phase,
     )
+    from src.workflows.annotate_helpers.graph_projection import project_graph_tables
 
     start_time = time.time()
 
@@ -132,6 +133,17 @@ def run_annotate(
     )
 
     _run_disambiguation_phase(session, state, phase_result, novel_id, use_rag, run_id=run_id)
+
+    # 最终消歧可能改变别名归一化规则，强制重建 graph_* 以避免旧投影残留。
+    if all_chunks:
+        final_chunk_id = all_chunks[-1][0]
+        project_graph_tables(
+            run_id,
+            from_chunk=0,
+            to_chunk=final_chunk_id,
+            session=session,
+            rebuild=True,
+        )
 
     elapsed = time.time() - start_time
     logger.info(f"annotate completed success={success_count} time={elapsed:.2f}s")

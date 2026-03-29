@@ -75,15 +75,6 @@ class EntityRepository(BaseRepository["EntityRepository"]):
         """根据规范名获取实体"""
         return queries.fetch_entity_by_canonical(self.session, novel_id, canonical, run_id)
 
-    def fetch_entity_by_alias(
-        self,
-        novel_id: str,
-        alias: str,
-        run_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        """根据别名获取实体"""
-        return queries.fetch_entity_by_alias(self.session, novel_id, alias, run_id)
-
     def fetch_all_aliases_for_entity(
         self,
         entity_id: int,
@@ -99,10 +90,6 @@ class EntityRepository(BaseRepository["EntityRepository"]):
     def increment_alias_confirm(self, entity_id: int, alias: str) -> None:
         """增加别名确认计数"""
         return queries.increment_alias_confirm(self.session, entity_id, alias)
-
-    def fetch_all_aliases_with_canonical(self, novel_id: str, run_id: str | None = None) -> list[tuple[str, str]]:
-        """获取所有别名及其规范名映射"""
-        return queries.fetch_all_aliases_with_canonical(self.session, novel_id, run_id)
 
     def fetch_entities_with_embeddings(
         self, novel_id: str, run_id: str | None = None
