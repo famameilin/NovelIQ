@@ -27,8 +27,6 @@ def _build_annotation_messages_v2(
     text: str,
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
-    prev_chunk_text: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -46,6 +44,11 @@ def _build_annotation_messages_v2(
     修改者: TraeAI
     任务: refactor-phase1-identity-extraction
     修改内容: 移除 character_appearances 参数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     messages = [{"role": "system", "content": SYSTEM_PROMPT_V2}]
 
@@ -75,9 +78,7 @@ def _build_annotation_messages_v2(
         chapter_id=chapter_id or 0,
         alias_map=alias_map_str,
         active_entities=active_entities_str,
-        prev_chunk_text=prev_chunk_text or "（无前文）",
         chunk_text=text,
-        next_chunk_text=next_chunk_text or "（无后文）",
     )
 
     user_content += "\n\n" + FORMAT_REQUIREMENTS_V2

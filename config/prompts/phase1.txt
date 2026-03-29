@@ -51,18 +51,11 @@
 - 如果没有映射，使用原文中最稳定、最常用的称呼
 - role_function：【主体|客体|发送者|接收者|帮助者|反对者】
 - action：一个动词短语，本块中最重要的一个行为
-- emotion_score：五档枚举，见下方说明
+- emotion_score：同 emotional_valence 五档
 
 【去重规则】同一人物只记录一条，若有多行为：
 1. 选择最能体现角色功能的行为
 2. 或用顿号合并多个行为，如"被白芷称为哥哥、决定拜师"
-
-### emotion_score 五档说明
-- strong_positive：明显的喜悦/兴奋/得意/感激
-- mild_positive：轻微的满足/平静的高兴/淡淡的期待
-- neutral：情绪平稳或情绪混杂无主导
-- mild_negative：轻微的不安/失落/担忧/疲惫
-- strong_negative：明显的愤怒/悲伤/恐惧/绝望
 
 ===USER_TEMPLATE===
 <全局背景>
@@ -79,17 +72,9 @@
 {active_entities}
 </活跃实体状态>
 
-<Previous_Chunk>
-{prev_chunk_text}
-</Previous_Chunk>
-
 <Current_Chunk>
 {chunk_text}
 </Current_Chunk>
-
-<Next_Chunk>
-{next_chunk_text}
-</Next_Chunk>
 
 ===FEW_SHOT===
 ---EXAMPLE_1_USER---
@@ -107,20 +92,12 @@
 []
 </活跃实体状态>
 
-<Previous_Chunk>
-（无前文）
-</Previous_Chunk>
-
 <Current_Chunk>
 赵云飞冷冷地看着跪在地上的李明，眼中没有丝毫怜悯。「你以为你是谁？竟敢染指我赵家的禁地。」
 李明咬紧牙关，双手撑地，缓缓抬起头：「赵长老，我只是路过，并非有意冒犯。」
 「路过？」赵云飞嗤笑一声，右手微抬，一道灵力压下，「在这秘境之中，我的话就是规矩。」
 李明感受到那股令人窒息的压力，心中暗自盘算——此时不是正面冲突的时机。
 </Current_Chunk>
-
-<Next_Chunk>
-（无后文）
-</Next_Chunk>
 
 ---EXAMPLE_1_ASSISTANT---
 {
@@ -149,17 +126,9 @@
 []
 </活跃实体状态>
 
-<Previous_Chunk>
-（无前文）
-</Previous_Chunk>
-
 <Current_Chunk>
 伯安召集了侯飞白和褚大山，三人蹲在假山后面商量着什么。「这次我们一定要成功！」侯飞白兴奋地说。褚大山点点头：「我都听你的，伯安。」三人从小一起长大，情同手足。
 </Current_Chunk>
-
-<Next_Chunk>
-（无后文）
-</Next_Chunk>
 
 ---EXAMPLE_2_ASSISTANT---
 {
@@ -212,20 +181,10 @@
   ]
 }
 
-【实体分类处理规则】
-- 群体名称（如"赤甲卫"、"禁军"）记录到 group_appearances
-- 组织名称（如"贺家"、"玄天道宗"）记录到 organization_appearances
-- 地点名称（如"产房"、"厅堂"、"贺府"、"院子"）记录到 location_appearances
-
 【地点类型识别规则】
 - room（房间类）：产房、卧房、厅堂、厢房、书房、厨房、灵兽棚等
 - building（建筑类）：府邸、宅院、宫殿、庙宇、楼阁、贺府等
 - area（区域类）：院子、花园、街道、城门、广场等
-
-【人名格式规则】
-1. characters[].name  必须使用人物当前已知的常用名
-2. 如果提供了【人物别名对照表】，必须使用对照表箭头右侧的常用名
-3. 如人物在文本中无任何称呼，使用「匿名_C{chunk_id}_{序号}」作为占位名
 
 【严格限制】
 - characters[].name 必须是文本中逐字出现的词语
