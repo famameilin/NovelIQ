@@ -363,6 +363,13 @@ def _fetch_chunk_annotations(
     if hasattr(annotation_repo, "session"):
         graph_repo = GraphRepository(annotation_repo.session)
         relation_events_raw = graph_repo.fetch_relation_events(run_id)
+        if not relation_events_raw:
+            pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+            if pending_relations:
+                raise RuntimeError(
+                    "graph relation events are empty while pending relations still exist; "
+                    "run graph projection before exporting results."
+                )
 
     characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
     for row in characters_raw:
@@ -460,6 +467,13 @@ def _fetch_character_relations(
 
     graph_repo = GraphRepository(annotation_repo.session)
     graph_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
+    if not graph_relations:
+        pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+        if pending_relations:
+            raise RuntimeError(
+                "graph current relations are empty while pending relations still exist; "
+                "run graph projection before reading character relations."
+            )
 
     result: list[CharacterRelation] = []
     for row in graph_relations:

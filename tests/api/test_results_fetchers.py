@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
@@ -13,6 +15,10 @@ from src.api.routes.results_fetchers import (
 class _DummyAnnotationRepo2:
     def __init__(self):
         self.session = object()
+        self._pending = []
+
+    def fetch_pending_chunk_relations(self, run_id, to_chunk=None, limit=200):
+        return self._pending
 
 
 
@@ -241,3 +247,31 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
     assert result[0].chunk_id == 15
     assert result[0].change == "汇总"
 
+
+def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
+    annotation_repo = _DummyAnnotationRepo2()
+    annotation_repo._pending = [object()]
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = []
+
+    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
+        with pytest.raises(RuntimeError, match="pending relations"):
+            _fetch_character_relations(
+                run_id="run-1",
+                annotation_repo=annotation_repo,
+            )
+
+
+def test_fetch_character_relations_allows_empty_graph_when_no_pending():
+    annotation_repo = _DummyAnnotationRepo2()
+    annotation_repo._pending = []
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = []
+
+    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+        )
+
+    assert result == []
