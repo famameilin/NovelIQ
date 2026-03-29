@@ -380,21 +380,15 @@ def _run_final_disambiguation_with_state(
         )
     
     ann_repo = AnnotationRepository(conn)
-    canonical_to_entity_id = ann_repo.ensure_canonical_entities(
+    ann_repo.ensure_canonical_entities(
         run_id,
         new_state.known_canonical_names,
         novel_id=novel_id,
         entity_types=result.entity_types if result else None,
     )
     ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
-    ann_repo.create_entity_alias_rows(
-        run_id,
-        new_state.get_alias_merges_dict(),
-        novel_id=novel_id,
-        canonical_to_entity_id=canonical_to_entity_id,
-    )
     logger.info(
-        "Stateful final disambiguation persisted: {} canonicals, {} merges",
+        "Stateful final disambiguation persisted: {} canonicals, {} merges (legacy aliases will be mirrored from graph tables)",
         len(new_state.known_canonical_names),
         len(new_state.alias_merges),
     )
