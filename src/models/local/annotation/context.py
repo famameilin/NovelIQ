@@ -44,6 +44,11 @@ class AnnotationContext:
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 character_appearances 字段
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: 移除 prev_chunk_text 和 next_chunk_text 字段（Phase1 不再需要前后 chunk）
     """
 
     text: str
@@ -51,11 +56,9 @@ class AnnotationContext:
     alias_map: dict[str, str] | None = None
     chunk_id: int | None = None
     global_context: str | None = None
-    prev_chunk_text: str | None = None
     active_entities: str | None = None
     rag_evidence: str | None = None
     known_aliases: str | None = None
-    next_chunk_text: str | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None
