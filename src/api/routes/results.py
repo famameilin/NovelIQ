@@ -37,6 +37,7 @@ from src.api.routes.results_fetchers import (
     _fetch_characters,
     _fetch_diagnosis,
     _fetch_emotion_curve,
+    _fetch_graph_snapshot,
     _fetch_rhythm_curve,
     _fetch_topics,
 )
@@ -337,6 +338,22 @@ async def get_diagnosis(
         annotation_repo = AnnotationRepository(conn)
         alias_map = annotation_repo.fetch_alias_map(run_id)
         return _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    finally:
+        conn.close()
+
+
+@router.get("/{novel_id}/graph")
+async def get_graph(
+    novel_id: str,
+    task_id: str = Query(..., description="分析任务ID"),
+    novel_service: NovelService = Depends(get_novel_service),
+):
+    conn, run_id = _get_session_and_run_id(task_id, novel_service)
+    if conn is None or run_id is None:
+        return {}
+    try:
+        annotation_repo = AnnotationRepository(conn)
+        return _fetch_graph_snapshot(run_id, annotation_repo)
     finally:
         conn.close()
 

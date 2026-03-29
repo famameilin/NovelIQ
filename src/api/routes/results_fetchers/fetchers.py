@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from sqlalchemy import select
 
 from src.api.models.responses import (
     CharacterRelation,
@@ -44,6 +45,7 @@ from src.api.routes.results_fetchers.parsers import _parse_int_field, _parse_jso
 from src.api.routes.results_fetchers.scoring import _calculate_protagonist_scores, _normalize_arc_scores
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
+from src.storage.models import GraphEntity
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -702,3 +704,61 @@ def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository)
     repo = DiagnosisRepository(annotation_repo.session)
     _, alias_merges = repo.fetch_character_disambig_data(run_id)
     return alias_merges
+
+
+def _fetch_graph_snapshot(
+    run_id: str,
+    annotation_repo: AnnotationRepository,
+) -> dict[str, Any]:
+    """获取知识图谱快照（nodes/edges/events/summary）。"""
+    if not hasattr(annotation_repo, "session"):
+        return {
+            "nodes": [],
+            "edges": [],
+            "events": [],
+            "summary": {},
+            "quality": {},
+        }
+
+    graph_repo = GraphRepository(annotation_repo.session)
+    pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+    if pending_relations:
+        raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
+
+    node_rows = annotation_repo.session.execute(
+        select(
+            GraphEntity.entity_id,
+            GraphEntity.canonical_name,
+            GraphEntity.entity_type,
+            GraphEntity.first_seen_chunk,
+            GraphEntity.last_seen_chunk,
+            GraphEntity.primary_role_function,
+            GraphEntity.last_emotion_score,
+            GraphEntity.status,
+        ).where(GraphEntity.run_id == run_id)
+    ).fetchall()
+    nodes = [
+        {
+            "entity_id": row[0],
+            "name": row[1],
+            "entity_type": row[2],
+            "first_seen_chunk": row[3],
+            "last_seen_chunk": row[4],
+            "role": row[5],
+            "emotion_score": row[6],
+            "status": row[7],
+        }
+        for row in node_rows
+    ]
+
+    edges = graph_repo.fetch_current_relations(run_id, active_only=False)
+    events = graph_repo.fetch_relation_events(run_id, limit=200)
+    summary = DiagnosisRepository(annotation_repo.session).fetch_graph_summary(run_id)
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "events": events,
+        "summary": summary,
+        "quality": summary.get("quality", {}),
+    }
