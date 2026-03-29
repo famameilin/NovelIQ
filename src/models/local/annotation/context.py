@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-    from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
+    from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
 
 
 @dataclass
@@ -178,3 +178,4 @@ class MultiPhaseAnnotationResult:
     dialogue_tones: dict[int, str] | None = None
     dialogue_evidences: dict[int, str] | None = None
     dialogue_identity_clues: dict[int, str | None] | None = None
+    relations: list[RelationChangeSnapshot] | None = None

@@ -5,19 +5,19 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.character_metrics import (
-    compute_character_degree_centrality,
-    compute_relation_network_density,
-    compute_protagonist_betweenness,
-    compute_character_closeness_centrality,
-    compute_character_eigenvector_centrality,
-    compute_clustering_coefficient,
-    compute_average_clustering,
-    compute_number_of_connected_components,
-    compute_largest_component_size,
-    compute_character_function_coverage,
     compute_antagonist_strength_gap,
-    compute_relation_change_frequency,
+    compute_average_clustering,
+    compute_character_closeness_centrality,
+    compute_character_degree_centrality,
+    compute_character_eigenvector_centrality,
+    compute_character_function_coverage,
+    compute_clustering_coefficient,
     compute_greimas_coverage,
+    compute_largest_component_size,
+    compute_number_of_connected_components,
+    compute_protagonist_betweenness,
+    compute_relation_change_frequency,
+    compute_relation_network_density,
 )
 
 

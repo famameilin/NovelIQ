@@ -6,9 +6,9 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.disambiguation import ExtendedDisambigResult, build_evidence_profile
 from src.workflows.annotate_helpers.disambiguation import (
-    validate_confidence_with_evidence,
     DISAMBIG_CONFIDENCE_HIGH,
     DISAMBIG_CONFIDENCE_MEDIUM,
+    validate_confidence_with_evidence,
 )
 
 

@@ -40,6 +40,7 @@ from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
 from .phase2 import annotate_chunk_phase2
 from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_text
+from .phase4 import annotate_chunk_phase4
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
@@ -71,6 +72,11 @@ class _Phase3Result:
     dialogue_tones: dict[int, str] | None = None
     dialogue_evidences: dict[int, str] | None = None
     dialogue_identity_clues: dict[int, str | None] | None = None
+
+
+@dataclass
+class _Phase4Result:
+    relations: list | None = None
 
 
 def _run_phase1(
@@ -245,6 +251,7 @@ def _build_multi_phase_result(
     annotation: ChunkAnnotation,
     foreshadowing: ForeshadowingResult | None,
     phase3_result: _Phase3Result,
+    phase4_result: _Phase4Result,
 ) -> MultiPhaseAnnotationResult:
     """构建多阶段标注结果
 
@@ -271,6 +278,7 @@ def _build_multi_phase_result(
         dialogue_tones=phase3_result.dialogue_tones,
         dialogue_evidences=phase3_result.dialogue_evidences,
         dialogue_identity_clues=phase3_result.dialogue_identity_clues,
+        relations=phase4_result.relations,
     )
 
 
@@ -458,6 +466,13 @@ def annotate_chunk_parallel(
             run_id=run_id,
             known_characters=known_characters,
         )
+        phase4_result = _Phase4Result(
+            relations=annotate_chunk_phase4(
+                text=text,
+                known_characters=known_characters,
+                source_model=getattr(getattr(client, "_config", None), "model", None),
+            )
+        )
 
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
@@ -471,6 +486,7 @@ def annotate_chunk_parallel(
         annotation=annotation,
         foreshadowing=normalized_foreshadowing,
         phase3_result=phase3_result,
+        phase4_result=phase4_result,
     )
 
 
@@ -565,6 +581,13 @@ def annotate_chunk_serial(
         run_id=run_id,
         known_characters=known_characters,
     )
+    phase4_result = _Phase4Result(
+        relations=annotate_chunk_phase4(
+            text=text,
+            known_characters=known_characters,
+            source_model=getattr(getattr(client, "_config", None), "model", None),
+        )
+    )
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)
 
@@ -572,4 +595,5 @@ def annotate_chunk_serial(
         annotation=annotation,
         foreshadowing=normalized_foreshadowing,
         phase3_result=phase3_result,
+        phase4_result=phase4_result,
     )

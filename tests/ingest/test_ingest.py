@@ -1,8 +1,8 @@
 import json
 import sys
 import tempfile
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
