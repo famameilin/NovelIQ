@@ -160,6 +160,11 @@ class ChunkDialogue(Base):
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 添加 content 和 evidence 字段，便于追溯未知说话者的上下文
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 添加 identity_clue 字段，存储 Phase 3 提取的身份线索
     """
 
     __tablename__ = "chunk_dialogues"
@@ -171,6 +176,7 @@ class ChunkDialogue(Base):
     tone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    identity_clue: Mapped[str | None] = mapped_column(Text, nullable=True)
     run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )

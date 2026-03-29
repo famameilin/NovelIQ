@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: Chunk 双次调用分析拆分
 说明: 测试双次调用相关功能
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: refactor-phase1-identity-extraction
+修改内容: 移除 relations 和 character_appearances 相关测试
 """
 
 import sys
@@ -174,60 +179,6 @@ class TestForeshadowingValidation(unittest.TestCase):
         )
         chunk_text = "他捡起一块玉佩，玉佩背面刻着一个归字，随手塞进袖中。"
         self.assertTrue(validate_foreshadowing_result(result, chunk_text))
-
-
-class TestRelationFiltering(unittest.TestCase):
-    """测试 relations 过滤逻辑。"""
-
-    def test_filter_no_change_relations(self) -> None:
-        data = {
-            "emotional_valence": "neutral",
-            "relations": [
-                {"from": "张三", "to": "李四", "type": "盟友", "change": "无变化"},
-                {"from": "王五", "to": "赵六", "type": "敌对", "change": "强化"},
-            ],
-        }
-        annotation = build_annotation(data)
-        self.assertEqual(len(annotation.relations), 1)
-        self.assertEqual(annotation.relations[0].from_name, "王五")
-
-    def test_keep_all_change_relations(self) -> None:
-        data = {
-            "emotional_valence": "neutral",
-            "relations": [
-                {"from": "张三", "to": "李四", "type": "盟友", "change": "强化"},
-                {"from": "王五", "to": "赵六", "type": "敌对", "change": "断裂"},
-            ],
-        }
-        annotation = build_annotation(data)
-        self.assertEqual(len(annotation.relations), 2)
-
-
-class TestCharacterAppearanceFiltering(unittest.TestCase):
-    """测试 character_appearances 过滤逻辑。"""
-
-    def test_filter_none_clue_type(self) -> None:
-        data = {
-            "emotional_valence": "neutral",
-            "character_appearances": [
-                {"raw_name": "三哥", "identity_clue": "张三的别名", "clue_type": "none"},
-                {"raw_name": "四爷", "identity_clue": "李四的别名", "clue_type": "alias_revealed"},
-            ],
-        }
-        annotation = build_annotation(data)
-        self.assertEqual(len(annotation.character_appearances), 1)
-        self.assertEqual(annotation.character_appearances[0].raw_name, "四爷")
-
-    def test_keep_all_valid_clue_types(self) -> None:
-        data = {
-            "emotional_valence": "neutral",
-            "character_appearances": [
-                {"raw_name": "三哥", "identity_clue": "张三的别名", "clue_type": "alias_revealed"},
-                {"raw_name": "四爷", "identity_clue": "李四的别名", "clue_type": "named_by_other"},
-            ],
-        }
-        annotation = build_annotation(data)
-        self.assertEqual(len(annotation.character_appearances), 2)
 
 
 if __name__ == "__main__":

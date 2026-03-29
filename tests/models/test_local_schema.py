@@ -1,3 +1,15 @@
+"""
+测试本地数据模型
+
+创建时间: 2025-03-11
+创建者: TraeAI
+任务: 测试数据模型
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: refactor-phase1-identity-extraction
+修改内容: 移除 relations 字段相关测试
+"""
 import sys
 from pathlib import Path
 import unittest
@@ -8,7 +20,6 @@ from src.models.local.schema import (
     CharacterSnapshot,
     ChunkAnnotation,
     DialogueSnapshot,
-    RelationChangeSnapshot,
 )
 
 
@@ -31,14 +42,6 @@ class TestLocalSchema(unittest.TestCase):
                     emotion_score="neutral",
                 )
             ],
-            relations=[
-                RelationChangeSnapshot(
-                    from_name="张三",
-                    to_name="李四",
-                    type="盟友",
-                    change="新建",
-                )
-            ],
             dialogues=[
                 DialogueSnapshot(
                     speaker="张三",
@@ -49,7 +52,6 @@ class TestLocalSchema(unittest.TestCase):
         self.assertIn("emotional_valence", payload)
         self.assertIn("event_type", payload)
         self.assertIn("characters", payload)
-        self.assertIn("relations", payload)
         self.assertIn("dialogues", payload)
 
     def test_emotion_score_enum(self) -> None:

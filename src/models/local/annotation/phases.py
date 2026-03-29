@@ -4,10 +4,10 @@
 任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: Phase1/Phase2标注逻辑
 
-修改时间: 2026-03-21
+修改时间: 2026-03-29
 修改者: TraeAI
-任务: fix-validate-names-from-character-appearances
-修改内容: build_validation_sources 增加 character_appearances 参数
+任务: refactor-phase1-identity-extraction
+修改内容: 移除 character_appearances 参数
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ def build_phase1_messages(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    character_appearances: list[dict] | None = None,
 ) -> list[dict]:
     """
     构建Phase1消息
@@ -38,6 +37,11 @@ def build_phase1_messages(
     创建时间: 2026-03-18
     创建者: TraeAI
     任务: code-quality-refactor - Task 8 拆分annotation_client
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: refactor-phase1-identity-extraction
+    修改内容: 移除 character_appearances 参数
     """
     return _build_annotation_messages_v2(
         text=text,
@@ -50,7 +54,6 @@ def build_phase1_messages(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
-        character_appearances=character_appearances,
     )
 
 
@@ -91,7 +94,6 @@ def build_validation_sources(
     active_entities: str | None = None,
     alias_map: dict[str, str] | None = None,
     next_chunk_text: str | None = None,
-    character_appearances: list[dict] | None = None,
 ) -> dict:
     """
     构建验证来源字典
@@ -104,10 +106,10 @@ def build_validation_sources(
     修改者: TraeAI
     任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
 
-    修改时间: 2026-03-21
+    修改时间: 2026-03-29
     修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 增加 character_appearances 参数
+    任务: refactor-phase1-identity-extraction
+    修改内容: 移除 character_appearances 参数
     """
     return {
         "text": text,
@@ -115,5 +117,4 @@ def build_validation_sources(
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
         "next_chunk_text": next_chunk_text or "",
-        "character_appearances": character_appearances or [],
     }

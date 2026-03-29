@@ -35,10 +35,10 @@ class ChunkContext:
     修改者: TraeAI
     任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
 
-    修改时间: 2026-03-21
+    修改时间: 2026-03-29
     修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 增加 character_appearances 字段
+    任务: refactor-phase1-identity-extraction
+    修改内容: 移除 character_appearances 字段（已迁移至 Phase 3）
     """
 
     def __init__(
@@ -48,14 +48,12 @@ class ChunkContext:
         rag_evidence_str: str | None = None,
         known_aliases_str: str | None = None,
         next_chunk_text: str | None = None,
-        character_appearances: list[dict] | None = None,
     ) -> None:
         self.prev_chunk_text = prev_chunk_text
         self.active_entities_str = active_entities_str
         self.rag_evidence_str = rag_evidence_str
         self.known_aliases_str = known_aliases_str
         self.next_chunk_text = next_chunk_text
-        self.character_appearances = character_appearances or []
 
 
 def _init_rag_retriever(
@@ -119,17 +117,16 @@ def _prepare_chunk_context(
 ) -> ChunkContext:
     """准备chunk上下文
 
-    修改时间: 2026-03-21
+    修改时间: 2026-03-29
     修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 增加 character_appearances 数据获取
+    任务: refactor-phase1-identity-extraction
+    修改内容: 移除 character_appearances 数据获取（已迁移至 Phase 3）
     """
     from src.context import (
         format_entities_for_prompt,
         get_active_entities,
     )
     from src.storage.repositories import ChunkRepository, EntityRepository
-    from src.storage.repositories.annotation import characters
 
     context = ChunkContext()
 
@@ -151,10 +148,6 @@ def _prepare_chunk_context(
         active_entities = get_active_entities(entity_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
         if active_entities:
             context.active_entities_str = format_entities_for_prompt(active_entities)
-
-        context.character_appearances = characters.fetch_character_appearances_for_chunks(
-            conn, run_id, max(0, chunk_id - ANNOTATION_CONFIG.lookback), chunk_id
-        )
 
     if rag_retriever:
         context.known_aliases_str = rag_retriever.format_known_aliases_for_prompt()

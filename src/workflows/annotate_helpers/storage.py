@@ -18,6 +18,11 @@
 任务: refactor-phase3-to-annotation-layer
 修改内容: 将对话归属判断导入路径从 sentence.py 改为 models/local/annotation/phase3.py
 
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: remove-unused-annotation-fields
+修改内容: 移除 relations、character_appearances、chunk_summary 存储逻辑
+
 说明: 本模块包含结果存储相关的函数。
 """
 
@@ -42,6 +47,7 @@ def _store_annotation_results(
     dialogues: list[tuple[int, str]] | None = None,
     dialogue_tones: dict[int, str] | None = None,
     dialogue_evidences: dict[int, str] | None = None,
+    dialogue_identity_clues: dict[int, str | None] | None = None,
 ) -> None:
     """存储标注结果
 
@@ -83,12 +89,16 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: fix-unknown-speaker-context
     修改内容: 添加 dialogue_evidences 参数，传递对话判断依据
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: use-phase3-identity-clue-in-disambiguation
+    修改内容: 添加 dialogue_identity_clues 参数，传递身份线索
     """
     from src.models.local.schema import DialogueSnapshot
-    from src.storage.repositories import AnnotationRepository, StatsRepository
+    from src.storage.repositories import AnnotationRepository
 
     ann_repo = AnnotationRepository(conn)
-    stats_repo = StatsRepository(conn)
 
     if foreshadowing is not None:
         from src.models.local.schema import ChunkAnnotation
@@ -105,10 +115,7 @@ def _store_annotation_results(
                 if foreshadowing.has_foreshadowing else ""
             ),
             characters=annotation.characters,
-            relations=annotation.relations,
             dialogues=annotation.dialogues,
-            character_appearances=annotation.character_appearances,
-            chunk_summary=annotation.chunk_summary,
         )
 
     ann_repo.insert_chunk_annotation(run_id, chunk_id, annotation)
@@ -122,24 +129,24 @@ def _store_annotation_results(
             entity_repo = EntityRepository(conn)
             update_entity_registry(entity_repo, run_id, chunk_id, annotation.characters, alias_map=alias_map)
 
-    if annotation.relations:
-        ann_repo.insert_chunk_relations(run_id, chunk_id, annotation.relations)
-
     if dialogues:
         effective_dialogues = []
         for dialogue_idx, content in dialogues:
             speaker = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
             tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
             evidence = dialogue_evidences.get(dialogue_idx) if dialogue_evidences else None
-            effective_dialogues.append(DialogueSnapshot(speaker=speaker, content=content, tone=tone, evidence=evidence or ""))
+            identity_clue = dialogue_identity_clues.get(dialogue_idx) if dialogue_identity_clues else None
+            effective_dialogues.append(
+                DialogueSnapshot(
+                    speaker=speaker,
+                    content=content,
+                    tone=tone,
+                    evidence=evidence or "",
+                    identity_clue=identity_clue,
+                )
+            )
         lengths = [len(content) for _, content in dialogues]
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)
-
-    if annotation.chunk_summary:
-        stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
-
-    if annotation.character_appearances:
-        stats_repo.insert_character_appearances(run_id, chunk_id, annotation.character_appearances)
 
     if foreshadowing is not None:
         ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)

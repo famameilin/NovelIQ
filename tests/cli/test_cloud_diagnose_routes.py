@@ -24,6 +24,11 @@
 修改者: TraeAI
 任务: 简化 diagnosis payload
 修改内容: 移除 common_character_names 相关测试断言
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: refactor-phase1-identity-extraction
+修改内容: 移除 relations 字段相关测试
 """
 
 import json
@@ -145,20 +150,10 @@ class TestCloudDiagnose:
                         emotion_score="neutral",
                     )
                 ],
-                relations=[
-                    RelationChangeSnapshot(
-                        from_name="角色A",
-                        to_name="角色B",
-                        type="盟友",
-                        change="新建",
-                    )
-                ],
                 dialogues=[],
             )
             ann_repo.insert_chunk_annotation(self.run_id, i, annotation)
             ann_repo.insert_chunk_characters(self.run_id, i, annotation.characters)
-            if annotation.relations:
-                ann_repo.insert_chunk_relations(self.run_id, i, annotation.relations)
 
         self.db_session.commit()
 
@@ -240,13 +235,20 @@ class TestCloudDiagnose:
             assert len(chunk) == 3
 
     def test_fetch_relation_changes(self) -> None:
+        """
+        测试获取关系变更记录
+
+        修改时间: 2026-03-29
+        修改者: TraeAI
+        任务: refactor-phase1-identity-extraction
+        修改内容: relations 字段已移除，此测试应返回空列表
+        """
         self._create_full_data(5)
 
         diag_repo = DiagnosisRepository(self.db_session)
         relations = diag_repo.fetch_relation_changes(self.run_id)
-        assert len(relations) > 0
-        for rel in relations:
-            assert len(rel) == 5
+        # relations 字段已从 ChunkAnnotation 移除，所以返回空列表
+        assert len(relations) == 0
 
     def test_fetch_foreshadowing_chunks(self) -> None:
         self._create_full_data(5)
