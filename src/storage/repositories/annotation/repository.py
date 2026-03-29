@@ -188,24 +188,6 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         """获取指定运行的所有角色名及出现频次"""
         return characters.fetch_all_character_names(self.session, run_id, max_chunk_id=max_chunk_id)
 
-    def update_character_names(
-        self,
-        run_id: str,
-        alias_map: dict[str, str],
-        novel_id: str = "default",
-    ) -> None:
-        """更新角色名称（消歧）"""
-        return characters.update_character_names(
-            self.session,
-            run_id,
-            alias_map,
-            novel_id,
-        )
-
-    def apply_alias_corrections(self, run_id: str, alias_map: dict[str, str]) -> None:
-        """用最终消歧结果修正所有标注表里的错误名字"""
-        return characters.apply_alias_corrections(self.session, run_id, alias_map)
-
     def ensure_canonical_entities(
         self,
         run_id: str,
@@ -223,18 +205,3 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
 
     def apply_alias_merges(self, run_id: str, alias_merges: dict[str, str]) -> None:
         return characters.apply_alias_merges(self.session, run_id, alias_merges)
-
-    def create_entity_alias_rows(
-        self,
-        run_id: str,
-        alias_merges: dict[str, str],
-        novel_id: str,
-        canonical_to_entity_id: dict[str, int],
-    ) -> None:
-        return characters.create_entity_alias_rows(
-            self.session,
-            run_id,
-            alias_merges,
-            novel_id,
-            canonical_to_entity_id,
-        )

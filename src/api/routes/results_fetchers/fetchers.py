@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -48,6 +47,7 @@ from src.config.constants import EMOTION_SCORE_MAPPING
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
+    DiagnosisRepository,
     EntityRepository,
     GraphRepository,
     StatsRepository,
@@ -656,35 +656,9 @@ def _fetch_known_characters(run_id: str, annotation_repo: AnnotationRepository) 
     Raises:
         ValueError: checkpoint 数据格式无效
     """
-    from sqlalchemy import text
-
-    result = annotation_repo.session.execute(
-        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).fetchone()
-
-    if not result or not result[0]:
-        return []
-
-    raw_data = json.loads(result[0])
-
-    if not isinstance(raw_data, dict):
-        raise ValueError(
-            f"Invalid checkpoint data format for run_id={run_id}: "
-            f"expected dict, got {type(raw_data).__name__}"
-        )
-
-    if "known_canonical_names" not in raw_data:
-        raise ValueError(f"Missing 'known_canonical_names' in checkpoint data for run_id={run_id}")
-
-    known_canonical_names = raw_data.get("known_canonical_names")
-    if not isinstance(known_canonical_names, list):
-        raise ValueError(
-            f"Invalid 'known_canonical_names' format for run_id={run_id}: "
-            f"expected list, got {type(known_canonical_names).__name__}"
-        )
-
-    return known_canonical_names
+    repo = DiagnosisRepository(annotation_repo.session)
+    known_characters, _ = repo.fetch_character_disambig_data(run_id)
+    return known_characters
 
 
 def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository) -> dict[str, str]:
@@ -711,32 +685,6 @@ def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository)
     Raises:
         ValueError: checkpoint 数据格式无效
     """
-    from sqlalchemy import text
-
-    result = annotation_repo.session.execute(
-        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).fetchone()
-
-    if not result or not result[0]:
-        return {}
-
-    raw_data = json.loads(result[0])
-
-    if not isinstance(raw_data, dict):
-        raise ValueError(
-            f"Invalid checkpoint data format for run_id={run_id}: "
-            f"expected dict, got {type(raw_data).__name__}"
-        )
-
-    if "alias_merges" not in raw_data:
-        raise ValueError(f"Missing 'alias_merges' in checkpoint data for run_id={run_id}")
-
-    alias_merges_list = raw_data.get("alias_merges")
-    if not isinstance(alias_merges_list, list):
-        raise ValueError(
-            f"Invalid 'alias_merges' format for run_id={run_id}: "
-            f"expected list, got {type(alias_merges_list).__name__}"
-        )
-
-    return {alias: canonical for alias, canonical in alias_merges_list if alias != canonical}
+    repo = DiagnosisRepository(annotation_repo.session)
+    _, alias_merges = repo.fetch_character_disambig_data(run_id)
+    return alias_merges

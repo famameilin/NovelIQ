@@ -208,12 +208,16 @@ class TestCloudDiagnose:
         assert "last_chapter_summary" in payload
         assert "known_characters" in payload
         assert "alias_merges" in payload
+        assert "graph_summary" in payload
 
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
         assert len(payload["foreshadowing_list"]) > 0
         assert payload["known_characters"] == ["伯安"]
         assert payload["alias_merges"] == {"角色0": "伯安"}
+        assert "quality" in payload["graph_summary"]
+        assert "conflict_count" in payload["graph_summary"]["quality"]
+        assert "low_confidence_count" in payload["graph_summary"]["quality"]
 
     def test_fetch_pivot_blocks(self) -> None:
         self._create_full_data(5)
