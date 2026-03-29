@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 def save_chunk_locations(
-    session: "Session",
+    session: Session,
     chunk_id: int,
     locations: list[dict],
     run_id: str,
@@ -65,9 +65,9 @@ def save_chunk_locations(
     if not records:
         return 0
 
-    stmt = insert(ChunkLocation.__table__).values(records)
+    stmt = insert(ChunkLocation).values(records)
     stmt = stmt.on_conflict_do_nothing()
-    result = session.execute(stmt)
+    session.execute(stmt)
     session.flush()
 
     count = len(records)
@@ -76,7 +76,7 @@ def save_chunk_locations(
 
 
 def fetch_chunk_locations(
-    session: "Session",
+    session: Session,
     chunk_id: int,
     run_id: str,
 ) -> list[dict]:
@@ -106,7 +106,7 @@ def fetch_chunk_locations(
 
 
 def fetch_all_locations(
-    session: "Session",
+    session: Session,
     run_id: str,
 ) -> dict[str, int]:
     """
