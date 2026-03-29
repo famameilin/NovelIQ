@@ -29,6 +29,32 @@ if TYPE_CHECKING:
 DisambigStateSnapshot = dict[str, dict[str, str]]
 
 
+def _assert_checkpoint_schema(conn) -> None:
+    """确保 disambig_checkpoint 已包含图投影阶段所需列。"""
+    required_columns = {
+        "last_annotated_chunk",
+        "last_projected_chunk",
+        "projection_interval",
+    }
+    rows = conn.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'disambig_checkpoint'
+            """
+        )
+    ).fetchall()
+    existing_columns = {str(row[0]) for row in rows}
+    missing = sorted(required_columns - existing_columns)
+    if missing:
+        missing_text = ", ".join(missing)
+        raise RuntimeError(
+            "disambig_checkpoint schema is outdated, missing columns: "
+            f"{missing_text}. Run scripts/db/migrate_graph_projection_schema.py first."
+        )
+
+
 def _save_disambig_checkpoint_state(
     conn,
     run_id: str,
@@ -45,6 +71,7 @@ def _save_disambig_checkpoint_state(
     任务: disambiguation-state-three-layer
     说明: 保存完整的 DisambiguationState 到数据库
     """
+    _assert_checkpoint_schema(conn)
     state_dict = state.to_dict()
     params = {
         "run_id": run_id,
