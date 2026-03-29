@@ -48,6 +48,7 @@ def _store_annotation_results(
     dialogue_tones: dict[int, str] | None = None,
     dialogue_evidences: dict[int, str] | None = None,
     dialogue_identity_clues: dict[int, str | None] | None = None,
+    relations=None,
 ) -> None:
     """存储标注结果
 
@@ -147,6 +148,9 @@ def _store_annotation_results(
             )
         lengths = [len(content) for _, content in dialogues]
         ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)
+
+    if relations:
+        ann_repo.insert_chunk_relations(run_id, chunk_id, relations)
 
     if foreshadowing is not None:
         ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)

@@ -9,16 +9,15 @@
 """
 import sys
 from pathlib import Path
-from typing import Dict, List
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.cloud.client import CloudModelClient
-from src.models.disambiguation_types import NameCountCandidate
 from src.models.cloud.schema import CloudAnalysis
+from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.schema import (
-    ChunkAnnotation,
     CharacterSnapshot,
+    ChunkAnnotation,
     DialogueSnapshot,
     RelationChangeSnapshot,
 )
@@ -59,7 +58,7 @@ class FakeLocalModelClient:
         self,
         text: str,
         prev_summary: str | None = None,
-        alias_map: Dict[str, str] | None = None,
+        alias_map: dict[str, str] | None = None,
         chunk_id: int | None = None,
         global_context: str | None = None,
         prev_tail_text: str | None = None,
@@ -103,11 +102,11 @@ class FakeLocalModelClient:
 
     def disambiguate_characters(
         self,
-        candidates: List[NameCountCandidate],
-        context_sentences: Dict[str, str] | None = None,
-        existing_names: List[str] | None = None,
+        candidates: list[NameCountCandidate],
+        context_sentences: dict[str, str] | None = None,
+        existing_names: list[str] | None = None,
         rag_hint: str | None = None,
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         result = {}
         for item in candidates:
             name = item["name"]

@@ -19,7 +19,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -125,6 +127,12 @@ class ChunkRelation(Base):
     to_char: Mapped[str | None] = mapped_column(String(255), nullable=True)
     type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     change: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    projection_status: Mapped[str | None] = mapped_column(String(20), nullable=True, default="pending")
+    projected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    projection_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
@@ -137,6 +145,7 @@ class ChunkRelation(Base):
         ),
         Index("idx_chunk_relations_chunk_id", "chunk_id"),
         Index("idx_chunk_relations_run_id", "run_id"),
+        Index("idx_chunk_relations_projection_status", "run_id", "projection_status"),
     )
 
     def __repr__(self) -> str:

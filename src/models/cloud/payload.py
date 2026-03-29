@@ -143,6 +143,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     logger.info("[云端模型] 获取topic_words: count=%d", len(topic_words))
 
     known_characters, alias_merges = repo.fetch_character_disambig_data(effective_run_id)
+    graph_summary = repo.fetch_graph_summary(effective_run_id)
 
     payload = {
         "novel_id": novel_id,
@@ -156,10 +157,11 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "topic_words": topic_words,
         "known_characters": known_characters,
         "alias_merges": alias_merges,
+        "graph_summary": graph_summary,
     }
 
     logger.info(
-        "[云端模型] 诊断payload构建完成: pivot_blocks=%d pivot_moments=%d high_tension=%d relations=%d foreshadowing=%d topic_words=%d known_characters=%d alias_merges=%d",
+        "[云端模型] 诊断payload构建完成: pivot_blocks=%d pivot_moments=%d high_tension=%d relations=%d foreshadowing=%d topic_words=%d known_characters=%d alias_merges=%d graph_nodes=%d",
         len(pivot_blocks),
         len(pivot_moments),
         len(high_tension),
@@ -168,6 +170,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         len(topic_words),
         len(known_characters),
         len(alias_merges),
+        graph_summary.get("node_count", 0),
     )
 
     return payload

@@ -47,6 +47,7 @@ from src.models.local.annotation.phase3 import (
     compute_dialogue_lengths_with_llm,
     extract_dialogues_from_text,
 )
+from src.models.local.annotation.phase4 import annotate_chunk_phase4
 from src.models.local.annotation.phases import (
     build_phase1_messages,
     build_phase2_messages,
@@ -88,4 +89,5 @@ __all__ = [
     "attribute_dialogues_with_llm",
     "compute_dialogue_lengths_with_llm",
     "extract_dialogues_from_text",
+    "annotate_chunk_phase4",
 ]

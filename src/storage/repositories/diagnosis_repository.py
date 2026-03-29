@@ -19,7 +19,15 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.models import Chunk, ChunkAnnotation, ChunkRelation, ChunkTopic, EntitySnapshot
+from src.storage.models import (
+    Chunk,
+    ChunkAnnotation,
+    ChunkTopic,
+    EntitySnapshot,
+    GraphEntity,
+    GraphRelationCurrent,
+    GraphRelationEvent,
+)
 from src.storage.models.analysis import EmotionCurve
 from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.base import BaseRepository
@@ -139,21 +147,37 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if limit is None:
             limit = settings.diagnosis.relation_changes_limit
 
-        stmt = (
+        graph_stmt = (
             select(
-                ChunkRelation.chunk_id,
-                ChunkRelation.from_char,
-                ChunkRelation.to_char,
-                ChunkRelation.type,
-                ChunkRelation.change,
+                GraphRelationEvent.chunk_id,
+                GraphEntity.canonical_name,
+                GraphRelationEvent.to_entity_id,
+                GraphRelationEvent.relation_type,
+                GraphRelationEvent.change_type,
             )
-            .where(ChunkRelation.run_id == run_id)
-            .order_by(ChunkRelation.chunk_id)
+            .join(GraphEntity, GraphRelationEvent.from_entity_id == GraphEntity.entity_id)
+            .where(GraphRelationEvent.run_id == run_id)
+            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
             .limit(limit)
         )
+        graph_rows = self.session.execute(graph_stmt).fetchall()
+        name_map = {
+            row.entity_id: row.canonical_name
+            for row in self.session.execute(
+                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
+            ).fetchall()
+        }
+        return [
+            (
+                row.chunk_id,
+                row.canonical_name,
+                name_map.get(row.to_entity_id, str(row.to_entity_id)),
+                row.relation_type,
+                row.change_type,
+            )
+            for row in graph_rows
+        ]
 
-        result = self.session.execute(stmt)
-        return [(row.chunk_id, row.from_char, row.to_char, row.type, row.change) for row in result]
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
         """
@@ -416,14 +440,14 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if not run_id:
             return [], {}
 
-        stmt = select(DisambigCheckpoint.alias_map).where(DisambigCheckpoint.run_id == run_id)
+        stmt = select(DisambigCheckpoint.state_json).where(DisambigCheckpoint.run_id == run_id)
 
         result = self.session.execute(stmt).fetchone()
 
-        if not result or not result.alias_map:
+        if not result or not result.state_json:
             return [], {}
 
-        raw_data = json.loads(result.alias_map)
+        raw_data = json.loads(result.state_json)
         if not isinstance(raw_data, dict):
             raise ValueError(
                 f"Invalid checkpoint data format for run_id={run_id}: "
@@ -457,6 +481,48 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             if isinstance(alias, str) and isinstance(canonical, str) and alias != canonical
         }
         return [str(name) for name in (known_canonical_names or []) if isinstance(name, str)], alias_merges_dict
+
+    def fetch_graph_summary(self, run_id: str) -> dict[str, Any]:
+        node_count = self.session.execute(
+            select(func.count()).select_from(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalar() or 0
+        edge_count = self.session.execute(
+            select(func.count()).select_from(GraphRelationCurrent).where(
+                GraphRelationCurrent.run_id == run_id,
+                GraphRelationCurrent.is_active.is_(True),
+            )
+        ).scalar() or 0
+        core_characters_rows = self.session.execute(
+            select(GraphEntity.canonical_name)
+            .where(GraphEntity.run_id == run_id)
+            .order_by(GraphEntity.last_seen_chunk.desc().nullslast())
+            .limit(5)
+        ).fetchall()
+        recent_events = self.session.execute(
+            select(
+                GraphRelationEvent.chunk_id,
+                GraphRelationEvent.relation_type,
+                GraphRelationEvent.change_type,
+                GraphRelationEvent.evidence,
+            )
+            .where(GraphRelationEvent.run_id == run_id)
+            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
+            .limit(5)
+        ).fetchall()
+        return {
+            "node_count": int(node_count),
+            "edge_count": int(edge_count),
+            "core_characters": [row[0] for row in core_characters_rows],
+            "recent_events": [
+                {
+                    "chunk_id": row[0],
+                    "type": row[1],
+                    "change": row[2],
+                    "evidence": row[3],
+                }
+                for row in recent_events
+            ],
+        }
 
     def fetch_recent_snapshots(
         self,

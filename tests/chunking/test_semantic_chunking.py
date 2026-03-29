@@ -1,11 +1,11 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.chunking.chunker import SemanticChunker, Chunk
+from src.chunking.chunker import Chunk, SemanticChunker
 
 
 class TestSemanticChunker(unittest.TestCase):

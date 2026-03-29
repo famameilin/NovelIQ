@@ -33,6 +33,9 @@ def _save_disambig_checkpoint_state(
     conn,
     run_id: str,
     state: DisambiguationState,
+    last_annotated_chunk: int | None = None,
+    last_projected_chunk: int | None = None,
+    projection_interval: int | None = None,
 ) -> None:
     """
     保存消歧检查点
@@ -45,20 +48,44 @@ def _save_disambig_checkpoint_state(
     state_dict = state.to_dict()
     params = {
         "run_id": run_id,
-        "alias_map": json.dumps(state_dict),
+        "state_json": json.dumps(state_dict),
         "updated_at": time.time(),
         "entity_relations": json.dumps(list(state.pending_relations)) if state.pending_relations else None,
         "disambig_states": None,
+        "last_annotated_chunk": last_annotated_chunk,
+        "last_projected_chunk": last_projected_chunk,
+        "projection_interval": projection_interval,
     }
     conn.execute(
         text("""
-        INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at, entity_relations, disambig_states)
-        VALUES (:run_id, :alias_map, :updated_at, :entity_relations, :disambig_states)
+        INSERT INTO disambig_checkpoint (
+            run_id,
+            alias_map,
+            updated_at,
+            entity_relations,
+            disambig_states,
+            last_annotated_chunk,
+            last_projected_chunk,
+            projection_interval
+        )
+        VALUES (
+            :run_id,
+            :state_json,
+            :updated_at,
+            :entity_relations,
+            :disambig_states,
+            :last_annotated_chunk,
+            :last_projected_chunk,
+            :projection_interval
+        )
         ON CONFLICT (run_id) DO UPDATE SET
             alias_map = EXCLUDED.alias_map,
             updated_at = EXCLUDED.updated_at,
             entity_relations = EXCLUDED.entity_relations,
-            disambig_states = EXCLUDED.disambig_states
+            disambig_states = EXCLUDED.disambig_states,
+            last_annotated_chunk = COALESCE(EXCLUDED.last_annotated_chunk, disambig_checkpoint.last_annotated_chunk),
+            last_projected_chunk = COALESCE(EXCLUDED.last_projected_chunk, disambig_checkpoint.last_projected_chunk),
+            projection_interval = COALESCE(EXCLUDED.projection_interval, disambig_checkpoint.projection_interval)
     """),
         params,
     )
@@ -119,3 +146,27 @@ def _load_disambig_checkpoint_state(conn, run_id: str) -> DisambiguationState:
         f"{len(state.alias_merges)} merges"
     )
     return state
+
+
+def load_disambig_checkpoint_metadata(conn, run_id: str) -> dict[str, int | None]:
+    result = conn.execute(
+        text(
+            """
+            SELECT last_annotated_chunk, last_projected_chunk, projection_interval
+            FROM disambig_checkpoint
+            WHERE run_id = :run_id
+            """
+        ),
+        {"run_id": run_id},
+    ).fetchone()
+    if not result:
+        return {
+            "last_annotated_chunk": None,
+            "last_projected_chunk": None,
+            "projection_interval": None,
+        }
+    return {
+        "last_annotated_chunk": result[0],
+        "last_projected_chunk": result[1],
+        "projection_interval": result[2],
+    }

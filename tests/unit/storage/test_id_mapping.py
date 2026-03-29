@@ -8,18 +8,19 @@
 - 2026-03-19 TraeAI 初始创建
 """
 
+from unittest.mock import Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
 
 from src.storage.id_mapping import (
+    IDMappingError,
+    TaskIDNotFoundError,
+    convert_response_run_ids_to_task_ids,
     generate_run_id,
     generate_task_id,
     run_id_to_task_id,
-    task_id_to_run_id_pattern,
     task_id_to_run_id,
-    convert_response_run_ids_to_task_ids,
-    IDMappingError,
-    TaskIDNotFoundError,
+    task_id_to_run_id_pattern,
 )
 
 

@@ -22,6 +22,8 @@ from src.storage.models import (
     ChunkRelation,
     Entity,
     EntityAlias,
+    GraphEntity,
+    GraphEntityAlias,
 )
 
 if TYPE_CHECKING:
@@ -40,6 +42,18 @@ def fetch_alias_map(session: Session, run_id: str) -> dict[str, str]:
     Returns:
         别名到规范名的映射字典
     """
+    graph_stmt = (
+        select(GraphEntityAlias.alias, GraphEntity.canonical_name)
+        .join(GraphEntity, GraphEntityAlias.entity_id == GraphEntity.entity_id)
+        .where(GraphEntityAlias.run_id == run_id)
+    )
+    graph_rows = session.execute(graph_stmt).fetchall()
+    if graph_rows:
+        alias_map = {row[0]: row[1] for row in graph_rows}
+        for _alias, canonical in list(alias_map.items()):
+            alias_map.setdefault(canonical, canonical)
+        return alias_map
+
     stmt = (
         select(EntityAlias.alias, Entity.canonical)
         .join(Entity, EntityAlias.entity_id == Entity.entity_id)

@@ -16,12 +16,9 @@ CLI preprocess 模块测试
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """
 import sys
-import tempfile
 import uuid
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 

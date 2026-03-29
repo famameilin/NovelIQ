@@ -29,10 +29,10 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.workflows.diagnose import run_cloud_diagnose
-from src.storage.repositories import RunRepository
-
 from conftest import FakeClient
+
+from src.storage.repositories import RunRepository
+from src.workflows.diagnose import run_cloud_diagnose
 
 
 class TestCli:

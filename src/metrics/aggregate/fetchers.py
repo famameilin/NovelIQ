@@ -112,13 +112,19 @@ def fetch_relation_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> RelationData:
-    """提取 chunk_relations 表数据"""
-    relations = annotation_repo.fetch_relations(run_id)
-    full_relations = annotation_repo.fetch_full_relations(run_id)
+    """提取 graph_* 关系数据（权威来源）。"""
+    from src.storage.repositories import GraphRepository
+
+    graph_repo = GraphRepository(annotation_repo.session)
+    current_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
+    relation_events = graph_repo.fetch_relation_events(run_id)
 
     return RelationData(
-        relations=[(row[0], row[1]) for row in relations],
-        full_relations=[(row[0], row[1], row[2], row[3]) for row in full_relations],
+        relations=[(row["from_name"], row["to_name"]) for row in current_relations],
+        full_relations=[
+            (row["from_name"], row["to_name"], row["relation_type"], row["change_type"])
+            for row in relation_events
+        ],
     )
 
 

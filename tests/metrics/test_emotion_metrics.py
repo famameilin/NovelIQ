@@ -5,8 +5,8 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.emotion_metrics_extra import (
-    compute_emotion_recovery_speed,
     compute_emotion_polarity_distribution,
+    compute_emotion_recovery_speed,
     compute_pivot_moment_density,
 )
 

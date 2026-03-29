@@ -117,6 +117,49 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         """获取完整角色关系"""
         return queries.fetch_full_relations(self.session, run_id)
 
+    def fetch_chunk_relations_window(
+        self,
+        run_id: str,
+        from_chunk: int | None = None,
+        to_chunk: int | None = None,
+        projection_status: str | None = None,
+    ) -> list[Any]:
+        return queries.fetch_chunk_relations_window(
+            self.session,
+            run_id,
+            from_chunk=from_chunk,
+            to_chunk=to_chunk,
+            projection_status=projection_status,
+        )
+
+    def fetch_pending_chunk_relations(
+        self,
+        run_id: str,
+        to_chunk: int | None = None,
+        limit: int = 200,
+    ) -> list[Any]:
+        return queries.fetch_pending_chunk_relations(
+            self.session,
+            run_id,
+            to_chunk=to_chunk,
+            limit=limit,
+        )
+
+    def update_relation_projection_status(
+        self,
+        relation_id: int,
+        projection_status: str,
+        projected_at=None,
+        projection_error: str | None = None,
+    ) -> None:
+        return inserts.update_relation_projection_status(
+            self.session,
+            relation_id,
+            projection_status,
+            projected_at=projected_at,
+            projection_error=projection_error,
+        )
+
     def has_annotations(self, run_id: str) -> bool:
         """检查指定运行是否有标注数据"""
         return queries.has_annotations(self.session, run_id)

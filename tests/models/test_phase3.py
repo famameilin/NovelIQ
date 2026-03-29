@@ -23,9 +23,9 @@ from unittest.mock import MagicMock, patch
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.annotation.phase3 import (
-    extract_dialogues_from_text,
     attribute_dialogues_with_llm,
     compute_dialogue_lengths_with_llm,
+    extract_dialogues_from_text,
 )
 from src.models.local.schema import DialogueRecord, QuoteCandidate
 
@@ -114,8 +114,8 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
 
-        mock_client = MagicMock()
         mock_annotation_client = MagicMock()
+
         mock_annotation_client._config.model = "test-model"
         mock_annotation_client._config.temperature = 0.7
         mock_annotation_client._config.top_p = 0.9
@@ -144,9 +144,9 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
 
-        mock_client = MagicMock()
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = None
+
         candidates = [QuoteCandidate(index=1, content="你好")]
 
         with self.assertRaises(ValueError):
@@ -158,8 +158,8 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
 
-        mock_client = MagicMock()
         mock_annotation_client = MagicMock()
+
         mock_annotation_client._config.model = "test-model"
         mock_annotation_client._config.temperature = 0.7
         mock_annotation_client._config.top_p = 0.9

@@ -17,15 +17,14 @@ from unittest.mock import MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.annotation import AnnotationClient
 from src.models.local.annotation import (
     PHASE_MAX_RETRIES,
     Phase1MaxRetriesExceededError,
     Phase2MaxRetriesExceededError,
 )
+from src.models.local.annotation.multi_phase import annotate_chunk_multi_phase
 from src.models.local.annotation.phase1 import annotate_chunk_phase1
 from src.models.local.annotation.phase2 import annotate_chunk_phase2
-from src.models.local.annotation.multi_phase import annotate_chunk_multi_phase
 from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
 
 
