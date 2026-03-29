@@ -1,10 +1,21 @@
+"""
+测试验证器
+
+创建时间: 2025-03-11
+创建者: TraeAI
+任务: 测试验证器
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: refactor-phase1-identity-extraction
+修改内容: 移除 relations 和 character_appearances 字段相关测试
+"""
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.local.annotation.api_call import validate_annotation
 from src.models.local.validator import (
     generate_anonymous_name,
     replace_invalid_names_with_anonymous,
@@ -18,7 +29,6 @@ from src.models.local.schema import (
     CharacterSnapshot,
     ChunkAnnotation,
     DialogueSnapshot,
-    RelationChangeSnapshot,
 )
 
 
@@ -175,31 +185,11 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
                 CharacterSnapshot(name="张三", role_function="主体", action="行走", action_type="移动", emotion_score="neutral"),
                 CharacterSnapshot(name="李四", role_function="其他", action="站立", action_type="其他", emotion_score="neutral"),
             ],
-            relations=[],
             dialogues=[],
         )
         result = replace_invalid_names_with_anonymous(annotation, ["李四"], 1)
         self.assertEqual(result.characters[0].name, "张三")
         self.assertEqual(result.characters[1].name, "匿名_C1_0")
-
-    def test_replace_relation_names(self) -> None:
-        annotation = ChunkAnnotation(
-            emotional_valence="neutral",
-            event_type="铺垫",
-            pivot_moment=False,
-            cliffhanger=False,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-            characters=[],
-            relations=[
-                RelationChangeSnapshot(from_name="张三", to_name="李四", type="敌对", change="强化"),
-            ],
-            dialogues=[],
-        )
-        result = replace_invalid_names_with_anonymous(annotation, ["张三", "李四"], 2)
-        self.assertEqual(result.relations[0].from_name, "匿名_C2_0")
-        self.assertEqual(result.relations[0].to_name, "匿名_C2_1")
 
     def test_replace_dialogue_speaker(self) -> None:
         annotation = ChunkAnnotation(
@@ -211,7 +201,6 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
             foreshadowing_type=None,
             foreshadowing_desc="",
             characters=[],
-            relations=[],
             dialogues=[
                 DialogueSnapshot(speaker="张三"),
             ],
@@ -231,16 +220,12 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
             characters=[
                 CharacterSnapshot(name="张三", role_function="主体", action="行走", action_type="移动", emotion_score="neutral"),
             ],
-            relations=[
-                RelationChangeSnapshot(from_name="张三", to_name="李四", type="敌对", change="强化"),
-            ],
             dialogues=[
                 DialogueSnapshot(speaker="张三"),
             ],
         )
         result = replace_invalid_names_with_anonymous(annotation, ["张三"], 4)
         self.assertEqual(result.characters[0].name, "匿名_C4_0")
-        self.assertEqual(result.relations[0].from_name, "匿名_C4_0")
         self.assertEqual(result.dialogues[0].speaker, "匿名_C4_0")
 
 
@@ -256,49 +241,7 @@ class TestCharacterConsistencyValidation(unittest.TestCase):
 
         self.assertEqual(missing, ["赵哥"])
 
-    def test_validate_annotation_allows_character_appearance_name_without_character_snapshot(self) -> None:
-        annotation = ChunkAnnotation(
-            emotional_valence="neutral",
-            event_type="铺垫",
-            pivot_moment=False,
-            cliffhanger=False,
-            has_foreshadowing=False,
-            foreshadowing_type=None,
-            foreshadowing_desc="",
-            characters=[
-                CharacterSnapshot(
-                    name="贺铮",
-                    role_function="主体",
-                    action="下令",
-                    action_type="决策",
-                    emotion_score="neutral",
-                )
-            ],
-            relations=[],
-            dialogues=[],
-            character_appearances=[
-                CharacterAppearance(
-                    raw_name="侯正德",
-                    identity_clue="侯正德是侯飞白的父亲",
-                    clue_type="named_by_other",
-                )
-            ],
-            chunk_summary="贺铮下令传唤侯正德。",
-        )
-        sources = {
-            "text": "贺铮下令把侯正德叫来。",
-            "prev_chunk_text": "",
-            "active_entities": [],
-            "alias_map": {},
-            "next_chunk_text": "",
-            "character_appearances": [],
-        }
-
-        result = validate_annotation(annotation, sources, chunk_id=15, content_clean="{}")
-
-        self.assertEqual(result, annotation)
-
-    def test_validate_chunk_annotation_reports_relation_and_dialogue_names_not_in_characters(self) -> None:
+    def test_validate_chunk_annotation_reports_dialogue_names_not_in_characters(self) -> None:
         annotation = ChunkAnnotation(
             emotional_valence="neutral",
             event_type="铺垫",
@@ -315,9 +258,6 @@ class TestCharacterConsistencyValidation(unittest.TestCase):
                     action_type="对话",
                     emotion_score="neutral",
                 )
-            ],
-            relations=[
-                RelationChangeSnapshot(from_name="贺重明", to_name="赵哥", type="盟友", change="新建"),
             ],
             dialogues=[
                 DialogueSnapshot(speaker="赵哥"),

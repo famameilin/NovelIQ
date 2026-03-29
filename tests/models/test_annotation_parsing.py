@@ -78,7 +78,6 @@ class TestMakeEmptyAnnotation(unittest.TestCase):
         self.assertIsNone(annotation.foreshadowing_type)
         self.assertEqual(annotation.foreshadowing_desc, "")
         self.assertEqual(len(annotation.characters), 0)
-        self.assertEqual(len(annotation.relations), 0)
         self.assertEqual(len(annotation.dialogues), 0)
 
     def test_make_empty_annotation_validates(self) -> None:
