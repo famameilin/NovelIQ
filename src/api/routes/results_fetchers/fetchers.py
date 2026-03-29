@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -48,7 +47,9 @@ from src.config.constants import EMOTION_SCORE_MAPPING
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
+    DiagnosisRepository,
     EntityRepository,
+    GraphRepository,
     StatsRepository,
 )
 
@@ -356,8 +357,19 @@ def _fetch_chunk_annotations(
     """
     annotations_raw = annotation_repo.fetch_chunk_annotations_full(run_id)
     characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)
-    relations_raw = annotation_repo.fetch_chunk_relations_full(run_id)
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
+
+    relation_events_raw: list[dict[str, Any]] = []
+    if hasattr(annotation_repo, "session"):
+        graph_repo = GraphRepository(annotation_repo.session)
+        relation_events_raw = graph_repo.fetch_relation_events(run_id)
+        if not relation_events_raw:
+            pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+            if pending_relations:
+                raise RuntimeError(
+                    "graph relation events are empty while pending relations still exist; "
+                    "run graph projection before exporting results."
+                )
 
     characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
     for row in characters_raw:
@@ -377,12 +389,14 @@ def _fetch_chunk_annotations(
         )
 
     relations_by_chunk: dict[int, list[ChunkRelation]] = defaultdict(list)
-    for row in relations_raw:
-        cid = row[0]
-        from_normalized = _normalize_name(str(row[1]), alias_map)
-        to_normalized = _normalize_name(str(row[2]), alias_map)
-        from_char = from_normalized if from_normalized else str(row[1])
-        to_char = to_normalized if to_normalized else str(row[2])
+    for row in relation_events_raw:
+        cid = int(row["chunk_id"])
+        from_name_raw = str(row["from_name"])
+        to_name_raw = str(row["to_name"])
+        from_normalized = _normalize_name(from_name_raw, alias_map)
+        to_normalized = _normalize_name(to_name_raw, alias_map)
+        from_char = from_normalized if from_normalized else from_name_raw
+        to_char = to_normalized if to_normalized else to_name_raw
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
@@ -397,8 +411,8 @@ def _fetch_chunk_annotations(
             ChunkRelation(
                 from_char=from_char,
                 to_char=to_char,
-                type=str(row[3]) if row[3] else "",
-                change=str(row[4]) if row[4] else "",
+                type=str(row["relation_type"]) if row.get("relation_type") else "",
+                change=str(row["change_type"]) if row.get("change_type") else "",
             )
         )
 
@@ -447,63 +461,39 @@ def _fetch_character_relations(
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
 ) -> list:
-    """
-    获取角色关系数据
+    """获取角色关系数据（graph_relations_current 权威来源）。"""
+    if not hasattr(annotation_repo, "session"):
+        return []
 
-    修改时间: 2026-03-14
-    创建者: TraeAI
-    任务: refactor-routes-use-repository
-    修改内容: 重构为使用 AnnotationRepository
+    graph_repo = GraphRepository(annotation_repo.session)
+    graph_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
+    if not graph_relations:
+        pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+        if pending_relations:
+            raise RuntimeError(
+                "graph current relations are empty while pending relations still exist; "
+                "run graph projection before reading character relations."
+            )
 
-    修改时间: 2026-03-19
-    创建者: TraeAI
-    任务: fix-json-output-issues-v3
-    修改内容: 添加去重逻辑，避免同一对人物在同一chunk中出现重复关系
-
-    修改时间: 2026-03-19
-    创建者: TraeAI
-    任务: fix-character-alias-inconsistency
-    修改内容: 添加 alias_map 参数，应用别名归一化，将外号替换为正式姓名
-
-    修改时间: 2026-03-21
-    创建者: TraeAI
-    任务: refactor-duplicate-normalize-name
-    修改内容: 使用模块级 _normalize_name 函数替代内部定义
-    """
-    rows = annotation_repo.fetch_chunk_relations_full(run_id)
-
-    seen: dict[tuple, CharacterRelation] = {}
-    for row in rows:
-        chunk_id = int(row[0])
-        from_normalized = _normalize_name(str(row[1]), alias_map)
-        to_normalized = _normalize_name(str(row[2]), alias_map)
-        from_char = from_normalized if from_normalized else str(row[1])
-        to_char = to_normalized if to_normalized else str(row[2])
-        rel_type = str(row[3]) if row[3] else ""
-        change = str(row[4]) if row[4] else ""
+    result: list[CharacterRelation] = []
+    for row in graph_relations:
+        from_char = _normalize_name(row["from_name"], alias_map) or row["from_name"]
+        to_char = _normalize_name(row["to_name"], alias_map) or row["to_name"]
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
-            logger.warning(
-                "跳过悬空引用的角色关系: chunk_id={}, from_char={}, to_char={}, type={}",
-                chunk_id,
-                from_char,
-                to_char,
-                rel_type,
-            )
             continue
-
-        key = (from_char, to_char, rel_type)
-        if key not in seen:
-            seen[key] = CharacterRelation(
-                chunk_id=chunk_id,
+        result.append(
+            CharacterRelation(
+                chunk_id=row["last_seen_chunk"],
                 from_char=from_char,
                 to_char=to_char,
-                type=rel_type,
-                change=change,
+                type=row["type"],
+                change="汇总",
             )
+        )
 
-    return list(seen.values())
+    return result
 
 
 def _fetch_hierarchical_relations(
@@ -680,35 +670,9 @@ def _fetch_known_characters(run_id: str, annotation_repo: AnnotationRepository) 
     Raises:
         ValueError: checkpoint 数据格式无效
     """
-    from sqlalchemy import text
-
-    result = annotation_repo.session.execute(
-        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).fetchone()
-
-    if not result or not result[0]:
-        return []
-
-    raw_data = json.loads(result[0])
-
-    if not isinstance(raw_data, dict):
-        raise ValueError(
-            f"Invalid checkpoint data format for run_id={run_id}: "
-            f"expected dict, got {type(raw_data).__name__}"
-        )
-
-    if "known_canonical_names" not in raw_data:
-        raise ValueError(f"Missing 'known_canonical_names' in checkpoint data for run_id={run_id}")
-
-    known_canonical_names = raw_data.get("known_canonical_names")
-    if not isinstance(known_canonical_names, list):
-        raise ValueError(
-            f"Invalid 'known_canonical_names' format for run_id={run_id}: "
-            f"expected list, got {type(known_canonical_names).__name__}"
-        )
-
-    return known_canonical_names
+    repo = DiagnosisRepository(annotation_repo.session)
+    known_characters, _ = repo.fetch_character_disambig_data(run_id)
+    return known_characters
 
 
 def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository) -> dict[str, str]:
@@ -735,32 +699,6 @@ def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository)
     Raises:
         ValueError: checkpoint 数据格式无效
     """
-    from sqlalchemy import text
-
-    result = annotation_repo.session.execute(
-        text("SELECT alias_map FROM disambig_checkpoint WHERE run_id = :run_id"),
-        {"run_id": run_id},
-    ).fetchone()
-
-    if not result or not result[0]:
-        return {}
-
-    raw_data = json.loads(result[0])
-
-    if not isinstance(raw_data, dict):
-        raise ValueError(
-            f"Invalid checkpoint data format for run_id={run_id}: "
-            f"expected dict, got {type(raw_data).__name__}"
-        )
-
-    if "alias_merges" not in raw_data:
-        raise ValueError(f"Missing 'alias_merges' in checkpoint data for run_id={run_id}")
-
-    alias_merges_list = raw_data.get("alias_merges")
-    if not isinstance(alias_merges_list, list):
-        raise ValueError(
-            f"Invalid 'alias_merges' format for run_id={run_id}: "
-            f"expected list, got {type(alias_merges_list).__name__}"
-        )
-
-    return {alias: canonical for alias, canonical in alias_merges_list if alias != canonical}
+    repo = DiagnosisRepository(annotation_repo.session)
+    _, alias_merges = repo.fetch_character_disambig_data(run_id)
+    return alias_merges

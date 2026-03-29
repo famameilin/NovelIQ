@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from src.config.constants import EMOTION_SCORE_MAPPING
 
 if TYPE_CHECKING:
-    from src.storage.repositories import EntityRepository
+    from src.storage.repositories import EntityRepository, GraphRepository
 
 
 def _convert_emotion_score(score: Any) -> int:
@@ -102,8 +102,40 @@ def format_entities_for_prompt(entities: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _normalize_active_entity_row(row: Any) -> dict[str, Any] | None:
+    """统一兼容 EntityRepository(tuple) 与 GraphRepository(dict) 的返回结构。"""
+    if isinstance(row, dict):
+        name = row.get("name")
+        if not name:
+            return None
+        return {
+            "chunk_id": row.get("chunk_id"),
+            "name": name,
+            "role": row.get("role", ""),
+            "last_action": row.get("last_action", ""),
+            "last_emotion": row.get("last_emotion", ""),
+            "emotion_score": row.get("emotion_score", 0),
+        }
+
+    if isinstance(row, (tuple, list)) and len(row) >= 6:
+        name = row[1]
+        if not name:
+            return None
+        return {
+            "chunk_id": row[0],
+            "name": name,
+            "role": row[2],
+            "last_action": row[3],
+            "last_emotion": row[4],
+            "emotion_score": row[5],
+        }
+
+    return None
+
+
+
 def get_active_entities(
-    entity_repo: EntityRepository,
+    entity_repo: EntityRepository | GraphRepository,
     run_id: str,
     current_chunk_id: int,
     lookback: int = 10,
@@ -111,18 +143,14 @@ def get_active_entities(
     """获取活跃实体列表（按名称去重，保留最新）"""
     rows = entity_repo.fetch_active_entities(current_chunk_id, lookback, run_id)
 
-    # 使用字典去重，保留每个名称的最新记录
-    seen = {}
+    seen: dict[str, dict[str, Any]] = {}
     for row in rows:
-        name = row[1]
+        normalized = _normalize_active_entity_row(row)
+        if normalized is None:
+            continue
+        name = normalized["name"]
         if name not in seen:
-            seen[name] = {
-                "chunk_id": row[0],
-                "name": name,
-                "role": row[2],
-                "last_action": row[3],
-                "last_emotion": row[4],
-                "emotion_score": row[5],
-            }
+            seen[name] = normalized
 
     return list(seen.values())
+

@@ -17,7 +17,7 @@ GREIMAS_FUNCTIONS = {
 }
 
 
-def _build_character_graph(relations: list[tuple[str, str]]) -> nx.Graph:
+def build_character_graph(relations: list[tuple[str, str]]) -> nx.Graph:
     G = nx.Graph()
     for from_char, to_char in relations:
         if from_char != to_char:
@@ -27,22 +27,24 @@ def _build_character_graph(relations: list[tuple[str, str]]) -> nx.Graph:
 
 def compute_character_degree_centrality(
     relations: list[tuple[str, str]],
+    graph: nx.Graph | None = None,
 ) -> dict[str, float]:
     if not relations:
         return {}
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
     centrality = nx.degree_centrality(G)
     return dict(centrality)
 
 
 def compute_relation_network_density(
     relations: list[tuple[str, str]],
+    graph: nx.Graph | None = None,
 ) -> float:
     if not relations:
         return 0.0
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
     n = G.number_of_nodes()
     if n < 2:
         return 0.0
@@ -53,11 +55,12 @@ def compute_relation_network_density(
 def compute_protagonist_betweenness(
     relations: list[tuple[str, str]],
     protagonist_name: str,
+    graph: nx.Graph | None = None,
 ) -> float:
     if not relations or not protagonist_name:
         return 0.0
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
 
     if protagonist_name not in G:
         return 0.0
@@ -71,11 +74,12 @@ def compute_protagonist_betweenness(
 
 def compute_character_closeness_centrality(
     relations: list[tuple[str, str]],
+    graph: nx.Graph | None = None,
 ) -> dict[str, float]:
     if not relations:
         return {}
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
     centrality = nx.closeness_centrality(G)
     return dict(centrality)
 
@@ -83,13 +87,14 @@ def compute_character_closeness_centrality(
 def compute_character_eigenvector_centrality(
     relations: list[tuple[str, str]],
     max_iter: int | None = None,
+    graph: nx.Graph | None = None,
 ) -> dict[str, float]:
     if max_iter is None:
         max_iter = settings.metrics.character_max_iter
     if not relations:
         return {}
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
 
     if G.number_of_nodes() < 2:
         return dict.fromkeys(G.nodes(), 0.0)
@@ -103,22 +108,24 @@ def compute_character_eigenvector_centrality(
 
 def compute_clustering_coefficient(
     relations: list[tuple[str, str]],
+    graph: nx.Graph | None = None,
 ) -> dict[str, float]:
     if not relations:
         return {}
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
     clustering = nx.clustering(G)
     return dict(clustering)
 
 
 def compute_average_clustering(
     relations: list[tuple[str, str]],
+    graph: nx.Graph | None = None,
 ) -> float:
     if not relations:
         return 0.0
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
 
     if G.number_of_nodes() < 2:
         return 0.0
@@ -128,21 +135,23 @@ def compute_average_clustering(
 
 def compute_number_of_connected_components(
     relations: list[tuple[str, str]],
+    graph: nx.Graph | None = None,
 ) -> int:
     if not relations:
         return 0
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
     return nx.number_connected_components(G)
 
 
 def compute_largest_component_size(
     relations: list[tuple[str, str]],
+    graph: nx.Graph | None = None,
 ) -> int:
     if not relations:
         return 0
 
-    G = _build_character_graph(relations)
+    G = graph or build_character_graph(relations)
 
     if G.number_of_nodes() == 0:
         return 0

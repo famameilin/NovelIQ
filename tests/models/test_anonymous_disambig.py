@@ -13,7 +13,6 @@
 """
 import re
 import unittest
-from unittest.mock import MagicMock
 
 
 class TestBuildAnonymousContexts(unittest.TestCase):
@@ -36,8 +35,8 @@ class TestBuildAnonymousContexts(unittest.TestCase):
 class TestAnonymousDisambigClient(unittest.TestCase):
     def test_client_initialization(self) -> None:
         """测试匿名消歧客户端能正确初始化"""
-        from src.models.disambiguation import DisambiguationClient
         from src.config.input_config import TaskModelConfig
+        from src.models.disambiguation import DisambiguationClient
 
         config = TaskModelConfig(
             model='test-model',

@@ -19,10 +19,19 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.models import Chunk, ChunkAnnotation, ChunkRelation, ChunkTopic, EntitySnapshot
+from src.storage.models import (
+    Chunk,
+    ChunkAnnotation,
+    ChunkTopic,
+    EntitySnapshot,
+    GraphEntity,
+    GraphRelationCurrent,
+    GraphRelationEvent,
+)
 from src.storage.models.analysis import EmotionCurve
 from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.base import BaseRepository
+from src.storage.repositories.graph.repository import GraphRepository
 
 
 class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
@@ -139,21 +148,37 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if limit is None:
             limit = settings.diagnosis.relation_changes_limit
 
-        stmt = (
+        graph_stmt = (
             select(
-                ChunkRelation.chunk_id,
-                ChunkRelation.from_char,
-                ChunkRelation.to_char,
-                ChunkRelation.type,
-                ChunkRelation.change,
+                GraphRelationEvent.chunk_id,
+                GraphEntity.canonical_name,
+                GraphRelationEvent.to_entity_id,
+                GraphRelationEvent.relation_type,
+                GraphRelationEvent.change_type,
             )
-            .where(ChunkRelation.run_id == run_id)
-            .order_by(ChunkRelation.chunk_id)
+            .join(GraphEntity, GraphRelationEvent.from_entity_id == GraphEntity.entity_id)
+            .where(GraphRelationEvent.run_id == run_id)
+            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
             .limit(limit)
         )
+        graph_rows = self.session.execute(graph_stmt).fetchall()
+        name_map = {
+            row.entity_id: row.canonical_name
+            for row in self.session.execute(
+                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
+            ).fetchall()
+        }
+        return [
+            (
+                row.chunk_id,
+                row.canonical_name,
+                name_map.get(row.to_entity_id, str(row.to_entity_id)),
+                row.relation_type,
+                row.change_type,
+            )
+            for row in graph_rows
+        ]
 
-        result = self.session.execute(stmt)
-        return [(row.chunk_id, row.from_char, row.to_char, row.type, row.change) for row in result]
 
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
         """
@@ -416,14 +441,14 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if not run_id:
             return [], {}
 
-        stmt = select(DisambigCheckpoint.alias_map).where(DisambigCheckpoint.run_id == run_id)
+        stmt = select(DisambigCheckpoint.state_json).where(DisambigCheckpoint.run_id == run_id)
 
         result = self.session.execute(stmt).fetchone()
 
-        if not result or not result.alias_map:
+        if not result or not result.state_json:
             return [], {}
 
-        raw_data = json.loads(result.alias_map)
+        raw_data = json.loads(result.state_json)
         if not isinstance(raw_data, dict):
             raise ValueError(
                 f"Invalid checkpoint data format for run_id={run_id}: "
@@ -457,6 +482,90 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             if isinstance(alias, str) and isinstance(canonical, str) and alias != canonical
         }
         return [str(name) for name in (known_canonical_names or []) if isinstance(name, str)], alias_merges_dict
+
+    def fetch_graph_summary(self, run_id: str) -> dict[str, Any]:
+        graph_repo = GraphRepository(self.session)
+        node_count = self.session.execute(
+            select(func.count()).select_from(GraphEntity).where(GraphEntity.run_id == run_id)
+        ).scalar() or 0
+        edge_count = self.session.execute(
+            select(func.count()).select_from(GraphRelationCurrent).where(
+                GraphRelationCurrent.run_id == run_id,
+                GraphRelationCurrent.is_active.is_(True),
+            )
+        ).scalar() or 0
+        core_characters_rows = self.session.execute(
+            select(GraphEntity.canonical_name)
+            .where(GraphEntity.run_id == run_id)
+            .order_by(GraphEntity.last_seen_chunk.desc().nullslast())
+            .limit(5)
+        ).fetchall()
+        recent_events = self.session.execute(
+            select(
+                GraphRelationEvent.chunk_id,
+                GraphRelationEvent.relation_type,
+                GraphRelationEvent.change_type,
+                GraphRelationEvent.evidence,
+            )
+            .where(GraphRelationEvent.run_id == run_id)
+            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
+            .limit(5)
+        ).fetchall()
+        key_relation_rows = self.session.execute(
+            select(
+                GraphRelationCurrent.current_type,
+                GraphRelationCurrent.support_count,
+                GraphRelationCurrent.from_entity_id,
+                GraphRelationCurrent.to_entity_id,
+            )
+            .where(
+                GraphRelationCurrent.run_id == run_id,
+                GraphRelationCurrent.is_active.is_(True),
+            )
+            .order_by(GraphRelationCurrent.support_count.desc(), GraphRelationCurrent.last_seen_chunk.desc().nullslast())
+            .limit(5)
+        ).fetchall()
+        entity_name_map = {
+            row.entity_id: row.canonical_name
+            for row in self.session.execute(
+                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
+            ).fetchall()
+        }
+        low_confidence_events = graph_repo.fetch_low_confidence_relation_events(run_id, threshold=0.6, limit=20)
+        relation_conflicts = graph_repo.detect_relation_conflicts(run_id, active_only=True)
+        density = 0.0
+        if node_count > 1:
+            density = float(edge_count) / float(node_count * (node_count - 1))
+        return {
+            "node_count": int(node_count),
+            "edge_count": int(edge_count),
+            "density": round(density, 4),
+            "core_characters": [row[0] for row in core_characters_rows],
+            "key_relations": [
+                {
+                    "from": entity_name_map.get(row[2], str(row[2])),
+                    "to": entity_name_map.get(row[3], str(row[3])),
+                    "type": row[0],
+                    "support_count": int(row[1] or 0),
+                }
+                for row in key_relation_rows
+            ],
+            "recent_events": [
+                {
+                    "chunk_id": row[0],
+                    "type": row[1],
+                    "change": row[2],
+                    "evidence": row[3],
+                }
+                for row in recent_events
+            ],
+            "quality": {
+                "conflict_count": len(relation_conflicts),
+                "low_confidence_count": len(low_confidence_events),
+                "conflicts": relation_conflicts[:5],
+                "low_confidence_samples": low_confidence_events[:5],
+            },
+        }
 
     def fetch_recent_snapshots(
         self,

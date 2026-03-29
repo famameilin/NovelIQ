@@ -35,14 +35,14 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.storage.repositories import ChunkRepository, RunRepository
-from src.workflows.annotate import run_annotate
 from src.chunking.chunker import Chunk
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
-from src.models.local.schema import ChunkAnnotation, CharacterSnapshot, DialogueSnapshot
 from src.models.local.annotation import MultiPhaseAnnotationResult
 from src.models.local.disambiguation import ExtendedDisambigResult
+from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, DialogueSnapshot
+from src.storage.repositories import ChunkRepository, RunRepository
+from src.workflows.annotate import run_annotate
 
 
 def create_mock_annotation() -> MultiPhaseAnnotationResult:

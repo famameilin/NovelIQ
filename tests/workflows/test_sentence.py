@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.workflows.annotate_helpers.sentence import _get_name_variants, _build_sentence_pool
+from src.workflows.annotate_helpers.sentence import _build_sentence_pool, _get_name_variants
 
 
 class TestGetNameVariants(unittest.TestCase):

@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, Index, String, Text
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -75,10 +75,13 @@ class DisambigCheckpoint(Base):
     __tablename__ = "disambig_checkpoint"
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    alias_map: Mapped[str] = mapped_column(Text, nullable=False)
+    state_json: Mapped[str] = mapped_column("alias_map", Text, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
     entity_relations: Mapped[str | None] = mapped_column(Text, nullable=True)
     disambig_states: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_annotated_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_projected_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    projection_interval: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     def __repr__(self) -> str:
         return f"<DisambigCheckpoint(run_id={self.run_id}, updated_at={self.updated_at})>"

@@ -5,8 +5,8 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.style_metrics_extra import (
-    compute_idiom_density,
     compute_classical_sentence_ratio,
+    compute_idiom_density,
 )
 
 

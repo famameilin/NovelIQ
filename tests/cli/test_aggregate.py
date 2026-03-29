@@ -29,10 +29,10 @@ from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.storage.repositories import ChunkRepository, ChunkStyleData, RunRepository, AnnotationRepository
-from src.workflows.aggregate import run_aggregate
 from src.chunking.chunker import Chunk
 from src.models.local.schema import ChunkAnnotation
+from src.storage.repositories import AnnotationRepository, ChunkRepository, ChunkStyleData, RunRepository
+from src.workflows.aggregate import run_aggregate
 
 
 class TestAggregate:
