@@ -96,7 +96,6 @@ class AnnotationClient(BaseModelClient):
         chapter_id: int | None = None,
         cloud_client: AnnotationClient | None = None,
         run_id: str | None = None,
-        character_appearances: list[dict] | None = None,
     ) -> MultiPhaseAnnotationResult:
         ctx = AnnotationContext(
             text=text,
@@ -115,7 +114,6 @@ class AnnotationClient(BaseModelClient):
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
-            character_appearances=character_appearances,
         )
 
         return _annotate_chunk_multi_phase_impl(
@@ -136,7 +134,6 @@ class AnnotationClient(BaseModelClient):
             chapter_id=ctx.chapter_id,
             cloud_client=ctx.cloud_client,
             run_id=ctx.run_id,
-            character_appearances=ctx.character_appearances,
         )
 
     def _call_annotation_api(

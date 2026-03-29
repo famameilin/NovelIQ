@@ -66,16 +66,16 @@ def extract_names_from_annotation(annotation: ChunkAnnotation) -> list[str]:
     创建者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     说明: 从 AnnotationClient 类方法提取为独立函数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: remove-unused-annotation-fields
+    修改内容: 移除 relations 相关逻辑
     """
     names: set[str] = set()
     for character in annotation.characters:
         if character.name:
             names.add(character.name)
-    for relation in annotation.relations:
-        if relation.from_name:
-            names.add(relation.from_name)
-        if relation.to_name:
-            names.add(relation.to_name)
     for dialogue in annotation.dialogues:
         if dialogue.speaker:
             names.add(dialogue.speaker)

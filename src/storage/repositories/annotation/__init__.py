@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from . import characters, inserts, locations, queries
-
 from .repository import AnnotationRepository
 
 __all__ = [

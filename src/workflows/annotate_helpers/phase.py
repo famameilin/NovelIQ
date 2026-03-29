@@ -68,7 +68,6 @@ def _annotate_chunk(
     next_chunk_text: str | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
-    character_appearances: list[dict] | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     Chunk 标注函数
@@ -101,7 +100,6 @@ def _annotate_chunk(
             next_chunk_text=next_chunk_text,
             cloud_client=cloud_client,
             run_id=run_id,
-            character_appearances=character_appearances,
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
@@ -321,7 +319,6 @@ def _process_single_chunk(
         next_chunk_text=ctx.next_chunk_text,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
-        character_appearances=ctx.character_appearances,
     )
     
     _store_annotation_results(
@@ -337,6 +334,7 @@ def _process_single_chunk(
         dialogues=annotation_result.dialogues,
         dialogue_tones=annotation_result.dialogue_tones,
         dialogue_evidences=annotation_result.dialogue_evidences,
+        dialogue_identity_clues=annotation_result.dialogue_identity_clues,
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 

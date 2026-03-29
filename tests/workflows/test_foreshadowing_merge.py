@@ -3,6 +3,11 @@
 创建者: TraeAI
 任务: fix-null-fields-issue - 修复伏笔字段空值问题
 说明: 测试伏笔结果合并到 ChunkAnnotation 的逻辑
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: refactor-phase1-identity-extraction
+修改内容: 移除 relations、character_appearances、chunk_summary 字段
 """
 import sys
 from pathlib import Path
@@ -39,10 +44,7 @@ class TestForeshadowingMerge(unittest.TestCase):
                     emotion_score="neutral",
                 )
             ],
-            relations=[],
             dialogues=[],
-            character_appearances=[],
-            chunk_summary="测试摘要",
         )
 
     def test_merge_foreshadowing_with_has_foreshadowing_true(self) -> None:
@@ -68,10 +70,7 @@ class TestForeshadowingMerge(unittest.TestCase):
                 if foreshadowing.has_foreshadowing else ""
             ),
             characters=annotation.characters,
-            relations=annotation.relations,
             dialogues=annotation.dialogues,
-            character_appearances=annotation.character_appearances,
-            chunk_summary=annotation.chunk_summary,
         )
 
         self.assertTrue(merged.has_foreshadowing)
@@ -104,10 +103,7 @@ class TestForeshadowingMerge(unittest.TestCase):
                 if foreshadowing.has_foreshadowing else ""
             ),
             characters=annotation.characters,
-            relations=annotation.relations,
             dialogues=annotation.dialogues,
-            character_appearances=annotation.character_appearances,
-            chunk_summary=annotation.chunk_summary,
         )
 
         self.assertFalse(merged.has_foreshadowing)
@@ -137,10 +133,7 @@ class TestForeshadowingMerge(unittest.TestCase):
                 if foreshadowing.has_foreshadowing else ""
             ),
             characters=annotation.characters,
-            relations=annotation.relations,
             dialogues=annotation.dialogues,
-            character_appearances=annotation.character_appearances,
-            chunk_summary=annotation.chunk_summary,
         )
 
         self.assertEqual(merged.emotional_valence, "positive")
@@ -149,7 +142,6 @@ class TestForeshadowingMerge(unittest.TestCase):
         self.assertFalse(merged.cliffhanger)
         self.assertEqual(len(merged.characters), 1)
         self.assertEqual(merged.characters[0].name, "张三")
-        self.assertEqual(merged.chunk_summary, "测试摘要")
 
 
 if __name__ == "__main__":
