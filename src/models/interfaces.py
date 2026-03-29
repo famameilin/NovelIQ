@@ -7,6 +7,11 @@
 说明:
 - 为 workflow 层提供最小能力接口，减少对具体客户端实现的类型耦合
 - 仅约束 workflow 实际使用的方法与属性
+
+修改时间: 2026-03-29
+修改者: TraeAI
+任务: simplify-phase1-prompt
+修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
 """
 
 from __future__ import annotations
@@ -39,11 +44,9 @@ class AnnotationLike(Protocol):
         alias_map: dict[str, str] | None = None,
         chunk_id: int | None = None,
         global_context: str | None = None,
-        prev_chunk_text: str | None = None,
         active_entities: str | None = None,
         rag_evidence: str | None = None,
         known_aliases: str | None = None,
-        next_chunk_text: str | None = None,
         cloud_client: AnnotationLike | None = None,
         run_id: str | None = None,
     ) -> MultiPhaseAnnotationResult:

@@ -50,8 +50,6 @@ def execute_phase1_call(
     messages: list[dict],
     alias_map: dict[str, str] | None,
     active_entities: str | None,
-    prev_chunk_text: str | None,
-    next_chunk_text: str | None,
     chunk_id: int | None,
     retry_messages: list[dict] | None = None,
     run_id: str | None = None,
@@ -74,6 +72,11 @@ def execute_phase1_call(
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 character_appearances 参数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -113,10 +116,8 @@ def execute_phase1_call(
 
     sources = {
         "text": text,
-        "prev_chunk_text": prev_chunk_text or "",
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
-        "next_chunk_text": next_chunk_text or "",
     }
 
     result = client._validate_annotation(result, sources, chunk_id, content_clean)
@@ -132,8 +133,6 @@ def execute_phase1_with_retry(
     messages: list[dict],
     alias_map: dict[str, str] | None,
     active_entities: str | None,
-    prev_chunk_text: str | None,
-    next_chunk_text: str | None,
     chunk_id: int | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None = None,
@@ -159,6 +158,11 @@ def execute_phase1_with_retry(
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 character_appearances 参数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     from src.models.local.schema import ChunkAnnotation
 
@@ -178,7 +182,7 @@ def execute_phase1_with_retry(
         """执行单次Phase1调用"""
         result, _ = execute_phase1_call(
             local_client, text, messages, alias_map, active_entities,
-            prev_chunk_text, next_chunk_text, chunk_id, retry_messages,
+            chunk_id, retry_messages,
             run_id=run_id, attempt_number=handler.state.attempt,
         )
         return result
@@ -204,8 +208,6 @@ def annotate_chunk_phase1(
     text: str,
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
-    prev_chunk_text: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -237,13 +239,16 @@ def annotate_chunk_phase1(
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 character_appearances 参数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     messages = _build_annotation_messages_v2(
         text=text,
         alias_map=alias_map,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
@@ -257,8 +262,6 @@ def annotate_chunk_phase1(
         messages=messages,
         alias_map=alias_map,
         active_entities=active_entities,
-        prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         chunk_id=chunk_id,
         cloud_client=cloud_client,
         run_id=run_id,

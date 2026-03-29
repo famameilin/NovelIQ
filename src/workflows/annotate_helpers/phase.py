@@ -61,11 +61,9 @@ def _annotate_chunk(
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     global_context: str | None = None,
-    prev_chunk_text: str | None = None,
     active_entities: str | None = None,
     rag_evidence: str | None = None,
     known_aliases: str | None = None,
-    next_chunk_text: str | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
 ) -> MultiPhaseAnnotationResult:
@@ -81,6 +79,11 @@ def _annotate_chunk(
     任务: fix-validate-names-from-character-appearances
     修改内容: 增加 character_appearances 参数支持
 
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
+
     重试策略:
     - 内层: 本地模型最多3次（任何错误类型）
     - 内层: 本地失败后云端1次
@@ -93,11 +96,9 @@ def _annotate_chunk(
             alias_map=alias_map,
             chunk_id=chunk_id,
             global_context=global_context,
-            prev_chunk_text=prev_chunk_text,
             active_entities=active_entities,
             rag_evidence=rag_evidence,
             known_aliases=known_aliases,
-            next_chunk_text=next_chunk_text,
             cloud_client=cloud_client,
             run_id=run_id,
         )
@@ -312,11 +313,9 @@ def _process_single_chunk(
         alias_map=alias_map if alias_map else None,
         chunk_id=chunk_id,
         global_context=phase_result.global_context_str,
-        prev_chunk_text=ctx.prev_chunk_text,
         active_entities=ctx.active_entities_str,
         rag_evidence=ctx.rag_evidence_str,
         known_aliases=ctx.known_aliases_str,
-        next_chunk_text=ctx.next_chunk_text,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
     )
