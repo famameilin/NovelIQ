@@ -50,7 +50,6 @@ from src.models.diagnosis import DiagnosisClient
 from src.models.local.schema import (
     CharacterSnapshot,
     ChunkAnnotation,
-    RelationChangeSnapshot,
 )
 from src.storage.repositories import (
     AnnotationRepository,

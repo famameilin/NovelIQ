@@ -5,15 +5,15 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.narrative_metrics import (
+    compute_cliffhanger_rate,
+    compute_climax_spacing,
+    compute_event_density,
+    compute_middle_collapse_index,
     compute_three_act_ratio,
     compute_three_act_ratio_by_tension,
-    compute_climax_spacing,
-    compute_middle_collapse_index,
-    compute_event_density,
-    compute_cliffhanger_rate,
     find_global_peak,
-    find_valley_before_peak,
     find_local_peaks,
+    find_valley_before_peak,
 )
 
 

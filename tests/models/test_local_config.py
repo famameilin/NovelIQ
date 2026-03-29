@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import TaskModelConfig, load_task_config, Settings
+from src.config import Settings, TaskModelConfig, load_task_config
 
 
 class TestTaskModelConfigFromFile(unittest.TestCase):

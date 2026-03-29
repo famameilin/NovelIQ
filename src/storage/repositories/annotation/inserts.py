@@ -13,6 +13,8 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from sqlalchemy import update
+
 from src.models.local.schema import (
     CharacterSnapshot,
     DialogueSnapshot,
@@ -84,6 +86,12 @@ def insert_chunk_relations(
             to_char=r.to_name,
             type=r.type,
             change=r.change,
+            evidence=r.evidence,
+            confidence=r.confidence,
+            source_model=r.source_model,
+            projection_status=r.projection_status,
+            projected_at=datetime.fromisoformat(r.projected_at) if r.projected_at else None,
+            projection_error=r.projection_error,
             run_id=run_id,
         )
         for r in relations
@@ -93,6 +101,27 @@ def insert_chunk_relations(
         return
     session.add_all(records)
     session.commit()
+
+
+def update_relation_projection_status(
+    session: Session,
+    relation_id: int,
+    projection_status: str,
+    projected_at: datetime | None = None,
+    projection_error: str | None = None,
+) -> None:
+    """更新单条关系的投影状态。"""
+    stmt = (
+        update(ChunkRelation)
+        .where(ChunkRelation.id == relation_id)
+        .values(
+            projection_status=projection_status,
+            projected_at=projected_at,
+            projection_error=projection_error,
+        )
+    )
+    session.execute(stmt)
+
 
 
 def insert_chunk_dialogues(

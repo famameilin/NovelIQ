@@ -1,6 +1,6 @@
 import sys
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -18,6 +18,7 @@ from src.metrics.lexicon_metrics import (
 )
 from src.metrics.rhythm_metrics import tension_composite, tension_proxy
 from src.metrics.style_metrics import (
+    FUNCTION_WORDS_PATH,
     average_word_length,
     dialogue_ratio,
     function_word_distribution,
@@ -26,11 +27,10 @@ from src.metrics.style_metrics import (
     metaphor_density,
     mtld,
     pause_density,
-    sentence_length_stats,
     semantic_category_density,
+    sentence_length_stats,
     ttr,
     word_frequency_breadth,
-    FUNCTION_WORDS_PATH,
 )
 from src.metrics.text_utils import dialogue_length, split_sentences, tokenize_words
 

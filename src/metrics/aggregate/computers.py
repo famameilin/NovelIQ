@@ -153,21 +153,22 @@ def compute_character_relation_metrics(
     total_chunks: int,
 ) -> dict[str, Any]:
     """计算人物关系聚合指标"""
+    relation_input = relation_data.relations
     result: dict[str, Any] = {
-        "network_density": compute_relation_network_density(relation_data.relations),
+        "network_density": compute_relation_network_density(relation_input),
         "antagonist_strength_gap": compute_antagonist_strength_gap(char_data.characters),
-        "average_clustering": compute_average_clustering(relation_data.relations),
-        "num_connected_components": float(compute_number_of_connected_components(relation_data.relations)),
-        "largest_component_size": float(compute_largest_component_size(relation_data.relations)),
+        "average_clustering": compute_average_clustering(relation_input),
+        "num_connected_components": float(compute_number_of_connected_components(relation_input)),
+        "largest_component_size": float(compute_largest_component_size(relation_input)),
         **compute_relation_change_frequency(relation_data.full_relations, total_chunks),
     }
 
     if char_data.protagonist_name:
         result["protagonist_betweenness"] = compute_protagonist_betweenness(
-            relation_data.relations, char_data.protagonist_name
+            relation_input, char_data.protagonist_name
         )
 
-    degree_centrality = compute_character_degree_centrality(relation_data.relations)
+    degree_centrality = compute_character_degree_centrality(relation_input)
     if degree_centrality:
         max_char = max(degree_centrality, key=lambda k: degree_centrality[k] or 0.0)
         result["max_degree_character"] = max_char

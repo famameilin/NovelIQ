@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.context.rolling_memory import (
-    get_prev_tail_text,
-    get_next_text,
     format_rolling_memory_for_prompt,
+    get_next_text,
+    get_prev_tail_text,
 )
 
 

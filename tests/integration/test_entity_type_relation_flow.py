@@ -79,26 +79,24 @@ class TestEntityRelationStorageIntegration(unittest.TestCase):
 
 class TestGetEntityIdByNameIntegration(unittest.TestCase):
     @patch("src.storage.repositories.entity.queries.fetch_entity_by_canonical")
-    @patch("src.storage.repositories.entity.queries.fetch_entity_by_alias")
-    def test_find_entity_by_name(self, mock_fetch_alias, mock_fetch_canonical) -> None:
+    def test_find_entity_by_name(self, mock_fetch_canonical) -> None:
         from src.storage.repositories.entity.queries import get_entity_id_by_name
 
-        mock_fetch_canonical.return_value = {"entity_id": 1, "canonical": "CharacterA"}
-        mock_fetch_alias.return_value = None
-
         mock_session = MagicMock()
+
+        mock_fetch_canonical.return_value = {"entity_id": 1, "canonical": "CharacterA"}
         entity_id = get_entity_id_by_name(mock_session, "novel_1", "CharacterA", None)
         self.assertEqual(entity_id, 1)
 
         mock_fetch_canonical.return_value = None
-        mock_fetch_alias.return_value = {"entity_id": 2, "canonical": "CharacterB"}
+        mock_session.execute.return_value.fetchone.return_value = (2,)
         entity_id = get_entity_id_by_name(mock_session, "novel_1", "AliasB", None)
         self.assertEqual(entity_id, 2)
 
-        mock_fetch_canonical.return_value = None
-        mock_fetch_alias.return_value = None
+        mock_session.execute.return_value.fetchone.return_value = None
         entity_id = get_entity_id_by_name(mock_session, "novel_1", "Missing", None)
         self.assertIsNone(entity_id)
+
 
 
 if __name__ == "__main__":

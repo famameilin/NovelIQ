@@ -14,16 +14,16 @@
 from __future__ import annotations
 
 import os
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-load_dotenv()
-
 from src.storage.models import Base
+
+load_dotenv()
 
 _test_engine = None
 
@@ -82,6 +82,10 @@ def setup_test_database(test_database_url: str) -> Generator[None, None, None]:
         "global_context",
         "token_usage",
         "graph_storage",
+        "graph_relations_current",
+        "graph_relation_events",
+        "graph_entity_aliases",
+        "graph_entities",
         "novels",
         "entity_knowledge_graph",
         "entity_aliases",

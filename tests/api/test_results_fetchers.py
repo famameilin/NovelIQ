@@ -1,7 +1,9 @@
+from unittest.mock import MagicMock, patch
+
 from src.api.routes.results_fetchers import (
+    _fetch_character_relations,
     _fetch_characters,
     _fetch_diagnosis,
-    _fetch_character_relations,
     _normalize_arc_scores,
     _normalize_name_list,
     _normalize_text_by_alias_map,
@@ -9,11 +11,9 @@ from src.api.routes.results_fetchers import (
 
 
 class _DummyAnnotationRepo2:
-    def __init__(self, rows):
-        self._rows = rows
+    def __init__(self):
+        self.session = object()
 
-    def fetch_chunk_relations_full(self, run_id):
-        return self._rows
 
 
 class _DummyStatsRepo:
@@ -195,43 +195,49 @@ def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
 
 def test_fetch_character_relations_deduplicates_across_chunks():
     rows = [
-        (1, "贺伯安", "二妈妈", "家族", "强化"),
-        (2, "贺伯安", "二妈妈", "家族", "强化"),
-        (3, "贺伯安", "二妈妈", "家族", "强化"),
-        (4, "贺伯安", "林立果", "盟友", "新建"),
-        (5, "贺伯安", "林立果", "盟友", "强化"),
+        {"from_name": "贺伯安", "to_name": "二妈妈", "type": "家族", "last_seen_chunk": 3},
+        {"from_name": "贺伯安", "to_name": "林立果", "type": "盟友", "last_seen_chunk": 5},
     ]
 
-    annotation_repo = _DummyAnnotationRepo2(rows)
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-    )
+    annotation_repo = _DummyAnnotationRepo2()
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = rows
+
+    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+        )
 
     assert len(result) == 2
 
     rel1 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "二妈妈")
-    assert rel1.chunk_id == 1
+    assert rel1.chunk_id == 3
     assert rel1.type == "家族"
-    assert rel1.change == "强化"
+    assert rel1.change == "汇总"
 
     rel2 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "林立果")
-    assert rel2.chunk_id == 4
+    assert rel2.chunk_id == 5
     assert rel2.type == "盟友"
 
 
-def test_fetch_character_relations_preserves_first_chunk_id():
+
+def test_fetch_character_relations_uses_last_seen_chunk_id():
     rows = [
-        (5, "张三", "李四", "朋友", "新建"),
-        (10, "张三", "李四", "朋友", "强化"),
-        (15, "张三", "李四", "朋友", "强化"),
+        {"from_name": "张三", "to_name": "李四", "type": "朋友", "last_seen_chunk": 15},
     ]
 
-    annotation_repo = _DummyAnnotationRepo2(rows)
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-    )
+    annotation_repo = _DummyAnnotationRepo2()
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = rows
+
+    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+        )
 
     assert len(result) == 1
-    assert result[0].chunk_id == 5
+    assert result[0].chunk_id == 15
+    assert result[0].change == "汇总"
+

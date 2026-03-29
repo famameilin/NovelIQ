@@ -13,22 +13,20 @@
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """
 import sys
-from pathlib import Path
 import uuid
-
-import pytest
+from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.storage.repositories import (
-    ChunkRepository,
-    AnnotationRepository,
-    StatsRepository,
-    RunRepository,
-)
-from src.models.local.schema import ChunkAnnotation
-from src.models.cloud.schema import CloudAnalysis
 from src.chunking.chunker import Chunk
+from src.models.cloud.schema import CloudAnalysis
+from src.models.local.schema import ChunkAnnotation
+from src.storage.repositories import (
+    AnnotationRepository,
+    ChunkRepository,
+    RunRepository,
+    StatsRepository,
+)
 
 
 def _create_chunks(count: int = 3) -> list[Chunk]:

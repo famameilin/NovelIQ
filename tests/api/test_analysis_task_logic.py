@@ -3,17 +3,18 @@
 测试analyze接口多任务判断逻辑
 """
 import sys
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
+
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.api.services.novel_service import NovelService
-from src.api.services.analysis_service import AnalysisService
-from src.api.services.task_manager import TaskManager
 from src.api.exceptions import AnalysisError
+from src.api.services.analysis_service import AnalysisService
+from src.api.services.novel_service import NovelService
+from src.api.services.task_manager import TaskManager
 
 
 class TestNovelServiceTaskLogic(unittest.TestCase):
@@ -30,7 +31,6 @@ class TestNovelServiceTaskLogic(unittest.TestCase):
 
     def test_get_task_counts_by_status_single_task(self):
         """单个任务时正确计数"""
-        novel_id = self.service._novels.__class__.__bases__[0] if False else "test_novel"
         self.service._novels["test_novel"] = {"novel_id": "test_novel", "file_path": "test.txt"}
         self.service._tasks["task1"] = {"task_id": "task1", "novel_id": "test_novel", "status": "completed"}
         
