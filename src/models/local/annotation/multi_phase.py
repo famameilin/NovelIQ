@@ -78,8 +78,6 @@ def _run_phase1(
     text: str,
     alias_map: dict[str, str] | None,
     chunk_id: int | None,
-    prev_chunk_text: str | None,
-    next_chunk_text: str | None,
     novel_title: str | None,
     main_characters: str | None,
     position_pct: float | None,
@@ -93,14 +91,17 @@ def _run_phase1(
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     return annotate_chunk_phase1(
         client=client,
         text=text,
         alias_map=alias_map,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
@@ -313,6 +314,11 @@ def annotate_chunk_multi_phase(
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 character_appearances 参数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: Phase1 不再使用 prev_chunk_text 和 next_chunk_text，仅 Phase2 使用
     """
     parallel = settings.analysis.multi_phase_annotation.parallel
 
@@ -399,6 +405,11 @@ def annotate_chunk_parallel(
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 character_appearances 参数
+
+    修改时间: 2026-03-29
+    修改者: TraeAI
+    任务: simplify-phase1-prompt
+    修改内容: Phase1 不再使用 prev_chunk_text 和 next_chunk_text
     """
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
@@ -409,8 +420,6 @@ def annotate_chunk_parallel(
             text=text,
             alias_map=alias_map,
             chunk_id=chunk_id,
-            prev_chunk_text=prev_chunk_text,
-            next_chunk_text=next_chunk_text,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
@@ -515,8 +524,6 @@ def annotate_chunk_serial(
         text=text,
         alias_map=alias_map,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
