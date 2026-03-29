@@ -23,6 +23,7 @@ from collections import Counter
 from typing import Any
 
 from ..character_metrics import (
+    build_character_graph,
     compute_antagonist_strength_gap,
     compute_average_clustering,
     compute_character_degree_centrality,
@@ -154,21 +155,22 @@ def compute_character_relation_metrics(
 ) -> dict[str, Any]:
     """计算人物关系聚合指标"""
     relation_input = relation_data.relations
+    relation_graph = build_character_graph(relation_input) if relation_input else None
     result: dict[str, Any] = {
-        "network_density": compute_relation_network_density(relation_input),
+        "network_density": compute_relation_network_density(relation_input, graph=relation_graph),
         "antagonist_strength_gap": compute_antagonist_strength_gap(char_data.characters),
-        "average_clustering": compute_average_clustering(relation_input),
-        "num_connected_components": float(compute_number_of_connected_components(relation_input)),
-        "largest_component_size": float(compute_largest_component_size(relation_input)),
+        "average_clustering": compute_average_clustering(relation_input, graph=relation_graph),
+        "num_connected_components": float(compute_number_of_connected_components(relation_input, graph=relation_graph)),
+        "largest_component_size": float(compute_largest_component_size(relation_input, graph=relation_graph)),
         **compute_relation_change_frequency(relation_data.full_relations, total_chunks),
     }
 
     if char_data.protagonist_name:
         result["protagonist_betweenness"] = compute_protagonist_betweenness(
-            relation_input, char_data.protagonist_name
+            relation_input, char_data.protagonist_name, graph=relation_graph
         )
 
-    degree_centrality = compute_character_degree_centrality(relation_input)
+    degree_centrality = compute_character_degree_centrality(relation_input, graph=relation_graph)
     if degree_centrality:
         max_char = max(degree_centrality, key=lambda k: degree_centrality[k] or 0.0)
         result["max_degree_character"] = max_char

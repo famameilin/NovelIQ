@@ -56,19 +56,28 @@ def _merge_relations_for_projection(
 
 
 
-def project_graph_tables(run_id: str, from_chunk: int | None = None, to_chunk: int | None = None, session=None) -> None:
+def project_graph_tables(
+    run_id: str,
+    from_chunk: int | None = None,
+    to_chunk: int | None = None,
+    session=None,
+    rebuild: bool = False,
+) -> None:
     if session is None:
         raise ValueError("session is required for project_graph_tables")
 
     run_repo = RunRepository(session)
-    run = run_repo.get_run(run_id)
-    if run is None:
+    if run_repo.get_run(run_id) is None:
         raise ValueError(f"run not found: {run_id}")
 
     graph_repo = GraphRepository(session)
     state: DisambiguationState = _load_disambig_checkpoint_state(session, run_id)
     checkpoint_meta = load_disambig_checkpoint_metadata(session, run_id)
-    if from_chunk is None:
+    if rebuild:
+        logger.info("graph projection rebuild requested run_id={} to_chunk={}", run_id, to_chunk)
+        graph_repo.reset_graph_tables(run_id)
+        from_chunk = 0
+    elif from_chunk is None:
         from_chunk = (checkpoint_meta.get("last_projected_chunk") or -1) + 1
 
     chunk_characters = list(
@@ -199,9 +208,13 @@ def project_graph_tables(run_id: str, from_chunk: int | None = None, to_chunk: i
 
     affected_pairs: set[tuple[int, int]] = set()
     last_projected_chunk = checkpoint_meta.get("last_projected_chunk")
-    if window_relations:
-        max_window_chunk = max(item.chunk_id for item in window_relations)
-        last_projected_chunk = max(last_projected_chunk or max_window_chunk, max_window_chunk)
+    if to_chunk is not None:
+        last_projected_chunk = max(last_projected_chunk or to_chunk, to_chunk)
+    else:
+        projected_rows = [*chunk_characters, *chunk_dialogues, *window_relations]
+        if projected_rows:
+            max_window_chunk = max(item.chunk_id for item in projected_rows)
+            last_projected_chunk = max(last_projected_chunk or max_window_chunk, max_window_chunk)
 
     projected_count = 0
     pending_count = 0
@@ -322,8 +335,6 @@ def project_graph_tables(run_id: str, from_chunk: int | None = None, to_chunk: i
     for from_entity_id, to_entity_id in affected_pairs:
         graph_repo.refresh_current_relation(run_id, from_entity_id, to_entity_id)
 
-    graph_repo.sync_entity_aliases_to_legacy(run_id, run["novel_id"])
-
     _save_disambig_checkpoint_state(
         session,
         run_id,
@@ -332,10 +343,11 @@ def project_graph_tables(run_id: str, from_chunk: int | None = None, to_chunk: i
     )
     session.commit()
     logger.info(
-        "graph projection completed run_id={} from_chunk={} to_chunk={} window_relations={} retried_pending={} total_relations={} projected={} pending={} failed={} affected_pairs={}",
+        "graph projection completed run_id={} from_chunk={} to_chunk={} rebuild={} window_relations={} retried_pending={} total_relations={} projected={} pending={} failed={} affected_pairs={}",
         run_id,
         from_chunk,
         to_chunk,
+        rebuild,
         len(window_relations),
         max(0, len(chunk_relations) - len(window_relations)),
         len(chunk_relations),

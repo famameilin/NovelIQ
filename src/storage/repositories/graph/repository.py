@@ -3,12 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 
 from src.storage.models import (
-    Entity,
-    EntityAlias,
     GraphEntity,
     GraphEntityAlias,
     GraphRelationCurrent,
@@ -18,6 +16,18 @@ from src.storage.repositories.base import BaseRepository
 
 
 class GraphRepository(BaseRepository["GraphRepository"]):
+    def reset_graph_tables(self, run_id: str) -> None:
+        """
+        清空指定 run 的 graph_* 权威表数据。
+
+        用于在别名归一化规则发生显著变化后执行全量重建，避免旧投影残留。
+        """
+        self.session.execute(delete(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id))
+        self.session.execute(delete(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id))
+        self.session.execute(delete(GraphEntityAlias).where(GraphEntityAlias.run_id == run_id))
+        self.session.execute(delete(GraphEntity).where(GraphEntity.run_id == run_id))
+        self.session.flush()
+
     def get_entity_by_canonical(self, run_id: str, canonical_name: str) -> GraphEntity | None:
         stmt = select(GraphEntity).where(
             GraphEntity.run_id == run_id,
@@ -327,53 +337,52 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             for row in rows
         ]
 
-    def sync_entity_aliases_to_legacy(self, run_id: str, novel_id: str) -> None:
-        entities_by_canonical: dict[str, Entity] = {
-            entity.canonical: entity
-            for entity in self.session.execute(
-                select(Entity).where(Entity.run_id == run_id, Entity.novel_id == novel_id)
-            ).scalars().all()
-        }
-        graph_entities = self.session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars().all()
-        for graph_entity in graph_entities:
-            legacy_entity = entities_by_canonical.get(graph_entity.canonical_name)
-            if legacy_entity is None:
-                legacy_entity = Entity(
-                    novel_id=novel_id,
-                    canonical=graph_entity.canonical_name,
-                    entity_type=graph_entity.entity_type,
-                    first_chunk=graph_entity.first_seen_chunk,
-                    last_chunk=graph_entity.last_seen_chunk,
-                    description=None,
-                    confidence=graph_entity.source_confidence or 1.0,
-                    run_id=run_id,
-                )
-                self.session.add(legacy_entity)
-                self.session.flush()
-                entities_by_canonical[graph_entity.canonical_name] = legacy_entity
-            else:
-                legacy_entity.last_chunk = graph_entity.last_seen_chunk
-                legacy_entity.first_chunk = graph_entity.first_seen_chunk
-                legacy_entity.entity_type = graph_entity.entity_type
+    def fetch_low_confidence_relation_events(
+        self,
+        run_id: str,
+        threshold: float = 0.6,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        events = self.fetch_relation_events(run_id)
+        low_confidence = [
+            event
+            for event in events
+            if event["confidence"] is None or float(event["confidence"]) < threshold
+        ]
+        return low_confidence[:limit] if limit > 0 else low_confidence
 
-        aliases = self.session.execute(select(GraphEntityAlias).where(GraphEntityAlias.run_id == run_id)).scalars().all()
-        for alias in aliases:
-            alias_owner = next((item for item in graph_entities if item.entity_id == alias.entity_id), None)
-            if alias_owner is None:
+    def detect_relation_conflicts(
+        self,
+        run_id: str,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        current_relations = self.fetch_current_relations(run_id, active_only=active_only)
+        pair_map: dict[tuple[int, int], list[dict[str, Any]]] = {}
+        for rel in current_relations:
+            key = tuple(sorted([rel["from_entity_id"], rel["to_entity_id"]]))
+            pair_map.setdefault(key, []).append(rel)
+
+        conflicts: list[dict[str, Any]] = []
+        for (left_id, right_id), relations in pair_map.items():
+            relation_types = {str(item["type"]) for item in relations if item.get("type")}
+            if len(relation_types) < 2:
                 continue
-            legacy_entity = entities_by_canonical.get(alias_owner.canonical_name)
-            if legacy_entity is None or legacy_entity.entity_id is None:
-                continue
-            stmt = (
-                insert(EntityAlias)
-                .values(
-                    entity_id=legacy_entity.entity_id,
-                    alias=alias.alias,
-                    alias_type="graph_mirror" if not alias.is_primary else "canonical",
-                    source_chunk=alias.source_chunk_id,
-                    confirm_count=1,
-                    run_id=run_id,
-                )
-                .on_conflict_do_nothing(constraint="uq_entity_aliases_entity_alias")
+            conflicts.append(
+                {
+                    "entity_pair": (left_id, right_id),
+                    "entity_names": sorted(
+                        {
+                            str(rel_item.get("from_name", left_id))
+                            for rel_item in relations
+                        }
+                        | {
+                            str(rel_item.get("to_name", right_id))
+                            for rel_item in relations
+                        }
+                    ),
+                    "relation_types": sorted(relation_types),
+                    "relation_count": len(relations),
+                    "relation_ids": [item.get("relation_id") for item in relations],
+                }
             )
-            self.session.execute(stmt)
+        return conflicts
