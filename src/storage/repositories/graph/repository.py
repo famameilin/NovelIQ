@@ -68,11 +68,11 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             entity.first_seen_chunk = min(entity.first_seen_chunk or first_seen_chunk, first_seen_chunk)
         if last_seen_chunk is not None:
             entity.last_seen_chunk = max(entity.last_seen_chunk or last_seen_chunk, last_seen_chunk)
-        if primary_role_function:
+        if primary_role_function is not None:
             entity.primary_role_function = primary_role_function
-        if last_emotion_score:
+        if last_emotion_score is not None:
             entity.last_emotion_score = last_emotion_score
-        if last_action:
+        if last_action is not None:
             entity.last_action = last_action
         if source_confidence is not None:
             entity.source_confidence = source_confidence
