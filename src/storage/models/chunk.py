@@ -16,25 +16,15 @@
 本模块定义分块相关的数据表：
 - Chunk: 文本分块表
 - ChunkStyle: 分块风格指标表
-- ChunkCulture: 分块文化指标表
 - ChunkTopic: 分块主题表
-- ChunkEmbedding: 分块嵌入向量表（pgvector）
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
-
-if TYPE_CHECKING:
-    pass
-
-EMBEDDING_DIM = 1536
 
 
 class Chunk(Base):
@@ -128,8 +118,6 @@ class ChunkStyle(Base):
         return f"<ChunkStyle(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
-
-
 class ChunkTopic(Base):
     """
     分块主题表
@@ -165,40 +153,4 @@ class ChunkTopic(Base):
         return f"<ChunkTopic(chunk_id={self.chunk_id}, topic_id={self.topic_id})>"
 
 
-class ChunkEmbedding(Base):
-    """
-    分块嵌入向量表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块的嵌入向量，使用 pgvector 进行语义检索
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
-    """
-
-    __tablename__ = "chunk_embeddings"
-
-    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    embedding_vector: Mapped[list | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
-    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["analysis_runs.run_id"],
-            ondelete="CASCADE",
-        ),
-        Index("idx_chunk_embeddings_run_id", "run_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ChunkEmbedding(chunk_id={self.chunk_id}, run_id={self.run_id})>"
