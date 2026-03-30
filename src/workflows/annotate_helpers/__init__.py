@@ -52,7 +52,7 @@ __all__ = [
     "AnnotationPhaseResult",
     "_init_annotation_clients",
     "_setup_token_usage_callback",
-    "_init_rag_retriever",
+    "_init_disambig_provider",
     "_prepare_chunk_context",
     "_store_annotation_results",
     "_run_incremental_disambiguation_with_state",
