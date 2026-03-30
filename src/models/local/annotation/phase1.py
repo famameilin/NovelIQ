@@ -189,13 +189,18 @@ def execute_phase1_with_retry(
 
     def build_retry_messages() -> list[dict]:
         """构建重试消息"""
-        if handler.state.last_bad_output and handler.state.last_invalid_names:
+        if handler.state.last_bad_output:
             original_user_prompt = messages[-1]["content"]
+            is_repetitive = (
+                handler.state.last_error is not None
+                and handler.state.last_error.__class__.__name__ == "RepetitiveOutputError"
+            )
             retry_prompt = build_retry_prompt(
                 original_user_prompt,
                 handler.state.last_bad_output,
                 handler.state.last_invalid_names,
                 handler.state.last_validation_details,
+                is_repetitive=is_repetitive,
             )
             return messages[:-1] + [{"role": "user", "content": retry_prompt}]
         return messages

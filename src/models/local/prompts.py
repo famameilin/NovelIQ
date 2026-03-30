@@ -30,8 +30,9 @@ ANONYMOUS_DISAMBIG_SYSTEM_PROMPT = settings.prompts.anonymous_disambig
 def build_retry_prompt(
     original_user_prompt: str,
     bad_output: str,
-    invalid_names: list[str],
+    invalid_names: list[str] | None = None,
     validation_details: dict[str, list[str]] | None = None,
+    is_repetitive: bool = False,
 ) -> str:
     """
     构建重试 prompt
@@ -40,14 +41,35 @@ def build_retry_prompt(
     创建者: TraeAI
     任务: code-quality-refactor
 
+    修改时间: 2026-03-30
+    修改者: TraeAI
+    任务: feature/chunk-summary-timeline-only
+    修改内容: 添加 is_repetitive 参数，支持重复输出重试
+
     Args:
         original_user_prompt: 原始用户 prompt
         bad_output: 上次的错误输出
-        invalid_names: 无效人名列表
+        invalid_names: 无效人名列表（可选）
+        is_repetitive: 是否为重复输出错误
 
     Returns:
         重试 prompt
     """
+    if is_repetitive:
+        return f"""{original_user_prompt}
+
+【上次输出有误，请重新标注】
+上次输出存在重复内容，请确保：
+1. 每个字段只出现一次
+2. 不要重复相同的 JSON 结构
+3. 输出简洁、无冗余
+
+上次的错误输出（已截断）：
+{bad_output[:1000]}...
+
+请严格遵守格式要求，输出正确的 JSON。"""
+
+    invalid_names = invalid_names or []
     invalid_names_str = "、".join(invalid_names)
     sections: list[str] = []
     details = validation_details or {}
