@@ -20,6 +20,18 @@ from loguru import logger
 from src.models.local.parser import extract_thinking_unified
 
 
+class RepetitiveOutputError(Exception):
+    """
+    LLM 输出重复异常
+
+    创建时间: 2026-03-30
+    创建者: TraeAI
+    任务: feature/chunk-summary-timeline-only
+    说明: 当 LLM 输出包含重复模式时抛出，触发重试机制
+    """
+    pass
+
+
 def _detect_repetition(content: str, threshold: int = 3000) -> tuple[bool, str | None]:
     """
     检测 LLM 输出是否存在重复模式
@@ -130,6 +142,9 @@ def process_annotation_response(
             phase,
             len(content_clean),
             repeat_pattern,
+        )
+        raise RepetitiveOutputError(
+            f"LLM output contains repetitive pattern: {repeat_pattern}"
         )
 
     if is_cloud:
