@@ -37,7 +37,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     修改内容: 使用函数组合方式重组代码结构，拆分为5个模块：
         - metrics: 全局统计和Token使用统计、云端分析、全局上下文
         - runs: 运行状态和完成度检查
-        - chunks: 情绪曲线、节奏曲线、文化数据
+        - chunks: 分块曲线、文化数据
         - summaries: 分块摘要、角色出场信息
 
     """
@@ -98,6 +98,14 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== chunks 模块方法 ====================
 
+    def insert_chunk_curve(
+        self,
+        run_id: str,
+        rows: Iterable[tuple[int, float, float, float, float, float, float]],
+    ) -> None:
+        """插入分块曲线数据（情绪 + 节奏）"""
+        return chunks.insert_chunk_curve(self.session, run_id, rows)
+
     def insert_emotion_curve(self, run_id: str, rows: Iterable[tuple[int, float, float, float, float]]) -> None:
         """插入情绪曲线数据"""
         return chunks.insert_emotion_curve(self.session, run_id, rows)
@@ -125,6 +133,12 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     def fetch_rhythm_curve_full(self, run_id: str) -> list[tuple[int, float, float]]:
         """获取节奏曲线完整数据（包含 chunk_id）"""
         return chunks.fetch_rhythm_curve_full(self.session, run_id)
+
+    def fetch_chunk_curves_full(
+        self, run_id: str
+    ) -> list[tuple[int, float, float, float, float, float, float]]:
+        """获取分块曲线完整数据（情绪 + 节奏，包含 chunk_id）"""
+        return chunks.fetch_chunk_curves_full(self.session, run_id)
 
     def fetch_emotion_densities(self, run_id: str) -> list[tuple[float, float]]:
         """获取情绪密度数据"""
