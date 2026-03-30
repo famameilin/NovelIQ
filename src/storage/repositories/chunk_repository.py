@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 from src.chunking.chunker import Chunk
 from src.storage.models import Chunk as ChunkModel
 from src.storage.models import ChunkEmbedding
+from src.storage.models import ChunkSummary
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.chunk import (
     ChunkStyleData,
@@ -304,3 +305,21 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             预处理是否完成
         """
         return self.has_chunks(run_id)
+
+    def fetch_chunk_summaries(self, run_id: str) -> list[tuple[int, str]]:
+        """
+        获取指定运行的所有分块摘要
+
+        Args:
+            run_id: 运行ID
+
+        Returns:
+            (chunk_id, summary) 元组列表，按 chunk_id 升序排列
+        """
+        stmt = (
+            select(ChunkSummary.chunk_id, ChunkSummary.summary)
+            .where(ChunkSummary.run_id == run_id)
+            .order_by(ChunkSummary.chunk_id)
+        )
+        result = self.session.execute(stmt)
+        return [(row[0], row[1]) for row in result.fetchall()]

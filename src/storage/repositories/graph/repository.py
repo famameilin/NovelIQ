@@ -386,3 +386,43 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 }
             )
         return conflicts
+
+    def fetch_entities(
+        self,
+        run_id: str,
+        entity_type: str | None = None,
+    ) -> list[GraphEntity]:
+        """
+        获取指定运行的图谱实体（ORM 对象）。
+
+        Args:
+            run_id: 运行ID
+            entity_type: 可选的实体类型过滤（如 "character"）
+
+        Returns:
+            GraphEntity ORM 对象列表
+        """
+        stmt = select(GraphEntity).where(GraphEntity.run_id == run_id)
+        if entity_type is not None:
+            stmt = stmt.where(GraphEntity.entity_type == entity_type)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def fetch_relation_event_models(self, run_id: str) -> list[GraphRelationEvent]:
+        """
+        获取指定运行的关系事件（ORM 对象）。
+
+        与 fetch_relation_events() 不同，本方法返回 ORM 对象而非 dict，
+        适用于需要访问原始属性（如 chunk_id、from_entity_id）的场景。
+
+        Args:
+            run_id: 运行ID
+
+        Returns:
+            GraphRelationEvent ORM 对象列表
+        """
+        stmt = (
+            select(GraphRelationEvent)
+            .where(GraphRelationEvent.run_id == run_id)
+            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
