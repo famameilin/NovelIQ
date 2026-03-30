@@ -111,7 +111,11 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         Returns:
             (chunk_id, text) 元组列表
         """
-        stmt = select(ChunkModel.chunk_id, ChunkModel.text).where(ChunkModel.run_id == run_id).order_by(ChunkModel.chunk_id)
+        stmt = (
+            select(ChunkModel.chunk_id, ChunkModel.text)
+            .where(ChunkModel.run_id == run_id)
+            .order_by(ChunkModel.chunk_id)
+        )
         result = self.session.execute(stmt)
         return [(row[0], row[1]) for row in result.fetchall()]
 
@@ -134,9 +138,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def clear_chunk_topics(self, run_id: str) -> None:
         clear_chunk_topics(self.session, run_id)
 
-    def fetch_chunk_styles_full(
-        self, run_id: str
-    ) -> Sequence[Row]:
+    def fetch_chunk_styles_full(self, run_id: str) -> Sequence[Row]:
         return fetch_chunk_styles_full(self.session, run_id)
 
     def fetch_chunk_cultures_full(self, run_id: str) -> list[tuple[int, float | None]]:
@@ -155,9 +157,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         Returns:
             (total_chunks, total_chars) 元组
         """
-        stmt = select(func.count(), func.sum(func.length(ChunkModel.text))).where(
-            ChunkModel.run_id == run_id
-        )
+        stmt = select(func.count(), func.sum(func.length(ChunkModel.text))).where(ChunkModel.run_id == run_id)
         result = self.session.execute(stmt)
         row = result.fetchone()
         if row is None:

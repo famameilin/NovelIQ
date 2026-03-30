@@ -216,12 +216,12 @@ def _run_incremental_disambiguation_with_state(
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
-    
+
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: disambiguation-state-three-layer
     说明: 使用 DisambiguationState 替代 alias_map
-    
+
     流程：
     1. 从 DB 抓候选名
     2. 用 discovered_names 判断哪些是真新名字
@@ -232,20 +232,20 @@ def _run_incremental_disambiguation_with_state(
     """
     if (current_idx + 1) % checkpoint_interval != 0:
         return state
-    
+
     alias_map_dict = state.get_alias_merges_dict()
     new_names = extract_new_names_from_db(conn, alias_map_dict, run_id, current_chunk_id=chunk_id)
-    
+
     truly_new_names: list[NameCountCandidate] = [
         name for name in new_names if name["name"] not in state.discovered_names
     ]
-    
+
     if not truly_new_names:
         return state
-    
+
     context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
     existing_names = list(state.known_canonical_names)
-    
+
     result = _retry_disambig(
         incremental_disambig_client,
         truly_new_names,
@@ -254,11 +254,11 @@ def _run_incremental_disambiguation_with_state(
         stage_name="incremental disambiguation",
         run_id=run_id,
     )
-    
+
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-    
+
     new_state = apply_disambiguation_decisions(state, result)
-    
+
     if new_state != state:
         logger.debug(
             f"DisambiguationState updated: "
@@ -266,16 +266,14 @@ def _run_incremental_disambiguation_with_state(
             f"{len(new_state.known_canonical_names)} canonicals, "
             f"{len(new_state.alias_merges)} merges"
         )
-        
-        new_relations = _normalize_relations_with_alias_map(
-            result.entity_relations, new_state.get_alias_merges_dict()
-        )
+
+        new_relations = _normalize_relations_with_alias_map(result.entity_relations, new_state.get_alias_merges_dict())
         merged_relations = _merge_relations(list(new_state.pending_relations), new_relations)
-        
+
         new_state = new_state.with_updates(pending_relations=tuple(merged_relations))
-        
+
         _save_disambig_checkpoint_state(conn, run_id, new_state)
-    
+
     return new_state
 
 
@@ -289,12 +287,12 @@ def _run_final_disambiguation_with_state(
 ) -> DisambiguationState:
     """
     执行最终消歧（使用新的三层状态）
-    
+
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: disambiguation-state-three-layer
     说明: 使用 DisambiguationState 替代 alias_map
-    
+
     流程：
     1. 从 checkpoint 加载 state（已在外部完成）
     2. 用 review_status 决定复审候选
@@ -309,12 +307,12 @@ def _run_final_disambiguation_with_state(
     pending_relations = list(state.pending_relations)
     if pending_relations:
         logger.info(f"Found {len(pending_relations)} pending relations from checkpoint, will process them")
-    
+
     existing_names = list(state.known_canonical_names)
-    
+
     if not existing_names:
         return state
-    
+
     raw_all_names = fetch_all_character_names(conn, run_id)
     all_names: list[NameCountCandidate] = []
     for item in raw_all_names:
@@ -327,7 +325,7 @@ def _run_final_disambiguation_with_state(
         except (TypeError, ValueError):
             count = 0
         all_names.append({"name": name, "count": count})
-    
+
     review_status_dict = state.get_review_status_dict()
     alias_map_dict = state.get_alias_merges_dict()
     state_snapshot_for_candidates: DisambigStateSnapshot = {
@@ -344,7 +342,7 @@ def _run_final_disambiguation_with_state(
         state.known_canonical_names,
     )
     candidates = _collect_final_disambiguation_candidates(all_names, alias_map_dict, state_snapshot_for_candidates)
-    
+
     if candidates:
         candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
@@ -367,11 +365,11 @@ def _run_final_disambiguation_with_state(
             entity_relations=[],
             alias_confidence={},
         )
-    
+
     new_state = state
     if result.canonical_decisions:
         new_state = apply_disambiguation_decisions(state, result)
-    
+
     if new_state != state:
         logger.info(
             f"Final disambiguation completed: "
@@ -379,7 +377,7 @@ def _run_final_disambiguation_with_state(
             f"{len(new_state.known_canonical_names)} canonicals, "
             f"{len(new_state.alias_merges)} merges"
         )
-    
+
     ann_repo = AnnotationRepository(conn)
     ann_repo.ensure_canonical_entities(
         run_id,
@@ -394,10 +392,8 @@ def _run_final_disambiguation_with_state(
         len(new_state.known_canonical_names),
         len(new_state.alias_merges),
     )
-    
-    final_relations = _normalize_relations_with_alias_map(
-        result.entity_relations, new_state.get_alias_merges_dict()
-    )
+
+    final_relations = _normalize_relations_with_alias_map(result.entity_relations, new_state.get_alias_merges_dict())
     relations_to_process = _merge_relations(pending_relations, final_relations)
     retryable_relations: list[dict[str, str]] = []
     if relations_to_process:
@@ -411,8 +407,8 @@ def _run_final_disambiguation_with_state(
                 "Final disambig: {} relations left for retry, kept in checkpoint",
                 len(retryable_relations),
             )
-    
+
     new_state = new_state.with_updates(pending_relations=tuple(retryable_relations))
     _save_disambig_checkpoint_state(conn, run_id, new_state)
-    
+
     return new_state

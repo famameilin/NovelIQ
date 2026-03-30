@@ -50,6 +50,7 @@ class AnnotationPhaseConfig:
 
 class ChunkAnnotationMaxRetriesExceededError(Exception):
     """Chunk标注重试次数耗尽异常"""
+
     pass
 
 
@@ -152,13 +153,11 @@ def _init_annotation_phase_with_config(
     if not config.run_id:
         raise ValueError("run_id is required for annotation phase")
 
-    (annotation_client, cloud_annotation_client, incremental_client, full_client) = (
-        _init_annotation_clients(
-            config.analysis_logger,
-            config.annotate_client,
-            config.incremental_disambig_client,
-            config.full_disambig_client,
-        )
+    (annotation_client, cloud_annotation_client, incremental_client, full_client) = _init_annotation_clients(
+        config.analysis_logger,
+        config.annotate_client,
+        config.incremental_disambig_client,
+        config.full_disambig_client,
     )
 
     # 设置 session 用于保存模型交互记录
@@ -174,9 +173,7 @@ def _init_annotation_phase_with_config(
         incremental_client,
         full_client,
     ]
-    _setup_token_usage_callback(
-        config.conn, clients, config.novel_id, annotation_client, run_id=config.run_id
-    )
+    _setup_token_usage_callback(config.conn, clients, config.novel_id, annotation_client, run_id=config.run_id)
 
     alias_keywords = _load_alias_keywords()
 
@@ -314,7 +311,7 @@ def _process_single_chunk(
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
     )
-    
+
     _store_annotation_results(
         conn,
         chunk_id,

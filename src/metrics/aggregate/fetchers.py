@@ -129,8 +129,7 @@ def fetch_relation_data(
     return RelationData(
         relations=[(row["from_name"], row["to_name"]) for row in current_relations],
         full_relations=[
-            (row["from_name"], row["to_name"], row["relation_type"], row["change_type"])
-            for row in relation_events
+            (row["from_name"], row["to_name"], row["relation_type"], row["change_type"]) for row in relation_events
         ],
     )
 

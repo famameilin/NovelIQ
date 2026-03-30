@@ -70,28 +70,20 @@ class AnnotationConfig:
     def __post_init__(self):
         # 由于frozen=True，使用object.__setattr__来设置默认值
         if self.valid_role_functions is None:
-            object.__setattr__(
-                self,
-                "valid_role_functions",
-                ["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
-            )
+            object.__setattr__(self, "valid_role_functions", ["主体", "客体", "发送者", "接收者", "帮助者", "反对者"])
         if self.valid_action_types is None:
-            object.__setattr__(
-                self,
-                "valid_action_types",
-                ["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
-            )
+            object.__setattr__(self, "valid_action_types", ["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"])
         if self.valid_emotion_scores is None:
             object.__setattr__(
                 self,
                 "valid_emotion_scores",
-                ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
+                ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"],
             )
         if self.valid_interpersonal_relation_types is None:
             object.__setattr__(
                 self,
                 "valid_interpersonal_relation_types",
-                ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
+                ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"],
             )
         if self.valid_hierarchical_relation_types is None:
             object.__setattr__(
@@ -108,14 +100,10 @@ class AnnotationConfig:
                     "child_of",
                     "sibling_of",
                     "spouse_of",
-                ]
+                ],
             )
         if self.valid_entity_types is None:
-            object.__setattr__(
-                self,
-                "valid_entity_types",
-                ["character", "group", "organization"]
-            )
+            object.__setattr__(self, "valid_entity_types", ["character", "group", "organization"])
         if self.valid_clue_types is None:
             object.__setattr__(
                 self,
@@ -129,20 +117,12 @@ class AnnotationConfig:
                     "unique_body_marker",
                     "kinship_identity",
                     "naming_scene",
-                ]
+                ],
             )
         if self.valid_event_types is None:
-            object.__setattr__(
-                self,
-                "valid_event_types",
-                ["冲突", "铺垫", "转折"]
-            )
+            object.__setattr__(self, "valid_event_types", ["冲突", "铺垫", "转折"])
         if self.valid_foreshadowing_types is None:
-            object.__setattr__(
-                self,
-                "valid_foreshadowing_types",
-                ["causal", "thematic"]
-            )
+            object.__setattr__(self, "valid_foreshadowing_types", ["causal", "thematic"])
 
 
 # 全局实例

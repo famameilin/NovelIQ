@@ -115,7 +115,7 @@ def ensure_canonical_entities(
     canonical_to_entity_id: dict[str, int] = {}
 
     for canonical in known_canonical_names:
-        entity_type = (entity_types.get(canonical, "character") if entity_types else "character")
+        entity_type = entity_types.get(canonical, "character") if entity_types else "character"
         entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=canonical,
@@ -136,15 +136,15 @@ def apply_alias_merges(
 ) -> None:
     """
     执行文本归一化（不改写 chunk_relations 原始称呼）
-    
+
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: disambiguation-state-three-layer
     说明: 从 update_character_names 拆分，只负责文本归一化
-    
+
     只处理 alias != canonical 的映射。
     注意：chunk_relations 作为关系证据入口，需要保留原始称呼，归一化应在 graph 投影阶段完成。
-    
+
     Args:
         session: 数据库会话
         run_id: 运行ID
@@ -154,27 +154,27 @@ def apply_alias_merges(
     for alias, canonical in alias_merges.items():
         if alias == canonical:
             continue
-        
+
         session.execute(
             update(ChunkCharacter)
             .where(ChunkCharacter.name == alias, ChunkCharacter.run_id == run_id)
             .values(name=canonical)
         )
-        
+
         session.execute(
             update(ChunkDialogue)
             .where(ChunkDialogue.speaker == alias, ChunkDialogue.run_id == run_id)
             .values(speaker=canonical)
         )
-        
+
         session.execute(
             update(CharacterAppearance)
             .where(CharacterAppearance.raw_name == alias, CharacterAppearance.run_id == run_id)
             .values(raw_name=canonical)
         )
-        
+
         correction_count += 1
-    
+
     session.execute(
         delete(ChunkRelation).where(
             ChunkRelation.from_char == ChunkRelation.to_char,

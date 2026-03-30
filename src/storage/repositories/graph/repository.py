@@ -168,7 +168,9 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                     GraphRelationEvent.to_entity_id == to_entity_id,
                 )
                 .order_by(GraphRelationEvent.chunk_id, GraphRelationEvent.relation_event_id)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         if not events:
             return
@@ -239,17 +241,21 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         if run_id is None:
             return []
         start_chunk = max(0, current_chunk_id - lookback)
-        rows = self.session.execute(
-            select(GraphEntity)
-            .where(
-                GraphEntity.run_id == run_id,
-                GraphEntity.last_seen_chunk.is_not(None),
-                GraphEntity.last_seen_chunk >= start_chunk,
-                GraphEntity.last_seen_chunk <= current_chunk_id,
-                GraphEntity.status == "active",
+        rows = (
+            self.session.execute(
+                select(GraphEntity)
+                .where(
+                    GraphEntity.run_id == run_id,
+                    GraphEntity.last_seen_chunk.is_not(None),
+                    GraphEntity.last_seen_chunk >= start_chunk,
+                    GraphEntity.last_seen_chunk <= current_chunk_id,
+                    GraphEntity.status == "active",
+                )
+                .order_by(GraphEntity.last_seen_chunk.desc(), GraphEntity.entity_id.asc())
             )
-            .order_by(GraphEntity.last_seen_chunk.desc(), GraphEntity.entity_id.asc())
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             {
                 "entity_id": row.entity_id,
@@ -316,9 +322,13 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
             ).fetchall()
         }
-        stmt = select(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id).order_by(
-            GraphRelationEvent.chunk_id.desc(),
-            GraphRelationEvent.relation_event_id.desc(),
+        stmt = (
+            select(GraphRelationEvent)
+            .where(GraphRelationEvent.run_id == run_id)
+            .order_by(
+                GraphRelationEvent.chunk_id.desc(),
+                GraphRelationEvent.relation_event_id.desc(),
+            )
         )
         if limit is not None:
             stmt = stmt.limit(limit)
@@ -349,9 +359,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     ) -> list[dict[str, Any]]:
         events = self.fetch_relation_events(run_id)
         low_confidence = [
-            event
-            for event in events
-            if event["confidence"] is None or float(event["confidence"]) < threshold
+            event for event in events if event["confidence"] is None or float(event["confidence"]) < threshold
         ]
         return low_confidence[:limit] if limit > 0 else low_confidence
 
@@ -375,14 +383,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 {
                     "entity_pair": (left_id, right_id),
                     "entity_names": sorted(
-                        {
-                            str(rel_item.get("from_name", left_id))
-                            for rel_item in relations
-                        }
-                        | {
-                            str(rel_item.get("to_name", right_id))
-                            for rel_item in relations
-                        }
+                        {str(rel_item.get("from_name", left_id)) for rel_item in relations}
+                        | {str(rel_item.get("to_name", right_id)) for rel_item in relations}
                     ),
                     "relation_types": sorted(relation_types),
                     "relation_count": len(relations),

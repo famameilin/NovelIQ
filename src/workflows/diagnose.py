@@ -255,6 +255,3 @@ def run_diagnose(
     _log_diagnosis_results(result)
 
     return result
-
-
-

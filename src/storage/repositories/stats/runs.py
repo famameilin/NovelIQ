@@ -36,10 +36,7 @@ def has_aggregated_data(session: Session, run_id: str) -> bool:
         是否有聚合数据
     """
     curve_count = (
-        session.execute(
-            select(func.count()).select_from(ChunkCurve).where(ChunkCurve.run_id == run_id)
-        ).scalar()
-        or 0
+        session.execute(select(func.count()).select_from(ChunkCurve).where(ChunkCurve.run_id == run_id)).scalar() or 0
     )
 
     return curve_count > 0
@@ -57,10 +54,7 @@ def has_topic_data(session: Session, run_id: str) -> bool:
         是否有主题数据
     """
     count = (
-        session.execute(
-            select(func.count()).select_from(ChunkTopic).where(ChunkTopic.run_id == run_id)
-        ).scalar()
-        or 0
+        session.execute(select(func.count()).select_from(ChunkTopic).where(ChunkTopic.run_id == run_id)).scalar() or 0
     )
     return count > 0
 
@@ -77,9 +71,7 @@ def has_diagnosis_data(session: Session, run_id: str) -> bool:
         是否有诊断数据
     """
     count = (
-        session.execute(
-            select(func.count()).select_from(CloudAnalysis).where(CloudAnalysis.run_id == run_id)
-        ).scalar()
+        session.execute(select(func.count()).select_from(CloudAnalysis).where(CloudAnalysis.run_id == run_id)).scalar()
         or 0
     )
     return count > 0
@@ -96,15 +88,10 @@ def is_aggregate_complete(session: Session, run_id: str) -> bool:
     Returns:
         聚合是否完成
     """
-    chunks_count = (
-        session.execute(select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)).scalar() or 0
-    )
+    chunks_count = session.execute(select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)).scalar() or 0
 
     curve_count = (
-        session.execute(
-            select(func.count()).select_from(ChunkCurve).where(ChunkCurve.run_id == run_id)
-        ).scalar()
-        or 0
+        session.execute(select(func.count()).select_from(ChunkCurve).where(ChunkCurve.run_id == run_id)).scalar() or 0
     )
 
     return chunks_count > 0 and curve_count >= chunks_count

@@ -239,9 +239,7 @@ def build_annotation(data: dict[str, Any]) -> ChunkAnnotation:
         cliffhanger=data.get("cliffhanger", False),
         chunk_summary=data.get("chunk_summary", ""),
         has_foreshadowing=has_foreshadowing,
-        foreshadowing_type=_parse_foreshadowing_type(
-            has_foreshadowing, data.get("foreshadowing_type")
-        ),
+        foreshadowing_type=_parse_foreshadowing_type(has_foreshadowing, data.get("foreshadowing_type")),
         foreshadowing_desc=data.get("foreshadowing_desc", ""),
         characters=_parse_characters(data),
         location_appearances=_parse_location_appearances(data),

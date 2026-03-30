@@ -25,11 +25,13 @@ if TYPE_CHECKING:
 
 class IDMappingError(Exception):
     """ID映射相关的异常基类"""
+
     pass
 
 
 class TaskIDNotFoundError(IDMappingError):
     """当task_id找不到对应的run_id时抛出"""
+
     pass
 
 
@@ -140,7 +142,12 @@ def task_id_to_run_id(task_id: str, conn: Connection | Session) -> str:
     from src.storage.models.core import AnalysisRun
 
     pattern = task_id_to_run_id_pattern(task_id)
-    stmt = select(AnalysisRun.run_id).where(AnalysisRun.run_id.like(pattern)).order_by(AnalysisRun.created_at.asc()).limit(1)
+    stmt = (
+        select(AnalysisRun.run_id)
+        .where(AnalysisRun.run_id.like(pattern))
+        .order_by(AnalysisRun.created_at.asc())
+        .limit(1)
+    )
     result = conn.execute(stmt).scalar_one_or_none()
 
     if result is None:

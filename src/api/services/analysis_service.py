@@ -152,13 +152,14 @@ class AnalysisService:
         conn = db_session.connection
 
         run_repo = RunRepository(conn)
-        
+
         existing_run = run_repo.get_run_by_run_id_prefix(task_id)
         if existing_run:
             run_id = existing_run["run_id"]
             logger.info(f"Reusing existing run_id: {run_id} for task_id: {task_id}")
         else:
             import uuid
+
             run_id = f"{task_id}{str(uuid.uuid4())[8:]}"
 
             run_repo.create_run(

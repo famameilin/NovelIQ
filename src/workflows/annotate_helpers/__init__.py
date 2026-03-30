@@ -23,7 +23,6 @@ from .client_init import (
 )
 from .context import (
     ChunkContext,
-    _init_rag_retriever,
     _prepare_chunk_context,
 )
 from .disambiguation import (
@@ -39,7 +38,6 @@ from .phase import (
 )
 from .sentence import (
     _add_identity_clues,
-    _add_prev_summaries,
     _annotate_dialogue_structure,
     _build_sentence_pool,
     _extract_and_save_global_context,
@@ -63,7 +61,6 @@ __all__ = [
     "_run_disambiguation_phase",
     "_build_sentence_pool",
     "_annotate_dialogue_structure",
-    "_add_prev_summaries",
     "_add_identity_clues",
     "_load_alias_keywords",
     "_extract_and_save_global_context",

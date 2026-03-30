@@ -83,9 +83,9 @@ def _dto_to_timeline_node(dto: TimelineNodeDTO) -> TimelineNode:
         is_cliffhanger=dto.is_cliffhanger,
         tension_percentile=dto.tension_percentile,
         node_type=dto.node_type,
-        relation_changes=[
-            _dto_to_relation_change_event(rc) for rc in dto.relation_changes
-        ] if dto.relation_changes else None,
+        relation_changes=[_dto_to_relation_change_event(rc) for rc in dto.relation_changes]
+        if dto.relation_changes
+        else None,
         character_entries=dto.character_entries,
         character_exits=dto.character_exits,
     )
@@ -257,8 +257,7 @@ async def get_timeline(
     api_phases = [_dto_to_timeline_phase(phase) for phase in timeline_phases]
 
     logger.info(
-        f"Timeline generated for novel {novel_id}, task {task_id}: "
-        f"{len(api_nodes)} nodes, {len(api_phases)} phases"
+        f"Timeline generated for novel {novel_id}, task {task_id}: {len(api_nodes)} nodes, {len(api_phases)} phases"
     )
 
     return TimelineResponse(

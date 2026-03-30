@@ -178,7 +178,6 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             for row in graph_rows
         ]
 
-
     def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[tuple[int, str, str, str]]:
         """
         获取伏笔分块
@@ -363,8 +362,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         raw_data = json.loads(result.state_json)
         if not isinstance(raw_data, dict):
             raise ValueError(
-                f"Invalid checkpoint data format for run_id={run_id}: "
-                f"expected dict, got {type(raw_data).__name__}"
+                f"Invalid checkpoint data format for run_id={run_id}: expected dict, got {type(raw_data).__name__}"
             )
 
         known_canonical_names = raw_data.get("known_canonical_names")
@@ -397,15 +395,23 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_graph_summary(self, run_id: str) -> dict[str, Any]:
         graph_repo = GraphRepository(self.session)
-        node_count = self.session.execute(
-            select(func.count()).select_from(GraphEntity).where(GraphEntity.run_id == run_id)
-        ).scalar() or 0
-        edge_count = self.session.execute(
-            select(func.count()).select_from(GraphRelationCurrent).where(
-                GraphRelationCurrent.run_id == run_id,
-                GraphRelationCurrent.is_active.is_(True),
-            )
-        ).scalar() or 0
+        node_count = (
+            self.session.execute(
+                select(func.count()).select_from(GraphEntity).where(GraphEntity.run_id == run_id)
+            ).scalar()
+            or 0
+        )
+        edge_count = (
+            self.session.execute(
+                select(func.count())
+                .select_from(GraphRelationCurrent)
+                .where(
+                    GraphRelationCurrent.run_id == run_id,
+                    GraphRelationCurrent.is_active.is_(True),
+                )
+            ).scalar()
+            or 0
+        )
         core_characters_rows = self.session.execute(
             select(GraphEntity.canonical_name)
             .where(GraphEntity.run_id == run_id)
@@ -434,7 +440,9 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 GraphRelationCurrent.run_id == run_id,
                 GraphRelationCurrent.is_active.is_(True),
             )
-            .order_by(GraphRelationCurrent.support_count.desc(), GraphRelationCurrent.last_seen_chunk.desc().nullslast())
+            .order_by(
+                GraphRelationCurrent.support_count.desc(), GraphRelationCurrent.last_seen_chunk.desc().nullslast()
+            )
             .limit(5)
         ).fetchall()
         entity_name_map = {

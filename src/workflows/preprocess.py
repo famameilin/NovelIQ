@@ -81,12 +81,12 @@ def run_preprocess(
     )
 
     start_time = time.time()
-    
+
     chunk_repo = ChunkRepository(session)
     if chunk_repo.is_preprocess_complete(run_id):
         logger.info(f"preprocess already complete for run_id={run_id}, skipping")
         return 0, 0, 0.0
-    
+
     docs = ingest_path(source_path, metadata_path)
     if not docs:
         logger.warning(f"no documents found source={source_path}")
@@ -103,6 +103,7 @@ def run_preprocess(
 
     # 从配置读取是否启用语义分块
     from src.config import settings
+
     use_semantic = settings.chunking.use_semantic_chunking
     if use_semantic:
         logger.info("启用语义分块")

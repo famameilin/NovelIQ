@@ -75,7 +75,11 @@ def _find_existing_name_mentions(context: str, existing_names: list[str] | None)
 def _has_only_weak_evidence(profile: EvidenceProfile | None) -> bool:
     if profile is None:
         return False
-    return profile.strength == EVIDENCE_STRENGTH_WEAK and not profile.has_original_sentence and not profile.has_identity_clue
+    return (
+        profile.strength == EVIDENCE_STRENGTH_WEAK
+        and not profile.has_original_sentence
+        and not profile.has_identity_clue
+    )
 
 
 def _has_strong_merge_signal(profile: EvidenceProfile | None) -> bool:
@@ -172,21 +176,21 @@ def apply_disambiguation_decisions(
 ) -> DisambiguationState:
     """
     将模型决策应用到状态
-    
+
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: disambiguation-state-three-layer
     说明: 将 canonical_decisions 分流到三层状态
-    
+
     处理逻辑：
     1. A -> A 自映射：加入 discovered_names 和 known_canonical_names，不写入 alias_merges
     2. A -> B 别名合并：A、B 加入 discovered_names，B 加入 known_canonical_names，写入 alias_merges[A] = B
     3. canonical 被撤销时：更新 alias_merges 和 review_status 中的引用
-    
+
     Args:
         state: 当前消歧状态
         result: 模型输出结果（包含 canonical_decisions）
-    
+
     Returns:
         更新后的新状态实例
     """
@@ -201,14 +205,10 @@ def apply_disambiguation_decisions(
         raw_confidence = result.alias_confidence.get(name, "medium")
         confidence = _normalize_disambig_confidence(raw_confidence)
         evidence_profile = result.evidence_profiles.get(name)
-        evidence_strength = _normalize_evidence_strength(
-            evidence_profile.strength if evidence_profile else None
-        )
+        evidence_strength = _normalize_evidence_strength(evidence_profile.strength if evidence_profile else None)
 
         if name == canonical:
-            is_confirmed_canonical = (
-                confidence == DISAMBIG_CONFIDENCE_HIGH and evidence_strength in ("mixed", "strong")
-            )
+            is_confirmed_canonical = confidence == DISAMBIG_CONFIDENCE_HIGH and evidence_strength in ("mixed", "strong")
             if is_confirmed_canonical:
                 new_known_canonical.add(name)
             status_value = DISAMBIG_STATE_RESOLVED if is_confirmed_canonical else DISAMBIG_STATE_REVIEW
@@ -231,27 +231,27 @@ def apply_disambiguation_decisions(
                 proposed_canonical=canonical,
                 evidence_strength=evidence_strength,
             )
-    
+
     old_canonicals = state.known_canonical_names
     new_canonicals = frozenset(new_known_canonical)
     demoted_canonicals = old_canonicals - new_canonicals
-    
+
     if demoted_canonicals:
         logger.info(f"Canonical demotion detected: {demoted_canonicals}")
-        
+
         canonical_replacement: dict[str, str] = {}
         for demoted in demoted_canonicals:
             for alias, target in result.canonical_decisions.items():
                 if alias == demoted and target != demoted:
                     canonical_replacement[demoted] = target
                     break
-        
+
         for demoted, new_target in canonical_replacement.items():
             for i, (alias, target) in enumerate(new_alias_merges):
                 if target == demoted:
                     new_alias_merges[i] = (alias, new_target)
                     logger.debug(f"Updated alias_merges: {alias} -> {new_target} (was {demoted})")
-        
+
         for name, review in list(new_review_status.items()):
             if review.proposed_canonical in demoted_canonicals:
                 new_target = canonical_replacement.get(review.proposed_canonical, name)
@@ -261,21 +261,21 @@ def apply_disambiguation_decisions(
                     proposed_canonical=new_target,
                     evidence_strength=review.evidence_strength,
                 )
-    
+
     final_alias_merges: list[tuple[str, str]] = []
     seen_aliases: set[str] = set()
     for alias, target in new_alias_merges:
         if alias != target and alias not in seen_aliases:
             final_alias_merges.append((alias, target))
             seen_aliases.add(alias)
-    
+
     new_state = state.with_updates(
         discovered_names=frozenset(new_discovered),
         known_canonical_names=frozenset(new_known_canonical),
         alias_merges=frozenset(final_alias_merges),
         review_status=tuple(new_review_status.items()),
     )
-    
+
     validate_state_invariants(new_state)
-    
+
     return new_state

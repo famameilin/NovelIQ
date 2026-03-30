@@ -103,14 +103,12 @@ def execute_phase1_call(
         response_text=content_clean,
         thinking_content=thinking_content,
         duration_ms=duration_ms,
-        model_name=client._config.model if hasattr(client._config, 'model') else None,
+        model_name=client._config.model if hasattr(client._config, "model") else None,
         model_provider="cloud" if is_cloud else "local",
-        session=client._session if hasattr(client, '_session') else None,
+        session=client._session if hasattr(client, "_session") else None,
     )
 
-    client._log_prompt_response(
-        chunk_id, content_clean, thinking_content, extraction, current_messages, text, None
-    )
+    client._log_prompt_response(chunk_id, content_clean, thinking_content, extraction, current_messages, text, None)
 
     result = client._parse_annotation(content_clean)
 
@@ -181,9 +179,15 @@ def execute_phase1_with_retry(
     def operation(local_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ChunkAnnotation:
         """执行单次Phase1调用"""
         result, _ = execute_phase1_call(
-            local_client, text, messages, alias_map, active_entities,
-            chunk_id, retry_messages,
-            run_id=run_id, attempt_number=handler.state.attempt,
+            local_client,
+            text,
+            messages,
+            alias_map,
+            active_entities,
+            chunk_id,
+            retry_messages,
+            run_id=run_id,
+            attempt_number=handler.state.attempt,
         )
         return result
 

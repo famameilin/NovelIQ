@@ -65,7 +65,7 @@ class StatsRepositoryProtocol(Protocol):
             摘要统计字典
         """
         ...
-    
+
     def get_graph_data(self, novel_id: str) -> dict[str, Any]:
         """
         获取图表数据
@@ -77,7 +77,7 @@ class StatsRepositoryProtocol(Protocol):
             图表数据字典
         """
         ...
-    
+
     def get_run_metrics(self, run_id: str) -> dict[str, Any]:
         """
         获取运行指标
@@ -89,7 +89,7 @@ class StatsRepositoryProtocol(Protocol):
             运行指标字典
         """
         ...
-    
+
     def insert_character_stats(self, novel_id: str, stats: list[dict[str, Any]]) -> None:
         """
         插入角色统计
@@ -99,7 +99,7 @@ class StatsRepositoryProtocol(Protocol):
             stats: 统计数据列表
         """
         ...
-    
+
     def insert_relation_stats(self, novel_id: str, stats: list[dict[str, Any]]) -> None:
         """
         插入关系统计
@@ -109,7 +109,7 @@ class StatsRepositoryProtocol(Protocol):
             stats: 统计数据列表
         """
         ...
-    
+
     def insert_dialogue_stats(self, novel_id: str, stats: list[dict[str, Any]]) -> None:
         """
         插入对话统计
@@ -119,7 +119,7 @@ class StatsRepositoryProtocol(Protocol):
             stats: 统计数据列表
         """
         ...
-    
+
     def insert_summary_stats(self, novel_id: str, stats: dict[str, Any]) -> None:
         """
         插入摘要统计
@@ -129,7 +129,7 @@ class StatsRepositoryProtocol(Protocol):
             stats: 统计数据字典
         """
         ...
-    
+
     def insert_graph_data(self, novel_id: str, graph_data: dict[str, Any]) -> None:
         """
         插入图表数据
@@ -139,7 +139,7 @@ class StatsRepositoryProtocol(Protocol):
             graph_data: 图表数据字典
         """
         ...
-    
+
     def insert_run_metrics(self, run_id: str, metrics: dict[str, Any]) -> None:
         """
         插入运行指标
@@ -149,7 +149,7 @@ class StatsRepositoryProtocol(Protocol):
             metrics: 指标数据字典
         """
         ...
-    
+
     def clear_stats(self, novel_id: str) -> None:
         """
         清空统计数据

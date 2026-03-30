@@ -23,9 +23,7 @@ def build_networkx_from_graph_tables(
 
     graph_repo = GraphRepository(session)
     edges = graph_repo.fetch_current_relations(run_id, active_only=active_only)
-    entities = session.execute(
-        select(GraphEntity).where(GraphEntity.run_id == run_id)
-    ).scalars().all()
+    entities = session.execute(select(GraphEntity).where(GraphEntity.run_id == run_id)).scalars().all()
 
     graph: nx.Graph = nx.DiGraph() if directed else nx.Graph()
 
