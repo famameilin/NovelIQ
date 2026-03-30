@@ -15,14 +15,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 
 from src.metrics.narrative_metrics import find_global_peak
-
-if TYPE_CHECKING:
-    pass
 
 # Literal 类型定义
 TimelineNodeType = Literal["plot", "character_entry", "character_exit", "relation_change"]
@@ -488,10 +485,8 @@ def convert_to_timeline_phases(phases: list[NarrativePhase]) -> list[TimelinePha
     """
     result: list[TimelinePhaseDTO] = []
     for p in phases:
-        # 类型转换检查
-        name: TimelinePhaseName
         if p.name in ("引入期", "发展期", "高潮期", "收束期"):
-            name = p.name  # type: ignore[assignment]
+            name = cast(TimelinePhaseName, p.name)
         else:
             name = "引入期"  # fallback
         result.append(

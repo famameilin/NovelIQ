@@ -217,10 +217,11 @@ def _fetch_timeline_data(
             major_character_entries,
             relation_break_events,
         ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
-    except ValueError:
+    except ValueError as e:
+        logger.warning(f"No chunk data for run {run_id}: {e}")
         return None
     except Exception as e:
-        logger.warning(f"Failed to build timeline data: {e}")
+        logger.error(f"Unexpected error building timeline for run {run_id}: {e}")
         return None
 
     selected_nodes = select_timeline_nodes(

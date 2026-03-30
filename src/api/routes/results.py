@@ -148,7 +148,9 @@ async def get_results(
 
     # 验证 run 是否属于该 novel
     if run.get("novel_id") != novel_id:
-        raise NovelNotFoundError(f"任务 {task_id} 不属于小说 {novel_id}")
+        # 使用 run_id 的前8位作为 task_id 确保错误消息准确
+        actual_task_id = run_id[:8] if len(run_id) >= 8 else run_id
+        raise NovelNotFoundError(f"任务 {actual_task_id} 不属于小说 {novel_id}")
 
     VALID_EXPORT_STATUSES = ("completed", "aggregated", "diagnosed")
     if run["status"] not in VALID_EXPORT_STATUSES:

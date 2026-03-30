@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db_session
+from src.api.dependencies import get_db_session, get_novel_service
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ErrorResponse
 from src.api.models.timeline import (
@@ -30,7 +30,6 @@ from src.api.models.timeline import (
     TimelinePhase,
     TimelineResponse,
 )
-from src.api.routes.novels import get_novel_service
 from src.api.services.novel_service import NovelService
 from src.metrics.timeline_metrics import (
     RelationChangeEventDTO,
@@ -187,7 +186,13 @@ async def get_timeline(
 
     novel_name = novel_info.get("filename", "未知")
 
-    # 2. 获取 run_id (task_id 是 run_id 的前 8 位)
+    # 2. 获取运行记录
+    # 注意：此处使用 get_run_by_run_id_prefix 而非 resolve_run_id 依赖注入，
+    # 原因是 timeline 路由需要额外的数据：
+    #   - novel_id: 验证任务是否属于该小说
+    #   - status: 检查分析是否完成
+    # resolve_run_id 仅返回 run_id 字符串，无法获取这些额外字段。
+    # results.py 的路由只需要 run_id，所以使用 resolve_run_id 依赖注入。
     run_repo = RunRepository(session)
     run_data = run_repo.get_run_by_run_id_prefix(task_id)
     if run_data is None:
