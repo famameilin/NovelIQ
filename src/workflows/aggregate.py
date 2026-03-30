@@ -225,9 +225,6 @@ def run_aggregate(
 
     emotion_rows, raw_densities = compute_emotion_curve(chunk_texts, pos_terms, neg_terms)
 
-    stats_repo.insert_emotion_curve(run_id, emotion_rows)
-    logger.info(f"inserted {len(emotion_rows)} emotion curve rows")
-
     chunk_annotations = ann_repo.fetch_chunk_annotations(run_id)
     chunk_styles = chunk_repo.fetch_chunk_styles(run_id)
 
@@ -238,8 +235,19 @@ def run_aggregate(
     tension_composite_values = _compute_tension_composite(tension_signals)
     rhythm_rows = compute_rhythm_curve(chunk_texts, fight_terms, tension_composite_values)
 
-    stats_repo.insert_rhythm_curve(run_id, rhythm_rows)
-    logger.info(f"inserted {len(rhythm_rows)} rhythm curve rows")
+    chunk_curves = list(zip(
+        [r[0] for r in emotion_rows],
+        [r[1] for r in emotion_rows],
+        [r[2] for r in emotion_rows],
+        [r[3] for r in emotion_rows],
+        [r[4] for r in emotion_rows],
+        [r[0] for r in rhythm_rows],
+        [r[1] for r in rhythm_rows],
+        strict=True,
+    ))
+
+    stats_repo.insert_chunk_curve(run_id, chunk_curves)
+    logger.info(f"inserted {len(chunk_curves)} chunk curve rows")
 
     global_stats = compute_global_stats(session, raw_densities, tension_composite_values, chunk_texts)
 
@@ -257,13 +265,12 @@ def run_aggregate(
 
     elapsed = time.time() - start_time
     logger.info(
-        f"aggregate completed chunks={total_chunks} emotion_rows={len(emotion_rows)} rhythm_rows={len(rhythm_rows)} time={elapsed:.2f}s"
+        f"aggregate completed chunks={total_chunks} chunk_curves={len(chunk_curves)} time={elapsed:.2f}s"
     )
     logger.info("\n=== Aggregate Statistics ===")
     logger.info(f"Total chunks: {total_chunks}")
-    logger.info(f"Emotion curve rows: {len(emotion_rows)}")
-    logger.info(f"Rhythm curve rows: {len(rhythm_rows)}")
+    logger.info(f"Chunk curve rows: {len(chunk_curves)}")
     logger.info(f"Global stats: {len(global_stats)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
-    return total_chunks, len(emotion_rows), len(rhythm_rows)
+    return total_chunks, len(chunk_curves), len(chunk_curves)
 

@@ -230,11 +230,6 @@ class CultureStats(BaseModel):
     imagery_density: float | None = None
 
 
-class ChunkCulture(BaseModel):
-    chunk_id: int
-    imagery_lexicon_density: float | None = None
-
-
 class TopicInfo(BaseModel):
     topic_id: int
     words: list[str]
@@ -280,7 +275,6 @@ class NovelResultsResponse(BaseModel):
     character_stats: CharacterStatsAggregate | None = None
     style_stats: StyleStats | None = None
     culture_stats: CultureStats | None = None
-    chunk_cultures: list[ChunkCulture] = []
 
 
 class ErrorResponse(BaseModel):

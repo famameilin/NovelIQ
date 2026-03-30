@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -112,6 +112,9 @@ class Level3VectorEvidence:
 
     def is_available(self) -> bool:
         return False
+
+    def search_similar_entities(self, sentence: str) -> list[dict[str, str]]:
+        return []
 
 
 class RAGRetriever:
