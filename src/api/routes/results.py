@@ -43,7 +43,6 @@ from src.api.routes.results_fetchers import (
 )
 from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import (
-    _fetch_timeline_data,
     fetch_all_results_data,
 )
 from src.config import settings
@@ -160,7 +159,8 @@ async def get_results(
         run = run_repo.get_run(run_id)
         if not run:
             raise NovelNotFoundError(f"运行记录不存在: {run_id}")
-        if run["status"] != "completed":
+        VALID_EXPORT_STATUSES = ("completed", "aggregated", "diagnosed")
+        if run["status"] not in VALID_EXPORT_STATUSES:
             raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
 
     # 使用SQLAlchemy session直接查询数据
@@ -428,48 +428,4 @@ async def get_culture_stats(
         conn.close()
 
 
-@router.get("/{novel_id}/timeline")
-async def get_timeline_from_results(
-    novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    include_curve: bool = Query(False, description="是否包含张力曲线数据"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    """
-    获取叙事时间轴数据（Results 接口风格）
 
-    与 GET /api/novels/{novel_id}/timeline 功能相同，但使用 Results 接口的连接方式
-    便于与 results 其他接口保持一致的调用模式
-
-    Args:
-        novel_id: 小说ID
-        task_id: 分析任务ID（8位短UUID）
-        include_curve: 是否包含完整的张力曲线数据（默认 false，只返回节点和阶段）
-
-    Returns:
-        Timeline 数据，包含 phases, nodes, 可选 tension_curve
-    """
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        annotation_repo = AnnotationRepository(conn)
-        chunk_repo = ChunkRepository(conn)
-        stats_repo = StatsRepository(conn)
-
-        timeline_data = _fetch_timeline_data(
-            run_id=run_id,
-            session=conn,
-            chunk_repo=chunk_repo,
-            annotation_repo=annotation_repo,
-            stats_repo=stats_repo,
-        )
-
-        if timeline_data is None:
-            return {}
-
-        # 根据 include_curve 参数决定是否返回张力曲线
-        if not include_curve:
-            timeline_data.pop("tension_curve", None)
-
-        return timeline_data
-    finally:
-        conn.close()

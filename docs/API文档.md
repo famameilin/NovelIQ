@@ -7,16 +7,11 @@
 ### 服务启动
 
 ```bash
-# 方式一：使用模块启动（推荐，带端口占用检测）
+# 启动服务（带端口占用检测）
 python -m src.api.main --host 0.0.0.0 --port 8000
-
-# 方式二：使用启动脚本（带端口占用检测）
-python scripts/run_api.py --port 8000
 
 # 开发模式（支持热重载）
 python -m src.api.main --reload
-# 或
-python scripts/run_api.py --reload
 
 # 指定其他端口
 python -m src.api.main --port 8001
@@ -29,7 +24,7 @@ python -m src.api.main --port 8001
 | --port | 8000 | 监听端口 |
 | --reload | False | 启用开发模式自动重载 |
 
-**端口占用检测**: 使用 `python -m src.api.main` 或 `python scripts/run_api.py` 启动时，会自动检测端口是否被占用，如果被占用会显示友好的错误提示并退出。
+**端口占用检测**: 使用 `python -m src.api.main` 启动时，会自动检测端口是否被占用，如果被占用会显示友好的错误提示并退出。
 
 ### 在线文档
 
@@ -46,19 +41,19 @@ python -m src.api.main --port 8001
 |------|------|------|
 | POST | `/api/novels/upload` | 上传小说文件 |
 | GET | `/api/novels/` | 列出所有小说 |
-| DELETE | `/api/novels/{id}` | 删除小说 |
+| DELETE | `/api/novels/{novel_id}` | 删除小说 |
 | POST | `/api/novels/batch-delete` | 批量删除小说 |
 
 ### 2.2 分析任务接口
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/api/novels/{id}/analyze` | 启动分析任务 |
-| POST | `/api/novels/{id}/reanalyze` | 重新分析 |
-| GET | `/api/novels/{id}/status` | 查询分析进度 |
-| GET | `/api/novels/{id}/tasks` | 获取所有分析任务 |
-| DELETE | `/api/novels/{id}/tasks/{task_id}` | 删除特定分析任务 |
-| POST | `/api/novels/{id}/tasks/batch-delete` | 批量删除分析任务 |
+| POST | `/api/novels/{novel_id}/analyze` | 启动分析任务 |
+| POST | `/api/novels/{novel_id}/reanalyze` | 重新分析 |
+| GET | `/api/novels/{novel_id}/status` | 查询分析进度 |
+| GET | `/api/novels/{novel_id}/tasks` | 获取所有分析任务 |
+| DELETE | `/api/novels/{novel_id}/tasks/{task_id}` | 删除特定分析任务 |
+| POST | `/api/novels/{novel_id}/tasks/batch-delete` | 批量删除分析任务 |
 
 ### ID 体系说明
 
@@ -85,26 +80,33 @@ python -m src.api.main --port 8001
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/api/novels/{id}/results?task_id={task_id}` | 导出完整结果（复盘/测试用） |
-| GET | `/api/novels/{id}/emotion-curve?task_id={task_id}` | 获取情感曲线 |
-| GET | `/api/novels/{id}/rhythm-curve?task_id={task_id}` | 获取节奏曲线 |
-| GET | `/api/novels/{id}/characters?task_id={task_id}` | 获取人物统计 |
-| GET | `/api/novels/{id}/topics?task_id={task_id}` | 获取主题分布 |
-| GET | `/api/novels/{id}/diagnosis?task_id={task_id}` | 获取云端诊断 |
+| GET | `/api/novels/{novel_id}/results?task_id={task_id}` | 导出完整结果（复盘/测试用） |
+| GET | `/api/novels/{novel_id}/emotion-curve?task_id={task_id}` | 获取情感曲线 |
+| GET | `/api/novels/{novel_id}/rhythm-curve?task_id={task_id}` | 获取节奏曲线 |
+| GET | `/api/novels/{novel_id}/characters?task_id={task_id}` | 获取人物统计 |
+| GET | `/api/novels/{novel_id}/topics?task_id={task_id}` | 获取主题分布 |
+| GET | `/api/novels/{novel_id}/diagnosis?task_id={task_id}` | 获取云端诊断 |
+| GET | `/api/novels/{novel_id}/graph?task_id={task_id}` | 获取知识图谱快照 |
 
-**注意**：所有结果查询接口都需要提供 `task_id` 参数来指定要查询的分析任务。
-
-### 2.4 聚合指标接口
+### 2.4 叙事时间轴接口
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/api/novels/{id}/metrics/narrative-structure?task_id={task_id}` | 获取叙事结构指标 |
-| GET | `/api/novels/{id}/metrics/emotion-stats?task_id={task_id}` | 获取情感统计指标 |
-| GET | `/api/novels/{id}/metrics/character-stats?task_id={task_id}` | 获取人物统计指标 |
-| GET | `/api/novels/{id}/metrics/style-stats?task_id={task_id}` | 获取风格统计指标 |
-| GET | `/api/novels/{id}/metrics/culture-stats?task_id={task_id}` | 获取文化统计指标 |
+| GET | `/api/novels/{novel_id}/timeline?task_id={task_id}` | 获取叙事时间轴 |
 
-### 2.5 系统接口
+**注意**：所有结果查询接口都需要提供 `task_id` 参数来指定要查询的分析任务。
+
+### 2.5 聚合指标接口
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/novels/{novel_id}/metrics/narrative-structure?task_id={task_id}` | 获取叙事结构指标 |
+| GET | `/api/novels/{novel_id}/metrics/emotion-stats?task_id={task_id}` | 获取情感统计指标 |
+| GET | `/api/novels/{novel_id}/metrics/character-stats?task_id={task_id}` | 获取人物统计指标 |
+| GET | `/api/novels/{novel_id}/metrics/style-stats?task_id={task_id}` | 获取风格统计指标 |
+| GET | `/api/novels/{novel_id}/metrics/culture-stats?task_id={task_id}` | 获取文化统计指标 |
+
+### 2.6 系统接口
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
@@ -156,7 +158,7 @@ python -m src.api.main --port 8001
 
 ---
 
-#### DELETE /api/novels/{id}
+#### DELETE /api/novels/{novel_id}
 
 删除指定小说及其分析数据。
 
@@ -218,7 +220,7 @@ python -m src.api.main --port 8001
 
 ### 3.2 分析任务
 
-#### POST /api/novels/{id}/analyze
+#### POST /api/novels/{novel_id}/analyze
 
 启动或继续分析任务。
 
@@ -288,7 +290,7 @@ python -m src.api.main --port 8001
 
 ---
 
-#### POST /api/novels/{id}/reanalyze
+#### POST /api/novels/{novel_id}/reanalyze
 
 重新分析已上传的小说（强制创建新任务）。
 
@@ -301,8 +303,7 @@ python -m src.api.main --port 8001
   "force_topic_model": false,
   "force_diagnose": false,
   "num_topics": 25,
-  "label": "v2",
-  "use_semantic_chunking": false
+  "label": "v2"
 }
 ```
 
@@ -315,7 +316,6 @@ python -m src.api.main --port 8001
 | force_diagnose | bool | false | 强制重新诊断 |
 | num_topics | int | 25 | 主题数量 |
 | label | string | null | 分析版本标签 |
-| use_semantic_chunking | bool | false | 是否启用语义分块 |
 
 **响应示例**:
 ```json
@@ -333,7 +333,7 @@ python -m src.api.main --port 8001
 
 ---
 
-#### GET /api/novels/{id}/tasks
+#### GET /api/novels/{novel_id}/tasks
 
 获取小说的所有分析任务列表。
 
@@ -358,7 +358,7 @@ python -m src.api.main --port 8001
 
 ---
 
-#### DELETE /api/novels/{id}/tasks/{task_id}
+#### DELETE /api/novels/{novel_id}/tasks/{task_id}
 
 删除特定分析任务。
 
@@ -375,7 +375,7 @@ python -m src.api.main --port 8001
 
 ---
 
-#### POST /api/novels/{id}/tasks/batch-delete
+#### POST /api/novels/{novel_id}/tasks/batch-delete
 
 批量删除分析任务。
 
@@ -423,7 +423,7 @@ python -m src.api.main --port 8001
 
 ---
 
-#### GET /api/novels/{id}/status
+#### GET /api/novels/{novel_id}/status
 
 查询分析任务进度。
 
@@ -469,7 +469,7 @@ python -m src.api.main --port 8001
 
 ### 3.3 结果查询
 
-#### GET /api/novels/{id}/results
+#### GET /api/novels/{novel_id}/results
 
 📋 **复盘与测试专用接口**
 
@@ -529,7 +529,7 @@ GET /api/novels/10960c77/results?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{id}/emotion-curve
+#### GET /api/novels/{novel_id}/emotion-curve
 
 获取情感曲线数据。
 
@@ -558,7 +558,7 @@ GET /api/novels/10960c77/emotion-curve?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{id}/rhythm-curve
+#### GET /api/novels/{novel_id}/rhythm-curve
 
 获取节奏曲线数据。
 
@@ -585,7 +585,7 @@ GET /api/novels/10960c77/rhythm-curve?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{id}/characters
+#### GET /api/novels/{novel_id}/characters
 
 获取人物统计数据。
 
@@ -605,15 +605,34 @@ GET /api/novels/10960c77/characters?task_id=a1b2c3d4
   {
     "name": "主角名",
     "appearance_count": 35,
-    "role_function": "protagonist",
+    "dominant_role_function": "protagonist",
+    "role_function_distribution": {
+      "protagonist": 30,
+      "helper": 5
+    },
+    "dominant_role_ratio": 0.86,
+    "protagonist_score": 0.95,
+    "is_protagonist": true,
     "avg_emotion_score": -0.83
   }
 ]
 ```
 
+**字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| name | str | 角色名称 |
+| appearance_count | int | 出场次数 |
+| dominant_role_function | str | 主导角色功能（如 protagonist/antagonist/helper 等） |
+| role_function_distribution | dict | 角色功能分布统计 |
+| dominant_role_ratio | float | 主导角色占比 |
+| protagonist_score | float | 主角得分（综合评估） |
+| is_protagonist | bool | 是否为主角 |
+| avg_emotion_score | float | 平均情感得分 |
+
 ---
 
-#### GET /api/novels/{id}/topics
+#### GET /api/novels/{novel_id}/topics
 
 获取主题分布数据。
 
@@ -640,7 +659,7 @@ GET /api/novels/10960c77/topics?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{id}/diagnosis
+#### GET /api/novels/{novel_id}/diagnosis
 
 获取云端诊断结果。
 
@@ -658,7 +677,7 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 ```json
 {
   "foreshadow_rate": 0.6,
-  "arc_scores": [8.0, 7.0, 6.0],
+  "arc_scores": {"主角A": 8.0, "主角B": 7.0},
   "narrative_type": "寓言",
   "topic_labels": ["抗争", "宿命"],
   "diagnosis": "该叙事以寓言形式探索人类面对困境的成长历程...",
@@ -669,15 +688,34 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
   "common_people_dignity": 4,
   "dignity_reason": "...",
   "cultural_depth_score": 4,
-  "cultural_depth_reason": "传统文化词汇深度参与叙事，儒家伦理观念推动主角行为选择..."
+  "cultural_depth_reason": "传统文化词汇深度参与叙事，儒家伦理观念推动主角行为选择...",
+  "narrative_arc_type": "成长型",
+  "protagonist": "主角名",
+  "main_characters": ["主角A", "主角B", "配角C"],
+  "core_cast": ["主角A", "主角B"]
 }
 ```
 
-**新增字段说明**:
+**字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| cultural_depth_score | int | 文化内涵真实性评分（0-5分），判断传统文化词汇是核心叙事逻辑还是背景装饰 |
-| cultural_depth_reason | str | 评分说明，引用具体段落或情节 |
+| foreshadow_rate | float | 伏笔兑现率（0-1） |
+| arc_scores | dict[str, float] | 各角色弧线得分 |
+| narrative_type | str | 叙事类型 |
+| topic_labels | list[str] | 主题标签 |
+| diagnosis | str | 诊断分析文本 |
+| value_logic_type | str | 价值逻辑类型 |
+| value_logic_reason | str | 价值逻辑说明 |
+| power_stance_score | int | 权力立场评分（0-5） |
+| power_stance_reason | str | 权力立场说明 |
+| common_people_dignity | int | 平民尊严评分（0-5） |
+| dignity_reason | str | 尊严评分说明 |
+| cultural_depth_score | int | 文化内涵真实性评分（0-5分） |
+| cultural_depth_reason | str | 评分说明 |
+| narrative_arc_type | str | 叙事弧线类型 |
+| protagonist | str | 主角名称 |
+| main_characters | list[str] | 主要角色列表 |
+| core_cast | list[str] | 核心演员列表 |
 
 **实体关系数据**:
 
@@ -700,9 +738,88 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 
 ---
 
-### 3.4 聚合指标
+#### GET /api/novels/{novel_id}/graph
 
-#### GET /api/novels/{id}/metrics/narrative-structure
+获取知识图谱快照。
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| task_id | str | 是 | 分析任务ID |
+
+**响应示例**:
+```json
+{
+  "nodes": [
+    {"id": "节点1", "type": "character"},
+    {"id": "节点2", "type": "organization"}
+  ],
+  "edges": [
+    {"source": "节点1", "target": "节点2", "relation": "belongs_to"}
+  ]
+}
+```
+
+---
+
+### 3.4 叙事时间轴
+
+#### GET /api/novels/{novel_id}/timeline
+
+获取叙事时间轴数据。
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| task_id | str | 是 | 分析任务ID |
+| include_curve | bool | 否 | 是否包含张力曲线数据（默认 false） |
+| max_level | int | 否 | 显示重要性级别 ≤ 此值的节点（默认 3，范围 1-3） |
+
+**响应示例**:
+```json
+{
+  "meta": {
+    "novel_id": "novel_001",
+    "novel_name": "重明传",
+    "total_chunks": 500
+  },
+  "phases": [
+    {"name": "引入期", "start": 1, "end": 75, "ratio": 0.15},
+    {"name": "发展期", "start": 76, "end": 350, "ratio": 0.55},
+    {"name": "高潮期", "start": 351, "end": 420, "ratio": 0.14},
+    {"name": "收束期", "start": 421, "end": 500, "ratio": 0.16}
+  ],
+  "nodes": [
+    {
+      "chunk_id": 1,
+      "progress": 0.0,
+      "importance_score": 6.0,
+      "level": 1,
+      "event": "贺重明在宗门试炼中展露天赋",
+      "characters": ["贺重明", "长老"],
+      "is_pivot": false,
+      "is_cliffhanger": false,
+      "tension_percentile": 45,
+      "node_type": "character_entry",
+      "relation_changes": null,
+      "character_entries": ["贺重明"],
+      "character_exits": null
+    }
+  ],
+  "tension_curve": null
+}
+```
+
+**max_level 说明**:
+- 1: 仅显示重要节点
+- 2: 显示重要 + 较重要节点
+- 3: 显示全部节点
+
+---
+
+### 3.6 聚合指标
+
+#### GET /api/novels/{novel_id}/metrics/narrative-structure
 
 获取叙事结构聚合指标。
 
@@ -731,13 +848,18 @@ GET /api/novels/10960c77/metrics/narrative-structure?task_id=a1b2c3d4
     "铺垫": 0.33,
     "日常": 0.26
   },
-  "cliffhanger_rate": 0.29
+  "cliffhanger_rate": 0.29,
+  "climax_count": 3,
+  "climax_positions": [0.25, 0.65, 0.85],
+  "climax_heights": [0.8, 0.9, 0.95],
+  "peak_escalation": "rising",
+  "dominant_climax_pos": 0.85
 }
 ```
 
 ---
 
-#### GET /api/novels/{id}/metrics/emotion-stats
+#### GET /api/novels/{novel_id}/metrics/emotion-stats
 
 获取情感统计聚合指标。
 
@@ -771,7 +893,7 @@ GET /api/novels/10960c77/metrics/emotion-stats?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{id}/metrics/character-stats
+#### GET /api/novels/{novel_id}/metrics/character-stats
 
 获取人物统计聚合指标。
 
@@ -790,14 +912,13 @@ GET /api/novels/10960c77/metrics/character-stats?task_id=a1b2c3d4
 {
   "network_density": 0.32,
   "protagonist_betweenness": 0.23,
-  "max_degree_character": "贺重明",
-  "max_degree_value": 0.85,
   "degree_centrality": {
     "贺重明": 0.85,
     "侯飞白": 0.72,
     "林立果": 0.65
   },
-  "greimas_coverage": {
+  "greimas_coverage": 0.73,
+  "function_coverage_distribution": {
     "protagonist": 0.47,
     "antagonist": 0.08,
     "helper": 0.09,
@@ -810,7 +931,7 @@ GET /api/novels/10960c77/metrics/character-stats?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{id}/metrics/style-stats
+#### GET /api/novels/{novel_id}/metrics/style-stats
 
 获取风格统计聚合指标。
 
@@ -864,7 +985,7 @@ GET /api/novels/10960c77/metrics/style-stats?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{id}/metrics/culture-stats
+#### GET /api/novels/{novel_id}/metrics/culture-stats
 
 获取文化统计聚合指标。
 
@@ -881,25 +1002,22 @@ GET /api/novels/10960c77/metrics/culture-stats?task_id=a1b2c3d4
 **响应示例**:
 ```json
 {
-  "confucian_density": 0.001,
-  "taoist_density": 0.002,
-  "buddhist_density": 0.001,
-  "folk_density": 0.003,
-  "allusion_density": 0.005,
   "idiom_density": 0.69,
   "classical_sentence_ratio": 0.0,
   "imagery_density": 0.012
 }
 ```
 
-**新增字段说明**:
+**字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| idiom_density | float | 成语密度 |
+| classical_sentence_ratio | float | 文言句式比例 |
 | imagery_density | float | 整书级古典意象字符密度（按全文字符占比统计，不受 chunk 切分影响） |
 
 ---
 
-## 四、错误响应
+## 五、错误响应
 
 所有错误响应遵循统一格式：
 
@@ -922,14 +1040,14 @@ GET /api/novels/10960c77/metrics/culture-stats?task_id=a1b2c3d4
 
 ---
 
-## 五、结果文件存储
+## 六、结果文件存储
 
-调用 `GET /api/novels/{id}/results` 接口后，结果文件存储在：
+调用 `GET /api/novels/{novel_id}/results` 接口后，结果文件存储在：
 
 ```
-log/results/
-├── novel_123_重明传.json
-├── novel_456_人祖传.json
+outputs/
+├── a1b2c3d4.json
+├── b2c3d4e5.json
 └── ...
 ```
 
@@ -937,11 +1055,11 @@ log/results/
 
 ```json
 {
+  "task_id": "a1b2c3d4",
   "novel_id": "novel_123",
   "novel_name": "重明传",
   "generated_at": "2024-03-08T10:30:00",
   "total_chunks": 42,
-  "total_chars": 21451,
   "emotion_curve": [...],
   "rhythm_curve": [...],
   "characters": [...],
@@ -950,6 +1068,7 @@ log/results/
   "chunk_styles": [...],
   "chunk_annotations": [...],
   "character_relations": [...],
+  "hierarchical_relations": [...],
   "global_stats": {...},
   "chunk_cultures": [...],
   "aggregate_metrics": {
@@ -958,7 +1077,11 @@ log/results/
     "character_stats": {...},
     "style_stats": {...},
     "culture_stats": {...}
-  }
+  },
+  "token_usage_stats": {...},
+  "graph_summary": {...},
+  "graph_quality_report": {...},
+  "timeline": {...}
 }
 ```
 
@@ -976,7 +1099,7 @@ log/results/
 
 ---
 
-## 六、使用示例
+## 七、使用示例
 
 ### cURL 示例
 
@@ -993,19 +1116,22 @@ curl -X POST http://localhost:8000/api/novels/{novel_id}/reanalyze \
   -d '{"label": "修正版", "num_topics": 30}'
 
 # 查询状态
-curl http://localhost:8000/api/novels/{novel_id}/status
+curl "http://localhost:8000/api/novels/{novel_id}/status?task_id={task_id}"
 
-# 获取所有分析版本
-curl http://localhost:8000/api/novels/{novel_id}/analyses
+# 获取所有分析任务
+curl http://localhost:8000/api/novels/{novel_id}/tasks
 
-# 删除特定分析版本
-curl -X DELETE http://localhost:8000/api/novels/{novel_id}/analyses/{analysis_id}
+# 删除特定分析任务
+curl -X DELETE http://localhost:8000/api/novels/{novel_id}/tasks/{task_id}
 
-# 导出完整结果
-curl http://localhost:8000/api/novels/{novel_id}/results
+# 导出完整结果（必须指定 task_id）
+curl "http://localhost:8000/api/novels/{novel_id}/results?task_id={task_id}"
 
 # 获取情感曲线
-curl http://localhost:8000/api/novels/{novel_id}/emotion-curve
+curl "http://localhost:8000/api/novels/{novel_id}/emotion-curve?task_id={task_id}"
+
+# 获取叙事时间轴
+curl "http://localhost:8000/api/novels/{novel_id}/timeline?task_id={task_id}"
 ```
 
 ### Python 示例
@@ -1021,32 +1147,49 @@ with open("小说.txt", "rb") as f:
     novel_id = response.json()["novel_id"]
 
 # 启动分析
-requests.post(f"{BASE_URL}/novels/{novel_id}/analyze")
+response = requests.post(f"{BASE_URL}/novels/{novel_id}/analyze")
+task_id = response.json()["task_id"]
+print(f"分析任务ID: {task_id}")
 
 # 重新分析（创建新版本）
 response = requests.post(
     f"{BASE_URL}/novels/{novel_id}/reanalyze",
     json={"label": "修正版", "num_topics": 30}
 )
-analysis_id = response.json()["analysis_id"]
-print(f"新分析版本: {analysis_id}")
+task_id = response.json()["task_id"]
+print(f"新分析任务ID: {task_id}")
 
 # 查询状态
-status = requests.get(f"{BASE_URL}/novels/{novel_id}/status").json()
+status = requests.get(
+    f"{BASE_URL}/novels/{novel_id}/status",
+    params={"task_id": task_id}
+).json()
 print(f"进度: {status['progress']}%")
 
-# 获取所有分析版本
-analyses = requests.get(f"{BASE_URL}/novels/{novel_id}/analyses").json()
-for a in analyses["analyses"]:
-    print(f"版本: {a['analysis_id']}, 状态: {a['status']}")
+# 获取所有分析任务
+tasks = requests.get(f"{BASE_URL}/novels/{novel_id}/tasks").json()
+for t in tasks["tasks"]:
+    print(f"任务: {t['task_id']}, 状态: {t['status']}")
 
-# 删除特定分析版本
-requests.delete(f"{BASE_URL}/novels/{novel_id}/analyses/{analysis_id}")
+# 删除特定分析任务
+requests.delete(f"{BASE_URL}/novels/{novel_id}/tasks/{task_id}")
 
-# 导出结果
-result = requests.get(f"{BASE_URL}/novels/{novel_id}/results").json()
+# 导出结果（必须指定 task_id）
+result = requests.get(
+    f"{BASE_URL}/novels/{novel_id}/results",
+    params={"task_id": task_id}
+).json()
 print(f"文件路径: {result['file_path']}")
 
 # 获取情感曲线
-emotion_curve = requests.get(f"{BASE_URL}/novels/{novel_id}/emotion-curve").json()
+emotion_curve = requests.get(
+    f"{BASE_URL}/novels/{novel_id}/emotion-curve",
+    params={"task_id": task_id}
+).json()
+
+# 获取叙事时间轴
+timeline = requests.get(
+    f"{BASE_URL}/novels/{novel_id}/timeline",
+    params={"task_id": task_id, "include_curve": "true"}
+).json()
 ```

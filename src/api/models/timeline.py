@@ -43,7 +43,7 @@ class TimelineNode(BaseModel):
 
     chunk_id: int = Field(description="所属 chunk ID")
     progress: float = Field(ge=0, le=1, description="叙事进度 (0-1)")
-    importance_score: float = Field(ge=0, le=11, description="重要性分数（最高 11 分）")
+    importance_score: float = Field(ge=0, le=13, description="重要性分数（最高 13 分）")
     level: Literal[1, 2, 3] = Field(description="重要性级别: 1=重要, 2=较重要, 3=不重要")
     event: str = Field(description="事件描述")
     characters: list[str] = Field(default_factory=list, description="涉及角色")

@@ -72,6 +72,25 @@
 【层级关系类型说明】
 {{RELATION_TYPES_SECTION}}
 
+【关系提取规则】
+从参考句和身份线索中提取实体间的层级/亲属关系：
+
+1. 亲缘关系线索：
+   - "X是Y的父亲/儿子/母亲/女儿" → father_of / son_of / parent_of / child_of
+   - "X的丈夫/妻子是Y" → spouse_of
+   - "X是Y的手下/上司" → member_of / leader_of
+   - "X属于Y门派/家族" → affiliated_with / member_of
+   - "X和Y是兄弟姐妹" → sibling_of
+
+2. 主从关系线索：
+   - "X效忠于Y" / "X追随Y" → affiliated_with
+   - "X是Y的人" → member_of
+   - "Y是X的首领/头目" → leader_of
+
+3. 归属关系线索：
+   - "X是Y的东西/所属" → belongs_to
+   - "Y的门派/帮派是X" → affiliated_with
+
 【防误合并规则】
 【重要前提】如果存在明确的身份说明句（如"X，字Y"）证明X和Y是同一人，则直接合并，无需检查以下规则。
 
