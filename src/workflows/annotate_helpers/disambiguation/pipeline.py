@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from src.config.constants import MAX_DISAMBIG_RETRIES
 from src.models.disambiguation_types import NameCountCandidate
@@ -279,7 +280,7 @@ def _run_incremental_disambiguation_with_state(
 
 
 def _run_final_disambiguation_with_state(
-    conn,
+    conn: Session,
     state: DisambiguationState,
     full_disambig_client: DisambiguationLike,
     alias_keywords: list[str],
@@ -387,6 +388,7 @@ def _run_final_disambiguation_with_state(
         entity_types=result.entity_types if result else None,
     )
     ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
+    conn.commit()
     logger.info(
         "Stateful final disambiguation persisted: {} canonicals, {} merges (legacy aliases will be mirrored from graph tables)",
         len(new_state.known_canonical_names),
