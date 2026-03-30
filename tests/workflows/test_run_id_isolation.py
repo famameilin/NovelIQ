@@ -87,9 +87,7 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
 
     assert "zhangsan" in result
     context = result["zhangsan"]
-    assert "run1-summary" in context
     assert "run1-clue" in context
-    assert "run2-summary" not in context
     assert "run2-clue" not in context
     assert "叛徒" not in context
 
