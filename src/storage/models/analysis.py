@@ -6,8 +6,7 @@
 
 本模块定义分析结果相关的数据表：
 - CloudAnalysis: 云端分析结果表
-- EmotionCurve: 情绪曲线表
-- RhythmCurve: 节奏曲线表
+- ChunkCurve: 分块曲线表（情绪 + 节奏）
 - GlobalStats: 全局统计表
 - GlobalContext: 全局上下文表
 - ChunkSummary: 分块摘要表
@@ -73,21 +72,17 @@ class CloudAnalysis(Base):
         return f"<CloudAnalysis(id={self.id}, novel_id={self.novel_id})>"
 
 
-class EmotionCurve(Base):
+class ChunkCurve(Base):
     """
-    情绪曲线表
+    分块曲线表（合并情绪曲线 + 节奏曲线）
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块的情绪密度数据
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
+    创建时间: 2026-03-30
+    创建者: CodeBuddy
+    任务: db-schema-cleanup
+    说明: 将 emotion_curve 和 rhythm_curve 合并为 chunk_curves，统一管理所有分块级曲线数据
     """
 
-    __tablename__ = "emotion_curve"
+    __tablename__ = "chunk_curves"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
@@ -95,43 +90,6 @@ class EmotionCurve(Base):
     neg_density: Mapped[float | None] = mapped_column(Float, nullable=True)
     net_density: Mapped[float | None] = mapped_column(Float, nullable=True)
     smoothed_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["analysis_runs.run_id"],
-            ondelete="CASCADE",
-        ),
-        Index("idx_emotion_curve_run_id", "run_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<EmotionCurve(chunk_id={self.chunk_id}, run_id={self.run_id})>"
-
-
-class RhythmCurve(Base):
-    """
-    节奏曲线表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块的张力/节奏数据
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
-    """
-
-    __tablename__ = "rhythm_curve"
-
-    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
     tension_proxy: Mapped[float | None] = mapped_column(Float, nullable=True)
     tension_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
 
@@ -146,11 +104,11 @@ class RhythmCurve(Base):
             ["analysis_runs.run_id"],
             ondelete="CASCADE",
         ),
-        Index("idx_rhythm_curve_run_id", "run_id"),
+        Index("idx_chunk_curves_run_id", "run_id"),
     )
 
     def __repr__(self) -> str:
-        return f"<RhythmCurve(chunk_id={self.chunk_id}, run_id={self.run_id})>"
+        return f"<ChunkCurve(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
 class GlobalStats(Base):

@@ -5,6 +5,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分stats_repository
 说明: 情绪曲线、节奏曲线、文化数据等分块相关操作
+
+修改时间: 2026-03-30
+修改者: CodeBuddy
+任务: db-schema-cleanup
+修改内容: 合并 EmotionCurve + RhythmCurve 为 ChunkCurve
 """
 
 from __future__ import annotations
@@ -15,15 +20,63 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.storage.models import ChunkStyle, EmotionCurve, RhythmCurve
+from src.storage.models import ChunkCurve, ChunkStyle
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
+def insert_chunk_curve(
+    session: Session,
+    run_id: str,
+    rows: Iterable[tuple[int, float, float, float, float, float, float]],
+) -> None:
+    """
+    插入分块曲线数据（情绪 + 节奏）
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+        rows: 曲线数据迭代器
+            (chunk_id, pos_density, neg_density, net_density, smoothed_density,
+             tension_proxy, tension_composite)
+    """
+    data_list = list(rows)
+    if not data_list:
+        return
+
+    for chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite in data_list:
+        stmt = (
+            pg_insert(ChunkCurve)
+            .values(
+                chunk_id=chunk_id,
+                pos_density=pos_density,
+                neg_density=neg_density,
+                net_density=net_density,
+                smoothed_density=smoothed_density,
+                tension_proxy=tension_proxy,
+                tension_composite=tension_composite,
+                run_id=run_id,
+            )
+            .on_conflict_do_update(
+                index_elements=["chunk_id", "run_id"],
+                set_={
+                    "pos_density": pos_density,
+                    "neg_density": neg_density,
+                    "net_density": net_density,
+                    "smoothed_density": smoothed_density,
+                    "tension_proxy": tension_proxy,
+                    "tension_composite": tension_composite,
+                },
+            )
+        )
+        session.execute(stmt)
+    session.commit()
+
+
 def insert_emotion_curve(session: Session, run_id: str, rows: Iterable[tuple[int, float, float, float, float]]) -> None:
     """
-    插入情绪曲线数据
+    插入情绪曲线数据（兼容接口，写入 ChunkCurve）
 
     Args:
         session: 数据库会话
@@ -36,7 +89,7 @@ def insert_emotion_curve(session: Session, run_id: str, rows: Iterable[tuple[int
 
     for chunk_id, pos_density, neg_density, net_density, smoothed_density in data_list:
         stmt = (
-            pg_insert(EmotionCurve)
+            pg_insert(ChunkCurve)
             .values(
                 chunk_id=chunk_id,
                 pos_density=pos_density,
@@ -61,7 +114,7 @@ def insert_emotion_curve(session: Session, run_id: str, rows: Iterable[tuple[int
 
 def insert_rhythm_curve(session: Session, run_id: str, rows: Iterable[tuple[int, float, float]]) -> None:
     """
-    插入节奏曲线数据
+    插入节奏曲线数据（兼容接口，写入 ChunkCurve）
 
     Args:
         session: 数据库会话
@@ -74,7 +127,7 @@ def insert_rhythm_curve(session: Session, run_id: str, rows: Iterable[tuple[int,
 
     for chunk_id, tension_proxy, tension_composite in data_list:
         stmt = (
-            pg_insert(RhythmCurve)
+            pg_insert(ChunkCurve)
             .values(
                 chunk_id=chunk_id,
                 tension_proxy=tension_proxy,
@@ -106,12 +159,12 @@ def fetch_emotion_curve(session: Session, run_id: str) -> list[tuple[float, floa
     """
     stmt = (
         select(
-            EmotionCurve.pos_density,
-            EmotionCurve.neg_density,
-            EmotionCurve.net_density,
+            ChunkCurve.pos_density,
+            ChunkCurve.neg_density,
+            ChunkCurve.net_density,
         )
-        .where(EmotionCurve.run_id == run_id)
-        .order_by(EmotionCurve.chunk_id)
+        .where(ChunkCurve.run_id == run_id)
+        .order_by(ChunkCurve.chunk_id)
     )
 
     result = session.execute(stmt).fetchall()
@@ -129,7 +182,7 @@ def fetch_rhythm_curve(session: Session, run_id: str) -> list[tuple[float]]:
     Returns:
         (tension_composite,) 元组列表
     """
-    stmt = select(RhythmCurve.tension_composite).where(RhythmCurve.run_id == run_id).order_by(RhythmCurve.chunk_id)
+    stmt = select(ChunkCurve.tension_composite).where(ChunkCurve.run_id == run_id).order_by(ChunkCurve.chunk_id)
 
     result = session.execute(stmt).fetchall()
     return [(row.tension_composite,) for row in result]
@@ -176,14 +229,14 @@ def fetch_emotion_curve_full(session: Session, run_id: str) -> list[tuple[int, f
     """
     stmt = (
         select(
-            EmotionCurve.chunk_id,
-            EmotionCurve.pos_density,
-            EmotionCurve.neg_density,
-            EmotionCurve.net_density,
-            EmotionCurve.smoothed_density,
+            ChunkCurve.chunk_id,
+            ChunkCurve.pos_density,
+            ChunkCurve.neg_density,
+            ChunkCurve.net_density,
+            ChunkCurve.smoothed_density,
         )
-        .where(EmotionCurve.run_id == run_id)
-        .order_by(EmotionCurve.chunk_id)
+        .where(ChunkCurve.run_id == run_id)
+        .order_by(ChunkCurve.chunk_id)
     )
 
     result = session.execute(stmt).fetchall()
@@ -212,18 +265,61 @@ def fetch_rhythm_curve_full(session: Session, run_id: str) -> list[tuple[int, fl
     """
     stmt = (
         select(
-            RhythmCurve.chunk_id,
-            RhythmCurve.tension_proxy,
-            RhythmCurve.tension_composite,
+            ChunkCurve.chunk_id,
+            ChunkCurve.tension_proxy,
+            ChunkCurve.tension_composite,
         )
-        .where(RhythmCurve.run_id == run_id)
-        .order_by(RhythmCurve.chunk_id)
+        .where(ChunkCurve.run_id == run_id)
+        .order_by(ChunkCurve.chunk_id)
     )
 
     result = session.execute(stmt).fetchall()
     return [
         (
             row.chunk_id,
+            row.tension_proxy,
+            row.tension_composite,
+        )
+        for row in result
+    ]
+
+
+def fetch_chunk_curves_full(
+    session: Session, run_id: str
+) -> list[tuple[int, float, float, float, float, float, float]]:
+    """
+    获取分块曲线完整数据（情绪 + 节奏）
+
+    Args:
+        session: 数据库会话
+        run_id: 运行ID
+
+    Returns:
+        (chunk_id, pos_density, neg_density, net_density, smoothed_density,
+         tension_proxy, tension_composite) 元组列表
+    """
+    stmt = (
+        select(
+            ChunkCurve.chunk_id,
+            ChunkCurve.pos_density,
+            ChunkCurve.neg_density,
+            ChunkCurve.net_density,
+            ChunkCurve.smoothed_density,
+            ChunkCurve.tension_proxy,
+            ChunkCurve.tension_composite,
+        )
+        .where(ChunkCurve.run_id == run_id)
+        .order_by(ChunkCurve.chunk_id)
+    )
+
+    result = session.execute(stmt).fetchall()
+    return [
+        (
+            row.chunk_id,
+            row.pos_density,
+            row.neg_density,
+            row.net_density,
+            row.smoothed_density,
             row.tension_proxy,
             row.tension_composite,
         )
@@ -244,11 +340,11 @@ def fetch_emotion_densities(session: Session, run_id: str) -> list[tuple[float, 
     """
     stmt = (
         select(
-            EmotionCurve.pos_density,
-            EmotionCurve.neg_density,
+            ChunkCurve.pos_density,
+            ChunkCurve.neg_density,
         )
-        .where(EmotionCurve.run_id == run_id)
-        .order_by(EmotionCurve.chunk_id)
+        .where(ChunkCurve.run_id == run_id)
+        .order_by(ChunkCurve.chunk_id)
     )
 
     result = session.execute(stmt).fetchall()

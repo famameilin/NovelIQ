@@ -21,14 +21,13 @@ from src.api.models.responses import (
     ChunkAnnotation,
     ChunkCharacter,
     ChunkCulture,
+    ChunkCurvePoint,
     ChunkDialogue,
     ChunkRelation,
     ChunkStyle,
     DiagnosisResult,
-    EmotionCurvePoint,
     GlobalStats,
     HierarchicalRelation,
-    RhythmCurvePoint,
     TokenUsageByModel,
     TokenUsageByTask,
     TokenUsageStats,
@@ -53,35 +52,28 @@ from src.storage.repositories import (
 )
 
 
-def _fetch_emotion_curve(run_id: str, stats_repo: StatsRepository) -> list:
+def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
     """
-    获取情绪曲线数据
+    获取分块曲线数据（情绪 + 节奏）
 
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: refactor-routes-use-repository
-    修改内容: 重构为使用 StatsRepository
+    修改时间: 2026-03-30
+    修改者: CodeBuddy
+    任务: db-schema-cleanup
+    修改内容: 合并 _fetch_emotion_curve + _fetch_rhythm_curve 为统一接口
     """
-    rows = stats_repo.fetch_emotion_curve_full(run_id)
+    rows = stats_repo.fetch_chunk_curves_full(run_id)
     return [
-        EmotionCurvePoint(
-            chunk_id=row[0], pos_density=row[1], neg_density=row[2], net_density=row[3], smoothed_density=row[4]
+        ChunkCurvePoint(
+            chunk_id=row[0],
+            pos_density=row[1],
+            neg_density=row[2],
+            net_density=row[3],
+            smoothed_density=row[4],
+            tension_proxy=row[5],
+            tension_composite=row[6],
         )
         for row in rows
     ]
-
-
-def _fetch_rhythm_curve(run_id: str, stats_repo: StatsRepository) -> list:
-    """
-    获取节奏曲线数据
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: refactor-routes-use-repository
-    修改内容: 重构为使用 StatsRepository
-    """
-    rows = stats_repo.fetch_rhythm_curve_full(run_id)
-    return [RhythmCurvePoint(chunk_id=row[0], tension_proxy=row[1], tension_composite=row[2]) for row in rows]
 
 
 def _fetch_characters(

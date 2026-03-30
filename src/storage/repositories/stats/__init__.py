@@ -16,11 +16,13 @@ from __future__ import annotations
 
 from .chunks import (
     fetch_chunk_culture,
+    fetch_chunk_curves_full,
     fetch_emotion_curve,
     fetch_emotion_curve_full,
     fetch_emotion_densities,
     fetch_rhythm_curve,
     fetch_rhythm_curve_full,
+    insert_chunk_curve,
     insert_emotion_curve,
     insert_rhythm_curve,
 )
@@ -66,6 +68,7 @@ __all__ = [
     "has_diagnosis_data",
     "is_aggregate_complete",
     # chunks
+    "insert_chunk_curve",
     "insert_emotion_curve",
     "insert_rhythm_curve",
     "fetch_emotion_curve",
@@ -73,6 +76,7 @@ __all__ = [
     "fetch_chunk_culture",
     "fetch_emotion_curve_full",
     "fetch_rhythm_curve_full",
+    "fetch_chunk_curves_full",
     "fetch_emotion_densities",
     # summaries
     "insert_chunk_summary",
