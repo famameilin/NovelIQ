@@ -37,6 +37,10 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         def apply_alias_merges(self, run_id, alias_merges):
             captured["merges"] = (run_id, dict(alias_merges))
 
+    class _DummyConn:
+        def commit(self):
+            pass
+
     state = DisambiguationState(
         discovered_names=frozenset({"bai_zhi", "hou_fei_bai"}),
         known_canonical_names=frozenset({"bai_zhi", "hou_fei_bai"}),
@@ -52,7 +56,7 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         patch.object(pipeline_mod, "_save_disambig_checkpoint_state", return_value=None),
     ):
         new_state = disambig_mod._run_final_disambiguation_with_state(
-            conn=None,
+            conn=_DummyConn(),
             state=state,
             full_disambig_client=MagicMock(),
             alias_keywords=["alias"],
@@ -67,6 +71,10 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
 
 
 def test_run_final_disambiguation_with_state_skips_known_canonical_without_review_record() -> None:
+    class _DummyConn:
+        def commit(self):
+            pass
+
     state = DisambiguationState(
         discovered_names=frozenset({"hou_fei_bai"}),
         known_canonical_names=frozenset({"hou_fei_bai"}),
@@ -84,7 +92,7 @@ def test_run_final_disambiguation_with_state_skips_known_canonical_without_revie
         patch.object(pipeline_mod, "_save_disambig_checkpoint_state", return_value=None),
     ):
         new_state = disambig_mod._run_final_disambiguation_with_state(
-            conn=None,
+            conn=_DummyConn(),
             state=state,
             full_disambig_client=MagicMock(),
             alias_keywords=["alias"],

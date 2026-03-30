@@ -33,9 +33,9 @@ from src.api.models.timeline import (
 from src.api.routes.novels import get_novel_service
 from src.api.services.novel_service import NovelService
 from src.metrics.timeline_metrics import (
+    RelationChangeEventDTO,
     TimelineNodeDTO,
     TimelinePhaseDTO,
-    RelationChangeEventDTO,
     build_timeline_candidates,
     convert_to_timeline_nodes,
     select_timeline_nodes,
@@ -171,11 +171,11 @@ def _dto_to_timeline_node(dto: TimelineNodeDTO) -> TimelineNode:
 )
 async def get_timeline(
     novel_id: str,
-    task_id: Annotated[str, Query(..., description="分析任务ID（8位短UUID）")],
-    include_curve: Annotated[bool, Query(False, description="是否包含张力曲线数据")],
-    max_level: Annotated[int, Query(3, ge=1, le=3, description="显示重要性级别 ≤ 此值的节点")],
+    task_id: Annotated[str, Query(description="分析任务ID（8位短UUID）")],
     session: Annotated[Session, Depends(get_db_session)],
     service: Annotated[NovelService, Depends(get_novel_service)],
+    include_curve: Annotated[bool, Query(description="是否包含张力曲线数据")] = False,
+    max_level: Annotated[int, Query(ge=1, le=3, description="显示重要性级别 ≤ 此值的节点")] = 3,
 ) -> TimelineResponse:
     """获取叙事时间轴数据"""
 
