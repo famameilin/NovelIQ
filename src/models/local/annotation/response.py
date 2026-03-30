@@ -135,7 +135,7 @@ def process_annotation_response(
 
     is_repetitive, repeat_pattern = _detect_repetition(content_clean)
     if is_repetitive:
-        logger.warning(
+        logger.error(
             "检测到重复输出: novel_id={} chunk_id={} phase={} response_chars={} pattern={}",
             novel_id,
             chunk_id,
