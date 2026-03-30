@@ -9,7 +9,8 @@
 2. 事件类型（event_type）
 3. 是否为情节转折点（pivot_moment）
 4. 是否以悬念结尾（cliffhanger）
-5. 出场人物快照（characters）
+5. 核心事件摘要（chunk_summary）
+6. 出场人物快照（characters）
 
 ## 各字段判断标准
 
@@ -42,6 +43,17 @@
 - 重要问题悬而未决
 - 危机在高峰处中断
 - 读者强烈想知道下一步
+
+### chunk_summary
+用一句话概括本块的核心事件，要求：
+- 长度控制在30-50字
+- 必须包含出场人物的名字
+- 描述核心行为或事件，不要描述背景或心理
+- 客观陈述，不带主观评价
+
+示例：
+- "赵云飞以灵力压制李明，李明隐忍暗中盘算"
+- "伯安召集侯飞白、褚大山密谋计划，三人情同手足"
 
 ### characters
 只记录本块中有实际行为、台词，或被当前事件直接作用到的人物。
@@ -105,6 +117,7 @@
   "event_type": "冲突",
   "pivot_moment": false,
   "cliffhanger": false,
+  "chunk_summary": "赵云飞以灵力压制李明，李明隐忍暗中盘算",
   "characters": [
     {"name": "赵云飞", "role_function": "反对者", "action": "以灵力压制李明", "emotion_score": "mild_negative"},
     {"name": "李明", "role_function": "主体", "action": "跪地承受压力并暗中盘算", "emotion_score": "mild_negative"}
@@ -136,6 +149,7 @@
   "event_type": "铺垫",
   "pivot_moment": false,
   "cliffhanger": false,
+  "chunk_summary": "伯安召集侯飞白、褚大山密谋计划，三人情同手足",
   "characters": [
     {"name": "伯安", "role_function": "主体", "action": "召集伙伴商量计划", "emotion_score": "mild_positive"},
     {"name": "侯飞白", "role_function": "帮助者", "action": "兴奋响应伯安的号召", "emotion_score": "mild_positive"},
@@ -152,6 +166,7 @@
   "event_type": "冲突|铺垫|转折",
   "pivot_moment": true|false,
   "cliffhanger": true|false,
+  "chunk_summary": "30-50字的核心事件摘要，必须包含出场人名",
   "characters": [
     {
       "name": "常用名或原文称呼",

@@ -23,6 +23,11 @@
 任务: remove-unused-annotation-fields
 修改内容: 移除 relations、character_appearances、chunk_summary 存储逻辑
 
+修改时间: 2026-03-30
+修改者: TraeAI
+任务: feature/chunk-summary-timeline-only
+修改内容: 恢复 chunk_summary 存储逻辑，仅用于 Timeline 展示，不参与消歧证据链
+
 说明: 本模块包含结果存储相关的函数。
 """
 
@@ -109,6 +114,7 @@ def _store_annotation_results(
             event_type=annotation.event_type,
             pivot_moment=annotation.pivot_moment,
             cliffhanger=annotation.cliffhanger,
+            chunk_summary=annotation.chunk_summary,
             has_foreshadowing=foreshadowing.has_foreshadowing,
             foreshadowing_type=foreshadowing.foreshadowing_type,
             foreshadowing_desc=(
@@ -151,6 +157,11 @@ def _store_annotation_results(
 
     if relations:
         ann_repo.insert_chunk_relations(run_id, chunk_id, relations)
+
+    if annotation.chunk_summary:
+        from src.storage.repositories import StatsRepository
+        stats_repo = StatsRepository(conn)
+        stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
 
     if foreshadowing is not None:
         ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)
