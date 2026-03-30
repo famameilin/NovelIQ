@@ -16,9 +16,7 @@ from sqlalchemy.orm import Mapper, Session
 from src.storage.models import ChunkTopic
 
 
-def insert_chunk_topics(
-    session: Session, run_id: str, rows: Iterable[tuple[int, int, float]]
-) -> None:
+def insert_chunk_topics(session: Session, run_id: str, rows: Iterable[tuple[int, int, float]]) -> None:
     """
     插入分块主题数据
 

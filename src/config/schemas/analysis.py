@@ -213,7 +213,6 @@ class RAGSettings:
     top_k: int = 3
     level1_enabled: bool = True
     level2_enabled: bool = True
-    level3_enabled: bool = True
 
 
 def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
@@ -426,5 +425,4 @@ def _parse_rag_settings(data: dict[str, Any] | None) -> RAGSettings:
         top_k=data.get("top_k", 3),
         level1_enabled=data.get("level1_enabled", True),
         level2_enabled=data.get("level2_enabled", True),
-        level3_enabled=data.get("level3_enabled", True),
     )

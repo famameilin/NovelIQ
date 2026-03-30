@@ -29,6 +29,7 @@ ImportanceLevel = Literal[1, 2, 3]
 
 # ==================== DTO 定义 ====================
 
+
 @dataclass
 class RelationChangeEventDTO:
     """关系变化事件 DTO"""
@@ -71,6 +72,7 @@ class TimelineNodeDTO:
 
 # ==================== 内部数据结构 ====================
 
+
 @dataclass
 class NarrativePhase:
     """叙事阶段内部数据结构"""
@@ -101,6 +103,7 @@ class TimelineCandidate:
 
 
 # ==================== 核心函数 ====================
+
 
 def compute_importance_score(
     pivot_moment: bool,
@@ -247,9 +250,7 @@ def compute_four_phases(
     phases: list[NarrativePhase] = []
 
     # 引入期（始终存在）
-    phases.append(
-        NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total)
-    )
+    phases.append(NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total))
 
     # 发展期
     dev_start_idx = valley_idx + 1
@@ -460,9 +461,12 @@ def get_major_characters_by_span(
         按活跃跨度排序的主要角色列表
     """
     valid_entities = [
-        e for e in entities
-        if hasattr(e, "first_seen_chunk") and hasattr(e, "last_seen_chunk")
-        and e.first_seen_chunk is not None and e.last_seen_chunk is not None
+        e
+        for e in entities
+        if hasattr(e, "first_seen_chunk")
+        and hasattr(e, "last_seen_chunk")
+        and e.first_seen_chunk is not None
+        and e.last_seen_chunk is not None
     ]
 
     # 计算活跃跨度
@@ -603,9 +607,7 @@ def build_timeline_candidates(
     entities = graph_repo.fetch_entities(run_id, entity_type="character")
 
     # 预构建实体ID到名称的映射
-    entity_name_map: dict[int, str] = {
-        e.entity_id: e.canonical_name for e in entities if e.entity_id is not None
-    }
+    entity_name_map: dict[int, str] = {e.entity_id: e.canonical_name for e in entities if e.entity_id is not None}
 
     relation_events = graph_repo.fetch_relation_event_models(run_id)
 
@@ -690,8 +692,7 @@ def build_timeline_candidates(
 
         # 检查是否为主要角色相关
         is_major_character = bool(
-            set(character_entries) | set(character_exits)
-            & {c.canonical_name for c in major_characters}
+            set(character_entries) | set(character_exits) & {c.canonical_name for c in major_characters}
         )
 
         # 计算重要性分数
@@ -745,4 +746,12 @@ def build_timeline_candidates(
             )
         )
 
-    return candidates, tension_scores, chunk_ids, total_chunks, timeline_phases, major_character_entries, relation_break_events
+    return (
+        candidates,
+        tension_scores,
+        chunk_ids,
+        total_chunks,
+        timeline_phases,
+        major_character_entries,
+        relation_break_events,
+    )

@@ -37,8 +37,7 @@ async def delete_novel(novel_id: str, service: NovelService = Depends(get_novel_
 
 @router.post("/batch-delete", response_model=BatchDeleteNovelsResponse)
 async def batch_delete_novels(
-    request: BatchDeleteNovelsRequest,
-    service: NovelService = Depends(get_novel_service)
+    request: BatchDeleteNovelsRequest, service: NovelService = Depends(get_novel_service)
 ) -> BatchDeleteNovelsResponse:
     """
     批量删除小说

@@ -125,6 +125,7 @@ class DatabaseSession:
         if self._auto_close:
             self.close()
 
+
 class SessionFactory:
     """
     会话工厂类，管理数据库会话

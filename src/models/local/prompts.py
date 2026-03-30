@@ -78,13 +78,10 @@ def build_retry_prompt(
     dangling_names = details.get("dangling_names") or []
 
     if hallucinated_names:
-        sections.append(
-            f"上次输出中以下名字未在文本或可用上下文中出现：{'、'.join(hallucinated_names)}"
-        )
+        sections.append(f"上次输出中以下名字未在文本或可用上下文中出现：{'、'.join(hallucinated_names)}")
     if dangling_names:
         sections.append(
-            "上次输出中以下名字出现在 relations 或 dialogues 中，"
-            f"但没有写入 characters：{'、'.join(dangling_names)}"
+            f"上次输出中以下名字出现在 relations 或 dialogues 中，但没有写入 characters：{'、'.join(dangling_names)}"
         )
     if not sections:
         sections.append(f"上次输出中以下名字需要修正：{invalid_names_str}")

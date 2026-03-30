@@ -125,9 +125,7 @@ def retry_with_validation(
                 chunk_id,
             )
 
-            retry_prompt = build_retry_prompt(
-                original_user_prompt, content_clean, current_invalid_names
-            )
+            retry_prompt = build_retry_prompt(original_user_prompt, content_clean, current_invalid_names)
 
         except Exception as e:
             logger.error(

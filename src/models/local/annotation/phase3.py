@@ -153,7 +153,7 @@ def attribute_dialogues_with_llm(
     修改时间: 2026-03-23
     修改者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
-    修改内容: 
+    修改内容:
     - 接收 QuoteCandidate 列表替代 tuple 列表
     - 返回 DialogueRecord 列表替代 dict
     - 添加失败重试机制
@@ -186,7 +186,10 @@ def attribute_dialogues_with_llm(
         retry_messages: list[dict] | None = None,
     ) -> list[DialogueRecord]:
         dialogue_list = "\n".join(
-            [f'{c.index}. ctx_before: "{c.ctx_before}"\n   content: "{c.content}"\n   ctx_after: "{c.ctx_after}"' for c in candidates]
+            [
+                f'{c.index}. ctx_before: "{c.ctx_before}"\n   content: "{c.content}"\n   ctx_after: "{c.ctx_after}"'
+                for c in candidates
+            ]
         )
         known_chars = "、".join(known_characters) if known_characters else "无"
 
@@ -283,10 +286,7 @@ def _post_process_validation(
     candidate_indices = {c.index for c in candidates}
     known_set = None
     if known_characters:
-        known_set = {
-            alias_map.get(name, name) if alias_map else name
-            for name in known_characters
-        }
+        known_set = {alias_map.get(name, name) if alias_map else name for name in known_characters}
 
     for record in records:
         if record.index not in candidate_indices:
@@ -325,9 +325,14 @@ def compute_dialogue_lengths_with_llm(
     return_tones: bool = False,
     return_evidences: bool = False,
     return_identity_clues: bool = False,
-) -> tuple[dict[str, int], dict[int, str], list[tuple[int, str]]] | tuple[
-    dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]
-] | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]] | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str], dict[int, str | None]]:
+) -> (
+    tuple[dict[str, int], dict[int, str], list[tuple[int, str]]]
+    | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]]
+    | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]]
+    | tuple[
+        dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str], dict[int, str | None]
+    ]
+):
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
 
@@ -354,7 +359,7 @@ def compute_dialogue_lengths_with_llm(
     修改时间: 2026-03-23
     修改者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
-    修改内容: 
+    修改内容:
     - 接收 QuoteCandidate 列表替代 tuple 列表
     - 返回 DialogueRecord 列表替代 dict
     - 添加失败重试机制
@@ -387,9 +392,7 @@ def compute_dialogue_lengths_with_llm(
         - return_evidences: (+ {dialogue_idx: evidence, ...})
         - return_identity_clues: (+ {dialogue_idx: identity_clue, ...})
     """
-    logger.info(
-        f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}"
-    )
+    logger.info(f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}")
 
     if not text:
         logger.info("compute_dialogue_lengths_with_llm: early return - text_empty=True")
@@ -434,9 +437,7 @@ def compute_dialogue_lengths_with_llm(
     candidate_map = {c.index: c.content for c in candidates}
     for record in records:
         if record.index in seen_indices:
-            logger.warning(
-                f"compute_dialogue_lengths_with_llm: duplicate index={record.index}, skipping duplicate"
-            )
+            logger.warning(f"compute_dialogue_lengths_with_llm: duplicate index={record.index}, skipping duplicate")
             continue
         seen_indices.add(record.index)
 
@@ -467,7 +468,14 @@ def compute_dialogue_lengths_with_llm(
 
     logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
     if return_identity_clues:
-        return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones, dialogue_evidences, dialogue_identity_clues)
+        return (
+            speaker_lengths,
+            canonical_attribution,
+            dialogues,
+            dialogue_tones,
+            dialogue_evidences,
+            dialogue_identity_clues,
+        )
     if return_evidences:
         return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones, dialogue_evidences)
     if return_tones:

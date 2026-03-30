@@ -49,9 +49,13 @@ def fetch_chunk_cultures_full(session: Session, run_id: str) -> list[tuple[int, 
     Returns:
         (chunk_id, imagery_lexicon_density) 元组列表
     """
-    stmt = select(
-        ChunkStyle.chunk_id,
-        ChunkStyle.imagery_lexicon_density,
-    ).where(ChunkStyle.run_id == run_id).order_by(ChunkStyle.chunk_id)
+    stmt = (
+        select(
+            ChunkStyle.chunk_id,
+            ChunkStyle.imagery_lexicon_density,
+        )
+        .where(ChunkStyle.run_id == run_id)
+        .order_by(ChunkStyle.chunk_id)
+    )
     result = session.execute(stmt)
     return [(row.chunk_id, row.imagery_lexicon_density) for row in result.fetchall()]

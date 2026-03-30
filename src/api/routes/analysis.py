@@ -65,6 +65,7 @@ def _get_task_status_from_db(task_id: str) -> TaskStatus:
             return _map_status_to_task_status(run["status"])
         return TaskStatus.PENDING
 
+
 router = APIRouter(prefix="/novels", tags=["analysis"])
 
 _task_manager = TaskManager()
@@ -135,9 +136,7 @@ async def delete_task(novel_id: str, task_id: str, novel_service: NovelService =
 
 @router.post("/{novel_id}/tasks/batch-delete", response_model=BatchDeleteTasksResponse)
 async def batch_delete_tasks(
-    novel_id: str,
-    request: BatchDeleteTasksRequest,
-    novel_service: NovelService = Depends(get_novel_service)
+    novel_id: str, request: BatchDeleteTasksRequest, novel_service: NovelService = Depends(get_novel_service)
 ) -> BatchDeleteTasksResponse:
     """
     批量删除任务

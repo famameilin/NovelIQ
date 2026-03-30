@@ -16,6 +16,7 @@ from .json_utils import try_parse_json
 
 class DisambiguationParseError(Exception):
     """人名消歧解析错误"""
+
     pass
 
 

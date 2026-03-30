@@ -65,7 +65,7 @@ def _save_disambig_checkpoint_state(
 ) -> None:
     """
     保存消歧检查点
-    
+
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: disambiguation-state-three-layer
@@ -126,7 +126,7 @@ def _save_disambig_checkpoint_state(
 def _load_disambig_checkpoint_state(conn, run_id: str) -> DisambiguationState:
     """
     加载消歧检查点
-    
+
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: disambiguation-state-three-layer
@@ -136,7 +136,7 @@ def _load_disambig_checkpoint_state(conn, run_id: str) -> DisambiguationState:
     修改者: TraeAI
     任务: consolidate-codebase-architecture
     修改内容: 禁止静默吞异常，数据格式错误时抛出 ValueError
-    
+
     Returns:
         DisambiguationState: 完整的消歧状态
 
@@ -155,8 +155,7 @@ def _load_disambig_checkpoint_state(conn, run_id: str) -> DisambiguationState:
 
     if not isinstance(raw_data, dict):
         raise ValueError(
-            f"Invalid checkpoint data format for run_id={run_id}: "
-            f"expected dict, got {type(raw_data).__name__}"
+            f"Invalid checkpoint data format for run_id={run_id}: expected dict, got {type(raw_data).__name__}"
         )
 
     if "discovered_names" not in raw_data or "known_canonical_names" not in raw_data:

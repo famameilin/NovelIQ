@@ -220,51 +220,6 @@ def _annotate_dialogue_structure(sentence: str) -> str:
     return annotate_dialogue_structure(sentence)
 
 
-def _add_prev_summaries(
-    conn,
-    result: dict[str, str],
-    name_list: list[str],
-    prev_chunks: int,
-    run_id: str,
-) -> None:
-    """添加前文摘要
-
-    废弃时间: 2026-03-30
-    废弃者: TraeAI
-    任务: feature/chunk-summary-timeline-only
-    废弃原因: summary 仅用于 Timeline 展示，不参与消歧证据链
-    """
-    for name in name_list:
-        chunk_rows = conn.execute(
-            text("""
-                SELECT DISTINCT cc.chunk_id 
-                FROM chunk_characters cc 
-                WHERE cc.name = :name
-                  AND cc.run_id = :run_id
-                ORDER BY cc.chunk_id DESC LIMIT 1
-            """),
-            {"name": name, "run_id": run_id},
-        ).fetchall()
-
-        if chunk_rows:
-            chunk_id = chunk_rows[0][0]
-            summaries = []
-            for i in range(1, prev_chunks + 1):
-                row = conn.execute(
-                    text("""
-                        SELECT summary FROM chunk_summaries 
-                        WHERE chunk_id = :chunk_id
-                          AND run_id = :run_id
-                    """),
-                    {"chunk_id": chunk_id - i, "run_id": run_id},
-                ).fetchone()
-                if row and row[0]:
-                    summaries.append(row[0])
-
-            if summaries:
-                result[name] = f"【前文总结】{' | '.join(summaries)}\n{result.get(name, '')}"
-
-
 def _add_identity_clues(
     conn,
     result: dict[str, str],
@@ -296,4 +251,3 @@ def _add_identity_clues(
     for speaker, clue in dialogues:
         if speaker in result and clue:
             result[speaker] += f" | 【身份线索】{clue}"
-

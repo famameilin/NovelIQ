@@ -70,8 +70,16 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     ) -> int | None:
         """插入 token 使用记录"""
         return metrics.insert_token_usage(
-            self.session, run_id, novel_id, task_type, call_type, model,
-            prompt_tokens, total_tokens, completion_tokens, chunk_id
+            self.session,
+            run_id,
+            novel_id,
+            task_type,
+            call_type,
+            model,
+            prompt_tokens,
+            total_tokens,
+            completion_tokens,
+            chunk_id,
         )
 
     def fetch_token_usage_stats(self, run_id: str, novel_id: str) -> dict[str, Any]:
@@ -110,9 +118,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """获取分块文化数据"""
         return chunks.fetch_chunk_culture(self.session, run_id)
 
-    def fetch_chunk_curves_full(
-        self, run_id: str
-    ) -> list[tuple[int, float, float, float, float, float, float]]:
+    def fetch_chunk_curves_full(self, run_id: str) -> list[tuple[int, float, float, float, float, float, float]]:
         """获取分块曲线完整数据（情绪 + 节奏，包含 chunk_id）"""
         return chunks.fetch_chunk_curves_full(self.session, run_id)
 
@@ -174,6 +180,3 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     def insert_character_appearances(self, run_id: str, chunk_id: int, appearances: Sequence[Any]) -> None:
         """插入角色出场信息"""
         return summaries.insert_character_appearances(self.session, run_id, chunk_id, appearances)
-
-
-

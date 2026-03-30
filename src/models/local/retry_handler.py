@@ -203,7 +203,9 @@ class AnnotationRetryHandler[T]:
             # 根据操作名选择异常类型
             if "phase2" in self.config.operation_name.lower():
                 from src.models.local.annotation import Phase2MaxRetriesExceededError
+
                 raise Phase2MaxRetriesExceededError(error_msg)
             else:
                 from src.models.local.annotation import Phase1MaxRetriesExceededError
+
                 raise Phase1MaxRetriesExceededError(error_msg)

@@ -455,9 +455,7 @@ def annotate_chunk_parallel(
         annotation = phase1_future.result()
         foreshadowing = phase2_future.result()
 
-        known_characters = (
-            [c.name for c in annotation.characters] if annotation.characters else None
-        )
+        known_characters = [c.name for c in annotation.characters] if annotation.characters else None
         phase3_result = _run_phase3_if_needed(
             client=client,
             text=text,
@@ -570,9 +568,7 @@ def annotate_chunk_serial(
         chunk_id=chunk_id,
     )
 
-    known_characters = (
-        [c.name for c in annotation.characters] if annotation.characters else None
-    )
+    known_characters = [c.name for c in annotation.characters] if annotation.characters else None
     phase3_result = _run_phase3_if_needed(
         client=client,
         text=text,

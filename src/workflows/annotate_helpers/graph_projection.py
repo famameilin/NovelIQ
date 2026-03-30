@@ -25,20 +25,20 @@ def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases
     return alias_map.get(name) or graph_aliases.get(name) or name
 
 
-
 def _fetch_pending_relations(
     session,
     run_id: str,
     to_chunk: int | None,
     limit: int = PENDING_RETRY_LIMIT,
 ) -> list[ChunkRelation]:
-    query = session.query(ChunkRelation).filter(ChunkRelation.run_id == run_id).filter(
-        ChunkRelation.projection_status == "pending"
+    query = (
+        session.query(ChunkRelation)
+        .filter(ChunkRelation.run_id == run_id)
+        .filter(ChunkRelation.projection_status == "pending")
     )
     if to_chunk is not None:
         query = query.filter(ChunkRelation.chunk_id <= to_chunk)
     return list(query.order_by(ChunkRelation.chunk_id, ChunkRelation.id).limit(limit).all())
-
 
 
 def _merge_relations_for_projection(
@@ -53,7 +53,6 @@ def _merge_relations_for_projection(
         seen.add(relation.id)
         merged.append(relation)
     return merged
-
 
 
 def project_graph_tables(

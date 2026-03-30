@@ -45,7 +45,15 @@ def insert_chunk_curve(
     if not data_list:
         return
 
-    for chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite in data_list:
+    for (
+        chunk_id,
+        pos_density,
+        neg_density,
+        net_density,
+        smoothed_density,
+        tension_proxy,
+        tension_composite,
+    ) in data_list:
         stmt = (
             pg_insert(ChunkCurve)
             .values(

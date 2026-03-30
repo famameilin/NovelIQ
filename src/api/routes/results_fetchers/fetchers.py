@@ -168,9 +168,7 @@ def _fetch_characters(
     return result[:limit]
 
 
-def _fetch_topics(
-    run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str, str] | None = None
-) -> list:
+def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str, str] | None = None) -> list:
     """
     获取主题数据
 
@@ -260,7 +258,9 @@ def _fetch_diagnosis(
 
     main_characters_raw = _parse_json_field(data.get("main_characters"))
     main_characters_normalized = (
-        _normalize_name_list(main_characters_raw, alias_map) if isinstance(main_characters_raw, list) else main_characters_raw
+        _normalize_name_list(main_characters_raw, alias_map)
+        if isinstance(main_characters_raw, list)
+        else main_characters_raw
     )
 
     core_cast_raw = _parse_json_field(data.get("core_cast"))

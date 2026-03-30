@@ -52,12 +52,7 @@ def _calculate_protagonist_scores(
 
         in_main_cast = 1.0 if char.name in main_characters else 0.0
 
-        protagonist_score = (
-            0.25 * appearance_norm
-            + 0.25 * subject_ratio
-            + 0.25 * arc_norm
-            + 0.25 * in_main_cast
-        )
+        protagonist_score = 0.25 * appearance_norm + 0.25 * subject_ratio + 0.25 * arc_norm + 0.25 * in_main_cast
 
         char.protagonist_score = round(protagonist_score, 4)
 

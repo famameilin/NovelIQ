@@ -88,9 +88,7 @@ def fetch_global_stats_dict(session: Session, run_id: str) -> dict[str, float]:
     Returns:
         统计名称到值的映射字典
     """
-    stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(
-        GlobalStats.run_id == run_id
-    )
+    stmt = select(GlobalStats.stat_name, GlobalStats.stat_value).where(GlobalStats.run_id == run_id)
     result = session.execute(stmt).fetchall()
     return {row.stat_name: row.stat_value for row in result}
 

@@ -36,7 +36,7 @@ def _get_novel_service_instance() -> NovelService:
 def get_novel_service() -> NovelService:
     """
     获取小说服务的依赖函数。
-    
+
     Returns:
         NovelService 实例
     """
@@ -46,10 +46,10 @@ def get_novel_service() -> NovelService:
 def get_db_session() -> Generator[Session, None, None]:
     """
     获取数据库会话的依赖函数。
-    
+
     使用 yield 模式确保 session 在使用后自动关闭。
     这是 FastAPI 推荐的依赖注入模式。
-    
+
     Yields:
         SQLAlchemy Session 实例
     """
@@ -67,23 +67,23 @@ async def resolve_run_id(
 ) -> str:
     """
     从 task_id 解析出 run_id，无效时抛 NovelNotFoundError (404)。
-    
+
     Args:
         task_id: 分析任务ID（run_id 的前8位）
         novel_service: 小说服务实例
-    
+
     Returns:
         完整的 run_id 字符串
-    
+
     Raises:
         NovelNotFoundError: 当 task_id 无效或找不到对应运行记录时
     """
     task = novel_service.get_run_by_task_id(task_id)
     if task is None:
         raise NovelNotFoundError(f"任务不存在: {task_id}")
-    
+
     run_id = task.get("run_id")
     if run_id is None:
         raise NovelNotFoundError(f"任务数据不完整: {task_id}")
-    
+
     return run_id

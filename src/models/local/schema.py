@@ -225,27 +225,6 @@ class DialogueRecord(BaseModel):
     identity_clue: str | None = Field(default=None, description="身份线索（如自报身份、称呼关系、别名揭示等）")
 
 
-class DialogueAttribution(BaseModel):
-    """
-    单条对话归属数据结构（已废弃，请使用 DialogueRecord）
-
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: analyze-dialogue-length-zero
-    说明: 用于存储单条对话的说话者归属判断结果
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
-    修改内容: 标记为废弃，建议使用 DialogueRecord
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    index: int = Field(description="对话序号（1开始）")
-    speaker: str = Field(description="说话者名称")
-
-
 class DialogueAttributionResult(BaseModel):
     """
     对话归属判断结果数据结构
@@ -368,10 +347,7 @@ class ChunkAnnotation(BaseModel):
     event_type: str
     pivot_moment: bool
     cliffhanger: bool
-    chunk_summary: str = Field(
-        default="",
-        description="核心事件摘要，30-50字，用于 Timeline 展示。不参与消歧证据链。"
-    )
+    chunk_summary: str = Field(default="", description="核心事件摘要，30-50字，用于 Timeline 展示。不参与消歧证据链。")
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
     )

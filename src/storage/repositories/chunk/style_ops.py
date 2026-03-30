@@ -23,9 +23,7 @@ from src.storage.models import ChunkStyle
 from src.storage.repositories.chunk import ChunkStyleData
 
 
-def fetch_chunk_styles(
-    session: Session, run_id: str
-) -> list[tuple[int, float, float, float]]:
+def fetch_chunk_styles(session: Session, run_id: str) -> list[tuple[int, float, float, float]]:
     """
     获取分块风格数据
 
@@ -46,9 +44,7 @@ def fetch_chunk_styles(
     return [(row[0], row[1], row[2], row[3]) for row in result.fetchall()]
 
 
-def insert_chunk_style(
-    session: Session, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]
-) -> None:
+def insert_chunk_style(session: Session, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]) -> None:
     """
     插入分块风格数据
 
@@ -68,9 +64,7 @@ def insert_chunk_style(
         session.bulk_insert_mappings(cast(Mapper[Any], ChunkStyle), style_rows)
 
 
-def fetch_chunk_styles_full(
-    session: Session, run_id: str
-) -> Sequence[Row]:
+def fetch_chunk_styles_full(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取完整的分块风格数据
 
@@ -86,21 +80,25 @@ def fetch_chunk_styles_full(
     任务: fix-pause-density-d-value-equality
     修改内容: 返回 Row 对象而非元组，支持字段名访问，避免索引错位问题
     """
-    stmt = select(
-        ChunkStyle.chunk_id,
-        ChunkStyle.mtld,
-        ChunkStyle.ttr,
-        ChunkStyle.avg_sent_len,
-        ChunkStyle.sent_len_std,
-        ChunkStyle.d_value,
-        ChunkStyle.pause_density,
-        ChunkStyle.fight_density,
-        ChunkStyle.exclaim_density,
-        ChunkStyle.dialogue_ratio,
-        ChunkStyle.question_density,
-        ChunkStyle.sensory_density,
-        ChunkStyle.metaphor_density,
-        ChunkStyle.function_word_vector,
-    ).where(ChunkStyle.run_id == run_id).order_by(ChunkStyle.chunk_id)
+    stmt = (
+        select(
+            ChunkStyle.chunk_id,
+            ChunkStyle.mtld,
+            ChunkStyle.ttr,
+            ChunkStyle.avg_sent_len,
+            ChunkStyle.sent_len_std,
+            ChunkStyle.d_value,
+            ChunkStyle.pause_density,
+            ChunkStyle.fight_density,
+            ChunkStyle.exclaim_density,
+            ChunkStyle.dialogue_ratio,
+            ChunkStyle.question_density,
+            ChunkStyle.sensory_density,
+            ChunkStyle.metaphor_density,
+            ChunkStyle.function_word_vector,
+        )
+        .where(ChunkStyle.run_id == run_id)
+        .order_by(ChunkStyle.chunk_id)
+    )
     result = session.execute(stmt)
     return result.fetchall()

@@ -212,9 +212,7 @@ def fetch_relations(session: Session, run_id: str) -> list[Any]:
     Returns:
         (from_char, to_char) 元组列表
     """
-    stmt = select(ChunkRelation.from_char, ChunkRelation.to_char).where(
-        ChunkRelation.run_id == run_id
-    )
+    stmt = select(ChunkRelation.from_char, ChunkRelation.to_char).where(ChunkRelation.run_id == run_id)
     result = session.execute(stmt)
     return list(result.fetchall())
 
@@ -256,7 +254,6 @@ def fetch_chunk_relations_window(
     return list(session.execute(stmt).scalars().all())
 
 
-
 def fetch_pending_chunk_relations(
     session: Session,
     run_id: str,
@@ -278,9 +275,7 @@ def fetch_pending_chunk_relations(
 
 def has_annotations(session: Session, run_id: str) -> bool:
     """检查指定运行是否有标注数据"""
-    stmt = select(func.count()).select_from(ChunkAnnotation).where(
-        ChunkAnnotation.run_id == run_id
-    )
+    stmt = select(func.count()).select_from(ChunkAnnotation).where(ChunkAnnotation.run_id == run_id)
     count = session.execute(stmt).scalar()
     return (count or 0) > 0
 
@@ -292,14 +287,13 @@ def is_annotate_complete(session: Session, run_id: str) -> bool:
     Returns:
         标注是否完成（标注数量 >= 分块数量）
     """
-    chunks_count = session.execute(
-        select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)
-    ).scalar() or 0
-    annotations_count = session.execute(
-        select(func.count()).select_from(ChunkAnnotation).where(
-            ChunkAnnotation.run_id == run_id
-        )
-    ).scalar() or 0
+    chunks_count = session.execute(select(func.count()).select_from(Chunk).where(Chunk.run_id == run_id)).scalar() or 0
+    annotations_count = (
+        session.execute(
+            select(func.count()).select_from(ChunkAnnotation).where(ChunkAnnotation.run_id == run_id)
+        ).scalar()
+        or 0
+    )
     return chunks_count > 0 and annotations_count >= chunks_count
 
 
@@ -320,11 +314,7 @@ def get_annotation_by_chunk(session: Session, run_id: str, chunk_id: int) -> dic
     Returns:
         标注结果字典，包含 characters 等字段
     """
-    stmt = (
-        select(ChunkAnnotation)
-        .where(ChunkAnnotation.run_id == run_id)
-        .where(ChunkAnnotation.chunk_id == chunk_id)
-    )
+    stmt = select(ChunkAnnotation).where(ChunkAnnotation.run_id == run_id).where(ChunkAnnotation.chunk_id == chunk_id)
     result = session.execute(stmt).scalar_one_or_none()
 
     if result is None:
@@ -339,19 +329,17 @@ def get_annotation_by_chunk(session: Session, run_id: str, chunk_id: int) -> dic
         "characters": [],
     }
 
-    char_stmt = (
-        select(ChunkCharacter)
-        .where(ChunkCharacter.run_id == run_id)
-        .where(ChunkCharacter.chunk_id == chunk_id)
-    )
+    char_stmt = select(ChunkCharacter).where(ChunkCharacter.run_id == run_id).where(ChunkCharacter.chunk_id == chunk_id)
     characters = session.execute(char_stmt).scalars().all()
 
     for char in characters:
-        annotation_dict["characters"].append({
-            "name": char.name,
-            "role_function": char.role_function,
-            "action": char.action,
-            "emotion_score": char.emotion_score,
-        })
+        annotation_dict["characters"].append(
+            {
+                "name": char.name,
+                "role_function": char.role_function,
+                "action": char.action,
+                "emotion_score": char.emotion_score,
+            }
+        )
 
     return annotation_dict

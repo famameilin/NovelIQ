@@ -54,13 +54,15 @@ def save_chunk_locations(
         raw_name = loc.get("raw_name", "")
         if not raw_name:
             continue
-        records.append({
-            "chunk_id": chunk_id,
-            "location_name": raw_name,
-            "location_type": loc.get("location_type"),
-            "run_id": run_id,
-            "novel_id": novel_id,
-        })
+        records.append(
+            {
+                "chunk_id": chunk_id,
+                "location_name": raw_name,
+                "location_type": loc.get("location_type"),
+                "run_id": run_id,
+                "novel_id": novel_id,
+            }
+        )
 
     if not records:
         return 0

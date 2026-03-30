@@ -68,6 +68,7 @@ def aggregate_all_metrics(
 
     return result
 
+
 __all__ = [
     # types
     "AggregateResult",
