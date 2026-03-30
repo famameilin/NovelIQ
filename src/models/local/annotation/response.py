@@ -3,15 +3,67 @@
 创建者: TraeAI
 任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: 响应处理和thinking提取逻辑
+
+修改时间: 2026-03-30
+修改者: TraeAI
+任务: feature/chunk-summary-timeline-only
+修改内容: 添加重复输出检测，防止模型生成循环内容
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from loguru import logger
 
 from src.models.local.parser import extract_thinking_unified
+
+
+def _detect_repetition(content: str, threshold: int = 3000) -> tuple[bool, str | None]:
+    """
+    检测 LLM 输出是否存在重复模式
+
+    创建时间: 2026-03-30
+    创建者: TraeAI
+    任务: feature/chunk-summary-timeline-only
+    说明: 当响应字符数异常大时，检测是否有重复内容
+
+    Args:
+        content: 响应内容
+        threshold: 触发检测的字符数阈值
+
+    Returns:
+        tuple: (is_repetitive, pattern) - 是否重复，以及检测到的重复模式
+    """
+    if len(content) < threshold:
+        return False, None
+
+    lines = content.split('\n')
+    if len(lines) < 3:
+        return False, None
+
+    line_counts: dict[str, int] = {}
+    for line in lines:
+        line = line.strip()
+        if len(line) > 20:
+            line_counts[line] = line_counts.get(line, 0) + 1
+
+    for line, count in line_counts.items():
+        if count >= 3:
+            return True, line[:50] + "..." if len(line) > 50 else line
+
+    for pattern in [r'"[^"]+":\s*"[^"]*",?\s*', r'\{[^}]+\},?\s*']:
+        matches = re.findall(pattern, content)
+        if len(matches) >= 5:
+            match_counts: dict[str, int] = {}
+            for m in matches:
+                match_counts[m] = match_counts.get(m, 0) + 1
+            for m, count in match_counts.items():
+                if count >= 3:
+                    return True, m[:50] + "..." if len(m) > 50 else m
+
+    return False, None
 
 
 def process_annotation_response(
@@ -68,6 +120,17 @@ def process_annotation_response(
 
     has_thinking = bool(thinking_content and thinking_content.strip())
     has_response = bool(content_clean and content_clean.strip())
+
+    is_repetitive, repeat_pattern = _detect_repetition(content_clean)
+    if is_repetitive:
+        logger.warning(
+            "检测到重复输出: novel_id={} chunk_id={} phase={} response_chars={} pattern={}",
+            novel_id,
+            chunk_id,
+            phase,
+            len(content_clean),
+            repeat_pattern,
+        )
 
     if is_cloud:
         logger.info(
