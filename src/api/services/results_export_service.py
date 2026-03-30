@@ -233,11 +233,13 @@ def _fetch_timeline_data(
         max_nodes=20,
     )
 
+    from dataclasses import asdict
+
     timeline_nodes = convert_to_timeline_nodes(selected_nodes)
 
     return {
-        "phases": [p.model_dump() for p in timeline_phases],
-        "nodes": [n.model_dump() for n in timeline_nodes],
+        "phases": [asdict(p) for p in timeline_phases],
+        "nodes": [asdict(n) for n in timeline_nodes],
         "tension_curve": tension_scores,
         "total_chunks": total_chunks,
     }
