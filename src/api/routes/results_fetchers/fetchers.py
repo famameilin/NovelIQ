@@ -325,6 +325,7 @@ def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
             dialogue_ratio=row.dialogue_ratio,
             sensory_density=row.sensory_density,
             metaphor_density=row.metaphor_density,
+            imagery_lexicon_density=row.imagery_lexicon_density,
         )
         for row in rows
     ]
@@ -570,17 +571,7 @@ def _fetch_global_stats(run_id: str, stats_repo: StatsRepository, chunk_repo: Ch
 
 def _fetch_chunk_cultures(run_id: str, chunk_repo: ChunkRepository) -> list:
     """
-    获取分块文化数据
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: refactor-routes-use-repository
-    修改内容: 重构为使用 ChunkRepository
-
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 只返回 imagery_lexicon_density
+    获取分块文化数据（从 chunk_style 读取 imagery_lexicon_density）
     """
     rows = chunk_repo.fetch_chunk_cultures_full(run_id)
     return [

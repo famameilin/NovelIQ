@@ -97,6 +97,7 @@ class ChunkStyle(BaseModel):
     dialogue_ratio: float | None = None
     sensory_density: float | None = None
     metaphor_density: float | None = None
+    imagery_lexicon_density: float | None = None
 
 
 class ChunkCharacter(BaseModel):
