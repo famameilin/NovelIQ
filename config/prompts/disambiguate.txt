@@ -55,6 +55,9 @@
    例如：赵兰英说"就叫伯安"——这里伯安是被命名的孩子，不是赵兰英的别名
 5. 如果一个名字没有其他称呼，则 canonical_decisions 映射到自身
 6. 如果无法确定是否为同一人物，保持独立
+7. 【禁止】entity_relations 中不得使用 "same_person" 类型
+   - 别名映射应通过 canonical_decisions 处理
+   - entity_relations 仅用于层级/亲属关系（如 father_of, leader_of）
 
 【实体类型识别规则】
 - character：具体人物角色（如伯安、贺重明）
