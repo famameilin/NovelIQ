@@ -36,7 +36,7 @@ from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
     DiagnosisRepository,
-    EntityRepository,
+    GraphRepository,
     StatsRepository,
 )
 
@@ -69,16 +69,11 @@ def load_character_bundle(
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    entity_repo: EntityRepository,
+    graph_repo: GraphRepository,
     alias_map: dict[str, str],
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
     """
     加载角色相关数据
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-hierarchical-relation-filter
-    修改内容: 添加 entity_repo 参数，将 entities 表中的实体也加入 valid_character_names
 
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
@@ -100,8 +95,8 @@ def load_character_bundle(
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
 
-    entity_names = entity_repo.fetch_all_canonical_names(novel_id, run_id)
-    valid_character_names = valid_character_names | entity_names
+    graph_entities = graph_repo.fetch_entities(run_id)
+    valid_character_names = valid_character_names | {e.canonical_name for e in graph_entities}
 
     return characters, arc_scores, main_characters, valid_character_names, missing_fields
 
@@ -145,7 +140,7 @@ def load_aggregate_bundle(
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    entity_repo: EntityRepository,
+    graph_repo: GraphRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
 ) -> tuple[list, list, Any, list, Any, dict[str, Any], dict[str, Any]]:
@@ -162,9 +157,8 @@ def load_aggregate_bundle(
         valid_character_names=valid_character_names,
     )
     hierarchical_relations = _fetch_hierarchical_relations(
-        novel_id,
         run_id,
-        entity_repo,
+        graph_repo,
         valid_character_names=valid_character_names,
     )
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
@@ -301,26 +295,17 @@ def fetch_all_results_data(
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    entity_repo: EntityRepository,
+    graph_repo: GraphRepository,
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-api-layer-functions
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: consolidate-codebase-architecture
-    修改内容: 拆分为多个子函数，简化主函数逻辑
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
 
     emotion_curve, rhythm_curve, missing_fields = load_core_results(run_id, stats_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, entity_repo, alias_map
+        run_id, novel_id, stats_repo, annotation_repo, graph_repo, alias_map
     )
     missing_fields.extend(char_missing)
 
@@ -342,7 +327,7 @@ def fetch_all_results_data(
         aggregate_metrics,
         graph_summary,
     ) = load_aggregate_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, chunk_repo, entity_repo, alias_map, valid_character_names
+        run_id, novel_id, stats_repo, annotation_repo, chunk_repo, graph_repo, alias_map, valid_character_names
     )
 
     novel_name = _fetch_novel_name(run_id, novel_id, stats_repo)

@@ -36,13 +36,6 @@ from src.storage.models.annotation import (
 from src.storage.models.base import Base
 from src.storage.models.chunk import Chunk, ChunkCulture, ChunkEmbedding, ChunkStyle, ChunkTopic
 from src.storage.models.core import AnalysisRun, DisambigCheckpoint
-from src.storage.models.entity import (
-    Entity,
-    EntityAlias,
-    EntityRegistry,
-    EntityRelation,
-    EntitySnapshot,
-)
 from src.storage.models.graph import (
     GraphEntity,
     GraphEntityAlias,
@@ -70,11 +63,6 @@ __all__ = [
     "ChunkDialogue",
     "ChunkForeshadowing",
     "CharacterAppearance",
-    "Entity",
-    "EntityAlias",
-    "EntityRelation",
-    "EntitySnapshot",
-    "EntityRegistry",
     "GraphEntity",
     "GraphEntityAlias",
     "GraphRelationEvent",

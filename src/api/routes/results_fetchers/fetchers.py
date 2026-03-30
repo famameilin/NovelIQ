@@ -48,7 +48,6 @@ from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
     DiagnosisRepository,
-    EntityRepository,
     GraphRepository,
     StatsRepository,
 )
@@ -493,9 +492,8 @@ def _fetch_character_relations(
 
 
 def _fetch_hierarchical_relations(
-    novel_id: str,
     run_id: str,
-    entity_repo: EntityRepository,
+    entity_repo: GraphRepository,
     valid_character_names: set[str] | None = None,
 ) -> list:
     """
@@ -504,31 +502,36 @@ def _fetch_hierarchical_relations(
     创建时间: 2026-03-19
     创建者: TraeAI
     任务: 添加层级关系导出到JSON功能
-    说明: 从entity_relations表中获取层级关系类型
+    说明: 从 graph_relation_current 表中获取层级关系类型
 
     修改时间: 2026-03-27
     修改者: TraeAI
     任务: fix-character-dangling-reference
     修改内容: 添加 valid_character_names 参数，过滤悬空引用的关系
+
+    修改时间: 2026-03-30
+    修改者: CodeBuddy
+    任务: db-schema-cleanup
+    修改内容: 改用 GraphRepository 查询 graph_relation_current
     """
-    relations = entity_repo.fetch_hierarchical_relations_with_names(novel_id, run_id)
+    hierarchical_types = {"child_of", "parent_of", "father_of", "son_of", "sibling_of", "spouse_of"}
+    all_relations = entity_repo.fetch_current_relations(run_id, active_only=False)
     result = []
-    for rel in relations:
-        from_entity = rel["from_entity"]
-        to_entity = rel["to_entity"]
+    for rel in all_relations:
+        rel_type = rel.get("type", "")
+        if rel_type not in hierarchical_types:
+            continue
+        from_entity = rel.get("from_name", "")
+        to_entity = rel.get("to_name", "")
         if valid_character_names is not None:
             if from_entity not in valid_character_names or to_entity not in valid_character_names:
-                logger.warning(
-                    f"跳过悬空引用的层级关系: rel_id={rel['rel_id']}, "
-                    f"from_entity={from_entity}, to_entity={to_entity}"
-                )
                 continue
         result.append(
             HierarchicalRelation(
-                rel_id=rel["rel_id"],
-                rel_type=rel["rel_type"],
-                first_chunk=rel["first_chunk"],
-                last_chunk=rel["last_chunk"],
+                rel_id=rel.get("relation_id"),
+                rel_type=rel_type,
+                first_chunk=rel.get("first_seen_chunk"),
+                last_chunk=rel.get("last_seen_chunk"),
                 from_entity=from_entity,
                 to_entity=to_entity,
             )
