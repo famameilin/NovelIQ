@@ -224,6 +224,11 @@ def build_annotation(data: dict[str, Any]) -> ChunkAnnotation:
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 relations、character_appearances、chunk_summary 字段处理
+
+    修改时间: 2026-03-30
+    修改者: TraeAI
+    任务: feature/chunk-summary-timeline-only
+    修改内容: 恢复 chunk_summary 字段处理，仅用于 Timeline 展示
     """
     has_foreshadowing = data.get("has_foreshadowing", False)
 
@@ -232,6 +237,7 @@ def build_annotation(data: dict[str, Any]) -> ChunkAnnotation:
         event_type=_parse_event_type(data.get("event_type", "铺垫")),
         pivot_moment=data.get("pivot_moment", False),
         cliffhanger=data.get("cliffhanger", False),
+        chunk_summary=data.get("chunk_summary", ""),
         has_foreshadowing=has_foreshadowing,
         foreshadowing_type=_parse_foreshadowing_type(
             has_foreshadowing, data.get("foreshadowing_type")

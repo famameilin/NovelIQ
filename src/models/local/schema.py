@@ -355,6 +355,11 @@ class ChunkAnnotation(BaseModel):
     修改者: TraeAI
     任务: remove-unused-annotation-fields
     修改内容: 移除 relations、character_appearances、chunk_summary 字段
+
+    修改时间: 2026-03-30
+    修改者: TraeAI
+    任务: feature/chunk-summary-timeline-only
+    修改内容: 恢复 chunk_summary 字段，仅用于 Timeline 展示，不参与消歧证据链
     """
 
     model_config = ConfigDict(frozen=False)
@@ -363,6 +368,10 @@ class ChunkAnnotation(BaseModel):
     event_type: str
     pivot_moment: bool
     cliffhanger: bool
+    chunk_summary: str = Field(
+        default="",
+        description="核心事件摘要，30-50字，用于 Timeline 展示。不参与消歧证据链。"
+    )
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
     )
@@ -379,6 +388,7 @@ class ChunkAnnotation(BaseModel):
             "event_type": self.event_type,
             "pivot_moment": self.pivot_moment,
             "cliffhanger": self.cliffhanger,
+            "chunk_summary": self.chunk_summary,
             "has_foreshadowing": self.has_foreshadowing,
             "foreshadowing_type": self.foreshadowing_type,
             "foreshadowing_desc": self.foreshadowing_desc,

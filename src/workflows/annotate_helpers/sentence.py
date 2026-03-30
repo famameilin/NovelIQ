@@ -72,7 +72,13 @@ def build_context_sentences(
     prev_chunks: int = ANNOTATION_CONFIG.prev_chunks,
     run_id: str | None = None,
 ) -> dict[str, str]:
-    """为候选名构建上下文句子"""
+    """为候选名构建上下文句子
+
+    修改时间: 2026-03-30
+    修改者: TraeAI
+    任务: feature/chunk-summary-timeline-only
+    修改内容: 移除 _add_prev_summaries 调用，summary 仅用于 Timeline 展示，不参与消歧证据链
+    """
     if not run_id:
         raise ValueError("run_id is required for build_context_sentences")
     if alias_keywords is None:
@@ -81,7 +87,6 @@ def build_context_sentences(
     name_list = [candidate["name"] for candidate in candidates]
 
     result = _build_sentence_pool(conn, name_list, alias_keywords, run_id)
-    _add_prev_summaries(conn, result, name_list, prev_chunks, run_id)
     _add_identity_clues(conn, result, name_list, run_id)
 
     return result
@@ -222,7 +227,13 @@ def _add_prev_summaries(
     prev_chunks: int,
     run_id: str,
 ) -> None:
-    """添加前文摘要"""
+    """添加前文摘要
+
+    废弃时间: 2026-03-30
+    废弃者: TraeAI
+    任务: feature/chunk-summary-timeline-only
+    废弃原因: summary 仅用于 Timeline 展示，不参与消歧证据链
+    """
     for name in name_list:
         chunk_rows = conn.execute(
             text("""
