@@ -33,6 +33,7 @@ from .pipeline import (
 )
 from .relations import (
     _extract_retryable_relations,
+    _is_valid_inverse_pair,
     _process_entity_relations,
     detect_cycle_in_relations,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "_retry_disambig",
     "extract_new_names_from_db",
     "detect_cycle_in_relations",
+    "_is_valid_inverse_pair",
     "_process_entity_relations",
     "_extract_retryable_relations",
     "_collect_final_disambiguation_candidates",

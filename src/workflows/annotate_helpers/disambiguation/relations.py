@@ -91,10 +91,6 @@ def _extract_retryable_relations(skipped_relations: list[dict[str, Any]] | None)
 
 
 _INVERSE_RELATION_PAIRS: dict[str, str] = {
-    "child_of": "parent_of",
-    "parent_of": "child_of",
-    "father_of": "son_of",
-    "son_of": "father_of",
     "sibling_of": "sibling_of",
     "spouse_of": "spouse_of",
 }
