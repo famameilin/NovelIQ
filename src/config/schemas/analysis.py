@@ -102,6 +102,8 @@ class AnalysisSettings:
     """
 
     incremental_disambig_interval: int = 10
+    checkpoint_interval: int = 1
+    projection_interval: int = 1
     analysis_log_rotation: str = "10 MB"
     analysis_log_retention: str = "30 days"
     sentence_preview_max_chars: int = 100
@@ -311,6 +313,8 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         return AnalysisSettings()
     return AnalysisSettings(
         incremental_disambig_interval=data.get("incremental_disambig_interval", 10),
+        checkpoint_interval=data.get("checkpoint_interval", 1),
+        projection_interval=data.get("projection_interval", 1),
         analysis_log_rotation=data.get("analysis_log_rotation", "10 MB"),
         analysis_log_retention=data.get("analysis_log_retention", "30 days"),
         sentence_preview_max_chars=data.get("sentence_preview_max_chars", 100),

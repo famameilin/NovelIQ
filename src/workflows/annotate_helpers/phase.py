@@ -259,7 +259,6 @@ def _process_single_chunk(
     state: DisambiguationState,
     use_context_enhancement: bool,
     incremental_interval: int,
-    projection_interval: int,
     run_id: str = "",
     novel_id: str = "",
 ) -> DisambiguationState:
@@ -287,7 +286,6 @@ def _process_single_chunk(
     """
     from .context import _prepare_chunk_context
     from .disambiguation import _run_incremental_disambiguation_with_state
-    from .disambiguation.checkpoint import _save_disambig_checkpoint_state
     from .storage import _store_annotation_results
 
     logger.info(f"Annotating chunk {idx + 1}/{total_chunks}")
@@ -342,14 +340,6 @@ def _process_single_chunk(
         incremental_interval,
     )
 
-    _save_disambig_checkpoint_state(
-        conn,
-        run_id,
-        state,
-        last_annotated_chunk=chunk_id,
-        projection_interval=projection_interval,
-    )
-
     return state
 
 
@@ -374,20 +364,18 @@ def _process_chunks_phase(
     修改时间: 2026-03-27
     修改者: TraeAI
     任务: disambiguation-state-three-layer
-    修改内容: 使用 _load_disambig_checkpoint_state 替代 _load_disambig_checkpoint，返回 DisambiguationState
+    修改内容: 使用 _load_disambig_checkpoint 替代 _load_disambig_checkpoint，返回 DisambiguationState
     """
-    from .disambiguation import DisambiguationMaxRetriesExceededError, _load_disambig_checkpoint_state
-    from .disambiguation.checkpoint import load_disambig_checkpoint_metadata
+    from .disambiguation import DisambiguationMaxRetriesExceededError, _load_disambig_checkpoint, _save_disambig_checkpoint
     from .graph_projection import project_graph_tables
 
     success_count = 0
 
-    projection_interval = max(1, ANNOTATION_CONFIG.checkpoint_interval)
+    checkpoint_interval = max(1, settings.analysis.checkpoint_interval)
+    projection_interval = max(1, settings.analysis.projection_interval)
     state: DisambiguationState = DisambiguationState.empty()
     if resume and run_id:
-        state = _load_disambig_checkpoint_state(conn, run_id)
-        checkpoint_meta = load_disambig_checkpoint_metadata(conn, run_id)
-        projection_interval = max(1, checkpoint_meta.get("projection_interval") or projection_interval)
+        state = _load_disambig_checkpoint(conn, run_id)
         if state.discovered_names:
             logger.info(
                 f"resumed from checkpoint: {len(state.discovered_names)} discovered, "
@@ -412,11 +400,12 @@ def _process_chunks_phase(
                 state,
                 use_context_enhancement,
                 incremental_interval,
-                projection_interval,
                 run_id=run_id,
                 novel_id=novel_id,
             )
             success_count += 1
+            if run_id and success_count % checkpoint_interval == 0:
+                _save_disambig_checkpoint(conn, run_id, state)
             if run_id and success_count % projection_interval == 0:
                 project_graph_tables(run_id, to_chunk=chunk_id, session=conn)
         except ChunkAnnotationMaxRetriesExceededError as e:
