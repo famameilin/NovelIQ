@@ -108,6 +108,7 @@ class ChunkStyle(Base):
     category_density_measure: Mapped[float | None] = mapped_column(Float, nullable=True)
     category_density_emotion: Mapped[float | None] = mapped_column(Float, nullable=True)
     category_density_color: Mapped[float | None] = mapped_column(Float, nullable=True)
+    imagery_lexicon_density: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -127,47 +128,6 @@ class ChunkStyle(Base):
         return f"<ChunkStyle(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
-class ChunkCulture(Base):
-    """
-    分块文化指标表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块的传统文化指标数据
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
-
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度字段，只保留 imagery_lexicon_density
-    """
-
-    __tablename__ = "chunk_culture"
-
-    chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    imagery_lexicon_density: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["chunk_id", "run_id"],
-            ["chunks.chunk_id", "chunks.run_id"],
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["analysis_runs.run_id"],
-            ondelete="CASCADE",
-        ),
-        Index("idx_chunk_culture_run_id", "run_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ChunkCulture(chunk_id={self.chunk_id}, run_id={self.run_id})>"
 
 
 class ChunkTopic(Base):
