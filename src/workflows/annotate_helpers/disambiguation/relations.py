@@ -99,12 +99,15 @@ _INVERSE_RELATION_PAIRS: dict[str, str] = {
     "spouse_of": "spouse_of",
 }
 
+_PARENT_CHILD_GROUP = {"child_of", "parent_of", "son_of", "father_of"}
+
 
 def _is_valid_inverse_pair(relations: list[dict[str, str]], from_node: str, to_node: str) -> bool:
     """
     检查两个节点之间的双向关系是否是合法的互逆关系对
 
     例如：A child_of B 和 B parent_of A 是合法的互逆关系对
+    也支持 cross-type 配对：A child_of B 和 B father_of A 也是合法的
     """
     forward_types: set[str] = set()
     backward_types: set[str] = set()
@@ -114,6 +117,9 @@ def _is_valid_inverse_pair(relations: list[dict[str, str]], from_node: str, to_n
             forward_types.add(rel["type"])
         elif rel["from"] == to_node and rel["to"] == from_node:
             backward_types.add(rel["type"])
+
+    if forward_types & _PARENT_CHILD_GROUP and backward_types & _PARENT_CHILD_GROUP:
+        return True
 
     for fwd_type in forward_types:
         expected_inverse = _INVERSE_RELATION_PAIRS.get(fwd_type)
