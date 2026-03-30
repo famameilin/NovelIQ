@@ -130,6 +130,10 @@ class AnnotationRetryHandler[T]:
             self.state.last_bad_output = getattr(error, "bad_output", "")
             self.state.last_validation_details = getattr(error, "validation_details", None)
 
+        # 检查是否是重复输出错误
+        if error.__class__.__name__ == "RepetitiveOutputError":
+            self.state.last_bad_output = str(error)
+
         logger.error(
             "{} attempt {}/{} failed: {} chunk_id={}",
             self.config.operation_name,
