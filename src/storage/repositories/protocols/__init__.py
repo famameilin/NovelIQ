@@ -10,7 +10,6 @@ from __future__ import annotations
 from .annotation import AnnotationRepositoryProtocol
 from .chunk import ChunkRepositoryProtocol
 from .diagnosis import DiagnosisRepositoryProtocol
-from .entity import EntityRepositoryProtocol
 from .run import RunRepositoryProtocol
 from .stats import StatsRepositoryProtocol
 
@@ -18,7 +17,6 @@ __all__ = [
     "AnnotationRepositoryProtocol",
     "ChunkRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
-    "EntityRepositoryProtocol",
     "RunRepositoryProtocol",
     "StatsRepositoryProtocol",
 ]

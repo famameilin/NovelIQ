@@ -53,7 +53,7 @@ from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
-    EntityRepository,
+    GraphRepository,
     RunRepository,
     StatsRepository,
 )
@@ -159,10 +159,10 @@ async def get_results(
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
-    entity_repo = EntityRepository(session)
+    graph_repo = GraphRepository(session)
 
     results_data, missing_fields, novel_name = fetch_all_results_data(
-        novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo, entity_repo
+        novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo, graph_repo
     )
 
     file_path = _write_results_to_file(task_id, results_data)
