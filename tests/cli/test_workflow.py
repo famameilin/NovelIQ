@@ -106,8 +106,7 @@ class TestStageCompletion:
         from src.chunking.chunker import Chunk
         chunks = [Chunk(index=0, text="测试文本" * 100, start=0, end=100)]
         chunk_repo.insert_chunks(run_id, chunks)
-        stats_repo.insert_emotion_curve(run_id, [(0, 0.1, 0.2, 0.0, 0.1)])
-        stats_repo.insert_rhythm_curve(run_id, [(0, 0.5, 0.3)])
+        stats_repo.insert_chunk_curve(run_id, [(0, 0.1, 0.2, 0.0, 0.1, 0.5, 0.3)])
 
         assert stats_repo.has_aggregated_data(run_id)
 

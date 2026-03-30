@@ -58,9 +58,9 @@ def fetch_emotion_data(
     stats_repo: StatsRepository,
     run_id: str,
 ) -> EmotionData:
-    """提取 emotion_curve 表数据"""
-    rows = stats_repo.fetch_emotion_curve(run_id)
-    emotion_values = [row[2] for row in rows]
+    """提取 chunk_curves 表数据"""
+    rows = stats_repo.fetch_chunk_curves_full(run_id)
+    emotion_values = [row[3] for row in rows]
 
     density_rows = stats_repo.fetch_emotion_densities(run_id)
     pos_densities = [row[0] for row in density_rows if row[0] is not None]
@@ -173,9 +173,9 @@ def fetch_tension_data(
     stats_repo: StatsRepository,
     run_id: str,
 ) -> TensionData:
-    """提取 rhythm_curve 表的 tension_composite 数据"""
-    rows = stats_repo.fetch_rhythm_curve(run_id)
-    tension_composite_scores = [row[0] for row in rows if row[0] is not None]
+    """提取 chunk_curves 表的 tension_composite 数据"""
+    rows = stats_repo.fetch_chunk_curves_full(run_id)
+    tension_composite_scores = [row[6] for row in rows if row[6] is not None]
     return TensionData(tension_composite_scores=tension_composite_scores)
 
 

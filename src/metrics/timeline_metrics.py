@@ -583,8 +583,8 @@ def build_timeline_candidates(
     chunk_id_to_idx: dict[int, int] = {cid: idx for idx, cid in enumerate(chunk_ids)}
 
     # 获取张力曲线
-    rhythm_curve = stats_repo.fetch_rhythm_curve(run_id)
-    tension_scores = [row[0] if row else 0.0 for row in rhythm_curve] if rhythm_curve else [0.5] * total_chunks
+    chunk_curves = stats_repo.fetch_chunk_curves_full(run_id)
+    tension_scores = [row[5] if row else 0.0 for row in chunk_curves] if chunk_curves else [0.5] * total_chunks
 
     # 确保张力数据长度匹配
     if len(tension_scores) < total_chunks:
