@@ -169,3 +169,5 @@ deprecated/
 
 # LDA Topic Models - 训练好的模型文件
 /models/
+
+.codebuddy/
