@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import select
 
 from src.api.models.responses import (
     CharacterRelation,
@@ -45,7 +44,6 @@ from src.api.routes.results_fetchers.parsers import _parse_int_field, _parse_jso
 from src.api.routes.results_fetchers.scoring import _calculate_protagonist_scores, _normalize_arc_scores
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
-from src.storage.models import GraphEntity
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -220,7 +218,7 @@ def _fetch_topics(
             for topic_id in range(topic_model.num_topics):
                 topic_words = topic_model.get_topic_words(topic_id, top_n=10)
                 topic_words_map[topic_id] = [w.word for w in topic_words]
-        except Exception as e:
+        except (FileNotFoundError, ImportError, OSError, ValueError) as e:
             logger.warning(f"Failed to load topic model: {e}")
 
     result: list[TopicInfo] = []
@@ -362,16 +360,15 @@ def _fetch_chunk_annotations(
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
 
     relation_events_raw: list[dict[str, Any]] = []
-    if hasattr(annotation_repo, "session"):
-        graph_repo = GraphRepository(annotation_repo.session)
-        relation_events_raw = graph_repo.fetch_relation_events(run_id)
-        if not relation_events_raw:
-            pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-            if pending_relations:
-                raise RuntimeError(
-                    "graph relation events are empty while pending relations still exist; "
-                    "run graph projection before exporting results."
-                )
+    graph_repo = GraphRepository(annotation_repo.session)
+    relation_events_raw = graph_repo.fetch_relation_events(run_id)
+    if not relation_events_raw:
+        pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+        if pending_relations:
+            raise RuntimeError(
+                "graph relation events are empty while pending relations still exist; "
+                "run graph projection before exporting results."
+            )
 
     characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
     for row in characters_raw:
@@ -464,9 +461,6 @@ def _fetch_character_relations(
     valid_character_names: set[str] | None = None,
 ) -> list:
     """获取角色关系数据（graph_relations_current 权威来源）。"""
-    if not hasattr(annotation_repo, "session"):
-        return []
-
     graph_repo = GraphRepository(annotation_repo.session)
     graph_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
     if not graph_relations:
@@ -711,42 +705,22 @@ def _fetch_graph_snapshot(
     annotation_repo: AnnotationRepository,
 ) -> dict[str, Any]:
     """获取知识图谱快照（nodes/edges/events/summary）。"""
-    if not hasattr(annotation_repo, "session"):
-        return {
-            "nodes": [],
-            "edges": [],
-            "events": [],
-            "summary": {},
-            "quality": {},
-        }
-
     graph_repo = GraphRepository(annotation_repo.session)
     pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
     if pending_relations:
         raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
 
-    node_rows = annotation_repo.session.execute(
-        select(
-            GraphEntity.entity_id,
-            GraphEntity.canonical_name,
-            GraphEntity.entity_type,
-            GraphEntity.first_seen_chunk,
-            GraphEntity.last_seen_chunk,
-            GraphEntity.primary_role_function,
-            GraphEntity.last_emotion_score,
-            GraphEntity.status,
-        ).where(GraphEntity.run_id == run_id)
-    ).fetchall()
+    node_rows = graph_repo.fetch_entities(run_id)
     nodes = [
         {
-            "entity_id": row[0],
-            "name": row[1],
-            "entity_type": row[2],
-            "first_seen_chunk": row[3],
-            "last_seen_chunk": row[4],
-            "role": row[5],
-            "emotion_score": row[6],
-            "status": row[7],
+            "entity_id": row.entity_id,
+            "name": row.canonical_name,
+            "entity_type": row.entity_type,
+            "first_seen_chunk": row.first_seen_chunk,
+            "last_seen_chunk": row.last_seen_chunk,
+            "role": row.primary_role_function,
+            "emotion_score": row.last_emotion_score,
+            "status": row.status,
         }
         for row in node_rows
     ]
