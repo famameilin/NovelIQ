@@ -187,7 +187,7 @@ def ensure_canonical_entities(
         if entity.entity_id is not None:
             canonical_to_entity_id[canonical] = entity.entity_id
     
-    session.commit()
+    # 注意：Repository 层不管理事务，由调用方控制 commit
     logger.info(f"Ensured {len(canonical_to_entity_id)} canonical entities")
     return canonical_to_entity_id
 
@@ -244,6 +244,6 @@ def apply_alias_merges(
             ChunkRelation.run_id == run_id,
         )
     )
-    
-    session.commit()
+
+    # 注意：Repository 层不管理事务，由调用方控制 commit
     logger.info(f"Applied {correction_count} alias merges")
