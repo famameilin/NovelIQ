@@ -22,8 +22,8 @@ from .candidates import (
     extract_new_names_from_db,
 )
 from .checkpoint import (
-    _load_disambig_checkpoint_state,
-    _save_disambig_checkpoint_state,
+    _load_disambig_checkpoint,
+    _save_disambig_checkpoint,
 )
 from .pipeline import (
     DisambiguationMaxRetriesExceededError,
@@ -69,7 +69,7 @@ __all__ = [
     "DISAMBIG_STATE_UNRESOLVED",
     "EXTENSION_REVIEW_MIN_GAP",
     "EXTENSION_REVIEW_MIN_RATIO",
-    "_save_disambig_checkpoint_state",
-    "_load_disambig_checkpoint_state",
+    "_save_disambig_checkpoint",
+    "_load_disambig_checkpoint",
     "DisambigStateSnapshot",
 ]

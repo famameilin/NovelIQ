@@ -178,16 +178,14 @@ class TestCloudDiagnose:
         self.db_session.execute(
             text(
                 """
-                INSERT INTO disambig_checkpoint (run_id, alias_map, updated_at, entity_relations, disambig_states)
-                VALUES (:run_id, :alias_map, :updated_at, :entity_relations, :disambig_states)
+                INSERT INTO disambig_checkpoint (run_id, state_json, updated_at)
+                VALUES (:run_id, :state_json, :updated_at)
                 """
             ),
             {
                 "run_id": self.run_id,
-                "alias_map": json.dumps(state_payload, ensure_ascii=False),
+                "state_json": json.dumps(state_payload, ensure_ascii=False),
                 "updated_at": 1.0,
-                "entity_relations": None,
-                "disambig_states": None,
             },
         )
         self.db_session.commit()

@@ -48,9 +48,6 @@ class AnnotationConfig:
     disambig_max_retries: int = 3
     validation_max_retries: int = 3
 
-    # 检查点配置
-    checkpoint_interval: int = 50
-
     # 上下文配置
     prev_chunks: int = 3
     last_n_chunks: int = 10

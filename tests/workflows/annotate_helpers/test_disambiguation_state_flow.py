@@ -53,7 +53,7 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         patch.object(pipeline_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(pipeline_mod, "fetch_all_character_names", return_value=[]),
         patch.object(pipeline_mod, "_process_entity_relations", return_value=(1, [])) as process_mock,
-        patch.object(pipeline_mod, "_save_disambig_checkpoint_state", return_value=None),
+        patch.object(pipeline_mod, "_save_disambig_checkpoint", return_value=None),
     ):
         new_state = disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
@@ -89,7 +89,7 @@ def test_run_final_disambiguation_with_state_skips_known_canonical_without_revie
         ),
         patch.object(pipeline_mod, "_retry_disambig") as retry_mock,
         patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
-        patch.object(pipeline_mod, "_save_disambig_checkpoint_state", return_value=None),
+        patch.object(pipeline_mod, "_save_disambig_checkpoint", return_value=None),
     ):
         new_state = disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
