@@ -27,7 +27,7 @@ from src.models.local.disambiguation import DisambiguationState
 
 if TYPE_CHECKING:
     from src.models.local.annotation import MultiPhaseAnnotationResult
-    from src.rag import RAGRetriever
+    from src.rag import DisambigContextProvider
 
 
 @dataclass
@@ -115,7 +115,7 @@ class AnnotationPhaseResult:
         cloud_annotation_client: AnnotationLike | None,
         incremental_disambig_client: DisambiguationLike,
         full_disambig_client: DisambiguationLike,
-        rag_retriever: RAGRetriever | None,
+        rag_retriever: DisambigContextProvider | None,
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
@@ -146,7 +146,7 @@ def _init_annotation_phase_with_config(
 ) -> AnnotationPhaseResult:
     """初始化标注阶段（使用配置对象）"""
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
-    from .context import _init_rag_retriever
+    from .context import _init_disambig_provider
     from .sentence import _extract_and_save_global_context, _load_alias_keywords
 
     if not config.run_id:
@@ -179,14 +179,11 @@ def _init_annotation_phase_with_config(
     )
 
     alias_keywords = _load_alias_keywords()
-    token_usage_callback = getattr(annotation_client, "_token_usage_callback", None)
 
-    rag_retriever, _ = _init_rag_retriever(
+    rag_retriever = _init_disambig_provider(
         config.conn,
         config.novel_id,
         config.use_rag,
-        config.resume,
-        token_usage_callback,
         run_id=config.run_id,
     )
 
