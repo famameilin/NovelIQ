@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import pickle
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 from loguru import logger
 
 """
@@ -27,7 +25,7 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from src.models.local.embedding import EmbeddingClient
-    from src.storage.repositories import EntityRepository, GraphRepository
+    from src.storage.repositories import GraphRepository
 
 
 
@@ -44,12 +42,10 @@ class Level1ExactMatch:
     def __init__(
         self,
         graph_repo: GraphRepository | None = None,
-        entity_repo: EntityRepository | None = None,
         novel_id: str = "default",
         run_id: str | None = None,
     ):
         self._graph_repo = graph_repo
-        self._entity_repo = entity_repo
         self._novel_id = novel_id
         self._run_id = run_id
 
@@ -91,91 +87,39 @@ class Level2GraphConstraint:
 
 
 class Level3VectorEvidence:
+    """
+    嵌入向量检索层（已废弃 — 嵌入向量功能暂不使用）。
+    保留类结构以确保 RAGRetriever 接口兼容。
+    """
+
     def __init__(
         self,
-        entity_repo: EntityRepository,
         novel_id: str = "default",
         run_id: str | None = None,
         embedding_client: EmbeddingClient | None = None,
         similarity_threshold: float = 0.7,
         top_k: int = 3,
     ):
-        self._entity_repo = entity_repo
         self._novel_id = novel_id
         self._run_id = run_id
         self._embedding_client = embedding_client
         self._similarity_threshold = similarity_threshold
         self._top_k = top_k
-        self._available = embedding_client is not None
+        self._available = False
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
-        self._embedding_client = client
-        self._available = True
+        pass
 
     def is_available(self) -> bool:
-        return self._available and self._embedding_client is not None
-
-    def search_similar_entities(
-        self,
-        query_text: str,
-    ) -> list[dict[str, Any]]:
-        if not self.is_available():
-            return []
-
-        try:
-            query_vec = self._embedding_client.get_embedding(query_text) if self._embedding_client else None
-        except Exception as e:
-            logger.warning(f"Level3 embedding failed: {e}")
-            self._available = False
-            return []
-
-        if query_vec is None:
-            return []
-
-        entity_rows = self._entity_repo.fetch_entities_with_embeddings(
-            self._novel_id,
-            self._run_id,
-        )
-
-        results: list[dict[str, Any]] = []
-        for row in entity_rows:
-            entity_id, canonical, description, embedding_blob = row
-            if embedding_blob is None:
-                continue
-            entity_vec = pickle.loads(embedding_blob)
-
-            similarity = self._compute_similarity(query_vec, entity_vec)
-            if similarity >= self._similarity_threshold:
-                results.append(
-                    {
-                        "entity_id": entity_id,
-                        "canonical": canonical,
-                        "description": description,
-                        "similarity": similarity,
-                    }
-                )
-
-        results.sort(key=lambda x: x["similarity"], reverse=True)
-        return results[: self._top_k]
-
-    def _compute_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        arr1 = np.array(vec1)
-        arr2 = np.array(vec2)
-        dot_product = np.dot(arr1, arr2)
-        norm1 = np.linalg.norm(arr1)
-        norm2 = np.linalg.norm(arr2)
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        return float(dot_product / (norm1 * norm2))
+        return False
 
 
 class RAGRetriever:
     def __init__(
         self,
-        entity_repo: EntityRepository,
+        graph_repo: GraphRepository | None = None,
         novel_id: str = "default",
         run_id: str | None = None,
-        graph_repo: GraphRepository | None = None,
         embedding_client: EmbeddingClient | None = None,
         similarity_threshold: float = 0.7,
         lookback_chunks: int = 10,
@@ -183,18 +127,16 @@ class RAGRetriever:
 
         self._level1 = Level1ExactMatch(
             graph_repo=graph_repo,
-            entity_repo=entity_repo,
             novel_id=novel_id,
             run_id=run_id,
         )
         self._level2 = Level2GraphConstraint(graph_repo=graph_repo, run_id=run_id)
 
         self._level3 = Level3VectorEvidence(
-            entity_repo,
-            novel_id,
-            run_id,
-            embedding_client,
-            similarity_threshold,
+            novel_id=novel_id,
+            run_id=run_id,
+            embedding_client=embedding_client,
+            similarity_threshold=similarity_threshold,
         )
 
         self._novel_id = novel_id

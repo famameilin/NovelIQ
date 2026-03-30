@@ -24,8 +24,6 @@ from src.storage.models import (
     ChunkCharacter,
     ChunkDialogue,
     ChunkRelation,
-    Entity,
-    EntityAlias,
     GraphEntity,
     GraphEntityAlias,
 )
@@ -52,20 +50,10 @@ def fetch_alias_map(session: Session, run_id: str) -> dict[str, str]:
         .where(GraphEntityAlias.run_id == run_id)
     )
     graph_rows = session.execute(graph_stmt).fetchall()
-    if graph_rows:
-        alias_map = {row[0]: row[1] for row in graph_rows}
-        for _alias, canonical in list(alias_map.items()):
-            alias_map.setdefault(canonical, canonical)
-        return alias_map
-
-    stmt = (
-        select(EntityAlias.alias, Entity.canonical)
-        .join(Entity, EntityAlias.entity_id == Entity.entity_id)
-        .where(EntityAlias.alias_type == "disambiguation")
-        .where(EntityAlias.run_id == run_id)
-    )
-    result = session.execute(stmt)
-    return {row[0]: row[1] for row in result.fetchall()}
+    alias_map = {row[0]: row[1] for row in graph_rows}
+    for _alias, canonical in list(alias_map.items()):
+        alias_map.setdefault(canonical, canonical)
+    return alias_map
 
 
 def fetch_all_character_names(
@@ -109,85 +97,34 @@ def ensure_canonical_entities(
     entity_types: dict[str, str] | None = None,
 ) -> dict[str, int]:
     """
-    只为 known_canonical_names 创建实体
-    
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 从 update_character_names 拆分，只负责实体创建
-    
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-hierarchical-relation-filter
-    修改内容: 添加 entity_types 参数，支持设置正确的实体类型
-    
-    修改时间: 2026-03-30
-    修改者: CodeBuddy
-    任务: refactor-session-management
-    修改内容: 优化为批量查询，减少 N+1 问题
-    
+    只为 known_canonical_names 创建实体（GraphEntity）
+
     Args:
         session: 数据库会话
         run_id: 运行ID
         known_canonical_names: 规范角色名集合
-        novel_id: 小说ID
+        novel_id: 小说ID（保留参数兼容性）
         entity_types: 实体类型映射（可选），key为实体名，value为类型
-    
+
     Returns:
         {canonical_name: entity_id} 映射
     """
+    from src.storage.repositories.graph.repository import GraphRepository
+
+    graph_repo = GraphRepository(session)
     canonical_to_entity_id: dict[str, int] = {}
-    
-    # 批量查询所有已存在的实体
-    if known_canonical_names:
-        stmt = select(Entity.entity_id, Entity.canonical, Entity.entity_type).where(
-            Entity.novel_id == novel_id,
-            Entity.run_id == run_id,
-            Entity.canonical.in_(known_canonical_names),
-        )
-        existing_rows = session.execute(stmt).fetchall()
-        existing_map: dict[str, tuple[int, str | None]] = {
-            row.canonical: (row.entity_id, row.entity_type) for row in existing_rows
-        }
-    else:
-        existing_map = {}
-    
+
     for canonical in known_canonical_names:
-        if canonical in existing_map:
-            entity_id, current_type = existing_map[canonical]
-            canonical_to_entity_id[canonical] = entity_id
-            # 如果需要更新 entity_type
-            if entity_types and canonical in entity_types:
-                desired_type = entity_types[canonical]
-                if current_type != desired_type:
-                    session.execute(
-                        update(Entity)
-                        .where(Entity.entity_id == entity_id)
-                        .values(entity_type=desired_type)
-                    )
-            continue
-        
-        # 创建新实体
-        entity_type = "character"
-        if entity_types and canonical in entity_types:
-            entity_type = entity_types[canonical]
-        
-        entity = Entity(
-            novel_id=novel_id,
-            canonical=canonical,
-            entity_type=entity_type,
-            first_chunk=None,
-            last_chunk=None,
-            description=None,
-            confidence=1.0,
+        entity_type = (entity_types.get(canonical, "character") if entity_types else "character")
+        entity = graph_repo.upsert_entity(
             run_id=run_id,
+            canonical_name=canonical,
+            entity_type=entity_type,
+            source_confidence=1.0,
         )
-        session.add(entity)
-        session.flush()
         if entity.entity_id is not None:
             canonical_to_entity_id[canonical] = entity.entity_id
-    
-    # 注意：Repository 层不管理事务，由调用方控制 commit
+
     logger.info(f"Ensured {len(canonical_to_entity_id)} canonical entities")
     return canonical_to_entity_id
 

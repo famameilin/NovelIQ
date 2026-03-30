@@ -20,7 +20,6 @@ from .repositories import (
     ChunkRepository,
     ChunkStyleData,
     DiagnosisRepository,
-    EntityRepository,
     RunRepository,
     StatsRepository,
 )
@@ -38,7 +37,6 @@ __all__ = [
     "ChunkStyleData",
     "DatabaseSession",
     "DiagnosisRepository",
-    "EntityRepository",
     "RunRepository",
     "SessionFactory",
     "StatsRepository",

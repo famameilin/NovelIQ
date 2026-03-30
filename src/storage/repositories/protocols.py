@@ -15,7 +15,6 @@ from __future__ import annotations
 from .protocols import (
     ChunkRepositoryProtocol,
     DiagnosisRepositoryProtocol,
-    EntityRepositoryProtocol,
     RunRepositoryProtocol,
     StatsRepositoryProtocol,
 )
@@ -23,7 +22,6 @@ from .protocols import (
 __all__ = [
     "ChunkRepositoryProtocol",
     "DiagnosisRepositoryProtocol",
-    "EntityRepositoryProtocol",
     "RunRepositoryProtocol",
     "StatsRepositoryProtocol",
 ]

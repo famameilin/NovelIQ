@@ -224,12 +224,12 @@ def _process_entity_relations(
     Returns:
         (success_count, skipped_relations): 成功写入的关系数量、被跳过的关系列表
     """
-    from src.storage.repositories import EntityRepository
+    from src.storage.repositories import GraphRepository
 
     if not entity_relations:
         return 0, []
 
-    entity_repo = EntityRepository(conn)
+    graph_repo = GraphRepository(conn)
 
     valid_relations, cycle_skipped, cycle_paths = detect_cycle_in_relations(entity_relations)
 
@@ -271,52 +271,33 @@ def _process_entity_relations(
             )
             continue
 
-        from_entity_id = entity_repo.get_entity_id_by_name(novel_id, from_name, run_id)
-        to_entity_id = entity_repo.get_entity_id_by_name(novel_id, to_name, run_id)
-
-        if from_entity_id is None:
-            from_entity_type = entity_types.get(from_name, "character")
-            from_entity_id = entity_repo.insert_entity(
-                novel_id=novel_id,
-                canonical=from_name,
-                entity_type=from_entity_type,
-                run_id=run_id,
-            )
-            if from_entity_id is None:
-                skipped_relations.append(
-                    {
-                        "relation": rel,
-                        "reason": "from_entity_creation_failed",
-                    }
-                )
-                continue
-
-        if to_entity_id is None:
-            to_entity_type = entity_types.get(to_name, "character")
-            to_entity_id = entity_repo.insert_entity(
-                novel_id=novel_id,
-                canonical=to_name,
-                entity_type=to_entity_type,
-                run_id=run_id,
-            )
-            if to_entity_id is None:
-                skipped_relations.append(
-                    {
-                        "relation": rel,
-                        "reason": "to_entity_creation_failed",
-                    }
-                )
-                continue
+        from_entity_obj = graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name=from_name,
+            entity_type=entity_types.get(from_name, "character"),
+            source_confidence=1.0,
+        )
+        to_entity_obj = graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name=to_name,
+            entity_type=entity_types.get(to_name, "character"),
+            source_confidence=1.0,
+        )
 
         try:
-            entity_repo.insert_entity_relation(
-                novel_id=novel_id,
-                from_entity=from_entity_id,
-                to_entity=to_entity_id,
-                rel_type=rel_type,
-                rel_category="hierarchical",
+            graph_repo.insert_relation_event(
                 run_id=run_id,
+                from_entity_id=from_entity_obj.entity_id,
+                to_entity_id=to_entity_obj.entity_id,
+                relation_type=rel_type,
+                change_type="established",
+                chunk_id=0,
+                evidence=None,
+                confidence=1.0,
+                source_relation_row_id=None,
+                directionality=None,
             )
+            graph_repo.refresh_current_relation(run_id, from_entity_obj.entity_id, to_entity_obj.entity_id)
             success_count += 1
         except Exception as e:
             logger.error(f"插入关系失败: {rel}, 错误: {e}")

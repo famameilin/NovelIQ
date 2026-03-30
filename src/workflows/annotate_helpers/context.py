@@ -67,7 +67,7 @@ def _init_rag_retriever(
         return None, None
 
     from src.rag import RAGRetriever
-    from src.storage.repositories import EntityRepository, GraphRepository
+    from src.storage.repositories import GraphRepository
 
     logger.info("initializing RAG retriever")
 
@@ -81,13 +81,11 @@ def _init_rag_retriever(
     except Exception as e:
         logger.warning(f"embedding client initialization failed: {e}")
 
-    entity_repo = EntityRepository(conn)
     graph_repo = GraphRepository(conn)
     rag_retriever = RAGRetriever(
-        entity_repo=entity_repo,
+        graph_repo=graph_repo,
         novel_id=novel_id,
         run_id=run_id,
-        graph_repo=graph_repo,
         embedding_client=embedding_client if settings.rag.embedding_enabled else None,
         similarity_threshold=settings.rag.similarity_threshold,
         lookback_chunks=settings.rag.lookback_chunks,

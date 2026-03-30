@@ -23,7 +23,6 @@ from src.storage.models import (
     Chunk,
     ChunkAnnotation,
     ChunkTopic,
-    EntitySnapshot,
     GraphEntity,
     GraphRelationCurrent,
     GraphRelationEvent,
@@ -287,93 +286,6 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.text) for row in result]
 
-    def insert_entity_snapshot(
-        self,
-        run_id: str,
-        novel_id: str,
-        entity_id: int,
-        chunk_id: int,
-        state_json: str,
-    ) -> int | None:
-        """
-        插入实体快照
-
-        使用 merge 操作实现 INSERT OR REPLACE 语义：
-        如果存在相同 (novel_id, entity_id, chunk_id) 的记录则更新，否则插入。
-
-        Args:
-            run_id: 运行ID
-            novel_id: 小说ID
-            entity_id: 实体ID
-            chunk_id: 分块ID
-            state_json: 状态JSON
-
-        Returns:
-            插入记录的 ID
-        """
-        snapshot = EntitySnapshot(
-            novel_id=novel_id,
-            entity_id=entity_id,
-            chunk_id=chunk_id,
-            state_json=state_json,
-            run_id=run_id,
-        )
-        merged = self.session.merge(snapshot)
-        self.session.flush()
-        return merged.snap_id
-
-    def fetch_snapshots_by_chunk(
-        self,
-        run_id: str,
-        novel_id: str,
-        start_chunk: int,
-        end_chunk: int,
-    ) -> list[dict[str, Any]]:
-        """
-        按分块范围获取快照
-
-        Args:
-            run_id: 运行ID
-            novel_id: 小说ID
-            start_chunk: 起始分块ID
-            end_chunk: 结束分块ID
-
-        Returns:
-            快照字典列表
-        """
-        stmt = (
-            select(
-                EntitySnapshot.snap_id,
-                EntitySnapshot.novel_id,
-                EntitySnapshot.entity_id,
-                EntitySnapshot.chunk_id,
-                EntitySnapshot.state_json,
-                EntitySnapshot.run_id,
-            )
-            .where(
-                and_(
-                    EntitySnapshot.novel_id == novel_id,
-                    EntitySnapshot.chunk_id >= start_chunk,
-                    EntitySnapshot.chunk_id <= end_chunk,
-                    EntitySnapshot.run_id == run_id,
-                )
-            )
-            .order_by(EntitySnapshot.chunk_id.desc())
-        )
-
-        result = self.session.execute(stmt)
-        return [
-            {
-                "snap_id": row.snap_id,
-                "novel_id": row.novel_id,
-                "entity_id": row.entity_id,
-                "chunk_id": row.chunk_id,
-                "state_json": row.state_json,
-                "run_id": row.run_id,
-            }
-            for row in result
-        ]
-
     def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[dict[str, Any]]:
         """
         获取主题词
@@ -566,52 +478,3 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 "low_confidence_samples": low_confidence_events[:5],
             },
         }
-
-    def fetch_recent_snapshots(
-        self,
-        run_id: str,
-        novel_id: str,
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        """
-        获取最近的快照
-
-        Args:
-            run_id: 运行ID
-            novel_id: 小说ID
-            limit: 返回数量限制
-
-        Returns:
-            快照字典列表
-        """
-        stmt = (
-            select(
-                EntitySnapshot.snap_id,
-                EntitySnapshot.novel_id,
-                EntitySnapshot.entity_id,
-                EntitySnapshot.chunk_id,
-                EntitySnapshot.state_json,
-                EntitySnapshot.run_id,
-            )
-            .where(
-                and_(
-                    EntitySnapshot.novel_id == novel_id,
-                    EntitySnapshot.run_id == run_id,
-                )
-            )
-            .order_by(EntitySnapshot.chunk_id.desc())
-            .limit(limit)
-        )
-
-        result = self.session.execute(stmt)
-        return [
-            {
-                "snap_id": row.snap_id,
-                "novel_id": row.novel_id,
-                "entity_id": row.entity_id,
-                "chunk_id": row.chunk_id,
-                "state_json": row.state_json,
-                "run_id": row.run_id,
-            }
-            for row in result
-        ]
