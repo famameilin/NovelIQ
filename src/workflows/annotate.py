@@ -88,12 +88,12 @@ def run_annotate(
     Returns:
         Tuple[int, int, int]: (成功数量, 0, 总块数)
     """
+    from src.workflows.annotate_helpers.graph_projection import project_graph_tables
     from src.workflows.annotate_helpers.phase import (
         _init_annotation_phase,
         _process_chunks_phase,
         _run_disambiguation_phase,
     )
-    from src.workflows.annotate_helpers.graph_projection import project_graph_tables
 
     start_time = time.time()
 

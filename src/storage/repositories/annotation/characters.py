@@ -20,6 +20,7 @@ from src.storage.models import (
     ChunkDialogue,
     ChunkRelation,
     Entity,
+    EntityAlias,
     GraphEntity,
     GraphEntityAlias,
 )
