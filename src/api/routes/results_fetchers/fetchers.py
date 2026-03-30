@@ -486,7 +486,7 @@ def _fetch_character_relations(
 
 def _fetch_hierarchical_relations(
     run_id: str,
-    entity_repo: GraphRepository,
+    graph_repo: GraphRepository,
     valid_character_names: set[str] | None = None,
 ) -> list:
     """
@@ -508,7 +508,7 @@ def _fetch_hierarchical_relations(
     修改内容: 改用 GraphRepository 查询 graph_relation_current
     """
     hierarchical_types = {"child_of", "parent_of", "father_of", "son_of", "sibling_of", "spouse_of"}
-    all_relations = entity_repo.fetch_current_relations(run_id, active_only=False)
+    all_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
     result = []
     for rel in all_relations:
         rel_type = rel.get("type", "")
