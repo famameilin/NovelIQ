@@ -5,28 +5,41 @@
 创建者: CodeBuddy
 任务: 实现叙事时间轴功能
 说明: 提供时间轴数据查询接口，支持四阶段划分、节点筛选和张力曲线
+
+修改时间: 2026-03-30
+修改者: CodeBuddy
+任务: refactor-session-management
+修改内容: 添加 DTO 到 Pydantic 模型的转换函数，适配 metrics 层 DTO
 """
 
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.dependencies import get_db_session
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ErrorResponse
 from src.api.models.timeline import (
+    RelationChangeEvent,
     TimelineMeta,
+    TimelineNode,
+    TimelinePhase,
     TimelineResponse,
 )
 from src.api.routes.novels import get_novel_service
 from src.api.services.novel_service import NovelService
 from src.metrics.timeline_metrics import (
+    TimelineNodeDTO,
+    TimelinePhaseDTO,
+    RelationChangeEventDTO,
     build_timeline_candidates,
     convert_to_timeline_nodes,
     select_timeline_nodes,
 )
-from src.storage.db import get_session_factory
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -37,14 +50,46 @@ from src.storage.repositories import (
 router = APIRouter(prefix="/novels", tags=["timeline"])
 
 
-def get_db_session():
-    """获取数据库会话"""
-    session_factory = get_session_factory()
-    session = session_factory()
-    try:
-        yield session
-    finally:
-        session.close()
+def _dto_to_relation_change_event(dto: RelationChangeEventDTO) -> RelationChangeEvent:
+    """将 RelationChangeEventDTO 转换为 Pydantic 模型"""
+    return RelationChangeEvent(
+        from_char=dto.from_char,
+        to_char=dto.to_char,
+        relation_type=dto.relation_type,
+        change_type=dto.change_type,
+        evidence=dto.evidence,
+    )
+
+
+def _dto_to_timeline_phase(dto: TimelinePhaseDTO) -> TimelinePhase:
+    """将 TimelinePhaseDTO 转换为 Pydantic 模型"""
+    return TimelinePhase(
+        name=dto.name,
+        start=dto.start,
+        end=dto.end,
+        ratio=dto.ratio,
+    )
+
+
+def _dto_to_timeline_node(dto: TimelineNodeDTO) -> TimelineNode:
+    """将 TimelineNodeDTO 转换为 Pydantic 模型"""
+    return TimelineNode(
+        chunk_id=dto.chunk_id,
+        progress=dto.progress,
+        importance_score=dto.importance_score,
+        level=dto.level,
+        event=dto.event,
+        characters=dto.characters,
+        is_pivot=dto.is_pivot,
+        is_cliffhanger=dto.is_cliffhanger,
+        tension_percentile=dto.tension_percentile,
+        node_type=dto.node_type,
+        relation_changes=[
+            _dto_to_relation_change_event(rc) for rc in dto.relation_changes
+        ] if dto.relation_changes else None,
+        character_entries=dto.character_entries,
+        character_exits=dto.character_exits,
+    )
 
 
 @router.get(
@@ -126,11 +171,11 @@ def get_db_session():
 )
 async def get_timeline(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID（8位短UUID）"),
-    include_curve: bool = Query(False, description="是否包含张力曲线数据"),
-    max_level: int = Query(3, ge=1, le=3, description="显示重要性级别 ≤ 此值的节点"),
-    session: Session = Depends(get_db_session),
-    service: NovelService = Depends(get_novel_service),
+    task_id: Annotated[str, Query(..., description="分析任务ID（8位短UUID）")],
+    include_curve: Annotated[bool, Query(False, description="是否包含张力曲线数据")],
+    max_level: Annotated[int, Query(3, ge=1, le=3, description="显示重要性级别 ≤ 此值的节点")],
+    session: Annotated[Session, Depends(get_db_session)],
+    service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> TimelineResponse:
     """获取叙事时间轴数据"""
 
@@ -202,10 +247,13 @@ async def get_timeline(
 
     # 转换为 API 模型
     timeline_nodes = convert_to_timeline_nodes(selected_candidates)
+    # DTO -> Pydantic 模型转换
+    api_nodes = [_dto_to_timeline_node(node) for node in timeline_nodes]
+    api_phases = [_dto_to_timeline_phase(phase) for phase in timeline_phases]
 
     logger.info(
         f"Timeline generated for novel {novel_id}, task {task_id}: "
-        f"{len(timeline_nodes)} nodes, {len(timeline_phases)} phases"
+        f"{len(api_nodes)} nodes, {len(api_phases)} phases"
     )
 
     return TimelineResponse(
@@ -214,7 +262,7 @@ async def get_timeline(
             novel_name=novel_name,
             total_chunks=total_chunks,
         ),
-        phases=timeline_phases,
-        nodes=timeline_nodes,
+        phases=api_phases,
+        nodes=api_nodes,
         tension_curve=tension_scores if include_curve else None,
     )

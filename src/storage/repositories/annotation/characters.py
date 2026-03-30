@@ -5,6 +5,11 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分annotation_repository
 说明: 角色消歧、名称更新、别名映射等操作
+
+修改时间: 2026-03-30
+修改者: CodeBuddy
+任务: refactor-session-management
+修改内容: 优化 ensure_canonical_entities 为批量查询，减少 N+1 问题
 """
 
 from __future__ import annotations
@@ -116,6 +121,11 @@ def ensure_canonical_entities(
     任务: fix-hierarchical-relation-filter
     修改内容: 添加 entity_types 参数，支持设置正确的实体类型
     
+    修改时间: 2026-03-30
+    修改者: CodeBuddy
+    任务: refactor-session-management
+    修改内容: 优化为批量查询，减少 N+1 问题
+    
     Args:
         session: 数据库会话
         run_id: 运行ID
@@ -128,25 +138,36 @@ def ensure_canonical_entities(
     """
     canonical_to_entity_id: dict[str, int] = {}
     
-    for canonical in known_canonical_names:
-        stmt = select(Entity.entity_id, Entity.entity_type).where(
+    # 批量查询所有已存在的实体
+    if known_canonical_names:
+        stmt = select(Entity.entity_id, Entity.canonical, Entity.entity_type).where(
             Entity.novel_id == novel_id,
-            Entity.canonical == canonical,
             Entity.run_id == run_id,
+            Entity.canonical.in_(known_canonical_names),
         )
-        row = session.execute(stmt).fetchone()
-        if row:
-            canonical_to_entity_id[canonical] = row[0]
+        existing_rows = session.execute(stmt).fetchall()
+        existing_map: dict[str, tuple[int, str | None]] = {
+            row.canonical: (row.entity_id, row.entity_type) for row in existing_rows
+        }
+    else:
+        existing_map = {}
+    
+    for canonical in known_canonical_names:
+        if canonical in existing_map:
+            entity_id, current_type = existing_map[canonical]
+            canonical_to_entity_id[canonical] = entity_id
+            # 如果需要更新 entity_type
             if entity_types and canonical in entity_types:
                 desired_type = entity_types[canonical]
-                if row[1] != desired_type:
+                if current_type != desired_type:
                     session.execute(
                         update(Entity)
-                        .where(Entity.entity_id == row[0])
+                        .where(Entity.entity_id == entity_id)
                         .values(entity_type=desired_type)
                     )
             continue
         
+        # 创建新实体
         entity_type = "character"
         if entity_types and canonical in entity_types:
             entity_type = entity_types[canonical]
@@ -226,4 +247,3 @@ def apply_alias_merges(
     
     session.commit()
     logger.info(f"Applied {correction_count} alias merges")
-
