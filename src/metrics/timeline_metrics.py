@@ -1,24 +1,78 @@
 """
 叙事时间轴核心算法模块。
 
-提供时间轴节点重要性计算、四阶段划分、节点筛选功能。
+创建时间: 2026-03-30
+创建者: CodeBuddy
+任务: refactor-session-management
+说明: 提供时间轴节点重要性计算、四阶段划分、节点筛选功能
+
+修改内容:
+- 定义独立 DTO，解耦 API 模型依赖
+- 使用 Literal 类型强化类型安全
+- 修复四阶段边界逻辑
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
 
-from src.api.models.timeline import (
-    RelationChangeEvent,
-    TimelineNode,
-    TimelinePhase,
-)
+from loguru import logger
+
 from src.metrics.narrative_metrics import find_global_peak
 
 if TYPE_CHECKING:
     pass
 
+# Literal 类型定义
+TimelineNodeType = Literal["plot", "character_entry", "character_exit", "relation_change"]
+TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
+ImportanceLevel = Literal[1, 2, 3]
+
+
+# ==================== DTO 定义 ====================
+
+@dataclass
+class RelationChangeEventDTO:
+    """关系变化事件 DTO"""
+
+    from_char: str
+    to_char: str
+    relation_type: str
+    change_type: str
+    evidence: str | None = None
+
+
+@dataclass
+class TimelinePhaseDTO:
+    """时间轴阶段 DTO"""
+
+    name: TimelinePhaseName
+    start: int
+    end: int
+    ratio: float
+
+
+@dataclass
+class TimelineNodeDTO:
+    """时间轴节点 DTO"""
+
+    chunk_id: int
+    progress: float
+    importance_score: float
+    level: ImportanceLevel
+    event: str
+    characters: list[str] = field(default_factory=list)
+    is_pivot: bool = False
+    is_cliffhanger: bool = False
+    tension_percentile: int = 50
+    node_type: TimelineNodeType = "plot"
+    relation_changes: list[RelationChangeEventDTO] | None = None
+    character_entries: list[str] | None = None
+    character_exits: list[str] | None = None
+
+
+# ==================== 内部数据结构 ====================
 
 @dataclass
 class NarrativePhase:
@@ -29,6 +83,27 @@ class NarrativePhase:
     end: int
     ratio: float
 
+
+@dataclass
+class TimelineCandidate:
+    """时间轴候选节点内部数据结构"""
+
+    chunk_id: int
+    progress: float
+    importance_score: float
+    level: ImportanceLevel
+    event: str
+    characters: list[str]
+    is_pivot: bool
+    is_cliffhanger: bool
+    tension_percentile: int
+    node_type: TimelineNodeType
+    relation_changes: list[RelationChangeEventDTO] | None = None
+    character_entries: list[str] | None = None
+    character_exits: list[str] | None = None
+
+
+# ==================== 核心函数 ====================
 
 def compute_importance_score(
     pivot_moment: bool,
@@ -41,7 +116,7 @@ def compute_importance_score(
     has_character_entry: bool = False,
     has_character_exit: bool = False,
     is_major_character: bool = False,
-) -> tuple[float, int]:
+) -> tuple[float, ImportanceLevel]:
     """
     计算节点重要性分数。
 
@@ -98,7 +173,7 @@ def compute_importance_score(
 
     # 分级
     if score >= 7:
-        level = 1
+        level: ImportanceLevel = 1
     elif score >= 4:
         level = 2
     else:
@@ -131,6 +206,7 @@ def compute_four_phases(
 
     Returns:
         NarrativePhase 列表，按顺序包含引入期、发展期、高潮期、收束期
+        始终返回 4 个阶段（极端情况下某些阶段可能为空，ratio=0）
     """
     if not tension_scores or not chunk_ids:
         return []
@@ -167,37 +243,35 @@ def compute_four_phases(
     climax_start = max(valley_idx + MIN_PHASE_LENGTH, peak_idx - climax_radius)
     climax_end = min(total - 1 - MIN_PHASE_LENGTH, peak_idx + climax_radius)
 
-    if valley_idx >= climax_start - MIN_PHASE_LENGTH:
-        valley_idx = max(MIN_PHASE_LENGTH, climax_start - int(total * 0.1) - MIN_PHASE_LENGTH)
-
-    # 确保 valley_idx < climax_start，避免阶段顺序错乱
+    # 确保 valley_idx < climax_start，保留至少 MIN_PHASE_LENGTH 给发展期
     valley_idx = min(valley_idx, climax_start - MIN_PHASE_LENGTH)
-
-    # 二次保护：确保 valley_idx 至少为 MIN_PHASE_LENGTH，防止边界重叠
     valley_idx = max(valley_idx, MIN_PHASE_LENGTH)
 
     phases: list[NarrativePhase] = []
 
-    if valley_idx >= MIN_PHASE_LENGTH:
-        phases.append(
-            NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total)
-        )
-    else:
-        valley_idx = max(MIN_PHASE_LENGTH, int(total * 0.1))
-        phases.append(
-            NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total)
-        )
+    # 引入期（始终存在）
+    phases.append(
+        NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total)
+    )
 
-    if valley_idx < climax_start - MIN_PHASE_LENGTH:
+    # 发展期
+    dev_start_idx = valley_idx + 1
+    dev_end_idx = climax_start - 1
+    if dev_end_idx >= dev_start_idx:
         phases.append(
             NarrativePhase(
                 "发展期",
-                chunk_ids[valley_idx + 1],
-                chunk_ids[climax_start - 1],
-                (climax_start - valley_idx - 1) / total,
+                chunk_ids[dev_start_idx],
+                chunk_ids[dev_end_idx],
+                (dev_end_idx - dev_start_idx + 1) / total,
             )
         )
+    else:
+        logger.warning(f"发展期被跳过: valley_idx={valley_idx}, climax_start={climax_start}, total={total}")
+        # 退化处理：在引入期和高潮期之间插入空发展期
+        phases.append(NarrativePhase("发展期", chunk_ids[valley_idx], chunk_ids[valley_idx], 0.0))
 
+    # 高潮期（始终存在）
     phases.append(
         NarrativePhase(
             "高潮期",
@@ -207,6 +281,7 @@ def compute_four_phases(
         )
     )
 
+    # 收束期（始终存在，即使长度为0）
     if climax_end < total - 1 - MIN_PHASE_LENGTH:
         phases.append(
             NarrativePhase(
@@ -216,27 +291,11 @@ def compute_four_phases(
                 (total - climax_end - 1) / total,
             )
         )
+    else:
+        # 退化处理：高潮期直接到结尾，收束期为空
+        phases.append(NarrativePhase("收束期", chunk_ids[climax_end], chunk_ids[climax_end], 0.0))
 
     return phases
-
-
-@dataclass
-class TimelineCandidate:
-    """时间轴候选节点内部数据结构"""
-
-    chunk_id: int
-    progress: float
-    importance_score: float
-    level: int
-    event: str
-    characters: list[str]
-    is_pivot: bool
-    is_cliffhanger: bool
-    tension_percentile: int
-    node_type: str
-    relation_changes: list[RelationChangeEvent] | None = None
-    character_entries: list[str] | None = None
-    character_exits: list[str] | None = None
 
 
 def select_timeline_nodes(
@@ -244,7 +303,7 @@ def select_timeline_nodes(
     chunk_ids: list[int],
     tension_scores: list[float],
     major_character_entries: list[tuple[str, int]],  # [(char_name, first_chunk_idx), ...]
-    relation_break_events: list[tuple[int, RelationChangeEvent]],  # [(chunk_idx, event), ...]
+    relation_break_events: list[tuple[int, RelationChangeEventDTO]],  # [(chunk_idx, event), ...]
     min_nodes: int = 10,
     max_nodes: int = 20,
 ) -> list[TimelineCandidate]:
@@ -417,25 +476,27 @@ def get_major_characters_by_span(
     return sorted_entities[:top_n]
 
 
-def convert_to_timeline_phases(phases: list[NarrativePhase]) -> list[TimelinePhase]:
+def convert_to_timeline_phases(phases: list[NarrativePhase]) -> list[TimelinePhaseDTO]:
     """
-    将内部 NarrativePhase 转换为 API TimelinePhase。
+    将内部 NarrativePhase 转换为 TimelinePhaseDTO。
 
     Args:
         phases: NarrativePhase 列表
 
     Returns:
-        TimelinePhase 列表
+        TimelinePhaseDTO 列表
     """
-    result: list[TimelinePhase] = []
+    result: list[TimelinePhaseDTO] = []
     for p in phases:
         # 类型转换检查
-        name = p.name
-        if name not in ("引入期", "发展期", "高潮期", "收束期"):
+        name: TimelinePhaseName
+        if p.name in ("引入期", "发展期", "高潮期", "收束期"):
+            name = p.name  # type: ignore[assignment]
+        else:
             name = "引入期"  # fallback
         result.append(
-            TimelinePhase(
-                name=name,  # type: ignore[arg-type]
+            TimelinePhaseDTO(
+                name=name,
                 start=p.start,
                 end=p.end,
                 ratio=round(p.ratio, 4),
@@ -444,28 +505,28 @@ def convert_to_timeline_phases(phases: list[NarrativePhase]) -> list[TimelinePha
     return result
 
 
-def convert_to_timeline_nodes(candidates: list[TimelineCandidate]) -> list[TimelineNode]:
+def convert_to_timeline_nodes(candidates: list[TimelineCandidate]) -> list[TimelineNodeDTO]:
     """
-    将内部 TimelineCandidate 转换为 API TimelineNode。
+    将内部 TimelineCandidate 转换为 TimelineNodeDTO。
 
     Args:
         candidates: TimelineCandidate 列表
 
     Returns:
-        TimelineNode 列表
+        TimelineNodeDTO 列表
     """
     return [
-        TimelineNode(
+        TimelineNodeDTO(
             chunk_id=c.chunk_id,
             progress=round(c.progress, 4),
             importance_score=round(c.importance_score, 2),
-            level=c.level,  # type: ignore[arg-type]
+            level=c.level,
             event=c.event,
             characters=c.characters,
             is_pivot=c.is_pivot,
             is_cliffhanger=c.is_cliffhanger,
             tension_percentile=c.tension_percentile,
-            node_type=c.node_type,  # type: ignore[arg-type]
+            node_type=c.node_type,
             relation_changes=c.relation_changes,
             character_entries=c.character_entries,
             character_exits=c.character_exits,
@@ -484,9 +545,9 @@ def build_timeline_candidates(
     list[float],
     list[int],
     int,
-    list[NarrativePhase],
+    list[TimelinePhaseDTO],
     list[tuple[str, int]],
-    list[tuple[int, RelationChangeEvent]],
+    list[tuple[int, RelationChangeEventDTO]],
 ]:
     """
     构建时间轴候选节点（共享函数）。
@@ -567,7 +628,7 @@ def build_timeline_candidates(
                 major_character_entries.append((char.canonical_name, idx))
 
     # 获取关系断裂事件
-    relation_break_events: list[tuple[int, RelationChangeEvent]] = []
+    relation_break_events: list[tuple[int, RelationChangeEventDTO]] = []
     for rel_event in relation_events:
         if rel_event.change_type == "断裂":
             idx = chunk_id_to_idx.get(rel_event.chunk_id)
@@ -578,7 +639,7 @@ def build_timeline_candidates(
             relation_break_events.append(
                 (
                     idx,
-                    RelationChangeEvent(
+                    RelationChangeEventDTO(
                         from_char=from_char,
                         to_char=to_char,
                         relation_type=rel_event.relation_type,
@@ -618,12 +679,12 @@ def build_timeline_candidates(
                 character_exits.append(char.canonical_name)
 
         # 检查是否为关系变化节点
-        relation_changes: list[RelationChangeEvent] = []
+        relation_changes: list[RelationChangeEventDTO] = []
         for event_data in chunk_relation_events.get(chunk_id, []):
             from_char = entity_name_map.get(event_data.from_entity_id, str(event_data.from_entity_id))
             to_char = entity_name_map.get(event_data.to_entity_id, str(event_data.to_entity_id))
             relation_changes.append(
-                RelationChangeEvent(
+                RelationChangeEventDTO(
                     from_char=from_char,
                     to_char=to_char,
                     relation_type=event_data.relation_type,
@@ -653,7 +714,7 @@ def build_timeline_candidates(
         )
 
         # 确定节点类型
-        node_type = "plot"
+        node_type: TimelineNodeType = "plot"
         if character_entries and is_major_character:
             node_type = "character_entry"
         elif character_exits and is_major_character:

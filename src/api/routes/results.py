@@ -18,17 +18,23 @@
 修改者: TraeAI
 任务: consolidate-codebase-architecture
 修改内容: 使用 ResultsExportService 简化路由层
+
+修改时间: 2026-03-30
+修改者: CodeBuddy
+任务: refactor-session-management
+修改内容: 统一使用 FastAPI Depends 注入模式，删除手动 session 管理
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.dependencies import get_db_session, resolve_run_id
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ResultsWriteResponse
 from src.api.routes.novels import get_novel_service
@@ -42,18 +48,16 @@ from src.api.routes.results_fetchers import (
     _fetch_topics,
 )
 from src.api.services.novel_service import NovelService
-from src.api.services.results_export_service import (
-    fetch_all_results_data,
-)
+from src.api.services.results_export_service import fetch_all_results_data
 from src.config import settings
 from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
     EntityRepository,
+    RunRepository,
     StatsRepository,
 )
-from src.storage.session import SessionFactory
 
 router = APIRouter(prefix="/novels", tags=["results"])
 
@@ -123,63 +127,47 @@ router = APIRouter(prefix="/novels", tags=["results"])
 )
 async def get_results(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
+    task_id: Annotated[str, Query(..., description="分析任务ID")],
+    session: Annotated[Session, Depends(get_db_session)],
+    novel_service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> ResultsWriteResponse:
     """
     2026-03-12: Claude修改，检查任务状态是否为completed，如果任务未完成，抛出AnalysisNotCompleteError
     2026-03-13: TraeAI重构，提取数据获取和响应构建逻辑到独立函数
     2026-03-14: TraeAI重构，使用 Repository 模式
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 移除 has_db/get_db_path 等 SQLite 特有方法
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 修复API参数问题
-    修改内容: 将task_id改为run_id，使用完整UUID查询
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: API接口参数统一优化
-    修改内容: 将run_id参数改为task_id，内部转换为run_id
+    2026-03-15: TraeAI重构，移除 has_db/get_db_path 等 SQLite 特有方法
+    2026-03-17: TraeAI重构，将task_id改为run_id，使用完整UUID查询
+    2026-03-19: TraeAI重构，将run_id参数改为task_id，内部转换为run_id
+    2026-03-30: CodeBuddy重构，使用 Depends 注入 session
     """
     # 从数据库查询运行记录
-    from src.storage.db import get_session_factory
     from src.storage.id_mapping import task_id_to_run_id
-    from src.storage.repositories import RunRepository
 
-    session_factory = get_session_factory()
-    with session_factory() as session:
-        # 将task_id转换为run_id
-        run_id = task_id_to_run_id(task_id, session.connection())
-        run_repo = RunRepository(session)
-        run = run_repo.get_run(run_id)
-        if not run:
-            raise NovelNotFoundError(f"运行记录不存在: {run_id}")
-        VALID_EXPORT_STATUSES = ("completed", "aggregated", "diagnosed")
-        if run["status"] not in VALID_EXPORT_STATUSES:
-            raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
+    # 将task_id转换为run_id
+    run_id = task_id_to_run_id(task_id, session.connection())
+    run_repo = RunRepository(session)
+    run = run_repo.get_run(run_id)
+    if not run:
+        raise NovelNotFoundError(f"运行记录不存在: {run_id}")
+    VALID_EXPORT_STATUSES = ("completed", "aggregated", "diagnosed")
+    if run["status"] not in VALID_EXPORT_STATUSES:
+        raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
 
-    # 使用SQLAlchemy session直接查询数据
-    with session_factory() as session:
-        stats_repo = StatsRepository(session)
-        annotation_repo = AnnotationRepository(session)
-        chunk_repo = ChunkRepository(session)
-        entity_repo = EntityRepository(session)
+    stats_repo = StatsRepository(session)
+    annotation_repo = AnnotationRepository(session)
+    chunk_repo = ChunkRepository(session)
+    entity_repo = EntityRepository(session)
 
-        results_data, missing_fields, novel_name = fetch_all_results_data(
-            novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo, entity_repo
-        )
+    results_data, missing_fields, novel_name = fetch_all_results_data(
+        novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo, entity_repo
+    )
 
-        file_path = _write_results_to_file(task_id, results_data)
+    file_path = _write_results_to_file(task_id, results_data)
 
-        if missing_fields:
-            logger.warning(f"Task {task_id} has missing fields: {missing_fields}")
+    if missing_fields:
+        logger.warning(f"Task {task_id} has missing fields: {missing_fields}")
 
-        return _build_results_response(file_path, novel_id, novel_name, missing_fields)
+    return _build_results_response(file_path, novel_id, novel_name, missing_fields)
 
 
 def _build_results_response(
@@ -213,58 +201,34 @@ def _write_results_to_file(task_id: str, data: dict[str, Any]) -> str:
     return str(file_path)
 
 
-def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> tuple[Session, str]:
-    """
-    从 task_id 获取数据库连接和 run_id。
-
-    当 task_id 格式无效或找不到对应 run_id 时，抛出 NovelNotFoundError（HTTP 404）。
-    """
-    from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
-
-    session_factory = SessionFactory()
-    db_session = session_factory.get_session()
-    try:
-        run_id = task_id_to_run_id(task_id, db_session.connection)
-        return db_session.connection, run_id
-    except (ValueError, TaskIDNotFoundError):
-        db_session.connection.close()
-        raise NovelNotFoundError(f"任务不存在: {task_id}")
-
-
 @router.get("/{novel_id}/emotion-curve")
 async def get_emotion_curve(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        stats_repo = StatsRepository(conn)
-        return _fetch_emotion_curve(run_id, stats_repo)
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取情感曲线数据"""
+    stats_repo = StatsRepository(session)
+    return _fetch_emotion_curve(run_id, stats_repo)
 
 
 @router.get("/{novel_id}/rhythm-curve")
 async def get_rhythm_curve(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        stats_repo = StatsRepository(conn)
-        return _fetch_rhythm_curve(run_id, stats_repo)
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取节奏曲线数据"""
+    stats_repo = StatsRepository(session)
+    return _fetch_rhythm_curve(run_id, stats_repo)
 
 
 @router.get("/{novel_id}/characters")
 async def get_characters(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
     """
     获取角色统计数据
 
@@ -273,159 +237,128 @@ async def get_characters(
     任务: protagonist-score-fusion
     修改内容: 先获取 diagnosis，传递 arc_scores 和 main_characters 给 _fetch_characters
     """
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        annotation_repo = AnnotationRepository(conn)
-        stats_repo = StatsRepository(conn)
+    annotation_repo = AnnotationRepository(session)
+    stats_repo = StatsRepository(session)
 
-        alias_map = annotation_repo.fetch_alias_map(run_id)
-        diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    alias_map = annotation_repo.fetch_alias_map(run_id)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
 
-        arc_scores: dict[str, float] | None = None
-        main_characters: list[str] | None = None
-        if diagnosis:
-            arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
-            main_characters = diagnosis.main_characters
+    arc_scores: dict[str, float] | None = None
+    main_characters: list[str] | None = None
+    if diagnosis:
+        arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
+        main_characters = diagnosis.main_characters
 
-        return _fetch_characters(run_id, annotation_repo, arc_scores, main_characters)
-    finally:
-        conn.close()
+    return _fetch_characters(run_id, annotation_repo, arc_scores, main_characters)
 
 
 @router.get("/{novel_id}/topics")
 async def get_topics(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        chunk_repo = ChunkRepository(conn)
-        annotation_repo = AnnotationRepository(conn)
-        alias_map = annotation_repo.fetch_alias_map(run_id)
-        return _fetch_topics(run_id, chunk_repo, alias_map)
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取主题分布数据"""
+    chunk_repo = ChunkRepository(session)
+    annotation_repo = AnnotationRepository(session)
+    alias_map = annotation_repo.fetch_alias_map(run_id)
+    return _fetch_topics(run_id, chunk_repo, alias_map)
 
 
 @router.get("/{novel_id}/diagnosis")
 async def get_diagnosis(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        stats_repo = StatsRepository(conn)
-        annotation_repo = AnnotationRepository(conn)
-        alias_map = annotation_repo.fetch_alias_map(run_id)
-        return _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取云端诊断数据"""
+    stats_repo = StatsRepository(session)
+    annotation_repo = AnnotationRepository(session)
+    alias_map = annotation_repo.fetch_alias_map(run_id)
+    return _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
 
 
 @router.get("/{novel_id}/graph")
 async def get_graph(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        annotation_repo = AnnotationRepository(conn)
-        return _fetch_graph_snapshot(run_id, annotation_repo)
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取知识图谱快照"""
+    annotation_repo = AnnotationRepository(session)
+    return _fetch_graph_snapshot(run_id, annotation_repo)
 
 
 @router.get("/{novel_id}/metrics/narrative-structure")
 async def get_narrative_structure(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        ann_repo = AnnotationRepository(conn)
-        chunk_repo = ChunkRepository(conn)
-        stats_repo = StatsRepository(conn)
-        result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-        narrative_structure, _, _, _, _ = _convert_aggregate_result(result)
-        return narrative_structure
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取叙事结构指标"""
+    ann_repo = AnnotationRepository(session)
+    chunk_repo = ChunkRepository(session)
+    stats_repo = StatsRepository(session)
+    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
+    narrative_structure, _, _, _, _ = _convert_aggregate_result(result)
+    return narrative_structure
 
 
 @router.get("/{novel_id}/metrics/emotion-stats")
 async def get_emotion_stats(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        ann_repo = AnnotationRepository(conn)
-        chunk_repo = ChunkRepository(conn)
-        stats_repo = StatsRepository(conn)
-        result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-        _, emotion_stats, _, _, _ = _convert_aggregate_result(result)
-        return emotion_stats
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取情感统计指标"""
+    ann_repo = AnnotationRepository(session)
+    chunk_repo = ChunkRepository(session)
+    stats_repo = StatsRepository(session)
+    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
+    _, emotion_stats, _, _, _ = _convert_aggregate_result(result)
+    return emotion_stats
 
 
 @router.get("/{novel_id}/metrics/character-stats")
 async def get_character_stats(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        ann_repo = AnnotationRepository(conn)
-        chunk_repo = ChunkRepository(conn)
-        stats_repo = StatsRepository(conn)
-        result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-        _, _, character_stats, _, _ = _convert_aggregate_result(result)
-        return character_stats
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取角色统计指标"""
+    ann_repo = AnnotationRepository(session)
+    chunk_repo = ChunkRepository(session)
+    stats_repo = StatsRepository(session)
+    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
+    _, _, character_stats, _, _ = _convert_aggregate_result(result)
+    return character_stats
 
 
 @router.get("/{novel_id}/metrics/style-stats")
 async def get_style_stats(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        ann_repo = AnnotationRepository(conn)
-        chunk_repo = ChunkRepository(conn)
-        stats_repo = StatsRepository(conn)
-        result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-        _, _, _, style_stats, _ = _convert_aggregate_result(result)
-        return style_stats
-    finally:
-        conn.close()
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取风格统计指标"""
+    ann_repo = AnnotationRepository(session)
+    chunk_repo = ChunkRepository(session)
+    stats_repo = StatsRepository(session)
+    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
+    _, _, _, style_stats, _ = _convert_aggregate_result(result)
+    return style_stats
 
 
 @router.get("/{novel_id}/metrics/culture-stats")
 async def get_culture_stats(
     novel_id: str,
-    task_id: str = Query(..., description="分析任务ID"),
-    novel_service: NovelService = Depends(get_novel_service),
-):
-    conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    try:
-        ann_repo = AnnotationRepository(conn)
-        chunk_repo = ChunkRepository(conn)
-        stats_repo = StatsRepository(conn)
-        result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-        _, _, _, _, culture_stats = _convert_aggregate_result(result)
-        return culture_stats
-    finally:
-        conn.close()
-
-
-
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> dict:
+    """获取文化元素统计指标"""
+    ann_repo = AnnotationRepository(session)
+    chunk_repo = ChunkRepository(session)
+    stats_repo = StatsRepository(session)
+    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
+    _, _, _, _, culture_stats = _convert_aggregate_result(result)
+    return culture_stats
