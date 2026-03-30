@@ -70,7 +70,6 @@ class RelationData:
     full_relations: list[tuple[str, str, str, str]]
 
 
-
 @dataclass
 class TextData:
     """文本数据"""

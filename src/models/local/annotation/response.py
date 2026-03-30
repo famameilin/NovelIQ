@@ -29,6 +29,7 @@ class RepetitiveOutputError(Exception):
     任务: feature/chunk-summary-timeline-only
     说明: 当 LLM 输出包含重复模式时抛出，触发重试机制
     """
+
     pass
 
 
@@ -51,7 +52,7 @@ def _detect_repetition(content: str, threshold: int = 3000) -> tuple[bool, str |
     if len(content) < threshold:
         return False, None
 
-    lines = content.split('\n')
+    lines = content.split("\n")
     if len(lines) < 3:
         return False, None
 
@@ -65,7 +66,7 @@ def _detect_repetition(content: str, threshold: int = 3000) -> tuple[bool, str |
         if count >= 3:
             return True, line[:50] + "..." if len(line) > 50 else line
 
-    for pattern in [r'"[^"]+":\s*"[^"]*",?\s*', r'\{[^}]+\},?\s*']:
+    for pattern in [r'"[^"]+":\s*"[^"]*",?\s*', r"\{[^}]+\},?\s*"]:
         matches = re.findall(pattern, content)
         if len(matches) >= 5:
             match_counts: dict[str, int] = {}
@@ -143,9 +144,7 @@ def process_annotation_response(
             len(content_clean),
             repeat_pattern,
         )
-        raise RepetitiveOutputError(
-            f"LLM output contains repetitive pattern: {repeat_pattern}"
-        )
+        raise RepetitiveOutputError(f"LLM output contains repetitive pattern: {repeat_pattern}")
 
     if is_cloud:
         logger.info(

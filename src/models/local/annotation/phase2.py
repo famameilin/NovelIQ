@@ -71,7 +71,9 @@ def _do_phase2(
         response_model=ForeshadowingResult,
     )
 
-    content_clean, thinking_content, extraction = client._process_annotation_response(response, is_cloud, chunk_id, "phase2")
+    content_clean, thinking_content, extraction = client._process_annotation_response(
+        response, is_cloud, chunk_id, "phase2"
+    )
 
     duration_ms = int((time.time() - start_time) * 1000)
 
@@ -85,9 +87,9 @@ def _do_phase2(
         response_text=content_clean,
         thinking_content=thinking_content,
         duration_ms=duration_ms,
-        model_name=client._config.model if hasattr(client._config, 'model') else None,
+        model_name=client._config.model if hasattr(client._config, "model") else None,
         model_provider="cloud" if is_cloud else "local",
-        session=client._session if hasattr(client, '_session') else None,
+        session=client._session if hasattr(client, "_session") else None,
     )
 
     client._log_prompt_response(

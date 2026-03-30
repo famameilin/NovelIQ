@@ -237,9 +237,9 @@ def replace_invalid_names_with_anonymous(
         new_dialogues.append(
             DialogueSnapshot(
                 speaker=new_speaker,
-                content=dialogue.content if hasattr(dialogue, 'content') else "",
-                tone=dialogue.tone if hasattr(dialogue, 'tone') else None,
-                evidence=dialogue.evidence if hasattr(dialogue, 'evidence') else "",
+                content=dialogue.content if hasattr(dialogue, "content") else "",
+                tone=dialogue.tone if hasattr(dialogue, "tone") else None,
+                evidence=dialogue.evidence if hasattr(dialogue, "evidence") else "",
             )
         )
 
@@ -299,9 +299,7 @@ def validate_character_appearances_sync(
             continue
 
         if raw_name in character_names:
-            logger.debug(
-                f"[validate_character_appearances_sync] 角色已存在: raw_name={raw_name}"
-            )
+            logger.debug(f"[validate_character_appearances_sync] 角色已存在: raw_name={raw_name}")
             continue
 
         missing_names.append(raw_name)
@@ -355,16 +353,12 @@ def validate_chunk_annotation(
     for char in annotation.characters:
         if char.name and char.name not in existing_characters:
             missing_names.add(char.name)
-            logger.debug(
-                f"[validate_chunk_annotation] 发现缺失角色: {char.name} (在 characters 中)"
-            )
+            logger.debug(f"[validate_chunk_annotation] 发现缺失角色: {char.name} (在 characters 中)")
 
     for dialogue in annotation.dialogues:
         if dialogue.speaker and dialogue.speaker not in existing_characters:
             missing_names.add(dialogue.speaker)
-            logger.debug(
-                f"[validate_chunk_annotation] 发现缺失角色: {dialogue.speaker} (在 dialogues.speaker 中)"
-            )
+            logger.debug(f"[validate_chunk_annotation] 发现缺失角色: {dialogue.speaker} (在 dialogues.speaker 中)")
 
     is_valid = len(missing_names) == 0
     if not is_valid:

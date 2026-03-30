@@ -16,18 +16,22 @@ def term_counts(text: str, terms: Iterable[str]) -> dict[str, int]:
             counts[term] = count
     return counts
 
+
 def count_hits(text: str, terms: Iterable[str]) -> int:
     return sum(term_counts(text, terms).values())
+
 
 def density(text: str, terms: Iterable[str]) -> float:
     total = count_hits(text, terms)
     return total / max(len(text), 1)
+
 
 def count_token_hits(tokens: Sequence[str], terms: Iterable[str]) -> int:
     term_set = {term for term in terms if term}
     if not term_set:
         return 0
     return sum(1 for token in tokens if token in term_set)
+
 
 def _is_phrase_term(term: str) -> bool:
     cleaned = term.strip()
@@ -36,6 +40,7 @@ def _is_phrase_term(term: str) -> bool:
     if " " in cleaned:
         return True
     return len(cleaned) >= 2
+
 
 def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequence[str]) -> dict[str, int]:
     counts: dict[str, int] = defaultdict(int)
@@ -85,6 +90,7 @@ def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequen
 
     return counts
 
+
 def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) -> dict[str, int]:
     if not terms:
         return {}
@@ -92,8 +98,10 @@ def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) ->
     text_value = text or ""
     return dict(_count_non_overlapping_spans(text_value, terms, tokens))
 
+
 def count_mixed_hits(text: str, tokens: Sequence[str], terms: Iterable[str]) -> int:
     return sum(term_mixed_counts(text, tokens, terms).values())
+
 
 def token_density(tokens: Sequence[str], terms: Iterable[str]) -> float:
     total = count_token_hits(tokens, terms)

@@ -25,6 +25,7 @@ from src.models.local.embedding import EmbeddingClient
 # 数据类型
 # =============================================================================
 
+
 @dataclass(frozen=True)
 class Chunk:
     """文本块数据类"""
@@ -146,6 +147,7 @@ def chunk_text(
 
     if use_semantic:
         from src.models.local.embedding import EmbeddingClient
+
         embedding_client = EmbeddingClient()
         chunker = SemanticChunker(embedding_client=embedding_client)
         return chunker.chunk_text_semantic(text)
@@ -177,9 +179,7 @@ def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
 
         chunk_text_content = text[start:end].strip()
         if chunk_text_content:
-            chunks.append(
-                Chunk(index=idx, text=chunk_text_content, start=start, end=end)
-            )
+            chunks.append(Chunk(index=idx, text=chunk_text_content, start=start, end=end))
             idx += 1
 
         start = end - overlap if end < len(text) else end
@@ -234,7 +234,7 @@ def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> list[Chunk]:
 
 class SemanticChunker:
     """语义分块器
-    
+
     修改时间: 2026-03-20
     修改者: TraeAI
     任务: 添加长度限制，当累计长度超过 max_chars 时强制分割
@@ -282,9 +282,7 @@ class SemanticChunker:
 
         return paragraphs
 
-    def _compute_paragraph_embeddings(
-        self, paragraphs: list[tuple[int, int, str]]
-    ) -> list[list[float]]:
+    def _compute_paragraph_embeddings(self, paragraphs: list[tuple[int, int, str]]) -> list[list[float]]:
         """计算段落的嵌入向量"""
         if self._embedding_client is None:
             return []
@@ -297,11 +295,11 @@ class SemanticChunker:
         embeddings: list[list[float]],
     ) -> list[int]:
         """找到语义边界
-        
+
         修改时间: 2026-03-20
         修改者: TraeAI
         任务: 添加长度限制，当累计长度超过 max_chars 时强制分割
-        
+
         说明:
         - 优先使用语义边界（模型判断）
         - 当累计长度超过 max_chars 时强制分割（工程约束）
@@ -366,9 +364,7 @@ class SemanticChunker:
             current_sim = np.dot(current_emb, window_mean) / (
                 np.linalg.norm(current_emb) * np.linalg.norm(window_mean) + 1e-8
             )
-            next_sim = np.dot(next_emb, window_mean) / (
-                np.linalg.norm(next_emb) * np.linalg.norm(window_mean) + 1e-8
-            )
+            next_sim = np.dot(next_emb, window_mean) / (np.linalg.norm(next_emb) * np.linalg.norm(window_mean) + 1e-8)
 
             similarities.append(float((current_sim + next_sim) / 2))
 
@@ -417,7 +413,7 @@ class SemanticChunker:
             # 如果块太小，尝试合并到前一个块
             elif chunk_len < self._min_chars and chunks:
                 prev_chunk = chunks[-1]
-                merged_text = text[prev_chunk.start:end_pos].strip()
+                merged_text = text[prev_chunk.start : end_pos].strip()
                 # 检查合并后是否超长
                 if len(merged_text) > self._max_chars:
                     # 不合并，保持原样
@@ -537,4 +533,3 @@ def chunk_documents(
         offset += len(chunks)
 
     return _reindex(all_chunks)
-

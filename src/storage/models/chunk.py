@@ -151,6 +151,3 @@ class ChunkTopic(Base):
 
     def __repr__(self) -> str:
         return f"<ChunkTopic(chunk_id={self.chunk_id}, topic_id={self.topic_id})>"
-
-
-

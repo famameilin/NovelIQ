@@ -235,16 +235,18 @@ def run_aggregate(
     tension_composite_values = _compute_tension_composite(tension_signals)
     rhythm_rows = compute_rhythm_curve(chunk_texts, fight_terms, tension_composite_values)
 
-    chunk_curves = list(zip(
-        [r[0] for r in emotion_rows],
-        [r[1] for r in emotion_rows],
-        [r[2] for r in emotion_rows],
-        [r[3] for r in emotion_rows],
-        [r[4] for r in emotion_rows],
-        [r[0] for r in rhythm_rows],
-        [r[1] for r in rhythm_rows],
-        strict=True,
-    ))
+    chunk_curves = list(
+        zip(
+            [r[0] for r in emotion_rows],
+            [r[1] for r in emotion_rows],
+            [r[2] for r in emotion_rows],
+            [r[3] for r in emotion_rows],
+            [r[4] for r in emotion_rows],
+            [r[0] for r in rhythm_rows],
+            [r[1] for r in rhythm_rows],
+            strict=True,
+        )
+    )
 
     stats_repo.insert_chunk_curve(run_id, chunk_curves)
     logger.info(f"inserted {len(chunk_curves)} chunk curve rows")
@@ -264,13 +266,10 @@ def run_aggregate(
         logger.warning(f"Failed to compute aggregate metrics: {e}")
 
     elapsed = time.time() - start_time
-    logger.info(
-        f"aggregate completed chunks={total_chunks} chunk_curves={len(chunk_curves)} time={elapsed:.2f}s"
-    )
+    logger.info(f"aggregate completed chunks={total_chunks} chunk_curves={len(chunk_curves)} time={elapsed:.2f}s")
     logger.info("\n=== Aggregate Statistics ===")
     logger.info(f"Total chunks: {total_chunks}")
     logger.info(f"Chunk curve rows: {len(chunk_curves)}")
     logger.info(f"Global stats: {len(global_stats)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
     return total_chunks, len(chunk_curves), len(chunk_curves)
-

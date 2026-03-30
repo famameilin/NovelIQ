@@ -36,9 +36,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def insert_chunk_annotation(
-    session: Session, run_id: str, chunk_id: int, annotation: ChunkAnnotationSchema
-) -> None:
+def insert_chunk_annotation(session: Session, run_id: str, chunk_id: int, annotation: ChunkAnnotationSchema) -> None:
     """插入分块标注"""
     record = ChunkAnnotation(
         chunk_id=chunk_id,
@@ -123,7 +121,6 @@ def update_relation_projection_status(
     session.execute(stmt)
 
 
-
 def insert_chunk_dialogues(
     session: Session,
     run_id: str,
@@ -172,9 +169,7 @@ def insert_chunk_dialogues(
     session.commit()
 
 
-def insert_foreshadowing(
-    session: Session, run_id: str, chunk_id: int, result: ForeshadowingResult
-) -> None:
+def insert_foreshadowing(session: Session, run_id: str, chunk_id: int, result: ForeshadowingResult) -> None:
     """插入伏笔分析结果"""
     if not result.has_foreshadowing:
         return

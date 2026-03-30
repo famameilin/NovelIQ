@@ -31,11 +31,9 @@ class AnnotationLike(Protocol):
     _novel_id: str | None
     _token_usage_callback: Any
 
-    def set_session(self, session: Any) -> None:
-        ...
+    def set_session(self, session: Any) -> None: ...
 
-    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
-        ...
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None: ...
 
     def annotate_chunk(
         self,
@@ -49,8 +47,7 @@ class AnnotationLike(Protocol):
         known_aliases: str | None = None,
         cloud_client: AnnotationLike | None = None,
         run_id: str | None = None,
-    ) -> MultiPhaseAnnotationResult:
-        ...
+    ) -> MultiPhaseAnnotationResult: ...
 
 
 @runtime_checkable
@@ -61,11 +58,9 @@ class DisambiguationLike(Protocol):
     _novel_id: str | None
     _token_usage_callback: Any
 
-    def set_session(self, session: Any) -> None:
-        ...
+    def set_session(self, session: Any) -> None: ...
 
-    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
-        ...
+    def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None: ...
 
     def disambiguate_characters(
         self,
@@ -73,8 +68,6 @@ class DisambiguationLike(Protocol):
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
         rag_hint: str | None = None,
-    ) -> ExtendedDisambigResult:
-        ...
+    ) -> ExtendedDisambigResult: ...
 
-    def is_cloud_api(self) -> bool:
-        ...
+    def is_cloud_api(self) -> bool: ...

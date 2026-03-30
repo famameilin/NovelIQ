@@ -119,7 +119,8 @@ def _store_annotation_results(
             foreshadowing_type=foreshadowing.foreshadowing_type,
             foreshadowing_desc=(
                 f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}"
-                if foreshadowing.has_foreshadowing else ""
+                if foreshadowing.has_foreshadowing
+                else ""
             ),
             characters=annotation.characters,
             dialogues=annotation.dialogues,
@@ -154,6 +155,7 @@ def _store_annotation_results(
 
     if annotation.chunk_summary:
         from src.storage.repositories import StatsRepository
+
         stats_repo = StatsRepository(conn)
         stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
 
