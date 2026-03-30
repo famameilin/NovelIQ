@@ -41,7 +41,7 @@ setup_logging(verbose=True, debug=False)
 
 # ruff: noqa: E402
 from src.api.middleware import register_exception_handlers
-from src.api.routes import analysis_router, novels_router, results_router
+from src.api.routes import analysis_router, novels_router, results_router, timeline_router
 
 
 @asynccontextmanager
@@ -79,6 +79,7 @@ async def health_check():
 app.include_router(novels_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(results_router, prefix="/api")
+app.include_router(timeline_router, prefix="/api")
 
 register_exception_handlers(app)
 

@@ -13,6 +13,17 @@ from .aggregate import (
     AggregateResult,
     aggregate_all_metrics,
 )
+from .timeline_metrics import (
+    NarrativePhase,
+    TimelineCandidate,
+    calculate_tension_percentile,
+    compute_four_phases,
+    compute_importance_score,
+    convert_to_timeline_nodes,
+    convert_to_timeline_phases,
+    get_major_characters_by_span,
+    select_timeline_nodes,
+)
 from .character_metrics import (
     GREIMAS_FUNCTIONS,
     compute_antagonist_strength_gap,
@@ -83,6 +94,15 @@ from .text_utils import dialogue_length, split_sentences, tokenize_words
 __all__ = [
     "AggregateResult",
     "aggregate_all_metrics",
+    "NarrativePhase",
+    "TimelineCandidate",
+    "calculate_tension_percentile",
+    "compute_four_phases",
+    "compute_importance_score",
+    "convert_to_timeline_nodes",
+    "convert_to_timeline_phases",
+    "get_major_characters_by_span",
+    "select_timeline_nodes",
     "CLASSICAL_IMAGERY",
     "CLASSICAL_PATTERNS",
     "FUNCTION_WORDS",
