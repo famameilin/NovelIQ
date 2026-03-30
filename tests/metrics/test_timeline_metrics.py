@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.api.models.timeline import RelationChangeEvent
 from src.metrics.timeline_metrics import (
     NarrativePhase,
+    RelationChangeEventDTO,
     TimelineCandidate,
     calculate_tension_percentile,
     compute_four_phases,
@@ -586,7 +586,7 @@ class TestConvertToTimelineNodes:
     def test_with_relation_changes(self):
         """测试带关系变化的节点转换"""
         relation_changes = [
-            RelationChangeEvent(
+            RelationChangeEventDTO(
                 from_char="A",
                 to_char="B",
                 relation_type="师徒",
