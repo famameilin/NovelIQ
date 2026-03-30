@@ -44,6 +44,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         last_seen_chunk: int | None = None,
         primary_role_function: str | None = None,
         last_emotion_score: str | None = None,
+        last_action: str | None = None,
         source_confidence: float | None = None,
     ) -> GraphEntity:
         entity = self.get_entity_by_canonical(run_id, canonical_name)
@@ -56,6 +57,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 last_seen_chunk=last_seen_chunk,
                 primary_role_function=primary_role_function,
                 last_emotion_score=last_emotion_score,
+                last_action=last_action,
                 source_confidence=source_confidence,
             )
             self.session.add(entity)
@@ -70,6 +72,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             entity.primary_role_function = primary_role_function
         if last_emotion_score:
             entity.last_emotion_score = last_emotion_score
+        if last_action:
+            entity.last_action = last_action
         if source_confidence is not None:
             entity.source_confidence = source_confidence
         entity.updated_at = datetime.now(UTC)
@@ -251,7 +255,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 "entity_id": row.entity_id,
                 "name": row.canonical_name,
                 "role": row.primary_role_function,
-                "last_action": "",
+                "last_action": row.last_action or "",
                 "last_emotion": row.last_emotion_score or "",
                 "emotion_score": row.last_emotion_score,
                 "chunk_id": row.last_seen_chunk,
