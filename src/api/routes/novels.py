@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, UploadFile
 from loguru import logger
 
+from src.api.dependencies import get_novel_service
 from src.api.exceptions import NovelNotFoundError
 from src.api.models.responses import (
     BatchDeleteNovelsRequest,
@@ -14,13 +13,6 @@ from src.api.models.responses import (
 from src.api.services.novel_service import NovelService
 
 router = APIRouter(prefix="/novels", tags=["novels"])
-
-_upload_dir = Path("data/uploads")
-_novel_service = NovelService(_upload_dir)
-
-
-def get_novel_service() -> NovelService:
-    return _novel_service
 
 
 @router.post("/upload", response_model=UploadResponse)
