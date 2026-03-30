@@ -140,6 +140,7 @@ def project_graph_tables(
             last_seen_chunk=row.chunk_id,
             primary_role_function=row.role_function,
             last_emotion_score=row.emotion_score,
+            last_action=row.action,
             source_confidence=1.0,
         )
         if entity.entity_id is None:

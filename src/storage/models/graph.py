@@ -23,6 +23,7 @@ class GraphEntity(Base):
     last_seen_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
     primary_role_function: Mapped[str | None] = mapped_column(String(50), nullable=True)
     last_emotion_score: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     source_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
