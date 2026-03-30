@@ -37,7 +37,6 @@ from sqlalchemy.orm import Session
 from src.api.dependencies import get_db_session, get_novel_service, resolve_run_id
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ResultsWriteResponse
-
 from src.api.routes.results_converters import _convert_aggregate_result
 from src.api.routes.results_fetchers import (
     _fetch_characters,
@@ -128,6 +127,7 @@ router = APIRouter(prefix="/novels", tags=["results"])
 async def get_results(
     novel_id: str,
     task_id: Annotated[str, Query(..., description="分析任务ID")],
+    run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
     novel_service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> ResultsWriteResponse:
@@ -140,15 +140,16 @@ async def get_results(
     2026-03-19: TraeAI重构，将run_id参数改为task_id，内部转换为run_id
     2026-03-30: CodeBuddy重构，使用 Depends 注入 session
     """
-    # 从数据库查询运行记录
-    from src.storage.id_mapping import task_id_to_run_id
-
-    # 将task_id转换为run_id
-    run_id = task_id_to_run_id(task_id, session.connection())
+    # run_id 已通过 resolve_run_id 依赖注入获取
     run_repo = RunRepository(session)
     run = run_repo.get_run(run_id)
     if not run:
         raise NovelNotFoundError(f"运行记录不存在: {run_id}")
+
+    # 验证 run 是否属于该 novel
+    if run.get("novel_id") != novel_id:
+        raise NovelNotFoundError(f"任务 {task_id} 不属于小说 {novel_id}")
+
     VALID_EXPORT_STATUSES = ("completed", "aggregated", "diagnosed")
     if run["status"] not in VALID_EXPORT_STATUSES:
         raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
@@ -206,7 +207,7 @@ async def get_emotion_curve(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> list:
     """获取情感曲线数据"""
     stats_repo = StatsRepository(session)
     return _fetch_emotion_curve(run_id, stats_repo)
@@ -217,7 +218,7 @@ async def get_rhythm_curve(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> list:
     """获取节奏曲线数据"""
     stats_repo = StatsRepository(session)
     return _fetch_rhythm_curve(run_id, stats_repo)
@@ -228,7 +229,7 @@ async def get_characters(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> list:
     """
     获取角色统计数据
 
@@ -257,7 +258,7 @@ async def get_topics(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> list:
     """获取主题分布数据"""
     chunk_repo = ChunkRepository(session)
     annotation_repo = AnnotationRepository(session)
@@ -270,7 +271,7 @@ async def get_diagnosis(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> Any:
     """获取云端诊断数据"""
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
@@ -294,7 +295,7 @@ async def get_narrative_structure(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> Any:
     """获取叙事结构指标"""
     ann_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
@@ -309,7 +310,7 @@ async def get_emotion_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> Any:
     """获取情感统计指标"""
     ann_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
@@ -324,7 +325,7 @@ async def get_character_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> Any:
     """获取角色统计指标"""
     ann_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
@@ -339,7 +340,7 @@ async def get_style_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> Any:
     """获取风格统计指标"""
     ann_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
@@ -354,7 +355,7 @@ async def get_culture_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> dict:
+) -> Any:
     """获取文化元素统计指标"""
     ann_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)

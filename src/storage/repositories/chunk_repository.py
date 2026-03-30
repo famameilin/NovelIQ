@@ -42,8 +42,7 @@ from sqlalchemy.orm import Session
 
 from src.chunking.chunker import Chunk
 from src.storage.models import Chunk as ChunkModel
-from src.storage.models import ChunkEmbedding
-from src.storage.models import ChunkSummary
+from src.storage.models import ChunkEmbedding, ChunkSummary
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.chunk import (
     ChunkStyleData,
