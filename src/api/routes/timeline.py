@@ -16,28 +16,17 @@ from sqlalchemy.orm import Session
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ErrorResponse
 from src.api.models.timeline import (
-    RelationChangeEvent,
     TimelineMeta,
     TimelineResponse,
 )
 from src.api.routes.novels import get_novel_service
 from src.api.services.novel_service import NovelService
 from src.metrics.timeline_metrics import (
-    TimelineCandidate,
-    calculate_tension_percentile,
-    compute_four_phases,
-    compute_importance_score,
+    build_timeline_candidates,
     convert_to_timeline_nodes,
-    convert_to_timeline_phases,
-    get_major_characters_by_span,
     select_timeline_nodes,
 )
 from src.storage.db import get_session_factory
-from src.storage.models import (
-    ChunkSummary,
-    GraphEntity,
-    GraphRelationEvent,
-)
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -169,14 +158,22 @@ async def get_timeline(
     if run_data["status"] not in ("completed", "aggregated", "diagnosed"):
         raise AnalysisNotCompleteError(f"分析尚未完成，当前状态: {run_data['status']}")
 
-    # 4. 获取数据
+    # 4. 构建时间轴候选节点（共享函数）
     chunk_repo = ChunkRepository(session)
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
 
-    # 获取 chunk 文本列表
-    chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
-    if not chunk_texts:
+    try:
+        (
+            candidates,
+            tension_scores,
+            chunk_ids,
+            total_chunks,
+            timeline_phases,
+            major_character_entries,
+            relation_break_events,
+        ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
+    except ValueError:
         logger.warning(f"No chunks found for run {run_id}")
         return TimelineResponse(
             meta=TimelineMeta(
@@ -189,202 +186,7 @@ async def get_timeline(
             tension_curve=None,
         )
 
-    chunk_ids = [cid for cid, _ in chunk_texts]
-    total_chunks = len(chunk_ids)
-
-    # 获取张力曲线
-    rhythm_curve = stats_repo.fetch_rhythm_curve(run_id)
-    tension_scores = [row[0] if row else 0.0 for row in rhythm_curve] if rhythm_curve else [0.5] * total_chunks
-
-    # 确保张力数据长度匹配
-    if len(tension_scores) < total_chunks:
-        tension_scores.extend([0.5] * (total_chunks - len(tension_scores)))
-    elif len(tension_scores) > total_chunks:
-        tension_scores = tension_scores[:total_chunks]
-
-    # 获取分块摘要
-    summaries_data = (
-        session.query(ChunkSummary.chunk_id, ChunkSummary.summary)
-        .filter(ChunkSummary.run_id == run_id)
-        .order_by(ChunkSummary.chunk_id)
-        .all()
-    )
-    summary_map = {row[0]: row[1] for row in summaries_data}
-
-    # 获取标注数据
-    annotations = annotation_repo.fetch_chunk_annotations(run_id)
-    annotation_map = {ann.chunk_id: ann for ann in annotations} if annotations else {}
-
-    # 获取知识图谱数据
-    entities = (
-        session.query(GraphEntity)
-        .filter(GraphEntity.run_id == run_id, GraphEntity.entity_type == "character")
-        .all()
-    )
-
-    # 预构建实体ID到名称的映射，避免N+1查询问题
-    entity_name_map: dict[int, str] = {
-        e.entity_id: e.canonical_name for e in entities if e.entity_id is not None
-    }
-
-    relation_events = (
-        session.query(GraphRelationEvent)
-        .filter(GraphRelationEvent.run_id == run_id)
-        .all()
-    )
-
-    # 5. 计算四阶段划分
-    phases = compute_four_phases(tension_scores, chunk_ids)
-    timeline_phases = convert_to_timeline_phases(phases)
-
-    # 6. 获取主要角色（基于活跃跨度）
-    major_characters = get_major_characters_by_span(entities, top_n=3)
-    major_character_entries: list[tuple[str, int]] = []
-    for char in major_characters:
-        if char.first_seen_chunk is not None:
-            # 找到 first_seen_chunk 在 chunk_ids 中的索引
-            try:
-                idx = chunk_ids.index(char.first_seen_chunk)
-                major_character_entries.append((char.canonical_name, idx))
-            except ValueError:
-                pass
-
-    # 7. 获取关系断裂事件（使用预构建的 entity_name_map 避免 N+1 查询）
-    relation_break_events: list[tuple[int, RelationChangeEvent]] = []
-    for rel_event in relation_events:
-        if rel_event.change_type == "断裂":
-            try:
-                idx = chunk_ids.index(rel_event.chunk_id)
-                # 从预构建的映射获取角色名称，避免循环内查询数据库
-                from_char = entity_name_map.get(
-                    rel_event.from_entity_id, str(rel_event.from_entity_id)
-                )
-                to_char = entity_name_map.get(
-                    rel_event.to_entity_id, str(rel_event.to_entity_id)
-                )
-
-                relation_break_events.append(
-                    (
-                        idx,
-                        RelationChangeEvent(
-                            from_char=from_char,
-                            to_char=to_char,
-                            relation_type=rel_event.relation_type,
-                            change_type=rel_event.change_type,
-                            evidence=rel_event.evidence,
-                        ),
-                    )
-                )
-            except ValueError:
-                pass
-
-    # 8. 创建候选节点
-    candidates: list[TimelineCandidate] = []
-    for i, (chunk_id, text) in enumerate(chunk_texts):
-        progress = i / (total_chunks - 1) if total_chunks > 1 else 0.0
-
-        # 获取标注数据
-        ann = annotation_map.get(chunk_id)
-
-        pivot_moment = ann.pivot_moment if ann else False
-        cliffhanger = ann.cliffhanger if ann else False
-        event_type = ann.event_type if ann else ""
-        emotional_valence = ann.emotional_valence if ann else ""
-
-        # 获取事件描述
-        event = summary_map.get(chunk_id, "")
-        if not event:
-            event = text[:30] + "..." if len(text) > 30 else text
-
-        # 检查是否有角色登场/退场
-        character_entries: list[str] = []
-        character_exits: list[str] = []
-        for char in entities:
-            if char.first_seen_chunk == chunk_id:
-                character_entries.append(char.canonical_name)
-            if char.last_seen_chunk == chunk_id:
-                character_exits.append(char.canonical_name)
-
-        # 检查是否为关系变化节点（使用预构建的 entity_name_map 避免 N+1 查询）
-        relation_changes: list[RelationChangeEvent] = []
-        for event_data in relation_events:
-            if event_data.chunk_id == chunk_id:
-                # 从预构建的映射获取角色名称，避免循环内查询数据库
-                from_char = entity_name_map.get(
-                    event_data.from_entity_id, str(event_data.from_entity_id)
-                )
-                to_char = entity_name_map.get(
-                    event_data.to_entity_id, str(event_data.to_entity_id)
-                )
-
-                relation_changes.append(
-                    RelationChangeEvent(
-                        from_char=from_char,
-                        to_char=to_char,
-                        relation_type=event_data.relation_type,
-                        change_type=event_data.change_type,
-                        evidence=event_data.evidence,
-                    )
-                )
-
-        # 检查是否为主要角色相关
-        is_major_character = bool(
-            set(character_entries) | set(character_exits)
-            & {c.canonical_name for c in major_characters}
-        )
-
-        # 计算重要性分数
-        importance_score, level = compute_importance_score(
-            pivot_moment=pivot_moment,
-            cliffhanger=cliffhanger,
-            tension_composite=tension_scores[i],
-            all_tensions=tension_scores,
-            event_type=event_type,
-            emotional_valence=emotional_valence,
-            has_relation_change=bool(relation_changes),
-            has_character_entry=bool(character_entries),
-            has_character_exit=bool(character_exits),
-            is_major_character=is_major_character,
-        )
-
-        # 确定节点类型
-        node_type = "plot"
-        if character_entries and is_major_character:
-            node_type = "character_entry"
-        elif character_exits and is_major_character:
-            node_type = "character_exit"
-        elif relation_changes:
-            node_type = "relation_change"
-
-        # 计算张力百分位
-        tension_percentile = calculate_tension_percentile(tension_scores[i], tension_scores)
-
-        # 获取涉及的角色
-        characters = list(set(character_entries + character_exits))
-        if relation_changes:
-            for rc in relation_changes:
-                characters.extend([rc.from_char, rc.to_char])
-        characters = list(set(characters))
-
-        candidates.append(
-            TimelineCandidate(
-                chunk_id=chunk_id,
-                progress=progress,
-                importance_score=importance_score,
-                level=level,
-                event=event,
-                characters=characters,
-                is_pivot=pivot_moment,
-                is_cliffhanger=cliffhanger,
-                tension_percentile=tension_percentile,
-                node_type=node_type,
-                relation_changes=relation_changes if relation_changes else None,
-                character_entries=character_entries if character_entries else None,
-                character_exits=character_exits if character_exits else None,
-            )
-        )
-
-    # 9. 筛选节点
+    # 5. 筛选节点
     selected_candidates = select_timeline_nodes(
         candidates=candidates,
         chunk_ids=chunk_ids,
@@ -395,7 +197,7 @@ async def get_timeline(
         max_nodes=20,
     )
 
-    # 10. 根据 max_level 过滤节点
+    # 6. 根据 max_level 过滤节点
     selected_candidates = [c for c in selected_candidates if c.level <= max_level]
 
     # 转换为 API 模型

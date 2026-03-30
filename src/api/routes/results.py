@@ -213,33 +213,22 @@ def _write_results_to_file(task_id: str, data: dict[str, Any]) -> str:
     return str(file_path)
 
 
-def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> tuple[Session | None, str | None]:
+def _get_session_and_run_id(task_id: str, novel_service: NovelService) -> tuple[Session, str]:
     """
-    2026-03-14: TraeAI创建，任务refactor-routes-use-repository
-    从 task_id 获取数据库连接和 run_id
+    从 task_id 获取数据库连接和 run_id。
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 移除 has_db 检查，使用单一 PostgreSQL 数据库
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: API接口参数统一优化
-    修改内容: 将task_id转换为run_id返回，处理无效task_id情况
+    当 task_id 格式无效或找不到对应 run_id 时，抛出 NovelNotFoundError（HTTP 404）。
     """
     from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
 
     session_factory = SessionFactory()
     db_session = session_factory.get_session()
     try:
-        # 将task_id转换为run_id
         run_id = task_id_to_run_id(task_id, db_session.connection)
         return db_session.connection, run_id
     except (ValueError, TaskIDNotFoundError):
-        # task_id格式无效或找不到对应的run_id
         db_session.connection.close()
-        return None, None
+        raise NovelNotFoundError(f"任务不存在: {task_id}")
 
 
 @router.get("/{novel_id}/emotion-curve")
@@ -249,8 +238,6 @@ async def get_emotion_curve(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return []
     try:
         stats_repo = StatsRepository(conn)
         return _fetch_emotion_curve(run_id, stats_repo)
@@ -265,8 +252,6 @@ async def get_rhythm_curve(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return []
     try:
         stats_repo = StatsRepository(conn)
         return _fetch_rhythm_curve(run_id, stats_repo)
@@ -289,8 +274,6 @@ async def get_characters(
     修改内容: 先获取 diagnosis，传递 arc_scores 和 main_characters 给 _fetch_characters
     """
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return []
     try:
         annotation_repo = AnnotationRepository(conn)
         stats_repo = StatsRepository(conn)
@@ -316,8 +299,6 @@ async def get_topics(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return []
     try:
         chunk_repo = ChunkRepository(conn)
         annotation_repo = AnnotationRepository(conn)
@@ -334,8 +315,6 @@ async def get_diagnosis(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return None
     try:
         stats_repo = StatsRepository(conn)
         annotation_repo = AnnotationRepository(conn)
@@ -352,8 +331,6 @@ async def get_graph(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return {}
     try:
         annotation_repo = AnnotationRepository(conn)
         return _fetch_graph_snapshot(run_id, annotation_repo)
@@ -368,8 +345,6 @@ async def get_narrative_structure(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -388,8 +363,6 @@ async def get_emotion_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -408,8 +381,6 @@ async def get_character_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -428,8 +399,6 @@ async def get_style_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -448,8 +417,6 @@ async def get_culture_stats(
     novel_service: NovelService = Depends(get_novel_service),
 ):
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return None
     try:
         ann_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)
@@ -483,8 +450,6 @@ async def get_timeline_from_results(
         Timeline 数据，包含 phases, nodes, 可选 tension_curve
     """
     conn, run_id = _get_session_and_run_id(task_id, novel_service)
-    if conn is None or run_id is None:
-        return {}
     try:
         annotation_repo = AnnotationRepository(conn)
         chunk_repo = ChunkRepository(conn)

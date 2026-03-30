@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from loguru import logger
+
 from src.api.routes.results_converters import _convert_aggregate_result
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
@@ -29,16 +31,7 @@ from src.api.routes.results_fetchers import (
     _fetch_topics,
 )
 from src.metrics.aggregate import aggregate_all_metrics
-from src.metrics.timeline_metrics import (
-    TimelineCandidate,
-    calculate_tension_percentile,
-    compute_four_phases,
-    compute_importance_score,
-    convert_to_timeline_phases,
-    get_major_characters_by_span,
-    select_timeline_nodes,
-)
-from src.storage.models import ChunkSummary, GraphEntity, GraphRelationEvent
+from src.metrics.timeline_metrics import build_timeline_candidates, convert_to_timeline_nodes, select_timeline_nodes
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -215,200 +208,40 @@ def _fetch_timeline_data(
     Returns:
         时间轴数据字典，包含 phases, nodes, tension_curve
     """
-    from src.api.models.timeline import RelationChangeEvent
-
     try:
-        # 获取 chunk 文本列表
-        chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
-        if not chunk_texts:
-            return None
-
-        chunk_ids = [cid for cid, _ in chunk_texts]
-        total_chunks = len(chunk_ids)
-
-        # 获取张力曲线
-        rhythm_curve = stats_repo.fetch_rhythm_curve(run_id)
-        tension_scores = [row[0] if row else 0.0 for row in rhythm_curve] if rhythm_curve else [0.5] * total_chunks
-
-        # 确保张力数据长度匹配
-        if len(tension_scores) < total_chunks:
-            tension_scores.extend([0.5] * (total_chunks - len(tension_scores)))
-        elif len(tension_scores) > total_chunks:
-            tension_scores = tension_scores[:total_chunks]
-
-        # 获取分块摘要
-        summaries_data = (
-            session.query(ChunkSummary.chunk_id, ChunkSummary.summary)
-            .filter(ChunkSummary.run_id == run_id)
-            .order_by(ChunkSummary.chunk_id)
-            .all()
-        )
-        summary_map = {row[0]: row[1] for row in summaries_data}
-
-        # 获取标注数据
-        annotations = annotation_repo.fetch_chunk_annotations(run_id)
-        annotation_map = {ann.chunk_id: ann for ann in annotations} if annotations else {}
-
-        # 获取知识图谱数据
-        entities = (
-            session.query(GraphEntity)
-            .filter(GraphEntity.run_id == run_id, GraphEntity.entity_type == "character")
-            .all()
-        )
-
-        # 预构建实体ID到名称的映射
-        entity_name_map: dict[int, str] = {
-            e.entity_id: e.canonical_name for e in entities if e.entity_id is not None
-        }
-
-        relation_events = (
-            session.query(GraphRelationEvent)
-            .filter(GraphRelationEvent.run_id == run_id)
-            .all()
-        )
-
-        # 计算四阶段划分
-        phases = compute_four_phases(tension_scores, chunk_ids)
-        timeline_phases = convert_to_timeline_phases(phases)
-
-        # 获取主要角色
-        major_characters = get_major_characters_by_span(entities, top_n=3)
-        major_character_entries: list[tuple[str, int]] = []
-        for char in major_characters:
-            if char.first_seen_chunk is not None:
-                try:
-                    idx = chunk_ids.index(char.first_seen_chunk)
-                    major_character_entries.append((char.canonical_name, idx))
-                except ValueError:
-                    pass
-
-        # 获取关系断裂事件
-        relation_break_events: list[tuple[int, RelationChangeEvent]] = []
-        for rel_event in relation_events:
-            if rel_event.change_type == "断裂":
-                try:
-                    idx = chunk_ids.index(rel_event.chunk_id)
-                    from_char = entity_name_map.get(
-                        rel_event.from_entity_id, str(rel_event.from_entity_id)
-                    )
-                    to_char = entity_name_map.get(
-                        rel_event.to_entity_id, str(rel_event.to_entity_id)
-                    )
-                    relation_break_events.append(
-                        (
-                            idx,
-                            RelationChangeEvent(
-                                from_char=from_char,
-                                to_char=to_char,
-                                relation_type=rel_event.relation_type,
-                                change_type=rel_event.change_type,
-                                evidence=rel_event.evidence,
-                            ),
-                        )
-                    )
-                except ValueError:
-                    pass
-
-        # 创建候选节点
-        candidates: list[TimelineCandidate] = []
-        for i, (chunk_id, text) in enumerate(chunk_texts):
-            progress = i / (total_chunks - 1) if total_chunks > 1 else 0.0
-
-            ann = annotation_map.get(chunk_id)
-            pivot_moment = ann.pivot_moment if ann else False
-            cliffhanger = ann.cliffhanger if ann else False
-            event_type = ann.event_type if ann else ""
-            emotional_valence = ann.emotional_valence if ann else ""
-
-            event = summary_map.get(chunk_id, "")
-            if not event:
-                event = text[:30] + "..." if len(text) > 30 else text
-
-            character_entries: list[str] = []
-            character_exits: list[str] = []
-            for char in entities:
-                if char.first_seen_chunk == chunk_id:
-                    character_entries.append(char.canonical_name)
-                if char.last_seen_chunk == chunk_id:
-                    character_exits.append(char.canonical_name)
-
-            relation_changes: list[RelationChangeEvent] = []
-            for event_data in relation_events:
-                if event_data.chunk_id == chunk_id:
-                    from_char = entity_name_map.get(
-                        event_data.from_entity_id, str(event_data.from_entity_id)
-                    )
-                    to_char = entity_name_map.get(
-                        event_data.to_entity_id, str(event_data.to_entity_id)
-                    )
-                    relation_changes.append(
-                        RelationChangeEvent(
-                            from_char=from_char,
-                            to_char=to_char,
-                            relation_type=event_data.relation_type,
-                            change_type=event_data.change_type,
-                            evidence=event_data.evidence,
-                        )
-                    )
-
-            is_major_character = bool(
-                set(character_entries) | set(character_exits)
-                & {c.canonical_name for c in major_characters}
-            )
-
-            importance_score, level = compute_importance_score(
-                pivot_moment=pivot_moment,
-                cliffhanger=cliffhanger,
-                tension_composite=tension_scores[i],
-                all_tensions=tension_scores,
-                event_type=event_type,
-                emotional_valence=emotional_valence,
-                has_relation_change=bool(relation_changes),
-                has_character_entry=bool(character_entries),
-                has_character_exit=bool(character_exits),
-                is_major_character=is_major_character,
-            )
-
-            candidates.append(
-                TimelineCandidate(
-                    chunk_id=chunk_id,
-                    progress=progress,
-                    importance_score=importance_score,
-                    level=level,
-                    event=event,
-                    characters=character_entries + character_exits,
-                    is_pivot=pivot_moment,
-                    is_cliffhanger=cliffhanger,
-                    tension_percentile=calculate_tension_percentile(tension_scores[i], tension_scores),
-                    node_type="character_entry" if character_entries else ("character_exit" if character_exits else "plot"),
-                    relation_changes=relation_changes if relation_changes else None,
-                    character_entries=character_entries if character_entries else None,
-                    character_exits=character_exits if character_exits else None,
-                )
-            )
-
-        # 筛选节点
-        from src.metrics.timeline_metrics import convert_to_timeline_nodes
-        selected_nodes = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=major_character_entries,
-            relation_break_events=relation_break_events,
-            min_nodes=10,
-            max_nodes=20,
-        )
-
-        timeline_nodes = convert_to_timeline_nodes(selected_nodes)
-
-        return {
-            "phases": [p.model_dump() for p in timeline_phases],
-            "nodes": [n.model_dump() for n in timeline_nodes],
-            "tension_curve": tension_scores,
-            "total_chunks": total_chunks,
-        }
-    except Exception:
+        (
+            candidates,
+            tension_scores,
+            chunk_ids,
+            total_chunks,
+            timeline_phases,
+            major_character_entries,
+            relation_break_events,
+        ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
+    except ValueError:
         return None
+    except Exception as e:
+        logger.warning(f"Failed to build timeline data: {e}")
+        return None
+
+    selected_nodes = select_timeline_nodes(
+        candidates=candidates,
+        chunk_ids=chunk_ids,
+        tension_scores=tension_scores,
+        major_character_entries=major_character_entries,
+        relation_break_events=relation_break_events,
+        min_nodes=10,
+        max_nodes=20,
+    )
+
+    timeline_nodes = convert_to_timeline_nodes(selected_nodes)
+
+    return {
+        "phases": [p.model_dump() for p in timeline_phases],
+        "nodes": [n.model_dump() for n in timeline_nodes],
+        "tension_curve": tension_scores,
+        "total_chunks": total_chunks,
+    }
 
 
 def build_export_payload(
