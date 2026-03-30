@@ -20,7 +20,6 @@ from src.api.models.responses import (
     CharacterStats,
     ChunkAnnotation,
     ChunkCharacter,
-    ChunkCulture,
     ChunkCurvePoint,
     ChunkDialogue,
     ChunkRelation,
@@ -519,9 +518,12 @@ def _fetch_hierarchical_relations(
         if valid_character_names is not None:
             if from_entity not in valid_character_names or to_entity not in valid_character_names:
                 continue
+        rel_id = rel.get("relation_id")
+        if rel_id is None:
+            continue
         result.append(
             HierarchicalRelation(
-                rel_id=rel.get("relation_id"),
+                rel_id=rel_id,
                 rel_type=rel_type,
                 first_chunk=rel.get("first_seen_chunk"),
                 last_chunk=rel.get("last_seen_chunk"),
@@ -559,20 +561,6 @@ def _fetch_global_stats(run_id: str, stats_repo: StatsRepository, chunk_repo: Ch
         global_avg_sent_len=stats.get("global_avg_sent_len"),
         global_avg_ttr=stats.get("global_avg_ttr"),
     )
-
-
-def _fetch_chunk_cultures(run_id: str, chunk_repo: ChunkRepository) -> list:
-    """
-    获取分块文化数据（从 chunk_style 读取 imagery_lexicon_density）
-    """
-    rows = chunk_repo.fetch_chunk_cultures_full(run_id)
-    return [
-        ChunkCulture(
-            chunk_id=row[0],
-            imagery_lexicon_density=row[1],
-        )
-        for row in rows
-    ]
 
 
 def _fetch_novel_name(run_id: str, novel_id: str, stats_repo: StatsRepository) -> str | None:

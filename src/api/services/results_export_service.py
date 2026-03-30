@@ -19,14 +19,12 @@ from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
-    _fetch_chunk_cultures,
+    _fetch_chunk_curves,
     _fetch_chunk_styles,
     _fetch_diagnosis,
-    _fetch_emotion_curve,
     _fetch_global_stats,
     _fetch_hierarchical_relations,
     _fetch_novel_name,
-    _fetch_rhythm_curve,
     _fetch_token_usage_stats,
     _fetch_topics,
 )
@@ -44,24 +42,25 @@ from src.storage.repositories import (
 def load_core_results(
     run_id: str,
     stats_repo: StatsRepository,
-) -> tuple[list, list, list[str]]:
+) -> tuple[list, list[str]]:
     """
-    加载核心结果数据：情感曲线、节奏曲线、缺失字段
+    加载核心结果数据：chunk_curves、缺失字段
+
+    创建时间: 2026-03-30
+    创建者: CodeBuddy
+    任务: db-schema-cleanup
+    说明: 合并 emotion_curve + rhythm_curve 为 chunk_curves
 
     Returns:
-        (emotion_curve, rhythm_curve, missing_fields)
+        (chunk_curves, missing_fields)
     """
     missing_fields: list[str] = []
 
-    emotion_curve = _fetch_emotion_curve(run_id, stats_repo)
-    if not emotion_curve:
-        missing_fields.append("emotion_curve")
+    chunk_curves = _fetch_chunk_curves(run_id, stats_repo)
+    if not chunk_curves:
+        missing_fields.append("chunk_curves")
 
-    rhythm_curve = _fetch_rhythm_curve(run_id, stats_repo)
-    if not rhythm_curve:
-        missing_fields.append("rhythm_curve")
-
-    return emotion_curve, rhythm_curve, missing_fields
+    return chunk_curves, missing_fields
 
 
 def load_character_bundle(
@@ -143,12 +142,12 @@ def load_aggregate_bundle(
     graph_repo: GraphRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
-) -> tuple[list, list, Any, list, Any, dict[str, Any], dict[str, Any]]:
+) -> tuple[list, list, Any, Any, dict[str, Any], dict[str, Any]]:
     """
     加载聚合统计数据
 
     Returns:
-        (character_relations, hierarchical_relations, global_stats, chunk_cultures, token_usage_stats, aggregate_metrics, graph_summary)
+        (character_relations, hierarchical_relations, global_stats, token_usage_stats, aggregate_metrics, graph_summary)
     """
     character_relations = _fetch_character_relations(
         run_id,
@@ -164,7 +163,6 @@ def load_aggregate_bundle(
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
 
     result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
-    chunk_cultures = _fetch_chunk_cultures(run_id, chunk_repo)
     narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
 
     aggregate_metrics = {
@@ -182,7 +180,6 @@ def load_aggregate_bundle(
         character_relations,
         hierarchical_relations,
         global_stats,
-        chunk_cultures,
         token_usage_stats,
         aggregate_metrics,
         graph_summary,
@@ -253,7 +250,6 @@ def build_export_payload(
     character_relations: list,
     hierarchical_relations: list,
     global_stats: Any,
-    chunk_cultures: list,
     aggregate_metrics: dict[str, Any],
     token_usage_stats: Any,
     graph_summary: dict[str, Any] | None = None,
@@ -277,7 +273,6 @@ def build_export_payload(
         "character_relations": [r.model_dump(exclude_none=True) for r in character_relations],
         "hierarchical_relations": [r.model_dump(exclude_none=True) for r in hierarchical_relations],
         "global_stats": global_stats.model_dump(exclude_none=True) if global_stats else None,
-        "chunk_cultures": [c.model_dump(exclude_none=True) for c in chunk_cultures],
         "aggregate_metrics": aggregate_metrics,
         "token_usage_stats": token_usage_stats.model_dump(exclude_none=True),
         "graph_summary": graph_summary or {},
@@ -300,7 +295,7 @@ def fetch_all_results_data(
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
 
-    emotion_curve, rhythm_curve, missing_fields = load_core_results(run_id, stats_repo)
+    chunk_curves, missing_fields = load_core_results(run_id, stats_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
         run_id, novel_id, stats_repo, annotation_repo, graph_repo, alias_map
@@ -320,7 +315,6 @@ def fetch_all_results_data(
         character_relations,
         hierarchical_relations,
         global_stats,
-        chunk_cultures,
         token_usage_stats,
         aggregate_metrics,
         graph_summary,
@@ -344,8 +338,7 @@ def fetch_all_results_data(
         task_id=task_id,
         novel_id=novel_id,
         novel_name=novel_name,
-        emotion_curve=emotion_curve,
-        rhythm_curve=rhythm_curve,
+        chunk_curves=chunk_curves,
         characters=characters,
         topics=topics,
         diagnosis=diagnosis,
@@ -354,7 +347,6 @@ def fetch_all_results_data(
         character_relations=character_relations,
         hierarchical_relations=hierarchical_relations,
         global_stats=global_stats,
-        chunk_cultures=chunk_cultures,
         aggregate_metrics=aggregate_metrics,
         token_usage_stats=token_usage_stats,
         graph_summary=graph_summary,

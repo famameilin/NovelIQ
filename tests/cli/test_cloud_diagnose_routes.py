@@ -112,7 +112,7 @@ class TestCloudDiagnose:
         for i in range(chunk_count):
             self.db_session.execute(
                 text(
-                    "INSERT INTO emotion_curve (chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :run_id)"
+                    "INSERT INTO chunk_curves (chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :proxy, :composite, :run_id)"
                 ),
                 {
                     "chunk_id": i,
@@ -120,14 +120,10 @@ class TestCloudDiagnose:
                     "neg": 0.05,
                     "net": 0.05 + i * 0.01,
                     "smoothed": 0.05,
+                    "proxy": 0.5,
+                    "composite": 0.5,
                     "run_id": self.run_id,
                 },
-            )
-            self.db_session.execute(
-                text(
-                    "INSERT INTO rhythm_curve (chunk_id, tension_proxy, tension_composite, run_id) VALUES (:chunk_id, :proxy, :composite, :run_id)"
-                ),
-                {"chunk_id": i, "proxy": 0.5, "composite": 0.5, "run_id": self.run_id},
             )
 
         ann_repo = AnnotationRepository(self.db_session)
