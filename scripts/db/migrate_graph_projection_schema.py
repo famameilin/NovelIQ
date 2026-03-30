@@ -19,9 +19,6 @@ def _apply_schema_upgrade(database_url: str) -> None:
     Base.metadata.create_all(bind=engine)
 
     statements = [
-        "ALTER TABLE disambig_checkpoint ADD COLUMN IF NOT EXISTS last_annotated_chunk INTEGER",
-        "ALTER TABLE disambig_checkpoint ADD COLUMN IF NOT EXISTS last_projected_chunk INTEGER",
-        "ALTER TABLE disambig_checkpoint ADD COLUMN IF NOT EXISTS projection_interval INTEGER",
         "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS evidence TEXT",
         "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION",
         "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS source_model VARCHAR(100)",

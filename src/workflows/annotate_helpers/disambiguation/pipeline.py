@@ -41,7 +41,7 @@ from .candidates import (
     _ensure_state_snapshot_has_known_names,
     extract_new_names_from_db,
 )
-from .checkpoint import _save_disambig_checkpoint_state
+from .checkpoint import _save_disambig_checkpoint
 from .relations import (
     _extract_retryable_relations,
     _merge_relations,
@@ -212,15 +212,10 @@ def _run_incremental_disambiguation_with_state(
     run_id: str,
     chunk_id: int,
     current_idx: int,
-    checkpoint_interval: int,
+    disambig_interval: int,
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 使用 DisambiguationState 替代 alias_map
 
     流程：
     1. 从 DB 抓候选名
@@ -230,7 +225,7 @@ def _run_incremental_disambiguation_with_state(
     5. state = apply_disambiguation_decisions(state, result)
     6. 保存 checkpoint
     """
-    if (current_idx + 1) % checkpoint_interval != 0:
+    if (current_idx + 1) % disambig_interval != 0:
         return state
 
     alias_map_dict = state.get_alias_merges_dict()
@@ -272,7 +267,7 @@ def _run_incremental_disambiguation_with_state(
 
         new_state = new_state.with_updates(pending_relations=tuple(merged_relations))
 
-        _save_disambig_checkpoint_state(conn, run_id, new_state)
+        _save_disambig_checkpoint(conn, run_id, new_state)
 
     return new_state
 
@@ -409,6 +404,6 @@ def _run_final_disambiguation_with_state(
             )
 
     new_state = new_state.with_updates(pending_relations=tuple(retryable_relations))
-    _save_disambig_checkpoint_state(conn, run_id, new_state)
+    _save_disambig_checkpoint(conn, run_id, new_state)
 
     return new_state
