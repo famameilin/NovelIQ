@@ -83,17 +83,12 @@ class TestAggregate:
     def test_aggregate_basic(self) -> None:
         self._create_chunks_with_style(5)
 
-        chunks, emotion_rows, rhythm_rows = run_aggregate(run_id=self.run_id, session=self.db_session)
+        chunks, chunk_curves_count, _ = run_aggregate(run_id=self.run_id, session=self.db_session)
         assert chunks == 5
-        assert emotion_rows == 5
-        assert rhythm_rows == 5
+        assert chunk_curves_count == 5
 
-        emotion_count = self.db_session.execute(
-            text("SELECT COUNT(*) FROM emotion_curve WHERE run_id = :run_id"),
-            {"run_id": self.run_id},
-        ).scalar()
-        rhythm_count = self.db_session.execute(
-            text("SELECT COUNT(*) FROM rhythm_curve WHERE run_id = :run_id"),
+        chunk_curves_count = self.db_session.execute(
+            text("SELECT COUNT(*) FROM chunk_curves WHERE run_id = :run_id"),
             {"run_id": self.run_id},
         ).scalar()
         stats_count = self.db_session.execute(
@@ -101,17 +96,16 @@ class TestAggregate:
             {"run_id": self.run_id},
         ).scalar()
 
-        assert emotion_count == 5
-        assert rhythm_count == 5
+        assert chunk_curves_count == 5
         assert stats_count > 0
 
-    def test_aggregate_emotion_curve(self) -> None:
+    def test_aggregate_chunk_curves(self) -> None:
         self._create_chunks_with_style(3)
 
         run_aggregate(run_id=self.run_id, session=self.db_session)
 
         rows = self.db_session.execute(
-            text("SELECT chunk_id, pos_density, neg_density, net_density, smoothed_density FROM emotion_curve WHERE run_id = :run_id ORDER BY chunk_id"),
+            text("SELECT chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite FROM chunk_curves WHERE run_id = :run_id ORDER BY chunk_id"),
             {"run_id": self.run_id},
         ).fetchall()
         assert len(rows) == 3
@@ -121,21 +115,8 @@ class TestAggregate:
             assert isinstance(row[2], float)
             assert isinstance(row[3], float)
             assert isinstance(row[4], float)
-
-    def test_aggregate_rhythm_curve(self) -> None:
-        self._create_chunks_with_style(3)
-
-        run_aggregate(run_id=self.run_id, session=self.db_session)
-
-        rows = self.db_session.execute(
-            text("SELECT chunk_id, tension_proxy, tension_composite FROM rhythm_curve WHERE run_id = :run_id ORDER BY chunk_id"),
-            {"run_id": self.run_id},
-        ).fetchall()
-        assert len(rows) == 3
-        for row in rows:
-            assert row[0] is not None
-            assert isinstance(row[1], float)
-            assert isinstance(row[2], float)
+            assert isinstance(row[5], float)
+            assert isinstance(row[6], float)
 
     def test_aggregate_global_stats(self) -> None:
         self._create_chunks_with_style(5)
@@ -209,17 +190,16 @@ class TestAggregate:
             )
             ann_repo.insert_chunk_annotation(self.run_id, i, annotation)
 
-        chunks, emotion_rows, rhythm_rows = run_aggregate(run_id=self.run_id, session=self.db_session)
+        chunks, chunk_curves_count, _ = run_aggregate(run_id=self.run_id, session=self.db_session)
         assert chunks == 3
 
-        rhythm_data = self.db_session.execute(
-            text("SELECT tension_composite FROM rhythm_curve WHERE run_id = :run_id"),
+        curve_data = self.db_session.execute(
+            text("SELECT tension_composite FROM chunk_curves WHERE run_id = :run_id"),
             {"run_id": self.run_id},
         ).fetchall()
-        assert len(rhythm_data) == 3
+        assert len(curve_data) == 3
 
     def test_aggregate_empty_db(self) -> None:
-        chunks, emotion_rows, rhythm_rows = run_aggregate(run_id=self.run_id, session=self.db_session)
+        chunks, chunk_curves_count, _ = run_aggregate(run_id=self.run_id, session=self.db_session)
         assert chunks == 0
-        assert emotion_rows == 0
-        assert rhythm_rows == 0
+        assert chunk_curves_count == 0

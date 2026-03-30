@@ -107,15 +107,15 @@ def test_diagnosis_repository_joins_are_run_isolated(db_session) -> None:
 
     db_session.execute(
         text(
-            "INSERT INTO emotion_curve (chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) "
-            "VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :run_id)"
+            "INSERT INTO chunk_curves (chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) "
+            "VALUES (:chunk_id, :pos, :neg, :net, :smoothed, 0.5, 0.5, :run_id)"
         ),
         {"chunk_id": 0, "pos": 0.1, "neg": 0.05, "net": 0.2, "smoothed": 0.1, "run_id": run_1},
     )
     db_session.execute(
         text(
-            "INSERT INTO emotion_curve (chunk_id, pos_density, neg_density, net_density, smoothed_density, run_id) "
-            "VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :run_id)"
+            "INSERT INTO chunk_curves (chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) "
+            "VALUES (:chunk_id, :pos, :neg, :net, :smoothed, 0.5, 0.5, :run_id)"
         ),
         {"chunk_id": 0, "pos": 0.1, "neg": 0.05, "net": 0.3, "smoothed": 0.1, "run_id": run_2},
     )
