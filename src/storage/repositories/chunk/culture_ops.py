@@ -1,24 +1,18 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分chunk_repository.py
-说明: 分块文化数据操作
+分块文化数据操作（合并到 ChunkStyle 表）
 
-修改时间: 2026-03-26
-修改者: TraeAI
-任务: 简化文化指标系统
-修改内容: 删除低价值词表密度字段，只保留 imagery_lexicon_density
+imagery_lexicon_density 字段已从 chunk_culture 表迁移到 chunk_style 表。
+本模块提供兼容性接口，将数据读写委托给 style_ops。
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any, cast
 
-from sqlalchemy import delete, select
-from sqlalchemy.orm import Mapper, Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from src.storage.models import ChunkCulture
+from src.storage.models import ChunkStyle
 
 
 def insert_chunk_culture(
@@ -27,29 +21,26 @@ def insert_chunk_culture(
     rows: Iterable[tuple[int, float | None]],
 ) -> None:
     """
-    插入分块文化数据
+    插入分块文化数据（写入 chunk_style.imagery_lexicon_density）
 
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
         rows: 文化数据行 (chunk_id, imagery_lexicon_density)
     """
-    session.execute(delete(ChunkCulture).where(ChunkCulture.run_id == run_id))
-    culture_rows = [
-        {
-            "chunk_id": row[0],
-            "imagery_lexicon_density": row[1],
-            "run_id": run_id,
-        }
-        for row in rows
-    ]
-    if culture_rows:
-        session.bulk_insert_mappings(cast(Mapper[Any], ChunkCulture), culture_rows)
+    for chunk_id, density in rows:
+        stmt = select(ChunkStyle).where(
+            ChunkStyle.chunk_id == chunk_id,
+            ChunkStyle.run_id == run_id,
+        )
+        style = session.execute(stmt).scalar_one_or_none()
+        if style is not None:
+            style.imagery_lexicon_density = density
 
 
 def fetch_chunk_cultures_full(session: Session, run_id: str) -> list[tuple[int, float | None]]:
     """
-    获取完整的分块文化数据
+    获取完整的分块文化数据（从 chunk_style 读取）
 
     Args:
         session: SQLAlchemy Session 实例
@@ -59,8 +50,8 @@ def fetch_chunk_cultures_full(session: Session, run_id: str) -> list[tuple[int, 
         (chunk_id, imagery_lexicon_density) 元组列表
     """
     stmt = select(
-        ChunkCulture.chunk_id,
-        ChunkCulture.imagery_lexicon_density,
-    ).where(ChunkCulture.run_id == run_id).order_by(ChunkCulture.chunk_id)
+        ChunkStyle.chunk_id,
+        ChunkStyle.imagery_lexicon_density,
+    ).where(ChunkStyle.run_id == run_id).order_by(ChunkStyle.chunk_id)
     result = session.execute(stmt)
-    return [tuple(row) for row in result.fetchall()]
+    return [(row.chunk_id, row.imagery_lexicon_density) for row in result.fetchall()]

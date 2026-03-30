@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.storage.models import ChunkCulture, EmotionCurve, RhythmCurve
+from src.storage.models import ChunkStyle, EmotionCurve, RhythmCurve
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -153,10 +153,10 @@ def fetch_chunk_culture(session: Session, run_id: str) -> list[tuple[float | Non
     """
     stmt = (
         select(
-            ChunkCulture.imagery_lexicon_density,
+            ChunkStyle.imagery_lexicon_density,
         )
-        .where(ChunkCulture.run_id == run_id)
-        .order_by(ChunkCulture.chunk_id)
+        .where(ChunkStyle.run_id == run_id)
+        .order_by(ChunkStyle.chunk_id)
     )
 
     result = session.execute(stmt).fetchall()
