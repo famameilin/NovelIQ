@@ -41,18 +41,14 @@ class StatusResponse(BaseModel):
     completed_at: datetime | None = None
 
 
-class EmotionCurvePoint(BaseModel):
+class ChunkCurvePoint(BaseModel):
     chunk_id: int
-    pos_density: float
-    neg_density: float
-    net_density: float
-    smoothed_density: float
-
-
-class RhythmCurvePoint(BaseModel):
-    chunk_id: int
-    tension_proxy: float
-    tension_composite: float
+    pos_density: float | None = None
+    neg_density: float | None = None
+    net_density: float | None = None
+    smoothed_density: float | None = None
+    tension_proxy: float | None = None
+    tension_composite: float | None = None
 
 
 class CharacterStats(BaseModel):
@@ -271,8 +267,7 @@ class DiagnosisResult(BaseModel):
 class NovelResultsResponse(BaseModel):
     novel_id: str
     novel_info: dict[str, Any]
-    emotion_curve: list[EmotionCurvePoint]
-    rhythm_curve: list[RhythmCurvePoint]
+    chunk_curves: list[ChunkCurvePoint] = []
     characters: list[CharacterStats]
     topics: list[TopicInfo]
     diagnosis: DiagnosisResult | None = None

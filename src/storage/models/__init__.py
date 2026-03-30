@@ -7,7 +7,7 @@
 修改时间: 2026-03-15
 修改者: TraeAI
 任务: postgresql-migration
-修改内容: 使用 pgvector，移除旧的 embedding 字段导出
+修改内容: 统一 ORM 模型导出
 
 修改时间: 2026-03-16
 修改者: TraeAI
@@ -18,12 +18,11 @@
 """
 
 from src.storage.models.analysis import (
+    ChunkCurve,
     ChunkSummary,
     CloudAnalysis,
-    EmotionCurve,
     GlobalContext,
     GlobalStats,
-    RhythmCurve,
 )
 from src.storage.models.annotation import (
     CharacterAppearance,
@@ -34,7 +33,7 @@ from src.storage.models.annotation import (
     ChunkRelation,
 )
 from src.storage.models.base import Base
-from src.storage.models.chunk import Chunk, ChunkEmbedding, ChunkStyle, ChunkTopic
+from src.storage.models.chunk import Chunk, ChunkStyle, ChunkTopic
 from src.storage.models.core import AnalysisRun, DisambigCheckpoint
 from src.storage.models.graph import (
     GraphEntity,
@@ -46,8 +45,6 @@ from src.storage.models.location import ChunkLocation
 from src.storage.models.model_interaction import ModelInteraction
 from src.storage.models.rag import TokenUsage
 
-EMBEDDING_DIM = 1536
-
 __all__ = [
     "Base",
     "AnalysisRun",
@@ -55,7 +52,6 @@ __all__ = [
     "Chunk",
     "ChunkStyle",
     "ChunkTopic",
-    "ChunkEmbedding",
     "ChunkAnnotation",
     "ChunkCharacter",
     "ChunkRelation",
@@ -67,13 +63,11 @@ __all__ = [
     "GraphRelationEvent",
     "GraphRelationCurrent",
     "CloudAnalysis",
-    "EmotionCurve",
-    "RhythmCurve",
+    "ChunkCurve",
     "GlobalStats",
     "GlobalContext",
     "ChunkSummary",
     "TokenUsage",
     "ModelInteraction",
-    "EMBEDDING_DIM",
     "ChunkLocation",
 ]

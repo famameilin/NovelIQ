@@ -40,10 +40,9 @@ from src.api.models.responses import ResultsWriteResponse
 from src.api.routes.results_converters import _convert_aggregate_result
 from src.api.routes.results_fetchers import (
     _fetch_characters,
+    _fetch_chunk_curves,
     _fetch_diagnosis,
-    _fetch_emotion_curve,
     _fetch_graph_snapshot,
-    _fetch_rhythm_curve,
     _fetch_topics,
 )
 from src.api.services.novel_service import NovelService
@@ -82,8 +81,7 @@ router = APIRouter(prefix="/novels", tags=["results"])
 - 数据完整性检查结果（缺失字段列表）
 
 **生产环境数据获取请使用专用接口：**
-- `GET /{novel_id}/emotion-curve` - 获取情感曲线
-- `GET /{novel_id}/rhythm-curve` - 获取节奏曲线
+- `GET /{novel_id}/chunk-curves` - 获取分块曲线（情绪 + 节奏）
 - `GET /{novel_id}/characters` - 获取人物统计
 - `GET /{novel_id}/topics` - 获取主题分布
 - `GET /{novel_id}/diagnosis` - 获取云端诊断
@@ -117,7 +115,7 @@ router = APIRouter(prefix="/novels", tags=["results"])
                         "novel_id": "10960c77",
                         "novel_name": None,
                         "task_id": "a1b2c3d4",
-                        "missing_fields": ["emotion_curve", "rhythm_curve"],
+                        "missing_fields": ["chunk_curves"],
                     }
                 }
             },
@@ -204,26 +202,15 @@ def _write_results_to_file(task_id: str, data: dict[str, Any]) -> str:
     return str(file_path)
 
 
-@router.get("/{novel_id}/emotion-curve")
-async def get_emotion_curve(
+@router.get("/{novel_id}/chunk-curves")
+async def get_chunk_curves(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list:
-    """获取情感曲线数据"""
+    """获取分块曲线数据（情绪 + 节奏）"""
     stats_repo = StatsRepository(session)
-    return _fetch_emotion_curve(run_id, stats_repo)
-
-
-@router.get("/{novel_id}/rhythm-curve")
-async def get_rhythm_curve(
-    novel_id: str,
-    run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
-) -> list:
-    """获取节奏曲线数据"""
-    stats_repo = StatsRepository(session)
-    return _fetch_rhythm_curve(run_id, stats_repo)
+    return _fetch_chunk_curves(run_id, stats_repo)
 
 
 @router.get("/{novel_id}/characters")

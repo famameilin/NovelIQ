@@ -22,12 +22,12 @@ from src.config import settings
 from src.storage.models import (
     Chunk,
     ChunkAnnotation,
+    ChunkCurve,
     ChunkTopic,
     GraphEntity,
     GraphRelationCurrent,
     GraphRelationEvent,
 )
-from src.storage.models.analysis import EmotionCurve
 from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.graph.repository import GraphRepository
@@ -107,22 +107,22 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         if limit is None:
             limit = settings.diagnosis.high_tension_limit
 
-        tension_expr = func.abs(EmotionCurve.net_density).label("tension")
+        tension_expr = func.abs(ChunkCurve.net_density).label("tension")
 
         stmt = (
             select(Chunk.chunk_id, Chunk.text, tension_expr)
             .select_from(Chunk)
             .join(
-                EmotionCurve,
+                ChunkCurve,
                 and_(
-                    Chunk.chunk_id == EmotionCurve.chunk_id,
-                    Chunk.run_id == EmotionCurve.run_id,
+                    Chunk.chunk_id == ChunkCurve.chunk_id,
+                    Chunk.run_id == ChunkCurve.run_id,
                 ),
             )
             .where(
                 and_(
-                    func.abs(EmotionCurve.net_density) > 0.01,
-                    EmotionCurve.run_id == run_id,
+                    func.abs(ChunkCurve.net_density) > 0.01,
+                    ChunkCurve.run_id == run_id,
                     Chunk.run_id == run_id,
                 )
             )
