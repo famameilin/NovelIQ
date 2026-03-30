@@ -129,12 +129,6 @@ def _store_annotation_results(
 
     if annotation.characters:
         ann_repo.insert_chunk_characters(run_id, chunk_id, annotation.characters)
-        if use_context_enhancement:
-            from src.context import update_entity_registry
-            from src.storage.repositories import EntityRepository
-
-            entity_repo = EntityRepository(conn)
-            update_entity_registry(entity_repo, run_id, chunk_id, annotation.characters, alias_map=alias_map)
 
     if dialogues:
         effective_dialogues = []

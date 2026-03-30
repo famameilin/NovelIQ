@@ -6,12 +6,11 @@
 
 本模块定义 RAG 相关的数据表：
 - TokenUsage: Token 使用统计表
-- GraphStorage: 知识图谱存储表
 """
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -51,33 +50,3 @@ class TokenUsage(Base):
 
     def __repr__(self) -> str:
         return f"<TokenUsage(id={self.id}, novel_id={self.novel_id}, task_type={self.task_type})>"
-
-
-class GraphStorage(Base):
-    """
-    知识图谱存储表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储知识图谱的序列化数据
-    """
-
-    __tablename__ = "graph_storage"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    graph_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    graph_json: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    run_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
-    )
-
-    __table_args__ = (
-        UniqueConstraint("graph_name", "run_id", name="uq_graph_storage_name_run"),
-        Index("idx_graph_storage_run_id", "run_id"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<GraphStorage(id={self.id}, graph_name={self.graph_name})>"
