@@ -197,7 +197,6 @@ def load_aggregate_bundle(
 
 def _fetch_timeline_data(
     run_id: str,
-    session: Any,
     chunk_repo: ChunkRepository,
     annotation_repo: AnnotationRepository,
     stats_repo: StatsRepository,
@@ -348,7 +347,6 @@ def fetch_all_results_data(
     # 获取时间轴数据
     timeline_data = _fetch_timeline_data(
         run_id=run_id,
-        session=stats_repo.session,
         chunk_repo=chunk_repo,
         annotation_repo=annotation_repo,
         stats_repo=stats_repo,

@@ -151,7 +151,7 @@ def _fetch_characters(
         avg_score = data["weighted_score"] / data["count"] if data["count"] > 0 else 0
         rf_counts = data["role_function_counts"]
         total_count = data["count"]
-        dominant_role = max(rf_counts, key=rf_counts.get)
+        dominant_role = max(rf_counts, key=lambda k: rf_counts[k] or 0)
         dominant_count = rf_counts[dominant_role]
         dominant_ratio = dominant_count / total_count if total_count > 0 else 0.0
 
