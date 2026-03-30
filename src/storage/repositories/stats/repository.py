@@ -106,33 +106,9 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """插入分块曲线数据（情绪 + 节奏）"""
         return chunks.insert_chunk_curve(self.session, run_id, rows)
 
-    def insert_emotion_curve(self, run_id: str, rows: Iterable[tuple[int, float, float, float, float]]) -> None:
-        """插入情绪曲线数据"""
-        return chunks.insert_emotion_curve(self.session, run_id, rows)
-
-    def insert_rhythm_curve(self, run_id: str, rows: Iterable[tuple[int, float, float]]) -> None:
-        """插入节奏曲线数据"""
-        return chunks.insert_rhythm_curve(self.session, run_id, rows)
-
-    def fetch_emotion_curve(self, run_id: str) -> list[tuple[float, float, float]]:
-        """获取情绪曲线数据"""
-        return chunks.fetch_emotion_curve(self.session, run_id)
-
-    def fetch_rhythm_curve(self, run_id: str) -> list[tuple[float]]:
-        """获取节奏曲线数据"""
-        return chunks.fetch_rhythm_curve(self.session, run_id)
-
     def fetch_chunk_culture(self, run_id: str) -> list[tuple[float | None]]:
         """获取分块文化数据"""
         return chunks.fetch_chunk_culture(self.session, run_id)
-
-    def fetch_emotion_curve_full(self, run_id: str) -> list[tuple[int, float, float, float, float]]:
-        """获取情绪曲线完整数据（包含 chunk_id）"""
-        return chunks.fetch_emotion_curve_full(self.session, run_id)
-
-    def fetch_rhythm_curve_full(self, run_id: str) -> list[tuple[int, float, float]]:
-        """获取节奏曲线完整数据（包含 chunk_id）"""
-        return chunks.fetch_rhythm_curve_full(self.session, run_id)
 
     def fetch_chunk_curves_full(
         self, run_id: str
