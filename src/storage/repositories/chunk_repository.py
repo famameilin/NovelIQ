@@ -42,7 +42,7 @@ from sqlalchemy.orm import Session
 
 from src.chunking.chunker import Chunk
 from src.storage.models import Chunk as ChunkModel
-from src.storage.models import ChunkEmbedding, ChunkSummary
+from src.storage.models import ChunkSummary
 from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.chunk import (
     ChunkStyleData,
@@ -133,24 +133,6 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
     def clear_chunk_topics(self, run_id: str) -> None:
         clear_chunk_topics(self.session, run_id)
-
-    def fetch_chunk_embedding(self, run_id: str, chunk_id: int) -> bytes | None:
-        """
-        获取分块嵌入向量
-
-        Args:
-            run_id: 运行ID
-            chunk_id: 分块ID
-
-        Returns:
-            嵌入向量字节，不存在则返回 None
-        """
-        stmt = select(ChunkEmbedding.embedding_vector).where(
-            ChunkEmbedding.run_id == run_id, ChunkEmbedding.chunk_id == chunk_id
-        )
-        result = self.session.execute(stmt)
-        row = result.fetchone()
-        return row[0] if row else None
 
     def fetch_chunk_styles_full(
         self, run_id: str
