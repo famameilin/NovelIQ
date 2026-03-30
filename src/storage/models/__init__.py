@@ -51,7 +51,7 @@ from src.storage.models.graph import (
 )
 from src.storage.models.location import ChunkLocation
 from src.storage.models.model_interaction import ModelInteraction
-from src.storage.models.rag import GraphStorage, TokenUsage
+from src.storage.models.rag import TokenUsage
 
 EMBEDDING_DIM = 1536
 
@@ -86,7 +86,6 @@ __all__ = [
     "GlobalContext",
     "ChunkSummary",
     "TokenUsage",
-    "GraphStorage",
     "ModelInteraction",
     "EMBEDDING_DIM",
     "ChunkLocation",

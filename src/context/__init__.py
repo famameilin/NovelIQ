@@ -1,7 +1,6 @@
 from .entity_registry import (
     format_entities_for_prompt,
     get_active_entities,
-    update_entity_registry,
 )
 from .global_context import (
     extract_global_context,
@@ -22,7 +21,6 @@ __all__ = [
     "load_global_context",
     "update_global_context_in_db",
     "format_global_context_for_prompt",
-    "update_entity_registry",
     "get_active_entities",
     "format_entities_for_prompt",
     "get_prev_tail_text",
