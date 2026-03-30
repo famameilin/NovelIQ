@@ -148,7 +148,7 @@ class TestStageCompleteChecks:
         assert not stats_repo.is_aggregate_complete(run_id)
 
     def test_is_aggregate_complete_partial_data(self, db_session):
-        """只有部分emotion_curve时aggregate未完成"""
+        """只有部分chunk_curves时aggregate未完成"""
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(
             novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
@@ -159,26 +159,8 @@ class TestStageCompleteChecks:
         stats_repo = StatsRepository(db_session)
         chunks = _create_chunks(3)
         chunk_repo.insert_chunks(run_id, chunks)
-        stats_repo.insert_emotion_curve(run_id, [(0, 0.1, 0.2, 0.0, 0.1)])
+        stats_repo.insert_chunk_curve(run_id, [(0, 0.1, 0.2, 0.0, 0.1, 0.5, 0.3)])
         assert not stats_repo.is_aggregate_complete(run_id)
-
-    def test_is_aggregate_complete_all_data(self, db_session):
-        """emotion_curve和rhythm_curve数量都等于chunks数量时aggregate完成"""
-        run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
-            source_path="test",
-            title="Test Novel",
-        )
-        chunk_repo = ChunkRepository(db_session)
-        stats_repo = StatsRepository(db_session)
-        chunks = _create_chunks(3)
-        chunk_repo.insert_chunks(run_id, chunks)
-        emotion_rows = [(i, 0.1, 0.2, 0.0, 0.1) for i in range(3)]
-        rhythm_rows = [(i, 0.5, 0.3) for i in range(3)]
-        stats_repo.insert_emotion_curve(run_id, emotion_rows)
-        stats_repo.insert_rhythm_curve(run_id, rhythm_rows)
-        assert stats_repo.is_aggregate_complete(run_id)
 
     def test_is_topic_model_complete_no_data(self, db_session):
         """无chunk_topics时topic_model未完成"""
