@@ -34,10 +34,10 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db_session, resolve_run_id
+from src.api.dependencies import get_db_session, get_novel_service, resolve_run_id
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ResultsWriteResponse
-from src.api.routes.novels import get_novel_service
+
 from src.api.routes.results_converters import _convert_aggregate_result
 from src.api.routes.results_fetchers import (
     _fetch_characters,
