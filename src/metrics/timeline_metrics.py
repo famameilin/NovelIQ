@@ -600,8 +600,19 @@ def build_timeline_candidates(
     summary_map = {row[0]: row[1] for row in chunk_repo.fetch_chunk_summaries(run_id)}
 
     # 获取标注数据
-    annotations = annotation_repo.fetch_chunk_annotations(run_id)
-    annotation_map = {ann.chunk_id: ann for ann in annotations} if annotations else {}
+    raw_annotations = annotation_repo.fetch_chunk_annotations_full(run_id)
+
+    class Annotation:
+        __slots__ = ("chunk_id", "event_type", "cliffhanger", "pivot_moment", "emotional_valence")
+
+        def __init__(self, row):
+            self.chunk_id = row[0]
+            self.event_type = row[2] if len(row) > 2 else ""
+            self.cliffhanger = row[4] if len(row) > 4 else False
+            self.pivot_moment = row[3] if len(row) > 3 else False
+            self.emotional_valence = row[1] if len(row) > 1 else ""
+
+    annotation_map = {ann.chunk_id: ann for ann in [Annotation(r) for r in raw_annotations]} if raw_annotations else {}
 
     # 获取知识图谱数据
     entities = graph_repo.fetch_entities(run_id, entity_type="character")
