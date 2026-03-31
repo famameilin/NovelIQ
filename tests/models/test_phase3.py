@@ -434,6 +434,45 @@ class TestPostProcessValidationFix(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].speaker, "伯安")
 
+    def test_unknown_speaker_corrected_by_clue(self) -> None:
+        """unknown speaker 通过 identity_clue 反推修正（不限制 known_set）"""
+        records = [
+            DialogueRecord(
+                index=1, content="我叫白芷。", is_dialogue=True,
+                speaker="白芷", identity_clue="白芷自称名为白芷",
+            ),
+        ]
+        result = self._call_validation(records, known_characters=["伯安", "贺铮"])
+        self.assertEqual(len(result), 1)
+        # 白芷不在 known_set，但 clue 明确说"白芷自称"，应保留为白芷而非 null
+        self.assertEqual(result[0].speaker, "白芷")
+
+    def test_unknown_speaker_null_when_no_clue_match(self) -> None:
+        """unknown speaker 无有效 clue 时保留为 null"""
+        records = [
+            DialogueRecord(
+                index=1, content="来者何人？", is_dialogue=True,
+                speaker="灰衣人", identity_clue="某人从远处走来",
+            ),
+        ]
+        result = self._call_validation(records, known_characters=["伯安"])
+        self.assertEqual(len(result), 1)
+        self.assertIsNone(result[0].speaker)
+
+    def test_unknown_speaker_with_clue_describing_others(self) -> None:
+        """clue 描述的是对方而非说话者时，speaker 仍为 null"""
+        records = [
+            DialogueRecord(
+                index=1, content="伯安少爷，那位是来应聘做您先生的。", is_dialogue=True,
+                speaker="赤甲卫", identity_clue="赤甲卫称呼贺重明为伯安少爷",
+            ),
+        ]
+        # clue 说赤甲卫在称呼别人，但说话者就是赤甲卫本人
+        # _extract_speaker_from_clue 匹配 "赤甲卫称呼..." → 赤甲卫
+        result = self._call_validation(records, known_characters=["伯安"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].speaker, "赤甲卫")
+
 
 if __name__ == "__main__":
     unittest.main()
