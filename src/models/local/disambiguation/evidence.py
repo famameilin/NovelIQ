@@ -25,6 +25,7 @@ _IDENTITY_MARKERS = (
     "【独特标记】",
     "【亲缘身份】",
     "【命名场景】",
+    "【身份线索】",
 )
 _BODY_MARKER_KEYWORDS = (
     "胎记",
