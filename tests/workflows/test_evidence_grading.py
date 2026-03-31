@@ -133,6 +133,20 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
         self.assertEqual(validated.canonical_decisions["婴儿"], "贺伯安")
         self.assertEqual(validated.alias_confidence["婴儿"], DISAMBIG_CONFIDENCE_HIGH)
 
+    def test_kinship_identity_does_not_override_self_mapping(self) -> None:
+        context = "【身份线索】白芷的哥哥是贺铮"
+        result = ExtendedDisambigResult(
+            canonical_decisions={"白芷": "白芷"},
+            entity_types={"白芷": "character"},
+            entity_relations=[],
+            alias_confidence={"白芷": DISAMBIG_CONFIDENCE_MEDIUM},
+            evidence_profiles={"白芷": build_evidence_profile(context)},
+        )
+
+        validated = validate_confidence_with_evidence(result, ["贺铮"], {"白芷": context})
+
+        self.assertEqual(validated.canonical_decisions["白芷"], "白芷")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -58,13 +58,20 @@ def fetch_emotion_data(
     stats_repo: StatsRepository,
     run_id: str,
 ) -> EmotionData:
-    """提取 chunk_curves 表数据"""
+    """
+    提取 chunk_curves 表数据
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 使用字段名访问替代硬编码索引
+    """
     rows = stats_repo.fetch_chunk_curves_full(run_id)
-    emotion_values = [row[3] for row in rows]
+    emotion_values = [row.net_density for row in rows]
 
     density_rows = stats_repo.fetch_emotion_densities(run_id)
-    pos_densities = [row[0] for row in density_rows if row[0] is not None]
-    neg_densities = [row[1] for row in density_rows if row[1] is not None]
+    pos_densities = [row.pos_density for row in density_rows if row.pos_density is not None]
+    neg_densities = [row.neg_density for row in density_rows if row.neg_density is not None]
 
     return EmotionData(
         emotion_values=emotion_values,
@@ -172,9 +179,16 @@ def fetch_tension_data(
     stats_repo: StatsRepository,
     run_id: str,
 ) -> TensionData:
-    """提取 chunk_curves 表的 tension_composite 数据"""
+    """
+    提取 chunk_curves 表的 tension_composite 数据
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 使用字段名访问替代硬编码索引
+    """
     rows = stats_repo.fetch_chunk_curves_full(run_id)
-    tension_composite_scores = [row[6] for row in rows if row[6] is not None]
+    tension_composite_scores = [row.tension_composite for row in rows if row.tension_composite is not None]
     return TensionData(tension_composite_scores=tension_composite_scores)
 
 
@@ -189,7 +203,12 @@ def fetch_dialogue_data(
     创建者: TraeAI
     任务: fix-tone-distribution-semantic-error
     说明: 从对话表获取语气类型数据用于聚合计算
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 使用字段名访问替代硬编码索引
     """
     rows = annotation_repo.fetch_chunk_dialogues_full(run_id)
-    tones = [row[3] for row in rows if len(row) > 3 and row[3] is not None]
+    tones = [row.tone for row in rows if row.tone is not None]
     return DialogueData(tones=tones)

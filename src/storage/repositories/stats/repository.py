@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from sqlalchemy.engine import Row
+
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
 from src.storage.repositories.base import BaseRepository
 
@@ -118,12 +120,26 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """获取分块文化数据"""
         return chunks.fetch_chunk_culture(self.session, run_id)
 
-    def fetch_chunk_curves_full(self, run_id: str) -> list[tuple[int, float, float, float, float, float, float]]:
-        """获取分块曲线完整数据（情绪 + 节奏，包含 chunk_id）"""
+    def fetch_chunk_curves_full(self, run_id: str) -> Sequence[Row]:
+        """
+        获取分块曲线完整数据（情绪 + 节奏，包含 chunk_id）
+
+        修改时间: 2026-03-31
+        修改者: TraeAI
+        任务: refactor-hardcoded-index-access
+        修改内容: 返回 Sequence[Row] 支持字段名访问， 替代元组列表
+        """
         return chunks.fetch_chunk_curves_full(self.session, run_id)
 
-    def fetch_emotion_densities(self, run_id: str) -> list[tuple[float, float]]:
-        """获取情绪密度数据"""
+    def fetch_emotion_densities(self, run_id: str) -> Sequence[Row]:
+        """
+        获取情绪密度数据
+
+        修改时间: 2026-03-31
+        修改者: TraeAI
+        任务: refactor-hardcoded-index-access
+        修改内容: 返回 Sequence[Row] 支持字段名访问， 替代元组列表
+        """
         return chunks.fetch_emotion_densities(self.session, run_id)
 
     # ==================== metrics 模块补充方法 ====================

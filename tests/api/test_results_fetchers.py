@@ -6,10 +6,39 @@ from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_diagnosis,
+    _fetch_hierarchical_relations,
     _normalize_arc_scores,
     _normalize_name_list,
     _normalize_text_by_alias_map,
 )
+
+
+class _DummyRow:
+    """
+    模拟 SQLAlchemy Row 对象，支持字段名访问
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 新增类，用于测试中模拟 Row 对象
+    """
+
+    __slots__ = ("_fields", "_values")
+
+    def __init__(self, **kwargs):
+        object.__setattr__(self, "_fields", tuple(kwargs.keys()))
+        object.__setattr__(self, "_values", tuple(kwargs.values()))
+
+    def __getattr__(self, name):
+        fields = object.__getattribute__(self, "_fields")
+        values = object.__getattribute__(self, "_values")
+        if name in fields:
+            return values[fields.index(name)]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def __getitem__(self, index):
+        values = object.__getattribute__(self, "_values")
+        return values[index]
 
 
 class _DummyAnnotationRepo2:
@@ -148,8 +177,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
 
 def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
     rows = []
-    rows.extend([("\u7532", "\u5ba2\u4f53", "neutral")] * 20)
-    rows.extend([("\u4e59", "\u4e3b\u4f53", "neutral")] * 10)
+    rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score="neutral")] * 20)
+    rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score="neutral")] * 10)
 
     annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
 
@@ -171,9 +200,9 @@ def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
 
 def test_fetch_characters_returns_all_items_when_limit_is_none():
     rows = []
-    rows.extend([("甲", "主体", "neutral")] * 3)
-    rows.extend([("乙", "客体", "neutral")] * 2)
-    rows.extend([("丙", "帮助者", "neutral")] * 1)
+    rows.extend([_DummyRow(name="甲", role_function="主体", emotion_score="neutral")] * 3)
+    rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score="neutral")] * 2)
+    rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score="neutral")] * 1)
 
     annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
 
@@ -273,5 +302,62 @@ def test_fetch_character_relations_allows_empty_graph_when_no_pending():
             run_id="run-1",
             annotation_repo=annotation_repo,
         )
+
+    assert result == []
+
+
+def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = [
+        {
+            "relation_id": 1,
+            "type": "father_of",
+            "from_name": "老贺",
+            "to_name": "伯安",
+            "first_seen_chunk": 2,
+            "last_seen_chunk": 9,
+        },
+        {
+            "relation_id": 2,
+            "type": "ally_of",
+            "from_name": "老贺",
+            "to_name": "伯安",
+            "first_seen_chunk": 2,
+            "last_seen_chunk": 9,
+        },
+    ]
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        graph_repo=mock_graph_repo,
+        alias_map={"老贺": "贺铮"},
+        valid_character_names={"贺铮", "伯安"},
+    )
+
+    assert len(result) == 1
+    assert result[0].from_entity == "贺铮"
+    assert result[0].to_entity == "伯安"
+    assert result[0].rel_type == "father_of"
+
+
+def test_fetch_hierarchical_relations_filters_unknown_after_normalization():
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = [
+        {
+            "relation_id": 10,
+            "type": "spouse_of",
+            "from_name": "二妈妈",
+            "to_name": "陌生人",
+            "first_seen_chunk": 1,
+            "last_seen_chunk": 4,
+        }
+    ]
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        graph_repo=mock_graph_repo,
+        alias_map={"二妈妈": "柳婉儿"},
+        valid_character_names={"柳婉儿", "贺伯安"},
+    )
 
     assert result == []
