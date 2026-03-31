@@ -24,30 +24,11 @@ class TestAnnotationConfig(unittest.TestCase):
     说明: 测试 ANNOTATION_CONFIG 配置常量
     """
 
-    def test_valid_interpersonal_relation_types(self) -> None:
-        """测试人际关系类型常量"""
+    def test_valid_relation_types(self) -> None:
+        """测试关系类型常量"""
         expected = ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
         self.assertEqual(
-            ANNOTATION_CONFIG.valid_interpersonal_relation_types,
-            expected
-        )
-
-    def test_valid_hierarchical_relation_types(self) -> None:
-        """测试层级关系类型常量"""
-        expected = [
-            "belongs_to",
-            "member_of",
-            "leader_of",
-            "affiliated_with",
-            "father_of",
-            "son_of",
-            "parent_of",
-            "child_of",
-            "sibling_of",
-            "spouse_of",
-        ]
-        self.assertEqual(
-            ANNOTATION_CONFIG.valid_hierarchical_relation_types,
+            ANNOTATION_CONFIG.valid_relation_types,
             expected
         )
 
@@ -98,9 +79,11 @@ class TestAnnotationConfig(unittest.TestCase):
         self.assertEqual(ANNOTATION_CONFIG.disambig_max_retries, 3)
         self.assertEqual(ANNOTATION_CONFIG.validation_max_retries, 3)
 
-    def test_checkpoint_interval(self) -> None:
-        """测试检查点间隔"""
-        self.assertEqual(ANNOTATION_CONFIG.checkpoint_interval, 50)
+    def test_context_config(self) -> None:
+        """测试上下文配置"""
+        self.assertEqual(ANNOTATION_CONFIG.prev_chunks, 3)
+        self.assertEqual(ANNOTATION_CONFIG.last_n_chunks, 10)
+        self.assertEqual(ANNOTATION_CONFIG.lookback, 10)
 
 
 if __name__ == "__main__":
