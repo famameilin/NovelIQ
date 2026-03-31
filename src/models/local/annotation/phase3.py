@@ -334,11 +334,23 @@ def _post_process_validation(
             canonical_speaker = alias_map.get(canonical_speaker, canonical_speaker)
 
         if known_set and canonical_speaker and canonical_speaker not in known_set:
-            logger.info(
-                f"phase3_validation: speaker '{record.speaker}' not in known_set, "
-                f"keeping record with null speaker, chunk_id={chunk_id} index={record.index}"
-            )
-            valid_records.append(record.model_copy(update={"speaker": None}))
+            # 先尝试从 identity_clue 反推 speaker（不限制 known_set，因为是新角色场景）
+            inferred = None
+            if record.identity_clue:
+                inferred = _extract_speaker_from_clue(record.identity_clue, known_set=None)
+            if inferred:
+                logger.warning(
+                    f"phase3_validation: speaker '{record.speaker}' not in known_set, "
+                    f"but identity_clue implies '{inferred}', correcting. "
+                    f"chunk_id={chunk_id} index={record.index}"
+                )
+                valid_records.append(record.model_copy(update={"speaker": inferred}))
+            else:
+                logger.info(
+                    f"phase3_validation: speaker '{record.speaker}' not in known_set, "
+                    f"keeping record with null speaker, chunk_id={chunk_id} index={record.index}"
+                )
+                valid_records.append(record.model_copy(update={"speaker": None}))
             continue
 
         if record.identity_clue and canonical_speaker:
