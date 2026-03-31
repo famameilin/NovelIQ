@@ -149,16 +149,21 @@ def fetch_chunk_curves_full(
     return result.fetchall()
 
 
-def fetch_emotion_densities(session: Session, run_id: str) -> list[tuple[float, float]]:
+def fetch_emotion_densities(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取情绪密度数据
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
 
     Args:
         session: 数据库会话
         run_id: 运行ID
 
     Returns:
-        (pos_density, neg_density) 元组列表
+        Row 对象序列，支持字段名访问： row.pos_density, row.neg_density
     """
     stmt = (
         select(
@@ -169,5 +174,5 @@ def fetch_emotion_densities(session: Session, run_id: str) -> list[tuple[float, 
         .order_by(ChunkCurve.chunk_id)
     )
 
-    result = session.execute(stmt).fetchall()
-    return [(row.pos_density, row.neg_density) for row in result]
+    result = session.execute(stmt)
+    return result.fetchall()
