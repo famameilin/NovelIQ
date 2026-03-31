@@ -59,17 +59,22 @@ def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
     修改者: CodeBuddy
     任务: db-schema-cleanup
     修改内容: 合并 _fetch_emotion_curve + _fetch_rhythm_curve 为统一接口
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 使用字段名访问替代硬编码索引
     """
     rows = stats_repo.fetch_chunk_curves_full(run_id)
     return [
         ChunkCurvePoint(
-            chunk_id=row[0],
-            pos_density=row[1],
-            neg_density=row[2],
-            net_density=row[3],
-            smoothed_density=row[4],
-            tension_proxy=row[5],
-            tension_composite=row[6],
+            chunk_id=row.chunk_id,
+            pos_density=row.pos_density,
+            neg_density=row.neg_density,
+            net_density=row.net_density,
+            smoothed_density=row.smoothed_density,
+            tension_proxy=row.tension_proxy,
+            tension_composite=row.tension_composite,
         )
         for row in rows
     ]
@@ -118,10 +123,10 @@ def _fetch_characters(
 
     merged: dict[str, dict[str, Any]] = {}
     for row in rows:
-        name: str = str(row[0])
+        name: str = str(row.name)
         canonical = alias_map.get(name, name)
-        role_function: str = str(row[1]) if row[1] else "unknown"
-        emotion_raw: str | None = str(row[2]) if row[2] else None
+        role_function: str = str(row.role_function) if row.role_function else "unknown"
+        emotion_raw: str | None = str(row.emotion_score) if row.emotion_score else None
         emotion_score = EMOTION_SCORE_MAPPING.get(emotion_raw, 0) if emotion_raw else 0
 
         if canonical not in merged:
@@ -211,11 +216,11 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str,
 
     result: list[TopicInfo] = []
     for row in rows:
-        topic_id = row[0]
+        topic_id = row.chunk_id
         words: list[str] = topic_words_map.get(topic_id, [])
         words = _normalize_name_list(words, alias_map) or []
         if words:
-            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row[1]))
+            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.avg_weight))
 
     return result
 
@@ -345,6 +350,11 @@ def _fetch_chunk_annotations(
     修改者: TraeAI
     任务: refactor-duplicate-normalize-name
     修改内容: 使用模块级 _normalize_name 函数替代内部定义
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 使用字段名访问替代硬编码索引
     """
     annotations_raw = annotation_repo.fetch_chunk_annotations_full(run_id)
     characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)
@@ -363,18 +373,18 @@ def _fetch_chunk_annotations(
 
     characters_by_chunk: dict[int, list[ChunkCharacter]] = defaultdict(list)
     for row in characters_raw:
-        cid = row[0]
-        normalized_name = _normalize_name(str(row[1]), alias_map)
-        character_name = normalized_name if normalized_name else str(row[1])
+        cid = row.chunk_id
+        normalized_name = _normalize_name(str(row.name), alias_map)
+        character_name = normalized_name if normalized_name else str(row.name)
         if valid_character_names is not None and character_name not in valid_character_names:
             logger.warning("跳过分块角色中的悬空引用: chunk_id={}, name={}", cid, character_name)
             continue
         characters_by_chunk[cid].append(
             ChunkCharacter(
                 name=character_name,
-                role_function=str(row[2]) if row[2] else None,
-                action=str(row[3]) if row[3] else None,
-                emotion_score=str(row[4]) if row[4] else None,
+                role_function=str(row.role_function) if row.role_function else None,
+                action=str(row.action) if row.action else None,
+                emotion_score=str(row.emotion_score) if row.emotion_score else None,
             )
         )
 
@@ -408,8 +418,8 @@ def _fetch_chunk_annotations(
 
     dialogues_by_chunk: dict[int, list[ChunkDialogue]] = defaultdict(list)
     for row in dialogues_raw:
-        cid = row[0]
-        speaker = row[1] if row[1] else None
+        cid = row.chunk_id
+        speaker = row.speaker if row.speaker else None
         normalized_speaker = _normalize_name(speaker, alias_map)
         if normalized_speaker and valid_character_names is not None and normalized_speaker not in valid_character_names:
             logger.warning("将分块对话中的悬空 speaker 置空: chunk_id={}, speaker={}", cid, normalized_speaker)
@@ -419,23 +429,23 @@ def _fetch_chunk_annotations(
         dialogues_by_chunk[cid].append(
             ChunkDialogue(
                 speaker=normalized_speaker,
-                length=int(row[2]) if row[2] is not None else None,
+                length=int(row.length) if row.length is not None else None,
             )
         )
 
     result: list[ChunkAnnotation] = []
     for row in annotations_raw:
-        chunk_id = int(row[0])
+        chunk_id = int(row.chunk_id)
         result.append(
             ChunkAnnotation(
                 chunk_id=chunk_id,
-                emotional_valence=str(row[1]) if row[1] else None,
-                event_type=str(row[2]) if row[2] else None,
-                pivot_moment=bool(row[3]) if row[3] is not None else None,
-                cliffhanger=bool(row[4]) if row[4] is not None else None,
-                has_foreshadowing=bool(row[5]) if row[5] is not None else None,
-                foreshadowing_type=str(row[6]) if row[6] else None,
-                foreshadowing_desc=str(row[7]) if row[7] else None,
+                emotional_valence=str(row.emotional_valence) if row.emotional_valence else None,
+                event_type=str(row.event_type) if row.event_type else None,
+                pivot_moment=bool(row.pivot_moment) if row.pivot_moment is not None else None,
+                cliffhanger=bool(row.cliffhanger) if row.cliffhanger is not None else None,
+                has_foreshadowing=bool(row.has_foreshadowing) if row.has_foreshadowing is not None else None,
+                foreshadowing_type=str(row.foreshadowing_type) if row.foreshadowing_type else None,
+                foreshadowing_desc=str(row.foreshadowing_desc) if row.foreshadowing_desc else None,
                 characters=characters_by_chunk.get(chunk_id, []),
                 relations=relations_by_chunk.get(chunk_id, []),
                 dialogues=dialogues_by_chunk.get(chunk_id, []),
