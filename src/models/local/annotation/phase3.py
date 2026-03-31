@@ -262,6 +262,31 @@ def attribute_dialogues_with_llm(
         raise DialogueAttributionError(f"对话归属判断失败: {e}") from e
 
 
+def _extract_speaker_from_clue(clue: str, known_set: set[str] | None) -> str | None:
+    """从 identity_clue 中提取实际说话者名。
+
+    匹配模式：
+    - "白芷自称..." → 白芷
+    - "赤甲卫自称属下" → 赤甲卫
+    - "说话者自称..." → None（无具体名字）
+
+    修改时间: 2026-03-31
+    修改者: CodeBuddy
+    任务: fix/phase3-speaker-identity-clue-mismatch
+    修改内容: 新增辅助函数，从 identity_clue 反推 speaker
+    """
+    if not clue:
+        return None
+    generic_terms = {"说话者", "被指代", "对方", "某人"}
+    for pattern in (r'^([\u4e00-\u9fff]{2,6})(自称|称呼|让|告诉|问)', r'^([\u4e00-\u9fff]{2,6})(说明|揭示|表示)'):
+        m = re.match(pattern, clue)
+        if m:
+            name = m.group(1)
+            if name not in generic_terms and (known_set is None or name in known_set):
+                return name
+    return None
+
+
 def _post_process_validation(
     records: list[DialogueRecord],
     candidates: list[QuoteCandidate],
@@ -270,7 +295,7 @@ def _post_process_validation(
     chunk_id: int | None,
 ) -> list[DialogueRecord]:
     """
-    后处理验证：验证 index 范围和说话者有效性
+    后处理验证：验证 index 范围、说话者有效性、identity_clue 一致性
 
     创建时间: 2026-03-23
     创建者: TraeAI
@@ -281,6 +306,14 @@ def _post_process_validation(
     修改者: TraeAI
     任务: fix-phase3-validation
     修改内容: 添加 candidates 参数验证 index 范围，跳过未知说话者的记录
+
+    修改时间: 2026-03-31
+    修改者: CodeBuddy
+    任务: fix/phase3-speaker-identity-clue-mismatch
+    修改内容:
+    - unknown speaker 保留为 null 而非丢弃整条记录
+    - 增加 identity_clue 与 speaker 一致性校验
+    - 从 identity_clue 反推 speaker 修正错误归属
     """
     valid_records = []
     candidate_indices = {c.index for c in candidates}
@@ -301,11 +334,31 @@ def _post_process_validation(
             canonical_speaker = alias_map.get(canonical_speaker, canonical_speaker)
 
         if known_set and canonical_speaker and canonical_speaker not in known_set:
-            logger.warning(
-                f"phase3_validation: unknown speaker '{record.speaker}', "
-                f"skipping record, chunk_id={chunk_id}, index={record.index}"
+            logger.info(
+                f"phase3_validation: speaker '{record.speaker}' not in known_set, "
+                f"keeping record with null speaker, chunk_id={chunk_id} index={record.index}"
             )
+            valid_records.append(record.model_copy(update={"speaker": None}))
             continue
+
+        if record.identity_clue and canonical_speaker:
+            inferred = _extract_speaker_from_clue(record.identity_clue, known_set)
+            if inferred and inferred != canonical_speaker:
+                if not known_set or inferred in known_set:
+                    logger.warning(
+                        f"phase3_validation: identity_clue implies speaker='{inferred}' "
+                        f"but field has '{canonical_speaker}', correcting. "
+                        f"chunk_id={chunk_id} index={record.index}"
+                    )
+                    valid_records.append(record.model_copy(update={"speaker": inferred}))
+                else:
+                    logger.warning(
+                        f"phase3_validation: identity_clue implies speaker='{inferred}' "
+                        f"(not in known_set), nullifying clue. speaker='{canonical_speaker}' "
+                        f"chunk_id={chunk_id} index={record.index}"
+                    )
+                    valid_records.append(record.model_copy(update={"identity_clue": None}))
+                continue
 
         if canonical_speaker != record.speaker:
             valid_records.append(record.model_copy(update={"speaker": canonical_speaker}))

@@ -249,5 +249,8 @@ def _add_identity_clues(
     ).fetchall()
 
     for speaker, clue in dialogues:
-        if speaker in result and clue:
-            result[speaker] += f" | 【身份线索】{clue}"
+        if clue:
+            if speaker in result:
+                result[speaker] += f" | 【身份线索】{clue}"
+            else:
+                result[speaker] = f"【身份线索】{clue}"

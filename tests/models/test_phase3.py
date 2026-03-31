@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.annotation.phase3 import (
+    _extract_speaker_from_clue,
     attribute_dialogues_with_llm,
     compute_dialogue_lengths_with_llm,
     extract_dialogues_from_text,
@@ -320,6 +321,118 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         self.assertEqual(attribution, {1: "寮犱笁"})
         self.assertEqual(dialogues[0][0], 1)
         self.assertEqual(tones, {1: "寮虹‖"})
+
+
+class TestExtractSpeakerFromClue(unittest.TestCase):
+    """测试从 identity_clue 反推 speaker 的辅助函数"""
+
+    def test_self_introduction(self) -> None:
+        """自报身份模式"""
+        self.assertEqual(_extract_speaker_from_clue("白芷自称名为白芷", {"白芷", "伯安"}), "白芷")
+        self.assertEqual(_extract_speaker_from_clue("说话者自称是铁匠铺老板", None), None)
+
+    def test_address_relation(self) -> None:
+        """称呼关系模式"""
+        self.assertEqual(_extract_speaker_from_clue("赤甲卫称呼灰衣人为先生，自称属下", {"赤甲卫"}), "赤甲卫")
+
+    def test_explanation_pattern(self) -> None:
+        """说明/揭示模式"""
+        self.assertEqual(_extract_speaker_from_clue("白芷说明精灵族长老活了快四百岁", {"白芷"}), "白芷")
+
+    def test_generic_terms_excluded(self) -> None:
+        """泛指词被排除"""
+        self.assertEqual(_extract_speaker_from_clue("被指代者是说话者的哥哥", {"被指代"}), None)
+        self.assertEqual(_extract_speaker_from_clue("对方要求叫他铁哥", {"对方"}), None)
+
+    def test_empty_clue(self) -> None:
+        """空 clue 返回 None"""
+        self.assertIsNone(_extract_speaker_from_clue("", None))
+        self.assertIsNone(_extract_speaker_from_clue(None, None))  # type: ignore[arg-type]
+
+    def test_no_match_pattern(self) -> None:
+        """不匹配任何模式"""
+        self.assertIsNone(_extract_speaker_from_clue("某人说了什么", {"某人"}))
+
+    def test_not_in_known_set(self) -> None:
+        """推理出的名字不在 known_set 中"""
+        self.assertIsNone(_extract_speaker_from_clue("新角色自称某某", {"白芷", "伯安"}))
+
+    def test_known_set_none_accepts_any(self) -> None:
+        """known_set 为 None 时接受任何非泛指名字"""
+        self.assertEqual(_extract_speaker_from_clue("新角色自称某某", None), "新角色")
+
+
+class TestPostProcessValidationFix(unittest.TestCase):
+    """测试修复后的 _post_process_validation 逻辑"""
+
+    def _call_validation(
+        self,
+        records: list[DialogueRecord],
+        known_characters: list[str] | None = None,
+        alias_map: dict[str, str] | None = None,
+    ) -> list[DialogueRecord]:
+        from src.models.local.annotation.phase3 import _post_process_validation
+        candidates = [QuoteCandidate(index=r.index, content=r.content or "") for r in records]
+        return _post_process_validation(records, candidates, known_characters, alias_map, chunk_id=1)
+
+    def test_unknown_speaker_kept_as_null(self) -> None:
+        """unknown speaker 保留为 null 而非丢弃"""
+        records = [
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="新角色"),
+        ]
+        result = self._call_validation(records, known_characters=["伯安"])
+        self.assertEqual(len(result), 1)
+        self.assertIsNone(result[0].speaker)
+
+    def test_identity_clue_corrects_speaker(self) -> None:
+        """identity_clue 提示正确 speaker 时修正"""
+        records = [
+            DialogueRecord(
+                index=1, content="我叫白芷。", is_dialogue=True,
+                speaker="伯安", identity_clue="白芷自称名为白芷",
+            ),
+        ]
+        result = self._call_validation(records, known_characters=["伯安", "白芷"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].speaker, "白芷")
+        self.assertEqual(result[0].identity_clue, "白芷自称名为白芷")
+
+    def test_identity_clue_nullified_when_inferred_not_in_known_set(self) -> None:
+        """identity_clue 推理出的名字不在 known_set 时，清空 clue 并保留原 speaker"""
+        records = [
+            DialogueRecord(
+                index=1, content="我叫白芷。", is_dialogue=True,
+                speaker="伯安", identity_clue="白芷自称名为白芷",
+            ),
+        ]
+        # known_characters=None 让 _extract_speaker_from_clue 不过滤 known_set
+        result = self._call_validation(records, known_characters=None)
+        self.assertEqual(len(result), 1)
+        # inferred="白芷" 不等于 canonical_speaker="伯安" 且不在空 known_set 中
+        # 应修正 speaker 为白芷
+        self.assertEqual(result[0].speaker, "白芷")
+
+    def test_consistent_identity_clue_passes_through(self) -> None:
+        """identity_clue 与 speaker 一致时正常通过"""
+        records = [
+            DialogueRecord(
+                index=1, content="我叫白芷。", is_dialogue=True,
+                speaker="白芷", identity_clue="白芷自称名为白芷",
+            ),
+        ]
+        result = self._call_validation(records, known_characters=["白芷"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].speaker, "白芷")
+        self.assertEqual(result[0].identity_clue, "白芷自称名为白芷")
+
+    def test_no_identity_clue_passes_through(self) -> None:
+        """无 identity_clue 时正常通过"""
+        records = [
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="伯安"),
+        ]
+        result = self._call_validation(records, known_characters=["伯安"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].speaker, "伯安")
 
 
 if __name__ == "__main__":
