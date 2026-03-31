@@ -144,7 +144,15 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def fetch_chunk_cultures_full(self, run_id: str) -> list[tuple[int, float | None]]:
         return fetch_chunk_cultures_full(self.session, run_id)
 
-    def fetch_chunk_topics_agg(self, run_id: str) -> list[tuple[int, float]]:
+    def fetch_chunk_topics_agg(self, run_id: str) -> Sequence[Row]:
+        """
+        获取聚合后的分块主题数据（每个分块的平均主题权重）
+
+        修改时间: 2026-03-31
+        修改者: TraeAI
+        任务: refactor-hardcoded-index-access
+        修改内容: 返回 Sequence[Row] 支持字段名访问， 替代元组列表
+        """
         return fetch_chunk_topics_agg(self.session, run_id)
 
     def fetch_chunk_counts(self, run_id: str) -> tuple[int, int]:
@@ -287,15 +295,20 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         return self.has_chunks(run_id)
 
-    def fetch_chunk_summaries(self, run_id: str) -> list[tuple[int, str]]:
+    def fetch_chunk_summaries(self, run_id: str) -> Sequence[Row]:
         """
         获取指定运行的所有分块摘要
+
+        修改时间: 2026-03-31
+        修改者: TraeAI
+        任务: refactor-hardcoded-index-access
+        修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
 
         Args:
             run_id: 运行ID
 
         Returns:
-            (chunk_id, summary) 元组列表，按 chunk_id 升序排列
+            Row 对象序列，支持字段名访问：row.chunk_id, row.summary
         """
         stmt = (
             select(ChunkSummary.chunk_id, ChunkSummary.summary)
@@ -303,4 +316,4 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             .order_by(ChunkSummary.chunk_id)
         )
         result = self.session.execute(stmt)
-        return [(row[0], row[1]) for row in result.fetchall()]
+        return result.fetchall()

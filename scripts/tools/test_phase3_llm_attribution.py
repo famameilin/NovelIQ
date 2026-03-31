@@ -1,10 +1,16 @@
 """
-Phase3 对话归属测试 — 使用正式 AnnotationClient 入口测试 LLM
+Phase3 对话归属测试 — 覆盖完整 消歧→phase3 链路
 
 创建时间: 2026-03-31
-创建者: TraeAI
-任务: fix-phase3-speaker-identity-clue-mismatch
-说明: 使用正式 API 入口测试修复后的对话归属功能，对比旧结果
+创建者: CodeBuddy
+任务: fix/disambiguation-bugs
+说明: 从 disambig_checkpoint 读取 alias_map 和 known_canonical_names，
+      模拟实际 annotate 流程中 phase3 收到的输入，与数据库旧结果对比。
+
+      与旧版本区别:
+      - alias_map 从 disambig_checkpoint 读取（非 None）
+      - known_characters 从 disambig state 的 known_canonical_names 读取（非 chunk_characters）
+      - 可选运行增量消歧，验证 Fix 1/3 的效果
 
 测试数据: 从数据库读取真实 chunk
 
@@ -15,12 +21,12 @@ import sys
 import os
 import time
 import io
+import json
 from datetime import datetime
 
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, _project_root)
 
-# 设置无缓冲输出
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
 
 from dotenv import load_dotenv
@@ -57,6 +63,7 @@ class TeeLogger:
         sys.stdout = self.console
         self.close()
         return False
+
 from src.models.local.annotation.phase3 import (
     extract_dialogues_from_text,
     compute_dialogue_lengths_with_llm,
@@ -91,8 +98,37 @@ def get_old_results_from_db(session, chunk_id: int, run_id: str) -> list[dict]:
     ]
 
 
+def load_disambig_state(session, run_id: str) -> dict | None:
+    """从 disambig_checkpoint 加载消歧状态，返回解析后的字典"""
+    row = session.execute(
+        sa_text("""
+            SELECT state_json FROM disambig_checkpoint WHERE run_id = :rid
+        """),
+        {"rid": run_id},
+    ).fetchone()
+    if not row or not row[0]:
+        return None
+    raw = str(row[0])
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # 双重转义兼容
+        return json.loads(json.loads(raw) if raw.startswith('"') else raw)
+
+
+def build_alias_map_from_state(state: dict) -> dict[str, str]:
+    """从 disambig state 构建 alias_map（与 phase.py:293 一致）"""
+    alias_merges = state.get("alias_merges", [])
+    return {alias: canonical for alias, canonical in alias_merges}
+
+
+def get_known_canonical_names(state: dict) -> list[str]:
+    """从 disambig state 获取 known_canonical_names"""
+    return list(state.get("known_canonical_names", []))
+
+
 def get_known_characters_from_db(session, run_id: str) -> list[str]:
-    """从数据库获取已知角色列表"""
+    """从数据库获取已知角色列表（回退方案）"""
     result = session.execute(
         sa_text("""
             SELECT DISTINCT name FROM chunk_characters
@@ -181,7 +217,7 @@ def print_comparison_table(comparison: list[dict], chunk_id: int) -> None:
 
 def run_test() -> None:
     """运行测试"""
-    print("Phase3 对话归属 LLM 测试（使用真实数据）")
+    print("Phase3 对话归属 LLM 测试（消歧→phase3 完整链路）")
     print(f"测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*80)
 
@@ -190,6 +226,10 @@ def run_test() -> None:
     print(f"Base URL: {client._config.base_url}")
     print(f"Thinking: {client._config.thinking_enabled}")
 
+    # ---- 配置 ----
+    run_id = "14fddab9-c60b-4fc3-8265-029292eb7db3"
+    test_run_id = "test-phase3-fix-20260331"
+
     global_same = 0
     global_improved = 0
     global_regression = 0
@@ -197,7 +237,25 @@ def run_test() -> None:
     failed_chunks = []
 
     with get_session() as session:
-        run_id = "14fddab9-c60b-4fc3-8265-029292eb7db3"
+        # ---- 从 disambig_checkpoint 读取真实消歧状态 ----
+        disambig_state = load_disambig_state(session, run_id)
+
+        if disambig_state:
+            alias_map = build_alias_map_from_state(disambig_state)
+            known_chars = get_known_canonical_names(disambig_state)
+            print(f"\n[消歧状态] 已加载 disambig_checkpoint")
+            print(f"  discovered_names ({len(disambig_state.get('discovered_names', []))}): "
+                  f"{sorted(disambig_state.get('discovered_names', []))}")
+            print(f"  known_canonical_names ({len(known_chars)}): {sorted(known_chars)}")
+            print(f"  alias_merges ({len(disambig_state.get('alias_merges', []))}): "
+                  f"{disambig_state.get('alias_merges', [])}")
+            print(f"  alias_map: {alias_map}")
+        else:
+            print(f"\n[消歧状态] 未找到 checkpoint，回退到 chunk_characters")
+            alias_map = None
+            known_chars = get_known_characters_from_db(session, run_id)
+
+        # ---- 加载 chunk 数据 ----
         chunk_repo = ChunkRepository(session)
         chunks = chunk_repo.fetch_chunk_texts(run_id)
 
@@ -206,9 +264,9 @@ def run_test() -> None:
             return
 
         chunk_dict = dict(chunks)
-        known_chars = get_known_characters_from_db(session, run_id)
-        print(f"从数据库加载 {len(chunks)} 个 chunks")
-        print(f"已知角色: {known_chars}")
+        print(f"\n从数据库加载 {len(chunks)} 个 chunks")
+        print(f"使用 known_characters: {sorted(known_chars)}")
+        print(f"使用 alias_map: {alias_map if alias_map else 'None'}")
 
         test_chunk_ids = list(sorted(chunk_dict.keys()))
         test_chunks = [(cid, chunk_dict[cid]) for cid in test_chunk_ids if cid in chunk_dict]
@@ -225,13 +283,14 @@ def run_test() -> None:
 
             start_time = time.time()
             try:
+                # 关键修改：传入真实的 alias_map 和 known_characters
                 result = compute_dialogue_lengths_with_llm(
                     client=client,
                     text=text,
-                    alias_map=None,
+                    alias_map=alias_map if alias_map else None,
                     chunk_id=chunk_id,
-                    run_id="test-phase3-fix-20260331",
-                    known_characters=known_chars,
+                    run_id=test_run_id,
+                    known_characters=known_chars if known_chars else None,
                     return_tones=True,
                     return_evidences=True,
                     return_identity_clues=True,
@@ -296,6 +355,9 @@ def run_test() -> None:
     print(f"\n{'='*80}")
     print("全局统计汇总")
     print(f"{'='*80}")
+    print(f"测试 run_id: {run_id}")
+    print(f"alias_map: {alias_map}")
+    print(f"known_characters: {sorted(known_chars) if known_chars else 'None'}")
     print(f"总对话数: {global_total}")
     print(f"相同: {global_same} ({global_same/global_total*100:.1f}%)" if global_total else "")
     print(f"改进: {global_improved} ({global_improved/global_total*100:.1f}%)" if global_total else "")
