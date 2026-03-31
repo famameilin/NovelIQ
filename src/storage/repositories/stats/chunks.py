@@ -14,11 +14,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Row
 
 from src.storage.models import ChunkCurve, ChunkStyle
 
@@ -112,17 +113,23 @@ def fetch_chunk_culture(session: Session, run_id: str) -> list[tuple[float | Non
 
 def fetch_chunk_curves_full(
     session: Session, run_id: str
-) -> list[tuple[int, float, float, float, float, float, float]]:
+) -> Sequence[Row]:
     """
     获取分块曲线完整数据（情绪 + 节奏）
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
 
     Args:
         session: 数据库会话
         run_id: 运行ID
 
     Returns:
-        (chunk_id, pos_density, neg_density, net_density, smoothed_density,
-         tension_proxy, tension_composite) 元组列表
+        Row 对象序列，支持字段名访问：
+        row.chunk_id, row.pos_density, row.neg_density, row.net_density,
+        row.smoothed_density, row.tension_proxy, row.tension_composite
     """
     stmt = (
         select(
@@ -138,19 +145,8 @@ def fetch_chunk_curves_full(
         .order_by(ChunkCurve.chunk_id)
     )
 
-    result = session.execute(stmt).fetchall()
-    return [
-        (
-            row.chunk_id,
-            row.pos_density,
-            row.neg_density,
-            row.net_density,
-            row.smoothed_density,
-            row.tension_proxy,
-            row.tension_composite,
-        )
-        for row in result
-    ]
+    result = session.execute(stmt)
+    return result.fetchall()
 
 
 def fetch_emotion_densities(session: Session, run_id: str) -> list[tuple[float, float]]:
