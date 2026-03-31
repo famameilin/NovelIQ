@@ -6,6 +6,7 @@ from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_diagnosis,
+    _fetch_hierarchical_relations,
     _normalize_arc_scores,
     _normalize_name_list,
     _normalize_text_by_alias_map,
@@ -273,5 +274,62 @@ def test_fetch_character_relations_allows_empty_graph_when_no_pending():
             run_id="run-1",
             annotation_repo=annotation_repo,
         )
+
+    assert result == []
+
+
+def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = [
+        {
+            "relation_id": 1,
+            "type": "father_of",
+            "from_name": "老贺",
+            "to_name": "伯安",
+            "first_seen_chunk": 2,
+            "last_seen_chunk": 9,
+        },
+        {
+            "relation_id": 2,
+            "type": "ally_of",
+            "from_name": "老贺",
+            "to_name": "伯安",
+            "first_seen_chunk": 2,
+            "last_seen_chunk": 9,
+        },
+    ]
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        graph_repo=mock_graph_repo,
+        alias_map={"老贺": "贺铮"},
+        valid_character_names={"贺铮", "伯安"},
+    )
+
+    assert len(result) == 1
+    assert result[0].from_entity == "贺铮"
+    assert result[0].to_entity == "伯安"
+    assert result[0].rel_type == "father_of"
+
+
+def test_fetch_hierarchical_relations_filters_unknown_after_normalization():
+    mock_graph_repo = MagicMock()
+    mock_graph_repo.fetch_current_relations.return_value = [
+        {
+            "relation_id": 10,
+            "type": "spouse_of",
+            "from_name": "二妈妈",
+            "to_name": "陌生人",
+            "first_seen_chunk": 1,
+            "last_seen_chunk": 4,
+        }
+    ]
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        graph_repo=mock_graph_repo,
+        alias_map={"二妈妈": "柳婉儿"},
+        valid_character_names={"柳婉儿", "贺伯安"},
+    )
 
     assert result == []

@@ -486,6 +486,7 @@ def _fetch_character_relations(
 def _fetch_hierarchical_relations(
     run_id: str,
     graph_repo: GraphRepository,
+    alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
 ) -> list:
     """
@@ -513,8 +514,10 @@ def _fetch_hierarchical_relations(
         rel_type = rel.get("type", "")
         if rel_type not in hierarchical_types:
             continue
-        from_entity = rel.get("from_name", "")
-        to_entity = rel.get("to_name", "")
+        from_name_raw = rel.get("from_name", "")
+        to_name_raw = rel.get("to_name", "")
+        from_entity = _normalize_name(from_name_raw, alias_map) or from_name_raw
+        to_entity = _normalize_name(to_name_raw, alias_map) or to_name_raw
         if valid_character_names is not None:
             if from_entity not in valid_character_names or to_entity not in valid_character_names:
                 continue
