@@ -20,7 +20,8 @@ from src.models.local.disambiguation import (
     validate_state_invariants,
 )
 from src.models.local.disambiguation.evidence import (
-    EVIDENCE_SIGNAL_APPEARANCE_ONLY,
+    EVIDENCE_SIGNAL_IDENTITY_REVEAL,
+    EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
     EVIDENCE_STRENGTH_STRONG,
     EVIDENCE_STRENGTH_WEAK,
     EvidenceProfile,
@@ -39,6 +40,14 @@ _DisambigStateLiteral = Literal["resolved", "review", "unresolved"]
 DISAMBIG_STATE_RESOLVED: _DisambigStateLiteral = "resolved"
 DISAMBIG_STATE_REVIEW: _DisambigStateLiteral = "review"
 DISAMBIG_STATE_UNRESOLVED: _DisambigStateLiteral = "unresolved"
+
+# Only these evidence signals justify overriding a model's self-mapping decision.
+# naming_scene and stable_title_or_rank are excluded because "being mentioned in
+# the same context as X" does NOT imply "is an alias of X".
+_OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset({
+    EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
+    EVIDENCE_SIGNAL_IDENTITY_REVEAL,
+})
 
 
 def _normalize_disambig_confidence(confidence: Any) -> Literal["low", "medium", "high"]:
@@ -87,7 +96,7 @@ def _has_strong_merge_signal(profile: EvidenceProfile | None) -> bool:
         return False
     if profile.strength != EVIDENCE_STRENGTH_STRONG:
         return False
-    return any(signal != EVIDENCE_SIGNAL_APPEARANCE_ONLY for signal in profile.strong_signals)
+    return any(signal in _OVERRIDE_ALLOWED_SIGNALS for signal in profile.strong_signals)
 
 
 def _apply_strong_evidence_merge_override(

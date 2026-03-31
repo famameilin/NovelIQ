@@ -365,6 +365,28 @@ def _run_final_disambiguation_with_state(
     if result.canonical_decisions:
         new_state = apply_disambiguation_decisions(state, result)
 
+    # Promote review-status names with mixed/strong evidence to canonical.
+    # These names were seen by the model but never reached high confidence;
+    # promoting them ensures minor characters appear in graph_entities.
+    review_dict = new_state.get_review_status_dict()
+    alias_set = {a for a, _ in new_state.alias_merges}
+    promoted_names: list[str] = []
+    for name, review in review_dict.items():
+        if (
+            review.status == "review"
+            and review.evidence_strength in ("mixed", "strong")
+            and name not in alias_set
+            and name not in new_state.known_canonical_names
+        ):
+            promoted_names.append(name)
+    if promoted_names:
+        logger.info(
+            f"Promoting {len(promoted_names)} review-status names to canonical: {promoted_names}"
+        )
+        new_state = new_state.with_updates(
+            known_canonical_names=new_state.known_canonical_names | frozenset(promoted_names),
+        )
+
     if new_state != state:
         logger.info(
             f"Final disambiguation completed: "
