@@ -188,14 +188,17 @@ class QuoteCandidate(BaseModel):
     创建者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
     说明: 用于存储正则提取的引号候选及其上下文
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: cleanup-phase3-ctx-context
+    修改内容: 移除 ctx_before 和 ctx_after 字段，LLM 有完整 chunk_text 不需要上下文
     """
 
     model_config = ConfigDict(frozen=True)
 
     index: int = Field(description="候选序号（1开始）")
-    ctx_before: str = Field(default="", description="引号前的上下文")
     content: str = Field(description="引号内的文字")
-    ctx_after: str = Field(default="", description="引号后的上下文")
 
 
 class DialogueRecord(BaseModel):
