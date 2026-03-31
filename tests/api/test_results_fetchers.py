@@ -13,6 +13,34 @@ from src.api.routes.results_fetchers import (
 )
 
 
+class _DummyRow:
+    """
+    模拟 SQLAlchemy Row 对象，支持字段名访问
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 新增类，用于测试中模拟 Row 对象
+    """
+
+    __slots__ = ("_fields", "_values")
+
+    def __init__(self, **kwargs):
+        object.__setattr__(self, "_fields", tuple(kwargs.keys()))
+        object.__setattr__(self, "_values", tuple(kwargs.values()))
+
+    def __getattr__(self, name):
+        fields = object.__getattribute__(self, "_fields")
+        values = object.__getattribute__(self, "_values")
+        if name in fields:
+            return values[fields.index(name)]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+    def __getitem__(self, index):
+        values = object.__getattribute__(self, "_values")
+        return values[index]
+
+
 class _DummyAnnotationRepo2:
     def __init__(self):
         self.session = object()
@@ -149,8 +177,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
 
 def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
     rows = []
-    rows.extend([("\u7532", "\u5ba2\u4f53", "neutral")] * 20)
-    rows.extend([("\u4e59", "\u4e3b\u4f53", "neutral")] * 10)
+    rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score="neutral")] * 20)
+    rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score="neutral")] * 10)
 
     annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
 
@@ -172,9 +200,9 @@ def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
 
 def test_fetch_characters_returns_all_items_when_limit_is_none():
     rows = []
-    rows.extend([("甲", "主体", "neutral")] * 3)
-    rows.extend([("乙", "客体", "neutral")] * 2)
-    rows.extend([("丙", "帮助者", "neutral")] * 1)
+    rows.extend([_DummyRow(name="甲", role_function="主体", emotion_score="neutral")] * 3)
+    rows.extend([_DummyRow(name="乙", role_function="客体", emotion_score="neutral")] * 2)
+    rows.extend([_DummyRow(name="丙", role_function="帮助者", emotion_score="neutral")] * 1)
 
     annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=rows)
 

@@ -144,7 +144,15 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def fetch_chunk_cultures_full(self, run_id: str) -> list[tuple[int, float | None]]:
         return fetch_chunk_cultures_full(self.session, run_id)
 
-    def fetch_chunk_topics_agg(self, run_id: str) -> list[tuple[int, float]]:
+    def fetch_chunk_topics_agg(self, run_id: str) -> Sequence[Row]:
+        """
+        获取聚合后的分块主题数据（每个分块的平均主题权重）
+
+        修改时间: 2026-03-31
+        修改者: TraeAI
+        任务: refactor-hardcoded-index-access
+        修改内容: 返回 Sequence[Row] 支持字段名访问， 替代元组列表
+        """
         return fetch_chunk_topics_agg(self.session, run_id)
 
     def fetch_chunk_counts(self, run_id: str) -> tuple[int, int]:
