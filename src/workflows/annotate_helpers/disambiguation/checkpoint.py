@@ -32,7 +32,7 @@ def _save_disambig_checkpoint(
     """),
         {
             "run_id": run_id,
-            "state_json": json.dumps(state_dict),
+            "state_json": json.dumps(state_dict, ensure_ascii=False),
             "updated_at": time.time(),
         },
     )

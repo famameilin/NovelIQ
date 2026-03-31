@@ -354,7 +354,7 @@ def _post_process_validation(
             continue
 
         if record.identity_clue and canonical_speaker:
-            inferred = _extract_speaker_from_clue(record.identity_clue, known_set)
+            inferred = _extract_speaker_from_clue(record.identity_clue, None)
             if inferred and inferred != canonical_speaker:
                 if not known_set or inferred in known_set:
                     correction_count += 1
