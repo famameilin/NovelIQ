@@ -158,6 +158,7 @@ def load_aggregate_bundle(
     hierarchical_relations = _fetch_hierarchical_relations(
         run_id,
         graph_repo,
+        alias_map,
         valid_character_names=valid_character_names,
     )
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
