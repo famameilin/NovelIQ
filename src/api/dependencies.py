@@ -80,6 +80,8 @@ async def resolve_run_id(
     """
     task = novel_service.get_run_by_task_id(task_id)
     if task is None:
+        task = novel_service._load_task_from_db(task_id)
+    if task is None:
         raise NovelNotFoundError(f"任务不存在: {task_id}")
 
     run_id = task.get("run_id")

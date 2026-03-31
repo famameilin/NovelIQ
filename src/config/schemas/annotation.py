@@ -18,6 +18,11 @@
 修改者: TraeAI
 任务: fix-relation-type-annotation
 修改内容: 新增"友情"关系类型，解决童年玩伴被误标为"家族"的问题
+
+修改时间: 2026-03-31
+修改者: TraeAI
+任务: fix-disambig-relation-type-mismatch
+修改内容: 统一关系配置，删除valid_hierarchical_relation_types(英文)，合并到valid_relation_types(中文)
 """
 
 from dataclasses import dataclass
@@ -57,8 +62,7 @@ class AnnotationConfig:
     valid_role_functions: list[str] | None = None
     valid_action_types: list[str] | None = None
     valid_emotion_scores: list[str] | None = None
-    valid_interpersonal_relation_types: list[str] | None = None
-    valid_hierarchical_relation_types: list[str] | None = None
+    valid_relation_types: list[str] | None = None
     valid_entity_types: list[str] | None = None
     valid_clue_types: list[str] | None = None
     valid_event_types: list[str] | None = None
@@ -76,28 +80,11 @@ class AnnotationConfig:
                 "valid_emotion_scores",
                 ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"],
             )
-        if self.valid_interpersonal_relation_types is None:
+        if self.valid_relation_types is None:
             object.__setattr__(
                 self,
-                "valid_interpersonal_relation_types",
+                "valid_relation_types",
                 ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"],
-            )
-        if self.valid_hierarchical_relation_types is None:
-            object.__setattr__(
-                self,
-                "valid_hierarchical_relation_types",
-                [
-                    "belongs_to",
-                    "member_of",
-                    "leader_of",
-                    "affiliated_with",
-                    "father_of",
-                    "son_of",
-                    "parent_of",
-                    "child_of",
-                    "sibling_of",
-                    "spouse_of",
-                ],
             )
         if self.valid_entity_types is None:
             object.__setattr__(self, "valid_entity_types", ["character", "group", "organization"])

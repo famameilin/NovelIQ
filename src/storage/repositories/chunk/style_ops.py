@@ -95,6 +95,7 @@ def fetch_chunk_styles_full(session: Session, run_id: str) -> Sequence[Row]:
             ChunkStyle.question_density,
             ChunkStyle.sensory_density,
             ChunkStyle.metaphor_density,
+            ChunkStyle.imagery_lexicon_density,
             ChunkStyle.function_word_vector,
         )
         .where(ChunkStyle.run_id == run_id)

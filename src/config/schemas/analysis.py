@@ -98,7 +98,10 @@ class AnalysisSettings:
     修改时间: 2026-03-19
     修改者: TraeAI
     修改内容: 添加有效层级关系类型配置
-    - valid_hierarchical_relation_types: 消歧阶段允许的层级关系类型列表
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    修改内容: 统一关系配置为valid_relation_types(中文)
     """
 
     incremental_disambig_interval: int = 10
@@ -111,18 +114,16 @@ class AnalysisSettings:
     cloud_annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     multi_phase_annotation: MultiPhaseAnnotationSettings = field(default_factory=MultiPhaseAnnotationSettings)
-    valid_hierarchical_relation_types: list[str] = field(
+    valid_relation_types: list[str] = field(
         default_factory=lambda: [
-            "belongs_to",
-            "member_of",
-            "leader_of",
-            "affiliated_with",
-            "father_of",
-            "son_of",
-            "parent_of",
-            "child_of",
-            "sibling_of",
-            "spouse_of",
+            "师徒",
+            "敌对",
+            "盟友",
+            "爱慕",
+            "家族",
+            "利益",
+            "主从",
+            "友情",
         ]
     )
 
@@ -322,19 +323,17 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         cloud_annotation_fallback_enabled=data.get("cloud_annotation_fallback_enabled", True),
         progress=_parse_progress_settings(data.get("progress")),
         multi_phase_annotation=_parse_multi_phase_annotation_settings(data.get("multi_phase_annotation")),
-        valid_hierarchical_relation_types=data.get(
-            "valid_hierarchical_relation_types",
+        valid_relation_types=data.get(
+            "valid_relation_types",
             [
-                "belongs_to",
-                "member_of",
-                "leader_of",
-                "affiliated_with",
-                "father_of",
-                "son_of",
-                "parent_of",
-                "child_of",
-                "sibling_of",
-                "spouse_of",
+                "师徒",
+                "敌对",
+                "盟友",
+                "爱慕",
+                "家族",
+                "利益",
+                "主从",
+                "友情",
             ],
         ),
     )

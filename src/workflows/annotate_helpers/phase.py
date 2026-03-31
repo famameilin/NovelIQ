@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
-from src.config.schemas.annotation import ANNOTATION_CONFIG
 from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.local.disambiguation import DisambiguationState
 
@@ -366,7 +366,11 @@ def _process_chunks_phase(
     任务: disambiguation-state-three-layer
     修改内容: 使用 _load_disambig_checkpoint 替代 _load_disambig_checkpoint，返回 DisambiguationState
     """
-    from .disambiguation import DisambiguationMaxRetriesExceededError, _load_disambig_checkpoint, _save_disambig_checkpoint
+    from .disambiguation import (
+        DisambiguationMaxRetriesExceededError,
+        _load_disambig_checkpoint,
+        _save_disambig_checkpoint,
+    )
     from .graph_projection import project_graph_tables
 
     success_count = 0
