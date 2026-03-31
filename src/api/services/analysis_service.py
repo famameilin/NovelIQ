@@ -355,12 +355,35 @@ class AnalysisService:
             )
 
     def _build_reanalysis_skip_stages(self, request: ReanalyzeRequest | None) -> dict[str, bool]:
+        if request is None:
+            return {
+                "skip_preprocess": False,
+                "skip_annotate": False,
+                "skip_aggregate": False,
+                "skip_topic_model": False,
+                "skip_diagnose": False,
+            }
+        all_force_false = (
+            not request.force_preprocess
+            and not request.force_annotate
+            and not request.force_aggregate
+            and not request.force_topic_model
+            and not request.force_diagnose
+        )
+        if all_force_false:
+            return {
+                "skip_preprocess": False,
+                "skip_annotate": False,
+                "skip_aggregate": False,
+                "skip_topic_model": False,
+                "skip_diagnose": False,
+            }
         return {
-            "skip_preprocess": not (request.force_preprocess if request else True),
-            "skip_annotate": not (request.force_annotate if request else True),
-            "skip_aggregate": not (request.force_aggregate if request else True),
-            "skip_topic_model": not (request.force_topic_model if request else True),
-            "skip_diagnose": not (request.force_diagnose if request else True),
+            "skip_preprocess": not request.force_preprocess,
+            "skip_annotate": not request.force_annotate,
+            "skip_aggregate": not request.force_aggregate,
+            "skip_topic_model": not request.force_topic_model,
+            "skip_diagnose": not request.force_diagnose,
         }
 
     async def _run_analysis(self, task_id: str, novel: dict, request: AnalyzeRequest | None) -> None:
@@ -428,6 +451,7 @@ class AnalysisService:
             )
 
             skip_stages = self._build_reanalysis_skip_stages(request)
+            logger.info(f"Reanalysis skip_stages: {skip_stages}")
             num_topics = request.num_topics if request else settings.topic_model.single_book.num_topics
 
             self.task_manager.update_task(task_id, status=TaskStatus.RUNNING, stage="preprocess", progress=0)
