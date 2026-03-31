@@ -320,6 +320,10 @@ def _post_process_validation(
     if known_characters:
         known_set = {alias_map.get(name, name) if alias_map else name for name in known_characters}
 
+    correction_count = 0
+    nullify_count = 0
+    kept_count = 0
+
     for record in records:
         if record.index not in candidate_indices:
             logger.warning(
@@ -333,23 +337,14 @@ def _post_process_validation(
             canonical_speaker = alias_map.get(canonical_speaker, canonical_speaker)
 
         if known_set and canonical_speaker and canonical_speaker not in known_set:
-            # 先尝试从 identity_clue 反推 speaker（不限制 known_set，因为是新角色场景）
             inferred = None
             if record.identity_clue:
                 inferred = _extract_speaker_from_clue(record.identity_clue, known_set=None)
             if inferred:
-                logger.warning(
-                    f"phase3_validation: speaker '{record.speaker}' not in known_set, "
-                    f"but identity_clue implies '{inferred}', correcting. "
-                    f"chunk_id={chunk_id} index={record.index}"
-                )
+                correction_count += 1
                 valid_records.append(record.model_copy(update={"speaker": inferred}))
             else:
-                logger.info(
-                    f"phase3_validation: speaker '{record.speaker}' not in known_set, "
-                    f"identity_clue反推失败，保留LLM原始判断, "
-                    f"chunk_id={chunk_id} index={record.index}"
-                )
+                kept_count += 1
                 valid_records.append(record)
             continue
 
@@ -357,18 +352,10 @@ def _post_process_validation(
             inferred = _extract_speaker_from_clue(record.identity_clue, known_set)
             if inferred and inferred != canonical_speaker:
                 if not known_set or inferred in known_set:
-                    logger.warning(
-                        f"phase3_validation: identity_clue implies speaker='{inferred}' "
-                        f"but field has '{canonical_speaker}', correcting. "
-                        f"chunk_id={chunk_id} index={record.index}"
-                    )
+                    correction_count += 1
                     valid_records.append(record.model_copy(update={"speaker": inferred}))
                 else:
-                    logger.warning(
-                        f"phase3_validation: identity_clue implies speaker='{inferred}' "
-                        f"(not in known_set), nullifying clue. speaker='{canonical_speaker}' "
-                        f"chunk_id={chunk_id} index={record.index}"
-                    )
+                    nullify_count += 1
                     valid_records.append(record.model_copy(update={"identity_clue": None}))
                 continue
 
@@ -376,6 +363,12 @@ def _post_process_validation(
             valid_records.append(record.model_copy(update={"speaker": canonical_speaker}))
         else:
             valid_records.append(record)
+
+    if correction_count > 0 or nullify_count > 0 or kept_count > 0:
+        logger.info(
+            f"phase3_validation summary: corrections={correction_count}, "
+            f"nullified_clues={nullify_count}, kept_original={kept_count}, chunk_id={chunk_id}"
+        )
 
     return valid_records
 
