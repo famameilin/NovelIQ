@@ -342,6 +342,11 @@ def _post_process_validation(
                 inferred = _extract_speaker_from_clue(record.identity_clue, known_set=None)
             if inferred:
                 correction_count += 1
+                logger.warning(
+                    f"phase3_validation: speaker '{record.speaker}' not in known_set, "
+                    f"identity_clue implies '{inferred}', correcting. "
+                    f"chunk_id={chunk_id} index={record.index}"
+                )
                 valid_records.append(record.model_copy(update={"speaker": inferred}))
             else:
                 kept_count += 1
@@ -353,6 +358,11 @@ def _post_process_validation(
             if inferred and inferred != canonical_speaker:
                 if not known_set or inferred in known_set:
                     correction_count += 1
+                    logger.warning(
+                        f"phase3_validation: identity_clue implies '{inferred}' "
+                        f"but speaker is '{canonical_speaker}', correcting. "
+                        f"chunk_id={chunk_id} index={record.index}"
+                    )
                     valid_records.append(record.model_copy(update={"speaker": inferred}))
                 else:
                     nullify_count += 1
