@@ -7,21 +7,56 @@ Phase3 对话归属测试 — 使用正式 AnnotationClient 入口测试 LLM
 说明: 使用正式 API 入口测试修复后的对话归属功能，对比旧结果
 
 测试数据: 从数据库读取真实 chunk
+
+输出: 实时打印到控制台，同时写入日志文件
 """
 
 import sys
 import os
 import time
+import io
 from datetime import datetime
 
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, _project_root)
+
+# 设置无缓冲输出
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_project_root, '.env'))
 
 import src.config
 from src.models.annotation import AnnotationClient
+
+
+class TeeLogger:
+    """双日志输出：同时写入文件和控制台"""
+    def __init__(self, file_path: str):
+        self.file = open(file_path, 'w', encoding='utf-8')
+        self.console = sys.stdout
+        self.file_path = file_path
+
+    def write(self, message: str):
+        self.file.write(message)
+        self.console.write(message)
+        self.flush()
+
+    def flush(self):
+        self.file.flush()
+        self.console.flush()
+
+    def close(self):
+        self.file.close()
+
+    def __enter__(self):
+        sys.stdout = self
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout = self.console
+        self.close()
+        return False
 from src.models.local.annotation.phase3 import (
     extract_dialogues_from_text,
     compute_dialogue_lengths_with_llm,
@@ -122,13 +157,13 @@ def print_comparison_table(comparison: list[dict], chunk_id: int) -> None:
     for item in comparison:
         if item["is_improved"]:
             improved_count += 1
-            status = "✓ 改进"
+            status = "[OK] improved"
         elif item["is_regression"]:
             regression_count += 1
-            status = "✗ 回归"
+            status = "[X] regression"
         else:
             same_count += 1
-            status = "✓ 相同"
+            status = "[=] same"
 
         old_sp = item["old_speaker"] or "(null)"
         new_sp = item["new_speaker"] or "(null)"
@@ -151,6 +186,15 @@ def run_test() -> None:
     print("="*80)
 
     client = AnnotationClient(task_type="annotation")
+    print(f"Model: {client._config.model}")
+    print(f"Base URL: {client._config.base_url}")
+    print(f"Thinking: {client._config.thinking_enabled}")
+
+    global_same = 0
+    global_improved = 0
+    global_regression = 0
+    global_total = 0
+    failed_chunks = []
 
     with get_session() as session:
         run_id = "14fddab9-c60b-4fc3-8265-029292eb7db3"
@@ -166,25 +210,18 @@ def run_test() -> None:
         print(f"从数据库加载 {len(chunks)} 个 chunks")
         print(f"已知角色: {known_chars}")
 
-        test_chunk_ids = [21, 25]
+        test_chunk_ids = list(sorted(chunk_dict.keys()))
         test_chunks = [(cid, chunk_dict[cid]) for cid in test_chunk_ids if cid in chunk_dict]
 
         if not test_chunks:
             print(f"错误: 数据库中找不到 chunk {test_chunk_ids}")
             return
 
-        for chunk_id, text in test_chunks:
-            print(f"\n{'#'*80}")
-            print(f"# 测试 Chunk {chunk_id}")
-            print(f"# 文本长度: {len(text)} 字符")
-            print(f"# 预计对话数: ~{text.count(chr(0x201C)) + text.count(chr(0x201D))} 条")
-
+        total_chunks = len(test_chunks)
+        for idx, (chunk_id, text) in enumerate(test_chunks, 1):
+            progress = f"[{idx}/{total_chunks}]"
             candidates = extract_dialogues_from_text(text, context_chars=50)
-            print(f"# 提取到候选: {len(candidates)} 条")
-
             old_results = get_old_results_from_db(session, chunk_id, run_id)
-            if old_results:
-                print(f"# 数据库旧结果: {len(old_results)} 条")
 
             start_time = time.time()
             try:
@@ -216,44 +253,60 @@ def run_test() -> None:
                     evidences = {}
                     identity_clues = {}
 
-                print(f"\n## LLM 调用成功 (耗时 {duration:.1f}s)")
-                print(f"## 说话者长度: {speaker_lengths}")
-                print(f"## 归属映射: {attribution}")
-
                 records = []
-                for idx, content in dialogues:
+                for didx, content in dialogues:
                     record = DialogueRecord(
-                        index=idx,
+                        index=didx,
                         content=content,
                         is_dialogue=True,
-                        speaker=attribution.get(idx),
-                        tone=tones.get(idx),
-                        evidence=evidences.get(idx),
-                        identity_clue=identity_clues.get(idx),
+                        speaker=attribution.get(didx),
+                        tone=tones.get(didx),
+                        evidence=evidences.get(didx),
+                        identity_clue=identity_clues.get(didx),
                     )
                     records.append(record)
 
                 if old_results:
                     comparison = format_comparison(old_results, records, candidates)
-                    print_comparison_table(comparison, chunk_id)
+                    chunk_same = sum(1 for c in comparison if c["is_same"])
+                    chunk_improved = sum(1 for c in comparison if c["is_improved"])
+                    chunk_regression = sum(1 for c in comparison if c["is_regression"])
+                    chunk_total = len(comparison)
+                    global_same += chunk_same
+                    global_improved += chunk_improved
+                    global_regression += chunk_regression
+                    global_total += chunk_total
+                    accuracy = chunk_same / chunk_total * 100 if chunk_total else 0
+                    print(f"{progress} Chunk {chunk_id}: {chunk_total} dialogues, "
+                          f"same={chunk_same}, improved={chunk_improved}, regression={chunk_regression}, "
+                          f"accuracy={accuracy:.1f}%, time={duration:.1f}s")
                 else:
-                    print("\n## 新结果（无旧结果对比）:")
-                    for idx, content in dialogues:
-                        speaker = attribution.get(idx)
-                        clue = identity_clues.get(idx)
-                        print(f"  [{idx}] {speaker or '(null)'}: {content[:30]}...")
-                        if clue:
-                            print(f"      clue: {clue}")
+                    global_total += len(dialogues)
+                    print(f"{progress} Chunk {chunk_id}: {len(dialogues)} dialogues, "
+                          f"no old results, time={duration:.1f}s")
 
             except Exception as e:
-                print(f"\n## LLM 调用失败: {e}")
+                duration = time.time() - start_time
+                print(f"{progress} Chunk {chunk_id}: FAILED after {duration:.1f}s - {e}")
                 import traceback
                 traceback.print_exc()
+                failed_chunks.append(chunk_id)
 
+    # 全局统计
     print(f"\n{'='*80}")
-    print("测试完成")
+    print("全局统计汇总")
     print(f"{'='*80}")
+    print(f"总对话数: {global_total}")
+    print(f"相同: {global_same} ({global_same/global_total*100:.1f}%)" if global_total else "")
+    print(f"改进: {global_improved} ({global_improved/global_total*100:.1f}%)" if global_total else "")
+    print(f"回归: {global_regression} ({global_regression/global_total*100:.1f}%)" if global_total else "")
+    if failed_chunks:
+        print(f"失败 chunks: {failed_chunks}")
+    print(f"{'='*80}")
+    print("测试完成")
 
 
 if __name__ == "__main__":
-    run_test()
+    log_file = os.path.join(os.path.dirname(__file__), '_test_phase3_attribution_log.txt')
+    with TeeLogger(log_file):
+        run_test()
