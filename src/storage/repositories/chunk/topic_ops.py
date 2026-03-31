@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any, cast
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapper, Session
 
 from src.storage.models import ChunkTopic
@@ -43,16 +44,21 @@ def clear_chunk_topics(session: Session, run_id: str) -> None:
     session.execute(delete(ChunkTopic).where(ChunkTopic.run_id == run_id))
 
 
-def fetch_chunk_topics_agg(session: Session, run_id: str) -> list[tuple[int, float]]:
+def fetch_chunk_topics_agg(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取聚合后的分块主题数据（每个分块的平均主题权重）
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
 
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
 
     Returns:
-        (chunk_id, avg_topic_weight) 元组列表
+        Row 对象序列，支持字段名访问：row.chunk_id, row.avg_weight
     """
     stmt = (
         select(ChunkTopic.chunk_id, func.avg(ChunkTopic.topic_weight).label("avg_weight"))
@@ -60,4 +66,4 @@ def fetch_chunk_topics_agg(session: Session, run_id: str) -> list[tuple[int, flo
         .group_by(ChunkTopic.chunk_id)
     )
     result = session.execute(stmt)
-    return [(row[0], row[1]) for row in result.fetchall()]
+    return result.fetchall()

@@ -588,7 +588,7 @@ def build_timeline_candidates(
 
     # 获取张力曲线
     chunk_curves = stats_repo.fetch_chunk_curves_full(run_id)
-    tension_scores = [row[5] if row else 0.0 for row in chunk_curves] if chunk_curves else [0.5] * total_chunks
+    tension_scores = [row.tension_proxy if row else 0.0 for row in chunk_curves] if chunk_curves else [0.5] * total_chunks
 
     # 确保张力数据长度匹配
     if len(tension_scores) < total_chunks:
@@ -597,7 +597,7 @@ def build_timeline_candidates(
         tension_scores = tension_scores[:total_chunks]
 
     # 获取分块摘要
-    summary_map = {row[0]: row[1] for row in chunk_repo.fetch_chunk_summaries(run_id)}
+    summary_map = {row.chunk_id: row.summary for row in chunk_repo.fetch_chunk_summaries(run_id)}
 
     # 获取标注数据
     raw_annotations = annotation_repo.fetch_chunk_annotations_full(run_id)
@@ -606,11 +606,11 @@ def build_timeline_candidates(
         __slots__ = ("chunk_id", "event_type", "cliffhanger", "pivot_moment", "emotional_valence")
 
         def __init__(self, row):
-            self.chunk_id = row[0]
-            self.event_type = row[2] if len(row) > 2 else ""
-            self.cliffhanger = row[4] if len(row) > 4 else False
-            self.pivot_moment = row[3] if len(row) > 3 else False
-            self.emotional_valence = row[1] if len(row) > 1 else ""
+            self.chunk_id = row.chunk_id
+            self.event_type = row.event_type if row.event_type else ""
+            self.cliffhanger = row.cliffhanger if row.cliffhanger is not None else False
+            self.pivot_moment = row.pivot_moment if row.pivot_moment is not None else False
+            self.emotional_valence = row.emotional_valence if row.emotional_valence else ""
 
     annotation_map = {ann.chunk_id: ann for ann in [Annotation(r) for r in raw_annotations]} if raw_annotations else {}
 
