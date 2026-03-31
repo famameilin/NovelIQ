@@ -376,13 +376,13 @@ class TestPostProcessValidationFix(unittest.TestCase):
         return _post_process_validation(records, candidates, known_characters, alias_map, chunk_id=1)
 
     def test_unknown_speaker_kept_as_null(self) -> None:
-        """unknown speaker 保留为 null 而非丢弃"""
+        """unknown speaker 保留 LLM 原始判断而非强制设为 null"""
         records = [
             DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="新角色"),
         ]
         result = self._call_validation(records, known_characters=["伯安"])
         self.assertEqual(len(result), 1)
-        self.assertIsNone(result[0].speaker)
+        self.assertEqual(result[0].speaker, "新角色")
 
     def test_identity_clue_corrects_speaker(self) -> None:
         """identity_clue 提示正确 speaker 时修正"""
@@ -448,7 +448,7 @@ class TestPostProcessValidationFix(unittest.TestCase):
         self.assertEqual(result[0].speaker, "白芷")
 
     def test_unknown_speaker_null_when_no_clue_match(self) -> None:
-        """unknown speaker 无有效 clue 时保留为 null"""
+        """unknown speaker 无有效 clue 时保留 LLM 原始判断"""
         records = [
             DialogueRecord(
                 index=1, content="来者何人？", is_dialogue=True,
@@ -457,7 +457,7 @@ class TestPostProcessValidationFix(unittest.TestCase):
         ]
         result = self._call_validation(records, known_characters=["伯安"])
         self.assertEqual(len(result), 1)
-        self.assertIsNone(result[0].speaker)
+        self.assertEqual(result[0].speaker, "灰衣人")
 
     def test_unknown_speaker_with_clue_describing_others(self) -> None:
         """clue 描述的是对方而非说话者时，speaker 仍为 null"""

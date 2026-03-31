@@ -72,16 +72,21 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
     修改内容: 修复中文双引号正则，添加「」和『』的匹配
 
     修改时间: 2026-03-23
-    修改者: TraeAI
+    创建者: TraeAI
     任务: refactor-dialogue-attribution-pipeline
-    修改内容: 返回 QuoteCandidate 列表，提取 ctx_before 和 ctx_after 上下文
+    修改内容: 返回 QuoteCandidate 列表，提取 ctx_before 上下文
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: cleanup-phase3-ctx-context
+    修改内容: 移除 ctx_before 和 ctx_after，只保留 content
 
     Args:
         text: 原文文本
-        context_chars: 上下文字符数，默认 50
+        context_chars: 上下文字符数（已废弃，LLM 有完整 chunk_text）
 
     Returns:
-        QuoteCandidate 列表，包含 index, ctx_before, content, ctx_after
+        QuoteCandidate 列表，包含 index, content
     """
     candidates: list[QuoteCandidate] = []
     seen_positions = set()
@@ -103,16 +108,10 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
     for idx, match in enumerate(all_matches, 1):
         content = match.group(1).strip()
         if content:
-            start = match.start()
-            end = match.end()
-            ctx_before = text[max(0, start - context_chars) : start].strip()
-            ctx_after = text[end : min(len(text), end + context_chars)].strip()
             candidates.append(
                 QuoteCandidate(
                     index=idx,
-                    ctx_before=ctx_before,
                     content=content,
-                    ctx_after=ctx_after,
                 )
             )
     return candidates
@@ -187,7 +186,7 @@ def attribute_dialogues_with_llm(
     ) -> list[DialogueRecord]:
         dialogue_list = "\n".join(
             [
-                f'{c.index}. ctx_before: "{c.ctx_before}"\n   content: "{c.content}"\n   ctx_after: "{c.ctx_after}"'
+                f'{c.index}. content: "{c.content}"'
                 for c in candidates
             ]
         )
@@ -348,9 +347,10 @@ def _post_process_validation(
             else:
                 logger.info(
                     f"phase3_validation: speaker '{record.speaker}' not in known_set, "
-                    f"keeping record with null speaker, chunk_id={chunk_id} index={record.index}"
+                    f"identity_clue反推失败，保留LLM原始判断, "
+                    f"chunk_id={chunk_id} index={record.index}"
                 )
-                valid_records.append(record.model_copy(update={"speaker": None}))
+                valid_records.append(record)
             continue
 
         if record.identity_clue and canonical_speaker:
