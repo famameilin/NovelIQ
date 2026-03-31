@@ -133,11 +133,17 @@ def detect_cycle_in_relations(
 
     使用 DFS 检测有向图中的循环。
     注意：合法的双向关系（如 child_of/parent_of）不算作循环。
+    注意：对称关系（家族、友情、爱慕）不参与循环检测。
 
     创建时间: 2026-03-28
     创建者: TraeAI
     任务: fix-cycle-detection-bug
     修改内容: 区分合法双向关系和矛盾循环
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: fix-disambig-relation-type-mismatch
+    修改内容: 添加对称关系(家族/友情/爱慕)不参与循环检测
 
     Args:
         relations: 关系列表，每个关系包含 from, to, type 字段
@@ -149,8 +155,11 @@ def detect_cycle_in_relations(
     if not relations:
         return [], [], []
 
+    symmetric_relations = {"家族", "友情", "爱慕", "认识"}
+    asymmetric_relations = [r for r in relations if r.get("type") not in symmetric_relations]
+
     graph = defaultdict(list)
-    for rel in relations:
+    for rel in asymmetric_relations:
         graph[rel["from"]].append(rel["to"])
 
     visited = set()
@@ -185,8 +194,13 @@ def detect_cycle_in_relations(
     valid_relations: list[dict[str, str]] = []
     skipped_relations: list[dict[str, str]] = []
 
+    symmetric_relations_set = {"家族", "友情", "爱慕", "认识"}
+
     for rel in relations:
-        if rel["from"] in cycle_nodes or rel["to"] in cycle_nodes:
+        rel_type = rel.get("type")
+        if rel_type in symmetric_relations_set:
+            valid_relations.append(rel)
+        elif rel["from"] in cycle_nodes or rel["to"] in cycle_nodes:
             skipped_relations.append(rel)
         else:
             valid_relations.append(rel)
@@ -245,7 +259,7 @@ def _process_entity_relations(
     success_count = 0
     skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
 
-    valid_relation_types = set(settings.analysis.valid_hierarchical_relation_types)
+    valid_relation_types = set(settings.analysis.valid_relation_types)
 
     for rel in valid_relations:
         raw_from_name = rel.get("from")
