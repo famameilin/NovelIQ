@@ -138,6 +138,12 @@ def project_graph_tables(
     alias_map = state.get_alias_merges_dict()
     graph_alias_map = graph_repo.fetch_alias_map(run_id)
 
+    # P1.1 fix: batch-load existing entity types to avoid hardcoded "character"
+    existing_entities = graph_repo.fetch_entities(run_id)
+    existing_types: dict[str, str] = {
+        e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name
+    }
+
     for row in chunk_characters:
         resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)
         if resolved_name is None:
@@ -145,7 +151,7 @@ def project_graph_tables(
         entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_name,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_name, "character"),
             first_seen_chunk=row.chunk_id,
             last_seen_chunk=row.chunk_id,
             primary_role_function=row.role_function,
@@ -186,7 +192,7 @@ def project_graph_tables(
         entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_name,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_name, "character"),
             first_seen_chunk=row.chunk_id,
             last_seen_chunk=row.chunk_id,
             source_confidence=0.8,
@@ -241,7 +247,7 @@ def project_graph_tables(
         from_entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_from,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_from, "character"),
             first_seen_chunk=relation.chunk_id,
             last_seen_chunk=relation.chunk_id,
             source_confidence=relation.confidence,
@@ -249,7 +255,7 @@ def project_graph_tables(
         to_entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_to,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_to, "character"),
             first_seen_chunk=relation.chunk_id,
             last_seen_chunk=relation.chunk_id,
             source_confidence=relation.confidence,
