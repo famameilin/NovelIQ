@@ -63,6 +63,7 @@ class DisambiguationState:
     alias_merges: frozenset[tuple[str, str]] = frozenset()
     review_status: tuple[tuple[str, NameReviewState], ...] = ()
     pending_relations: tuple[dict[str, str], ...] = ()
+    entity_types: dict[str, str] = field(default_factory=dict)
 
     version: int = 2
     created_at: float = field(default_factory=time.time)
@@ -88,6 +89,7 @@ class DisambiguationState:
         alias_merges: frozenset[tuple[str, str]] | None = None,
         review_status: tuple[tuple[str, NameReviewState], ...] | None = None,
         pending_relations: tuple[dict[str, str], ...] | None = None,
+        entity_types: dict[str, str] | None = None,
     ) -> DisambiguationState:
         """创建更新后的新实例（copy-on-write）"""
         return DisambiguationState(
@@ -98,6 +100,7 @@ class DisambiguationState:
             alias_merges=alias_merges if alias_merges is not None else self.alias_merges,
             review_status=review_status if review_status is not None else self.review_status,
             pending_relations=pending_relations if pending_relations is not None else self.pending_relations,
+            entity_types=entity_types if entity_types is not None else self.entity_types,
             version=self.version,
             created_at=self.created_at,
             updated_at=time.time(),
@@ -127,6 +130,7 @@ class DisambiguationState:
                 for name, state in self.review_status
             ],
             "pending_relations": list(self.pending_relations),
+            "entity_types": dict(self.entity_types),
             "version": self.version,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -189,6 +193,7 @@ class DisambiguationState:
             ),
             review_status=review_status,
             pending_relations=tuple(data.get("pending_relations", [])),
+            entity_types=data.get("entity_types", {}),
             version=version,
             created_at=data.get("created_at", time.time()),
             updated_at=data.get("updated_at", time.time()),
