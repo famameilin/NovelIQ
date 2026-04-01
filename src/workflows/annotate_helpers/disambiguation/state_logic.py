@@ -58,6 +58,13 @@ def _normalize_disambig_confidence(confidence: Any) -> Literal["low", "medium", 
     return "medium"
 
 
+_CONFIDENCE_RANK: dict[str, int] = {"low": 1, "medium": 2, "high": 3}
+
+
+def _disambig_confidence_rank(confidence: str) -> int:
+    return _CONFIDENCE_RANK.get(confidence, 2)
+
+
 def _normalize_evidence_strength(strength: Any) -> Literal["weak", "mixed", "strong"] | None:
     if isinstance(strength, str):
         normalized = strength.lower().strip()
@@ -215,6 +222,23 @@ def apply_disambiguation_decisions(
         confidence = _normalize_disambig_confidence(raw_confidence)
         evidence_profile = result.evidence_profiles.get(name)
         evidence_strength = _normalize_evidence_strength(evidence_profile.strength if evidence_profile else None)
+
+        # Protect existing non-self-map decisions from being overwritten by self-maps.
+        old_review = new_review_status.get(name)
+        if (
+            old_review is not None
+            and old_review.proposed_canonical is not None
+            and old_review.proposed_canonical != name
+            and canonical == name  # new decision is self-map
+        ):
+            # Don't overwrite a non-self-map with a self-map unless confidence is higher
+            if _disambig_confidence_rank(confidence) <= _disambig_confidence_rank(old_review.confidence):
+                logger.debug(
+                    f"Protecting existing merge '{name}->{old_review.proposed_canonical}' "
+                    f"(conf={old_review.confidence}) from self-map downgrade "
+                    f"(new conf={confidence})"
+                )
+                continue
 
         if name == canonical:
             is_confirmed_canonical = confidence == DISAMBIG_CONFIDENCE_HIGH and evidence_strength in ("mixed", "strong")

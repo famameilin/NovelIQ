@@ -198,48 +198,76 @@ def compute_run_metrics(
     Returns:
         (RunMetrics, details) — 指标和逐条对比明细
     """
-    # 构建系统合并查找表
+    # 构建系统合并查找表（双向：alias=canonical 等价）
     sys_merge_set = {(m["alias"], m["canonical"]) for m in system_merges}
     sys_alias_set = {m["alias"] for m in system_merges}
+    # 构建等价类查找：给定任一名字，找到其所在合并组的所有名字
+    _equiv_groups: list[set[str]] = []
+    for m in system_merges:
+        a, c = m["alias"], m["canonical"]
+        merged = False
+        for g in _equiv_groups:
+            if a in g or c in g:
+                g.add(a)
+                g.add(c)
+                merged = True
+                break
+        if not merged:
+            _equiv_groups.append({a, c})
 
     # 构建金标查找表
-    gold_merge_set = set()
-    gold_independent_set = set()
-    for g in gold_records:
-        alias = g["alias"]
-        canonical = g.get("canonical", "")
-        judgment = g.get("judgment", "")
+    gold_merge_set: set[tuple[str, str]] = set()
+    gold_independent_set: set[str] = set()
+    for rec in gold_records:
+        alias = rec["alias"]
+        canonical = rec.get("canonical", "")
+        judgment = rec.get("judgment", "")
         if judgment == "should_merge" and canonical and alias != canonical:
             gold_merge_set.add((alias, canonical))
         elif judgment == "should_not_merge":
             gold_independent_set.add(alias)
 
+    def _find_canonical(name: str) -> str | None:
+        """在系统合并中查找 name 的 canonical。"""
+        for a, c in sys_merge_set:
+            if a == name:
+                return c
+        return None
+
+    def _in_same_merge_group(name_a: str, name_b: str) -> bool:
+        """检查两个名字是否在同一个合并组中。"""
+        for g in _equiv_groups:
+            if name_a in g and name_b in g:
+                return True
+        return False
+
     metrics = RunMetrics(run_id=run_id)
     details: list[dict] = []
 
     # 遍历金标记录
-    for g in gold_records:
-        alias = g["alias"]
-        canonical = g.get("canonical", "")
-        judgment = g.get("judgment", "")
-        evidence = g.get("evidence", "")
+    for rec in gold_records:
+        alias = rec["alias"]
+        canonical = rec.get("canonical", "")
+        judgment = rec.get("judgment", "")
+        evidence = rec.get("evidence", "")
 
         if judgment == "should_merge":
             metrics.gold_should_merge_total += 1
-            # 系统是否执行了这个合并
-            if (alias, canonical) in sys_merge_set:
+            # 系统是否把 alias 和 canonical 合并到了同一组
+            if (alias, canonical) in sys_merge_set or (canonical, alias) in sys_merge_set:
+                metrics.correct_merges += 1
+                details.append({"alias": alias, "canonical": canonical, "result": "correct_merge", "evidence": evidence})
+            elif _in_same_merge_group(alias, canonical):
                 metrics.correct_merges += 1
                 details.append({"alias": alias, "canonical": canonical, "result": "correct_merge", "evidence": evidence})
             else:
-                # 金标说应该合并，但系统没做（可能合并到了不同的 canonical）
-                # 检查是否合并到了其他 canonical
-                any_merge = any(a == alias for a, c in sys_merge_set)
-                if any_merge:
-                    merged_to = next((c for a, c in sys_merge_set if a == alias), None)
+                # 金标说应该合并，但系统没做
+                sys_canonical = _find_canonical(alias)
+                if sys_canonical:
                     details.append({
                         "alias": alias,
                         "canonical": canonical,
-                        "system_merged_to": merged_to,
+                        "system_merged_to": sys_canonical,
                         "result": "wrong_merge_target",
                         "evidence": evidence,
                     })

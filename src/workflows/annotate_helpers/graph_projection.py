@@ -144,9 +144,30 @@ def project_graph_tables(
         e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name
     }
 
+    # Build set of uncertain names: review/low status, not in alias_merges or known_canonicals
+    review_dict = state.get_review_status_dict()
+    uncertain_names: set[str] = set()
+    canonical_names = state.known_canonical_names
+    alias_set = {a for a, _ in state.alias_merges}
+    for name, review in review_dict.items():
+        if (
+            review.status != "resolved"
+            and review.confidence in ("low", "medium")
+            and name not in canonical_names
+            and name not in alias_set
+        ):
+            uncertain_names.add(name)
+
+    if uncertain_names:
+        logger.info(
+            f"Skipping {len(uncertain_names)} uncertain names from graph projection: {uncertain_names}"
+        )
+
     for row in chunk_characters:
         resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)
         if resolved_name is None:
+            continue
+        if resolved_name in uncertain_names:
             continue
         entity = graph_repo.upsert_entity(
             run_id=run_id,

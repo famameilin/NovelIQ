@@ -241,6 +241,7 @@ def _run_incremental_disambiguation_with_state(
 
     context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
     existing_names = list(state.known_canonical_names)
+    rag_hint = _build_existing_character_hint_from_db(conn, new_names, existing_names, alias_keywords, run_id)
 
     result = _retry_disambig(
         incremental_disambig_client,
@@ -249,12 +250,19 @@ def _run_incremental_disambiguation_with_state(
         existing_names,
         stage_name="incremental disambiguation",
         run_id=run_id,
+        rag_hint=rag_hint,
     )
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
     result = align_canonical_by_frequency(result, truly_new_names)
 
     new_state = apply_disambiguation_decisions(state, result)
+
+    # Accumulate entity_types from LLM output into state
+    if result.entity_types:
+        merged_types = dict(state.entity_types)
+        merged_types.update(result.entity_types)
+        new_state = new_state.with_updates(entity_types=merged_types)
 
     if new_state != state:
         logger.debug(
@@ -368,6 +376,12 @@ def _run_final_disambiguation_with_state(
     if result.canonical_decisions:
         new_state = apply_disambiguation_decisions(state, result)
 
+    # Merge final disambig entity_types into accumulated state
+    if result.entity_types:
+        merged_types = dict(new_state.entity_types)
+        merged_types.update(result.entity_types)
+        new_state = new_state.with_updates(entity_types=merged_types)
+
     # Promote review-status names with mixed/strong evidence to canonical.
     # These names were seen by the model but never reached high confidence;
     # promoting them ensures minor characters appear in graph_entities.
@@ -403,7 +417,7 @@ def _run_final_disambiguation_with_state(
         run_id,
         new_state.known_canonical_names,
         novel_id=novel_id,
-        entity_types=result.entity_types if result else None,
+        entity_types=new_state.entity_types or None,
     )
     ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
     conn.commit()
