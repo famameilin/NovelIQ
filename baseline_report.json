@@ -1,0 +1,31 @@
+{
+  "generated_at": "2026-04-01T11:51:44.778272+00:00",
+  "baseline_branch": "refactor/disambiguation-v2",
+  "baseline_commit": "27cc487",
+  "runs": {
+    "6b401f00-6d56-4aaa-a05a-95179e8b803a": {
+      "run_id": "6b401f00-6d56-4aaa-a05a-95179e8b803a",
+      "total_merges": 11,
+      "correct_merges": 7,
+      "wrong_merges": 0,
+      "ambiguous_merges": 1,
+      "merge_accuracy": 0.7,
+      "false_merge_rate": 0.0,
+      "gold_should_merge_total": 7,
+      "missed_merges": 0,
+      "missed_merge_rate": 0.0,
+      "total_independent": 0,
+      "correct_independent": 7,
+      "wrong_independent": 0
+    }
+  },
+  "aggregate": {
+    "merge_accuracy": 0.7,
+    "false_merge_rate": 0.0,
+    "missed_merge_rate": 0.0,
+    "total_merges": 11,
+    "total_correct": 7,
+    "total_wrong": 0,
+    "total_missed": 0
+  }
+}

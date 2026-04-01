@@ -240,7 +240,7 @@ def _build_sentence_pool(
     if name_list:
         counts = conn.execute(
             text("""
-                SELECT name, count FROM (
+                SELECT name, count(*) FROM (
                     SELECT name FROM chunk_characters
                     WHERE run_id = :run_id AND name = ANY(:names)
                     UNION ALL

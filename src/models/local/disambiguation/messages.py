@@ -168,7 +168,7 @@ def _build_relation_types_union() -> str:
 
 def _build_entity_types_section() -> str:
     """根据配置动态构建实体类型说明。"""
-    valid_types = ANNOTATION_CONFIG.valid_entity_types
+    valid_types = ANNOTATION_CONFIG.valid_entity_types or ["character"]
     lines = ["【实体类型识别规则】"]
     for etype in valid_types:
         desc = _ENTITY_TYPE_DESCRIPTIONS.get(etype, f"{etype} 类型")
@@ -178,7 +178,7 @@ def _build_entity_types_section() -> str:
 
 def _build_entity_types_union() -> str:
     """构建实体类型联合字符串，用于 JSON 格式说明。"""
-    valid_types = ANNOTATION_CONFIG.valid_entity_types
+    valid_types = ANNOTATION_CONFIG.valid_entity_types or ["character"]
     return "|".join(valid_types)
 
 

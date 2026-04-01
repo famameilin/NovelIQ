@@ -176,22 +176,28 @@ def align_canonical_by_frequency(
     result: ExtendedDisambigResult,
     candidates: list[NameCountCandidate],
     min_ratio: float = 1.5,
+    global_freq: dict[str, int] | None = None,
 ) -> ExtendedDisambigResult:
     """基于原文频次对齐 canonical 方向，确保高频名作为 canonical。
 
     遍历 result.canonical_decisions 中每个 (alias, canonical) 对，
-    如果 alias 在 candidates 中频次高于 canonical 且比例 > min_ratio，
+    如果 alias 频次高于 canonical 且比例 > min_ratio，
     则交换方向使高频名成为 canonical。
 
     Args:
         result: LLM 消歧结果
-        candidates: 候选人名及频次列表
+        candidates: 候选人名及频次列表（当前批次）
         min_ratio: 触发翻转的最小频次比（alias_count / canonical_count）
+        global_freq: 全量名字频次表。当 canonical 不在 candidates 中时
+            从此表查找频次，避免 canonical_count=0 导致翻转被跳过。
 
     Returns:
         修改后的 ExtendedDisambigResult（原地修改并返回）
     """
     freq: dict[str, int] = {str(c["name"]): int(c.get("count", 0)) for c in candidates}
+    if global_freq:
+        for name, count in global_freq.items():
+            freq.setdefault(name, count)
     decisions = result.canonical_decisions
     flipped: list[tuple[str, str, str, int, int]] = []
 
