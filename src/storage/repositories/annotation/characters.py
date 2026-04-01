@@ -17,12 +17,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 
 from src.storage.models import (
-    CharacterAppearance,
     ChunkCharacter,
-    ChunkDialogue,
     ChunkRelation,
     GraphEntity,
     GraphEntityAlias,
@@ -135,45 +133,26 @@ def apply_alias_merges(
     alias_merges: dict[str, str],
 ) -> None:
     """
-    执行文本归一化（不改写 chunk_relations 原始称呼）
+    清理自环关系。
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 从 update_character_names 拆分，只负责文本归一化
+    不再改写 ChunkCharacter.name、ChunkDialogue.speaker、CharacterAppearance.raw_name。
+    原始名称是 LLM 从文本中提取的真实数据，不可逆修改会导致
+    project_graph_tables(rebuild) 后别名关系永久丢失。
 
-    只处理 alias != canonical 的映射。
-    注意：chunk_relations 作为关系证据入口，需要保留原始称呼，归一化应在 graph 投影阶段完成。
+    归一化由 graph_projection 层通过 DisambiguationState.alias_merges 完成，
+    写入 graph_entity_aliases 表。
+
+    修改时间: 2026-04-01
+    修改者: CodeBuddy
+    修改内容: 移除 ChunkCharacter/ChunkDialogue/CharacterAppearance 的归一化写入，
+              保留自环关系清理。
 
     Args:
         session: 数据库会话
         run_id: 运行ID
-        alias_merges: 别名到规范名的映射（只包含 alias != canonical）
+        alias_merges: 别名到规范名的映射（保留参数兼容性，当前仅用于日志）
     """
-    correction_count = 0
-    for alias, canonical in alias_merges.items():
-        if alias == canonical:
-            continue
-
-        session.execute(
-            update(ChunkCharacter)
-            .where(ChunkCharacter.name == alias, ChunkCharacter.run_id == run_id)
-            .values(name=canonical)
-        )
-
-        session.execute(
-            update(ChunkDialogue)
-            .where(ChunkDialogue.speaker == alias, ChunkDialogue.run_id == run_id)
-            .values(speaker=canonical)
-        )
-
-        session.execute(
-            update(CharacterAppearance)
-            .where(CharacterAppearance.raw_name == alias, CharacterAppearance.run_id == run_id)
-            .values(raw_name=canonical)
-        )
-
-        correction_count += 1
+    non_trivial = sum(1 for a, c in alias_merges.items() if a != c)
 
     session.execute(
         delete(ChunkRelation).where(
@@ -182,5 +161,4 @@ def apply_alias_merges(
         )
     )
 
-    # 注意：Repository 层不管理事务，由调用方控制 commit
-    logger.info(f"Applied {correction_count} alias merges")
+    logger.info(f"Cleaned self-loop relations, {non_trivial} alias merges deferred to graph projection")
