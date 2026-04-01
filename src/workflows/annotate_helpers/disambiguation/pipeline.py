@@ -35,12 +35,14 @@ from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
+from .candidate_filter import CandidateClassification
 from .candidates import (
     _build_candidate_payload_by_names,
     _build_existing_character_hint_from_db,
     _collect_final_disambiguation_candidates,
     _ensure_state_snapshot_has_known_names,
     extract_new_names_from_db,
+    filter_candidates_by_class,
 )
 from .checkpoint import _save_disambig_checkpoint
 from .relations import (
@@ -55,6 +57,17 @@ from .state_logic import (
 )
 
 DisambigStateSnapshot = dict[str, dict[str, str]]
+
+
+def _inject_category_into_context(
+    classifications: list[CandidateClassification],
+    context_sentences: dict[str, str],
+) -> None:
+    """将 protected 候选的分类标签注入到上下文字符串前缀。"""
+    for cls in classifications:
+        if cls.category == "protected" and cls.name in context_sentences:
+            ctx = context_sentences[cls.name]
+            context_sentences[cls.name] = f"【受保护-默认不合并】{ctx}"
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
@@ -239,7 +252,15 @@ def _run_incremental_disambiguation_with_state(
     if not truly_new_names:
         return state
 
+    # Candidate quality filter: remove blacklist, keep protected + normal
     context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
+    _, truly_new_names, classifications = filter_candidates_by_class(
+        truly_new_names, context_sentences
+    )
+    # Rebuild context for filtered candidates only
+    context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
+    # Inject protected category labels into context for prompt
+    _inject_category_into_context(classifications, context_sentences)
     existing_names = list(state.known_canonical_names)
     rag_hint = _build_existing_character_hint_from_db(conn, new_names, existing_names, alias_keywords, run_id)
 
@@ -351,6 +372,13 @@ def _run_final_disambiguation_with_state(
     if candidates:
         candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+        # Candidate quality filter: remove blacklist from final disambig candidates
+        _, candidate_payload, f_classifications = filter_candidates_by_class(
+            candidate_payload, context_sentences
+        )
+        context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+        # Inject protected category labels into context for prompt
+        _inject_category_into_context(f_classifications, context_sentences)
         rag_hint = _build_existing_character_hint_from_db(conn, all_names, existing_names, alias_keywords, run_id)
         result = _retry_disambig(
             full_disambig_client,

@@ -177,7 +177,13 @@ def _build_sentence_pool(
     alias_keywords: list[str],
     run_id: str,
 ) -> dict[str, str]:
-    """构建句子池"""
+    """构建句子池。
+
+    修改时间: 2026-04-01
+    修改者: CodeBuddy
+    任务: P1 候选质量治理 - 例句池优先级优化
+    修改内容: 分离高优命名句和普通句，命名句优先入选
+    """
     from src.metrics.text_utils import split_sentences
 
     name_set = set(name_list)
@@ -187,8 +193,13 @@ def _build_sentence_pool(
         for v in _get_name_variants(name, name_set):
             variant_to_name[v] = name
 
-    result = {}
-    sentences_pool: dict[str, list[str]] = {name: [] for name in name_list}
+    # Split into high-priority and normal pools
+    HIGH_PRIORITY_KEYWORDS = (
+        "叫作", "名为", "取名", "原名", "别名", "号称",
+        "本名", "全名", "字", "号", "就是", "其实",
+    )
+    high_pool: dict[str, list[str]] = {name: [] for name in name_list}
+    normal_pool: dict[str, list[str]] = {name: [] for name in name_list}
 
     rows = conn.execute(
         text("SELECT text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"),
@@ -203,14 +214,26 @@ def _build_sentence_pool(
 
             for name in matched:
                 annotated = _annotate_dialogue_structure(sentence)
-                if any(kw in sentence for kw in alias_keywords):
-                    sentences_pool[name].insert(0, annotated.strip()[: settings.analysis.sentence_preview_max_chars])
-                elif len(sentences_pool[name]) < 3:
-                    sentences_pool[name].append(annotated.strip()[: settings.analysis.sentence_pool_max_chars])
+                truncated = annotated.strip()[: settings.analysis.sentence_pool_max_chars]
 
-    for name, sents in sentences_pool.items():
-        if sents:
-            result[name] = " | ".join(sents[:3])
+                # High-priority: contains naming keywords
+                if any(kw in sentence for kw in HIGH_PRIORITY_KEYWORDS):
+                    if len(high_pool[name]) < 2:
+                        high_pool[name].append(truncated)
+                # Alias keywords: insert at head of normal pool
+                elif any(kw in sentence for kw in alias_keywords):
+                    if len(normal_pool[name]) < 3:
+                        normal_pool[name].insert(0, truncated)
+                # Normal: append
+                elif len(normal_pool[name]) < 3:
+                    normal_pool[name].append(truncated)
+
+    # Merge: high-priority first, then normal, total max 3
+    result = {}
+    for name in name_list:
+        merged = high_pool[name] + normal_pool[name]
+        if merged:
+            result[name] = " | ".join(merged[:3])
 
     return result
 

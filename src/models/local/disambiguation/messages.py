@@ -13,6 +13,7 @@ from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROM
 from .evidence import build_evidence_profile, format_evidence_profile
 
 if TYPE_CHECKING:
+    from ..annotate_helpers.disambiguation.candidate_filter import CandidateClassification
     from .evidence import EvidenceProfile
 
 _EVIDENCE_MARKERS = {
@@ -78,14 +79,29 @@ def _format_evidence_annotation(evidence_types: list[str]) -> str:
     return "【证据来源：" + "、".join(evidence_types) + "】"
 
 
-def _format_candidate_block(name: str, count: int, context: str, evidence_profile: EvidenceProfile) -> str:
+def _get_category_label(category: str | None) -> str:
+    """将分类类别转为中文标签。"""
+    if category == "protected":
+        return "受保护-默认不合并"
+    return "普通"
+
+
+def _format_candidate_block(
+    name: str,
+    count: int,
+    context: str,
+    evidence_profile: EvidenceProfile,
+    category: str | None = None,
+) -> str:
     """构建更结构化的候选项描述。"""
 
     lines = [
         f"- 候选称呼：{name}",
         f"  次数：{count}",
-        f"  {format_evidence_profile(evidence_profile)}",
     ]
+    if category and category != "normal":
+        lines.append(f"  类别：{_get_category_label(category)}")
+    lines.append(f"  {format_evidence_profile(evidence_profile)}")
     if context:
         lines.append(f"  参考上下文：{context}")
     return "\n".join(lines)
@@ -181,8 +197,15 @@ def build_disambiguate_messages(
     context_sentences: dict[str, str] | None = None,
     existing_names: list[str] | None = None,
     rag_hint: str | None = None,
+    classifications: list[CandidateClassification] | None = None,
 ) -> list[dict[str, str]]:
     """构建角色消歧消息，仅接受标准候选结构。"""
+    # Build name -> category lookup
+    category_map: dict[str, str] = {}
+    if classifications:
+        for cls in classifications:
+            category_map[cls.name] = cls.category
+
     lines: list[str] = []
 
     for item in candidates:
@@ -192,7 +215,8 @@ def build_disambiguate_messages(
         evidence_profile = build_evidence_profile(ctx)
         evidence_types = _extract_evidence_types_from_context(ctx)
         evidence_annotation = _format_evidence_annotation(evidence_types)
-        profile_block = _format_candidate_block(name, count, ctx, evidence_profile)
+        category = category_map.get(name)
+        profile_block = _format_candidate_block(name, count, ctx, evidence_profile, category)
         if evidence_annotation:
             lines.append(profile_block + f"\n  {evidence_annotation}")
         else:
