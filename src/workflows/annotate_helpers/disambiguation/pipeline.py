@@ -52,6 +52,7 @@ from .relations import (
     _process_entity_relations,
 )
 from .state_logic import (
+    DISAMBIG_CONFIDENCE_HIGH,
     apply_disambiguation_decisions,
     validate_confidence_with_evidence,
 )
@@ -68,6 +69,26 @@ def _inject_category_into_context(
         if cls.category == "protected" and cls.name in context_sentences:
             ctx = context_sentences[cls.name]
             context_sentences[cls.name] = f"【受保护-默认不合并】{ctx}"
+
+
+def _collect_review_candidates(
+    state: DisambiguationState,
+) -> list[NameCountCandidate]:
+    """收集需要复审的已判决名字。
+
+    条件：
+    1. status != resolved（即 review 或 unresolved）
+    2. confidence 不是 high（高置信的不需要复审）
+    """
+    review_dict = state.get_review_status_dict()
+    candidates: list[NameCountCandidate] = []
+    for name, review in review_dict.items():
+        if review.status == "resolved":
+            continue
+        if review.confidence == DISAMBIG_CONFIDENCE_HIGH:
+            continue
+        candidates.append({"name": name, "count": 0})  # count 不重要，复审阶段已有上下文
+    return candidates
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
@@ -125,6 +146,26 @@ def _build_disambig_response_text(result: Any) -> str:
             "entity_relations": [],
             "evidence_profiles": {},
         }
+
+    # Audit info (non-intrusive, for traceability)
+    audit_info: dict[str, Any] = {}
+    try:
+        import subprocess as _sp
+
+        audit_info["branch"] = (
+            _sp.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=_sp.DEVNULL, timeout=5)
+            .decode()
+            .strip()
+        )
+        audit_info["commit"] = (
+            _sp.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=_sp.DEVNULL, timeout=5)
+            .decode()
+            .strip()
+        )
+    except Exception:
+        pass
+    response_dict["audit"] = audit_info
+
     return json.dumps(response_dict, ensure_ascii=False)
 
 
@@ -249,16 +290,21 @@ def _run_incremental_disambiguation_with_state(
         name for name in new_names if name["name"] not in state.discovered_names
     ]
 
-    if not truly_new_names:
+    # Collect review candidates: previously decided names that need re-evaluation
+    review_candidates = _collect_review_candidates(state)
+
+    all_disambig_candidates = truly_new_names + review_candidates
+
+    if not all_disambig_candidates:
         return state
 
     # Candidate quality filter: remove blacklist, keep protected + normal
-    context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
-    _, truly_new_names, classifications = filter_candidates_by_class(
-        truly_new_names, context_sentences
+    context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
+    _, all_disambig_candidates, classifications = filter_candidates_by_class(
+        all_disambig_candidates, context_sentences
     )
     # Rebuild context for filtered candidates only
-    context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
+    context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
     # Inject protected category labels into context for prompt
     _inject_category_into_context(classifications, context_sentences)
     existing_names = list(state.known_canonical_names)
@@ -266,7 +312,7 @@ def _run_incremental_disambiguation_with_state(
 
     result = _retry_disambig(
         incremental_disambig_client,
-        truly_new_names,
+        all_disambig_candidates,
         context_sentences,
         existing_names,
         stage_name="incremental disambiguation",
@@ -275,7 +321,7 @@ def _run_incremental_disambiguation_with_state(
     )
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-    result = align_canonical_by_frequency(result, truly_new_names)
+    result = align_canonical_by_frequency(result, all_disambig_candidates)
 
     new_state = apply_disambiguation_decisions(state, result)
 
