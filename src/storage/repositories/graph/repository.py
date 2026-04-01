@@ -68,6 +68,14 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             entity.first_seen_chunk = min(entity.first_seen_chunk or first_seen_chunk, first_seen_chunk)
         if last_seen_chunk is not None:
             entity.last_seen_chunk = max(entity.last_seen_chunk or last_seen_chunk, last_seen_chunk)
+        # Update entity_type if the new value differs and is not the generic default
+        if entity_type and entity_type != "character" and entity.entity_type != entity_type:
+            from loguru import logger
+            logger.info(
+                "Updating entity_type for '{}': {} -> {}",
+                canonical_name, entity.entity_type, entity_type,
+            )
+            entity.entity_type = entity_type
         if primary_role_function is not None:
             entity.primary_role_function = primary_role_function
         if last_emotion_score is not None:
