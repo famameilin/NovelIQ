@@ -31,7 +31,7 @@ from src.models.local.disambiguation import (
     build_disambiguate_messages,
 )
 from src.models.local.disambiguation.result_builder import align_canonical_by_frequency
-from src.storage.repositories import AnnotationRepository
+from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
@@ -307,7 +307,10 @@ def _run_incremental_disambiguation_with_state(
     # Inject protected category labels into context for prompt
     _inject_category_into_context(classifications, context_sentences)
     existing_names = list(state.known_canonical_names)
-    rag_hint = _build_existing_character_hint_from_db(conn, new_names, existing_names, alias_keywords, run_id)
+    rag_hint = _build_existing_character_hint_from_db(
+        conn, new_names, existing_names, alias_keywords, run_id,
+        graph_repo=GraphRepository(conn),
+    )
 
     result = _retry_disambig(
         incremental_disambig_client,
@@ -425,7 +428,10 @@ def _run_final_disambiguation_with_state(
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
         # Inject protected category labels into context for prompt
         _inject_category_into_context(f_classifications, context_sentences)
-        rag_hint = _build_existing_character_hint_from_db(conn, all_names, existing_names, alias_keywords, run_id)
+        rag_hint = _build_existing_character_hint_from_db(
+            conn, all_names, existing_names, alias_keywords, run_id,
+            graph_repo=GraphRepository(conn),
+        )
         result = _retry_disambig(
             full_disambig_client,
             candidate_payload,
