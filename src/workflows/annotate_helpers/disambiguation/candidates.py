@@ -25,7 +25,7 @@ from .state_logic import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from src.storage.repositories import GraphRepository
 
 EXTENSION_REVIEW_MIN_GAP = 3
 EXTENSION_REVIEW_MIN_RATIO = 1.5
@@ -164,19 +164,78 @@ def _collect_final_disambiguation_candidates(
     return candidates
 
 
+def _augment_hint_with_graph(
+    hint: str | None,
+    graph_repo: GraphRepository,
+    run_id: str,
+    existing_names: list[str],
+) -> str | None:
+    """Append graph authority data (aliases, relations) to rag_hint.
+
+    This forms the feedback loop from graph tables back to disambiguation,
+    letting the LLM see already-resolved alias mappings and confirmed relations.
+    """
+    existing_set = set(existing_names)
+    parts: list[str] = []
+
+    if hint:
+        parts.append(hint)
+
+    # 1. Authority aliases from graph_entity_aliases
+    alias_map = graph_repo.fetch_alias_map(run_id)
+    graph_aliases = {a: c for a, c in alias_map.items() if a != c and c in existing_set}
+    if graph_aliases:
+        alias_lines = ["【图谱已裁决的别名映射】"]
+        for alias, canonical in sorted(graph_aliases.items()):
+            alias_lines.append(f"- {alias} → {canonical}")
+        parts.append("\n".join(alias_lines))
+        logger.debug(
+            "Graph feedback: injected {} alias mappings into rag_hint",
+            len(graph_aliases),
+        )
+
+    # 2. Current active relations from graph_relations_current
+    relations = graph_repo.fetch_current_relations(run_id, active_only=True)
+    relevant_rels = [
+        r for r in relations
+        if r["from_name"] in existing_set or r["to_name"] in existing_set
+    ]
+    if relevant_rels:
+        rel_lines = ["【图谱已确认的关系】"]
+        for r in relevant_rels[:10]:
+            rel_lines.append(f"- {r['from_name']} ←{r['type']}→ {r['to_name']}")
+        parts.append("\n".join(rel_lines))
+        logger.debug(
+            "Graph feedback: injected {} relations into rag_hint",
+            len(relevant_rels),
+        )
+
+    if not parts:
+        return hint
+
+    return "\n".join(parts)
+
+
 def _build_existing_character_hint_from_db(
     conn,
     all_names: list[NameCountCandidate],
     existing_names: list[str],
     alias_keywords: list[str],
     run_id: str,
+    graph_repo: GraphRepository | None = None,
 ) -> str | None:
     existing_payload = _build_candidate_payload_by_names(all_names, existing_names)
     if not existing_payload:
         return None
 
     existing_context_sentences = build_context_sentences(conn, existing_payload, alias_keywords, run_id=run_id)
-    return build_existing_character_hint(existing_names, existing_context_sentences)
+    hint = build_existing_character_hint(existing_names, existing_context_sentences)
+
+    # Step 3: augment with graph authority data
+    if graph_repo is not None:
+        hint = _augment_hint_with_graph(hint, graph_repo, run_id, existing_names)
+
+    return hint
 
 
 def extract_new_names_from_db(
