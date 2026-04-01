@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from src.config import settings
+from src.config.schemas.annotation import ANNOTATION_CONFIG
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
@@ -124,6 +125,14 @@ _RELATION_TYPE_DESCRIPTIONS: dict[str, str] = {
     "spouse_of": "A 是 B 的配偶（如 赵兰英 spouse_of 贺铎）",
 }
 
+_ENTITY_TYPE_DESCRIPTIONS: dict[str, str] = {
+    "character": "具体人物角色（如伯安、贺重明、柳婉儿）",
+    "group": "群体/队伍统称（如赤甲卫、禁军、一队）",
+    "organization": "组织/门派/家族（如贺家、玄天道宗）",
+    "creature": "灵兽/物种泛称（如灵禽、赤焰驹、白鹤）",
+    "artifact": "法宝/器物（如灵剑、玉佩、符箓）",
+}
+
 
 def _build_relation_types_section() -> str:
     """根据配置动态构建关系类型说明。"""
@@ -141,11 +150,29 @@ def _build_relation_types_union() -> str:
     return "|".join(valid_types)
 
 
+def _build_entity_types_section() -> str:
+    """根据配置动态构建实体类型说明。"""
+    valid_types = ANNOTATION_CONFIG.valid_entity_types
+    lines = ["【实体类型识别规则】"]
+    for etype in valid_types:
+        desc = _ENTITY_TYPE_DESCRIPTIONS.get(etype, f"{etype} 类型")
+        lines.append(f"- {etype}：{desc}")
+    return "\n".join(lines)
+
+
+def _build_entity_types_union() -> str:
+    """构建实体类型联合字符串，用于 JSON 格式说明。"""
+    valid_types = ANNOTATION_CONFIG.valid_entity_types
+    return "|".join(valid_types)
+
+
 def _build_dynamic_system_prompt() -> str:
-    """将动态关系类型填入系统提示词模板。"""
+    """将动态关系类型和实体类型填入系统提示词模板。"""
     base_prompt = DISAMBIGUATE_SYSTEM_PROMPT
     base_prompt = base_prompt.replace("{{RELATION_TYPES_UNION}}", _build_relation_types_union())
     base_prompt = base_prompt.replace("{{RELATION_TYPES_SECTION}}", _build_relation_types_section())
+    base_prompt = base_prompt.replace("{{ENTITY_TYPES_UNION}}", _build_entity_types_union())
+    base_prompt = base_prompt.replace("{{ENTITY_TYPES_SECTION}}", _build_entity_types_section())
     return base_prompt
 
 

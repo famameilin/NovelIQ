@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from loguru import logger
+
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..schema import DisambiguateResponseModel
@@ -168,3 +170,62 @@ def build_extended_result_from_response(
         evidence_profiles=evidence_profiles,
         _thinking_content=thinking_content,
     )
+
+
+def align_canonical_by_frequency(
+    result: ExtendedDisambigResult,
+    candidates: list[NameCountCandidate],
+    min_ratio: float = 1.5,
+) -> ExtendedDisambigResult:
+    """基于原文频次对齐 canonical 方向，确保高频名作为 canonical。
+
+    遍历 result.canonical_decisions 中每个 (alias, canonical) 对，
+    如果 alias 在 candidates 中频次高于 canonical 且比例 > min_ratio，
+    则交换方向使高频名成为 canonical。
+
+    Args:
+        result: LLM 消歧结果
+        candidates: 候选人名及频次列表
+        min_ratio: 触发翻转的最小频次比（alias_count / canonical_count）
+
+    Returns:
+        修改后的 ExtendedDisambigResult（原地修改并返回）
+    """
+    freq: dict[str, int] = {str(c["name"]): int(c.get("count", 0)) for c in candidates}
+    decisions = result.canonical_decisions
+    flipped: list[tuple[str, str, str, int, int]] = []
+
+    for alias, canonical in list(decisions.items()):
+        if alias == canonical:
+            continue
+        alias_count = freq.get(alias, 0)
+        canonical_count = freq.get(canonical, 0)
+        if canonical_count == 0 or alias_count <= canonical_count:
+            continue
+        ratio = alias_count / canonical_count
+        if ratio < min_ratio:
+            continue
+
+        # 翻转方向：高频名成为 canonical
+        decisions[canonical] = alias
+        decisions[alias] = alias  # 原 alias 变为 self-mapping
+
+        # 级联修正：将指向 alias 的其他映射更新为新 canonical
+        for other_alias, other_canonical in list(decisions.items()):
+            if other_alias != canonical and other_canonical == alias:
+                decisions[other_alias] = alias
+
+        flipped.append((alias, canonical, alias, alias_count, canonical_count))
+
+    if flipped:
+        for old_alias, old_canonical, new_canonical, a_count, c_count in flipped:
+            logger.info(
+                "canonical direction aligned by frequency: {} (count={}) -> {} (count={}), flipped to {} as canonical",
+                old_alias,
+                a_count,
+                old_canonical,
+                c_count,
+                new_canonical,
+            )
+
+    return result

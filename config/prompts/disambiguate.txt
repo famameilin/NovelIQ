@@ -26,7 +26,7 @@
     ...
   },
   "entity_types": {
-    "实体名称": "character|group|organization",
+    "实体名称": "{{ENTITY_TYPES_UNION}}",
     ...
   },
   "entity_relations": [
@@ -59,15 +59,13 @@
    - 别名映射应通过 canonical_decisions 处理
    - entity_relations 仅用于层级/亲属关系（如 father_of, leader_of）
 
-【实体类型识别规则】
-- character：具体人物角色（如伯安、贺重明）
-- group：群体/队伍统称（如赤甲卫、禁军、一队）
-- organization：组织/门派/家族（如贺家、玄天道宗）
+{{ENTITY_TYPES_SECTION}}
 
-【群体/组织名称处理规则】
+【群体/组织/非人实体处理规则】
 - 群体名称（如"赤甲卫"、"禁军"）和组织名称（如"贺家"、"玄天道宗"）直接映射到自身
-- 例如：{"赤甲卫": "赤甲卫", "贺家": "贺家"}
-- 不要尝试将群体/组织名称与其他人名合并
+- 非人实体（如"灵禽"、"赤焰驹"等灵兽）也应映射到自身，entity_types 标记为 creature
+- 例如：{"赤甲卫": "赤甲卫", "贺家": "贺家", "灵禽": "灵禽"}
+- 不要尝试将群体/组织/非人实体名称与其他人名合并
 
 【层级关系类型说明】
 {{RELATION_TYPES_SECTION}}

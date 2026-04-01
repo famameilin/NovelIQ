@@ -302,7 +302,7 @@ class DisambiguateResponseModel(BaseModel):
     )
     entity_types: dict[str, str] = Field(
         default_factory=dict,
-        description="实体类型映射，key为实体名称，value为类型（character/group/organization）",
+        description="实体类型映射，key为实体名称，value为类型（character/group/organization/creature/artifact）",
     )
     entity_relations: list[HierarchicalRelation] = Field(
         default_factory=list,
