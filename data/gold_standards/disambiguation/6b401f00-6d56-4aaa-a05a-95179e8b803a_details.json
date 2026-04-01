@@ -1,0 +1,50 @@
+[
+  {
+    "alias": "灰衣人",
+    "canonical": "白芷",
+    "result": "correct_merge",
+    "evidence": "灰衣人就是白芷"
+  },
+  {
+    "alias": "灵禽",
+    "canonical": "赤羽炽尾鸡",
+    "result": "false_merge",
+    "evidence": "灵禽是物种泛称，不应指向具体个体"
+  },
+  {
+    "alias": "褚大山",
+    "canonical": "柱子",
+    "result": "correct_merge",
+    "evidence": "褚大山就是柱子；原文频次：柱子34 vs 褚大山3"
+  },
+  {
+    "alias": "贺伯安",
+    "canonical": "伯安",
+    "result": "correct_merge",
+    "evidence": "贺伯安就是伯安"
+  },
+  {
+    "alias": "柳妹妹",
+    "canonical": "柳婉儿",
+    "result": "missed_merge",
+    "evidence": "柳婉儿就是柳妹妹；原文频次：柳婉儿9 vs 柳妹妹2，系统方向反了"
+  },
+  {
+    "alias": "猴子",
+    "canonical": "侯飞白",
+    "result": "missed_merge",
+    "evidence": "侯飞白就是猴子；原文频次：猴子57 vs 侯飞白6，系统方向反了"
+  },
+  {
+    "alias": "赵哥",
+    "canonical": "赤甲卫",
+    "result": "false_merge",
+    "evidence": "赵哥是赤甲卫中的具体个人，赤甲卫是组织名，不应合并"
+  },
+  {
+    "alias": "算盘",
+    "canonical": "林立果",
+    "result": "missed_merge",
+    "evidence": "林立果就是算盘；原文频次：算盘45 vs 林立果7，系统方向反了"
+  }
+]

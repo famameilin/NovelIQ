@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-04-01T01:01:01.352598+00:00",
+  "baseline_branch": "refactor/disambiguation-v2",
+  "baseline_commit": "d84e9b0",
+  "runs": {
+    "6b401f00-6d56-4aaa-a05a-95179e8b803a": {
+      "run_id": "6b401f00-6d56-4aaa-a05a-95179e8b803a",
+      "total_merges": 8,
+      "correct_merges": 3,
+      "wrong_merges": 2,
+      "ambiguous_merges": 0,
+      "merge_accuracy": 0.375,
+      "false_merge_rate": 0.25,
+      "gold_should_merge_total": 6,
+      "missed_merges": 3,
+      "missed_merge_rate": 0.5,
+      "total_independent": 0,
+      "correct_independent": 0,
+      "wrong_independent": 0
+    },
+    "abededd4-9dda-4165-a214-9c77f16f4833": {
+      "run_id": "abededd4-9dda-4165-a214-9c77f16f4833",
+      "total_merges": 11,
+      "correct_merges": 7,
+      "wrong_merges": 3,
+      "ambiguous_merges": 0,
+      "merge_accuracy": 0.6364,
+      "false_merge_rate": 0.2727,
+      "gold_should_merge_total": 8,
+      "missed_merges": 1,
+      "missed_merge_rate": 0.125,
+      "total_independent": 0,
+      "correct_independent": 0,
+      "wrong_independent": 0
+    }
+  },
+  "aggregate": {
+    "merge_accuracy": 0.5263,
+    "false_merge_rate": 0.2632,
+    "missed_merge_rate": 0.2857,
+    "total_merges": 19,
+    "total_correct": 10,
+    "total_wrong": 5,
+    "total_missed": 4
+  }
+}
