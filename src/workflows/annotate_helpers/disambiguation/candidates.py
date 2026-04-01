@@ -18,6 +18,7 @@ from src.models.local.disambiguation import build_existing_character_hint
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
+from .candidate_filter import CandidateClassification, CandidateFilter
 from .state_logic import (
     DISAMBIG_CONFIDENCE_HIGH,
     DISAMBIG_STATE_RESOLVED,
@@ -250,3 +251,49 @@ def _ensure_state_snapshot_has_known_names(
             },
         )
     return snapshot
+
+
+def filter_candidates_by_class(
+    candidates: list[NameCountCandidate],
+    context_sentences: dict[str, str] | None = None,
+    candidate_filter: CandidateFilter | None = None,
+) -> tuple[list[NameCountCandidate], list[NameCountCandidate], list[CandidateClassification]]:
+    """基于候选分类器过滤候选名。
+
+    返回:
+        filtered: 被黑名单过滤的候选（丢弃）
+        remaining: 保留的候选（protected + normal，送消歧）
+        classifications: 所有候选的分类结果（用于审计和 prompt 标记）
+    """
+    if candidate_filter is None:
+        candidate_filter = CandidateFilter()
+
+    filtered_cls, remaining_cls = candidate_filter.classify_batch(
+        [dict(c) for c in candidates], context_sentences
+    )
+    """基于候选分类器过滤候选名。
+
+    返回:
+        filtered: 被黑名单过滤的候选（丢弃）
+        remaining: 保留的候选（protected + normal，送消歧）
+        classifications: 所有候选的分类结果（用于审计和 prompt 标记）
+    """
+    if candidate_filter is None:
+        candidate_filter = CandidateFilter()
+
+    filtered_cls, remaining_cls = candidate_filter.classify_batch(
+        [dict(c) for c in candidates], context_sentences
+    )
+
+    filtered_names = {c.name for c in filtered_cls}
+    filtered: list[NameCountCandidate] = [c for c in candidates if c["name"] in filtered_names]
+    remaining: list[NameCountCandidate] = [c for c in candidates if c["name"] not in filtered_names]
+    all_classifications = filtered_cls + remaining_cls
+
+    if filtered:
+        logger.info(
+            f"Candidate filter: filtered {len(filtered)} candidates: "
+            f"{[c.name + '(' + c.reason + ')' for c in filtered_cls]}"
+        )
+
+    return filtered, remaining, all_classifications
