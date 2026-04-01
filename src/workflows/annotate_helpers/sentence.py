@@ -228,12 +228,40 @@ def _build_sentence_pool(
                 elif len(normal_pool[name]) < 3:
                     normal_pool[name].append(truncated)
 
-    # Merge: high-priority first, then normal, total max 3
+    # Merge: high-priority first, then normal
     result = {}
     for name in name_list:
         merged = high_pool[name] + normal_pool[name]
         if merged:
             result[name] = " | ".join(merged[:3])
+
+    # 稀有名（≤2次出现）不受例句数量限制，确保包含所有可用上下文
+    # 查询各名字的出现次数，对稀有名放宽限制
+    if name_list:
+        counts = conn.execute(
+            text("""
+                SELECT name, count FROM (
+                    SELECT name FROM chunk_characters
+                    WHERE run_id = :run_id AND name = ANY(:names)
+                    UNION ALL
+                    SELECT speaker AS name FROM chunk_dialogues
+                    WHERE run_id = :run_id AND speaker = ANY(:names)
+                ) t GROUP BY name
+            """),
+            {"names": name_list, "run_id": run_id},
+        ).fetchall()
+        rare_counts = {name: cnt for name, cnt in counts if cnt <= 2}
+        for name in rare_counts:
+            # 稀有名：重新扫描所有句子，不受 pool 大小限制
+            rare_sentences: list[str] = []
+            for (text_content,) in rows:
+                for sentence in split_sentences(text_content):
+                    if any(v in sentence for v in _get_name_variants(name, name_set)):
+                        truncated = _annotate_dialogue_structure(sentence).strip()[: settings.analysis.sentence_pool_max_chars]
+                        if truncated not in rare_sentences:
+                            rare_sentences.append(truncated)
+            if rare_sentences:
+                result[name] = " | ".join(rare_sentences)
 
     return result
 
