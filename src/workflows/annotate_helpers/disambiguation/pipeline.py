@@ -320,7 +320,8 @@ def _run_incremental_disambiguation_with_state(
     )
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-    result = align_canonical_by_frequency(result, all_disambig_candidates)
+    incremental_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in new_names}
+    result = align_canonical_by_frequency(result, all_disambig_candidates, global_freq=incremental_global_freq)
 
     new_state = apply_disambiguation_decisions(state, result)
 
@@ -435,7 +436,8 @@ def _run_final_disambiguation_with_state(
             rag_hint=rag_hint,
         )
         result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-        result = align_canonical_by_frequency(result, candidate_payload)
+        final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
+        result = align_canonical_by_frequency(result, candidate_payload, global_freq=final_global_freq)
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(
