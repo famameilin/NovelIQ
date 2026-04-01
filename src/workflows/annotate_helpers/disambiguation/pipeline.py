@@ -30,6 +30,7 @@ from src.models.local.disambiguation import (
     ExtendedDisambigResult,
     build_disambiguate_messages,
 )
+from src.models.local.disambiguation.result_builder import align_canonical_by_frequency
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
@@ -251,6 +252,7 @@ def _run_incremental_disambiguation_with_state(
     )
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
+    result = align_canonical_by_frequency(result, truly_new_names)
 
     new_state = apply_disambiguation_decisions(state, result)
 
@@ -352,6 +354,7 @@ def _run_final_disambiguation_with_state(
             rag_hint=rag_hint,
         )
         result = validate_confidence_with_evidence(result, existing_names, context_sentences)
+        result = align_canonical_by_frequency(result, candidate_payload)
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(
