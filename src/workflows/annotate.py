@@ -140,9 +140,10 @@ def run_annotate(
         resume=resume,
     )
 
-    _run_disambiguation_phase(session, state, phase_result, novel_id, use_rag, run_id=run_id)
+    state = _run_disambiguation_phase(session, state, phase_result, novel_id, use_rag, run_id=run_id)
 
     # 最终消歧可能改变别名归一化规则，强制重建 graph_* 以避免旧投影残留。
+    # rebuild 会清空 graph_entity_aliases，之后需要重新应用消歧合并。
     if all_chunks:
         final_chunk_id = all_chunks[-1][0]
         project_graph_tables(
@@ -152,6 +153,11 @@ def run_annotate(
             session=session,
             rebuild=True,
         )
+        # rebuild 后重新应用消歧合并到 graph_entity_aliases
+        if state.alias_merges:
+            ann_repo = AnnotationRepository(session)
+            ann_repo.apply_alias_merges(run_id, state.get_alias_merges_dict())
+            session.commit()
 
     elapsed = time.time() - start_time
     logger.info(f"annotate completed success={success_count} time={elapsed:.2f}s")
