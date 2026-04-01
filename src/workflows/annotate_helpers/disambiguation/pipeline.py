@@ -493,10 +493,12 @@ def _run_final_disambiguation_with_state(
         novel_id=novel_id,
         entity_types=new_state.entity_types or None,
     )
-    ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
+    # 不在此处调用 apply_alias_merges —— 它会改写 ChunkCharacter.name，
+    # 导致后续 project_graph_tables(rebuild) 读取到的已是归一化后的名称，
+    # 无法正确识别别名关系。由调用方在 projection 之后统一调用。
     conn.commit()
     logger.info(
-        "Stateful final disambiguation persisted: {} canonicals, {} merges (legacy aliases will be mirrored from graph tables)",
+        "Stateful final disambiguation persisted: {} canonicals, {} merges (alias merges deferred to post-projection)",
         len(new_state.known_canonical_names),
         len(new_state.alias_merges),
     )
