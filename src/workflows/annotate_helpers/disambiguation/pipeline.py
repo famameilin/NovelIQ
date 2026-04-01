@@ -76,16 +76,16 @@ def _collect_review_candidates(
 ) -> list[NameCountCandidate]:
     """收集需要复审的已判决名字。
 
-    条件：
-    1. status != resolved（即 review 或 unresolved）
-    2. confidence 不是 high（高置信的不需要复审）
+    条件（严格，避免推翻已有正确决策）：
+    1. status != resolved
+    2. confidence == low（medium 的不再复审，已有合并决策的不动）
     """
     review_dict = state.get_review_status_dict()
     candidates: list[NameCountCandidate] = []
     for name, review in review_dict.items():
         if review.status == "resolved":
             continue
-        if review.confidence == DISAMBIG_CONFIDENCE_HIGH:
+        if review.confidence != "low":
             continue
         candidates.append({"name": name, "count": 0})  # count 不重要，复审阶段已有上下文
     return candidates
