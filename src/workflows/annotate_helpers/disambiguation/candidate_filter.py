@@ -1,16 +1,15 @@
 """基于规则的候选名分类器。
 
 设计决策：
-1. 黑名单精确匹配 → 标记为 protected（不是丢弃），默认不合并但仍送消歧
-   原因：前期以职位身份出场的人物（如"侍卫"），后期可能揭示真名，需要保留合并能力
+1. 精确匹配受保护名单 → 标记为 protected（默认不合并但仍送消歧）
 2. 噪音过滤（≤1次+无上下文）→ 唯一的硬丢弃规则
-3. 外貌描述名 → protected，仅在有强证据时允许合并
+3. 不做外貌描述名匹配 — "灰衣人""白衣少女"在小说中经常是真正有身份揭示的角色，
+   正则无法区分，交给 LLM 自己判断
 4. 不做后缀匹配 — "赵军"、"张卫"是正常人名，不能因为结尾字就标 protected
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -26,13 +25,6 @@ class CandidateClassification:
     name: str
     category: Category
     reason: str  # 分类原因，用于审计日志
-
-
-# 纯外貌描述的正则
-APPEARANCE_PATTERN: re.Pattern[str] = re.compile(
-    r"^(灰衣|黑衣|白衣|青衣|红衣|金甲|银甲)?"
-    r"(人|少女|少年|男子|女子|老者|老妪|婴孩|婴儿|青年|壮汉)$"
-)
 
 
 def _load_protected_list() -> frozenset[str]:
@@ -61,9 +53,8 @@ class CandidateFilter:
     """基于规则的候选名分类器。
 
     分类规则（按优先级）：
-    - blacklist: 出现次数 ≤ 1 且无上下文例句 → 丢弃（可能是 OCR/分词噪音）
+    - blacklist: 出现次数 ≤ 1 且无上下文例句 → 丢弃（可能是噪音）
     - protected: 精确匹配受保护名单 → 送消歧，但 prompt 中标记为"默认不合并"
-    - protected: 匹配 APPEARANCE_PATTERN → 送消歧，但 prompt 中标记为"默认不合并"
     - normal: 以上均不匹配 → 正常处理
     """
 
@@ -95,14 +86,6 @@ class CandidateFilter:
                 name=name,
                 category="protected",
                 reason="精确匹配受保护名单",
-            )
-
-        # 3. 外貌描述名 → 送消歧但默认不合并
-        if APPEARANCE_PATTERN.match(name):
-            return CandidateClassification(
-                name=name,
-                category="protected",
-                reason="匹配外貌描述模式",
             )
 
         return CandidateClassification(
