@@ -15,7 +15,7 @@ export function useNovelTheme() {
     const root = document.documentElement;
 
     Object.entries(vars).forEach(([key, value]) => {
-      root.style.setProperty(key, value);
+      root.style.setProperty(key, value as string);
     });
 
     root.classList.toggle("dark", isDark);
