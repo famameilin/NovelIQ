@@ -1,20 +1,52 @@
 import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/cn";
 
-const Card = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn(
-      "rounded-md border border-border bg-surface shadow-sm",
-      className
-    )}
-    {...props}
-  />
-));
+/* ------------------------------------------------------------------ */
+/*  Card Variants                                                     */
+/* ------------------------------------------------------------------ */
+
+const cardVariants = cva(
+  "border bg-surface transition-all",
+  {
+    variants: {
+      variant: {
+        default: "border-border shadow-sm",
+        elevated:
+          "border-border overflow-hidden " +
+          "bg-surface shadow-sm " +
+          "transition-all duration-300 " +
+          "hover:-translate-y-1 hover:shadow-lg",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+);
+
+export interface CardProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof cardVariants> {}
+
+/* ------------------------------------------------------------------ */
+/*  Card                                                              */
+/* ------------------------------------------------------------------ */
+
+const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ className, variant, ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn(cardVariants({ variant }), className)}
+      {...props}
+    />
+  )
+);
 Card.displayName = "Card";
+
+/* ------------------------------------------------------------------ */
+/*  Sub-components (unchanged)                                        */
+/* ------------------------------------------------------------------ */
 
 const CardHeader = React.forwardRef<
   HTMLDivElement,
@@ -72,4 +104,4 @@ const CardFooter = React.forwardRef<
 ));
 CardFooter.displayName = "CardFooter";
 
-export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };
+export { Card, cardVariants, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };
