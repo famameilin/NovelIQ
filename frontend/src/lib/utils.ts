@@ -1,3 +1,5 @@
+import type { TaskStatus } from "@/api/types";
+
 /**
  * Format a number to a fixed number of decimal places
  */
@@ -26,3 +28,24 @@ export function truncate(str: string, maxLength: number): string {
 export function isValidHexColor(hex: string): boolean {
   return /^#[0-9A-Fa-f]{6}$/.test(hex);
 }
+
+// ============================================================
+// Task Status Config
+// ============================================================
+
+type BadgeVariant = "default" | "secondary" | "success" | "destructive" | "outline";
+
+export interface TaskStatusDisplay {
+  label: string;
+  variant: BadgeVariant;
+}
+
+export const taskStatusConfig: Record<TaskStatus, TaskStatusDisplay> = {
+  pending: { label: "等待中", variant: "outline" },
+  chunking: { label: "分块中", variant: "secondary" },
+  annotating: { label: "标注中", variant: "secondary" },
+  aggregating: { label: "聚合中", variant: "secondary" },
+  diagnosing: { label: "诊断中", variant: "secondary" },
+  completed: { label: "已完成", variant: "success" },
+  failed: { label: "失败", variant: "destructive" },
+};
