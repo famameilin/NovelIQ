@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Literal
 
 from loguru import logger
@@ -76,6 +77,29 @@ _STRUCTURED_EVIDENCE_SIGNALS = frozenset({
     EVIDENCE_SIGNAL_IDENTITY_REVEAL,
     EVIDENCE_SIGNAL_STABLE_TITLE,
 })
+
+
+def _build_evidence_audit_fields(profile: EvidenceProfile | None) -> tuple[int, tuple[str, ...]]:
+    """Build audit fields (evidence count, evidence types) from an evidence profile.
+
+    创建时间: 2026-04-02
+    创建者: CodeAI
+    任务: fix/decision-evidence-audit
+    说明: 为 NameReviewState 填充 decision_evidence_count 和 decision_evidence_types，
+          实现文档 §10.4 规划的证据门禁审计链条。
+    """
+    if profile is None:
+        return 0, ()
+    count = 0
+    types: list[str] = []
+    if profile.has_original_sentence:
+        count += 1
+        types.append("original_sentence")
+    for signal in profile.strong_signals:
+        if signal in _STRUCTURED_EVIDENCE_SIGNALS:
+            count += 1
+            types.append(signal)
+    return count, tuple(types)
 
 
 def _count_structured_evidence(profile: EvidenceProfile | None) -> int:
@@ -287,11 +311,16 @@ def apply_disambiguation_decisions(
             if is_confirmed_canonical:
                 new_known_canonical.add(name)
             status_value = DISAMBIG_STATE_RESOLVED if is_confirmed_canonical else DISAMBIG_STATE_REVIEW
+            evidence_count, evidence_types = _build_evidence_audit_fields(evidence_profile)
             new_review_status[name] = NameReviewState(
                 status=status_value,
                 confidence=confidence,
                 proposed_canonical=name,
                 evidence_strength=evidence_strength,
+                decision_evidence_count=evidence_count,
+                decision_evidence_types=evidence_types,
+                decision_source="llm",
+                decision_timestamp=time.time(),
             )
         else:
             new_discovered.add(canonical)
@@ -300,11 +329,16 @@ def apply_disambiguation_decisions(
             new_alias_merges.append((name, canonical))
 
             status_value = DISAMBIG_STATE_RESOLVED if confidence == DISAMBIG_CONFIDENCE_HIGH else DISAMBIG_STATE_REVIEW
+            evidence_count, evidence_types = _build_evidence_audit_fields(evidence_profile)
             new_review_status[name] = NameReviewState(
                 status=status_value,
                 confidence=confidence,
                 proposed_canonical=canonical,
                 evidence_strength=evidence_strength,
+                decision_evidence_count=evidence_count,
+                decision_evidence_types=evidence_types,
+                decision_source="llm",
+                decision_timestamp=time.time(),
             )
 
     old_canonicals = state.known_canonical_names
@@ -335,11 +369,18 @@ def apply_disambiguation_decisions(
                     confidence=review.confidence,
                     proposed_canonical=new_target,
                     evidence_strength=review.evidence_strength,
+                    decision_evidence_count=review.decision_evidence_count,
+                    decision_evidence_types=review.decision_evidence_types,
+                    decision_source=review.decision_source,
+                    decision_timestamp=review.decision_timestamp,
                 )
 
     # Demotion mechanism: if a previously resolved name is now demoted to review,
     # remove its alias_merge entry to prevent stale merges in the graph.
+    # P1 fix: filter alias_merges INLINE during the demotion loop instead of
+    # rebuilding new_alias_merges after the loop (which obscured the data flow).
     old_review_dict = state.get_review_status_dict()
+    demoted_aliases: set[str] = set()
     for name, review in new_review_status.items():
         old_review = old_review_dict.get(name)
         if (
@@ -351,7 +392,10 @@ def apply_disambiguation_decisions(
                 f"Demoting resolved name '{name}' from "
                 f"'{old_review.status}' to '{review.status}'"
             )
-            new_alias_merges = [(a, c) for a, c in new_alias_merges if a != name]
+            demoted_aliases.add(name)
+    # Apply alias_filter in a separate pass to avoid modifying list during iteration.
+    if demoted_aliases:
+        new_alias_merges = [(a, c) for a, c in new_alias_merges if a not in demoted_aliases]
 
     final_alias_merges: list[tuple[str, str]] = []
     seen_aliases: set[str] = set()
