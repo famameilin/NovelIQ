@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 from typing import Any
 
@@ -30,16 +31,19 @@ from src.models.local.disambiguation import (
     ExtendedDisambigResult,
     build_disambiguate_messages,
 )
-from src.storage.repositories import AnnotationRepository
+from src.models.local.disambiguation.result_builder import align_canonical_by_frequency
+from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
+from .candidate_filter import CandidateClassification
 from .candidates import (
     _build_candidate_payload_by_names,
     _build_existing_character_hint_from_db,
     _collect_final_disambiguation_candidates,
     _ensure_state_snapshot_has_known_names,
     extract_new_names_from_db,
+    filter_candidates_by_class,
 )
 from .checkpoint import _save_disambig_checkpoint
 from .relations import (
@@ -56,6 +60,37 @@ from .state_logic import (
 DisambigStateSnapshot = dict[str, dict[str, str]]
 
 
+def _inject_category_into_context(
+    classifications: list[CandidateClassification],
+    context_sentences: dict[str, str],
+) -> None:
+    """将 protected 候选的分类标签注入到上下文字符串前缀。"""
+    for cls in classifications:
+        if cls.category == "protected" and cls.name in context_sentences:
+            ctx = context_sentences[cls.name]
+            context_sentences[cls.name] = f"【受保护-默认不合并】{ctx}"
+
+
+def _collect_review_candidates(
+    state: DisambiguationState,
+) -> list[NameCountCandidate]:
+    """收集需要复审的已判决名字。
+
+    条件（严格，避免推翻已有正确决策）：
+    1. status != resolved
+    2. confidence == low（medium 的不再复审，已有合并决策的不动）
+    """
+    review_dict = state.get_review_status_dict()
+    candidates: list[NameCountCandidate] = []
+    for name, review in review_dict.items():
+        if review.status == "resolved":
+            continue
+        if review.confidence != "low":
+            continue
+        candidates.append({"name": name, "count": 0})  # count 不重要，复审阶段已有上下文
+    return candidates
+
+
 class DisambiguationMaxRetriesExceededError(Exception):
     """
     消歧重试次数耗尽异常
@@ -67,6 +102,35 @@ class DisambiguationMaxRetriesExceededError(Exception):
     """
 
     pass
+
+
+def _get_git_audit_info() -> dict[str, str]:
+    """获取 git 审计信息（模块加载时缓存，避免每次消歧调用 fork 进程）。"""
+    if not hasattr(_get_git_audit_info, "_cache"):
+        info: dict[str, str] = {}
+        try:
+            info["branch"] = (
+                subprocess.check_output(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                .decode()
+                .strip()
+            )
+            info["commit"] = (
+                subprocess.check_output(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                .decode()
+                .strip()
+            )
+        except Exception:
+            pass
+        _get_git_audit_info._cache = info  # type: ignore[attr-defined]
+    return _get_git_audit_info._cache  # type: ignore[attr-defined]
 
 
 def _build_disambig_response_text(result: Any) -> str:
@@ -111,6 +175,9 @@ def _build_disambig_response_text(result: Any) -> str:
             "entity_relations": [],
             "evidence_profiles": {},
         }
+
+    response_dict["audit"] = _get_git_audit_info()
+
     return json.dumps(response_dict, ensure_ascii=False)
 
 
@@ -235,24 +302,50 @@ def _run_incremental_disambiguation_with_state(
         name for name in new_names if name["name"] not in state.discovered_names
     ]
 
-    if not truly_new_names:
+    # Collect review candidates: previously decided names that need re-evaluation
+    review_candidates = _collect_review_candidates(state)
+
+    all_disambig_candidates = truly_new_names + review_candidates
+
+    if not all_disambig_candidates:
         return state
 
-    context_sentences = build_context_sentences(conn, truly_new_names, alias_keywords, run_id=run_id)
+    # Candidate quality filter: remove blacklist, keep protected + normal
+    context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
+    _, all_disambig_candidates, classifications = filter_candidates_by_class(
+        all_disambig_candidates, context_sentences
+    )
+    # Rebuild context for filtered candidates only
+    context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
+    # Inject protected category labels into context for prompt
+    _inject_category_into_context(classifications, context_sentences)
     existing_names = list(state.known_canonical_names)
+    rag_hint = _build_existing_character_hint_from_db(
+        conn, new_names, existing_names, alias_keywords, run_id,
+        graph_repo=GraphRepository(conn),
+    )
 
     result = _retry_disambig(
         incremental_disambig_client,
-        truly_new_names,
+        all_disambig_candidates,
         context_sentences,
         existing_names,
         stage_name="incremental disambiguation",
         run_id=run_id,
+        rag_hint=rag_hint,
     )
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
+    incremental_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in new_names}
+    result = align_canonical_by_frequency(result, all_disambig_candidates, global_freq=incremental_global_freq)
 
     new_state = apply_disambiguation_decisions(state, result)
+
+    # Accumulate entity_types from LLM output into state
+    if result.entity_types:
+        merged_types = dict(state.entity_types)
+        merged_types.update(result.entity_types)
+        new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
 
     if new_state != state:
         logger.debug(
@@ -341,7 +434,17 @@ def _run_final_disambiguation_with_state(
     if candidates:
         candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-        rag_hint = _build_existing_character_hint_from_db(conn, all_names, existing_names, alias_keywords, run_id)
+        # Candidate quality filter: remove blacklist from final disambig candidates
+        _, candidate_payload, f_classifications = filter_candidates_by_class(
+            candidate_payload, context_sentences
+        )
+        context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+        # Inject protected category labels into context for prompt
+        _inject_category_into_context(f_classifications, context_sentences)
+        rag_hint = _build_existing_character_hint_from_db(
+            conn, all_names, existing_names, alias_keywords, run_id,
+            graph_repo=GraphRepository(conn),
+        )
         result = _retry_disambig(
             full_disambig_client,
             candidate_payload,
@@ -352,6 +455,8 @@ def _run_final_disambiguation_with_state(
             rag_hint=rag_hint,
         )
         result = validate_confidence_with_evidence(result, existing_names, context_sentences)
+        final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
+        result = align_canonical_by_frequency(result, candidate_payload, global_freq=final_global_freq)
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(
@@ -364,6 +469,12 @@ def _run_final_disambiguation_with_state(
     new_state = state
     if result.canonical_decisions:
         new_state = apply_disambiguation_decisions(state, result)
+
+    # Merge final disambig entity_types into accumulated state
+    if result.entity_types:
+        merged_types = dict(new_state.entity_types)
+        merged_types.update(result.entity_types)
+        new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
 
     # Promote review-status names with mixed/strong evidence to canonical.
     # These names were seen by the model but never reached high confidence;
@@ -400,12 +511,12 @@ def _run_final_disambiguation_with_state(
         run_id,
         new_state.known_canonical_names,
         novel_id=novel_id,
-        entity_types=result.entity_types if result else None,
+        entity_types=new_state.get_entity_types_dict() or None,
     )
-    ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
+    ann_repo.cleanup_self_loop_relations(run_id)
     conn.commit()
     logger.info(
-        "Stateful final disambiguation persisted: {} canonicals, {} merges (legacy aliases will be mirrored from graph tables)",
+        "Stateful final disambiguation persisted: {} canonicals, {} merges",
         len(new_state.known_canonical_names),
         len(new_state.alias_merges),
     )
