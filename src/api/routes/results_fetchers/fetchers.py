@@ -116,8 +116,15 @@ def _fetch_characters(
       - 增加 arc_scores 和 main_characters 参数
       - 实现 protagonist_score 四维度融合计算
       - 实现 is_protagonist 判定逻辑
+
+    修改时间: 2026-04-02
+    修改者: TraeAI
+    任务: P2.1-downstream-switch
+    修改内容: 从 graph_entity_aliases 获取权威别名映射
     """
-    alias_map = annotation_repo.fetch_alias_map(run_id)
+    # 从 graph_entity_aliases 获取权威别名映射
+    graph_repo = GraphRepository(annotation_repo.session)
+    alias_map = graph_repo.fetch_alias_map(run_id)
 
     rows = annotation_repo.fetch_characters_with_scores(run_id)
 

@@ -405,13 +405,20 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         self,
         run_id: str,
         entity_type: str | None = None,
+        status: str | None = None,
     ) -> list[GraphEntity]:
         """
         获取指定运行的图谱实体（ORM 对象）。
 
+        修改时间: 2026-04-02
+        修改者: TraeAI
+        任务: P2.1-downstream-switch
+        修改内容: 新增 status 参数支持按状态过滤
+
         Args:
             run_id: 运行ID
             entity_type: 可选的实体类型过滤（如 "character"）
+            status: 可选的状态过滤（如 "active"）
 
         Returns:
             GraphEntity ORM 对象列表
@@ -419,6 +426,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         stmt = select(GraphEntity).where(GraphEntity.run_id == run_id)
         if entity_type is not None:
             stmt = stmt.where(GraphEntity.entity_type == entity_type)
+        if status is not None:
+            stmt = stmt.where(GraphEntity.status == status)
         return list(self.session.execute(stmt).scalars().all())
 
     def fetch_relation_event_models(self, run_id: str) -> list[GraphRelationEvent]:
