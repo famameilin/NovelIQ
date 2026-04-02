@@ -35,7 +35,7 @@ export function SegmentedBar({ segments, className }: SegmentedBarProps) {
           const pct = (seg.value / total) * 100;
           return (
             <SegmentBarItem
-              key={seg.label}
+              key={`${seg.label}-${i}`}
               colorClass={seg.colorClass}
               width={pct}
               delay={i * 0.1}

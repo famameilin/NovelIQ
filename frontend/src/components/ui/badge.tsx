@@ -1,6 +1,5 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
 
 const badgeVariants = cva(
@@ -31,11 +30,8 @@ export interface BadgeProps
 
 function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <motion.div
+    <div
       className={cn(badgeVariants({ variant }), className)}
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.15, ease: "easeOut" }}
       {...props}
     />
   );
