@@ -1,3 +1,5 @@
+import { motion, useInView } from "framer-motion";
+import { useRef } from "react";
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
@@ -7,13 +9,11 @@ import { cn } from "@/lib/cn";
 export interface SegmentedBarSegment {
   label: string;
   value: number;
-  /** Tailwind background class, e.g. "bg-primary" */
   colorClass: string;
 }
 
 export interface SegmentedBarProps {
   segments: SegmentedBarSegment[];
-  /** Additional className for the entire wrapper */
   className?: string;
 }
 
@@ -22,30 +22,30 @@ export interface SegmentedBarProps {
 /* ------------------------------------------------------------------ */
 
 export function SegmentedBar({ segments, className }: SegmentedBarProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isInView = useInView(containerRef, { once: true, margin: "-30px" });
+
   const total = segments.reduce((sum, s) => sum + s.value, 0);
   if (total === 0) return null;
 
   return (
-    <div className={cn("mt-4 space-y-1.5", className)}>
-      {/* Bar — same h-1.5 as MetricCard progress bar */}
+    <div ref={containerRef} className={cn("mt-4 space-y-1.5", className)}>
       <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-border">
-        {segments.map((seg) => {
+        {segments.map((seg, i) => {
           const pct = (seg.value / total) * 100;
           return (
-            <div
-              key={seg.label}
-              className={cn(
-                "h-full transition-all duration-500",
-                "first:rounded-l-full last:rounded-r-full",
-                seg.colorClass,
-              )}
-              style={{ width: `${pct}%` }}
+            <SegmentBarItem
+              key={`${seg.label}-${i}`}
+              colorClass={seg.colorClass}
+              width={pct}
+              delay={i * 0.1}
+              isLast={i === segments.length - 1}
+              isInView={isInView}
             />
           );
         })}
       </div>
 
-      {/* Legend row — markers evenly distributed left / center / right */}
       <div className="flex w-full items-start justify-between">
         {segments.map((seg) => (
           <div key={seg.label} className="flex items-center gap-1">
@@ -62,5 +62,33 @@ export function SegmentedBar({ segments, className }: SegmentedBarProps) {
         ))}
       </div>
     </div>
+  );
+}
+
+function SegmentBarItem({
+  colorClass,
+  width,
+  delay,
+  isLast,
+  isInView,
+}: {
+  colorClass: string;
+  width: number;
+  delay: number;
+  isLast: boolean;
+  isInView: boolean;
+}) {
+  return (
+    <motion.div
+      className={cn("h-full", colorClass, isLast && "rounded-r-full")}
+      initial={{ scaleX: 0 }}
+      animate={{ scaleX: isInView ? 1 : 0 }}
+      transition={{
+        duration: 0.6,
+        delay: isInView ? delay : 0,
+        ease: [0.16, 1, 0.3, 1],
+      }}
+      style={{ transformOrigin: "left", width: `${width}%` }}
+    />
   );
 }
