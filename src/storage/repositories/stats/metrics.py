@@ -269,6 +269,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
         protagonist=analysis.protagonist,
         main_characters=main_characters_json,
         core_cast=core_cast_json,
+        theme_color=analysis.theme_color,
         run_id=run_id,
     )
     session.add(cloud_analysis)
@@ -334,6 +335,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
         "protagonist": result.protagonist,
         "main_characters": result.main_characters,
         "core_cast": result.core_cast,
+        "theme_color": result.theme_color,
         "run_id": result.run_id,
     }
 

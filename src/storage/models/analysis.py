@@ -59,6 +59,7 @@ class CloudAnalysis(Base):
     protagonist: Mapped[str | None] = mapped_column(Text, nullable=True)
     main_characters: Mapped[str | None] = mapped_column(Text, nullable=True)
     core_cast: Mapped[str | None] = mapped_column(Text, nullable=True)
+    theme_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
     )
