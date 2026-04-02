@@ -332,7 +332,7 @@ def _run_incremental_disambiguation_with_state(
     if result.entity_types:
         merged_types = dict(state.entity_types)
         merged_types.update(result.entity_types)
-        new_state = new_state.with_updates(entity_types=merged_types)
+        new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
 
     if new_state != state:
         logger.debug(
@@ -461,7 +461,7 @@ def _run_final_disambiguation_with_state(
     if result.entity_types:
         merged_types = dict(new_state.entity_types)
         merged_types.update(result.entity_types)
-        new_state = new_state.with_updates(entity_types=merged_types)
+        new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
 
     # Promote review-status names with mixed/strong evidence to canonical.
     # These names were seen by the model but never reached high confidence;
@@ -498,9 +498,9 @@ def _run_final_disambiguation_with_state(
         run_id,
         new_state.known_canonical_names,
         novel_id=novel_id,
-        entity_types=new_state.entity_types or None,
+        entity_types=new_state.get_entity_types_dict() or None,
     )
-    ann_repo.apply_alias_merges(run_id, new_state.get_alias_merges_dict())
+    ann_repo.cleanup_self_loop_relations(run_id)
     conn.commit()
     logger.info(
         "Stateful final disambiguation persisted: {} canonicals, {} merges",

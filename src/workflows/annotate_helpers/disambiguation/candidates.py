@@ -330,19 +330,6 @@ def filter_candidates_by_class(
     filtered_cls, remaining_cls = candidate_filter.classify_batch(
         [dict(c) for c in candidates], context_sentences
     )
-    """基于候选分类器过滤候选名。
-
-    返回:
-        filtered: 被黑名单过滤的候选（丢弃）
-        remaining: 保留的候选（protected + normal，送消歧）
-        classifications: 所有候选的分类结果（用于审计和 prompt 标记）
-    """
-    if candidate_filter is None:
-        candidate_filter = CandidateFilter()
-
-    filtered_cls, remaining_cls = candidate_filter.classify_batch(
-        [dict(c) for c in candidates], context_sentences
-    )
 
     filtered_names = {c.name for c in filtered_cls}
     filtered: list[NameCountCandidate] = [c for c in candidates if c["name"] in filtered_names]
