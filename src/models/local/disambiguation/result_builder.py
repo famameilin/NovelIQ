@@ -153,11 +153,9 @@ def build_extended_result_from_response(
     valid_entity_type_keys = set(name_list) | set(canonical_decisions.values())
     filtered_entity_types = {k: v for k, v in entity_types.items() if k in valid_entity_type_keys}
     if len(filtered_entity_types) < len(entity_types):
-        from src.utils.logging import get_logger
-        logger = get_logger(__name__)
         invalid_keys = set(entity_types.keys()) - set(filtered_entity_types.keys())
         logger.debug(
-            "Filtered %d invalid entity_type keys: %s",
+            "Filtered {} invalid entity_type keys: {}",
             len(entity_types) - len(filtered_entity_types),
             invalid_keys,
         )
