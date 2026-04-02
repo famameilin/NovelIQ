@@ -73,6 +73,10 @@ class CloudAnalysis(BaseModel):
     protagonist: str | None = None
     main_characters: list[str] = Field(default_factory=list)
     core_cast: list[str] = Field(default_factory=list)
+    theme_color: str | None = Field(
+        default=None,
+        description="小说主题色，十六进制格式，如 #4A90D9",
+    )
 
     @field_validator("value_logic_type")
     @classmethod
@@ -109,4 +113,5 @@ class CloudAnalysis(BaseModel):
             "protagonist": self.protagonist,
             "main_characters": list(self.main_characters),
             "core_cast": list(self.core_cast),
+            "theme_color": self.theme_color,
         }

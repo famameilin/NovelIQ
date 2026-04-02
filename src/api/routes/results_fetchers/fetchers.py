@@ -298,6 +298,7 @@ def _fetch_diagnosis(
         protagonist=protagonist_normalized,
         main_characters=main_characters_normalized,
         core_cast=core_cast_normalized,
+        theme_color=data.get("theme_color"),
     )
 
 
