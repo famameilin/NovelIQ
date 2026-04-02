@@ -80,6 +80,8 @@
     --text-on-primary: 234 15% 10%;
 
     --chart-neutral: 234 10% 50%;
+    --chart-positive: 145 55% 45%;
+    --chart-negative: 0 60% 50%;
   }
 }
 

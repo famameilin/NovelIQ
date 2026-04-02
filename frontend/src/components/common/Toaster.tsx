@@ -8,7 +8,6 @@ export function Toaster() {
     <SonnerToaster
       theme={isDark ? "dark" : "light"}
       position="top-right"
-      richColors
       toastOptions={{
         style: {
           background: "hsl(var(--surface))",

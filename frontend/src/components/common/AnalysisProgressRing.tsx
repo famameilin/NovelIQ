@@ -29,12 +29,18 @@ export function AnalysisProgressRing({
     <div
       className={cn("relative inline-flex items-center justify-center", className)}
       style={{ width: size, height: size }}
+      role="progressbar"
+      aria-valuenow={Math.round(clampedProgress)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={label ?? `进度 ${Math.round(clampedProgress)}%`}
     >
       <svg
         width={size}
         height={size}
         className="-rotate-90"
         viewBox={`0 0 ${size} ${size}`}
+        aria-hidden="true"
       >
         {/* Background track */}
         <circle

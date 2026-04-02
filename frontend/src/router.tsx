@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { HomePage } from "@/pages/HomePage";
@@ -9,14 +10,24 @@ import { TopicsPage } from "@/pages/TopicsPage";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { DiagnosisPage } from "@/pages/DiagnosisPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
-import { ComponentShowcase } from "@/pages/ComponentShowcase";
+
+const ComponentShowcase = lazy(
+  () => import("@/pages/ComponentShowcase").then((m) => ({ default: m.ComponentShowcase }))
+);
 
 export const router = createBrowserRouter([
   {
     element: <AppLayout />,
     children: [
       { path: "/", element: <HomePage /> },
-      { path: "/dev/components", element: <ComponentShowcase /> },
+      {
+        path: "/dev/components",
+        element: (
+          <Suspense fallback={null}>
+            <ComponentShowcase />
+          </Suspense>
+        ),
+      },
     ],
   },
   {
