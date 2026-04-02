@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
@@ -7,16 +8,13 @@ import { cn } from "@/lib/cn";
 /* ------------------------------------------------------------------ */
 
 const cardVariants = cva(
-  "border bg-surface transition-all",
+  "border bg-surface",
   {
     variants: {
       variant: {
         default: "border-border shadow-sm",
         elevated:
-          "border-border overflow-hidden " +
-          "bg-surface shadow-sm " +
-          "transition-all duration-300 " +
-          "hover:-translate-y-1 hover:shadow-lg",
+          "border-border overflow-hidden bg-surface shadow-sm",
       },
     },
     defaultVariants: {
@@ -34,13 +32,29 @@ export interface CardProps
 /* ------------------------------------------------------------------ */
 
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
-  ({ className, variant, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn(cardVariants({ variant }), className)}
-      {...props}
-    />
-  )
+  ({ className, variant, ...props }, ref) => {
+    const baseClasses = cardVariants({ variant });
+
+    if (variant === "elevated") {
+      return (
+        <motion.div
+          ref={ref as React.Ref<HTMLDivElement>}
+          className={cn(baseClasses, className)}
+          whileHover={{ scale: 1.02, y: -4 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          {...(props as React.HTMLAttributes<HTMLDivElement>)}
+        />
+      );
+    }
+
+    return (
+      <div
+        ref={ref}
+        className={cn(baseClasses, className)}
+        {...props}
+      />
+    );
+  }
 );
 Card.displayName = "Card";
 
