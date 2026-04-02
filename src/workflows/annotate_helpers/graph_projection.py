@@ -143,9 +143,7 @@ def project_graph_tables(
 
     # P1.1 fix: batch-load existing entity types to avoid hardcoded "character"
     existing_entities = graph_repo.fetch_entities(run_id)
-    existing_types: dict[str, str] = {
-        e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name
-    }
+    existing_types: dict[str, str] = {e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name}
     # Merge disambiguation entity_types so LLM-judged types flow into graph projection
     if state.entity_types:
         existing_types.update(state.get_entity_types_dict())
@@ -165,13 +163,13 @@ def project_graph_tables(
             uncertain_names.add(name)
             logger.debug(
                 "Uncertain name skipped: '{}' (status={}, confidence={})",
-                name, review.status, review.confidence,
+                name,
+                review.status,
+                review.confidence,
             )
 
     if uncertain_names:
-        logger.info(
-            f"Skipping {len(uncertain_names)} uncertain names from graph projection: {uncertain_names}"
-        )
+        logger.info(f"Skipping {len(uncertain_names)} uncertain names from graph projection: {uncertain_names}")
 
     for row in chunk_characters:
         resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)
@@ -282,7 +280,8 @@ def project_graph_tables(
             pending_count += 1
             logger.debug(
                 "Skipping relation with uncertain endpoint: '{}' or '{}'",
-                resolved_from, resolved_to,
+                resolved_from,
+                resolved_to,
             )
             continue
 
@@ -365,7 +364,8 @@ def project_graph_tables(
         if rel_type not in valid_relation_types:
             logger.warning(
                 "Skipping relation with invalid type '{}' (chunk={})",
-                rel_type, relation.chunk_id,
+                rel_type,
+                relation.chunk_id,
             )
             relation.projection_status = "pending"
             relation.projection_error = f"invalid relation_type: {rel_type}"
@@ -375,7 +375,8 @@ def project_graph_tables(
         if rel_change not in VALID_CHANGE_TYPES:
             logger.warning(
                 "Skipping relation with invalid change '{}' (chunk={})",
-                rel_change, relation.chunk_id,
+                rel_change,
+                relation.chunk_id,
             )
             relation.projection_status = "pending"
             relation.projection_error = f"invalid change_type: {rel_change}"
@@ -413,7 +414,10 @@ def project_graph_tables(
 
     session.commit()
     logger.info(
-        "graph projection completed run_id={} from_chunk={} to_chunk={} rebuild={} window_relations={} retried_pending={} total_relations={} projected={} pending={} failed={} affected_pairs={}",
+        "graph projection completed: "
+        "run_id={} from_chunk={} to_chunk={} rebuild={} "
+        "window_relations={} retried_pending={} total_relations={} "
+        "projected={} pending={} failed={} affected_pairs={}",
         run_id,
         from_chunk,
         to_chunk,

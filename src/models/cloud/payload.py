@@ -161,7 +161,10 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     }
 
     logger.info(
-        "[云端模型] 诊断payload构建完成: pivot_blocks=%d pivot_moments=%d high_tension=%d relations=%d foreshadowing=%d topic_words=%d known_characters=%d alias_merges=%d graph_nodes=%d",
+        "[云端模型] 诊断payload构建完成: "
+        "pivot_blocks=%d pivot_moments=%d high_tension=%d "
+        "relations=%d foreshadowing=%d topic_words=%d "
+        "known_characters=%d alias_merges=%d graph_nodes=%d",
         len(pivot_blocks),
         len(pivot_moments),
         len(high_tension),

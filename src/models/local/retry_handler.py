@@ -188,7 +188,11 @@ class AnnotationRetryHandler[T]:
 
     def _raise_max_retries_error(self) -> NoReturn:
         """抛出最大重试次数 exceeded 错误"""
-        error_msg = f"{self.config.operation_name} failed after {self.config.max_retries} local + 1 cloud retries: {str(self.state.last_error)}"
+        error_msg = (
+            f"{self.config.operation_name} failed after "
+            f"{self.config.max_retries} local + 1 cloud retries: "
+            f"{str(self.state.last_error)}"
+        )
         logger.error(
             "{} failed after all retries chunk_id={}: {}",
             self.config.operation_name,

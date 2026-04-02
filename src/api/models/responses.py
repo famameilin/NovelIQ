@@ -239,7 +239,11 @@ class TopicInfo(BaseModel):
 class DiagnosisResult(BaseModel):
     foreshadow_rate: float | None = Field(
         default=None,
-        description="伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示，取值范围 0-1。该值由 diagnosis 阶段整体评估，不应与 chunk_annotations.has_foreshadowing 的占比直接比较。",
+        description=(
+            "伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示，"
+            "取值范围 0-1。该值由 diagnosis 阶段整体评估，"
+            "不应与 chunk_annotations.has_foreshadowing 的占比直接比较。"
+        ),
     )
     arc_scores: list[float] | dict[str, float] | None = None
     narrative_type: str | None = None

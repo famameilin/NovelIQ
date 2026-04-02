@@ -48,10 +48,12 @@ DISAMBIG_STATE_UNRESOLVED: _DisambigStateLiteral = "unresolved"
 # Only these evidence signals justify overriding a model's self-mapping decision.
 # naming_scene and stable_title_or_rank are excluded because "being mentioned in
 # the same context as X" does NOT imply "is an alias of X".
-_OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset({
-    EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
-    EVIDENCE_SIGNAL_IDENTITY_REVEAL,
-})
+_OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
+    {
+        EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
+        EVIDENCE_SIGNAL_IDENTITY_REVEAL,
+    }
+)
 
 
 def _normalize_disambig_confidence(confidence: Any) -> Literal["low", "medium", "high"]:
@@ -70,13 +72,15 @@ def _disambig_confidence_rank(confidence: str) -> int:
 
 
 # Signals that count as "structured evidence" for the evidence gate.
-_STRUCTURED_EVIDENCE_SIGNALS = frozenset({
-    EVIDENCE_SIGNAL_NAMING_SCENE,
-    EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
-    EVIDENCE_SIGNAL_KINSHIP_IDENTITY,
-    EVIDENCE_SIGNAL_IDENTITY_REVEAL,
-    EVIDENCE_SIGNAL_STABLE_TITLE,
-})
+_STRUCTURED_EVIDENCE_SIGNALS = frozenset(
+    {
+        EVIDENCE_SIGNAL_NAMING_SCENE,
+        EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
+        EVIDENCE_SIGNAL_KINSHIP_IDENTITY,
+        EVIDENCE_SIGNAL_IDENTITY_REVEAL,
+        EVIDENCE_SIGNAL_STABLE_TITLE,
+    }
+)
 
 
 def _build_evidence_audit_fields(profile: EvidenceProfile | None) -> tuple[int, tuple[str, ...]]:
@@ -383,15 +387,8 @@ def apply_disambiguation_decisions(
     demoted_aliases: set[str] = set()
     for name, review in new_review_status.items():
         old_review = old_review_dict.get(name)
-        if (
-            old_review
-            and old_review.status == DISAMBIG_STATE_RESOLVED
-            and review.status != DISAMBIG_STATE_RESOLVED
-        ):
-            logger.warning(
-                f"Demoting resolved name '{name}' from "
-                f"'{old_review.status}' to '{review.status}'"
-            )
+        if old_review and old_review.status == DISAMBIG_STATE_RESOLVED and review.status != DISAMBIG_STATE_RESOLVED:
+            logger.warning(f"Demoting resolved name '{name}' from '{old_review.status}' to '{review.status}'")
             demoted_aliases.add(name)
     # Apply alias_filter in a separate pass to avoid modifying list during iteration.
     if demoted_aliases:

@@ -52,7 +52,10 @@ class CloudAnalysis(BaseModel):
         default=None,
         ge=0,
         le=1,
-        description="伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示。该值来自 diagnosis 阶段的整体评估，不等于含伏笔 chunk 的占比。",
+        description=(
+            "伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示。"
+            "该值来自 diagnosis 阶段的整体评估，不等于含伏笔 chunk 的占比。"
+        ),
     )
     arc_scores: list[float] | dict[str, float] = Field(default_factory=list)
     narrative_type: str | None = None
