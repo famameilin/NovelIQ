@@ -1,21 +1,21 @@
 @import "tailwindcss";
 
-@theme {
-  --color-primary: hsl(var(--color-primary));
-  --color-primary-hover: hsl(var(--color-primary-hover));
-  --color-primary-active: hsl(var(--color-primary-active));
-  --color-primary-subtle: hsl(var(--color-primary-subtle));
+@theme inline {
+  --color-primary: hsl(var(--primary));
+  --color-primary-hover: hsl(var(--primary-hover));
+  --color-primary-active: hsl(var(--primary-active));
+  --color-primary-subtle: hsl(var(--primary-subtle));
 
-  --color-background: hsl(var(--color-background));
-  --color-surface: hsl(var(--color-surface));
-  --color-surface-hover: hsl(var(--color-surface-hover));
-  --color-border: hsl(var(--color-border));
-  --color-border-subtle: hsl(var(--color-border-subtle));
+  --color-background: hsl(var(--background));
+  --color-surface: hsl(var(--surface));
+  --color-surface-hover: hsl(var(--surface-hover));
+  --color-border: hsl(var(--border));
+  --color-border-subtle: hsl(var(--border-subtle));
 
-  --color-text: hsl(var(--color-text));
-  --color-text-secondary: hsl(var(--color-text-secondary));
-  --color-text-muted: hsl(var(--color-text-muted));
-  --color-text-on-primary: hsl(var(--color-text-on-primary));
+  --color-text: hsl(var(--text));
+  --color-text-secondary: hsl(var(--text-secondary));
+  --color-text-muted: hsl(var(--text-muted));
+  --color-text-on-primary: hsl(var(--text-on-primary));
 
   --color-chart-1: hsl(var(--chart-1));
   --color-chart-2: hsl(var(--chart-2));
@@ -34,21 +34,21 @@
 
 @layer base {
   :root {
-    --color-primary: 234 89% 67%;
-    --color-primary-hover: 234 89% 60%;
-    --color-primary-active: 234 89% 54%;
-    --color-primary-subtle: 234 69% 95%;
+    --primary: 234 89% 67%;
+    --primary-hover: 234 89% 60%;
+    --primary-active: 234 89% 54%;
+    --primary-subtle: 234 69% 95%;
 
-    --color-background: 234 15% 98%;
-    --color-surface: 234 12% 100%;
-    --color-surface-hover: 234 15% 96%;
-    --color-border: 234 12% 90%;
-    --color-border-subtle: 234 8% 94%;
+    --background: 234 25% 97%;
+    --surface: 234 20% 99%;
+    --surface-hover: 234 25% 95%;
+    --border: 234 20% 88%;
+    --border-subtle: 234 15% 93%;
 
-    --color-text: 234 15% 12%;
-    --color-text-secondary: 234 10% 40%;
-    --color-text-muted: 234 8% 55%;
-    --color-text-on-primary: 0 0% 100%;
+    --text: 234 15% 12%;
+    --text-secondary: 234 10% 40%;
+    --text-muted: 234 8% 55%;
+    --text-on-primary: 0 0% 100%;
 
     --chart-1: 234 89% 55%;
     --chart-2: 274 79% 55%;
@@ -63,21 +63,21 @@
   }
 
   .dark {
-    --color-primary: 234 84% 60%;
-    --color-primary-hover: 234 84% 67%;
-    --color-primary-active: 234 84% 73%;
-    --color-primary-subtle: 234 64% 15%;
+    --primary: 234 84% 60%;
+    --primary-hover: 234 84% 67%;
+    --primary-active: 234 84% 73%;
+    --primary-subtle: 234 64% 15%;
 
-    --color-background: 234 12% 7%;
-    --color-surface: 234 10% 11%;
-    --color-surface-hover: 234 12% 15%;
-    --color-border: 234 10% 18%;
-    --color-border-subtle: 234 8% 14%;
+    --background: 234 20% 7%;
+    --surface: 234 18% 11%;
+    --surface-hover: 234 20% 15%;
+    --border: 234 18% 20%;
+    --border-subtle: 234 15% 15%;
 
-    --color-text: 234 10% 93%;
-    --color-text-secondary: 234 8% 65%;
-    --color-text-muted: 234 6% 48%;
-    --color-text-on-primary: 234 15% 10%;
+    --text: 234 10% 93%;
+    --text-secondary: 234 8% 65%;
+    --text-muted: 234 6% 48%;
+    --text-on-primary: 234 15% 10%;
 
     --chart-neutral: 234 10% 50%;
   }
@@ -85,12 +85,12 @@
 
 @layer base {
   * {
-    border-color: hsl(var(--color-border));
+    border-color: hsl(var(--border));
   }
 
   body {
-    background-color: hsl(var(--color-background));
-    color: hsl(var(--color-text));
+    background-color: hsl(var(--background));
+    color: hsl(var(--text));
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
