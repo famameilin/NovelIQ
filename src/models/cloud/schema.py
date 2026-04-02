@@ -78,6 +78,19 @@ class CloudAnalysis(BaseModel):
         description="小说主题色，十六进制格式，如 #4A90D9",
     )
 
+    @field_validator("theme_color")
+    @classmethod
+    def validate_theme_color(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        # 去除首尾空白
+        v = v.strip()
+        # 校验十六进制格式 (#RRGGBB 或 #RGB)
+        import re
+        if not re.match(r"^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$", v):
+            return None  # 非法格式返回 None，由前端兜底
+        return v
+
     @field_validator("value_logic_type")
     @classmethod
     def validate_value_logic_type(cls, v: ValueLogicType | str | None) -> ValueLogicType | str | None:
