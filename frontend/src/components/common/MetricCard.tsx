@@ -131,14 +131,20 @@ function AnimatedNumber({
 
       if (progress < 1) {
         rafRef.current = requestAnimationFrame(tick);
-      } else {
-        prevRef.current = raw;
       }
     };
 
     rafRef.current = requestAnimationFrame(tick);
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        if (startTime !== null) {
+          const elapsed = performance.now() - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          prevRef.current = start + (raw - start) * eased;
+        }
+      }
     };
   }, [raw, format, decimals, maxScore]);
 

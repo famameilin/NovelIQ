@@ -18,7 +18,7 @@ export function AnalysisProgressRing({
   className,
 }: AnalysisProgressRingProps) {
   const ref = useRef<HTMLDivElement>(null);
-  useInView(ref, { once: true, margin: "-20px" });
+  const isInView = useInView(ref, { once: true, margin: "-20px" });
 
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -67,7 +67,7 @@ export function AnalysisProgressRing({
           strokeLinecap="round"
           stroke={`url(#${gradientId})`}
           initial={{ strokeDashoffset: circumference }}
-          animate={{ strokeDashoffset: circumference - (clampedProgress / 100) * circumference }}
+          animate={isInView ? { strokeDashoffset: circumference - (clampedProgress / 100) * circumference } : { strokeDashoffset: circumference }}
           transition={{ duration: 0.8, ease: "easeOut" }}
           style={{ strokeDasharray: circumference }}
         />

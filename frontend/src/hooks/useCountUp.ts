@@ -15,16 +15,12 @@ export function useCountUp(
 
   const [displayValue, setDisplayValue] = useState(start);
   const rafRef = useRef<number | null>(null);
-  const hasStartedRef = useRef(false);
 
   useEffect(() => {
     if (!enabled) {
       setDisplayValue(start);
       return;
     }
-
-    if (hasStartedRef.current) return;
-    hasStartedRef.current = true;
 
     let startTime: number | null = null;
 
