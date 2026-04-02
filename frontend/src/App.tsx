@@ -1,5 +1,8 @@
 import { RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { Toaster } from "@/components/common/Toaster";
 import { router } from "./router";
 import { useNovelTheme } from "@/hooks/useNovelTheme";
 
@@ -20,8 +23,13 @@ function ThemeInitializer() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeInitializer />
-      <RouterProvider router={router} />
+      <TooltipProvider delayDuration={300}>
+        <ThemeInitializer />
+        <ErrorBoundary>
+          <RouterProvider router={router} />
+        </ErrorBoundary>
+        <Toaster />
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
