@@ -150,6 +150,18 @@ def build_extended_result_from_response(
         context = context_sentences.get(name, "") if context_sentences else ""
         evidence_profiles[name] = build_evidence_profile(context)
     entity_types = dict(response_data.entity_types)
+    valid_entity_type_keys = set(name_list) | set(canonical_decisions.values())
+    filtered_entity_types = {k: v for k, v in entity_types.items() if k in valid_entity_type_keys}
+    if len(filtered_entity_types) < len(entity_types):
+        from src.utils.logging import get_logger
+        logger = get_logger(__name__)
+        invalid_keys = set(entity_types.keys()) - set(filtered_entity_types.keys())
+        logger.debug(
+            "Filtered %d invalid entity_type keys: %s",
+            len(entity_types) - len(filtered_entity_types),
+            invalid_keys,
+        )
+    entity_types = filtered_entity_types
     entity_relations: list[dict[str, str]] = []
     for rel in response_data.entity_relations:
         entity_relations.append(
