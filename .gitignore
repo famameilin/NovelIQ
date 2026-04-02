@@ -6,12 +6,12 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -180,3 +180,9 @@ deprecated/
 
 # Understand Everything Dashboard - 独立的前端可视化工具
 /understand-everything/
+
+# Frontend (Node.js)
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
