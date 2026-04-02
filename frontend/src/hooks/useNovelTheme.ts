@@ -1,10 +1,10 @@
-import { useEffect, useCallback } from "react";
-import { useThemeStore } from "@/store/themeStore";
+import { useEffect } from "react";
+import { useThemeStore, DEFAULT_SEED } from "@/store/themeStore";
 import { useNovelStore } from "@/store/novelStore";
 import { generateThemePalette } from "@/lib/theme";
 import { getDiagnosis } from "@/api/results";
 
-const DEFAULT_SEED = "#6366F1";
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 /**
  * Applies the dynamic theme palette to :root CSS variables.
@@ -14,31 +14,38 @@ export function useNovelTheme() {
   const { seedColor, isDark, setSeedColor } = useThemeStore();
   const { currentNovelId, currentTaskId } = useNovelStore();
 
-  // Fetch and apply theme color from diagnosis API
-  const fetchAndApplyTheme = useCallback(async () => {
-    if (!currentNovelId || !currentTaskId) {
-      // No novel selected, use default
-      setSeedColor(DEFAULT_SEED);
-      return;
-    }
-
-    try {
-      const diagnosis = await getDiagnosis(currentNovelId, currentTaskId);
-      if (diagnosis?.theme_color) {
-        setSeedColor(diagnosis.theme_color);
-      } else {
-        setSeedColor(DEFAULT_SEED);
-      }
-    } catch (e) {
-      console.warn("Failed to fetch theme color:", e);
-      setSeedColor(DEFAULT_SEED);
-    }
-  }, [currentNovelId, currentTaskId, setSeedColor]);
-
   // Fetch theme when novel/task changes
   useEffect(() => {
-    fetchAndApplyTheme();
-  }, [fetchAndApplyTheme]);
+    let cancelled = false;
+
+    const run = async () => {
+      if (!currentNovelId || !currentTaskId) {
+        setSeedColor(DEFAULT_SEED);
+        return;
+      }
+
+      try {
+        const diagnosis = await getDiagnosis(currentNovelId, currentTaskId);
+        if (!cancelled) {
+          setSeedColor(
+            diagnosis?.theme_color && HEX_COLOR_RE.test(diagnosis.theme_color)
+              ? diagnosis.theme_color
+              : DEFAULT_SEED
+          );
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn("Failed to fetch theme color:", e);
+          setSeedColor(DEFAULT_SEED);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentNovelId, currentTaskId, setSeedColor]);
 
   // Apply theme to CSS variables
   useEffect(() => {
