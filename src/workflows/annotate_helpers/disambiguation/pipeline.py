@@ -345,8 +345,17 @@ def _run_incremental_disambiguation_with_state(
 
     # Accumulate entity_types from LLM output into state
     if result.entity_types:
+        valid_names = new_state.discovered_names | new_state.known_canonical_names
+        filtered_types = {k: v for k, v in result.entity_types.items() if k in valid_names}
+        if len(filtered_types) < len(result.entity_types):
+            invalid_keys = set(result.entity_types.keys()) - set(filtered_types.keys())
+            logger.warning(
+                "Filtered %d invalid entity_type keys in incremental disambig: %s",
+                len(result.entity_types) - len(filtered_types),
+                invalid_keys,
+            )
         merged_types = dict(state.entity_types)
-        merged_types.update(result.entity_types)
+        merged_types.update(filtered_types)
         new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
 
     if new_state != state:
@@ -476,8 +485,17 @@ def _run_final_disambiguation_with_state(
 
     # Merge final disambig entity_types into accumulated state
     if result.entity_types:
+        valid_names = new_state.discovered_names | new_state.known_canonical_names
+        filtered_types = {k: v for k, v in result.entity_types.items() if k in valid_names}
+        if len(filtered_types) < len(result.entity_types):
+            invalid_keys = set(result.entity_types.keys()) - set(filtered_types.keys())
+            logger.warning(
+                "Filtered %d invalid entity_type keys in final disambig: %s",
+                len(result.entity_types) - len(filtered_types),
+                invalid_keys,
+            )
         merged_types = dict(new_state.entity_types)
-        merged_types.update(result.entity_types)
+        merged_types.update(filtered_types)
         new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
 
     # Promote review-status names with mixed/strong evidence to canonical.
