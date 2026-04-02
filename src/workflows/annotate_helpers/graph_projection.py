@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import text
 
+from src.config import settings
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
@@ -14,7 +15,6 @@ from src.workflows.annotate_helpers.disambiguation.checkpoint import (
 
 PENDING_RETRY_LIMIT = 200
 
-VALID_RELATION_TYPES = frozenset({"师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"})
 VALID_CHANGE_TYPES = frozenset({"强化", "弱化", "新建", "断裂", "无变化"})
 
 
@@ -148,7 +148,7 @@ def project_graph_tables(
     }
     # Merge disambiguation entity_types so LLM-judged types flow into graph projection
     if state.entity_types:
-        existing_types.update(state.entity_types)
+        existing_types.update(state.get_entity_types_dict())
 
     # Build set of uncertain names: review/low status, not in alias_merges or known_canonicals
     review_dict = state.get_review_status_dict()
@@ -274,6 +274,17 @@ def project_graph_tables(
             relation.projected_at = None
             failed_count += 1
             continue
+        # P4: Filter uncertain endpoints from relation projection
+        if resolved_from in uncertain_names or resolved_to in uncertain_names:
+            relation.projection_status = "pending"
+            relation.projection_error = "uncertain endpoint"
+            relation.projected_at = None
+            pending_count += 1
+            logger.debug(
+                "Skipping relation with uncertain endpoint: '{}' or '{}'",
+                resolved_from, resolved_to,
+            )
+            continue
 
         from_entity = graph_repo.upsert_entity(
             run_id=run_id,
@@ -350,7 +361,8 @@ def project_graph_tables(
         rel_change = relation.change or "无变化"
 
         # Validate relation_type and change_type before writing to graph
-        if rel_type not in VALID_RELATION_TYPES:
+        valid_relation_types = frozenset(settings.analysis.valid_relation_types)
+        if rel_type not in valid_relation_types:
             logger.warning(
                 "Skipping relation with invalid type '{}' (chunk={})",
                 rel_type, relation.chunk_id,

@@ -127,10 +127,9 @@ def ensure_canonical_entities(
     return canonical_to_entity_id
 
 
-def apply_alias_merges(
+def cleanup_self_loop_relations(
     session: Session,
     run_id: str,
-    alias_merges: dict[str, str],
 ) -> None:
     """
     清理自环关系。
@@ -147,18 +146,21 @@ def apply_alias_merges(
     修改内容: 移除 ChunkCharacter/ChunkDialogue/CharacterAppearance 的归一化写入，
               保留自环关系清理。
 
+    修改时间: 2026-04-02
+    修改者: TraeAI
+    任务: fix-disambiguation-code-quality
+    修改内容: 重命名为 cleanup_self_loop_relations，移除 alias_merges 参数
+
     Args:
         session: 数据库会话
         run_id: 运行ID
-        alias_merges: 别名到规范名的映射（保留参数兼容性，当前仅用于日志）
     """
-    non_trivial = sum(1 for a, c in alias_merges.items() if a != c)
-
-    session.execute(
+    result = session.execute(
         delete(ChunkRelation).where(
             ChunkRelation.from_char == ChunkRelation.to_char,
             ChunkRelation.run_id == run_id,
         )
     )
 
-    logger.info(f"Cleaned self-loop relations, {non_trivial} alias merges deferred to graph projection")
+    deleted_count = result.rowcount if hasattr(result, "rowcount") else 0
+    logger.info(f"Cleaned {deleted_count} self-loop relations for run {run_id}")

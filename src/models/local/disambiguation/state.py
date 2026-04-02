@@ -56,6 +56,11 @@ class DisambiguationState:
     - discovered_names: 系统已经见过的所有名字（包括别名和规范名）
     - known_canonical_names: 系统确认存在的规范角色名
     - alias_merges: 真实别名合并映射，禁止自映射（A -> A）
+
+    修改时间: 2026-04-02
+    修改者: TraeAI
+    任务: fix-disambiguation-code-quality
+    修改内容: entity_types 从 dict[str, str] 改为 tuple[tuple[str, str], ...] 保持不可变语义
     """
 
     discovered_names: frozenset[str] = frozenset()
@@ -63,7 +68,7 @@ class DisambiguationState:
     alias_merges: frozenset[tuple[str, str]] = frozenset()
     review_status: tuple[tuple[str, NameReviewState], ...] = ()
     pending_relations: tuple[dict[str, str], ...] = ()
-    entity_types: dict[str, str] = field(default_factory=dict)
+    entity_types: tuple[tuple[str, str], ...] = ()
 
     version: int = 2
     created_at: float = field(default_factory=time.time)
@@ -82,6 +87,10 @@ class DisambiguationState:
         """获取复审状态字典形式"""
         return dict(self.review_status)
 
+    def get_entity_types_dict(self) -> dict[str, str]:
+        """获取实体类型映射字典形式"""
+        return dict(self.entity_types)
+
     def with_updates(
         self,
         discovered_names: frozenset[str] | None = None,
@@ -89,7 +98,7 @@ class DisambiguationState:
         alias_merges: frozenset[tuple[str, str]] | None = None,
         review_status: tuple[tuple[str, NameReviewState], ...] | None = None,
         pending_relations: tuple[dict[str, str], ...] | None = None,
-        entity_types: dict[str, str] | None = None,
+        entity_types: tuple[tuple[str, str], ...] | None = None,
     ) -> DisambiguationState:
         """创建更新后的新实例（copy-on-write）"""
         return DisambiguationState(
@@ -183,6 +192,12 @@ class DisambiguationState:
             if isinstance(item, dict) and "name" in item and "state" in item
         )
 
+        entity_types_raw = data.get("entity_types", {})
+        if isinstance(entity_types_raw, dict):
+            entity_types = tuple(entity_types_raw.items())
+        else:
+            entity_types = tuple(entity_types_raw)
+
         return cls(
             discovered_names=frozenset(data.get("discovered_names", [])),
             known_canonical_names=frozenset(data.get("known_canonical_names", [])),
@@ -193,7 +208,7 @@ class DisambiguationState:
             ),
             review_status=review_status,
             pending_relations=tuple(data.get("pending_relations", [])),
-            entity_types=data.get("entity_types", {}),
+            entity_types=entity_types,
             version=version,
             created_at=data.get("created_at", time.time()),
             updated_at=data.get("updated_at", time.time()),

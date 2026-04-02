@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -126,7 +125,7 @@ def load_gold_standard(gold_path: Path) -> list[dict]:
     {"alias": "伯安", "canonical": "贺重明", "judgment": "should_merge", ...}
     """
     records: list[dict] = []
-    with open(gold_path, "r", encoding="utf-8") as f:
+    with open(gold_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -200,7 +199,6 @@ def compute_run_metrics(
     """
     # 构建系统合并查找表（双向：alias=canonical 等价）
     sys_merge_set = {(m["alias"], m["canonical"]) for m in system_merges}
-    sys_alias_set = {m["alias"] for m in system_merges}
     # 构建等价类查找：给定任一名字，找到其所在合并组的所有名字
     _equiv_groups: list[set[str]] = []
     for m in system_merges:
@@ -347,8 +345,8 @@ def format_report_markdown(report: BaselineReport) -> str:
         "",
         "## 汇总",
         "",
-        f"| 合并准确率 | 误合并率 | 漏合并率 |",
-        f"|-----------|----------|----------|",
+        "| 合并准确率 | 误合并率 | 漏合并率 |",
+        "|-----------|----------|----------|",
         f"| {acc} | {fmr} | {mmr} |",
     ])
     return "\n".join(lines)

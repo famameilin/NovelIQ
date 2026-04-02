@@ -203,5 +203,5 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
             entity_types,
         )
 
-    def apply_alias_merges(self, run_id: str, alias_merges: dict[str, str]) -> None:
-        return characters.apply_alias_merges(self.session, run_id, alias_merges)
+    def cleanup_self_loop_relations(self, run_id: str) -> None:
+        return characters.cleanup_self_loop_relations(self.session, run_id)

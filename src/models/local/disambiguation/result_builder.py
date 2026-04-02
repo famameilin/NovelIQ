@@ -25,7 +25,7 @@ from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
 
-from ..schema import DisambiguateResponseModel
+from ..schema import DisambiguateResponseModel, EntityType
 from .evidence import EvidenceProfile, build_evidence_profile
 
 
@@ -61,7 +61,7 @@ class ExtendedDisambigResult:
     """
 
     canonical_decisions: dict[str, str]
-    entity_types: dict[str, str]
+    entity_types: dict[str, EntityType]
     entity_relations: list[dict[str, str]]
     alias_confidence: dict[str, str] = field(default_factory=dict)
     evidence_profiles: dict[str, EvidenceProfile] = field(default_factory=dict)
