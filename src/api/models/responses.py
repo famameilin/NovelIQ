@@ -261,6 +261,7 @@ class DiagnosisResult(BaseModel):
     protagonist: str | None = None
     main_characters: list[str] | None = None
     core_cast: list[str] | None = None
+    theme_color: str | None = Field(default=None, description="小说主题色，十六进制格式，如 #4A90D9")
 
 
 class NovelResultsResponse(BaseModel):
