@@ -6,20 +6,12 @@ import { TaskSelector } from "./TaskSelector";
 import { useNovelStore } from "@/store/novelStore";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { cn } from "@/lib/cn";
+import { taskStatusConfig } from "@/lib/utils";
 import type { TaskStatus } from "@/api/types";
-
-const statusDisplay: Record<string, { label: string; variant: "default" | "secondary" | "success" | "destructive" | "outline" }> = {
-  pending: { label: "等待中", variant: "outline" },
-  chunking: { label: "分块中", variant: "secondary" },
-  annotating: { label: "标注中", variant: "secondary" },
-  aggregating: { label: "聚合中", variant: "secondary" },
-  diagnosing: { label: "诊断中", variant: "secondary" },
-  completed: { label: "已完成", variant: "success" },
-  failed: { label: "失败", variant: "destructive" },
-};
 
 export interface NovelHeaderProps {
   title: string;
+  novelId?: string;
   status?: TaskStatus;
   onReanalyze?: () => void;
   onDelete?: () => void;
@@ -29,13 +21,15 @@ export interface NovelHeaderProps {
 
 export function NovelHeader({
   title,
+  novelId: novelIdProp,
   status,
   onReanalyze,
   onDelete,
   isReanalyzing = false,
   className,
 }: NovelHeaderProps) {
-  const { novelId } = useParams<{ novelId: string }>();
+  const routeParams = useParams<{ novelId: string }>();
+  const novelId = novelIdProp ?? routeParams.novelId;
   const { currentTaskId } = useNovelStore();
 
   const { data: statusData } = useAnalysisStatus(
@@ -45,7 +39,7 @@ export function NovelHeader({
   );
 
   const currentStatus = statusData?.status ?? status;
-  const config = currentStatus ? statusDisplay[currentStatus] : undefined;
+  const config = currentStatus ? taskStatusConfig[currentStatus] : undefined;
 
   return (
     <div className={cn("flex flex-wrap items-center gap-4", className)}>

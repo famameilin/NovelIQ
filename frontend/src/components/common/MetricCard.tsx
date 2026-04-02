@@ -3,7 +3,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
@@ -104,13 +103,11 @@ export function MetricCard({
   if (!description) return content;
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>{content}</TooltipTrigger>
-        <TooltipContent side="top" className="max-w-xs">
-          <p>{description}</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>{content}</TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs">
+        <p>{description}</p>
+      </TooltipContent>
+    </Tooltip>
   );
 }
