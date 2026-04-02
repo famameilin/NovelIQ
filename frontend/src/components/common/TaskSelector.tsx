@@ -9,17 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { getAnalysisTasks } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
-import type { TaskStatus } from "@/api/types";
-
-const statusConfig: Record<TaskStatus, { label: string; variant: "default" | "secondary" | "success" | "destructive" | "outline" }> = {
-  pending: { label: "等待中", variant: "outline" },
-  chunking: { label: "分块中", variant: "secondary" },
-  annotating: { label: "标注中", variant: "secondary" },
-  aggregating: { label: "聚合中", variant: "secondary" },
-  diagnosing: { label: "诊断中", variant: "secondary" },
-  completed: { label: "已完成", variant: "success" },
-  failed: { label: "失败", variant: "destructive" },
-};
+import { taskStatusConfig } from "@/lib/utils";
 
 export interface TaskSelectorProps {
   novelId: string;
@@ -55,7 +45,7 @@ export function TaskSelector({ novelId, className }: TaskSelectorProps) {
       </SelectTrigger>
       <SelectContent>
         {tasks.map((task) => {
-          const config = statusConfig[task.status] ?? statusConfig.pending;
+          const config = taskStatusConfig[task.status] ?? taskStatusConfig.pending;
           return (
             <SelectItem key={task.task_id} value={task.task_id}>
               <span className="flex items-center gap-2">
