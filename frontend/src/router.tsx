@@ -9,12 +9,14 @@ import { TopicsPage } from "@/pages/TopicsPage";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { DiagnosisPage } from "@/pages/DiagnosisPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+import { ComponentShowcase } from "@/pages/ComponentShowcase";
 
 export const router = createBrowserRouter([
   {
     element: <AppLayout />,
     children: [
       { path: "/", element: <HomePage /> },
+      { path: "/dev/components", element: <ComponentShowcase /> },
     ],
   },
   {
