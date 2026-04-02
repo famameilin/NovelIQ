@@ -318,8 +318,12 @@ class DiagnosisClient(BaseModelClient):
         if alias_merges:
             naming_rules = [
                 "Naming rules:",
-                "When alias_merges provides an alias mapping, always rewrite the alias to its canonical character name before reasoning or output.",
-                "Apply this consistently in arc_scores, topic_labels, diagnosis, value_logic_reason, power_stance_reason, dignity_reason, and cultural_depth_reason.",
+                "When alias_merges provides an alias mapping, "
+                "always rewrite the alias to its canonical character name "
+                "before reasoning or output.",
+                "Apply this consistently in arc_scores, topic_labels, "
+                "diagnosis, value_logic_reason, power_stance_reason, "
+                "dignity_reason, and cultural_depth_reason.",
                 f"known_characters={json.dumps(known_characters, ensure_ascii=False)}",
                 f"alias_merges={json.dumps(alias_merges, ensure_ascii=False)}",
             ]

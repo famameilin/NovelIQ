@@ -148,7 +148,10 @@ def process_annotation_response(
 
     if is_cloud:
         logger.info(
-            "[云端模型] annotate_chunk 响应: novel_id={} chunk_id={} phase={} has_thinking={} thinking_chars={} has_response={} response_chars={}",
+            "[云端模型] annotate_chunk 响应: "
+            "novel_id={} chunk_id={} phase={} "
+            "has_thinking={} thinking_chars={} "
+            "has_response={} response_chars={}",
             novel_id,
             chunk_id,
             phase,
@@ -159,7 +162,10 @@ def process_annotation_response(
         )
     else:
         logger.info(
-            "annotate_chunk response: novel_id={} chunk_id={} phase={} has_thinking={} thinking_chars={} has_response={} response_chars={}",
+            "annotate_chunk response: "
+            "novel_id={} chunk_id={} phase={} "
+            "has_thinking={} thinking_chars={} "
+            "has_response={} response_chars={}",
             novel_id,
             chunk_id,
             phase,
@@ -169,7 +175,9 @@ def process_annotation_response(
             len(content_clean),
         )
         logger.debug(
-            "annotate_chunk response received: novel_id={} chunk_id={} phase={} chars={} thinking_chars={} thinking_format={}",
+            "annotate_chunk response received: "
+            "novel_id={} chunk_id={} phase={} "
+            "chars={} thinking_chars={} thinking_format={}",
             novel_id,
             chunk_id,
             phase,

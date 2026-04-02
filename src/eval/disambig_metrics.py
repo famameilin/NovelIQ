@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 @dataclass
 class MergeRecord:
     """单条合并决策记录。"""
+
     alias: str
     system_canonical: str  # 系统判决的规范名
     gold_canonical: str | None = None  # 金标中的规范名
@@ -53,6 +54,7 @@ class MergeRecord:
 @dataclass
 class RunMetrics:
     """单个 run 的评测指标。"""
+
     run_id: str
     total_merges: int = 0  # 系统执行的合并总数
     correct_merges: int = 0  # 与金标一致的合并数
@@ -95,8 +97,12 @@ class RunMetrics:
             "correct_merges": self.correct_merges,
             "wrong_merges": self.wrong_merges,
             "ambiguous_merges": self.ambiguous_merges,
-            "merge_accuracy": round(self.merge_accuracy, 4) if not (self.merge_accuracy != self.merge_accuracy) else None,
-            "false_merge_rate": round(self.false_merge_rate, 4) if not (self.false_merge_rate != self.false_merge_rate) else None,
+            "merge_accuracy": round(self.merge_accuracy, 4)
+            if not (self.merge_accuracy != self.merge_accuracy)
+            else None,
+            "false_merge_rate": round(self.false_merge_rate, 4)
+            if not (self.false_merge_rate != self.false_merge_rate)
+            else None,
             "gold_should_merge_total": self.gold_should_merge_total,
             "missed_merges": self.missed_merges,
             "missed_merge_rate": round(self.missed_merge_rate, 4),
@@ -109,6 +115,7 @@ class RunMetrics:
 @dataclass
 class BaselineReport:
     """评测基线报告。"""
+
     generated_at: str = ""
     branch: str = ""
     commit: str = ""
@@ -262,25 +269,33 @@ def compute_run_metrics(
             # 系统是否把 alias 和 canonical 合并到了同一组
             if (alias, canonical) in sys_merge_set or (canonical, alias) in sys_merge_set:
                 metrics.correct_merges += 1
-                details.append({"alias": alias, "canonical": canonical, "result": "correct_merge", "evidence": evidence})
+                details.append(
+                    {"alias": alias, "canonical": canonical, "result": "correct_merge", "evidence": evidence}
+                )
             elif _in_same_merge_group(alias, canonical):
                 metrics.correct_merges += 1
-                details.append({"alias": alias, "canonical": canonical, "result": "correct_merge", "evidence": evidence})
+                details.append(
+                    {"alias": alias, "canonical": canonical, "result": "correct_merge", "evidence": evidence}
+                )
             else:
                 # 金标说应该合并，但系统没做
                 sys_canonical = _find_canonical(alias)
                 if sys_canonical:
-                    details.append({
-                        "alias": alias,
-                        "canonical": canonical,
-                        "system_merged_to": sys_canonical,
-                        "result": "wrong_merge_target",
-                        "evidence": evidence,
-                    })
+                    details.append(
+                        {
+                            "alias": alias,
+                            "canonical": canonical,
+                            "system_merged_to": sys_canonical,
+                            "result": "wrong_merge_target",
+                            "evidence": evidence,
+                        }
+                    )
                     metrics.wrong_merges += 1
                 else:
                     metrics.missed_merges += 1
-                    details.append({"alias": alias, "canonical": canonical, "result": "missed_merge", "evidence": evidence})
+                    details.append(
+                        {"alias": alias, "canonical": canonical, "result": "missed_merge", "evidence": evidence}
+                    )
 
         elif judgment == "should_not_merge":
             if (alias, canonical) in sys_merge_set:
@@ -288,7 +303,9 @@ def compute_run_metrics(
                 details.append({"alias": alias, "canonical": canonical, "result": "false_merge", "evidence": evidence})
             else:
                 metrics.correct_independent += 1
-                details.append({"alias": alias, "canonical": canonical, "result": "correct_independent", "evidence": evidence})
+                details.append(
+                    {"alias": alias, "canonical": canonical, "result": "correct_independent", "evidence": evidence}
+                )
 
         elif judgment == "ambiguous":
             metrics.ambiguous_merges += 1
@@ -345,18 +362,28 @@ def format_report_markdown(report: BaselineReport) -> str:
         )
 
     agg = report.aggregate
-    acc = f"{agg['merge_accuracy']:.2%}" if agg.get("merge_accuracy") and agg["merge_accuracy"] == agg["merge_accuracy"] else "N/A"
-    fmr = f"{agg['false_merge_rate']:.2%}" if agg.get("false_merge_rate") and agg["false_merge_rate"] == agg["false_merge_rate"] else "N/A"
+    acc = (
+        f"{agg['merge_accuracy']:.2%}"
+        if agg.get("merge_accuracy") and agg["merge_accuracy"] == agg["merge_accuracy"]
+        else "N/A"
+    )
+    fmr = (
+        f"{agg['false_merge_rate']:.2%}"
+        if agg.get("false_merge_rate") and agg["false_merge_rate"] == agg["false_merge_rate"]
+        else "N/A"
+    )
     mmr_val = agg.get("missed_merge_rate")
     mmr = f"{mmr_val:.2%}" if mmr_val is not None and mmr_val == mmr_val else "N/A"
-    lines.extend([
-        "",
-        "## 汇总",
-        "",
-        "| 合并准确率 | 误合并率 | 漏合并率 |",
-        "|-----------|----------|----------|",
-        f"| {acc} | {fmr} | {mmr} |",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 汇总",
+            "",
+            "| 合并准确率 | 误合并率 | 漏合并率 |",
+            "|-----------|----------|----------|",
+            f"| {acc} | {fmr} | {mmr} |",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -425,9 +452,7 @@ def compute_metrics_by_entity_type(
     gold_aliases = {r["alias"] for r in gold_records}
     missing_types = gold_aliases - set(name_to_type.keys())
     if missing_types:
-        logger.warning(
-            f"entity_type lookup missing for {len(missing_types)} names: {list(missing_types)[:5]}..."
-        )
+        logger.warning(f"entity_type lookup missing for {len(missing_types)} names: {list(missing_types)[:5]}...")
 
     # 按 entity_type 分组
     type_records: dict[str, list[dict]] = {}

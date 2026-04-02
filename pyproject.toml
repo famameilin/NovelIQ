@@ -47,7 +47,7 @@ extend-exclude = ["deprecated", "scripts/legacy", "scripts/manual"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C4", "UP"]
-ignore = ["E501", "B008", "B017"]
+ignore = ["B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

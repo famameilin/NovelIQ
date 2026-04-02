@@ -235,7 +235,9 @@ def log_annotation_start(
     """
     if is_cloud:
         logger.info(
-            "[云端模型] annotate_chunk 开始: novel_id={} chunk_id={} phase={} task_type={} model={} text_len={} thinking_enabled={}",
+            "[云端模型] annotate_chunk 开始: "
+            "novel_id={} chunk_id={} phase={} "
+            "task_type={} model={} text_len={} thinking_enabled={}",
             novel_id,
             chunk_id,
             phase,
@@ -246,7 +248,10 @@ def log_annotation_start(
         )
     else:
         logger.debug(
-            "annotate_chunk start: novel_id={} chunk_id={} phase={} task_type={} model={} text_len={} has_summary={} thinking_enabled={}",
+            "annotate_chunk start: "
+            "novel_id={} chunk_id={} phase={} "
+            "task_type={} model={} text_len={} "
+            "has_summary={} thinking_enabled={}",
             novel_id,
             chunk_id,
             phase,

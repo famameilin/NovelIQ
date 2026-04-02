@@ -91,8 +91,8 @@ async def start_analysis(
 async def start_reanalysis(
     novel_id: str,
     request: ReanalyzeRequest | None = None,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
+    novel_service: NovelService = Depends(get_novel_service),  # noqa: B008
+    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
 ) -> ReanalyzeResponse:
     analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.start_reanalysis(novel_id, request)
@@ -100,7 +100,7 @@ async def start_reanalysis(
 
 
 @router.get("/{novel_id}/tasks", response_model=TaskListResponse)
-async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:
+async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_novel_service)) -> TaskListResponse:  # noqa: B008
     """
     获取小说的所有任务列表
 
@@ -136,7 +136,9 @@ async def delete_task(novel_id: str, task_id: str, novel_service: NovelService =
 
 @router.post("/{novel_id}/tasks/batch-delete", response_model=BatchDeleteTasksResponse)
 async def batch_delete_tasks(
-    novel_id: str, request: BatchDeleteTasksRequest, novel_service: NovelService = Depends(get_novel_service)
+    novel_id: str,
+    request: BatchDeleteTasksRequest,
+    novel_service: NovelService = Depends(get_novel_service),  # noqa: B008
 ) -> BatchDeleteTasksResponse:
     """
     批量删除任务

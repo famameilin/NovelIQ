@@ -84,7 +84,9 @@ def _resolve_disambiguation_fallback(
             )
     else:
         logger.warning(
-            f"{role} disambiguation fallback skipped because injected annotation _config is not TaskModelConfig, using no-op disambiguation client"
+            f"{role} disambiguation fallback skipped because "
+            f"injected annotation _config is not TaskModelConfig, "
+            f"using no-op disambiguation client"
         )
 
     return _NoopDisambiguationClient(config=config)

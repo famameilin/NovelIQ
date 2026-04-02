@@ -312,16 +312,18 @@ def _run_incremental_disambiguation_with_state(
 
     # Candidate quality filter: remove blacklist, keep protected + normal
     context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
-    _, all_disambig_candidates, classifications = filter_candidates_by_class(
-        all_disambig_candidates, context_sentences
-    )
+    _, all_disambig_candidates, classifications = filter_candidates_by_class(all_disambig_candidates, context_sentences)
     # Rebuild context for filtered candidates only
     context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
     # Inject protected category labels into context for prompt
     _inject_category_into_context(classifications, context_sentences)
     existing_names = list(state.known_canonical_names)
     rag_hint = _build_existing_character_hint_from_db(
-        conn, new_names, existing_names, alias_keywords, run_id,
+        conn,
+        new_names,
+        existing_names,
+        alias_keywords,
+        run_id,
         graph_repo=GraphRepository(conn),
     )
 
@@ -435,14 +437,16 @@ def _run_final_disambiguation_with_state(
         candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
         # Candidate quality filter: remove blacklist from final disambig candidates
-        _, candidate_payload, f_classifications = filter_candidates_by_class(
-            candidate_payload, context_sentences
-        )
+        _, candidate_payload, f_classifications = filter_candidates_by_class(candidate_payload, context_sentences)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
         # Inject protected category labels into context for prompt
         _inject_category_into_context(f_classifications, context_sentences)
         rag_hint = _build_existing_character_hint_from_db(
-            conn, all_names, existing_names, alias_keywords, run_id,
+            conn,
+            all_names,
+            existing_names,
+            alias_keywords,
+            run_id,
             graph_repo=GraphRepository(conn),
         )
         result = _retry_disambig(
@@ -491,9 +495,7 @@ def _run_final_disambiguation_with_state(
         ):
             promoted_names.append(name)
     if promoted_names:
-        logger.info(
-            f"Promoting {len(promoted_names)} review-status names to canonical: {promoted_names}"
-        )
+        logger.info(f"Promoting {len(promoted_names)} review-status names to canonical: {promoted_names}")
         new_state = new_state.with_updates(
             known_canonical_names=new_state.known_canonical_names | frozenset(promoted_names),
         )

@@ -60,7 +60,7 @@ def test_compute_metrics_by_entity_type_groups_by_type():
 
     with pytest.MonkeyPatch().context() as m:
         m.setattr(
-            "src.eval.disambig_metrics.GraphRepository",
+            "src.storage.repositories.GraphRepository",
             lambda session: mock_graph_repo,
         )
         result = compute_metrics_by_entity_type(
@@ -71,7 +71,16 @@ def test_compute_metrics_by_entity_type_groups_by_type():
     assert "group" in result
 
 
-def test_compute_metrics_by_entity_type_missing_type_warning(capslog):
+def test_compute_metrics_by_entity_type_missing_type_warning(caplog):
+    import logging
+    from loguru import logger
+
+    class PropagateHandler(logging.Handler):
+        def emit(self, record):
+            logging.getLogger(record.name).handle(record)
+
+    handler_id = logger.add(PropagateHandler(), format="{message}")
+
     gold_records = [
         {"alias": "灵禽", "canonical": "赤羽炽尾鸡", "judgment": "should_not_merge"},
     ]
@@ -85,15 +94,16 @@ def test_compute_metrics_by_entity_type_missing_type_warning(capslog):
 
     with pytest.MonkeyPatch().context() as m:
             m.setattr(
-                "src.eval.disambig_metrics.GraphRepository",
+                "src.storage.repositories.GraphRepository",
                 lambda session: mock_graph_repo,
             )
             type_metrics = compute_metrics_by_entity_type(
                 gold_records, system_merges, "run-1", session
             )
 
-    assert "灵禽" in str(capslog.text)
-    assert "character" in type_metrics  # fallback for missing alias
+    logger.remove(handler_id)
+    assert "灵禽" in caplog.text
+    assert "character" in type_metrics
 
 
 def test_compute_run_metrics_correct_merge():

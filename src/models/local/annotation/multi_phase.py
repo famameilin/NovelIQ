@@ -210,7 +210,8 @@ def _run_phase3_if_needed(
     result.dialogue_identity_clues = result_tuple[5] if len(result_tuple) > 5 else None
 
     logger.debug(
-        "Phase3: dialogue_lengths={} dialogue_speakers={} dialogues={} dialogue_tones={} dialogue_evidences={} chunk_id={}",
+        "Phase3: dialogue_lengths={} dialogue_speakers={} "
+        "dialogues={} dialogue_tones={} dialogue_evidences={} chunk_id={}",
         result.dialogue_lengths,
         result.dialogue_speakers,
         result.dialogues,

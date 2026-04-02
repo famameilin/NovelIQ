@@ -28,7 +28,9 @@ _EVIDENCE_MARKERS = {
     "身份线索": "身份线索",
 }
 
-_EVIDENCE_MARKER_PATTERN = re.compile(r"【(前文总结|自报身份|身份提示|被点名|外貌描写|独特标记|亲缘身份|命名场景|身份线索)】")
+_EVIDENCE_MARKER_PATTERN = re.compile(
+    r"【(前文总结|自报身份|身份提示|被点名|外貌描写|独特标记|亲缘身份|命名场景|身份线索)】"
+)
 _EVIDENCE_PREFIXES = tuple(f"【{marker}】" for marker in _EVIDENCE_MARKERS)
 
 

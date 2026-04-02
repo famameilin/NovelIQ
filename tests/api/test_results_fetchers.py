@@ -65,6 +65,7 @@ class _DummyAnnotationRepo:
     def __init__(self, alias_map, rows):
         self._alias_map = alias_map
         self._rows = rows
+        self.session = MagicMock()
 
     def fetch_alias_map(self, run_id):
         assert run_id == "run-1"
