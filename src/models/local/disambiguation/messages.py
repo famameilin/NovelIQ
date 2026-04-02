@@ -6,12 +6,14 @@ import re
 from typing import TYPE_CHECKING
 
 from src.config import settings
+from src.config.schemas.annotation import ANNOTATION_CONFIG
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
 from .evidence import build_evidence_profile, format_evidence_profile
 
 if TYPE_CHECKING:
+    from ..annotate_helpers.disambiguation.candidate_filter import CandidateClassification
     from .evidence import EvidenceProfile
 
 _EVIDENCE_MARKERS = {
@@ -77,14 +79,29 @@ def _format_evidence_annotation(evidence_types: list[str]) -> str:
     return "【证据来源：" + "、".join(evidence_types) + "】"
 
 
-def _format_candidate_block(name: str, count: int, context: str, evidence_profile: EvidenceProfile) -> str:
+def _get_category_label(category: str | None) -> str:
+    """将分类类别转为中文标签。"""
+    if category == "protected":
+        return "受保护-默认不合并"
+    return "普通"
+
+
+def _format_candidate_block(
+    name: str,
+    count: int,
+    context: str,
+    evidence_profile: EvidenceProfile,
+    category: str | None = None,
+) -> str:
     """构建更结构化的候选项描述。"""
 
     lines = [
         f"- 候选称呼：{name}",
         f"  次数：{count}",
-        f"  {format_evidence_profile(evidence_profile)}",
     ]
+    if category and category != "normal":
+        lines.append(f"  类别：{_get_category_label(category)}")
+    lines.append(f"  {format_evidence_profile(evidence_profile)}")
     if context:
         lines.append(f"  参考上下文：{context}")
     return "\n".join(lines)
@@ -124,6 +141,14 @@ _RELATION_TYPE_DESCRIPTIONS: dict[str, str] = {
     "spouse_of": "A 是 B 的配偶（如 赵兰英 spouse_of 贺铎）",
 }
 
+_ENTITY_TYPE_DESCRIPTIONS: dict[str, str] = {
+    "character": "具体人物角色（如伯安、贺重明、柳婉儿）",
+    "group": "群体/队伍统称（如赤甲卫、禁军、一队）",
+    "organization": "组织/门派/家族（如贺家、玄天道宗）",
+    "creature": "灵兽/物种泛称（如灵禽、赤焰驹、白鹤）",
+    "artifact": "法宝/器物（如灵剑、玉佩、符箓）",
+}
+
 
 def _build_relation_types_section() -> str:
     """根据配置动态构建关系类型说明。"""
@@ -141,11 +166,29 @@ def _build_relation_types_union() -> str:
     return "|".join(valid_types)
 
 
+def _build_entity_types_section() -> str:
+    """根据配置动态构建实体类型说明。"""
+    valid_types = ANNOTATION_CONFIG.valid_entity_types or ["character"]
+    lines = ["【实体类型识别规则】"]
+    for etype in valid_types:
+        desc = _ENTITY_TYPE_DESCRIPTIONS.get(etype, f"{etype} 类型")
+        lines.append(f"- {etype}：{desc}")
+    return "\n".join(lines)
+
+
+def _build_entity_types_union() -> str:
+    """构建实体类型联合字符串，用于 JSON 格式说明。"""
+    valid_types = ANNOTATION_CONFIG.valid_entity_types or ["character"]
+    return "|".join(valid_types)
+
+
 def _build_dynamic_system_prompt() -> str:
-    """将动态关系类型填入系统提示词模板。"""
+    """将动态关系类型和实体类型填入系统提示词模板。"""
     base_prompt = DISAMBIGUATE_SYSTEM_PROMPT
     base_prompt = base_prompt.replace("{{RELATION_TYPES_UNION}}", _build_relation_types_union())
     base_prompt = base_prompt.replace("{{RELATION_TYPES_SECTION}}", _build_relation_types_section())
+    base_prompt = base_prompt.replace("{{ENTITY_TYPES_UNION}}", _build_entity_types_union())
+    base_prompt = base_prompt.replace("{{ENTITY_TYPES_SECTION}}", _build_entity_types_section())
     return base_prompt
 
 
@@ -154,8 +197,15 @@ def build_disambiguate_messages(
     context_sentences: dict[str, str] | None = None,
     existing_names: list[str] | None = None,
     rag_hint: str | None = None,
+    classifications: list[CandidateClassification] | None = None,
 ) -> list[dict[str, str]]:
     """构建角色消歧消息，仅接受标准候选结构。"""
+    # Build name -> category lookup
+    category_map: dict[str, str] = {}
+    if classifications:
+        for cls in classifications:
+            category_map[cls.name] = cls.category
+
     lines: list[str] = []
 
     for item in candidates:
@@ -165,7 +215,8 @@ def build_disambiguate_messages(
         evidence_profile = build_evidence_profile(ctx)
         evidence_types = _extract_evidence_types_from_context(ctx)
         evidence_annotation = _format_evidence_annotation(evidence_types)
-        profile_block = _format_candidate_block(name, count, ctx, evidence_profile)
+        category = category_map.get(name)
+        profile_block = _format_candidate_block(name, count, ctx, evidence_profile, category)
         if evidence_annotation:
             lines.append(profile_block + f"\n  {evidence_annotation}")
         else:

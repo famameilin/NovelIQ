@@ -87,7 +87,11 @@ class AnnotationConfig:
                 ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"],
             )
         if self.valid_entity_types is None:
-            object.__setattr__(self, "valid_entity_types", ["character", "group", "organization"])
+            object.__setattr__(
+                self,
+                "valid_entity_types",
+                ["character", "group", "organization", "creature", "artifact"],
+            )
         if self.valid_clue_types is None:
             object.__setattr__(
                 self,

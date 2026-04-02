@@ -140,7 +140,7 @@ def run_annotate(
         resume=resume,
     )
 
-    _run_disambiguation_phase(session, state, phase_result, novel_id, use_rag, run_id=run_id)
+    state = _run_disambiguation_phase(session, state, phase_result, novel_id, use_rag, run_id=run_id)
 
     # 最终消歧可能改变别名归一化规则，强制重建 graph_* 以避免旧投影残留。
     if all_chunks:

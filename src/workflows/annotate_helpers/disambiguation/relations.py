@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from typing import Any
 
 from loguru import logger
@@ -213,7 +214,7 @@ def _process_entity_relations(
     novel_id: str,
     run_id: str,
     entity_relations: list[dict[str, str]],
-    entity_types: dict[str, str],
+    entity_types: Mapping[str, str],
     alias_map: dict[str, str],
 ) -> tuple[int, list[dict[str, Any]]]:
     """

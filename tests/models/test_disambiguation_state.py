@@ -64,7 +64,8 @@ class TestDisambiguationState:
         assert state.alias_merges == frozenset()
         assert state.review_status == ()
         assert state.pending_relations == ()
-        assert state.version == 1
+        assert state.entity_types == ()
+        assert state.version == 2
     
     def test_create_state_with_data(self):
         state = DisambiguationState(
