@@ -49,5 +49,5 @@ export function useCountUp(
     };
   }, [enabled, value, start, duration]);
 
-  return decimals > 0 ? displayValue.toFixed(decimals) : Math.round(displayValue);
+  return decimals > 0 ? displayValue.toFixed(decimals) : String(Math.round(displayValue));
 }

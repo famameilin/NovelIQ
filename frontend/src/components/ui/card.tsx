@@ -38,7 +38,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
     if (variant === "elevated") {
       return (
         <motion.div
-          ref={ref as React.Ref<HTMLDivElement>}
+          ref={ref}
           className={cn(baseClasses, className)}
           whileHover={{ scale: 1.02, y: -4 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
