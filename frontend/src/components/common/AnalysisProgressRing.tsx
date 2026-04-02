@@ -25,6 +25,8 @@ export function AnalysisProgressRing({
   const clampedProgress = Math.max(0, Math.min(100, progress));
   const offset = circumference - (clampedProgress / 100) * circumference;
 
+  const gradientId = `progress-ring-${Math.random().toString(36).slice(2, 9)}`;
+
   return (
     <div
       className={cn("relative inline-flex items-center justify-center", className)}
@@ -42,6 +44,13 @@ export function AnalysisProgressRing({
         viewBox={`0 0 ${size} ${size}`}
         aria-hidden="true"
       >
+        {/* Gradient definition — CSS class sets stop-color via CSS variables */}
+        <defs>
+          <linearGradient id={gradientId} gradientUnits="userSpaceOnUse">
+            <stop offset="0%" className="stop-color-primary" />
+            <stop offset="100%" className="stop-color-primary-hover" />
+          </linearGradient>
+        </defs>
         {/* Background track */}
         <circle
           cx={size / 2}
@@ -51,7 +60,7 @@ export function AnalysisProgressRing({
           strokeWidth={strokeWidth}
           className="stroke-border"
         />
-        {/* Progress arc */}
+        {/* Progress arc — gradient */}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -59,7 +68,8 @@ export function AnalysisProgressRing({
           fill="none"
           strokeWidth={strokeWidth}
           strokeLinecap="round"
-          className="stroke-primary transition-[stroke-dashoffset] duration-500 ease-out"
+          stroke={`url(#${gradientId})`}
+          className="transition-[stroke-dashoffset] duration-500 ease-out"
           style={{
             strokeDasharray: circumference,
             strokeDashoffset: offset,
