@@ -84,15 +84,37 @@ def fetch_character_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> CharacterData:
-    """提取 chunk_characters 表数据"""
+    """
+    提取角色数据。
+
+    修改时间: 2026-04-02
+    修改者: TraeAI
+    任务: P2.1-downstream-switch
+    修改内容: 从 graph_entities 读取权威角色列表，补充 chunk_characters 的情感分数
+    """
+    from src.storage.repositories import GraphRepository
+
+    graph_repo = GraphRepository(annotation_repo.session)
+
+    # 1. 从 graph_entities 获取权威角色（仅 active 状态）
+    entities = graph_repo.fetch_entities(run_id, status="active")
+
+    # 2. 从 chunk_characters 聚合情感分数（用于补充）
     rows = annotation_repo.fetch_characters_with_scores(run_id)
-
-    characters = []
+    emotion_map: dict[str, int] = {}
     for row in rows:
-        name, role_function, emotion_score_raw = row
-        emotion_score = map_emotion_score(emotion_score_raw)
-        characters.append((name, role_function, emotion_score))
+        name, _, emotion_score_raw = row
+        emotion_map[name] = map_emotion_score(emotion_score_raw)
 
+    # 3. 构建角色列表（使用 canonical_name 作为权威名称）
+    characters = []
+    for entity in entities:
+        canonical = entity.canonical_name
+        # 情感分数优先从 chunk_characters 获取，否则使用 entity 的 last_emotion_score
+        emotion_score = emotion_map.get(canonical, map_emotion_score(entity.last_emotion_score))
+        characters.append((canonical, entity.primary_role_function or "其他", emotion_score))
+
+    # 4. 构建情感序列（仍从 chunk_characters 获取）
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
     char_emotion_map: dict[str, list[float]] = {}
     for name, score_raw in char_emotion_rows:
@@ -102,10 +124,11 @@ def fetch_character_data(
         char_emotion_map[name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 
+    # 5. 确定主角（从 graph_entities 中找 role_function 为"主体"的）
     protagonist_name = None
-    for name, role, _ in characters:
-        if role == "主体":
-            protagonist_name = name
+    for entity in entities:
+        if entity.primary_role_function == "主体":
+            protagonist_name = entity.canonical_name
             break
 
     return CharacterData(
