@@ -1,20 +1,20 @@
 """
-鑱氬悎娴佺▼鏍稿績涓氬姟閫昏緫
+聚合流程核心业务逻辑
 
-鍒涘缓鏃堕棿: 2026-03-14
-鍒涘缓鑰? TraeAI
-浠诲姟: refactor-cli-layer-functions
-璇存槑: 浠?src/cli/aggregate.py 鎻愬彇鐨勬牳蹇冧笟鍔￠€昏緫锛岀敤浜?workflows 妯″潡
+创建时间: 2026-03-14
+创建者: TraeAI
+任务: refactor-cli-layer-functions
+说明: 从 src/cli/aggregate.py 提取的核心业务逻辑，用于 workflows 模块
 
-淇敼鏃堕棿: 2026-03-14
-淇敼鑰? TraeAI
-浠诲姟: workflows 浣跨敤 Repository 妯″紡閲嶆瀯
-淇敼鍐呭: 娣诲姞 run_id/session 鍙傛暟鏀寔锛屼娇鐢?ChunkRepository/StatsRepository 鏇夸唬鐩存帴璋冪敤 operations 鍑芥暟
+修改时间: 2026-03-14
+修改者: TraeAI
+任务: workflows 使用 Repository 模式重构
+修改内容: 添加 run_id/session 参数支持，使用 ChunkRepository/StatsRepository 替换直接调用 operations 函数
 
-淇敼鏃堕棿: 2026-03-15
-淇敼鑰? TraeAI
-浠诲姟: storage-layer-decoupling
-淇敼鍐呭: 绉婚櫎鍚戝悗鍏煎浠ｇ爜锛屽彧淇濈暀 Repository 妯″紡
+修改时间: 2026-03-15
+修改者: TraeAI
+任务: storage-layer-decoupling
+修改内容: 移除向后兼容代码，只保留 Repository 模式
 """
 
 from __future__ import annotations
@@ -66,12 +66,12 @@ def _compute_tension_composite(signals: list[dict]) -> list[float]:
 
 def _log_aggregate_results(agg_result) -> None:
     """
-    杈撳嚭鑱氬悎缁撴灉鏃ュ織
+    输出聚合结果日志
 
-    鍒涘缓鏃堕棿: 2026-03-13
-    鍒涘缓鑰? TraeAI
-    浠诲姟: refactor-cli-layer-functions
-    璇存槑: 浠?run_aggregate 涓彁鍙栵紝璐熻矗杈撳嚭鑱氬悎鎸囨爣鏃ュ織
+    创建时间: 2026-03-13
+    创建者: TraeAI
+    任务: refactor-cli-layer-functions
+    说明: 在 run_aggregate 中调用，负责输出聚合指标日志
     """
     logger.info("\n=== Aggregate Metrics ===")
 
@@ -180,27 +180,28 @@ def run_aggregate(
     cache_path: Path | None = None,
 ) -> tuple[int, int, int]:
     """
-    鎵ц鑱氬悎娴佺▼
+    执行聚合流程
 
-    鍒涘缓鏃堕棿: 2025-03-11
-    鍒涘缓鑰? TraeAI
-    浠诲姟: 鑱氬悎娴佺▼
+    创建时间: 2025-03-11
+    创建者: TraeAI
+    任务: 聚合流程
 
-    淇敼鏃堕棿: 2026-03-13
-    淇敼鑰? TraeAI
-    浠诲姟: refactor-cli-layer-functions
-    淇敼鍐呭: 鎻愬彇鏃ュ織杈撳嚭涓?_log_aggregate_results 杈呭姪鍑芥暟
-    淇敼鏃堕棿: 2026-03-14
-    淇敼鑰? TraeAI
-    浠诲姟: workflows 浣跨敤 Repository 妯″紡閲嶆瀯
-    淇敼鍐呭: 娣诲姞 run_id/session 鍙傛暟锛屾敮鎸?Repository 妯″紡
+    修改时间: 2026-03-13
+    修改者: TraeAI
+    任务: refactor-cli-layer-functions
+    修改内容: 提取日志输出到 _log_aggregate_results 辅助函数
+    修改时间: 2026-03-14
+    修改者: TraeAI
+    任务: workflows 使用 Repository 模式重构
+    修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
     Args:
-        run_id: 杩愯ID
-        session: 鏁版嵁搴撹繛鎺?        cache_path: 缂撳瓨璺緞
+        run_id: 运行ID
+        session: 数据库连接
+        cache_path: 缓存路径
 
     Returns:
-        Tuple[int, int, int]: (鎬诲潡鏁? 鎯呯华鏇茬嚎琛屾暟, 鑺傚鏇茬嚎琛屾暟)
+        Tuple[int, int, int]: (总块数, 情感曲线条数, 节奏曲线条数)
     """
     start_time = time.time()
 

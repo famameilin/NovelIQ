@@ -94,4 +94,9 @@ class ModelInteraction(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<ModelInteraction(id={self.id}, chunk_id={self.chunk_id}, run_id={self.run_id}, type={self.interaction_type}, phase={self.phase})>"
+        return (
+            f"<ModelInteraction("
+            f"id={self.id}, chunk_id={self.chunk_id}, "
+            f"run_id={self.run_id}, "
+            f"type={self.interaction_type}, phase={self.phase})>"
+        )

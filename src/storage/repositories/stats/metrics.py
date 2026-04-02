@@ -9,7 +9,8 @@
 修改时间: 2026-03-18
 修改者: TraeAI
 任务: code-quality-refactor - 补充遗漏方法
-修改内容: 添加 insert_cloud_analysis, insert_global_context, fetch_global_context, update_global_context, fetch_novel_title
+修改内容: 添加 insert_cloud_analysis, insert_global_context,
+    fetch_global_context, update_global_context, fetch_novel_title
 """
 
 from __future__ import annotations

@@ -41,12 +41,24 @@ def _load_protected_list() -> frozenset[str]:
     return frozenset(names) if names else _DEFAULT_PROTECTED
 
 
-_DEFAULT_PROTECTED: frozenset[str] = frozenset({
-    # 泛指代词 — 几乎不可能是真实人物
-    "来人", "有人", "某人", "众人", "旁人",
-    # 通用职位/身份 — 可能是前期未揭示真名的角色，保留送消歧
-    "传令兵", "侍卫", "护卫", "手下", "家丁", "丫鬟", "小厮",
-})
+_DEFAULT_PROTECTED: frozenset[str] = frozenset(
+    {
+        # 泛指代词 — 几乎不可能是真实人物
+        "来人",
+        "有人",
+        "某人",
+        "众人",
+        "旁人",
+        # 通用职位/身份 — 可能是前期未揭示真名的角色，保留送消歧
+        "传令兵",
+        "侍卫",
+        "护卫",
+        "手下",
+        "家丁",
+        "丫鬟",
+        "小厮",
+    }
+)
 
 
 class CandidateFilter:

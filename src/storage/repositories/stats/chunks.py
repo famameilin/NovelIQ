@@ -111,9 +111,7 @@ def fetch_chunk_culture(session: Session, run_id: str) -> list[tuple[float | Non
     return [(row.imagery_lexicon_density,) for row in result]
 
 
-def fetch_chunk_curves_full(
-    session: Session, run_id: str
-) -> Sequence[Row]:
+def fetch_chunk_curves_full(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取分块曲线完整数据（情绪 + 节奏）
 

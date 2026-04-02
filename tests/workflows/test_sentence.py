@@ -90,9 +90,9 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         例如：句子包含"重明"（贺重明的短形式），应归入贺重明的例句池
         """
         mock_conn = MagicMock()
-        mock_conn.execute.return_value.fetchall.return_value = [
-            ("贺重明号伯安，人称重明先生。",),
-            ("重明说道：「今日天气不错。」",),
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [("贺重明号伯安，人称重明先生。",), ("重明说道：「今日天气不错。」",)],
+            [],
         ]
 
         with patch("src.metrics.text_utils.split_sentences") as mock_split:
@@ -109,8 +109,9 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         例如：重明是独立候选，包含"重明"的句子不应归入贺重明
         """
         mock_conn = MagicMock()
-        mock_conn.execute.return_value.fetchall.return_value = [
-            ("重明说道：「今日天气不错。」",),
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [("重明说道：「今日天气不错。」",)],
+            [],
         ]
 
         with patch("src.metrics.text_utils.split_sentences") as mock_split:
@@ -127,8 +128,9 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         完整名字始终能匹配
         """
         mock_conn = MagicMock()
-        mock_conn.execute.return_value.fetchall.return_value = [
-            ("贺重明走进了房间。",),
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [("贺重明走进了房间。",)],
+            [],
         ]
 
         with patch("src.metrics.text_utils.split_sentences") as mock_split:
@@ -144,9 +146,9 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
         多个候选名，各自有变体，正确匹配
         """
         mock_conn = MagicMock()
-        mock_conn.execute.return_value.fetchall.return_value = [
-            ("重明和伯安一起来了。",),
-            ("李四说道：「你好。」",),
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [("重明和伯安一起来了。",), ("李四说道：「你好。」",)],
+            [],
         ]
 
         with patch("src.metrics.text_utils.split_sentences") as mock_split:

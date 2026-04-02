@@ -184,12 +184,7 @@ def attribute_dialogues_with_llm(
         current_client: AnnotationClient,
         retry_messages: list[dict] | None = None,
     ) -> list[DialogueRecord]:
-        dialogue_list = "\n".join(
-            [
-                f'{c.index}. content: "{c.content}"'
-                for c in candidates
-            ]
-        )
+        dialogue_list = "\n".join([f'{c.index}. content: "{c.content}"' for c in candidates])
         known_chars = "、".join(known_characters) if known_characters else "无"
 
         prompts = settings.prompts
@@ -233,7 +228,10 @@ def attribute_dialogues_with_llm(
         )
 
         logger.info(
-            f"dialogue_attribution: chunk_text_len={len(chunk_text)} candidates={len(candidates)} result_count={len(parsed.dialogues)}"
+            f"dialogue_attribution: "
+            f"chunk_text_len={len(chunk_text)} "
+            f"candidates={len(candidates)} "
+            f"result_count={len(parsed.dialogues)}"
         )
 
         return parsed.dialogues
@@ -277,7 +275,7 @@ def _extract_speaker_from_clue(clue: str, known_set: set[str] | None) -> str | N
     if not clue:
         return None
     generic_terms = {"说话者", "被指代", "对方", "某人"}
-    for pattern in (r'^([\u4e00-\u9fff]{2,6})(自称|称呼|让|告诉|问)', r'^([\u4e00-\u9fff]{2,6})(说明|揭示|表示)'):
+    for pattern in (r"^([\u4e00-\u9fff]{2,6})(自称|称呼|让|告诉|问)", r"^([\u4e00-\u9fff]{2,6})(说明|揭示|表示)"):
         m = re.match(pattern, clue)
         if m:
             name = m.group(1)

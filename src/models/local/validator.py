@@ -108,7 +108,10 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
     appearance_names = [ca.get("raw_name") for ca in character_appearances if ca.get("raw_name")]
 
     logger.debug(
-        "validate_names_in_sources: names={} text_len={} prev_chunk_len={} active_entities={} alias_map_keys={} next_chunk_len={} appearance_names={}",
+        "validate_names_in_sources: "
+        "names={} text_len={} prev_chunk_len={} "
+        "active_entities={} alias_map_keys={} "
+        "next_chunk_len={} appearance_names={}",
         names,
         len(text),
         len(prev_chunk_text),
@@ -363,7 +366,9 @@ def validate_chunk_annotation(
     is_valid = len(missing_names) == 0
     if not is_valid:
         logger.warning(
-            f"[validate_chunk_annotation] chunk_id={getattr(annotation, 'chunk_id', 'unknown')} 发现缺失角色: {missing_names}"
+            f"[validate_chunk_annotation] "
+            f"chunk_id={getattr(annotation, 'chunk_id', 'unknown')} "
+            f"发现缺失角色: {missing_names}"
         )
 
     return is_valid, sorted(missing_names)

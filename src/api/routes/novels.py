@@ -17,7 +17,8 @@ router = APIRouter(prefix="/novels", tags=["novels"])
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_novel(
-    file: UploadFile = File(...), service: NovelService = Depends(get_novel_service)
+    file: UploadFile = File(...),
+    service: NovelService = Depends(get_novel_service),
 ) -> UploadResponse:
     content = await file.read()
     novel_id = await service.save_upload(content, file.filename or "unknown.txt")
@@ -30,14 +31,15 @@ async def list_novels(service: NovelService = Depends(get_novel_service)):
 
 
 @router.delete("/{novel_id}")
-async def delete_novel(novel_id: str, service: NovelService = Depends(get_novel_service)):
+async def delete_novel(novel_id: str, service: NovelService = Depends(get_novel_service)):  # noqa: B008
     service.delete_novel(novel_id)
     return {"message": "删除成功", "novel_id": novel_id}
 
 
 @router.post("/batch-delete", response_model=BatchDeleteNovelsResponse)
 async def batch_delete_novels(
-    request: BatchDeleteNovelsRequest, service: NovelService = Depends(get_novel_service)
+    request: BatchDeleteNovelsRequest,
+    service: NovelService = Depends(get_novel_service),
 ) -> BatchDeleteNovelsResponse:
     """
     批量删除小说

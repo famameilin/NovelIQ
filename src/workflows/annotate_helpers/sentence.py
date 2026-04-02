@@ -195,8 +195,18 @@ def _build_sentence_pool(
 
     # Split into high-priority and normal pools
     HIGH_PRIORITY_KEYWORDS = (
-        "叫作", "名为", "取名", "原名", "别名", "号称",
-        "本名", "全名", "字", "号", "就是", "其实",
+        "叫作",
+        "名为",
+        "取名",
+        "原名",
+        "别名",
+        "号称",
+        "本名",
+        "全名",
+        "字",
+        "号",
+        "就是",
+        "其实",
     )
     high_pool: dict[str, list[str]] = {name: [] for name in name_list}
     normal_pool: dict[str, list[str]] = {name: [] for name in name_list}
@@ -257,7 +267,9 @@ def _build_sentence_pool(
             for (text_content,) in rows:
                 for sentence in split_sentences(text_content):
                     if any(v in sentence for v in _get_name_variants(name, name_set)):
-                        truncated = _annotate_dialogue_structure(sentence).strip()[: settings.analysis.sentence_pool_max_chars]
+                        truncated = _annotate_dialogue_structure(sentence).strip()[
+                            : settings.analysis.sentence_pool_max_chars
+                        ]
                         if truncated not in rare_sentences:
                             rare_sentences.append(truncated)
             if rare_sentences:

@@ -196,10 +196,7 @@ def _augment_hint_with_graph(
 
     # 2. Current active relations from graph_relations_current
     relations = graph_repo.fetch_current_relations(run_id, active_only=True)
-    relevant_rels = [
-        r for r in relations
-        if r["from_name"] in existing_set or r["to_name"] in existing_set
-    ]
+    relevant_rels = [r for r in relations if r["from_name"] in existing_set or r["to_name"] in existing_set]
     if relevant_rels:
         rel_lines = ["【图谱已确认的关系】"]
         for r in relevant_rels[:10]:
@@ -327,9 +324,7 @@ def filter_candidates_by_class(
     if candidate_filter is None:
         candidate_filter = CandidateFilter()
 
-    filtered_cls, remaining_cls = candidate_filter.classify_batch(
-        [dict(c) for c in candidates], context_sentences
-    )
+    filtered_cls, remaining_cls = candidate_filter.classify_batch([dict(c) for c in candidates], context_sentences)
 
     filtered_names = {c.name for c in filtered_cls}
     filtered: list[NameCountCandidate] = [c for c in candidates if c["name"] in filtered_names]

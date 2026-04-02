@@ -46,6 +46,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         last_emotion_score: str | None = None,
         last_action: str | None = None,
         source_confidence: float | None = None,
+        status: str | None = None,
     ) -> GraphEntity:
         entity = self.get_entity_by_canonical(run_id, canonical_name)
         if entity is None:
@@ -59,6 +60,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 last_emotion_score=last_emotion_score,
                 last_action=last_action,
                 source_confidence=source_confidence,
+                status=status or "active",
             )
             self.session.add(entity)
             self.session.flush()
@@ -71,9 +73,12 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         # Update entity_type if the new value differs and is not the generic default
         if entity_type and entity_type != "character" and entity.entity_type != entity_type:
             from loguru import logger
+
             logger.info(
                 "Updating entity_type for '{}': {} -> {}",
-                canonical_name, entity.entity_type, entity_type,
+                canonical_name,
+                entity.entity_type,
+                entity_type,
             )
             entity.entity_type = entity_type
         if primary_role_function is not None:
@@ -84,6 +89,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             entity.last_action = last_action
         if source_confidence is not None:
             entity.source_confidence = source_confidence
+        if status is not None:
+            entity.status = status
         entity.updated_at = datetime.now(UTC)
         self.session.flush()
         return entity
