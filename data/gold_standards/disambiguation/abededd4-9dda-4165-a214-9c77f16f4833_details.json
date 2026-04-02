@@ -1,0 +1,68 @@
+[
+  {
+    "alias": "灵禽",
+    "canonical": "赤羽炽尾鸡",
+    "result": "false_merge",
+    "evidence": "灵禽是物种泛称，不应指向具体个体"
+  },
+  {
+    "alias": "褚大山",
+    "canonical": "柱子",
+    "result": "missed_merge",
+    "evidence": "褚大山就是柱子；原文频次：柱子34 vs 褚大山3"
+  },
+  {
+    "alias": "二妈妈",
+    "canonical": "柳婉儿",
+    "result": "correct_merge",
+    "evidence": "二妈妈就是柳婉儿"
+  },
+  {
+    "alias": "算盘",
+    "canonical": "林立果",
+    "result": "correct_merge",
+    "evidence": "林立果就是算盘；原文频次：算盘45 vs 林立果7，系统方向反了"
+  },
+  {
+    "alias": "贺重明",
+    "canonical": "伯安",
+    "result": "correct_merge",
+    "evidence": "贺重明就是伯安"
+  },
+  {
+    "alias": "凤兰",
+    "canonical": "周凤兰",
+    "result": "correct_merge",
+    "evidence": "凤兰就是周凤兰；原文频次：凤兰17 vs 周凤兰13"
+  },
+  {
+    "alias": "白芷",
+    "canonical": "贺铮",
+    "result": "false_merge",
+    "evidence": "跨 run 矛盾：6b401f00 中灰衣人→白芷（should_merge），若白芷=贺铮则灰衣人也是贺铮，需进一步确认"
+  },
+  {
+    "alias": "赤甲卫",
+    "canonical": "伯安",
+    "result": "false_merge",
+    "evidence": "赤甲卫是组织名，伯安是个人，不应合并"
+  },
+  {
+    "alias": "柳妹妹",
+    "canonical": "柳婉儿",
+    "result": "correct_merge",
+    "evidence": "柳婉儿就是柳妹妹；原文频次：柳婉儿9 vs 柳妹妹2"
+  },
+  {
+    "alias": "贺伯安",
+    "canonical": "伯安",
+    "result": "correct_merge",
+    "evidence": "贺伯安就是伯安"
+  },
+  {
+    "alias": "猴子",
+    "canonical": "侯飞白",
+    "result": "correct_merge",
+    "evidence": "侯飞白就是猴子；原文频次：猴子57 vs 侯飞白6，系统方向反了"
+  }
+]

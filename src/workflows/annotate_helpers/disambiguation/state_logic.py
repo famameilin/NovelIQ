@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Literal
 
 from loguru import logger
@@ -21,6 +22,9 @@ from src.models.local.disambiguation import (
 )
 from src.models.local.disambiguation.evidence import (
     EVIDENCE_SIGNAL_IDENTITY_REVEAL,
+    EVIDENCE_SIGNAL_KINSHIP_IDENTITY,
+    EVIDENCE_SIGNAL_NAMING_SCENE,
+    EVIDENCE_SIGNAL_STABLE_TITLE,
     EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
     EVIDENCE_STRENGTH_STRONG,
     EVIDENCE_STRENGTH_WEAK,
@@ -56,6 +60,63 @@ def _normalize_disambig_confidence(confidence: Any) -> Literal["low", "medium", 
         if normalized in VALID_DISAMBIG_CONFIDENCE:
             return normalized  # type: ignore[return-value]
     return "medium"
+
+
+_CONFIDENCE_RANK: dict[str, int] = {"low": 1, "medium": 2, "high": 3}
+
+
+def _disambig_confidence_rank(confidence: str) -> int:
+    return _CONFIDENCE_RANK.get(confidence, 2)
+
+
+# Signals that count as "structured evidence" for the evidence gate.
+_STRUCTURED_EVIDENCE_SIGNALS = frozenset({
+    EVIDENCE_SIGNAL_NAMING_SCENE,
+    EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
+    EVIDENCE_SIGNAL_KINSHIP_IDENTITY,
+    EVIDENCE_SIGNAL_IDENTITY_REVEAL,
+    EVIDENCE_SIGNAL_STABLE_TITLE,
+})
+
+
+def _build_evidence_audit_fields(profile: EvidenceProfile | None) -> tuple[int, tuple[str, ...]]:
+    """Build audit fields (evidence count, evidence types) from an evidence profile.
+
+    创建时间: 2026-04-02
+    创建者: CodeAI
+    任务: fix/decision-evidence-audit
+    说明: 为 NameReviewState 填充 decision_evidence_count 和 decision_evidence_types，
+          实现文档 §10.4 规划的证据门禁审计链条。
+    """
+    if profile is None:
+        return 0, ()
+    count = 0
+    types: list[str] = []
+    if profile.has_original_sentence:
+        count += 1
+        types.append("original_sentence")
+    for signal in profile.strong_signals:
+        if signal in _STRUCTURED_EVIDENCE_SIGNALS:
+            count += 1
+            types.append(signal)
+    return count, tuple(types)
+
+
+def _count_structured_evidence(profile: EvidenceProfile | None) -> int:
+    """Count structured evidence items for a candidate.
+
+    Structured evidence = original sentences + strong signals
+    (excluding appearance_only which is not reliable).
+    """
+    if profile is None:
+        return 0
+    count = 0
+    if profile.has_original_sentence:
+        count += 1
+    for signal in profile.strong_signals:
+        if signal in _STRUCTURED_EVIDENCE_SIGNALS:
+            count += 1
+    return count
 
 
 def _normalize_evidence_strength(strength: Any) -> Literal["weak", "mixed", "strong"] | None:
@@ -158,6 +219,18 @@ def validate_confidence_with_evidence(
     """
     existing_set = set(existing_names) if existing_names else set()
 
+    # Structured evidence gate: high-confidence merges must have evidence
+    for name, canonical in result.canonical_decisions.items():
+        current_confidence = result.alias_confidence.get(name, DISAMBIG_CONFIDENCE_MEDIUM)
+        if current_confidence == DISAMBIG_CONFIDENCE_HIGH and canonical != name:
+            evidence_count = _count_structured_evidence(result.evidence_profiles.get(name))
+            if evidence_count == 0:
+                logger.info(
+                    f"Blocking high-confidence merge for '{name}': "
+                    f"no structured evidence (0 evidence items), downgrading to medium"
+                )
+                result.alias_confidence[name] = DISAMBIG_CONFIDENCE_MEDIUM
+
     for name, canonical in result.canonical_decisions.items():
         _apply_strong_evidence_merge_override(name, result, existing_names, context_sentences)
         canonical = result.canonical_decisions.get(name, canonical)
@@ -216,16 +289,38 @@ def apply_disambiguation_decisions(
         evidence_profile = result.evidence_profiles.get(name)
         evidence_strength = _normalize_evidence_strength(evidence_profile.strength if evidence_profile else None)
 
+        # Protect existing non-self-map decisions from being overwritten by self-maps.
+        old_review = new_review_status.get(name)
+        if (
+            old_review is not None
+            and old_review.proposed_canonical is not None
+            and old_review.proposed_canonical != name
+            and canonical == name  # new decision is self-map
+        ):
+            # Don't overwrite a non-self-map with a self-map unless confidence is higher
+            if _disambig_confidence_rank(confidence) <= _disambig_confidence_rank(old_review.confidence):
+                logger.debug(
+                    f"Protecting existing merge '{name}->{old_review.proposed_canonical}' "
+                    f"(conf={old_review.confidence}) from self-map downgrade "
+                    f"(new conf={confidence})"
+                )
+                continue
+
         if name == canonical:
             is_confirmed_canonical = confidence == DISAMBIG_CONFIDENCE_HIGH and evidence_strength in ("mixed", "strong")
             if is_confirmed_canonical:
                 new_known_canonical.add(name)
             status_value = DISAMBIG_STATE_RESOLVED if is_confirmed_canonical else DISAMBIG_STATE_REVIEW
+            evidence_count, evidence_types = _build_evidence_audit_fields(evidence_profile)
             new_review_status[name] = NameReviewState(
                 status=status_value,
                 confidence=confidence,
                 proposed_canonical=name,
                 evidence_strength=evidence_strength,
+                decision_evidence_count=evidence_count,
+                decision_evidence_types=evidence_types,
+                decision_source="llm",
+                decision_timestamp=time.time(),
             )
         else:
             new_discovered.add(canonical)
@@ -234,11 +329,16 @@ def apply_disambiguation_decisions(
             new_alias_merges.append((name, canonical))
 
             status_value = DISAMBIG_STATE_RESOLVED if confidence == DISAMBIG_CONFIDENCE_HIGH else DISAMBIG_STATE_REVIEW
+            evidence_count, evidence_types = _build_evidence_audit_fields(evidence_profile)
             new_review_status[name] = NameReviewState(
                 status=status_value,
                 confidence=confidence,
                 proposed_canonical=canonical,
                 evidence_strength=evidence_strength,
+                decision_evidence_count=evidence_count,
+                decision_evidence_types=evidence_types,
+                decision_source="llm",
+                decision_timestamp=time.time(),
             )
 
     old_canonicals = state.known_canonical_names
@@ -269,7 +369,33 @@ def apply_disambiguation_decisions(
                     confidence=review.confidence,
                     proposed_canonical=new_target,
                     evidence_strength=review.evidence_strength,
+                    decision_evidence_count=review.decision_evidence_count,
+                    decision_evidence_types=review.decision_evidence_types,
+                    decision_source=review.decision_source,
+                    decision_timestamp=review.decision_timestamp,
                 )
+
+    # Demotion mechanism: if a previously resolved name is now demoted to review,
+    # remove its alias_merge entry to prevent stale merges in the graph.
+    # P1 fix: filter alias_merges INLINE during the demotion loop instead of
+    # rebuilding new_alias_merges after the loop (which obscured the data flow).
+    old_review_dict = state.get_review_status_dict()
+    demoted_aliases: set[str] = set()
+    for name, review in new_review_status.items():
+        old_review = old_review_dict.get(name)
+        if (
+            old_review
+            and old_review.status == DISAMBIG_STATE_RESOLVED
+            and review.status != DISAMBIG_STATE_RESOLVED
+        ):
+            logger.warning(
+                f"Demoting resolved name '{name}' from "
+                f"'{old_review.status}' to '{review.status}'"
+            )
+            demoted_aliases.add(name)
+    # Apply alias_filter in a separate pass to avoid modifying list during iteration.
+    if demoted_aliases:
+        new_alias_merges = [(a, c) for a, c in new_alias_merges if a not in demoted_aliases]
 
     final_alias_merges: list[tuple[str, str]] = []
     seen_aliases: set[str] = set()

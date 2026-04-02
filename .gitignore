@@ -132,6 +132,11 @@ celerybeat.pid
 # Cython debug symbols
 cython_debug/
 
+# Trae IDE / code analysis
+.claude/
+.understand-anything/
+tree.txt
+
 # Local development files
 *.local
 temp_test*

@@ -37,6 +37,9 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         def apply_alias_merges(self, run_id, alias_merges):
             captured["merges"] = (run_id, dict(alias_merges))
 
+        def cleanup_self_loop_relations(self, run_id):
+            captured["cleanup"] = run_id
+
     class _DummyConn:
         def commit(self):
             pass
@@ -65,8 +68,8 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         )
 
     assert new_state.known_canonical_names == state.known_canonical_names
-    assert captured["ensure"] == ("run-1", {"bai_zhi", "hou_fei_bai"}, "novel-1", {})
-    assert captured["merges"] == ("run-1", {})
+    assert captured["ensure"] == ("run-1", {"bai_zhi", "hou_fei_bai"}, "novel-1", None)
+    assert captured["cleanup"] == "run-1"
     process_mock.assert_called_once()
 
 

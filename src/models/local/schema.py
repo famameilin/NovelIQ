@@ -11,9 +11,10 @@ ForeshadowingType = Literal["causal", "thematic"]
 ForeshadowingConfidence = Literal["high", "medium", "low"]
 DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
-RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从"]
+RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
 RelationChange = Literal["强化", "弱化", "新建", "断裂", "无变化"]
 ProjectionStatus = Literal["pending", "projected", "failed"]
+EntityType = Literal["character", "group", "organization", "creature", "artifact"]
 ClueType = Literal[
     "none",
     "self_introduction",
@@ -300,9 +301,9 @@ class DisambiguateResponseModel(BaseModel):
         default_factory=dict,
         description="disambiguation confidence per candidate (low/medium/high)",
     )
-    entity_types: dict[str, str] = Field(
+    entity_types: dict[str, EntityType] = Field(
         default_factory=dict,
-        description="实体类型映射，key为实体名称，value为类型（character/group/organization）",
+        description="实体类型映射，key为实体名称，value为类型（character/group/organization/creature/artifact）",
     )
     entity_relations: list[HierarchicalRelation] = Field(
         default_factory=list,

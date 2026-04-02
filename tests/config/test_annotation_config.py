@@ -34,7 +34,7 @@ class TestAnnotationConfig(unittest.TestCase):
 
     def test_valid_entity_types(self) -> None:
         """测试实体类型常量"""
-        expected = ["character", "group", "organization"]
+        expected = ["character", "group", "organization", "creature", "artifact"]
         self.assertEqual(
             ANNOTATION_CONFIG.valid_entity_types,
             expected

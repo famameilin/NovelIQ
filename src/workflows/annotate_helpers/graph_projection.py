@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import text
 
+from src.config import settings
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
@@ -13,6 +14,8 @@ from src.workflows.annotate_helpers.disambiguation.checkpoint import (
 )
 
 PENDING_RETRY_LIMIT = 200
+
+VALID_CHANGE_TYPES = frozenset({"强化", "弱化", "新建", "断裂", "无变化"})
 
 
 def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases: dict[str, str]) -> str | None:
@@ -138,14 +141,48 @@ def project_graph_tables(
     alias_map = state.get_alias_merges_dict()
     graph_alias_map = graph_repo.fetch_alias_map(run_id)
 
+    # P1.1 fix: batch-load existing entity types to avoid hardcoded "character"
+    existing_entities = graph_repo.fetch_entities(run_id)
+    existing_types: dict[str, str] = {
+        e.canonical_name: e.entity_type for e in existing_entities if e.canonical_name
+    }
+    # Merge disambiguation entity_types so LLM-judged types flow into graph projection
+    if state.entity_types:
+        existing_types.update(state.get_entity_types_dict())
+
+    # Build set of uncertain names: review/low status, not in alias_merges or known_canonicals
+    review_dict = state.get_review_status_dict()
+    uncertain_names: set[str] = set()
+    canonical_names = state.known_canonical_names
+    alias_set = {a for a, _ in state.alias_merges}
+    for name, review in review_dict.items():
+        if (
+            review.status != "resolved"
+            and review.confidence in ("low", "medium")
+            and name not in canonical_names
+            and name not in alias_set
+        ):
+            uncertain_names.add(name)
+            logger.debug(
+                "Uncertain name skipped: '{}' (status={}, confidence={})",
+                name, review.status, review.confidence,
+            )
+
+    if uncertain_names:
+        logger.info(
+            f"Skipping {len(uncertain_names)} uncertain names from graph projection: {uncertain_names}"
+        )
+
     for row in chunk_characters:
         resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)
         if resolved_name is None:
             continue
+        if resolved_name in uncertain_names:
+            continue
         entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_name,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_name, "character"),
             first_seen_chunk=row.chunk_id,
             last_seen_chunk=row.chunk_id,
             primary_role_function=row.role_function,
@@ -186,7 +223,7 @@ def project_graph_tables(
         entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_name,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_name, "character"),
             first_seen_chunk=row.chunk_id,
             last_seen_chunk=row.chunk_id,
             source_confidence=0.8,
@@ -237,11 +274,22 @@ def project_graph_tables(
             relation.projected_at = None
             failed_count += 1
             continue
+        # P4: Filter uncertain endpoints from relation projection
+        if resolved_from in uncertain_names or resolved_to in uncertain_names:
+            relation.projection_status = "pending"
+            relation.projection_error = "uncertain endpoint"
+            relation.projected_at = None
+            pending_count += 1
+            logger.debug(
+                "Skipping relation with uncertain endpoint: '{}' or '{}'",
+                resolved_from, resolved_to,
+            )
+            continue
 
         from_entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_from,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_from, "character"),
             first_seen_chunk=relation.chunk_id,
             last_seen_chunk=relation.chunk_id,
             source_confidence=relation.confidence,
@@ -249,7 +297,7 @@ def project_graph_tables(
         to_entity = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=resolved_to,
-            entity_type="character",
+            entity_type=existing_types.get(resolved_to, "character"),
             first_seen_chunk=relation.chunk_id,
             last_seen_chunk=relation.chunk_id,
             source_confidence=relation.confidence,
@@ -309,17 +357,43 @@ def project_graph_tables(
             )
             graph_alias_map[relation.to_char] = resolved_to
 
+        rel_type = relation.type or "未知"
+        rel_change = relation.change or "无变化"
+
+        # Validate relation_type and change_type before writing to graph
+        valid_relation_types = frozenset(settings.analysis.valid_relation_types)
+        if rel_type not in valid_relation_types:
+            logger.warning(
+                "Skipping relation with invalid type '{}' (chunk={})",
+                rel_type, relation.chunk_id,
+            )
+            relation.projection_status = "pending"
+            relation.projection_error = f"invalid relation_type: {rel_type}"
+            relation.projected_at = None
+            pending_count += 1
+            continue
+        if rel_change not in VALID_CHANGE_TYPES:
+            logger.warning(
+                "Skipping relation with invalid change '{}' (chunk={})",
+                rel_change, relation.chunk_id,
+            )
+            relation.projection_status = "pending"
+            relation.projection_error = f"invalid change_type: {rel_change}"
+            relation.projected_at = None
+            pending_count += 1
+            continue
+
         event = graph_repo.insert_relation_event(
             run_id=run_id,
             from_entity_id=from_entity.entity_id,
             to_entity_id=to_entity.entity_id,
-            relation_type=relation.type or "未知",
-            change_type=relation.change or "无变化",
+            relation_type=rel_type,
+            change_type=rel_change,
             chunk_id=relation.chunk_id,
             evidence=relation.evidence,
             confidence=relation.confidence,
             source_relation_row_id=relation.id,
-            directionality="symmetric" if relation.type in {"盟友", "友情", "家族"} else "directed",
+            directionality="symmetric" if rel_type in {"盟友", "友情", "家族"} else "directed",
         )
         if event is None:
             relation.projection_status = "failed"
