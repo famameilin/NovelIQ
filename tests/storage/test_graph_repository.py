@@ -123,3 +123,36 @@ class TestGraphQualitySignals:
         low_conf = graph_repo.fetch_low_confidence_relation_events(run_id, threshold=0.6)
         assert len(low_conf) == 1
         assert float(low_conf[0]["confidence"]) == 0.31
+
+
+class TestFetchEntitiesWithStatus:
+    def test_fetch_entities_filters_by_status_active(self, db_session) -> None:
+        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Test Novel",
+        )
+        graph_repo = GraphRepository(db_session)
+        graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name="方源",
+            first_seen_chunk=1,
+            last_seen_chunk=5,
+            status="active",
+        )
+        graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name="韩立",
+            first_seen_chunk=1,
+            last_seen_chunk=10,
+            status="merged",
+        )
+        db_session.commit()
+
+        active_entities = graph_repo.fetch_entities(run_id, status="active")
+        assert len(active_entities) == 1
+        assert active_entities[0].canonical_name == "方源"
+
+        all_entities = graph_repo.fetch_entities(run_id)
+        assert len(all_entities) == 2

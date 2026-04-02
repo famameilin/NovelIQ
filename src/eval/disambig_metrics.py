@@ -6,6 +6,11 @@
 任务: P0 评测基线系统
 
 提供金标对比和指标计算功能，支持 A/B 对比。
+
+修改时间: 2026-04-02
+修改者: TraeAI
+任务: P2.2-entity-type-metrics
+修改内容: 新增 compute_metrics_by_entity_type 函数，支持按实体类型分组统计
 """
 
 from __future__ import annotations
@@ -13,7 +18,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass
@@ -380,3 +388,58 @@ def compare_reports(baseline: BaselineReport, current: BaselineReport) -> str:
             lines.append(f"| {run_id} | {metric_label} | {bv:.4f} | {cv:.4f} | {arrow}{diff:.4f} |")
 
     return "\n".join(lines)
+
+
+def compute_metrics_by_entity_type(
+    gold_records: list[dict],
+    system_merges: list[dict],
+    run_id: str,
+    session: Session,
+) -> dict[str, RunMetrics]:
+    """
+    按实体类型分组统计误合并率。
+
+    数据来源：从 graph_entities JOIN graph_entity_aliases 获取每个 alias 的 entity_type，
+    不修改金标格式。
+
+    创建时间: 2026-04-02
+    创建者: TraeAI
+    任务: P2.2-entity-type-metrics
+    """
+    from loguru import logger
+
+    from src.storage.repositories import GraphRepository
+
+    graph_repo = GraphRepository(session)
+    entities = graph_repo.fetch_entities(run_id)
+    alias_map_rows = graph_repo.fetch_alias_map(run_id)
+
+    # 构建 name -> entity_type 查找表
+    name_to_type: dict[str, str] = {}
+    for e in entities:
+        name_to_type[e.canonical_name] = e.entity_type
+    for alias, canonical in alias_map_rows.items():
+        name_to_type[alias] = name_to_type.get(canonical, "character")
+
+    # 检查覆盖率
+    gold_aliases = {r["alias"] for r in gold_records}
+    missing_types = gold_aliases - set(name_to_type.keys())
+    if missing_types:
+        logger.warning(
+            f"entity_type lookup missing for {len(missing_types)} names: {list(missing_types)[:5]}..."
+        )
+
+    # 按 entity_type 分组
+    type_records: dict[str, list[dict]] = {}
+    for record in gold_records:
+        alias = record["alias"]
+        entity_type = name_to_type.get(alias, "character")
+        type_records.setdefault(entity_type, []).append(record)
+
+    # 分别计算各类型指标
+    result: dict[str, RunMetrics] = {}
+    for entity_type, records in type_records.items():
+        metrics, _ = compute_run_metrics(records, system_merges, run_id)
+        result[entity_type] = metrics
+
+    return result
