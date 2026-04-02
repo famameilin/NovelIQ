@@ -52,6 +52,7 @@ import {
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { MetricCard } from "@/components/common/MetricCard";
+import { SegmentedBar } from "@/components/common/SegmentedBar";
 import { AnalysisProgressRing } from "@/components/common/AnalysisProgressRing";
 import { useThemeStore } from "@/store/themeStore";
 import {
@@ -219,7 +220,11 @@ export function ComponentShowcase() {
 
       {/* ===== Card ===== */}
       <Section title="Card 卡片">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <p className="text-sm text-text-secondary mb-4">
+          支持 <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">default</code>（基础）和
+          <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">elevated</code>（微渐变 + hover 抬升）两种 variant。悬浮卡片查看效果。
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader>
               <CardTitle>基础卡片</CardTitle>
@@ -262,25 +267,58 @@ export function ComponentShowcase() {
               <Button variant="ghost" size="sm">删除</Button>
             </CardFooter>
           </Card>
+
+          <Card variant="elevated" className="bg-gradient-to-br from-surface via-surface to-chart-1/15">
+            <CardHeader>
+              <CardTitle>Elevated 卡片</CardTitle>
+              <CardDescription>微渐变 + 悬停抬升</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="success">已完成</Badge>
+                <span className="text-sm text-text-secondary">分析任务 #1</span>
+              </div>
+            </CardContent>
+            <CardFooter className="justify-between">
+              <Button variant="outline" size="sm">查看详情</Button>
+              <Button variant="ghost" size="sm">删除</Button>
+            </CardFooter>
+          </Card>
         </div>
       </Section>
 
       {/* ===== MetricCard ===== */}
       <Section title="MetricCard 指标卡片">
+        <p className="text-sm text-text-secondary mb-4">
+          支持 <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">accent</code> 多色强调、
+          <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">trend</code> 趋势标签、
+          <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">showOrb</code> 装饰光斑、
+          <code className="rounded bg-primary-subtle px-1.5 py-0.5 text-xs font-mono text-primary">footer</code> 自定义插槽。
+        </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="叙事结构"
             value={78}
             format="number"
             decimals={0}
-            icon={<TrendingUp className="h-4 w-4" />}
+            icon={<TrendingUp className="h-5 w-5" />}
             description="综合叙事结构评分，基于三幕比例、高潮间距、悬念率等指标计算"
+            footer={
+              <SegmentedBar
+                segments={[
+                  { label: "第一幕", value: 25, colorClass: "bg-chart-1" },
+                  { label: "第二幕", value: 55, colorClass: "bg-chart-2" },
+                  { label: "第三幕", value: 20, colorClass: "bg-chart-3" },
+                ]}
+              />
+            }
           />
           <MetricCard
             label="伏笔兑现率"
             value={0.62}
             format="percent"
-            icon={<Zap className="h-4 w-4" />}
+            icon={<Zap className="h-5 w-5" />}
+            accent="chart-2"
             description="已兑现伏笔占已设置伏笔的比率"
           />
           <MetricCard
@@ -288,14 +326,35 @@ export function ComponentShowcase() {
             value={3.8}
             format="score"
             maxScore={5}
-            icon={<BookOpen className="h-4 w-4" />}
+            icon={<BookOpen className="h-5 w-5" />}
+            accent="chart-4"
+            showOrb
             description="综合成语密度、古典意象、文言比例的文化深度评分"
           />
           <MetricCard
             label="角色数量"
             value={42}
             format="raw"
-            icon={<Users className="h-4 w-4" />}
+            icon={<Users className="h-5 w-5" />}
+            accent="chart-3"
+            trend="+12%"
+            showOrb
+            footer={
+              <>
+                <div className="flex -space-x-2">
+                  {["李逍遥", "赵灵儿", "林月如", "阿奴"].map((name, i) => (
+                    <div
+                      key={name}
+                      className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-surface bg-gradient-to-br from-primary/20 to-primary/40 text-[10px] font-medium text-primary"
+                      style={{ zIndex: 4 - i }}
+                    >
+                      {name[0]}
+                    </div>
+                  ))}
+                </div>
+                <span className="text-xs text-text-muted">+38 更多角色</span>
+              </>
+            }
           />
         </div>
       </Section>
