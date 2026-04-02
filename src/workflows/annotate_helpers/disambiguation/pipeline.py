@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 from typing import Any
 
@@ -103,6 +104,35 @@ class DisambiguationMaxRetriesExceededError(Exception):
     pass
 
 
+def _get_git_audit_info() -> dict[str, str]:
+    """获取 git 审计信息（模块加载时缓存，避免每次消歧调用 fork 进程）。"""
+    if not hasattr(_get_git_audit_info, "_cache"):
+        info: dict[str, str] = {}
+        try:
+            info["branch"] = (
+                subprocess.check_output(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                .decode()
+                .strip()
+            )
+            info["commit"] = (
+                subprocess.check_output(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                .decode()
+                .strip()
+            )
+        except Exception:
+            pass
+        _get_git_audit_info._cache = info  # type: ignore[attr-defined]
+    return _get_git_audit_info._cache  # type: ignore[attr-defined]
+
+
 def _build_disambig_response_text(result: Any) -> str:
     """
     构建消歧响应文本
@@ -146,24 +176,7 @@ def _build_disambig_response_text(result: Any) -> str:
             "evidence_profiles": {},
         }
 
-    # Audit info (non-intrusive, for traceability)
-    audit_info: dict[str, Any] = {}
-    try:
-        import subprocess as _sp
-
-        audit_info["branch"] = (
-            _sp.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=_sp.DEVNULL, timeout=5)
-            .decode()
-            .strip()
-        )
-        audit_info["commit"] = (
-            _sp.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=_sp.DEVNULL, timeout=5)
-            .decode()
-            .strip()
-        )
-    except Exception:
-        pass
-    response_dict["audit"] = audit_info
+    response_dict["audit"] = _get_git_audit_info()
 
     return json.dumps(response_dict, ensure_ascii=False)
 

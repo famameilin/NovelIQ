@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,9 +26,9 @@ class GraphEntity(Base):
     last_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     source_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=True, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
     )
 
     __table_args__ = (
@@ -51,7 +51,7 @@ class GraphEntityAlias(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         UniqueConstraint("run_id", "entity_id", "alias", name="uq_graph_entity_aliases_entity_alias"),
@@ -77,7 +77,7 @@ class GraphRelationEvent(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_relation_row_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     directionality: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=datetime.utcnow)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: datetime.now(UTC))
 
     __table_args__ = (
         UniqueConstraint(
@@ -111,7 +111,7 @@ class GraphRelationCurrent(Base):
     tension_index: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=True, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
     )
 
     __table_args__ = (
