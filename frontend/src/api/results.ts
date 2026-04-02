@@ -1,0 +1,156 @@
+import { apiClient } from "./client";
+import type {
+  Character,
+  ChunkCurvePoint,
+  Topic,
+  DiagnosisResult,
+  GraphData,
+  TimelineData,
+  NarrativeStructureMetrics,
+  EmotionStatsMetrics,
+  CharacterStatsMetrics,
+  StyleStatsMetrics,
+  CultureStatsMetrics,
+} from "./types";
+
+// ---- Characters ----
+
+export async function getCharacters(
+  novelId: string,
+  taskId: string
+): Promise<Character[]> {
+  const { data } = await apiClient.get<Character[]>(
+    `/api/novels/${novelId}/characters`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+// ---- Chunk Curves ----
+
+export async function getChunkCurves(
+  novelId: string,
+  taskId: string
+): Promise<ChunkCurvePoint[]> {
+  const { data } = await apiClient.get<ChunkCurvePoint[]>(
+    `/api/novels/${novelId}/chunk-curves`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+// ---- Topics ----
+
+export async function getTopics(
+  novelId: string,
+  taskId: string
+): Promise<Topic[]> {
+  const { data } = await apiClient.get<Topic[]>(
+    `/api/novels/${novelId}/topics`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+// ---- Diagnosis ----
+
+export async function getDiagnosis(
+  novelId: string,
+  taskId: string
+): Promise<DiagnosisResult> {
+  const { data } = await apiClient.get<DiagnosisResult>(
+    `/api/novels/${novelId}/diagnosis`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+// ---- Knowledge Graph ----
+
+export async function getGraph(
+  novelId: string,
+  taskId: string
+): Promise<GraphData> {
+  const { data } = await apiClient.get<GraphData>(
+    `/api/novels/${novelId}/graph`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+// ---- Timeline ----
+
+export async function getTimeline(
+  novelId: string,
+  taskId: string,
+  options?: { includeCurve?: boolean; maxLevel?: number }
+): Promise<TimelineData> {
+  const { data } = await apiClient.get<TimelineData>(
+    `/api/novels/${novelId}/timeline`,
+    {
+      params: {
+        task_id: taskId,
+        include_curve: options?.includeCurve ?? true,
+        max_level: options?.maxLevel ?? 3,
+      },
+    }
+  );
+  return data;
+}
+
+// ---- Metrics ----
+
+export async function getNarrativeStructure(
+  novelId: string,
+  taskId: string
+): Promise<NarrativeStructureMetrics> {
+  const { data } = await apiClient.get<NarrativeStructureMetrics>(
+    `/api/novels/${novelId}/metrics/narrative-structure`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+export async function getEmotionStats(
+  novelId: string,
+  taskId: string
+): Promise<EmotionStatsMetrics> {
+  const { data } = await apiClient.get<EmotionStatsMetrics>(
+    `/api/novels/${novelId}/metrics/emotion-stats`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+export async function getCharacterStats(
+  novelId: string,
+  taskId: string
+): Promise<CharacterStatsMetrics> {
+  const { data } = await apiClient.get<CharacterStatsMetrics>(
+    `/api/novels/${novelId}/metrics/character-stats`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+export async function getStyleStats(
+  novelId: string,
+  taskId: string
+): Promise<StyleStatsMetrics> {
+  const { data } = await apiClient.get<StyleStatsMetrics>(
+    `/api/novels/${novelId}/metrics/style-stats`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+export async function getCultureStats(
+  novelId: string,
+  taskId: string
+): Promise<CultureStatsMetrics> {
+  const { data } = await apiClient.get<CultureStatsMetrics>(
+    `/api/novels/${novelId}/metrics/culture-stats`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
