@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-const DEFAULT_SEED = "#6366F1"; // Indigo 500
+export const DEFAULT_SEED = "#6366F1"; // Indigo 500
 
 interface ThemeState {
   seedColor: string;
