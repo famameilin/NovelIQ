@@ -138,15 +138,15 @@ class AnalysisService:
         修改者: TraeAI
         任务: fix-resume-feature - 断点续传功能修复
         修改内容: 先检查是否已存在该task_id对应的run_id，存在则复用
+
+        修改时间: 2026-04-03
+        修改者: TraeAI
+        任务: 统一日志目录使用完整run_id
+        修改内容: 先确定run_id，再创建AnalysisLogger，确保logs目录与run_id一致
         """
         novel_id = novel["novel_id"]
         source_path = Path(novel["file_path"])
         novel_title = novel.get("filename", "").replace(".txt", "") if novel.get("filename") else None
-
-        log_base_dir = settings.paths.log_dir
-        analysis_logger = AnalysisLogger(log_base_dir, task_id)
-        logger.info(f"Task ID: {task_id}")
-        logger.info(f"Log directory: {analysis_logger.log_dir}")
 
         db_session = self.session_factory.get_session(init_tables=True)
         conn = db_session.connection
@@ -169,6 +169,12 @@ class AnalysisService:
                 run_id=run_id,
             )
             logger.info(f"Created analysis run: run_id={run_id} for novel_id={novel_id}")
+
+        log_base_dir = settings.paths.log_dir
+        analysis_logger = AnalysisLogger(log_base_dir, run_id)
+        logger.info(f"Task ID: {task_id}")
+        logger.info(f"Run ID: {run_id}")
+        logger.info(f"Log directory: {analysis_logger.log_dir}")
 
         stats_repo = StatsRepository(conn)
         if not stats_repo.has_global_context(run_id):

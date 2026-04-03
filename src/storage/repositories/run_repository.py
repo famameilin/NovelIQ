@@ -226,3 +226,18 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
         self.session.commit()
         return True
+
+    def count_distinct_novels(self) -> int:
+        """
+        统计不同小说的数量
+
+        创建时间: 2026-04-03
+        创建者: TraeAI
+        任务: 修改端点行为，从数据库查
+        说明: 返回 analysis_runs 表中 distinct novel_id 的数量
+        """
+        from sqlalchemy import func, select
+
+        stmt = select(func.count(func.distinct(AnalysisRun.novel_id))).select_from(AnalysisRun)
+        result = self.session.execute(stmt)
+        return result.scalar() or 0
