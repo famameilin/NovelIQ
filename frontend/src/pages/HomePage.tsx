@@ -102,8 +102,8 @@ export function HomePage() {
     return (
       <div className="flex h-full w-full items-center justify-center">
         <div className="text-center">
-          <h2 className="mb-4 text-2xl font-bold text-text">加载失败</h2>
-          <p className="mb-6 text-text-secondary">无法加载小说列表，请稍后重试。</p>
+          <h2 className="mb-4 text-2xl font-bold text-gray-900 dark:text-gray-100">加载失败</h2>
+          <p className="mb-6 text-gray-600 dark:text-gray-400">无法加载小说列表，请稍后重试。</p>
           <Button onClick={() => refetch()} variant="outline">
             <RefreshCw className="mr-2 h-4 w-4" />
             重试
@@ -130,8 +130,8 @@ export function HomePage() {
               <BookOpen className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-text">小说分析</h1>
-              <p className="text-xs text-text-muted">AI 驱动的网文分析</p>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">小说分析</h1>
+              <p className="text-xs text-gray-600 dark:text-gray-400">AI 驱动的网文分析</p>
             </div>
           </div>
 
@@ -141,7 +141,7 @@ export function HomePage() {
               <Sparkles className="h-4 w-4 text-primary" />
               <span className="text-sm font-medium text-primary">探索叙事的奥秘</span>
             </div>
-            <h2 className="text-3xl font-bold leading-tight text-text">
+            <h2 className="text-3xl font-bold leading-tight text-gray-900 dark:text-gray-100">
               上传中文网络小说，
               <br />
               <span className="bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
@@ -214,8 +214,8 @@ export function HomePage() {
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
               <BookOpen className="h-8 w-8 text-primary" />
             </div>
-            <h3 className="mb-1 text-lg font-semibold text-text">书架是空的</h3>
-            <p className="mb-6 text-sm text-text-muted">上传你的第一本小说开始分析</p>
+            <h3 className="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">书架是空的</h3>
+            <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">上传你的第一本小说开始分析</p>
             <Button onClick={() => setUploadDialogOpen(true)} className="gap-2">
               <Upload className="h-4 w-4" />
               上传小说

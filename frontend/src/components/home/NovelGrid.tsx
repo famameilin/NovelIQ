@@ -128,7 +128,7 @@ function Pagination({
         上一页
       </Button>
 
-      <span className="min-w-[5rem] text-center text-sm text-text-muted">
+      <span className="min-w-[5rem] text-center text-sm text-gray-600 dark:text-gray-400">
         {page} / {totalPages}
       </span>
 

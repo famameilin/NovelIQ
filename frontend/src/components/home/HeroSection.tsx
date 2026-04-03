@@ -57,14 +57,14 @@ export function HeroSection({
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-text">
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                 探索小说的
                 <span className="ml-1 bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
                   叙事奥秘
                 </span>
               </h1>
               {novelCount !== undefined && novelCount > 0 && (
-                <p className="text-xs text-text-muted">
+                <p className="text-xs text-gray-600 dark:text-gray-400">
                   <BookOpen className="mr-1 inline h-3 w-3" />
                   已上传 {novelCount} 本小说
                 </p>
