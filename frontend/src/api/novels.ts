@@ -1,8 +1,24 @@
 import { apiClient } from "./client";
-import type { Novel, NovelUploadResponse, BatchDeleteRequest, BatchDeleteResponse } from "./types";
+import type {
+  Novel,
+  NovelUploadResponse,
+  BatchDeleteRequest,
+  BatchDeleteResponse,
+  PaginatedResponse,
+} from "./types";
 
-export async function getNovels(): Promise<Novel[]> {
-  const { data } = await apiClient.get<Novel[]>("/api/novels/");
+export interface GetNovelsParams {
+  page?: number;
+  page_size?: number;
+}
+
+export async function getNovels(
+  params: GetNovelsParams = {}
+): Promise<PaginatedResponse<Novel>> {
+  const { page = 1, page_size = 12 } = params;
+  const { data } = await apiClient.get<PaginatedResponse<Novel>>("/api/novels/", {
+    params: { page, page_size },
+  });
   return data;
 }
 

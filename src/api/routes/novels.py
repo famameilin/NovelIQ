@@ -26,8 +26,22 @@ async def upload_novel(
 
 
 @router.get("/")
-async def list_novels(service: NovelService = Depends(get_novel_service)):
-    return service.list_novels()
+async def list_novels(
+    page: int = 1,
+    page_size: int = 12,
+    service: NovelService = Depends(get_novel_service),
+):
+    novels = service.list_novels()
+    total = len(novels)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return {
+        "items": novels[start:end],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
 
 
 @router.delete("/{novel_id}")
