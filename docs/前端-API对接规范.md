@@ -282,6 +282,7 @@ export interface StyleStats {
   vocab_breadth?: number;
   avg_word_len?: number;
   sent_len_std?: number;
+  dialogue_ratio?: number;
   function_word_vector?: Record<string, number>;
   category_density?: Record<string, number>;
 }

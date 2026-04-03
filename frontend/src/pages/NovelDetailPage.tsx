@@ -108,7 +108,7 @@ export function NovelDetailPage() {
         setTask(urlTaskId);
       }
     }
-  }, [novelId, urlTaskId, currentTaskId, setNovel, setTask]);
+  }, [novelId, urlTaskId, setNovel, setTask]);
 
   // Reflect currentTaskId to URL for shareability
   useEffect(() => {

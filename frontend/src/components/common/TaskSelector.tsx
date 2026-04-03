@@ -26,25 +26,27 @@ export function TaskSelector({ novelId, className }: TaskSelectorProps) {
     staleTime: 30_000,
   });
 
+  const taskList = tasks ?? [];
+
   if (isLoading) {
     return (
       <div className="h-9 w-48 animate-pulse rounded-md bg-surface-hover" />
     );
   }
 
-  if (!tasks || tasks.length === 0) {
+  if (taskList.length === 0) {
     return (
       <span className="text-sm text-text-muted">暂无分析任务</span>
     );
   }
 
   return (
-    <Select value={currentTaskId ?? undefined} onValueChange={setTask}>
+    <Select value={currentTaskId ?? ""} onValueChange={setTask}>
       <SelectTrigger className={className ?? "w-56"}>
         <SelectValue placeholder="选择分析任务" />
       </SelectTrigger>
       <SelectContent>
-        {tasks.map((task) => {
+        {taskList.map((task) => {
           const config = taskStatusConfig[task.status] ?? taskStatusConfig.pending;
           return (
             <SelectItem key={task.task_id} value={task.task_id}>
