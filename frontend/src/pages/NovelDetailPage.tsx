@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import {
   getNarrativeStructure,
   getEmotionStats,
@@ -14,11 +15,11 @@ import { useNovelStore } from "@/store/novelStore";
 import { useThemeStore } from "@/store/themeStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
-import { FiveDimensionRadar } from "@/components/charts/FiveDimensionRadar";
 import { DiagnosisSummaryCard } from "@/components/common/DiagnosisSummaryCard";
-import { MetricCardGrid } from "@/components/common/MetricCardGrid";
+import { ScoreOverviewCard } from "@/components/common/ScoreOverviewCard";
+import { DimensionMiniCard } from "@/components/common/DimensionMiniCard";
+import { NarrativeStructureBar } from "@/components/common/NarrativeStructureBar";
 import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
-import { toRadarDimensions } from "@/lib/normalize";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_SEED, HEX_COLOR_RE } from "@/store/themeStore";
@@ -38,11 +39,6 @@ function SkeletonGrid() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="h-[300px]">
-          <div className="flex h-full items-center justify-center">
-            <div className="h-48 w-48 animate-pulse rounded-full bg-surface-hover" />
-          </div>
-        </Card>
-        <Card className="h-[300px]">
           <CardContent className="p-5">
             <div className="space-y-4">
               <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
@@ -57,13 +53,38 @@ function SkeletonGrid() {
             </div>
           </CardContent>
         </Card>
+        <Card className="h-[300px]">
+          <CardContent className="p-5">
+            <div className="space-y-4">
+              <div className="h-5 w-24 animate-pulse rounded bg-surface-hover" />
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 animate-pulse rounded-full bg-surface-hover" />
+                <div className="space-y-2">
+                  <div className="h-3 w-16 animate-pulse rounded bg-surface-hover" />
+                  <div className="h-4 w-12 animate-pulse rounded bg-surface-hover" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="h-3 w-16 animate-pulse rounded bg-surface-hover" />
+                    <div className="h-3 w-20 animate-pulse rounded bg-surface-hover" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
-          <Card key={i} className="h-[120px]" />
+          <Card key={i} className="h-[140px]" />
         ))}
       </div>
-      <Card className="h-[200px]" />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card className="h-[200px]" />
+        <Card className="h-[200px]" />
+      </div>
     </div>
   );
 }
@@ -104,7 +125,7 @@ export function NovelDetailPage() {
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
-      if (urlTaskId && urlTaskId !== currentTaskId) {
+      if (urlTaskId) {
         setTask(urlTaskId);
       }
     }
@@ -248,22 +269,13 @@ export function NovelDetailPage() {
       {/* Main content */}
       {allMetricsLoaded && !isLoading && currentTaskId && (
         <div className="space-y-6">
-          {/* Row 1: Radar + Diagnosis Summary */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Card className="p-4">
-              <h3 className="mb-2 text-sm font-semibold text-text">五维指标概览</h3>
-              <FiveDimensionRadar
-                dimensions={toRadarDimensions({
-                  narrative: narrativeQuery.data,
-                  emotion: emotionQuery.data,
-                  character: characterQuery.data,
-                  style: styleQuery.data,
-                  culture: cultureQuery.data,
-                })}
-                className="h-[260px]"
-              />
-            </Card>
-
+          {/* Row 1: 诊断画像 + 评分速览 */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+          >
             {diagnosisQuery.data ? (
               <DiagnosisSummaryCard
                 diagnosis={diagnosisQuery.data}
@@ -275,22 +287,73 @@ export function NovelDetailPage() {
                 <p className="text-sm text-text-muted">暂无诊断数据</p>
               </Card>
             )}
-          </div>
 
-          {/* Row 2: Metric Cards Grid */}
-          <MetricCardGrid
-            narrative={narrativeQuery.data}
-            emotion={emotionQuery.data}
-            character={characterQuery.data}
-            style={styleQuery.data}
-            culture={cultureQuery.data}
-          />
+            <ScoreOverviewCard
+              foreshadowRate={diagnosisQuery.data?.foreshadow_rate}
+              powerStance={diagnosisQuery.data?.power_stance}
+              civilianDignity={diagnosisQuery.data?.civilian_dignity}
+              culturalDepth={diagnosisQuery.data?.cultural_depth}
+              novelId={novelId!}
+              className="h-full"
+            />
+          </motion.div>
 
-          {/* Row 3: Mini Curve Preview */}
-          <MiniCurvePreview
-            data={curvesQuery.data ?? []}
-            novelId={novelId!}
-          />
+          {/* Row 2: 五维速览 */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5"
+          >
+            <DimensionMiniCard
+              dimension="narrative"
+              data={narrativeQuery.data ?? {}}
+              novelId={novelId!}
+              linkTo={`/novels/${novelId}/timeline`}
+            />
+            <DimensionMiniCard
+              dimension="emotion"
+              data={emotionQuery.data ?? {}}
+              novelId={novelId!}
+              linkTo={`/novels/${novelId}/curves`}
+            />
+            <DimensionMiniCard
+              dimension="character"
+              data={characterQuery.data ?? {}}
+              novelId={novelId!}
+              linkTo={`/novels/${novelId}/graph`}
+            />
+            <DimensionMiniCard
+              dimension="style"
+              data={styleQuery.data ?? {}}
+              novelId={novelId!}
+            />
+            <DimensionMiniCard
+              dimension="culture"
+              data={cultureQuery.data ?? {}}
+              novelId={novelId!}
+            />
+          </motion.div>
+
+          {/* Row 3: 结构概览 + 曲线预览 */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+            className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+          >
+            <NarrativeStructureBar
+              act1Ratio={narrativeQuery.data?.act1_ratio}
+              act2Ratio={narrativeQuery.data?.act2_ratio}
+              act3Ratio={narrativeQuery.data?.act3_ratio}
+              eventDensity={narrativeQuery.data?.event_density}
+              novelId={novelId!}
+            />
+            <MiniCurvePreview
+              data={curvesQuery.data ?? []}
+              novelId={novelId!}
+            />
+          </motion.div>
         </div>
       )}
     </PageContainer>
