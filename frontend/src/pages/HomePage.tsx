@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
 import { Plus, RefreshCw } from "lucide-react";
 
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -10,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { HeroSection } from "@/components/home/HeroSection";
 import { NovelGrid } from "@/components/home/NovelGrid";
 import { UploadDialog, type UploadFileInfo } from "@/components/home/UploadDialog";
+import type { NovelCardData } from "@/components/common/NovelCard";
 
 import { getNovels, uploadNovel, deleteNovel } from "@/api/novels";
-import type { Novel, NovelCardData } from "@/api/types";
+import type { Novel } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Utils                                                             */

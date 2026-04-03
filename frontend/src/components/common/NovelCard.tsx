@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AnalysisProgressRing } from "./AnalysisProgressRing";
+import { cn } from "@/lib/cn";
 import type { TaskStatus } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
