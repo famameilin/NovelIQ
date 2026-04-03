@@ -94,6 +94,27 @@ export function generateThemePalette(seedHex: string): ThemePalette {
 }
 
 /**
+ * Convert a CSS hsl()/hsla() string to hsla() format with alpha.
+ * Handles both hsl(H S% L%) space-separated and hsl(H,S%,L%) comma-separated.
+ */
+export function hslToHsla(hsl: string, alpha: number): string {
+  const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+  if (HEX_COLOR_RE.test(hsl)) {
+    return hsl.replace("#", "").length === 6
+      ? `hsla(${parseInt(hsl.slice(1, 3), 16)}, ${parseInt(hsl.slice(3, 5), 16)}, ${parseInt(hsl.slice(5, 7), 16)}, ${alpha})`
+      : `hsla(0, 0%, 0%, ${alpha})`;
+  }
+
+  const trimmed = hsl.trim();
+  const match = trimmed.match(/^(?:hsla?\(|\s*)(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%(?:\s*,\s*([\d.]+))?(?:\s*\))?$/);
+  if (!match) {
+    return `hsla(0, 0%, 50%, ${alpha})`;
+  }
+  const [, h, s, l] = match.map(Number);
+  return `hsla(${h}, ${s}%, ${l}%, ${alpha})`;
+}
+
+/**
  * Read a CSS variable from :root and return as hsl() string for ECharts usage
  */
 export function getCSSColorVar(name: string): string {

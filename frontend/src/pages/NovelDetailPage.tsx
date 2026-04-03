@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   getNarrativeStructure,
@@ -11,15 +11,17 @@ import {
   getChunkCurves,
 } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
+import { useThemeStore } from "@/store/themeStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { FiveDimensionRadar } from "@/components/charts/FiveDimensionRadar";
 import { DiagnosisSummaryCard } from "@/components/common/DiagnosisSummaryCard";
 import { MetricCardGrid } from "@/components/common/MetricCardGrid";
 import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
-import { toRadarDimensions, type AllMetrics } from "@/lib/normalize";
+import { toRadarDimensions } from "@/lib/normalize";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/cn";
+import { Button } from "@/components/ui/button";
+import { DEFAULT_SEED } from "@/store/themeStore";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -89,16 +91,33 @@ function EmptyTaskPrompt() {
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
 
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
 export function NovelDetailPage() {
   const { novelId } = useParams<{ novelId: string }>();
-  const { currentTaskId, setNovel } = useNovelStore();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { currentTaskId, setNovel, setTask } = useNovelStore();
+  const { setSeedColor } = useThemeStore();
 
-  // Sync novelId to store on mount
+  const urlTaskId = searchParams.get("task_id");
+
+  // Sync novelId to store on mount; initialize task from URL if present
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
+      if (urlTaskId && urlTaskId !== currentTaskId) {
+        setTask(urlTaskId);
+      }
     }
-  }, [novelId, setNovel]);
+  }, [novelId, urlTaskId, currentTaskId, setNovel, setTask]);
+
+  // Reflect currentTaskId to URL for shareability
+  useEffect(() => {
+    if (currentTaskId) {
+      navigate(`/novels/${novelId}?task_id=${currentTaskId}`, { replace: true });
+    }
+  }, [currentTaskId, novelId, navigate]);
 
   // Parallel data fetching
   const enabled = !!novelId && !!currentTaskId;
@@ -152,6 +171,15 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
+  // Apply theme_color from diagnosis when available (declared after diagnosisQuery)
+  useEffect(() => {
+    if (diagnosisQuery.data?.theme_color && HEX_COLOR_RE.test(diagnosisQuery.data.theme_color)) {
+      setSeedColor(diagnosisQuery.data.theme_color);
+    } else if (!diagnosisQuery.isLoading && !diagnosisQuery.data) {
+      setSeedColor(DEFAULT_SEED);
+    }
+  }, [diagnosisQuery.data, diagnosisQuery.isLoading, setSeedColor]);
+
   const allMetricsLoaded =
     narrativeQuery.data &&
     emotionQuery.data &&
@@ -169,13 +197,32 @@ export function NovelDetailPage() {
       diagnosisQuery.isLoading ||
       curvesQuery.isLoading);
 
+  const hasAnyError =
+    narrativeQuery.isError ||
+    emotionQuery.isError ||
+    characterQuery.isError ||
+    styleQuery.isError ||
+    cultureQuery.isError ||
+    diagnosisQuery.isError ||
+    curvesQuery.isError;
+
+  const retryAll = () => {
+    narrativeQuery.refetch();
+    emotionQuery.refetch();
+    characterQuery.refetch();
+    styleQuery.refetch();
+    cultureQuery.refetch();
+    diagnosisQuery.refetch();
+    curvesQuery.refetch();
+  };
+
   // ---------- Render ----------
 
   return (
     <PageContainer>
       {/* Header */}
       <NovelHeader
-        title={novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析"}
+        title={diagnosisQuery.data?.narrative_type ? `${diagnosisQuery.data.narrative_type}分析` : (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
         status={diagnosisQuery.data ? "completed" : undefined}
         className="mb-6"
       />
@@ -186,16 +233,13 @@ export function NovelDetailPage() {
       {/* Loading skeleton */}
       {isLoading && currentTaskId && <SkeletonGrid />}
 
-      {/* Error state */}
-      {narrativeQuery.isError && currentTaskId && (
+      {/* Error state — check all queries */}
+      {hasAnyError && !isLoading && currentTaskId && (
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-text-muted">数据加载失败</p>
-          <button
-            onClick={() => narrativeQuery.refetch()}
-            className="text-sm text-primary hover:underline"
-          >
+          <Button variant="ghost" size="sm" onClick={retryAll}>
             重试
-          </button>
+          </Button>
         </div>
       )}
 

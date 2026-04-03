@@ -8,7 +8,7 @@ import {
   RadarComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import { getEChartsColors, getCSSColorVar } from "@/lib/theme";
+import { getEChartsColors, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import type { RadarDimension } from "@/lib/normalize";
 
@@ -86,7 +86,7 @@ export function FiveDimensionRadar({
               areaStyle: {
                 color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
                   { offset: 0, color: colors[0] },
-                  { offset: 1, color: colors[0].replace(")", ", 0.1)").replace("hsl(", "hsla(") },
+                  { offset: 1, color: hslToHsla(colors[0], 0.1) },
                 ]),
               },
               lineStyle: { width: 2 },

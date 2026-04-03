@@ -9,7 +9,7 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { Card } from "@/components/ui/card";
-import { getCSSColorVar } from "@/lib/theme";
+import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import type { ChunkCurvePoint } from "@/api/types";
 
@@ -41,8 +41,8 @@ export function MiniCurvePreview({
 }: MiniCurvePreviewProps) {
   const navigate = useNavigate();
 
-  const positiveColor = getCSSColorVar("--chart-positive");
-  const negativeColor = getCSSColorVar("--chart-negative");
+  const positiveColor = getCSSColorVar("--chart-1");
+  const negativeColor = getCSSColorVar("--chart-2");
 
   const option = useMemo(() => {
     if (!data.length) return {};
@@ -82,8 +82,8 @@ export function MiniCurvePreview({
           lineStyle: { width: 1.5, color: positiveColor },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: positiveColor.replace(")", ", 0.15)").replace("hsl(", "hsla(") },
-              { offset: 1, color: positiveColor.replace(")", ", 0.01)").replace("hsl(", "hsla(") },
+              { offset: 0, color: hslToHsla(positiveColor, 0.15) },
+              { offset: 1, color: hslToHsla(positiveColor, 0.01) },
             ]),
           },
           animationDuration: 800,
@@ -97,8 +97,8 @@ export function MiniCurvePreview({
           lineStyle: { width: 1.5, color: negativeColor },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: negativeColor.replace(")", ", 0.15)").replace("hsl(", "hsla(") },
-              { offset: 1, color: negativeColor.replace(")", ", 0.01)").replace("hsl(", "hsla(") },
+              { offset: 0, color: hslToHsla(negativeColor, 0.15) },
+              { offset: 1, color: hslToHsla(negativeColor, 0.01) },
             ]),
           },
           animationDuration: 800,

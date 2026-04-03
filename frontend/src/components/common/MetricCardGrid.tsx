@@ -10,6 +10,13 @@ import type {
   StyleStatsMetrics,
   CultureStatsMetrics,
 } from "@/api/types";
+import {
+  normalizeNarrative,
+  normalizeEmotion,
+  normalizeCharacter,
+  normalizeStyle,
+  normalizeCulture,
+} from "@/lib/normalize";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -18,6 +25,7 @@ import type {
 interface MetricDefinition {
   label: string;
   value: number;
+  normalizedValue: number;
   format: "number" | "percent" | "score";
   decimals: number;
   icon: React.ReactNode;
@@ -43,8 +51,9 @@ function buildMetrics(props: MetricCardGridProps): MetricDefinition[] {
     {
       label: "叙事结构",
       value: props.narrative.cliffhanger_rate,
-      format: "percent",
-      decimals: 1,
+      normalizedValue: normalizeNarrative(props.narrative),
+      format: "score",
+      decimals: 0,
       icon: <Settings className="h-5 w-5" />,
       accent: "chart-1",
       description: "悬念保持率：章节以悬念结尾的比例，越高说明读者驱动越强",
@@ -52,8 +61,9 @@ function buildMetrics(props: MetricCardGridProps): MetricDefinition[] {
     {
       label: "情感统计",
       value: props.emotion.pivot_moment_density,
-      format: "number",
-      decimals: 3,
+      normalizedValue: normalizeEmotion(props.emotion),
+      format: "score",
+      decimals: 0,
       icon: <Heart className="h-5 w-5" />,
       accent: "chart-2",
       description: "转折时刻密度：情感转折点在全文中的分布密度",
@@ -61,8 +71,9 @@ function buildMetrics(props: MetricCardGridProps): MetricDefinition[] {
     {
       label: "人物网络",
       value: props.character.network_density,
-      format: "number",
-      decimals: 3,
+      normalizedValue: normalizeCharacter(props.character),
+      format: "score",
+      decimals: 0,
       icon: <Users className="h-5 w-5" />,
       accent: "chart-3",
       description: "网络密度：角色关系图谱的连接紧密程度",
@@ -70,8 +81,9 @@ function buildMetrics(props: MetricCardGridProps): MetricDefinition[] {
     {
       label: "风格指标",
       value: props.style.vocab_breadth,
-      format: "number",
-      decimals: 3,
+      normalizedValue: normalizeStyle(props.style),
+      format: "score",
+      decimals: 0,
       icon: <Palette className="h-5 w-5" />,
       accent: "chart-4",
       description: "词汇广度：词汇多样性的量化指标",
@@ -79,8 +91,9 @@ function buildMetrics(props: MetricCardGridProps): MetricDefinition[] {
     {
       label: "文化元素",
       value: props.culture.idiom_density,
-      format: "number",
-      decimals: 4,
+      normalizedValue: normalizeCulture(props.culture),
+      format: "score",
+      decimals: 0,
       icon: <BookOpen className="h-5 w-5" />,
       accent: "chart-5",
       description: "成语密度：文本中成语使用的频率",
@@ -131,9 +144,10 @@ export function MetricCardGrid(props: MetricCardGridProps) {
         <motion.div key={m.label} variants={itemVariants}>
           <MetricCard
             label={m.label}
-            value={m.value}
-            format={m.format}
-            decimals={m.decimals}
+            value={m.normalizedValue}
+            format="score"
+            maxScore={100}
+            decimals={1}
             icon={m.icon}
             accent={m.accent}
             description={m.description}
