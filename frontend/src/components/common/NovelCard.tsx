@@ -160,7 +160,7 @@ export function NovelCard({
     <div
       className={cn(
         // 强制竖向比例 2:3 (宽:高)，这是书籍的比例
-        "relative w-full",
+        "group relative w-full",
         "aspect-[2/3]",
         className
       )}
