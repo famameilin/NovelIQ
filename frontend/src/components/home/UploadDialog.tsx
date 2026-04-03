@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { FileText, Upload, CheckCircle2, AlertCircle, X } from "lucide-react";
+import { FileText, Upload, CheckCircle2, AlertCircle, X, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatFileSize } from "@/lib/utils";
 
