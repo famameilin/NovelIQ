@@ -62,58 +62,28 @@ SEMANTIC_CATEGORY_KEYS = [
     "color",
 ]
 
-CLASSICAL_IMAGERY = {
-    "月",
-    "风",
-    "花",
-    "雪",
-    "云",
-    "雨",
-    "山",
-    "水",
-    "江",
-    "河",
-    "松",
-    "竹",
-    "梅",
-    "兰",
-    "菊",
-    "柳",
-    "桃",
-    "杏",
-    "荷",
-    "莲",
-    "鹤",
-    "雁",
-    "燕",
-    "莺",
-    "蝶",
-    "蝉",
-    "萤",
-    "鱼",
-    "龙",
-    "凤",
-    "楼",
-    "阁",
-    "亭",
-    "台",
-    "桥",
-    "舟",
-    "帆",
-    "灯",
-    "烛",
-    "香",
-    "琴",
-    "棋",
-    "书",
-    "画",
-    "剑",
-    "酒",
-    "茶",
-    "梦",
-    "魂",
-    "影",
-}
+CLASSICAL_IMAGERY: set[str] = set()
+
+
+def _load_classical_imagery() -> set[str]:
+    global CLASSICAL_IMAGERY
+    if CLASSICAL_IMAGERY:
+        return CLASSICAL_IMAGERY
+
+    try:
+        from src.lexicons.loader import load_lexicon
+
+        chars = load_lexicon("classical_imagery")
+        CLASSICAL_IMAGERY = set(chars)
+    except FileNotFoundError:
+        CLASSICAL_IMAGERY = {
+            "月", "风", "花", "雪", "云", "雨", "山", "水", "江", "河",
+            "松", "竹", "梅", "兰", "菊", "柳", "桃", "杏", "荷", "莲",
+            "鹤", "雁", "燕", "莺", "蝶", "蝉", "萤", "鱼", "龙", "凤",
+            "楼", "阁", "亭", "台", "桥", "舟", "帆", "灯", "烛", "香",
+            "琴", "棋", "书", "画", "剑", "酒", "茶", "梦", "魂", "影",
+        }
+    return CLASSICAL_IMAGERY
 
 IDIOM_SET: set[str] = set()
 
@@ -381,8 +351,9 @@ def compute_imagery_density(
     if total_chars == 0:
         return 0.0
 
+    imagery_set = _load_classical_imagery()
     all_chars = []
     for text in texts:
-        all_chars.extend([c for c in text if c in CLASSICAL_IMAGERY])
+        all_chars.extend([c for c in text if c in imagery_set])
 
     return len(all_chars) / total_chars
