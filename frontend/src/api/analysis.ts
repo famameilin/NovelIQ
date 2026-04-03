@@ -37,10 +37,10 @@ export async function getAnalysisStatus(
 export async function getAnalysisTasks(
   novelId: string
 ): Promise<AnalysisTask[]> {
-  const { data } = await apiClient.get<AnalysisTask[]>(
+  const { data } = await apiClient.get<{ novel_id: string; tasks: AnalysisTask[] }>(
     `/api/novels/${novelId}/tasks`
   );
-  return data;
+  return data.tasks;
 }
 
 export async function deleteAnalysisTask(
