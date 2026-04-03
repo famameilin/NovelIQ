@@ -43,6 +43,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "novel_id": run.novel_id,
             "source_path": run.source_path,
             "title": run.title,
+            "author": run.author,
             "status": run.status,
             "created_at": run.created_at.isoformat() if run.created_at else None,
             "updated_at": run.updated_at.isoformat() if run.updated_at else None,
@@ -53,6 +54,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         novel_id: str,
         source_path: str | None = None,
         title: str | None = None,
+        author: str | None = None,
         run_id: str | None = None,
     ) -> str:
         """
@@ -62,15 +64,11 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             novel_id: 小说ID
             source_path: 源文件路径
             title: 小说标题
+            author: 小说作者
             run_id: 可选的运行ID，如果不提供则自动生成
 
         Returns:
             运行ID
-
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: 修复task_id和run_id不关联的问题
-        修改内容: 添加run_id参数，支持外部传入run_id
         """
         if run_id is None:
             run_id = str(uuid.uuid4())
@@ -81,6 +79,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             novel_id=novel_id,
             source_path=source_path,
             title=title,
+            author=author,
             status="pending",
             created_at=now,
             updated_at=now,
