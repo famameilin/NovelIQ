@@ -266,6 +266,25 @@ class NovelService:
         """列出所有小说"""
         return list(self._novels.values())
 
+    def get_analysis_count(self) -> int:
+        """
+        从数据库查询不同小说的数量
+
+        创建时间: 2026-04-03
+        创建者: TraeAI
+        任务: 修改端点行为，从数据库查
+        说明: 返回 analysis_runs 表中不同 novel_id 的数量
+        """
+        try:
+            session_factory = get_session_factory()
+            with session_factory() as session:
+                from src.storage.repositories import RunRepository
+                run_repo = RunRepository(session)
+                return run_repo.count_distinct_novels()
+        except Exception as e:
+            logger.warning(f"Failed to get novel count from database: {e}")
+            return 0
+
     def delete_novel(self, novel_id: str) -> bool:
         """删除小说及其相关数据"""
         if novel_id not in self._novels:

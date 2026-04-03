@@ -32,7 +32,7 @@ async def list_novels(
     service: NovelService = Depends(get_novel_service),
 ):
     novels = service.list_novels()
-    total = len(novels)
+    total = service.get_analysis_count()
     start = (page - 1) * page_size
     end = start + page_size
     return {
@@ -40,7 +40,7 @@ async def list_novels(
         "total": total,
         "page": page,
         "page_size": page_size,
-        "total_pages": (total + page_size - 1) // page_size,
+        "total_pages": (total + page_size - 1) // page_size if total > 0 else 0,
     }
 
 
