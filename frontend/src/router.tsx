@@ -17,21 +17,13 @@ const ComponentShowcase = lazy(
 
 export const router = createBrowserRouter([
   {
-    element: <AppLayout />,
+    element: <AppLayout mode="with-hero-panel" />,
     children: [
       { path: "/", element: <HomePage /> },
-      {
-        path: "/dev/components",
-        element: (
-          <Suspense fallback={null}>
-            <ComponentShowcase />
-          </Suspense>
-        ),
-      },
     ],
   },
   {
-    element: <AppLayout showSideNav />,
+    element: <AppLayout mode="with-side-nav" />,
     children: [
       { path: "/novels/:novelId", element: <NovelDetailPage /> },
       { path: "/novels/:novelId/curves", element: <CurvesPage /> },
@@ -40,6 +32,19 @@ export const router = createBrowserRouter([
       { path: "/novels/:novelId/topics", element: <TopicsPage /> },
       { path: "/novels/:novelId/timeline", element: <TimelinePage /> },
       { path: "/novels/:novelId/diagnosis", element: <DiagnosisPage /> },
+    ],
+  },
+  {
+    element: <AppLayout mode="default" />,
+    children: [
+      {
+        path: "/dev/components",
+        element: (
+          <Suspense fallback={null}>
+            <ComponentShowcase />
+          </Suspense>
+        ),
+      },
     ],
   },
   { path: "*", element: <NotFoundPage /> },
