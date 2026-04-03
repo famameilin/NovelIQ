@@ -185,8 +185,28 @@ class NovelService:
             self._tasks[task_id]["status"] = status
 
     def get_tasks_by_novel(self, novel_id: str) -> list[dict]:
-        """获取小说的所有任务"""
-        return [t for t in self._tasks.values() if t.get("novel_id") == novel_id]
+        """获取小说的所有任务
+
+        从数据库读取，而不是从内存读取
+        """
+        try:
+            session_factory = get_session_factory()
+            with session_factory() as session:
+                from src.storage.repositories import RunRepository
+                run_repo = RunRepository(session)
+                runs = run_repo.get_runs_by_novel(novel_id)
+                return [
+                    {
+                        "task_id": run["run_id"][:8] if len(run["run_id"]) >= 8 else run["run_id"],
+                        "novel_id": run["novel_id"],
+                        "status": run["status"],
+                        "run_id": run["run_id"],
+                    }
+                    for run in runs
+                ]
+        except Exception as e:
+            logger.warning(f"Failed to get tasks from database: {e}")
+            return []
 
     def get_latest_completed_task(self, novel_id: str) -> dict | None:
         """获取小说的最新已完成任务"""
@@ -263,8 +283,48 @@ class NovelService:
         return sorted_tasks[0], None
 
     def list_novels(self) -> list[dict]:
-        """列出所有小说"""
-        return list(self._novels.values())
+        """列出所有小说及其信息
+
+        返回小说信息，包含 title、author、upload_time、file_size
+        （来自数据库最新运行记录和文件系统）
+        """
+        novel_ids = [n.get("novel_id") for n in self._novels.values() if n.get("novel_id")]
+        latest_runs: dict[str, dict] = {}
+
+        if novel_ids:
+            try:
+                session_factory = get_session_factory()
+                with session_factory() as session:
+                    run_repo = RunRepository(session)
+                    for nid in novel_ids:
+                        run = run_repo.get_latest_run(nid)
+                        if run:
+                            latest_runs[nid] = run
+            except Exception as e:
+                logger.warning(f"Failed to get latest runs from db: {e}")
+
+        novels = []
+        for novel in self._novels.values():
+            novel_id = novel.get("novel_id")
+            if not novel_id:
+                continue
+            latest_run = latest_runs.get(novel_id)
+            result = {**novel}
+            if latest_run:
+                result["title"] = latest_run.get("title") or novel.get("filename", "").replace(".txt", "")
+                result["author"] = latest_run.get("author") or "未知作者"
+                result["upload_time"] = latest_run.get("created_at")
+            else:
+                result["title"] = novel.get("filename", "").replace(".txt", "")
+                result["author"] = "未知作者"
+                result["upload_time"] = None
+            file_path = novel.get("file_path")
+            if file_path and os.path.exists(file_path):
+                result["file_size"] = os.path.getsize(file_path)
+            else:
+                result["file_size"] = 0
+            novels.append(result)
+        return novels
 
     def get_analysis_count(self) -> int:
         """
