@@ -285,44 +285,46 @@ class NovelService:
     def list_novels(self) -> list[dict]:
         """列出所有小说及其信息
 
-        创建时间: 2026-04-03
-        创建者: TraeAI
-        任务: 修复列表接口状态显示
-        说明: 返回小说信息，包含 title、author、upload_time、file_size（来自数据库最新任务和文件系统）
+        返回小说信息，包含 title、author、upload_time、file_size
+        （来自数据库最新运行记录和文件系统）
         """
+        novel_ids = [n.get("novel_id") for n in self._novels.values() if n.get("novel_id")]
+        latest_runs: dict[str, dict] = {}
+
+        if novel_ids:
+            try:
+                session_factory = get_session_factory()
+                with session_factory() as session:
+                    run_repo = RunRepository(session)
+                    for nid in novel_ids:
+                        run = run_repo.get_latest_run(nid)
+                        if run:
+                            latest_runs[nid] = run
+            except Exception as e:
+                logger.warning(f"Failed to get latest runs from db: {e}")
+
         novels = []
         for novel in self._novels.values():
             novel_id = novel.get("novel_id")
             if not novel_id:
                 continue
-            latest_run = self._get_latest_run_from_db(novel_id)
+            latest_run = latest_runs.get(novel_id)
+            result = {**novel}
             if latest_run:
-                novel["title"] = latest_run.get("title") or novel.get("filename", "").replace(".txt", "")
-                novel["author"] = latest_run.get("author") or "未知作者"
-                novel["upload_time"] = latest_run.get("created_at")
+                result["title"] = latest_run.get("title") or novel.get("filename", "").replace(".txt", "")
+                result["author"] = latest_run.get("author") or "未知作者"
+                result["upload_time"] = latest_run.get("created_at")
             else:
-                novel["title"] = novel.get("filename", "").replace(".txt", "")
-                novel["author"] = "未知作者"
-                novel["upload_time"] = None
+                result["title"] = novel.get("filename", "").replace(".txt", "")
+                result["author"] = "未知作者"
+                result["upload_time"] = None
             file_path = novel.get("file_path")
             if file_path and os.path.exists(file_path):
-                novel["file_size"] = os.path.getsize(file_path)
+                result["file_size"] = os.path.getsize(file_path)
             else:
-                novel["file_size"] = 0
-            novels.append(novel)
+                result["file_size"] = 0
+            novels.append(result)
         return novels
-
-    def _get_latest_run_from_db(self, novel_id: str) -> dict | None:
-        """从数据库获取小说的最新运行记录"""
-        try:
-            session_factory = get_session_factory()
-            with session_factory() as session:
-                from src.storage.repositories import RunRepository
-                run_repo = RunRepository(session)
-                return run_repo.get_latest_run(novel_id)
-        except Exception as e:
-            logger.warning(f"Failed to get latest run from db: {e}")
-            return None
 
     def get_analysis_count(self) -> int:
         """

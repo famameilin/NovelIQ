@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NovelCard, type NovelCardData } from "@/components/common/NovelCard";
 import { UploadDialog, type UploadFileInfo } from "@/components/home/UploadDialog";
@@ -27,15 +28,14 @@ function generateThemeColor(seed: string | undefined): string {
 }
 
 function mapNovelToCardData(novel: Novel): NovelCardData {
-  const novelId = novel.id || novel.novel_id;
   return {
-    id: novelId,
+    id: novel.novel_id,
     title: novel.title || novel.filename.replace(/\.txt$/, ""),
     author: novel.author || "未知作者",
     filename: novel.filename,
     fileSize: novel.file_size,
     updatedAt: novel.upload_time || new Date().toISOString(),
-    themeColor: generateThemeColor(novelId),
+    themeColor: generateThemeColor(novel.novel_id),
   };
 }
 
@@ -140,7 +140,15 @@ export function HomePage() {
             <div key={i} className="aspect-[2/3] animate-pulse rounded-lg bg-surface-hover" />
           ))}
         </div>
-      ) : novels.length === 0 ? null : (
+      ) : novels.length === 0 ? (
+        <div className="flex h-full items-center justify-center">
+          <div className="text-center">
+            <BookOpen className="mx-auto mb-4 h-12 w-12 text-text-muted/30" />
+            <p className="text-lg text-text-secondary">还没有小说</p>
+            <p className="mt-1 text-sm text-text-muted">点击左侧「上传小说」开始分析</p>
+          </div>
+        </div>
+      ) : (
         <div className="grid gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {novelCards.map((novel, index) => (
             <NovelCard

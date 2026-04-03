@@ -226,15 +226,15 @@ export function UploadCard({
     if (pendingFiles.length === 0) return;
 
     // Mark all pending files as uploading
-    setFiles((prev) =
-      prev.map((f) =
+    setFiles((prev) =>
+      prev.map((f) =>
         f.status === "pending" ? { ...f, status: "uploading" } : f
       )
     );
 
     // Simulate progress updates
     const progressInterval = setInterval(() => {
-      setFiles((prev) =
+      setFiles((prev) =>
         prev.map((f) => {
           if (f.status === "uploading" && f.progress < 90) {
             return { ...f, progress: f.progress + Math.random() * 10 };
