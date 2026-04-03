@@ -46,12 +46,15 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : motion.button;
     const motionProps = asChild ? {} : { whileTap: { scale: 0.97 }, transition: { duration: 0.1 } };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { onDragStart, onDragEnd, ...rest } = props as any;
+
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         {...motionProps}
-        {...props}
+        {...rest}
       />
     );
   }

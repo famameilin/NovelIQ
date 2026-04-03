@@ -18,7 +18,7 @@ export function HeroPanel({
 
       <div className="relative z-10 flex flex-1 flex-col p-8">
         <div className="mb-8 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-text-on-primary shadow-lg shadow-primary/20">
             <BookOpen className="h-6 w-6" />
           </div>
           <div>

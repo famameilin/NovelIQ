@@ -59,7 +59,7 @@ export function MiniCurvePreview({
         backgroundColor: "hsl(var(--surface))",
         borderColor: "hsl(var(--border))",
         textStyle: { color: "hsl(var(--text))", fontSize: 11 },
-        formatter: (params: Array<{ seriesName: string; value: number; marker: string }>) => {
+        formatter: (params: Array<{ seriesName: string; value: number; marker: string; axisValue?: string }>) => {
           if (!Array.isArray(params)) return "";
           return `分块 ${params[0]?.axisValue ?? ""}<br/>`
             + params.map((p) => `${p.marker} ${p.seriesName}: ${p.value.toFixed(4)}`).join("<br/>");
