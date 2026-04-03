@@ -9,6 +9,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/cn";
 import type { DiagnosisResult } from "@/api/types";
@@ -125,13 +126,15 @@ export function DiagnosisSummaryCard({
 
         {/* Footer: link to full diagnosis */}
         <div className="mt-auto pt-2">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate(`/novels/${novelId}/diagnosis`)}
             className="group flex items-center gap-1 text-xs text-text-muted transition-colors hover:text-primary"
           >
             查看完整诊断
             <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-          </button>
+          </Button>
         </div>
       </CardContent>
     </Card>
