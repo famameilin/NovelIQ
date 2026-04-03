@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export const DEFAULT_SEED = "#6366F1"; // Indigo 500
+export const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 interface ThemeState {
   seedColor: string;

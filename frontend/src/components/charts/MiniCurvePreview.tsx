@@ -41,8 +41,8 @@ export function MiniCurvePreview({
 }: MiniCurvePreviewProps) {
   const navigate = useNavigate();
 
-  const positiveColor = getCSSColorVar("--chart-1");
-  const negativeColor = getCSSColorVar("--chart-2");
+  const positiveColor = getCSSColorVar("--chart-positive");
+  const negativeColor = getCSSColorVar("--chart-negative");
 
   const option = useMemo(() => {
     if (!data.length) return {};
