@@ -72,13 +72,13 @@ export interface Character {
 // ============================================================
 
 export interface ChunkCurvePoint {
-  chunk_index: number;
-  positive_density: number;
-  negative_density: number;
-  net_density: number;
-  smoothed_density: number;
-  tension_proxy: number;
-  tension_composite?: number;
+  chunk_id: number;
+  pos_density: number | null;
+  neg_density: number | null;
+  net_density: number | null;
+  smoothed_density: number | null;
+  tension_proxy: number | null;
+  tension_composite?: number | null;
 }
 
 // ============================================================
