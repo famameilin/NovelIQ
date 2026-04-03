@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import ReactEChartsCore from "echarts-for-react/lib/core";
+import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts/core";
 import { LineChart } from "echarts/charts";
 import {
