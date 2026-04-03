@@ -72,12 +72,14 @@ function FileListItem({
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className={cn(
-        "flex items-center gap-3 rounded-lg border p-3 transition-colors",
-        isSuccess && "border-chart-positive/30 bg-chart-positive/5",
-        isError && "border-chart-negative/30 bg-chart-negative/5"
-      )}
     >
+      <Card
+        className={cn(
+          "flex items-center gap-3 p-3",
+          isSuccess && "border-chart-positive/30 bg-chart-positive/5",
+          isError && "border-chart-negative/30 bg-chart-negative/5"
+        )}
+      >
       {/* 文件图标 */}
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-surface-hover">
         {isSuccess ? (
@@ -125,6 +127,7 @@ function FileListItem({
           </button>
         )}
       </div>
+      </Card>
     </motion.div>
   );
 }
@@ -246,8 +249,8 @@ export function UploadCard({
 
       // Mark as success
       clearInterval(progressInterval);
-      setFiles((prev) =
-        prev.map((f) =
+      setFiles((prev) =>
+        prev.map((f) =>
           f.status === "uploading"
             ? { ...f, status: "success", progress: 100 }
             : f
@@ -256,8 +259,8 @@ export function UploadCard({
     } catch (error) {
       // Mark as error
       clearInterval(progressInterval);
-      setFiles((prev) =
-        prev.map((f) =
+      setFiles((prev) =>
+        prev.map((f) =>
           f.status === "uploading"
             ? { ...f, status: "error", error: "上传失败" }
             : f
