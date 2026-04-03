@@ -3,10 +3,11 @@
 // ============================================================
 
 export interface Novel {
-  id: string;
+  novel_id: string;
   title: string;
   filename: string;
-  upload_time: string;
+  author?: string;
+  upload_time: string | null;
   file_size: number;
 }
 
