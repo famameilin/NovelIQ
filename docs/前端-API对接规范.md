@@ -706,11 +706,15 @@ export function useDiagnosis(novelId: string, taskId: string) {
   │     └─▶ DiagnosisSummaryCard 渲染
   │
   ├─▶ useQuery(narrative) ──── fetchNarrativeStructure() ─── GET .../metrics/narrative-structure
+  │     └─▶ DimensionMiniCard(叙事) + NarrativeStructureBar（三幕比例 + 事件密度）
   ├─▶ useQuery(emotion) ────── fetchEmotionStats() ─── GET .../metrics/emotion-stats
+  │     └─▶ DimensionMiniCard(情感)（pos_neg_ratio）
   ├─▶ useQuery(character) ──── fetchCharacterStatsAggregate() ─── GET .../metrics/character-stats
+  │     └─▶ DimensionMiniCard(人物)（network_density）
   ├─▶ useQuery(style) ──────── fetchStyleStats() ─── GET .../metrics/style-stats
+  │     └─▶ DimensionMiniCard(风格)（vocab_breadth + dialogue_ratio）
   ├─▶ useQuery(culture) ────── fetchCultureStats() ─── GET .../metrics/culture-stats
-  │     └─▶ 五维指标归一化 → FiveDimensionRadar + MetricCardGrid
+  │     └─▶ DimensionMiniCard(文化)（idiom_density + classical_sentence_ratio + imagery_density）
   │
   └─▶ useQuery(curves) ─────── fetchChunkCurves() ─── GET .../chunk-curves
         └─▶ MiniCurvePreview 缩略图

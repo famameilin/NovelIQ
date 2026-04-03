@@ -47,9 +47,9 @@ export function MiniCurvePreview({
   const option = useMemo(() => {
     if (!data.length) return {};
 
-    const xData = data.map((d) => d.chunk_index);
-    const posData = data.map((d) => d.positive_density);
-    const negData = data.map((d) => d.negative_density);
+    const xData = data.map((d) => d.chunk_id);
+    const posData = data.map((d) => d.pos_density ?? 0);
+    const negData = data.map((d) => d.neg_density ?? 0);
 
     return {
       grid: { top: 10, right: 10, bottom: 10, left: 10, containLabel: false },
