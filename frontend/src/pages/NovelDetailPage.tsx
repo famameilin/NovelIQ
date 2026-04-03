@@ -21,7 +21,7 @@ import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
 import { toRadarDimensions } from "@/lib/normalize";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DEFAULT_SEED } from "@/store/themeStore";
+import { DEFAULT_SEED, HEX_COLOR_RE } from "@/store/themeStore";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -91,14 +91,12 @@ function EmptyTaskPrompt() {
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
 
-const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-
 export function NovelDetailPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { currentTaskId, setNovel, setTask } = useNovelStore();
-  const { setSeedColor } = useThemeStore();
+  const { seedColor: currentSeed, setSeedColor } = useThemeStore();
 
   const urlTaskId = searchParams.get("task_id");
 
@@ -175,10 +173,14 @@ export function NovelDetailPage() {
   useEffect(() => {
     if (diagnosisQuery.data?.theme_color && HEX_COLOR_RE.test(diagnosisQuery.data.theme_color)) {
       setSeedColor(diagnosisQuery.data.theme_color);
-    } else if (!diagnosisQuery.isLoading && !diagnosisQuery.data) {
+    } else if (
+      !diagnosisQuery.isLoading &&
+      !diagnosisQuery.data &&
+      currentSeed !== DEFAULT_SEED
+    ) {
       setSeedColor(DEFAULT_SEED);
     }
-  }, [diagnosisQuery.data, diagnosisQuery.isLoading, setSeedColor]);
+  }, [diagnosisQuery.data, diagnosisQuery.isLoading, currentSeed, setSeedColor]);
 
   const allMetricsLoaded =
     narrativeQuery.data &&
