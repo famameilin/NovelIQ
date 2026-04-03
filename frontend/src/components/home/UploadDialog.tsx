@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { FileText, Upload, CheckCircle2, AlertCircle, X, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -81,13 +83,15 @@ function FileListItem({
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 10 }}
-      className={cn(
-        "flex items-center gap-3 rounded-lg border p-3",
-        isSuccess && "border-chart-positive/30 bg-chart-positive/5",
-        isError && "border-chart-negative/30 bg-chart-negative/5",
-        !isSuccess && !isError && "border-border bg-surface"
-      )}
     >
+      <Card
+        className={cn(
+          "flex items-center gap-3 p-3",
+          isSuccess && "border-chart-positive/30 bg-chart-positive/5",
+          isError && "border-chart-negative/30 bg-chart-negative/5",
+          !isSuccess && !isError && "border-border bg-surface"
+        )}
+      >
       {/* 图标 */}
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-surface-hover">
         {isSuccess ? (
@@ -126,6 +130,7 @@ function FileListItem({
           <X className="h-4 w-4" />
         </button>
       )}
+      </Card>
     </motion.div>
   );
 }
@@ -145,6 +150,8 @@ export function UploadDialog({
 }: UploadDialogProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -228,91 +235,104 @@ export function UploadDialog({
   };
 
   return (
-    <div
-      className={cn(
-        "relative rounded-2xl border-2 border-dashed p-8 transition-all duration-200",
-        dragActive
-          ? "border-primary bg-primary-subtle/30"
-          : "border-border bg-surface hover:border-primary/30 hover:bg-surface-hover"
-      )}
-      onDragEnter={handleDrag}
-      onDragLeave={handleDrag}
-      onDragOver={handleDrag}
-      onDrop={handleDrop}
-    >
-      <input
-        type="file"
-        accept=".txt"
-        multiple
-        className="hidden"
-        onChange={(e) => e.target.files && addFiles(e.target.files)}
-      />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>上传小说</DialogTitle>
+          <DialogDescription>
+            上传中文网络小说，开始分析其叙事结构、情感走向和人物关系。
+          </DialogDescription>
+        </DialogHeader>
 
-      <div className="text-center">
-        <motion.div
-          initial={{ scale: 1 }}
-          animate={{ scale: dragActive ? 1.1 : 1 }}
-          transition={{ duration: 0.2 }}
+        {/* 拖拽上传区域 */}
+        <div
           className={cn(
-            "mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-2xl transition-colors",
-            dragActive ? "bg-primary/20" : "bg-surface-hover"
+            "relative rounded-xl border-2 border-dashed p-6 transition-all duration-200",
+            dragActive
+              ? "border-primary bg-primary-subtle/30"
+              : "border-border bg-surface hover:border-primary/30 hover:bg-surface-hover"
           )}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
         >
-          <Upload
-            className={cn(
-              "h-10 w-10 transition-colors",
-              dragActive ? "text-primary" : "text-text-muted"
-            )}
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".txt"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files);
+              e.target.value = "";
+            }}
           />
-        </motion.div>
 
-        <h3 className="mb-2 text-lg font-semibold text-text">
-          {dragActive ? "松开以上传文件" : "拖拽文件到此处"}
-        </h3>
-
-        <p className="mb-4 text-sm text-text-muted">
-          支持 .txt 格式，单个文件最大 10MB
-        </p>
-
-        <Button
-          variant="outline"
-          onClick={() =>
-            document
-              .querySelector('input[type="file"]')
-              ?.dispatchEvent(new MouseEvent("click"))
-          }
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          选择文件
-        </Button>
-      </div>
-
-      {/* 文件列表 */}
-      {files.length > 0 && (
-        <div className="mt-6 space-y-2">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium text-text">
-              待上传文件 ({files.length})
-            </h4>
-            {files.filter((f) => f.status === "pending").length > 0 && (
-              <Button size="sm" onClick={handleUpload} disabled={isUploading}>
-                {isUploading ? "上传中..." : "开始上传"}
-              </Button>
-            )}
-          </div>
-
-          <AnimatePresence mode="popLayout">
-            {files.map((file) => (
-              <FileListItem
-                key={file.id}
-                file={file}
-                onRemove={removeFile}
+          <div className="text-center">
+            <motion.div
+              initial={{ scale: 1 }}
+              animate={{ scale: dragActive ? 1.1 : 1 }}
+              transition={{ duration: 0.2 }}
+              className={cn(
+                "mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl transition-colors",
+                dragActive ? "bg-primary/20" : "bg-surface-hover"
+              )}
+            >
+              <Upload
+                className={cn(
+                  "h-8 w-8 transition-colors",
+                  dragActive ? "text-primary" : "text-text-muted"
+                )}
               />
-            ))}
-          </AnimatePresence>
+            </motion.div>
+
+            <p className="text-sm font-medium text-text">
+              {dragActive ? "松开以上传文件" : "拖拽文件到此处"}
+            </p>
+            <p className="mt-1 text-xs text-text-muted">
+              支持 .txt 格式，单个文件最大 10MB
+            </p>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => inputRef.current?.click()}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              选择文件
+            </Button>
+          </div>
         </div>
-      )}
-    </div>
+
+        {/* 文件列表 */}
+        {files.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-text">
+              待上传文件 ({files.length})
+            </p>
+            <AnimatePresence mode="popLayout">
+              {files.map((file) => (
+                <FileListItem
+                  key={file.id}
+                  file={file}
+                  onRemove={removeFile}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+
+        <DialogFooter>
+          {files.filter((f) => f.status === "pending").length > 0 && (
+            <Button onClick={handleUpload} disabled={isUploading}>
+              {isUploading ? "上传中..." : "开始上传"}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

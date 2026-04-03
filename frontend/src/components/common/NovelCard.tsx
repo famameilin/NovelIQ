@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { motion } from "framer-motion";
 import {
   MoreVertical,
   BookOpen,
@@ -34,6 +33,7 @@ export interface NovelCardData {
   title: string;
   author?: string;
   filename: string;
+  fileSize?: number;
   status: NovelStatus;
   progress?: number;
   themeColor?: string;
@@ -64,51 +64,69 @@ const STATUS_CONFIG: Record<
   pending: {
     label: "待分析",
     variant: "outline",
-    icon: <Clock className="h-3.5 w-3.5" />,
+    icon: <Clock className="h-3 w-3" />,
     color: "hsl(var(--text-muted))",
   },
   chunking: {
     label: "分块中",
     variant: "secondary",
-    icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    icon: <Loader2 className="h-3 w-3 animate-spin" />,
     color: "hsl(var(--primary))",
   },
   annotating: {
     label: "标注中",
     variant: "secondary",
-    icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    icon: <Loader2 className="h-3 w-3 animate-spin" />,
     color: "hsl(var(--primary))",
   },
   aggregating: {
     label: "聚合中",
     variant: "secondary",
-    icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    icon: <Loader2 className="h-3 w-3 animate-spin" />,
     color: "hsl(var(--primary))",
   },
   diagnosing: {
     label: "诊断中",
     variant: "secondary",
-    icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    icon: <Loader2 className="h-3 w-3 animate-spin" />,
     color: "hsl(var(--primary))",
   },
   completed: {
     label: "已完成",
     variant: "default",
-    icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+    icon: <CheckCircle2 className="h-3 w-3" />,
     color: "hsl(var(--chart-positive))",
   },
   failed: {
     label: "失败",
     variant: "destructive",
-    icon: <XCircle className="h-3.5 w-3.5" />,
+    icon: <XCircle className="h-3 w-3" />,
     color: "hsl(var(--chart-negative))",
   },
 };
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatDate(dateString: string): string {
   const date = new Date(dateString);
+  
+  // 处理无效日期
+  if (isNaN(date.getTime())) {
+    return "未知时间";
+  }
+  
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
+  
+  // 处理未来日期（时间戳为负）
+  if (diffMs < 0) {
+    return date.toLocaleDateString("zh-CN");
+  }
+  
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
@@ -136,132 +154,146 @@ export function NovelCard({
     novel.status !== "completed" &&
     novel.status !== "failed" &&
     novel.status !== "pending";
-
-  // 默认使用主色作为主题色
   const accentColor = novel.themeColor ?? "hsl(var(--primary))";
 
-  const handleView = () => onView?.(novel.id);
-  const handleDelete = () => {
-    if (confirm(`确定要删除《${novel.title}》吗？`)) {
-      onDelete?.(novel.id);
-    }
-  };
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className={className}
+    <div
+      className={cn(
+        // 强制竖向比例 2:3 (宽:高)，这是书籍的比例
+        "relative w-full",
+        "aspect-[2/3]",
+        className
+      )}
+      onClick={() => onView?.(novel.id)}
     >
-      <Card
-        variant="elevated"
-        className="group relative overflow-hidden cursor-pointer"
-        onClick={handleView}
-      >
-        {/* 顶部主题色装饰条 */}
-        <div
-          className="absolute left-0 right-0 top-0 h-1"
-          style={{ backgroundColor: accentColor }}
-        />
+      <Card className="absolute inset-0 flex flex-col overflow-hidden border-0 shadow-md transition-shadow hover:shadow-xl">
+        {/* 封面区域 - 占据卡片大部分空间 (75%) */}
+        <div className="relative h-[75%] overflow-hidden bg-gradient-to-b from-surface-hover to-surface">
+          {/* 左侧主题色装饰边 */}
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1.5 z-10"
+            style={{ backgroundColor: accentColor }}
+          />
 
-        {/* 操作菜单 */}
-        <div className="absolute right-3 top-3 z-10">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-surface/80 opacity-0 backdrop-blur-sm transition-all hover:bg-surface-hover group-hover:opacity-100"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreVertical className="h-4 w-4 text-text-secondary" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuItem onClick={handleView}>
-                <Eye className="mr-2 h-4 w-4" />
-                查看详情
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleDelete}
-                className="text-[hsl(var(--chart-negative))]"
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                删除
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* 封面/占位区域 */}
-        <div className="relative aspect-[3/4] overflow-hidden bg-surface-hover">
+          {/* 封面图或占位 */}
           {!imageError ? (
             <img
               src={`/api/novels/${novel.id}/cover`}
               alt={novel.title}
-              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+              className="h-full w-full object-cover"
               onError={() => setImageError(true)}
             />
           ) : (
-            <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+            <div 
+              className="relative flex h-full flex-col items-center justify-center p-4"
+              style={{
+                background: `linear-gradient(135deg, ${accentColor}08 0%, ${accentColor}15 50%, ${accentColor}08 100%)`
+              }}
+            >
+              {/* 装饰几何元素 */}
+              <div 
+                className="absolute right-4 top-4 h-16 w-16 rounded-full opacity-20"
+                style={{ backgroundColor: accentColor }}
+              />
+              <div 
+                className="absolute bottom-6 left-6 h-12 w-12 rounded-lg opacity-15"
+                style={{ backgroundColor: accentColor, transform: 'rotate(45deg)' }}
+              />
+              
+              {/* 图标容器 */}
               <div
-                className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
-                style={{ backgroundColor: `${accentColor}20` }}
+                className="relative mb-4 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg"
+                style={{ 
+                  backgroundColor: `${accentColor}18`,
+                  boxShadow: `0 4px 12px ${accentColor}25`
+                }}
               >
-                <BookOpen
-                  className="h-8 w-8"
-                  style={{ color: accentColor }}
-                />
+                <BookOpen className="h-8 w-8" style={{ color: accentColor }} />
               </div>
-              <p className="text-sm font-medium text-text line-clamp-2">
+              
+              {/* 标题 - 增大字号提升可读性 */}
+              <p className="relative line-clamp-2 text-center text-sm font-semibold text-gray-800 dark:text-gray-200 leading-relaxed">
                 {novel.title}
               </p>
-              {novel.author && (
-                <p className="mt-1 text-xs text-text-muted">{novel.author}</p>
-              )}
             </div>
           )}
 
-          {/* 分析中进度覆盖层 */}
+          {/* 分析进度遮罩 */}
           {isAnalyzing && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/80 backdrop-blur-sm">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/85 backdrop-blur-sm">
               <AnalysisProgressRing
                 progress={novel.progress || 0}
-                size={64}
-                strokeWidth={5}
+                size={44}
+                strokeWidth={3}
               />
-              <p className="mt-3 text-sm font-medium text-text">
+              <p className="mt-2 text-xs font-medium text-gray-700 dark:text-gray-300">
                 {statusConfig.label}
               </p>
             </div>
           )}
         </div>
 
-        {/* 底部信息区域 */}
-        <div className="p-4">
-          <div className="mb-3">
-            <h3 className="font-semibold text-text line-clamp-1">
+        {/* 底部信息栏 - 固定高度 (25%) */}
+        <div className="flex h-[25%] flex-col justify-between border-t border-border/30 bg-surface p-3">
+          <div>
+            <h3 className="mb-1 line-clamp-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
               {novel.title}
             </h3>
-            {novel.author && (
-              <p className="text-sm text-text-muted">{novel.author}</p>
-            )}
+            <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
+              {novel.author && (
+                <>
+                  <span className="line-clamp-1">{novel.author}</span>
+                  <span>·</span>
+                </>
+              )}
+              {novel.fileSize && <span>{formatFileSize(novel.fileSize)}</span>}
+            </div>
           </div>
 
           <div className="flex items-center justify-between">
             <Badge
               variant={statusConfig.variant}
-              className="flex items-center gap-1"
+              className="h-5 gap-1 px-1.5 text-[10px]"
             >
               {statusConfig.icon}
               {statusConfig.label}
             </Badge>
-            <span className="text-xs text-text-muted">
+            <span className="text-[10px] text-gray-500 dark:text-gray-400">
               {formatDate(novel.updatedAt)}
             </span>
           </div>
         </div>
+
+        {/* 操作菜单按钮 */}
+        <div className="absolute right-2 top-2 z-20">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex h-6 w-6 items-center justify-center rounded-full bg-surface/80 opacity-0 shadow-sm backdrop-blur-sm transition-all hover:bg-surface group-hover:opacity-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreVertical className="h-3 w-3 text-text-secondary" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-32">
+              <DropdownMenuItem onClick={() => onView?.(novel.id)}>
+                <Eye className="mr-2 h-3.5 w-3.5" />
+                查看
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => onDelete?.(novel.id)}
+                className="text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                删除
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </Card>
-    </motion.div>
+    </div>
   );
 }
+
+export default NovelCard;
