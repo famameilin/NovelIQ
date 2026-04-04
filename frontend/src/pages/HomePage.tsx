@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { useHomeContext } from "@/components/layout/AppLayout";
 
 import { getNovels, uploadNovel, deleteNovel } from "@/api/novels";
 import type { Novel } from "@/api/types";
+import { useNovelStore } from "@/store/novelStore";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -47,6 +48,7 @@ export function HomePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const homeContext = useHomeContext();
+  const setNovelsCache = useNovelStore((s) => s.setNovelsCache);
 
   const page = homeContext?.page ?? 1;
   const uploadDialogOpen = homeContext?.uploadDialogOpen ?? false;
@@ -63,9 +65,19 @@ export function HomePage() {
     queryFn: () => getNovels({ page, page_size: 10 }),
   });
 
-  const novels = novelsData?.items ?? [];
+  const novels = useMemo(
+    () => novelsData?.items ?? [],
+    [novelsData?.items]
+  );
   const total = novelsData?.total ?? 0;
   const totalPages = novelsData?.total_pages ?? 1;
+
+  // 同步小说列表到 store 缓存（供 TopBar 面包屑等跨页面复用）
+  useEffect(() => {
+    if (novels.length > 0) {
+      setNovelsCache(novels);
+    }
+  }, [novels, setNovelsCache]);
 
   useEffect(() => {
     if (setTotal) setTotal(total);
