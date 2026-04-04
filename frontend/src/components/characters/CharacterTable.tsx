@@ -14,7 +14,7 @@ export interface CharacterTableProps {
   className?: string;
 }
 
-type SortKey = "name" | "count" | "dominant_function" | "protagonist_score" | "avg_sentiment";
+type SortKey = "name" | "appearance_count" | "dominant_role_function" | "protagonist_score" | "avg_emotion_score";
 type SortDirection = "asc" | "desc";
 
 function SortIcon({
@@ -42,7 +42,7 @@ export function CharacterTable({
   protagonist,
   className,
 }: CharacterTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("count");
+  const [sortKey, setSortKey] = useState<SortKey>("appearance_count");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const sortedCharacters = useMemo(() => {
@@ -55,21 +55,21 @@ export function CharacterTable({
           aVal = a.name;
           bVal = b.name;
           break;
-        case "count":
-          aVal = a.count;
-          bVal = b.count;
+        case "appearance_count":
+          aVal = a.appearance_count;
+          bVal = b.appearance_count;
           break;
-        case "dominant_function":
-          aVal = a.dominant_function || "";
-          bVal = b.dominant_function || "";
+        case "dominant_role_function":
+          aVal = a.dominant_role_function || "";
+          bVal = b.dominant_role_function || "";
           break;
         case "protagonist_score":
           aVal = a.protagonist_score ?? 0;
           bVal = b.protagonist_score ?? 0;
           break;
-        case "avg_sentiment":
-          aVal = a.avg_sentiment ?? 0;
-          bVal = b.avg_sentiment ?? 0;
+        case "avg_emotion_score":
+          aVal = a.avg_emotion_score ?? 0;
+          bVal = b.avg_emotion_score ?? 0;
           break;
       }
 
@@ -109,16 +109,16 @@ export function CharacterTable({
                     <SortIcon column="name" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("count")}>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("appearance_count")}>
                   <div className="flex items-center gap-1">
                     出场次数
-                    <SortIcon column="count" sortKey={sortKey} sortDirection={sortDirection} />
+                    <SortIcon column="appearance_count" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("dominant_function")}>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("dominant_role_function")}>
                   <div className="flex items-center gap-1">
                     主导功能
-                    <SortIcon column="dominant_function" sortKey={sortKey} sortDirection={sortDirection} />
+                    <SortIcon column="dominant_role_function" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("protagonist_score")}>
@@ -127,10 +127,10 @@ export function CharacterTable({
                     <SortIcon column="protagonist_score" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("avg_sentiment")}>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("avg_emotion_score")}>
                   <div className="flex items-center gap-1">
                     情绪均值
-                    <SortIcon column="avg_sentiment" sortKey={sortKey} sortDirection={sortDirection} />
+                    <SortIcon column="avg_emotion_score" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
               </TableRow>
@@ -161,11 +161,11 @@ export function CharacterTable({
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell>{char.count}</TableCell>
+                    <TableCell>{char.appearance_count}</TableCell>
                     <TableCell>
-                      {char.dominant_function ? (
+                      {char.dominant_role_function ? (
                         <Badge variant="secondary" className="text-[10px]">
-                          {char.dominant_function}
+                          {char.dominant_role_function}
                         </Badge>
                       ) : (
                         <span className="text-text-muted">—</span>
@@ -179,19 +179,19 @@ export function CharacterTable({
                       )}
                     </TableCell>
                     <TableCell>
-                      {char.avg_sentiment != null ? (
+                      {char.avg_emotion_score != null ? (
                         <span
                           className={cn(
                             "tabular-nums",
-                            char.avg_sentiment > 0.1
+                            char.avg_emotion_score > 0.1
                               ? "text-chart-positive"
-                              : char.avg_sentiment < -0.1
+                              : char.avg_emotion_score < -0.1
                               ? "text-chart-negative"
                               : "text-text-muted"
                           )}
                         >
-                          {char.avg_sentiment > 0 ? "+" : ""}
-                          {char.avg_sentiment.toFixed(2)}
+                          {char.avg_emotion_score > 0 ? "+" : ""}
+                          {char.avg_emotion_score.toFixed(2)}
                         </span>
                       ) : (
                         <span className="text-text-muted">—</span>
