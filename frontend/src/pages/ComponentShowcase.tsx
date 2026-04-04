@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Button } from "@/components/ui/button";
@@ -95,18 +95,15 @@ const MONITOR_VARS = [
 ];
 
 function LiveCSSMonitor() {
-  const seedColor = useThemeStore((s) => s.seedColor);
-  const [vars, setVars] = useState<Record<string, string>>({});
-
-  useEffect(() => {
+  const vars = useMemo(() => {
     const root = document.documentElement;
     const values: Record<string, string> = {};
     for (const name of MONITOR_VARS) {
       values[name] = root.style.getPropertyValue(name) ||
         getComputedStyle(root).getPropertyValue(name).trim();
     }
-    setVars(values);
-  }, [seedColor]);
+    return values;
+  }, []);
 
   return (
     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">

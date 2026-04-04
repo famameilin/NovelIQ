@@ -256,8 +256,7 @@ export function UploadCard({
             : f
         )
       );
-    } catch (error) {
-      // Mark as error
+    } catch {
       clearInterval(progressInterval);
       setFiles((prev) =>
         prev.map((f) =>
