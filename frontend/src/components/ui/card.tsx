@@ -36,16 +36,13 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
     const baseClasses = cardVariants({ variant });
 
     if (variant === "elevated") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
-      // Strip native drag handlers to avoid conflict with Framer Motion's drag API
-      const { onDragStart: _onDragStart, onDragEnd: _onDragEnd, ...rest } = props as any;
       return (
         <motion.div
           ref={ref}
           className={cn(baseClasses, className)}
           whileHover={{ y: -1 }}
           transition={{ duration: 0.3, ease: "easeOut" }}
-          {...rest}
+          {...props}
         />
       );
     }
