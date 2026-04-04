@@ -9,6 +9,11 @@
 - SessionLocal: Session 工厂类
 - get_session(): 上下文管理器，用于获取 Session
 - init_db(): 初始化数据库（创建所有表）
+
+修改时间: 2026-04-04
+修改者: AI Assistant
+任务: fix-backend-stability
+修改内容: 添加数据库连接超时和 SQL 执行超时配置，添加连接池监控事件
 """
 
 from __future__ import annotations
@@ -69,8 +74,15 @@ def get_engine():
     pool_size = int(os.environ.get("DB_POOL_SIZE", "5"))
     max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "10"))
     pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
-    pool_recycle = int(os.environ.get("DB_POOL_RECYCLE", "3600"))
+    pool_recycle = int(os.environ.get("DB_POOL_RECYCLE", "1800"))
+    connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "5"))
+    statement_timeout = int(os.environ.get("DB_STATEMENT_TIMEOUT", "30000"))
     echo = os.environ.get("DB_ECHO", "false").lower() == "true"
+
+    connect_args = {
+        "connect_timeout": connect_timeout,
+        "options": f"-c statement_timeout={statement_timeout}",
+    }
 
     _engine = create_engine(
         database_url,
@@ -81,6 +93,7 @@ def get_engine():
         pool_recycle=pool_recycle,
         pool_pre_ping=True,
         echo=echo,
+        connect_args=connect_args,
     )
 
     if database_url.startswith("postgresql"):
@@ -91,7 +104,19 @@ def get_engine():
             cursor.execute("SET TIME ZONE 'UTC'")
             cursor.close()
 
-    logger.info(f"Created SQLAlchemy engine for {database_url.split(':')[0]} (pool_size={pool_size})")
+    @event.listens_for(_engine, "checkout")
+    def on_checkout(dbapi_conn, conn_record, conn_proxy):
+        logger.debug(f"Pool checkout: active={_engine.pool.status()}")
+
+    @event.listens_for(_engine, "checkin")
+    def on_checkin(dbapi_conn, conn_record):
+        logger.debug(f"Pool checkin: active={_engine.pool.status()}")
+
+    logger.info(
+        f"Created SQLAlchemy engine for {database_url.split(':')[0]} "
+        f"(pool_size={pool_size}, connect_timeout={connect_timeout}s, "
+        f"statement_timeout={statement_timeout}ms)"
+    )
 
     return _engine
 
@@ -137,8 +162,18 @@ def get_session() -> Generator[Session, None, None]:
     任务: postgresql-migration
     说明: 提供上下文管理器方式获取 Session，自动处理提交和回滚
 
+    修改时间: 2026-04-04
+    修改者: AI Assistant
+    任务: fix-backend-stability
+    修改内容: 添加只读场景行为说明
+
     Yields:
         SQLAlchemy Session 实例
+
+    注意:
+        - 退出上下文时会自动调用 commit()
+        - 对于只读操作（如 SELECT），commit 是无害的空操作
+        - 如需显式控制事务，请在上下文内调用 session.rollback() 或 session.commit()
 
     使用示例:
         with get_session() as session:
@@ -191,3 +226,28 @@ def dispose_engine() -> None:
         _engine = None
         _session_factory = None
         logger.info("SQLAlchemy engine disposed")
+
+
+def get_pool_status() -> dict | None:
+    """
+    获取连接池状态
+
+    创建时间: 2026-04-04
+    创建者: AI Assistant
+    任务: fix-backend-stability
+    说明: 返回连接池状态信息，用于监控和调试
+
+    Returns:
+        包含连接池状态的字典，如果引擎未初始化则返回 None
+    """
+    if _engine is None:
+        return None
+
+    pool = _engine.pool
+    return {
+        "pool_size": pool.size(),  # type: ignore[attr-defined]
+        "checked_in": pool.checkedin(),  # type: ignore[attr-defined]
+        "checked_out": pool.checkedout(),  # type: ignore[attr-defined]
+        "overflow": pool.overflow(),  # type: ignore[attr-defined]
+        "invalid": pool.invalidatedcount() if hasattr(pool, "invalidatedcount") else 0,
+    }
