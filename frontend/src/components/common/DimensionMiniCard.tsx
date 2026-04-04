@@ -292,10 +292,9 @@ function StyleVisualization({
   }
 
   return (
-    <div ref={ref} className="h-8 w-full space-y-1.5">
-      <div className="flex items-center gap-2">
-        <span className="w-14 text-[9px] text-text-muted">词频广度</span>
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
+    <div ref={ref} className="flex h-16 w-20 flex-col justify-center gap-1.5">
+      <div className="space-y-0.5">
+        <div className="h-1.5 overflow-hidden rounded-full bg-border">
           <motion.div
             className="h-full rounded-full bg-chart-4"
             initial={{ scaleX: 0 }}
@@ -304,14 +303,7 @@ function StyleVisualization({
             style={{ transformOrigin: "left" }}
           />
         </div>
-        <span className="w-8 text-right text-[9px] tabular-nums text-text-muted">
-          {(vocabBreadth * 100).toFixed(0)}%
-        </span>
-      </div>
-      
-      <div className="flex items-center gap-2">
-        <span className="w-14 text-[9px] text-text-muted">对话占比</span>
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
+        <div className="h-1.5 overflow-hidden rounded-full bg-border">
           <motion.div
             className="h-full rounded-full bg-chart-4/70"
             initial={{ scaleX: 0 }}
@@ -320,9 +312,6 @@ function StyleVisualization({
             style={{ transformOrigin: "left" }}
           />
         </div>
-        <span className="w-8 text-right text-[9px] tabular-nums text-text-muted">
-          {(dialogueRatio * 100).toFixed(0)}%
-        </span>
       </div>
     </div>
   );
@@ -347,30 +336,24 @@ function TopicVisualization({
   }
 
   return (
-    <div ref={ref} className="w-full space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-text-muted">📊 共 {topicCount} 个主题</span>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {topTopics.slice(0, 3).map((topic, i) => (
-          <motion.span
-            key={i}
-            className={cn(
-              "inline-block rounded-md px-2 py-0.5 text-[10px]",
-              "bg-chart-5/20 text-chart-5"
-            )}
-            style={{
-              fontSize: `${10 + topic.weight * 4}px`,
-              opacity: 0.7 + topic.weight * 0.3,
-            }}
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: isInView ? 0.7 + topic.weight * 0.3 : 0, scale: isInView ? 1 : 0.8 }}
-            transition={{ duration: 0.3, delay: i * 0.1 }}
-          >
-            {topic.words.slice(0, 2).join(" ")}
-          </motion.span>
-        ))}
-      </div>
+    <div ref={ref} className="flex h-16 w-20 flex-wrap items-center justify-center gap-1">
+      {topTopics.slice(0, 3).map((topic, i) => (
+        <motion.span
+          key={i}
+          className={cn(
+            "inline-block rounded px-1.5 py-0.5 text-[9px]",
+            "bg-chart-5/20 text-chart-5"
+          )}
+          style={{
+            opacity: 0.7 + topic.weight * 0.3,
+          }}
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: isInView ? 0.7 + topic.weight * 0.3 : 0, scale: isInView ? 1 : 0.8 }}
+          transition={{ duration: 0.3, delay: i * 0.1 }}
+        >
+          {topic.words[0]}
+        </motion.span>
+      ))}
     </div>
   );
 }
@@ -507,14 +490,8 @@ export function DimensionMiniCard({
             </p>
             <p className="mt-0.5 text-[10px] text-text-muted">{renderValueLabel()}</p>
           </div>
-          {dimension !== "style" && dimension !== "topic" && (
-            <div className="flex-shrink-0">{renderVisualization()}</div>
-          )}
+          <div className="flex-shrink-0">{renderVisualization()}</div>
         </div>
-
-        {(dimension === "style" || dimension === "topic") && (
-          <div className="mt-2">{renderVisualization()}</div>
-        )}
 
         {linkTo && (
           <Link
