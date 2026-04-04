@@ -104,11 +104,11 @@ export interface DiagnosisResult {
   arc_scores?: Record<string, number>;
   value_logic_type?: string;
   value_logic_reason?: string;
-  power_stance?: number;
+  power_stance_score?: number;
   power_stance_reason?: string;
-  civilian_dignity?: number;
-  civilian_dignity_reason?: string;
-  cultural_depth?: number;
+  common_people_dignity?: number;
+  dignity_reason?: string;
+  cultural_depth_score?: number;
   topic_labels?: string[];
   core_cast?: string[];
   major_cast?: string[];
@@ -193,7 +193,7 @@ export interface CharacterStatsMetrics {
 
 export interface StyleStatsMetrics {
   vocab_breadth: number;
-  mean_sentence_length: number;
+  avg_sent_len: number;
   dialogue_ratio: number;
 }
 

@@ -297,6 +297,8 @@ class NovelService:
                 with session_factory() as session:
                     run_repo = RunRepository(session)
                     for nid in novel_ids:
+                        if not isinstance(nid, str):
+                            continue
                         run = run_repo.get_latest_run(nid)
                         if run:
                             latest_runs[nid] = run
