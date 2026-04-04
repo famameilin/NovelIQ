@@ -117,7 +117,6 @@ export function ProtagonistCard({
               </div>
             )}
           </motion.div>
-          </div>
         ) : (
           <div className="flex h-32 items-center justify-center text-sm text-text-muted">
             暂无主角数据
