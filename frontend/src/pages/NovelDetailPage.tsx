@@ -290,9 +290,9 @@ export function NovelDetailPage() {
 
             <ScoreOverviewCard
               foreshadowRate={diagnosisQuery.data?.foreshadow_rate}
-              powerStance={diagnosisQuery.data?.power_stance}
-              civilianDignity={diagnosisQuery.data?.civilian_dignity}
-              culturalDepth={diagnosisQuery.data?.cultural_depth}
+              powerStance={diagnosisQuery.data?.power_stance_score}
+              civilianDignity={diagnosisQuery.data?.common_people_dignity}
+              culturalDepth={diagnosisQuery.data?.cultural_depth_score}
               novelId={novelId!}
               className="h-full"
             />
