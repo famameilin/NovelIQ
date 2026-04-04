@@ -17,6 +17,7 @@ import { Moon, Sun, BookOpen } from "lucide-react";
 import { Link, useParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useThemeStore } from "@/store/themeStore";
+import { useNovelStore } from "@/store/novelStore";
 import { cn } from "@/lib/cn";
 import { Breadcrumb, getBreadcrumbLabel } from "./Breadcrumb";
 import { getNovel } from "@/api/novels";
@@ -25,18 +26,29 @@ export function TopBar() {
   const { isDark, toggleDark } = useThemeStore();
   const { novelId } = useParams<{ novelId: string }>();
   const location = useLocation();
+  const cachedNovel = useNovelStore((s) => 
+    novelId ? s.getNovelById(novelId) : undefined
+  );
 
   const isHomePage = location.pathname === "/";
 
-  const { data: novel, isLoading, isError } = useQuery({
+  // 优先从 store 缓存读取，仅在缓存未命中时请求 API
+  const {
+    data: apiNovel,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["novel", novelId],
     queryFn: () => getNovel(novelId!),
-    enabled: !!novelId,
+    enabled: !!novelId && !cachedNovel, // 缓存命中时跳过 API 请求
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     retry: 2,
     refetchOnWindowFocus: false,
   });
+
+  // 缓存优先，API 结果作为 fallback
+  const novel = cachedNovel ?? apiNovel;
 
   const breadcrumbItems = [];
   breadcrumbItems.push({ id: "home", label: "首页", href: "/" });
