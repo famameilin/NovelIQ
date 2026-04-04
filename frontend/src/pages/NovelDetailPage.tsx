@@ -208,7 +208,8 @@ export function NovelDetailPage() {
     emotionQuery.data &&
     characterQuery.data &&
     styleQuery.data &&
-    topicsQuery.data;
+    topicsQuery.data &&
+    diagnosisQuery.data;
 
   const isLoading =
     enabled &&
