@@ -60,11 +60,13 @@ export interface AnalysisStartResponse {
 
 export interface Character {
   name: string;
-  count: number;
-  entity_type: string;
-  dominant_function?: string;
-  protagonist_score?: number;
-  avg_sentiment?: number;
+  appearance_count: number;
+  dominant_role_function: string;
+  role_function_distribution?: Record<string, number>;
+  dominant_role_ratio?: number;
+  protagonist_score?: number | null;
+  is_protagonist?: boolean | null;
+  avg_emotion_score?: number | null;
 }
 
 // ============================================================

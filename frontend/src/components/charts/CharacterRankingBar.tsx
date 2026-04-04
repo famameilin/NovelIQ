@@ -38,7 +38,7 @@ export function CharacterRankingBar({
   // 按出场次数排序，取前 N 个
   const sortedCharacters = useMemo(() => {
     return [...characters]
-      .sort((a, b) => b.count - a.count)
+      .sort((a, b) => b.appearance_count - a.appearance_count)
       .slice(0, limit);
   }, [characters, limit]);
 
@@ -47,7 +47,7 @@ export function CharacterRankingBar({
 
     // 反转顺序，让排名第一的在最上面
     const names = [...sortedCharacters].reverse().map((c) => c.name);
-    const counts = [...sortedCharacters].reverse().map((c) => c.count);
+    const counts = [...sortedCharacters].reverse().map((c) => c.appearance_count);
 
     // 为每个角色计算颜色（主角高亮）
     const colors = [...sortedCharacters].reverse().map((c) => {
@@ -69,8 +69,8 @@ export function CharacterRankingBar({
           const p = params[0];
           const char = sortedCharacters.find((c) => c.name === p.name);
           let text = `${p.name}<br/>${p.marker} 出场次数: ${p.value}`;
-          if (char?.dominant_function) {
-            text += `<br/>${p.marker} 功能: ${char.dominant_function}`;
+          if (char?.dominant_role_function) {
+            text += `<br/>${p.marker} 功能: ${char.dominant_role_function}`;
           }
           return text;
         },

@@ -57,9 +57,9 @@ export function ProtagonistCard({
                     主角
                   </Badge>
                 </div>
-                {protagonist?.dominant_function && (
+                {protagonist?.dominant_role_function && (
                   <p className="text-xs text-text-muted">
-                    功能: {protagonist.dominant_function}
+                    功能: {protagonist.dominant_role_function}
                   </p>
                 )}
               </div>
@@ -70,7 +70,7 @@ export function ProtagonistCard({
               <div className="flex flex-col items-center rounded-lg bg-surface-hover p-3">
                 <Star className="mb-1 h-4 w-4 text-chart-1" />
                 <span className="text-lg font-semibold text-text">
-                  {protagonist?.count ?? "—"}
+                  {protagonist?.appearance_count ?? "—"}
                 </span>
                 <span className="text-[10px] text-text-muted">出场次数</span>
               </div>
@@ -86,8 +86,8 @@ export function ProtagonistCard({
               <div className="flex flex-col items-center rounded-lg bg-surface-hover p-3">
                 <Heart className="mb-1 h-4 w-4 text-chart-3" />
                 <span className="text-lg font-semibold text-text">
-                  {protagonist?.avg_sentiment != null
-                    ? `${protagonist.avg_sentiment > 0 ? "+" : ""}${protagonist.avg_sentiment.toFixed(2)}`
+                  {protagonist?.avg_emotion_score != null
+                    ? `${protagonist.avg_emotion_score > 0 ? "+" : ""}${protagonist.avg_emotion_score.toFixed(2)}`
                     : "—"}
                 </span>
                 <span className="text-[10px] text-text-muted">情绪均值</span>
