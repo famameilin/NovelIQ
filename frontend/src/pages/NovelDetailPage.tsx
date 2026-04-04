@@ -256,7 +256,6 @@ export function NovelDetailPage() {
       {/* Header */}
       <NovelHeader
         title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
-        novelTitle={novelQuery.data?.title}
         status={diagnosisQuery.data ? "completed" : undefined}
         showTaskSelector={true}
         className="mb-6"
