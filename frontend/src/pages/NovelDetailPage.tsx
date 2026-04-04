@@ -7,7 +7,7 @@ import {
   getEmotionStats,
   getCharacterStats,
   getStyleStats,
-  getCultureStats,
+  getTopics,
   getDiagnosis,
   getChunkCurves,
 } from "@/api/results";
@@ -169,9 +169,9 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
-  const cultureQuery = useQuery({
-    queryKey: ["metrics", novelId, currentTaskId, "culture"],
-    queryFn: () => getCultureStats(novelId!, currentTaskId!),
+  const topicsQuery = useQuery({
+    queryKey: ["topics", novelId, currentTaskId],
+    queryFn: () => getTopics(novelId!, currentTaskId!),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -208,7 +208,7 @@ export function NovelDetailPage() {
     emotionQuery.data &&
     characterQuery.data &&
     styleQuery.data &&
-    cultureQuery.data;
+    topicsQuery.data;
 
   const isLoading =
     enabled &&
@@ -216,7 +216,7 @@ export function NovelDetailPage() {
       emotionQuery.isLoading ||
       characterQuery.isLoading ||
       styleQuery.isLoading ||
-      cultureQuery.isLoading ||
+      topicsQuery.isLoading ||
       diagnosisQuery.isLoading ||
       curvesQuery.isLoading);
 
@@ -225,7 +225,7 @@ export function NovelDetailPage() {
     emotionQuery.isError ||
     characterQuery.isError ||
     styleQuery.isError ||
-    cultureQuery.isError ||
+    topicsQuery.isError ||
     diagnosisQuery.isError ||
     curvesQuery.isError;
 
@@ -234,7 +234,7 @@ export function NovelDetailPage() {
     emotionQuery.refetch();
     characterQuery.refetch();
     styleQuery.refetch();
-    cultureQuery.refetch();
+    topicsQuery.refetch();
     diagnosisQuery.refetch();
     curvesQuery.refetch();
   };
@@ -329,9 +329,16 @@ export function NovelDetailPage() {
               novelId={novelId!}
             />
             <DimensionMiniCard
-              dimension="culture"
-              data={cultureQuery.data ?? {}}
+              dimension="topic"
+              data={{
+                topic_count: topicsQuery.data?.length,
+                top_topics: topicsQuery.data?.slice(0, 3).map(t => ({
+                  words: t.words,
+                  weight: t.weight,
+                })),
+              }}
               novelId={novelId!}
+              linkTo={`/novels/${novelId}/topics`}
             />
           </motion.div>
 

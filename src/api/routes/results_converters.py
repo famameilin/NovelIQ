@@ -28,12 +28,6 @@ def _default_float(value: Any, default: float = 0.0) -> float:
 def _convert_narrative_structure(
     result: AggregateResult,
 ) -> NarrativeStructureStats | None:
-    """
-    杞崲鍙欎簨缁撴瀯缁熻鏁版嵁銆?
-    鍒涘缓鏃堕棿: 2026-03-13
-    鍒涘缓鑰? TraeAI
-    浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗗彊浜嬬粨鏋勭粺璁¤浆鎹€?"""
     if not result.narrative_structure:
         return None
 
@@ -61,12 +55,6 @@ def _convert_narrative_structure(
 def _convert_emotion_stats(
     result: AggregateResult,
 ) -> EmotionStats | None:
-    """
-    杞崲鎯呮劅缁熻鏁版嵁銆?
-    鍒涘缓鏃堕棿: 2026-03-13
-    鍒涘缓鑰? TraeAI
-    浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗘儏鎰熺粺璁¤浆鎹€?"""
     if not result.emotion_curve:
         return None
 
@@ -86,12 +74,6 @@ def _convert_emotion_stats(
 def _convert_character_stats(
     result: AggregateResult,
 ) -> CharacterStatsAggregate | None:
-    """
-    杞崲浜虹墿缁熻鏁版嵁銆?
-    鍒涘缓鏃堕棿: 2026-03-13
-    鍒涘缓鑰? TraeAI
-    浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗕汉鐗╃粺璁¤浆鎹€?"""
     if not result.character_relations:
         return None
 
@@ -121,12 +103,6 @@ def _convert_character_stats(
 def _convert_style_stats(
     result: AggregateResult,
 ) -> StyleStats | None:
-    """
-    杞崲椋庢牸缁熻鏁版嵁銆?
-    鍒涘缓鏃堕棿: 2026-03-13
-    鍒涘缓鑰? TraeAI
-    浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗛鏍肩粺璁¤浆鎹€?"""
     if not result.language_style:
         return None
 
@@ -163,20 +139,7 @@ def _convert_style_stats(
 def _convert_culture_stats(
     result: AggregateResult,
 ) -> CultureStats | None:
-    """
-    杞崲鏂囧寲缁熻鏁版嵁銆?
-    鍒涘缓鏃堕棿: 2026-03-13
-    鍒涘缓鑰? TraeAI
-    浠诲姟: refactor-api-layer-functions
-    浠?_convert_aggregate_result 鎷嗗垎鍑烘潵锛屼笓闂ㄥ鐞嗘枃鍖栫粺璁¤浆鎹€?"""
-    if not result.traditional_culture:
-        return None
-
-    return CultureStats(
-        idiom_density=result.traditional_culture.get("idiom_density"),
-        classical_sentence_ratio=result.traditional_culture.get("classical_sentence_ratio"),
-        imagery_density=_default_float(result.traditional_culture.get("imagery_density")),
-    )
+    return None
 
 
 def _convert_aggregate_result(
@@ -188,12 +151,6 @@ def _convert_aggregate_result(
     StyleStats | None,
     CultureStats | None,
 ]:
-    """
-    杞崲鑱氬悎缁撴灉涓哄搷搴旀ā鍨嬨€?
-    淇敼鏃堕棿: 2026-03-13
-    淇敼鑰? TraeAI
-    浠诲姟: refactor-api-layer-functions
-    閲嶆瀯璇存槑: 灏嗗師鏈夐€昏緫鎷嗗垎涓?涓嫭绔嬬殑杞崲鍑芥暟锛屾彁楂樹唬鐮佸彲璇绘€у拰鍙淮鎶ゆ€с€?"""
     narrative_structure = _convert_narrative_structure(result)
     emotion_stats = _convert_emotion_stats(result)
     character_stats = _convert_character_stats(result)
