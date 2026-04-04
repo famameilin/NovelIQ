@@ -6,7 +6,12 @@
  *
  * 修改时间：2026-04-04
  * 修改者：GLM-5
- * 修改内容：添加面包屑导航和小说名显示功能
+ * 修改内容：
+ * - 新增面包屑导航功能，支持多级路由显示
+ * - 新增小说名称显示，通过 API 获取当前小说信息
+ * - 新增加载状态和错误状态处理
+ * - 优化数据获取配置，添加缓存和错误重试
+ * - 优化面包屑布局，改为左对齐
  */
 import { Moon, Sun, BookOpen } from "lucide-react";
 import { Link, useParams, useLocation } from "react-router-dom";
@@ -27,27 +32,33 @@ export function TopBar() {
     queryKey: ["novel", novelId],
     queryFn: () => getNovel(novelId!),
     enabled: !!novelId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    retry: 2,
+    refetchOnWindowFocus: false,
   });
 
   const breadcrumbItems = [];
-  breadcrumbItems.push({ label: "首页", href: "/" });
+  breadcrumbItems.push({ id: "home", label: "首页", href: "/" });
 
   if (novelId && !isHomePage) {
     if (isLoading) {
-      breadcrumbItems.push({ label: "加载中..." });
+      breadcrumbItems.push({ id: "loading", label: "加载中..." });
     } else if (isError || !novel) {
-      breadcrumbItems.push({ label: "未知小说" });
+      breadcrumbItems.push({ id: "error", label: "未知小说" });
     } else {
       const basePath = `/novels/${novelId}`;
       const currentPath = location.pathname.replace(basePath, "");
 
       breadcrumbItems.push({
+        id: `novel-${novelId}`,
         label: novel.title,
         href: basePath,
       });
 
       if (currentPath && currentPath !== "") {
         breadcrumbItems.push({
+          id: `page-${currentPath}`,
           label: getBreadcrumbLabel(currentPath),
         });
       }
@@ -64,7 +75,7 @@ export function TopBar() {
       </Link>
 
       {showBreadcrumb && (
-        <div className="flex-1 flex justify-center">
+        <div className="flex-1 flex justify-start px-8">
           <Breadcrumb items={breadcrumbItems} />
         </div>
       )}

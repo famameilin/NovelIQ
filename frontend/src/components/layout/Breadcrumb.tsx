@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { cn } from "@/lib/cn";
 
 interface BreadcrumbItem {
+  id: string;
   label: string;
   href?: string;
 }
@@ -25,7 +26,7 @@ export function Breadcrumb({ items }: BreadcrumbProps) {
         const isClickable = !!item.href && !isLast;
 
         return (
-          <div key={index} className="flex items-center">
+          <div key={item.id} className="flex items-center">
             {index > 0 && (
               <ChevronRight className="h-4 w-4 text-text-muted mx-2" />
             )}
