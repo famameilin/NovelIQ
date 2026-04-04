@@ -1,0 +1,204 @@
+import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ChevronUp, ChevronDown, User } from "lucide-react";
+import { cn } from "@/lib/cn";
+import type { Character } from "@/api/types";
+
+export interface CharacterTableProps {
+  /** 角色列表数据 */
+  characters: Character[];
+  /** 主角名称 */
+  protagonist?: string | null;
+  className?: string;
+}
+
+type SortKey = "name" | "count" | "dominant_function" | "protagonist_score" | "avg_sentiment";
+type SortDirection = "asc" | "desc";
+
+/**
+ * 角色表格 - 可排序的角色列表
+ */
+export function CharacterTable({
+  characters,
+  protagonist,
+  className,
+}: CharacterTableProps) {
+  const navigate = useNavigate();
+  const [sortKey, setSortKey] = useState<SortKey>("count");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+
+  const sortedCharacters = useMemo(() => {
+    return [...characters].sort((a, b) => {
+      let aVal: number | string | undefined;
+      let bVal: number | string | undefined;
+
+      switch (sortKey) {
+        case "name":
+          aVal = a.name;
+          bVal = b.name;
+          break;
+        case "count":
+          aVal = a.count;
+          bVal = b.count;
+          break;
+        case "dominant_function":
+          aVal = a.dominant_function || "";
+          bVal = b.dominant_function || "";
+          break;
+        case "protagonist_score":
+          aVal = a.protagonist_score ?? 0;
+          bVal = b.protagonist_score ?? 0;
+          break;
+        case "avg_sentiment":
+          aVal = a.avg_sentiment ?? 0;
+          bVal = b.avg_sentiment ?? 0;
+          break;
+      }
+
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        return sortDirection === "asc"
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal);
+      }
+
+      const aNum = (aVal as number) ?? 0;
+      const bNum = (bVal as number) ?? 0;
+      return sortDirection === "asc" ? aNum - bNum : bNum - aNum;
+    });
+  }, [characters, sortKey, sortDirection]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDirection("desc");
+    }
+  };
+
+  const SortIcon = ({ column }: { column: SortKey }) => {
+    if (sortKey !== column) return null;
+    return sortDirection === "asc" ? (
+      <ChevronUp className="h-3 w-3" />
+    ) : (
+      <ChevronDown className="h-3 w-3" />
+    );
+  };
+
+  return (
+    <Card variant="elevated" className={cn("rounded-xl overflow-hidden", className)}>
+      <CardContent className="flex flex-col gap-3 p-5">
+        <h4 className="text-sm font-semibold text-text">角色完整列表</h4>
+
+        <div className="max-h-[400px] overflow-auto rounded-md border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-surface-hover">
+                <TableHead className="w-[150px] cursor-pointer" onClick={() => handleSort("name")}>
+                  <div className="flex items-center gap-1">
+                    名称
+                    <SortIcon column="name" />
+                  </div>
+                </TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("count")}>
+                  <div className="flex items-center gap-1">
+                    出场次数
+                    <SortIcon column="count" />
+                  </div>
+                </TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("dominant_function")}>
+                  <div className="flex items-center gap-1">
+                    主导功能
+                    <SortIcon column="dominant_function" />
+                  </div>
+                </TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("protagonist_score")}>
+                  <div className="flex items-center gap-1">
+                    主角分
+                    <SortIcon column="protagonist_score" />
+                  </div>
+                </TableHead>
+                <TableHead className="cursor-pointer" onClick={() => handleSort("avg_sentiment")}>
+                  <div className="flex items-center gap-1">
+                    情绪均值
+                    <SortIcon column="avg_sentiment" />
+                  </div>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortedCharacters.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-32 text-center text-sm text-text-muted">
+                    暂无角色数据
+                  </TableCell>
+                </TableRow>
+              ) : (
+                sortedCharacters.map((char) => (
+                  <TableRow
+                    key={char.name}
+                    className={cn(
+                      "cursor-pointer transition-colors hover:bg-surface-hover",
+                      char.name === protagonist && "bg-primary/5"
+                    )}
+                  >
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        {char.name === protagonist && (
+                          <User className="h-3 w-3 text-primary" />
+                        )}
+                        <span className={char.name === protagonist ? "text-primary font-semibold" : ""}>
+                          {char.name}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>{char.count}</TableCell>
+                    <TableCell>
+                      {char.dominant_function ? (
+                        <Badge variant="secondary" className="text-[10px]">
+                          {char.dominant_function}
+                        </Badge>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {char.protagonist_score != null ? (
+                        <span className="tabular-nums">{char.protagonist_score.toFixed(1)}</span>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {char.avg_sentiment != null ? (
+                        <span
+                          className={cn(
+                            "tabular-nums",
+                            char.avg_sentiment > 0.1
+                              ? "text-chart-positive"
+                              : char.avg_sentiment < -0.1
+                              ? "text-chart-negative"
+                              : "text-text-muted"
+                          )}
+                        >
+                          {char.avg_sentiment > 0 ? "+" : ""}
+                          {char.avg_sentiment.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
