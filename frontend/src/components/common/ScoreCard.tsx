@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useInView } from "framer-motion";
+import { useInView, motion } from "framer-motion";
 import { useId } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
