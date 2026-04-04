@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 echarts.use([GridComponent, TooltipComponent, LegendComponent, BarChart, CanvasRenderer]);
 
 export interface ArcScoresChartProps {
-  /** 角色弧线得分数据，key 为角色名，value 为得分 (0-5) */
+  /** 角色弧线得分数据，key 为角色名，value 为得分 (0-10) */
   arcScores?: Record<string, number> | null;
   className?: string;
 }
@@ -49,12 +49,12 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
         textStyle: { color: "hsl(var(--text))", fontSize: 12 },
         formatter: (params: Array<{ name: string; value: number; marker: string }>) => {
           const p = params[0];
-          return `${p.name}<br/>${p.marker} 弧线得分: ${p.value}/5`;
+          return `${p.name}<br/>${p.marker} 弧线得分: ${p.value}/10`;
         },
       },
       xAxis: {
         type: "value" as const,
-        max: 5,
+        max: 10,
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: { color: "hsl(var(--text-muted))", fontSize: 11 },
@@ -83,7 +83,7 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
           label: {
             show: true,
             position: "right",
-            formatter: "{c}/5",
+            formatter: "{c}/10",
             color: "hsl(var(--text-muted))",
             fontSize: 11,
           },
