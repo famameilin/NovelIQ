@@ -6,15 +6,19 @@
 
 修改记录:
 - 2026-03-19 TraeAI 添加ID转换相关异常处理
+- 2026-04-04 AI Assistant 添加请求日志中间件
 """
 
 from __future__ import annotations
 
+import time
+import uuid
 from typing import Any
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api.exceptions import (
     AnalysisError,
@@ -205,3 +209,43 @@ def register_exception_handlers(app) -> None:
 
     # 通用异常处理器（最后注册）
     app.add_exception_handler(Exception, generic_exception_handler)
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """
+    请求日志中间件
+
+    创建时间: 2026-04-04
+    创建者: AI Assistant
+    任务: fix-backend-stability
+    说明: 记录每个请求的进入、退出和耗时信息
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = str(uuid.uuid4())[:8]
+        start_time = time.time()
+
+        logger.info(f"[{request_id}] → {request.method} {request.url.path}")
+
+        try:
+            response = await call_next(request)
+            duration = time.time() - start_time
+            logger.info(f"[{request_id}] ← {response.status_code} ({duration:.3f}s)")
+            response.headers["X-Request-ID"] = request_id
+            return response
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"[{request_id}] ✗ {e} ({duration:.3f}s)")
+            raise
+
+
+def register_middlewares(app) -> None:
+    """
+    注册所有中间件
+
+    创建时间: 2026-04-04
+    创建者: AI Assistant
+    任务: fix-backend-stability
+    说明: 注册请求日志等中间件
+    """
+    app.add_middleware(RequestLoggingMiddleware)
