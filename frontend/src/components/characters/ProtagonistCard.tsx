@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { User, Star, Heart, Zap } from "lucide-react";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
 import type { Character } from "@/api/types";
 
@@ -38,7 +39,12 @@ export function ProtagonistCard({
         </div>
 
         {hasData ? (
-          <div className="flex flex-col gap-4">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+            className="flex flex-col gap-4"
+          >
             {/* 主角头像占位 + 名称 */}
             <div className="flex items-center gap-4">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -98,7 +104,7 @@ export function ProtagonistCard({
                       key={i}
                       className={cn(
                         "h-2 w-2 rounded-full",
-                        i < protagonistArcScore
+                        i < Math.round(protagonistArcScore)
                           ? "bg-primary"
                           : "border border-border"
                       )}
@@ -110,6 +116,7 @@ export function ProtagonistCard({
                 </div>
               </div>
             )}
+          </motion.div>
           </div>
         ) : (
           <div className="flex h-32 items-center justify-center text-sm text-text-muted">

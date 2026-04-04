@@ -25,9 +25,13 @@ const STALE_TIME = 5 * 60 * 1000;
 
 function SkeletonGrid() {
   return (
-    <div className="space-y-6">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="space-y-6"
+    >
       {/* Ranking bar skeleton */}
-      <Card className="h-[460px]">
+      <Card variant="elevated" className="rounded-xl h-[460px] overflow-hidden">
         <CardContent className="p-5">
           <div className="space-y-3">
             <div className="h-5 w-28 animate-pulse rounded bg-surface-hover" />
@@ -36,9 +40,9 @@ function SkeletonGrid() {
         </CardContent>
       </Card>
 
-      {/* Pie + Table skeleton */}
+      {/* Pie + Protagonist Card skeleton */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card className="h-[340px]">
+        <Card variant="elevated" className="rounded-xl h-[340px] overflow-hidden">
           <CardContent className="p-5">
             <div className="space-y-3">
               <div className="h-5 w-28 animate-pulse rounded bg-surface-hover" />
@@ -46,7 +50,7 @@ function SkeletonGrid() {
             </div>
           </CardContent>
         </Card>
-        <Card className="h-[340px]">
+        <Card variant="elevated" className="rounded-xl h-[340px] overflow-hidden">
           <CardContent className="p-5">
             <div className="space-y-3">
               <div className="h-5 w-28 animate-pulse rounded bg-surface-hover" />
@@ -55,7 +59,7 @@ function SkeletonGrid() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -124,6 +128,13 @@ export function CharactersPage() {
         className="mb-6"
       />
 
+      {/* No task selected prompt */}
+      {!currentTaskId && (
+        <div className="flex h-64 flex-col items-center justify-center gap-3">
+          <p className="text-sm text-text-muted">请先选择一个分析任务</p>
+        </div>
+      )}
+
       {/* Loading skeleton */}
       {isLoading && <SkeletonGrid />}
 
@@ -137,8 +148,15 @@ export function CharactersPage() {
         </div>
       )}
 
+      {/* Empty data state */}
+      {characters && characters.length === 0 && !isLoading && !isError && (
+        <div className="flex h-64 flex-col items-center justify-center gap-3">
+          <p className="text-sm text-text-muted">暂无角色数据</p>
+        </div>
+      )}
+
       {/* Main content */}
-      {characters && !isLoading && (
+      {characters && characters.length > 0 && !isLoading && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
