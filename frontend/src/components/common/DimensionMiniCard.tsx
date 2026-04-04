@@ -82,9 +82,11 @@ const DIMENSION_CONFIG: Record<
 function NarrativeVisualization({
   value,
   gradientId,
+  accent = "chart-1",
 }: {
   value: number | undefined;
   gradientId: string;
+  accent?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-30px" });
@@ -101,8 +103,8 @@ function NarrativeVisualization({
       <svg viewBox="0 0 100 56" className="h-full w-full">
         <defs>
           <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="hsl(var(--chart-1))" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="hsl(var(--chart-1))" stopOpacity="0.8" />
+            <stop offset="0%" stopColor={`hsl(var(--${accent}))`} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={`hsl(var(--${accent}))`} stopOpacity="0.8" />
           </linearGradient>
         </defs>
 
@@ -130,7 +132,7 @@ function NarrativeVisualization({
           y1="50"
           x2="50"
           y2="18"
-          stroke={isWarning ? "hsl(var(--chart-negative))" : "hsl(var(--chart-1))"}
+          stroke={isWarning ? "hsl(var(--chart-negative))" : `hsl(var(--${accent}))`}
           strokeWidth="1.8"
           strokeLinecap="round"
           initial={{ rotate: -90 }}
@@ -139,7 +141,7 @@ function NarrativeVisualization({
           style={{ transformOrigin: "50px 50px" }}
         />
 
-        <circle cx="50" cy="50" r="2.5" fill={isWarning ? "hsl(var(--chart-negative))" : "hsl(var(--chart-1))"} />
+        <circle cx="50" cy="50" r="2.5" fill={isWarning ? "hsl(var(--chart-negative))" : `hsl(var(--${accent}))`} />
 
         <text
           x="50"
@@ -399,6 +401,7 @@ export function DimensionMiniCard({
           <NarrativeVisualization
             value={data.middle_collapse_index}
             gradientId={gradientId}
+            accent={config.accent}
           />
         );
       case "emotion":
