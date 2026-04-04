@@ -15,12 +15,13 @@
 import { useMemo, forwardRef } from "react";
 import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts/core";
-import { LineChart, MarkPointComponent } from "echarts/charts";
+import { LineChart } from "echarts/charts";
 import {
   GridComponent,
   TooltipComponent,
   LegendComponent,
   MarkLineComponent,
+  MarkPointComponent,
   DataZoomComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
