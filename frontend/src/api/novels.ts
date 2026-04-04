@@ -22,6 +22,13 @@ export async function getNovels(
   return data;
 }
 
+export async function getNovel(novelId: string): Promise<Novel | null> {
+  const { data } = await apiClient.get<PaginatedResponse<Novel>>("/api/novels/", {
+    params: { page: 1, page_size: 1000 },
+  });
+  return data.items.find((novel) => novel.novel_id === novelId) || null;
+}
+
 export async function uploadNovel(file: File): Promise<NovelUploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
