@@ -21,6 +21,11 @@ FastAPI 应用入口模块
 修改时间: 2026-03-19
 修改者: TraeAI
 修改内容: 移除 load_dotenv，改为在 config 模块中统一加载
+
+修改时间: 2026-04-04
+修改者: AI Assistant
+任务: fix-backend-stability
+修改内容: 增强健康检查端点，添加数据库连接检测和降级响应
 """
 
 from __future__ import annotations
@@ -31,7 +36,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
+from sqlalchemy import text
 
 # 导入 config 模块会先加载 .env 文件
 from src.config import settings  # noqa: F401
@@ -40,7 +47,7 @@ from src.config.logging_config import setup_logging
 setup_logging(verbose=True, debug=False)
 
 # ruff: noqa: E402
-from src.api.middleware import register_exception_handlers
+from src.api.middleware import register_exception_handlers, register_middlewares
 from src.api.routes import analysis_router, novels_router, results_router, timeline_router
 
 
@@ -69,11 +76,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+register_middlewares(app)
+
 
 @app.get("/health", tags=["Health"])
 async def health_check():
+    """
+    健康检查端点
+
+    创建时间: 2026-04-04
+    创建者: AI Assistant
+    任务: fix-backend-stability
+    说明: 检查数据库连接状态，异常时返回 503
+    """
+    from src.storage.db import get_pool_status, get_session
+
     logger.debug("Health check endpoint called")
-    return {"status": "healthy", "service": "novel-qa-api", "version": "0.1.0"}
+
+    try:
+        with get_session() as session:
+            session.execute(text("SELECT 1"))
+
+        pool_status = get_pool_status()
+        return {
+            "status": "healthy",
+            "service": "novel-qa-api",
+            "version": "0.1.0",
+            "pool": pool_status,
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "service": "novel-qa-api",
+                "version": "0.1.0",
+                "error": str(e),
+            },
+        )
 
 
 app.include_router(novels_router, prefix="/api")

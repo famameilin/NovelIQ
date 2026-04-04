@@ -378,31 +378,31 @@ class NovelService:
         修改者: TraeAI
         任务: Repository层ID统一优化
         修改内容: 使用get_run_by_run_id_prefix替代get_run_by_task_id
+
+        修改时间: 2026-04-04
+        修改者: AI Assistant
+        任务: fix-backend-stability
+        修改内容: 使用 get_session 上下文管理器替代手动 session 管理
+
+        修改时间: 2026-04-04
+        修改者: AI Assistant
+        任务: fix-backend-stability
+        修改内容: 修复静默失败问题，数据库删除失败时抛出异常，保持数据一致性
+
+        Raises:
+            RuntimeError: 数据库删除失败时抛出
         """
-        # 从数据库中查找对应的 run_id（task_id 是 run_id 的前8位）
-        from sqlalchemy.orm import sessionmaker
+        from src.storage.db import get_session
 
-        from src.storage.db import get_engine
-
-        engine = get_engine()
-        Session = sessionmaker(bind=engine)
-        session = Session()
-        try:
+        with get_session() as session:
             run_repo = RunRepository(session)
-            # task_id是run_id的前8位，使用前缀匹配查询
             run = run_repo.get_run_by_run_id_prefix(task_id)
 
             if run:
                 run_id = run["run_id"]
-                # 删除数据库中的记录
                 run_repo.delete_run(run_id)
                 logger.info(f"Run deleted from database: {run_id}")
-        except Exception as e:
-            logger.warning(f"Failed to delete run from database: {e}")
-        finally:
-            session.close()
 
-        # 删除内存中的任务
         if task_id in self._tasks:
             del self._tasks[task_id]
             logger.info(f"Task deleted from memory: {task_id}")
