@@ -181,10 +181,17 @@ export function DiagnosisPage() {
 
           {/* 预留诊断文本区域 */}
           {diagnosis.diagnosis && (
-            <DiagnosisText diagnosisText={diagnosis.diagnosis} />
+            <Card variant="elevated" className="rounded-xl overflow-hidden">
+              <CardContent className="p-5">
+                <h4 className="text-sm font-semibold text-text mb-3">综合诊断</h4>
+                <p className="text-sm text-text-secondary whitespace-pre-wrap">
+                  {diagnosis.diagnosis}
+                </p>
+              </CardContent>
+            </Card>
           )}
 
-          {/* Arc Scores Chart */}
+          {/* ArcScoresChart */}
           {diagnosis.arc_scores && Object.keys(diagnosis.arc_scores).length > 0 && (
             <ArcScoresChart arcScores={diagnosis.arc_scores} />
           )}
