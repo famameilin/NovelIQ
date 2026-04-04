@@ -148,7 +148,7 @@ export function DiagnosisPage() {
           {/* Diagnosis Header */}
           <DiagnosisHeader
             narrativeType={diagnosis.narrative_type}
-            arcType={diagnosis.arc_type}
+            arcType={diagnosis.narrative_arc_type}
           />
 
           {/* Score Cards Row */}
@@ -175,14 +175,14 @@ export function DiagnosisPage() {
               title="文化深度"
               type="score"
               score={diagnosis.cultural_depth_score}
-              reason={null}
+              reason={diagnosis.cultural_depth_reason}
             />
           </div>
 
-          {/* 预留诊断文本区域 - 后端暂无综合诊断文本字段 */}
-          {/* {diagnosis.diagnosis_text && (
-            <DiagnosisText diagnosisText={diagnosis.diagnosis_text} />
-          )} */}
+          {/* 预留诊断文本区域 */}
+          {diagnosis.diagnosis && (
+            <DiagnosisText diagnosisText={diagnosis.diagnosis} />
+          )}
 
           {/* Arc Scores Chart */}
           {diagnosis.arc_scores && Object.keys(diagnosis.arc_scores).length > 0 && (
@@ -198,7 +198,7 @@ export function DiagnosisPage() {
             <CharacterCastCard
               protagonist={diagnosis.protagonist}
               coreCast={diagnosis.core_cast}
-              majorCast={diagnosis.major_cast}
+              majorCast={diagnosis.main_characters}
             />
           </div>
 
