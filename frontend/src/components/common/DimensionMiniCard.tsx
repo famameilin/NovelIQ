@@ -97,55 +97,55 @@ function NarrativeVisualization({
   const isWarning = value < 0.85;
 
   return (
-    <div ref={ref} className="h-16 w-24">
-      <svg viewBox="0 0 100 60" className="h-full w-full">
+    <div ref={ref} className="flex h-full w-full items-center justify-center">
+      <svg viewBox="0 0 100 56" className="h-full w-full">
         <defs>
           <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="hsl(var(--chart-1))" stopOpacity="0.3" />
             <stop offset="100%" stopColor="hsl(var(--chart-1))" stopOpacity="0.8" />
           </linearGradient>
         </defs>
-        
+
         <path
-          d="M 10 55 A 40 40 0 0 1 90 55"
+          d="M 10 50 A 40 40 0 0 1 90 50"
           fill="none"
           stroke="hsl(var(--border))"
-          strokeWidth="6"
+          strokeWidth="5"
           strokeLinecap="round"
         />
-        
+
         <motion.path
-          d="M 10 55 A 40 40 0 0 1 90 55"
+          d="M 10 50 A 40 40 0 0 1 90 50"
           fill="none"
           stroke={`url(#${gradientId})`}
-          strokeWidth="6"
+          strokeWidth="5"
           strokeLinecap="round"
           initial={{ pathLength: 0 }}
           animate={{ pathLength: isInView ? 1 : 0 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
         />
-        
+
         <motion.line
           x1="50"
-          y1="55"
+          y1="50"
           x2="50"
-          y2="20"
+          y2="18"
           stroke={isWarning ? "hsl(var(--chart-negative))" : "hsl(var(--chart-1))"}
-          strokeWidth="2"
+          strokeWidth="1.8"
           strokeLinecap="round"
           initial={{ rotate: -90 }}
           animate={{ rotate: isInView ? angle - 90 : -90 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          style={{ transformOrigin: "50px 55px" }}
+          style={{ transformOrigin: "50px 50px" }}
         />
-        
-        <circle cx="50" cy="55" r="3" fill={isWarning ? "hsl(var(--chart-negative))" : "hsl(var(--chart-1))"} />
-        
+
+        <circle cx="50" cy="50" r="2.5" fill={isWarning ? "hsl(var(--chart-negative))" : "hsl(var(--chart-1))"} />
+
         <text
           x="50"
-          y="50"
+          y="45"
           textAnchor="middle"
-          className="fill-text text-[10px] font-bold"
+          className="fill-text text-[10px] font-semibold"
         >
           {value.toFixed(2)}
         </text>
@@ -172,43 +172,42 @@ function EmotionVisualization({
     return <EmptyState />;
   }
 
-  const maxHeight = 40;
+  const barHeight = 36;
+  const barWidth = 16;
 
   return (
-    <div ref={ref} className="h-12 w-20">
-      <svg viewBox="0 0 80 50" className="h-full w-full">
+    <div ref={ref} className="flex h-full w-full items-center justify-center gap-2">
+      <svg viewBox="0 0 50 48" className="h-full w-full">
+        <text x="25" y="6" textAnchor="middle" className="fill-text-muted text-[8px]">
+          正/负
+        </text>
+
         <motion.rect
-          x="15"
-          y={50 - maxHeight}
-          width="20"
-          height={maxHeight}
+          x="8"
+          y={44 - barHeight}
+          width={barWidth}
+          height={barHeight}
           fill="hsl(var(--chart-positive))"
           rx="2"
           initial={{ scaleY: 0 }}
           animate={{ scaleY: isInView ? positiveRatio : 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
-          style={{ transformOrigin: "25px 50px" }}
+          style={{ transformOrigin: `${8 + barWidth / 2}px 44px` }}
         />
-        
+
         <motion.rect
-          x="45"
-          y={50 - maxHeight}
-          width="20"
-          height={maxHeight}
+          x={26}
+          y={44 - barHeight}
+          width={barWidth}
+          height={barHeight}
           fill="hsl(var(--chart-negative))"
           rx="2"
           initial={{ scaleY: 0 }}
           animate={{ scaleY: isInView ? negativeRatio : 0 }}
           transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
-          style={{ transformOrigin: "55px 50px" }}
+          style={{ transformOrigin: `${26 + barWidth / 2}px 44px` }}
+
         />
-        
-        <text x="25" y="48" textAnchor="middle" className="fill-text-muted text-[8px]">
-          正
-        </text>
-        <text x="55" y="48" textAnchor="middle" className="fill-text-muted text-[8px]">
-          负
-        </text>
       </svg>
     </div>
   );
@@ -229,16 +228,16 @@ function CharacterVisualization({ density }: { density: number | undefined }) {
   const nodeCount = Math.max(3, Math.min(7, Math.round(density * 20)));
   const nodes = Array.from({ length: nodeCount }, (_, i) => {
     const angle = (i / nodeCount) * Math.PI * 2 - Math.PI / 2;
-    const radius = 16;
+    const radius = 18;
     return {
-      x: 24 + Math.cos(angle) * radius,
-      y: 24 + Math.sin(angle) * radius,
+      x: 28 + Math.cos(angle) * radius,
+      y: 28 + Math.sin(angle) * radius,
     };
   });
 
   return (
-    <div ref={ref} className="h-12 w-12">
-      <svg viewBox="0 0 48 48" className="h-full w-full">
+    <div ref={ref} className="flex h-full w-full items-center justify-center">
+      <svg viewBox="0 0 56 56" className="h-full w-full">
         {nodes.map((node, i) =>
           nodes.slice(i + 1).map((target, j) => (
             <motion.line
@@ -247,7 +246,7 @@ function CharacterVisualization({ density }: { density: number | undefined }) {
               y1={node.y}
               x2={target.x}
               y2={target.y}
-              stroke="hsl(var(--chart-3) / 0.3)"
+              stroke="hsl(var(--chart-3) / 0.35)"
               strokeWidth="1"
               initial={{ opacity: 0 }}
               animate={{ opacity: isInView ? 1 : 0 }}
@@ -255,13 +254,13 @@ function CharacterVisualization({ density }: { density: number | undefined }) {
             />
           ))
         )}
-        
+
         {nodes.map((node, i) => (
           <motion.circle
             key={`node-${i}`}
             cx={node.x}
             cy={node.y}
-            r="3"
+            r="3.5"
             fill="hsl(var(--chart-3))"
             initial={{ scale: 0 }}
             animate={{ scale: isInView ? 1 : 0 }}
@@ -292,25 +291,31 @@ function StyleVisualization({
   }
 
   return (
-    <div ref={ref} className="flex h-16 w-20 flex-col justify-center gap-1.5">
-      <div className="space-y-0.5">
-        <div className="h-1.5 overflow-hidden rounded-full bg-border">
-          <motion.div
-            className="h-full rounded-full bg-chart-4"
-            initial={{ scaleX: 0 }}
-            animate={{ scaleX: isInView ? Math.min(vocabBreadth, 1) : 0 }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-            style={{ transformOrigin: "left" }}
-          />
+    <div ref={ref} className="flex h-full w-full flex-col justify-center gap-2 px-1">
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="w-6 text-[8px] text-text-muted">词汇</span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-border">
+            <motion.div
+              className="h-full rounded-full bg-chart-4"
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: isInView ? Math.min(vocabBreadth, 1) : 0 }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+              style={{ transformOrigin: "left" }}
+            />
+          </div>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-border">
-          <motion.div
-            className="h-full rounded-full bg-chart-4/70"
-            initial={{ scaleX: 0 }}
-            animate={{ scaleX: isInView ? Math.min(dialogueRatio, 1) : 0 }}
-            transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
-            style={{ transformOrigin: "left" }}
-          />
+        <div className="flex items-center gap-1.5">
+          <span className="w-6 text-[8px] text-text-muted">对话</span>
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-border">
+            <motion.div
+              className="h-full rounded-full bg-chart-4/70"
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: isInView ? Math.min(dialogueRatio, 1) : 0 }}
+              transition={{ duration: 0.6, ease: "easeOut", delay: 0.15 }}
+              style={{ transformOrigin: "left" }}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -336,24 +341,27 @@ function TopicVisualization({
   }
 
   return (
-    <div ref={ref} className="flex h-16 w-20 flex-wrap items-center justify-center gap-1">
-      {topTopics.slice(0, 3).map((topic, i) => (
-        <motion.span
-          key={i}
-          className={cn(
-            "inline-block rounded px-1.5 py-0.5 text-[9px]",
-            "bg-chart-5/20 text-chart-5"
-          )}
-          style={{
-            opacity: 0.7 + topic.weight * 0.3,
-          }}
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: isInView ? 0.7 + topic.weight * 0.3 : 0, scale: isInView ? 1 : 0.8 }}
-          transition={{ duration: 0.3, delay: i * 0.1 }}
-        >
-          {topic.words[0]}
-        </motion.span>
-      ))}
+    <div ref={ref} className="flex h-full w-full flex-col items-center justify-center gap-1.5">
+      <span className="text-[8px] text-text-muted">热门主题</span>
+      <div className="flex flex-wrap items-center justify-center gap-1">
+        {topTopics.slice(0, 3).map((topic, i) => (
+          <motion.span
+            key={i}
+            className={cn(
+              "inline-block rounded px-1.5 py-0.5 text-[9px] font-medium",
+              "bg-chart-5/15 text-chart-5 border border-chart-5/20"
+            )}
+            style={{
+              opacity: 0.7 + topic.weight * 0.3,
+            }}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: isInView ? 0.7 + topic.weight * 0.3 : 0, scale: isInView ? 1 : 0.8 }}
+            transition={{ duration: 0.35, delay: i * 0.08 }}
+          >
+            {topic.words[0]}
+          </motion.span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -364,8 +372,8 @@ function TopicVisualization({
 
 function EmptyState() {
   return (
-    <div className="flex h-16 w-full items-center justify-center">
-      <span className="text-xs text-text-muted">暂无数据</span>
+    <div className="flex h-full w-full items-center justify-center">
+      <span className="text-[10px] text-text-muted">暂无数据</span>
     </div>
   );
 }
@@ -483,20 +491,22 @@ export function DimensionMiniCard({
           {config.label}
         </p>
 
-        <div className="flex items-start justify-between">
-          <div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <p className="text-2xl font-bold tabular-nums text-text">
               {renderValue()}
             </p>
             <p className="mt-0.5 text-[10px] text-text-muted">{renderValueLabel()}</p>
           </div>
-          <div className="flex-shrink-0">{renderVisualization()}</div>
+          <div className="flex h-14 w-20 flex-shrink-0 items-center justify-center">
+            {renderVisualization()}
+          </div>
         </div>
 
         {linkTo && (
           <Link
             to={linkTo}
-            className="inline-block text-xs text-text-muted transition-colors hover:text-primary"
+            className="inline-flex items-center gap-0.5 text-xs text-text-muted transition-colors hover:text-primary"
           >
             {renderLinkText()}
           </Link>
