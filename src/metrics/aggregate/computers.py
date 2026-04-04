@@ -22,6 +22,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+import numpy as np
+
 from ..character_metrics import (
     build_character_graph,
     compute_antagonist_strength_gap,
@@ -67,6 +69,7 @@ from .types import (
     CultureData,
     EmotionData,
     RelationData,
+    StyleData,
     TensionData,
     TextData,
 )
@@ -187,6 +190,7 @@ def compute_character_relation_metrics(
 def compute_language_style_metrics(
     text_data: TextData,
     dialogue_tones: list[str] | None = None,
+    style_data: StyleData | None = None,
 ) -> dict[str, Any]:
     """
     计算语言风格聚合指标
@@ -195,8 +199,13 @@ def compute_language_style_metrics(
     修改者: TraeAI
     任务: fix-tone-distribution-semantic-error
     修改内容: 参数名从 emotional_valences 改为 dialogue_tones
+
+    修改时间: 2026-04-04
+    修改者: TraeAI
+    任务: fix-style-stats-missing-fields
+    修改内容: 添加 style_data 参数，计算 dialogue_ratio 和 avg_sent_len
     """
-    return {
+    result = {
         "tone_distribution": _compute_tone_distribution(dialogue_tones),
         "vocab_breadth": compute_vocab_breadth(text_data.all_tokens),
         "avg_word_len": compute_avg_word_len(text_data.texts),
@@ -204,6 +213,15 @@ def compute_language_style_metrics(
         **{f"function_word_{k}": v for k, v in compute_function_word_vector(text_data.texts).items()},
         **{f"category_density_{k}": v for k, v in compute_category_density(text_data.texts).items()},
     }
+    
+    if style_data:
+        result["dialogue_ratio"] = float(np.mean(style_data.dialogue_ratios)) if style_data.dialogue_ratios else None
+        result["avg_sent_len"] = float(np.mean(style_data.avg_sent_lens)) if style_data.avg_sent_lens else None
+    else:
+        result["dialogue_ratio"] = None
+        result["avg_sent_len"] = None
+    
+    return result
 
 
 def compute_traditional_culture_metrics(
