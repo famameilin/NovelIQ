@@ -12,20 +12,24 @@ import type { TaskStatus } from "@/api/types";
 export interface NovelHeaderProps {
   title: string;
   novelId?: string;
+  novelTitle?: string;
   status?: TaskStatus;
   onReanalyze?: () => void;
   onDelete?: () => void;
   isReanalyzing?: boolean;
+  showTaskSelector?: boolean;
   className?: string;
 }
 
 export function NovelHeader({
   title,
   novelId: novelIdProp,
+  novelTitle,
   status,
   onReanalyze,
   onDelete,
   isReanalyzing = false,
+  showTaskSelector = false,
   className,
 }: NovelHeaderProps) {
   const routeParams = useParams<{ novelId: string }>();
@@ -49,8 +53,8 @@ export function NovelHeader({
         <Badge variant={config.variant}>{config.label}</Badge>
       )}
 
-      {novelId && (
-        <TaskSelector novelId={novelId} />
+      {novelId && showTaskSelector && (
+        <TaskSelector novelId={novelId} novelTitle={novelTitle} />
       )}
 
       <div className="ml-auto flex items-center gap-2">
