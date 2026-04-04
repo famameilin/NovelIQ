@@ -19,15 +19,16 @@ interface GreimasFunction {
   key: string;
   label: string;
   colorVar: string; // CSS 变量名，如 "--chart-1"
+  chineseNames: string[]; // 中文别名列表
 }
 
 const GREIMAS_FUNCTIONS: GreimasFunction[] = [
-  { key: "protagonist", label: "主角", colorVar: "--chart-1" },
-  { key: "antagonist", label: "反角", colorVar: "--chart-negative" },
-  { key: "helper", label: "帮手", colorVar: "--chart-positive" },
-  { key: "sender", label: "发送者", colorVar: "--chart-2" },
-  { key: "receiver", label: "接受者", colorVar: "--chart-3" },
-  { key: "opponent", label: "对手", colorVar: "--chart-4" },
+  { key: "protagonist", label: "主体", colorVar: "--chart-1", chineseNames: ["主体", "主角"] },
+  { key: "antagonist", label: "反对者", colorVar: "--chart-negative", chineseNames: ["反对者", "对手", "反角"] },
+  { key: "helper", label: "帮助者", colorVar: "--chart-positive", chineseNames: ["帮助者", "帮手"] },
+  { key: "sender", label: "发送者", colorVar: "--chart-2", chineseNames: ["发送者"] },
+  { key: "receiver", label: "接收者", colorVar: "--chart-3", chineseNames: ["接收者"] },
+  { key: "opponent", label: "反对者", colorVar: "--chart-4", chineseNames: ["反对者", "对手"] },
 ];
 
 export interface RoleFunctionPieProps {
@@ -49,9 +50,16 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
     });
 
     characters.forEach((char) => {
-      const func = char.dominant_role_function?.toLowerCase();
-      if (func && counts[func] !== undefined) {
-        counts[func]++;
+      const func = char.dominant_role_function?.trim();
+      if (!func) return;
+
+      // 匹配中文或英文功能名
+      const matchedFunc = GREIMAS_FUNCTIONS.find(
+        (f) => f.key === func.toLowerCase() || f.chineseNames.includes(func)
+      );
+
+      if (matchedFunc) {
+        counts[matchedFunc.key]++;
       } else if (char.protagonist_score && char.protagonist_score >= 4) {
         // 高主角分的默认为 protagonist
         counts["protagonist"]++;
