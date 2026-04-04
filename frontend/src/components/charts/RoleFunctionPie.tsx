@@ -49,7 +49,7 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
     });
 
     characters.forEach((char) => {
-      const func = char.dominant_function?.toLowerCase();
+      const func = char.dominant_role_function?.toLowerCase();
       if (func && counts[func] !== undefined) {
         counts[func]++;
       } else if (char.protagonist_score && char.protagonist_score >= 4) {
