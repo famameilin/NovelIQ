@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
 
-export type DimensionType = "narrative" | "emotion" | "character" | "style" | "culture";
+export type DimensionType = "narrative" | "emotion" | "character" | "style" | "topic";
 
 export interface DimensionData {
   middle_collapse_index?: number;
@@ -18,9 +18,8 @@ export interface DimensionData {
   network_density?: number;
   vocab_breadth?: number;
   dialogue_ratio?: number;
-  idiom_density?: number;
-  classical_sentence_ratio?: number;
-  imagery_density?: number;
+  topic_count?: number;
+  top_topics?: Array<{ words: string[]; weight: number }>;
 }
 
 export interface DimensionMiniCardProps {
@@ -68,8 +67,8 @@ const DIMENSION_CONFIG: Record<
     gradientEnd: "to-chart-4/15",
     hoverBorder: "hover:border-chart-4/30",
   },
-  culture: {
-    label: "文化底色",
+  topic: {
+    label: "主题内容",
     accent: "chart-5",
     gradientEnd: "to-chart-5/15",
     hoverBorder: "hover:border-chart-5/30",
@@ -330,54 +329,48 @@ function StyleVisualization({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Culture Visualization (Three Indicator Bars)                      */
+/*  Topic Visualization (Topic Tags)                                  */
 /* ------------------------------------------------------------------ */
 
-function CultureVisualization({
-  idiomDensity,
-  classicalSentenceRatio,
-  imageryDensity,
+function TopicVisualization({
+  topicCount,
+  topTopics,
 }: {
-  idiomDensity: number | undefined;
-  classicalSentenceRatio: number | undefined;
-  imageryDensity: number | undefined;
+  topicCount: number | undefined;
+  topTopics: Array<{ words: string[]; weight: number }> | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-30px" });
 
-  if (
-    idiomDensity === undefined ||
-    classicalSentenceRatio === undefined ||
-    imageryDensity === undefined
-  ) {
+  if (!topicCount || !topTopics || topTopics.length === 0) {
     return <EmptyState />;
   }
 
-  const indicators = [
-    { label: "成语", value: idiomDensity, color: "bg-chart-1" },
-    { label: "古典", value: classicalSentenceRatio, color: "bg-chart-2" },
-    { label: "意象", value: imageryDensity, color: "bg-chart-3" },
-  ];
-
   return (
     <div ref={ref} className="w-full space-y-2">
-      {indicators.map((indicator, i) => (
-        <div key={indicator.label} className="flex items-center gap-2">
-          <span className="w-10 text-[9px] text-text-muted">{indicator.label}</span>
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
-            <motion.div
-              className={cn("h-full rounded-full", indicator.color)}
-              initial={{ scaleX: 0 }}
-              animate={{ scaleX: isInView ? Math.min(indicator.value, 1) : 0 }}
-              transition={{ duration: 0.5, ease: "easeOut", delay: i * 0.1 }}
-              style={{ transformOrigin: "left" }}
-            />
-          </div>
-          <span className="w-10 text-right text-[9px] tabular-nums text-text-muted">
-            {(indicator.value * 100).toFixed(1)}%
-          </span>
-        </div>
-      ))}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-text-muted">📊 共 {topicCount} 个主题</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {topTopics.slice(0, 3).map((topic, i) => (
+          <motion.span
+            key={i}
+            className={cn(
+              "inline-block rounded-md px-2 py-0.5 text-[10px]",
+              "bg-chart-5/20 text-chart-5"
+            )}
+            style={{
+              fontSize: `${10 + topic.weight * 4}px`,
+              opacity: 0.7 + topic.weight * 0.3,
+            }}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: isInView ? 0.7 + topic.weight * 0.3 : 0, scale: isInView ? 1 : 0.8 }}
+            transition={{ duration: 0.3, delay: i * 0.1 }}
+          >
+            {topic.words.slice(0, 2).join(" ")}
+          </motion.span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -433,12 +426,11 @@ export function DimensionMiniCard({
             dialogueRatio={data.dialogue_ratio}
           />
         );
-      case "culture":
+      case "topic":
         return (
-          <CultureVisualization
-            idiomDensity={data.idiom_density}
-            classicalSentenceRatio={data.classical_sentence_ratio}
-            imageryDensity={data.imagery_density}
+          <TopicVisualization
+            topicCount={data.topic_count}
+            topTopics={data.top_topics}
           />
         );
     }
@@ -456,10 +448,8 @@ export function DimensionMiniCard({
         return data.vocab_breadth !== undefined
           ? `${(data.vocab_breadth * 100).toFixed(0)}%`
           : "—";
-      case "culture":
-        return data.idiom_density !== undefined
-          ? `${(data.idiom_density * 100).toFixed(1)}%`
-          : "—";
+      case "topic":
+        return data.topic_count?.toString() ?? "—";
     }
   };
 
@@ -473,8 +463,8 @@ export function DimensionMiniCard({
         return "网络密度";
       case "style":
         return "词频广度";
-      case "culture":
-        return "成语密度";
+      case "topic":
+        return "主题数量";
     }
   };
 
@@ -486,6 +476,8 @@ export function DimensionMiniCard({
         return "→ 曲线页";
       case "character":
         return "→ 关系图谱";
+      case "topic":
+        return "→ 主题分布";
       default:
         return null;
     }
@@ -515,12 +507,12 @@ export function DimensionMiniCard({
             </p>
             <p className="mt-0.5 text-[10px] text-text-muted">{renderValueLabel()}</p>
           </div>
-          {dimension !== "style" && dimension !== "culture" && (
+          {dimension !== "style" && dimension !== "topic" && (
             <div className="flex-shrink-0">{renderVisualization()}</div>
           )}
         </div>
 
-        {(dimension === "style" || dimension === "culture") && (
+        {(dimension === "style" || dimension === "topic") && (
           <div className="mt-2">{renderVisualization()}</div>
         )}
 
