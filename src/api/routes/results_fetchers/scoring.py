@@ -27,9 +27,16 @@ def _calculate_protagonist_scores(
     任务: protagonist-score-fusion
     说明: 四维度融合计算 protagonist_score，并判定 is_protagonist
 
+    修改时间: 2026-04-04
+    修改者: GLM-5
+    任务: 修复主角分计算逻辑
+    修改内容:
+    - arc_scores 取值范围是 0-10，需要归一化到 0-1
+    - 修正 arc_norm 计算逻辑，除以 10 而不是 max_arc_score
+
     Args:
         characters: 角色统计列表（已按出场次数排序）
-        arc_scores: 角色弧线评分字典 {name: score}
+        arc_scores: 角色弧线评分字典 {name: score}，取值范围 0-10
         main_characters: 主要角色名称列表
 
     Returns:
@@ -39,7 +46,6 @@ def _calculate_protagonist_scores(
         return characters
 
     max_appearance = max(c.appearance_count for c in characters)
-    max_arc_score = max(arc_scores.values()) if arc_scores else 0.0
 
     for char in characters:
         appearance_norm = char.appearance_count / max_appearance if max_appearance > 0 else 0.0
@@ -48,7 +54,7 @@ def _calculate_protagonist_scores(
         subject_ratio = subject_count / char.appearance_count if char.appearance_count > 0 else 0.0
 
         arc_score = arc_scores.get(char.name, 0.0)
-        arc_norm = arc_score / max_arc_score if max_arc_score > 0 else 0.0
+        arc_norm = arc_score / 10.0 if arc_score > 0 else 0.0
 
         in_main_cast = 1.0 if char.name in main_characters else 0.0
 
