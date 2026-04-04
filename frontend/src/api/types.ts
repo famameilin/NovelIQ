@@ -100,8 +100,9 @@ export interface DiagnosisResult {
   narrative_type?: string;
   foreshadow_rate?: number;
   protagonist?: string;
-  arc_type?: string;
+  narrative_arc_type?: string;
   arc_scores?: Record<string, number>;
+  diagnosis?: string;
   value_logic_type?: string;
   value_logic_reason?: string;
   power_stance_score?: number;
@@ -109,9 +110,10 @@ export interface DiagnosisResult {
   common_people_dignity?: number;
   dignity_reason?: string;
   cultural_depth_score?: number;
+  cultural_depth_reason?: string;
   topic_labels?: string[];
   core_cast?: string[];
-  major_cast?: string[];
+  main_characters?: string[];
   theme_color?: string;
 }
 
