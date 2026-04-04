@@ -193,7 +193,7 @@ export interface CharacterStatsMetrics {
 
 export interface StyleStatsMetrics {
   vocab_breadth: number;
-  mean_sentence_length: number;
+  avg_sent_len: number;
   dialogue_ratio: number;
 }
 

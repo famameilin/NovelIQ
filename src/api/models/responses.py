@@ -220,6 +220,8 @@ class StyleStats(BaseModel):
     vocab_breadth: float | None = None
     avg_word_len: float | None = None
     sent_len_std: float | None = None
+    dialogue_ratio: float | None = None
+    avg_sent_len: float | None = None
     function_word_vector: dict[str, float] | None = None
     category_density: dict[str, float] | None = None
 
