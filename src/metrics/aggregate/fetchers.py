@@ -25,6 +25,7 @@ from .types import (
     DialogueData,
     EmotionData,
     RelationData,
+    StyleData,
     TensionData,
     TextData,
     map_emotion_score,
@@ -235,3 +236,21 @@ def fetch_dialogue_data(
     rows = annotation_repo.fetch_chunk_dialogues_full(run_id)
     tones = [row.tone for row in rows if row.tone is not None]
     return DialogueData(tones=tones)
+
+
+def fetch_style_data(
+    chunk_repo: ChunkRepository,
+    run_id: str,
+) -> StyleData:
+    """
+    提取 chunk_styles 表的风格指标数据
+
+    创建时间: 2026-04-04
+    创建者: TraeAI
+    任务: fix-style-stats-missing-fields
+    说明: 从 chunk_styles 表获取 dialogue_ratio 和 avg_sent_len 数据用于聚合计算
+    """
+    rows = chunk_repo.fetch_chunk_styles(run_id)
+    dialogue_ratios = [row[1] for row in rows if row[1] is not None]
+    avg_sent_lens = [row[3] for row in rows if row[3] is not None]
+    return StyleData(dialogue_ratios=dialogue_ratios, avg_sent_lens=avg_sent_lens)
