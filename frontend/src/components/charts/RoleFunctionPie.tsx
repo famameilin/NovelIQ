@@ -8,25 +8,26 @@ import {
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import { Card, CardContent } from "@/components/ui/card";
+import { getCSSColorVar } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import type { Character } from "@/api/types";
 
 echarts.use([TooltipComponent, LegendComponent, PieChart, CanvasRenderer]);
 
-// Greimas 六元素映射
-const GREIMAS_FUNCTIONS = [
-  { key: "protagonist", label: "主角", color: "#3b82f6" },
-  { key: "antagonist", label: "反角", color: "#ef4444" },
-  { key: "helper", label: "帮手", color: "#22c55e" },
-  { key: "sender", label: "发送者", color: "#f59e0b" },
-  { key: "receiver", label: "接受者", color: "#8b5cf6" },
-  { key: "opponent", label: "对手", color: "#ec4899" },
-];
+// Greimas 六元素映射 - 使用 CSS 变量以支持动态主题
+interface GreimasFunction {
+  key: string;
+  label: string;
+  colorVar: string; // CSS 变量名，如 "--chart-1"
+}
 
-// 备用颜色
-const FALLBACK_COLORS = [
-  "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899",
-  "#14b8a6", "#f97316", "#6366f1", "#84cc16", "#06b6d4", "#a855f7",
+const GREIMAS_FUNCTIONS: GreimasFunction[] = [
+  { key: "protagonist", label: "主角", colorVar: "--chart-1" },
+  { key: "antagonist", label: "反角", colorVar: "--chart-negative" },
+  { key: "helper", label: "帮手", colorVar: "--chart-positive" },
+  { key: "sender", label: "发送者", colorVar: "--chart-2" },
+  { key: "receiver", label: "接受者", colorVar: "--chart-3" },
+  { key: "opponent", label: "对手", colorVar: "--chart-4" },
 ];
 
 export interface RoleFunctionPieProps {
@@ -57,12 +58,14 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
       }
     });
 
-    // 过滤掉数量为 0 的
-    return GREIMAS_FUNCTIONS.filter((f) => counts[f.key] > 0).map((f) => ({
-      name: f.label,
-      value: counts[f.key],
-      itemStyle: { color: f.color },
-    }));
+    // 过滤掉数量为 0 的，并解析 CSS 变量为运行时颜色值
+    return GREIMAS_FUNCTIONS
+      .filter((f) => counts[f.key] > 0)
+      .map((f) => ({
+        name: f.label,
+        value: counts[f.key],
+        itemStyle: { color: getCSSColorVar(f.colorVar) },
+      }));
   }, [characters]);
 
   const option = useMemo(() => {

@@ -16,7 +16,7 @@ export interface CharacterTableProps {
   className?: string;
 }
 
-type SortKey = "count" | "dominant_function" | "protagonist_score" | "avg_sentiment";
+type SortKey = "name" | "count" | "dominant_function" | "protagonist_score" | "avg_sentiment";
 type SortDirection = "asc" | "desc";
 
 /**
@@ -37,6 +37,10 @@ export function CharacterTable({
       let bVal: number | string | undefined;
 
       switch (sortKey) {
+        case "name":
+          aVal = a.name;
+          bVal = b.name;
+          break;
         case "count":
           aVal = a.count;
           bVal = b.count;
@@ -94,10 +98,10 @@ export function CharacterTable({
           <Table>
             <TableHeader>
               <TableRow className="bg-surface-hover">
-                <TableHead className="w-[150px] cursor-pointer" onClick={() => handleSort("count")}>
+                <TableHead className="w-[150px] cursor-pointer" onClick={() => handleSort("name")}>
                   <div className="flex items-center gap-1">
                     名称
-                    <SortIcon column="count" />
+                    <SortIcon column="name" />
                   </div>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("count")}>
