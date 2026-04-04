@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useInView } from "framer-motion";
+import { useInView, motion } from "framer-motion";
 import { useId } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
@@ -83,6 +83,7 @@ function ProgressRing({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-20px" });
+  const gradientId = useId();
 
   if (value == null || isNaN(value)) {
     return (
@@ -99,7 +100,6 @@ function ProgressRing({
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const clampedValue = Math.max(0, Math.min(100, value));
-  const gradientId = `score-ring-${useId()}`;
 
   return (
     <div
