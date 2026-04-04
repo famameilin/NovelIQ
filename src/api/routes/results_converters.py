@@ -153,6 +153,8 @@ def _convert_style_stats(
         vocab_breadth=lang_dict.get("vocab_breadth"),
         avg_word_len=lang_dict.get("avg_word_len"),
         sent_len_std=lang_dict.get("sent_len_std"),
+        dialogue_ratio=lang_dict.get("dialogue_ratio"),
+        avg_sent_len=lang_dict.get("avg_sent_len"),
         function_word_vector=function_word_vector,
         category_density=category_density,
     )

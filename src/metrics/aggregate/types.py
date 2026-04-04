@@ -111,6 +111,20 @@ class DialogueData:
     tones: list[str]
 
 
+@dataclass
+class StyleData:
+    """风格指标数据
+
+    创建时间: 2026-04-04
+    创建者: TraeAI
+    任务: fix-style-stats-missing-fields
+    说明: 存储风格指标数据用于聚合计算
+    """
+
+    dialogue_ratios: list[float]
+    avg_sent_lens: list[float]
+
+
 def map_emotion_score(score_raw: str | None) -> int:
     """
     将情绪分数字符串映射为数值
