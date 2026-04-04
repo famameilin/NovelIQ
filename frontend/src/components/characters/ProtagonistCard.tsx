@@ -99,7 +99,7 @@ export function ProtagonistCard({
               <div className="flex items-center gap-2">
                 <span className="text-xs text-text-muted">弧线得分:</span>
                 <div className="flex items-center gap-1">
-                  {Array.from({ length: 5 }).map((_, i) => (
+                  {Array.from({ length: 10 }).map((_, i) => (
                     <div
                       key={i}
                       className={cn(
@@ -111,7 +111,7 @@ export function ProtagonistCard({
                     />
                   ))}
                   <span className="ml-1 text-xs font-medium text-text">
-                    {protagonistArcScore}/5
+                    {protagonistArcScore}/10
                   </span>
                 </div>
               </div>
