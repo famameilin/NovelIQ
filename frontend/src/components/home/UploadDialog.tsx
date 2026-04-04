@@ -216,8 +216,7 @@ export function UploadDialog({
             : f
         )
       );
-    } catch (error) {
-      // Mark as error
+    } catch {
       onFilesChange?.(
         uploadingFiles.map((f) =>
           f.status === "uploading"
