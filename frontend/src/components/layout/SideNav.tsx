@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
+import { useNovelStore } from "@/store/novelStore";
 
 const navItems = [
   { to: "", icon: LayoutDashboard, label: "仪表盘" },
@@ -25,11 +26,13 @@ const navItems = [
 
 export function SideNav() {
   const { novelId } = useParams<{ novelId: string }>();
+  const currentTaskId = useNovelStore((s) => s.currentTaskId);
   const [collapsed, setCollapsed] = useState(false);
 
   if (!novelId) return null;
 
   const basePath = `/novels/${novelId}`;
+  const taskQuery = currentTaskId ? `?task_id=${currentTaskId}` : "";
 
   return (
     <aside
@@ -56,7 +59,7 @@ export function SideNav() {
         {navItems.map((item) => (
           <NavLink
             key={item.to}
-            to={`${basePath}${item.to}`}
+            to={`${basePath}${item.to}${taskQuery}`}
             end={item.to === ""}
             className={({ isActive }) =>
               cn(

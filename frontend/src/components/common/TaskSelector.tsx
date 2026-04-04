@@ -13,11 +13,10 @@ import { taskStatusConfig } from "@/lib/utils";
 
 export interface TaskSelectorProps {
   novelId: string;
-  novelTitle?: string;
   className?: string;
 }
 
-export function TaskSelector({ novelId, novelTitle, className }: TaskSelectorProps) {
+export function TaskSelector({ novelId, className }: TaskSelectorProps) {
   const { currentTaskId, setTask } = useNovelStore();
 
   const { data: tasks, isLoading } = useQuery({
@@ -44,7 +43,7 @@ export function TaskSelector({ novelId, novelTitle, className }: TaskSelectorPro
   return (
     <Select value={currentTaskId ?? ""} onValueChange={setTask}>
       <SelectTrigger className={className ?? "w-56"}>
-        <SelectValue placeholder={novelTitle ? `小说 ${novelTitle}` : "选择分析任务"} />
+        <SelectValue placeholder="选择分析任务" />
       </SelectTrigger>
       <SelectContent>
         {taskList.map((task) => {
