@@ -12,7 +12,6 @@ import type { TaskStatus } from "@/api/types";
 export interface NovelHeaderProps {
   title: string;
   novelId?: string;
-  novelTitle?: string;
   status?: TaskStatus;
   onReanalyze?: () => void;
   onDelete?: () => void;
@@ -24,7 +23,6 @@ export interface NovelHeaderProps {
 export function NovelHeader({
   title,
   novelId: novelIdProp,
-  novelTitle,
   status,
   onReanalyze,
   onDelete,
@@ -54,7 +52,7 @@ export function NovelHeader({
       )}
 
       {novelId && showTaskSelector && (
-        <TaskSelector novelId={novelId} novelTitle={novelTitle} />
+        <TaskSelector novelId={novelId} />
       )}
 
       <div className="ml-auto flex items-center gap-2">

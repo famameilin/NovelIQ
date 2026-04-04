@@ -26,6 +26,7 @@ export function TopBar() {
   const { isDark, toggleDark } = useThemeStore();
   const { novelId } = useParams<{ novelId: string }>();
   const location = useLocation();
+  const currentTaskId = useNovelStore((s) => s.currentTaskId);
   const cachedNovel = useNovelStore((s) => 
     novelId ? s.getNovelById(novelId) : undefined
   );
@@ -54,6 +55,8 @@ export function TopBar() {
   breadcrumbItems.push({ id: "home", label: "首页", href: "/" });
 
   if (novelId && !isHomePage) {
+    const taskQuery = currentTaskId ? `?task_id=${currentTaskId}` : "";
+    
     if (isLoading) {
       breadcrumbItems.push({ id: "loading", label: "加载中..." });
     } else if (isError || !novel) {
@@ -65,7 +68,7 @@ export function TopBar() {
       breadcrumbItems.push({
         id: `novel-${novelId}`,
         label: novel.title,
-        href: basePath,
+        href: `${basePath}${taskQuery}`,
       });
 
       if (currentPath && currentPath !== "") {
