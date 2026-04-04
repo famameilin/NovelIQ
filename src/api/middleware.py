@@ -219,6 +219,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     创建者: AI Assistant
     任务: fix-backend-stability
     说明: 记录每个请求的进入、退出和耗时信息
+
+    修改时间: 2026-04-04
+    修改者: AI Assistant
+    任务: fix-backend-stability
+    修改内容: 移除 try-except，避免与 generic_exception_handler 产生双重日志
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -227,16 +232,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         logger.info(f"[{request_id}] → {request.method} {request.url.path}")
 
-        try:
-            response = await call_next(request)
-            duration = time.time() - start_time
-            logger.info(f"[{request_id}] ← {response.status_code} ({duration:.3f}s)")
-            response.headers["X-Request-ID"] = request_id
-            return response
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.error(f"[{request_id}] ✗ {e} ({duration:.3f}s)")
-            raise
+        response = await call_next(request)
+        duration = time.time() - start_time
+        logger.info(f"[{request_id}] ← {response.status_code} ({duration:.3f}s)")
+        response.headers["X-Request-ID"] = request_id
+        return response
 
 
 def register_middlewares(app) -> None:

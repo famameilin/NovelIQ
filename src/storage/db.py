@@ -162,8 +162,18 @@ def get_session() -> Generator[Session, None, None]:
     任务: postgresql-migration
     说明: 提供上下文管理器方式获取 Session，自动处理提交和回滚
 
+    修改时间: 2026-04-04
+    修改者: AI Assistant
+    任务: fix-backend-stability
+    修改内容: 添加只读场景行为说明
+
     Yields:
         SQLAlchemy Session 实例
+
+    注意:
+        - 退出上下文时会自动调用 commit()
+        - 对于只读操作（如 SELECT），commit 是无害的空操作
+        - 如需显式控制事务，请在上下文内调用 session.rollback() 或 session.commit()
 
     使用示例:
         with get_session() as session:

@@ -383,20 +383,25 @@ class NovelService:
         修改者: AI Assistant
         任务: fix-backend-stability
         修改内容: 使用 get_session 上下文管理器替代手动 session 管理
+
+        修改时间: 2026-04-04
+        修改者: AI Assistant
+        任务: fix-backend-stability
+        修改内容: 修复静默失败问题，数据库删除失败时抛出异常，保持数据一致性
+
+        Raises:
+            RuntimeError: 数据库删除失败时抛出
         """
         from src.storage.db import get_session
 
-        try:
-            with get_session() as session:
-                run_repo = RunRepository(session)
-                run = run_repo.get_run_by_run_id_prefix(task_id)
+        with get_session() as session:
+            run_repo = RunRepository(session)
+            run = run_repo.get_run_by_run_id_prefix(task_id)
 
-                if run:
-                    run_id = run["run_id"]
-                    run_repo.delete_run(run_id)
-                    logger.info(f"Run deleted from database: {run_id}")
-        except Exception as e:
-            logger.warning(f"Failed to delete run from database: {e}")
+            if run:
+                run_id = run["run_id"]
+                run_repo.delete_run(run_id)
+                logger.info(f"Run deleted from database: {run_id}")
 
         if task_id in self._tasks:
             del self._tasks[task_id]
