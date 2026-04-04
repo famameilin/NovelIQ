@@ -11,6 +11,7 @@ import {
   getDiagnosis,
   getChunkCurves,
 } from "@/api/results";
+import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { useThemeStore } from "@/store/themeStore";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -141,6 +142,14 @@ export function NovelDetailPage() {
   // Parallel data fetching
   const enabled = !!novelId && !!currentTaskId;
 
+  // Fetch novel info for title
+  const novelQuery = useQuery({
+    queryKey: ["novel", novelId],
+    queryFn: () => getNovel(novelId!),
+    enabled: !!novelId,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const narrativeQuery = useQuery({
     queryKey: ["metrics", novelId, currentTaskId, "narrative"],
     queryFn: () => getNarrativeStructure(novelId!, currentTaskId!),
@@ -246,8 +255,10 @@ export function NovelDetailPage() {
     <PageContainer>
       {/* Header */}
       <NovelHeader
-        title={diagnosisQuery.data?.narrative_type ? `${diagnosisQuery.data.narrative_type}分析` : (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
+        title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
+        novelTitle={novelQuery.data?.title}
         status={diagnosisQuery.data ? "completed" : undefined}
+        showTaskSelector={true}
         className="mb-6"
       />
 
