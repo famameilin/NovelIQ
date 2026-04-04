@@ -1,9 +1,7 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ChevronUp, ChevronDown, User } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { Character } from "@/api/types";
@@ -19,6 +17,23 @@ export interface CharacterTableProps {
 type SortKey = "name" | "count" | "dominant_function" | "protagonist_score" | "avg_sentiment";
 type SortDirection = "asc" | "desc";
 
+function SortIcon({
+  column,
+  sortKey,
+  sortDirection,
+}: {
+  column: SortKey;
+  sortKey: SortKey;
+  sortDirection: SortDirection;
+}) {
+  if (sortKey !== column) return null;
+  return sortDirection === "asc" ? (
+    <ChevronUp className="h-3 w-3" />
+  ) : (
+    <ChevronDown className="h-3 w-3" />
+  );
+}
+
 /**
  * 角色表格 - 可排序的角色列表
  */
@@ -27,7 +42,6 @@ export function CharacterTable({
   protagonist,
   className,
 }: CharacterTableProps) {
-  const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>("count");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -80,15 +94,6 @@ export function CharacterTable({
     }
   };
 
-  const SortIcon = ({ column }: { column: SortKey }) => {
-    if (sortKey !== column) return null;
-    return sortDirection === "asc" ? (
-      <ChevronUp className="h-3 w-3" />
-    ) : (
-      <ChevronDown className="h-3 w-3" />
-    );
-  };
-
   return (
     <Card variant="elevated" className={cn("rounded-xl overflow-hidden", className)}>
       <CardContent className="flex flex-col gap-3 p-5">
@@ -101,31 +106,31 @@ export function CharacterTable({
                 <TableHead className="w-[150px] cursor-pointer" onClick={() => handleSort("name")}>
                   <div className="flex items-center gap-1">
                     名称
-                    <SortIcon column="name" />
+                    <SortIcon column="name" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("count")}>
                   <div className="flex items-center gap-1">
                     出场次数
-                    <SortIcon column="count" />
+                    <SortIcon column="count" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("dominant_function")}>
                   <div className="flex items-center gap-1">
                     主导功能
-                    <SortIcon column="dominant_function" />
+                    <SortIcon column="dominant_function" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("protagonist_score")}>
                   <div className="flex items-center gap-1">
                     主角分
-                    <SortIcon column="protagonist_score" />
+                    <SortIcon column="protagonist_score" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
                 <TableHead className="cursor-pointer" onClick={() => handleSort("avg_sentiment")}>
                   <div className="flex items-center gap-1">
                     情绪均值
-                    <SortIcon column="avg_sentiment" />
+                    <SortIcon column="avg_sentiment" sortKey={sortKey} sortDirection={sortDirection} />
                   </div>
                 </TableHead>
               </TableRow>
