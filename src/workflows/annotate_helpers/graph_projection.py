@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import text
 
-from src.config import settings
 from src.config.constants.annotation import (
     SYMMETRIC_RELATION_TYPES,
     VALID_CHANGE_TYPES,
+    VALID_RELATION_TYPES,
 )
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
@@ -365,8 +365,7 @@ def project_graph_tables(
         rel_change = relation.change or "无变化"
 
         # Validate relation_type and change_type before writing to graph
-        valid_relation_types = frozenset(settings.analysis.valid_relation_types)
-        if rel_type not in valid_relation_types:
+        if rel_type not in VALID_RELATION_TYPES:
             logger.warning(
                 "Skipping relation with invalid type '{}' (chunk={})",
                 rel_type,
