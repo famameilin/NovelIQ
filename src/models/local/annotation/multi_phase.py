@@ -44,7 +44,7 @@ from .phase4 import annotate_chunk_phase4
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-    from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
+    from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
 
 
 @dataclass
@@ -76,7 +76,7 @@ class _Phase3Result:
 
 @dataclass
 class _Phase4Result:
-    relations: list | None = None
+    relations: list[RelationChangeSnapshot] | None = None
 
 
 def _run_phase1(
