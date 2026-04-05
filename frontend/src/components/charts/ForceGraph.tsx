@@ -1,5 +1,7 @@
 import { useRef, useMemo, useCallback, useEffect, useImperativeHandle, forwardRef } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
+import { useThemeStore } from "@/store/themeStore";
+import { getCSSColorVar } from "@/lib/theme";
 import type {
   GraphData,
   GraphNode,
@@ -37,28 +39,61 @@ export interface ForceGraphHandle {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Constants - Canvas 不支持 CSS 变量，需使用实际颜色值              */
+/*  动态颜色映射 - 从 CSS 变量获取，跟随主题变化                        */
+/*  使用 useRef 存储，只在挂载/主题变化时调用 getCSSColorVar()          */
+/*  绘制时直接读 ref.current，零运行时开销                               */
 /* ------------------------------------------------------------------ */
 
-const ENTITY_TYPE_COLORS: Record<string, string> = {
-  character: "hsl(234, 89%, 55%)",
-  group: "hsl(274, 79%, 55%)",
-  organization: "hsl(194, 79%, 55%)",
-  location: "hsl(314, 74%, 55%)",
-  item: "hsl(154, 74%, 55%)",
-  event: "hsl(234, 10%, 60%)",
-  concept: "hsl(234, 10%, 40%)",
-};
+/** 实体类型颜色映射接口 */
+interface EntityColors {
+  character: string;
+  group: string;
+  organization: string;
+  location: string;
+  item: string;
+  event: string;
+  concept: string;
+}
 
-const RELATION_TYPE_COLORS: Record<string, string> = {
-  友好: "hsl(145, 55%, 48%)",
-  敌对: "hsl(0, 65%, 55%)",
-  从属: "hsl(234, 10%, 60%)",
-  合作: "hsl(274, 79%, 55%)",
-  亲情: "hsl(194, 79%, 55%)",
-  爱情: "hsl(314, 74%, 55%)",
-  师徒: "hsl(154, 74%, 55%)",
-};
+/** 关系类型颜色映射接口 */
+interface RelationColors {
+  [key: string]: string;
+}
+
+/**
+ * 从 CSS 变量获取实体类型颜色
+ * - character 使用主题色 primary（主角高亮）
+ * - 其他类型使用 chart-2 ~ chart-5 保持视觉区分
+ */
+function getEntityColorsFromCSS(): EntityColors {
+  return {
+    character: getCSSColorVar("--primary"),
+    group: getCSSColorVar("--chart-2"),
+    organization: getCSSColorVar("--chart-3"),
+    location: getCSSColorVar("--chart-4"),
+    item: getCSSColorVar("--chart-5"),
+    event: getCSSColorVar("--chart-neutral"),
+    concept: getCSSColorVar("--chart-neutral"),
+  };
+}
+
+/**
+ * 从 CSS 变量获取关系类型颜色
+ * - 语义色：友好/亲情/爱情 → positive，敌对 → negative
+ * - 中性色：从属 → neutral
+ * - 其他：使用 chart-* 系列保持区分度
+ */
+function getRelationColorsFromCSS(): RelationColors {
+  return {
+    "友好": getCSSColorVar("--chart-positive"),
+    "敌对": getCSSColorVar("--chart-negative"),
+    "从属": getCSSColorVar("--chart-neutral"),
+    "合作": getCSSColorVar("--chart-2"),
+    "亲情": getCSSColorVar("--chart-positive"),
+    "爱情": getCSSColorVar("--chart-4"),
+    "师徒": getCSSColorVar("--chart-5"),
+  };
+}
 
 /**
  * 层级关系类型：这些类型的边使用虚线样式
@@ -83,14 +118,6 @@ const LABEL_DEGREE_THRESHOLD = 3;
 /* ------------------------------------------------------------------ */
 /*  Helper Functions                                                  */
 /* ------------------------------------------------------------------ */
-
-function getEntityColor(entityType: string): string {
-  return ENTITY_TYPE_COLORS[entityType] || "hsl(234, 10%, 60%)";
-}
-
-function getRelationColor(relationType: string): string {
-  return RELATION_TYPE_COLORS[relationType] || "hsl(234, 10%, 60%)";
-}
 
 /**
  * 判断是否为层级关系（应使用虚线）
@@ -131,6 +158,13 @@ function mapValue(
  *   - 改为 forwardRef + useImperativeHandle，暴露 zoomIn/zoomOut/fitToScreen/center 方法
  *   - 添加边虚线样式支持（层级关系使用虚线，动态关系使用实线）
  *   - 新增 HIERARCHICAL_RELATION_TYPES 配置
+ *
+ * 修改时间: 2026-04-05
+ * 修改者: Theme Optimization
+ * 修改内容:
+ *   - 颜色系统从硬编码 HSL 值改为 CSS 变量（getCSSColorVar + useRef）
+ *   - 使用 useThemeStore(seedColor) 监听主题变化，自动刷新颜色映射
+ *   - 所有 Canvas 渲染颜色跟随"一书一色"主题变化
  */
 export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
   function ForceGraph({
@@ -167,6 +201,33 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
       graphRef.current?.centerAt(0, 0, 400);
     },
   }), []);
+
+  // ---- 动态颜色系统：从 CSS 变量获取，跟随主题变化 ----
+  // 使用 ref 存储颜色，只在挂载/主题变化时调用 getCSSColorVar()
+  // 绘制时直接读 ref.current，零运行时开销
+  const { seedColor } = useThemeStore();
+
+  // 颜色映射 ref（初始化 + 主题切换时更新）
+  const entityColorsRef = useRef<EntityColors>(getEntityColorsFromCSS());
+  const relationColorsRef = useRef<RelationColors>(getRelationColorsFromCSS());
+
+  // 监听主题变化：当 seedColor 变化时重新解析 CSS 变量
+  useEffect(() => {
+    entityColorsRef.current = getEntityColorsFromCSS();
+    relationColorsRef.current = getRelationColorsFromCSS();
+  }, [seedColor]);
+
+  /** 获取实体类型颜色（读 ref，零运行时开销） */
+  const getEntityColor = useCallback((entityType: string): string => {
+    return entityColorsRef.current[entityType as keyof EntityColors]
+      || getCSSColorVar("--chart-neutral");
+  }, []);
+
+  /** 获取关系类型颜色（读 ref，零运行时开销） */
+  const getRelationColor = useCallback((relationType: string): string => {
+    return relationColorsRef.current[relationType]
+      || getCSSColorVar("--chart-neutral");
+  }, []);
 
   const graphDataWithLinks = useMemo((): ForceGraphData => {
     return {
@@ -342,9 +403,9 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
         opacity = 0.2;
       }
 
-      // 搜索匹配：高亮显示为绿色
+      // 搜索匹配：高亮显示为主题 positive 色
       if (searchQuery && isSearchMatched) {
-        nodeColor = "hsl(145, 55%, 48%)";
+        nodeColor = getCSSColorVar("--chart-positive");
         opacity = 1;
       }
 
@@ -358,14 +419,14 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
 
       // 选中态白色边框
       if (isSelected) {
-        ctx.strokeStyle = "hsl(0, 0%, 100%)";
+        ctx.strokeStyle = getCSSColorVar("--background");
         ctx.lineWidth = 3;
         ctx.stroke();
       }
 
       // 高亮态白色边框（非选中时较细）
       if (isHighlighted && !isSelected) {
-        ctx.strokeStyle = "hsl(0, 0%, 100%)";
+        ctx.strokeStyle = getCSSColorVar("--background");
         ctx.lineWidth = 2;
         ctx.stroke();
       }
@@ -379,12 +440,13 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
         ctx.font = `${fontSize}px Sans-Serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillStyle = "hsl(234, 15%, 12%)";
+        ctx.fillStyle = getCSSColorVar("--text");
         ctx.fillText(label, node.x || 0, (node.y || 0) + size + 2);
       }
     },
     [
       getNodeSize,
+      getEntityColor,
       isNodeHighlighted,
       isNodeSelected,
       isNodeSearchMatched,
@@ -442,7 +504,7 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     },
-    [getLinkWidth, highlightedNodes]
+    [getLinkWidth, getRelationColor, highlightedNodes]
   );
 
   /* ---- 交互事件处理 ---- */
