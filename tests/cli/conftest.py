@@ -4,8 +4,13 @@
 修改时间: 2026-03-12
 修改者: TraeAI
 任务: fix-annotation-disambiguation-issues
-修改内容: 
-- 更新 FakeLocalModelClient.annotate_chunk 方法，返回包含 character_appearances 和 chunk_summary 新字段的 ChunkAnnotation
+修改内容:
+- 更新 FakeLocalModelClient.annotate_chunk 方法，返回包含新字段的 ChunkAnnotation
+
+修改时间: 2026-04-05
+修改者: TraeAI
+任务: phase4-code-review-fix
+修改内容: 移除已废弃的 relations 和 character_appearances 字段，使用 location_appearances
 """
 import sys
 from pathlib import Path
@@ -19,7 +24,6 @@ from src.models.local.schema import (
     CharacterSnapshot,
     ChunkAnnotation,
     DialogueSnapshot,
-    RelationChangeSnapshot,
 )
 
 
@@ -74,14 +78,6 @@ class FakeLocalModelClient:
                 emotion_score=0,
             )
         ]
-        relations = [
-            RelationChangeSnapshot(
-                from_name="张三",
-                to_name="李四",
-                type="盟友",
-                change="新建",
-            )
-        ]
         dialogues = [
             DialogueSnapshot(speaker="张三", tone="温和"),
         ]
@@ -94,9 +90,8 @@ class FakeLocalModelClient:
             foreshadowing_type=None,
             foreshadowing_desc="",
             characters=characters,
-            relations=relations,
             dialogues=dialogues,
-            character_appearances=[],
+            location_appearances=[],
             chunk_summary="",
         )
 

@@ -5,7 +5,11 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import text
 
-from src.config import settings
+from src.config.constants.annotation import (
+    SYMMETRIC_RELATION_TYPES,
+    VALID_CHANGE_TYPES,
+    VALID_RELATION_TYPES,
+)
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
@@ -14,8 +18,6 @@ from src.workflows.annotate_helpers.disambiguation.checkpoint import (
 )
 
 PENDING_RETRY_LIMIT = 200
-
-VALID_CHANGE_TYPES = frozenset({"强化", "弱化", "新建", "断裂", "无变化"})
 
 
 def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases: dict[str, str]) -> str | None:
@@ -61,13 +63,13 @@ def _get_last_projected_chunk(session, run_id: str) -> int:
     """查询 ChunkRelation 表中已投影的最大 chunk_id。"""
     result = session.execute(
         text("""
-            SELECT COALESCE(MAX(chunk_id), -1)
+            SELECT COALESCE(MAX(chunk_id), -1) AS max_chunk_id
             FROM chunk_relations
             WHERE run_id = :run_id AND projection_status = 'projected'
         """),
         {"run_id": run_id},
     ).fetchone()
-    return result[0] if result else -1
+    return result._mapping["max_chunk_id"] if result else -1
 
 
 def project_graph_tables(
@@ -169,7 +171,10 @@ def project_graph_tables(
             )
 
     if uncertain_names:
-        logger.info(f"Skipping {len(uncertain_names)} uncertain names from graph projection: {uncertain_names}")
+        logger.info(
+            "Skipping {} uncertain names from graph projection: {}",
+            uncertain_names,
+        )
 
     for row in chunk_characters:
         resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)
@@ -360,8 +365,7 @@ def project_graph_tables(
         rel_change = relation.change or "无变化"
 
         # Validate relation_type and change_type before writing to graph
-        valid_relation_types = frozenset(settings.analysis.valid_relation_types)
-        if rel_type not in valid_relation_types:
+        if rel_type not in VALID_RELATION_TYPES:
             logger.warning(
                 "Skipping relation with invalid type '{}' (chunk={})",
                 rel_type,
@@ -394,7 +398,7 @@ def project_graph_tables(
             evidence=relation.evidence,
             confidence=relation.confidence,
             source_relation_row_id=relation.id,
-            directionality="symmetric" if rel_type in {"盟友", "友情", "家族"} else "directed",
+            directionality="symmetric" if rel_type in SYMMETRIC_RELATION_TYPES else "directed",
         )
         if event is None:
             relation.projection_status = "failed"
@@ -404,6 +408,7 @@ def project_graph_tables(
             continue
 
         affected_pairs.add((from_entity.entity_id, to_entity.entity_id))
+
         relation.projection_status = "projected"
         relation.projected_at = datetime.now(UTC)
         relation.projection_error = None
