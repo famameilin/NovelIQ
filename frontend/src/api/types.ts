@@ -222,23 +222,50 @@ export interface ForceGraphData {
 // Timeline
 // ============================================================
 
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-B 叙事时间轴
+// 说明: 更新 Timeline 类型定义，与后端 API 响应结构对齐
+
+export interface TimelineMeta {
+  novel_id: string;
+  novel_name: string;
+  total_chunks: number;
+}
+
 export interface TimelinePhase {
-  phase_name: string;
-  start_ratio: number;
-  end_ratio: number;
+  name: "引入期" | "发展期" | "高潮期" | "收束期";
+  start: number;
+  end: number;
+  ratio: number;
+}
+
+export interface RelationChangeEvent {
+  from_char: string;
+  to_char: string;
+  relation_type: string;
+  change_type: string;
+  evidence?: string;
 }
 
 export interface TimelineNode {
-  node_id: string;
-  chunk_index: number;
-  summary: string;
+  chunk_id: number;
+  progress: number;
   importance_score: number;
-  node_type: string;
+  level: 1 | 2 | 3;
+  event: string;
   characters: string[];
-  tension_percentile?: number;
+  is_pivot: boolean;
+  is_cliffhanger: boolean;
+  tension_percentile: number;
+  node_type: "plot" | "character_entry" | "character_exit" | "relation_change";
+  relation_changes?: RelationChangeEvent[];
+  character_entries?: string[];
+  character_exits?: string[];
 }
 
-export interface TimelineData {
+export interface TimelineResponse {
+  meta: TimelineMeta;
   phases: TimelinePhase[];
   nodes: TimelineNode[];
   tension_curve?: number[];
