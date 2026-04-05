@@ -213,14 +213,14 @@ def compute_language_style_metrics(
         **{f"function_word_{k}": v for k, v in compute_function_word_vector(text_data.texts).items()},
         **{f"category_density_{k}": v for k, v in compute_category_density(text_data.texts).items()},
     }
-    
+
     if style_data:
         result["dialogue_ratio"] = float(np.mean(style_data.dialogue_ratios)) if style_data.dialogue_ratios else None
         result["avg_sent_len"] = float(np.mean(style_data.avg_sent_lens)) if style_data.avg_sent_lens else None
     else:
         result["dialogue_ratio"] = None
         result["avg_sent_len"] = None
-    
+
     return result
 
 
