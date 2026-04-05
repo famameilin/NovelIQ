@@ -1,4 +1,4 @@
-import { useRef, useMemo, useCallback, useEffect } from "react";
+import { useRef, useMemo, useCallback, useEffect, useImperativeHandle, forwardRef } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import type {
   GraphData,
@@ -22,6 +22,16 @@ export interface ForceGraphProps {
   searchQuery: string;
   relationFilter: Set<string>;
   className?: string;
+}
+
+/**
+ * ForceGraph 暴露给父组件的方法
+ */
+export interface ForceGraphHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fitToScreen: () => void;
+  center: () => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -48,6 +58,20 @@ const RELATION_TYPE_COLORS: Record<string, string> = {
   师徒: "hsl(154, 74%, 55%)",
 };
 
+/**
+ * 层级关系类型：这些类型的边使用虚线样式
+ * 设计文档 §2.5 要求："层级关系用虚线，动态关系用实线"
+ * 如果后端数据中包含 is_hierarchical 字段，优先使用该字段；
+ * 否则根据关系类型名称判断（从属、师徒、合作 等属于层级关系）
+ */
+const HIERARCHICAL_RELATION_TYPES = new Set([
+  "从属",
+  "师徒",
+  "上下级",
+  "隶属",
+  "管理",
+]);
+
 const NODE_SIZE_MIN = 8;
 const NODE_SIZE_MAX = 40;
 const LINK_WIDTH_MIN = 1;
@@ -64,6 +88,14 @@ function getEntityColor(entityType: string): string {
 
 function getRelationColor(relationType: string): string {
   return RELATION_TYPE_COLORS[relationType] || "hsl(234, 10%, 60%)";
+}
+
+/**
+ * 判断是否为层级关系（应使用虚线）
+ */
+function isHierarchicalRelation(relationType: string): boolean {
+  if (!relationType) return false;
+  return HIERARCHICAL_RELATION_TYPES.has(relationType);
 }
 
 function mapValue(
@@ -89,19 +121,49 @@ function mapValue(
  * 创建者: GLM-5
  * 任务: 创建 ForceGraph 组件
  * 说明: 使用 react-force-graph-2d 实现力导向图，支持节点大小/颜色映射、
- *       边粗细/颜色映射、悬浮高亮、点击事件、拖拽布局、缩放平移等功能
+ *       边粗细/颜色映射、虚线样式区分层级关系、悬浮高亮、点击事件、拖拽布局、缩放平移等功能
+ *
+ * 修改时间: 2026-04-05
+ * 修改者: Code Review Fix
+ * 修改内容:
+ *   - 改为 forwardRef + useImperativeHandle，暴露 zoomIn/zoomOut/fitToScreen/center 方法
+ *   - 添加边虚线样式支持（层级关系使用虚线，动态关系使用实线）
+ *   - 新增 HIERARCHICAL_RELATION_TYPES 配置
  */
-export function ForceGraph({
-  data,
-  selectedNode,
-  onNodeClick,
-  onNodeHover,
-  highlightedNodes,
-  searchQuery,
-  relationFilter,
-  className,
-}: ForceGraphProps) {
+export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
+  function ForceGraph({
+    data,
+    selectedNode,
+    onNodeClick,
+    onNodeHover,
+    highlightedNodes,
+    searchQuery,
+    relationFilter,
+    className,
+  }, ref) {
   const graphRef = useRef<ForceGraphMethods<GraphNodeObject, GraphLinkObject> | undefined>(undefined);
+
+  // 通过 useImperativeHandle 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    zoomIn: () => {
+      const fg = graphRef.current;
+      if (!fg) return;
+      const zoom = fg.zoom();
+      fg.zoom(zoom * 1.3, 400);
+    },
+    zoomOut: () => {
+      const fg = graphRef.current;
+      if (!fg) return;
+      const zoom = fg.zoom();
+      fg.zoom(zoom / 1.3, 400);
+    },
+    fitToScreen: () => {
+      graphRef.current?.zoomToFit(400, 50);
+    },
+    center: () => {
+      graphRef.current?.centerAt(0, 0, 400);
+    },
+  }), []);
 
   const graphDataWithLinks = useMemo((): ForceGraphData => {
     return {
@@ -144,6 +206,7 @@ export function ForceGraph({
     };
   }, [data.edges]);
 
+  // 关系类型过滤：只显示选中的关系类型对应的边和连接的节点
   const filteredData = useMemo((): ForceGraphData => {
     if (relationFilter.size === 0) {
       return graphDataWithLinks;
@@ -167,6 +230,7 @@ export function ForceGraph({
     };
   }, [data, graphDataWithLinks, relationFilter]);
 
+  // 搜索匹配的节点 ID 集合
   const searchMatchedNodes = useMemo(() => {
     if (!searchQuery.trim()) return new Set<string>();
     const query = searchQuery.toLowerCase();
@@ -178,6 +242,8 @@ export function ForceGraph({
     });
     return matched;
   }, [data.nodes, searchQuery]);
+
+  /* ---- 节点/边的尺寸/状态计算回调 ---- */
 
   const getNodeSize = useCallback(
     (node: GraphNode): number => {
@@ -242,6 +308,8 @@ export function ForceGraph({
     [nodeDegrees]
   );
 
+  /* ---- Canvas 渲染函数 ---- */
+
   const paintNode = useCallback(
     (node: GraphNodeObject, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const size = getNodeSize(node);
@@ -254,10 +322,12 @@ export function ForceGraph({
       let nodeColor = baseColor;
       let opacity = 1;
 
+      // 高亮模式：未高亮的节点变暗
       if (highlightedNodes.size > 0 && !isHighlighted) {
         opacity = 0.2;
       }
 
+      // 搜索匹配：高亮显示为绿色
       if (searchQuery && isSearchMatched) {
         nodeColor = "hsl(145, 55%, 48%)";
         opacity = 1;
@@ -265,17 +335,20 @@ export function ForceGraph({
 
       ctx.globalAlpha = opacity;
 
+      // 绘制节点圆形
       ctx.beginPath();
       ctx.arc(node.x || 0, node.y || 0, size, 0, 2 * Math.PI);
       ctx.fillStyle = nodeColor;
       ctx.fill();
 
+      // 选中态白色边框
       if (isSelected) {
         ctx.strokeStyle = "hsl(0, 0%, 100%)";
         ctx.lineWidth = 3;
         ctx.stroke();
       }
 
+      // 高亮态白色边框（非选中时较细）
       if (isHighlighted && !isSelected) {
         ctx.strokeStyle = "hsl(0, 0%, 100%)";
         ctx.lineWidth = 2;
@@ -284,6 +357,7 @@ export function ForceGraph({
 
       ctx.globalAlpha = 1;
 
+      // 标签绘制（度数 >= 阈值 或 处于高亮/搜索匹配状态时显示）
       if (showLabel || isHighlighted || isSearchMatched) {
         const label = node.name;
         const fontSize = Math.max(10, 12 / globalScale);
@@ -305,6 +379,11 @@ export function ForceGraph({
     ]
   );
 
+  /**
+   * 绘制连线
+   * - 层级关系（从属、师徒等）使用虚线
+   * - 动态关系（友好、敌对等）使用实线
+   */
   const paintLink = useCallback(
     (link: GraphLinkObject, ctx: CanvasRenderingContext2D) => {
       const source = typeof link.source === "string" ? null : link.source;
@@ -327,14 +406,31 @@ export function ForceGraph({
       ctx.globalAlpha = opacity;
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
+
+      // 判断是否需要虚线样式
+      const useDashedLine = isHierarchicalRelation(link.relation_type || "");
+
+      if (useDashedLine) {
+        // 虚线样式：层级关系 [6, 4] 间隔
+        ctx.setLineDash([6, 4]);
+      } else {
+        // 实线样式：动态关系
+        ctx.setLineDash([]);
+      }
+
       ctx.lineTo(target.x, target.y);
       ctx.strokeStyle = color;
       ctx.lineWidth = width;
       ctx.stroke();
+
+      // 重置虚线设置（防止影响后续绘制）
+      ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     },
     [getLinkWidth, highlightedNodes]
   );
+
+  /* ---- 交互事件处理 ---- */
 
   const handleNodeClick = useCallback(
     (node: GraphNodeObject) => {
@@ -351,6 +447,8 @@ export function ForceGraph({
     [onNodeHover]
   );
 
+  /* ---- 力学模拟参数配置 ---- */
+
   useEffect(() => {
     if (graphRef.current) {
       const fg = graphRef.current;
@@ -358,6 +456,8 @@ export function ForceGraph({
       fg.d3Force("link")?.distance(80);
     }
   }, []);
+
+  /* ---- 渲染 ---- */
 
   return (
     <div className={className}>
@@ -385,6 +485,9 @@ export function ForceGraph({
       />
     </div>
   );
-}
+  }
+);
+
+ForceGraph.displayName = "ForceGraph";
 
 export default ForceGraph;

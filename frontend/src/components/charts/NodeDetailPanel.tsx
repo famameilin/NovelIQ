@@ -257,7 +257,9 @@ export function NodeDetailPanel({
                     <div className="mb-3 flex items-center gap-2">
                       <Users className="h-4 w-4 text-text-muted" />
                       <h3 className="text-sm font-semibold text-text">
-                        关联角色
+                        {node.entity_type === "character"
+                          ? "关联角色"
+                          : `关联${getEntityTypeDisplayName(node.entity_type) || "实体"}`}
                       </h3>
                       <span className="text-xs text-text-muted">
                         ({relatedNodes.length})
