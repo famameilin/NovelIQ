@@ -49,7 +49,7 @@ export function GraphPage() {
   const urlTaskId = searchParams.get("task_id");
 
   // ForceGraph 组件引用（用于外部控制缩放/居中）
-  const forceGraphRef = useRef<ForceGraphHandle>(undefined);
+  const forceGraphRef = useRef<ForceGraphHandle>(null);
 
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [highlightedNodes, setHighlightedNodes] = useState<Set<string>>(new Set());
@@ -312,7 +312,7 @@ export function GraphPage() {
               {/* 使用封装的 ForceGraph 组件 */}
               <ForceGraph
                 ref={forceGraphRef}
-                data={graphData}
+                data={graphData!}
                 selectedNode={selectedNode}
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
