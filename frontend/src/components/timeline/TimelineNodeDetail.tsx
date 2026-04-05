@@ -126,7 +126,7 @@ export function TimelineNodeDetail({
               </div>
             </div>
 
-            {node.characters.length > 0 && (
+            {(node.characters?.length ?? 0) > 0 && (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-text-muted">
                   <Users className="h-3.5 w-3.5" />
