@@ -44,7 +44,7 @@ from .phase4 import annotate_chunk_phase4
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-    from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
+    from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
 
 
 @dataclass
@@ -76,7 +76,7 @@ class _Phase3Result:
 
 @dataclass
 class _Phase4Result:
-    relations: list | None = None
+    relations: list[RelationChangeSnapshot] | None = None
 
 
 def _run_phase1(
@@ -457,7 +457,9 @@ def annotate_chunk_parallel(
         foreshadowing = phase2_future.result()
 
         known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-        phase3_result = _run_phase3_if_needed(
+
+        phase3_future = executor.submit(
+            _run_phase3_if_needed,
             client=client,
             text=text,
             alias_map=alias_map,
@@ -465,13 +467,17 @@ def annotate_chunk_parallel(
             run_id=run_id,
             known_characters=known_characters,
         )
-        phase4_result = _Phase4Result(
-            relations=annotate_chunk_phase4(
-                text=text,
-                known_characters=known_characters,
-                source_model=getattr(getattr(client, "_config", None), "model", None),
-            )
+        phase4_future = executor.submit(
+            annotate_chunk_phase4,
+            client=client,
+            text=text,
+            known_characters=known_characters,
+            chunk_id=chunk_id,
+            run_id=run_id,
         )
+
+        phase3_result = phase3_future.result()
+        phase4_result = _Phase4Result(relations=phase4_future.result())
 
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
@@ -580,9 +586,11 @@ def annotate_chunk_serial(
     )
     phase4_result = _Phase4Result(
         relations=annotate_chunk_phase4(
+            client=client,
             text=text,
             known_characters=known_characters,
-            source_model=getattr(getattr(client, "_config", None), "model", None),
+            chunk_id=chunk_id,
+            run_id=run_id,
         )
     )
 

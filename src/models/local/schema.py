@@ -14,6 +14,7 @@ RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者"
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
 RelationChange = Literal["强化", "弱化", "新建", "断裂", "无变化"]
 ProjectionStatus = Literal["pending", "projected", "failed"]
+Directionality = Literal["directed", "symmetric"]
 EntityType = Literal["character", "group", "organization", "creature", "artifact"]
 ClueType = Literal[
     "none",
@@ -39,7 +40,7 @@ class LocationAppearance(BaseModel):
     说明: 用于 Phase1 标注阶段识别的地点信息
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     raw_name: str
     location_type: LocationType | None = None
@@ -98,15 +99,15 @@ class RelationChangeSnapshot(BaseModel):
 
     from_name: str
     to_name: str
-    type: str
-    change: str
+    type: RelationType
+    change: RelationChange
     evidence: str
     confidence: float
     source_model: str | None = None
     projection_status: ProjectionStatus = "pending"
     projected_at: str | None = None
     projection_error: str | None = None
-    directionality: str = "directed"
+    directionality: Directionality = "directed"
 
 
 class DialogueSnapshot(BaseModel):
@@ -247,6 +248,40 @@ class DialogueAttributionResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     dialogues: list[DialogueRecord] = Field(default_factory=list, description="对话归属列表")
+
+
+class RelationRecord(BaseModel):
+    """
+    关系记录数据结构
+
+    创建时间: 2026-04-05
+    创建者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    说明: 用于存储 LLM 识别的人物关系
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    from_name: str = Field(alias="from", description="关系发起者")
+    to_name: str = Field(alias="to", description="关系接受者")
+    type: RelationType = Field(description="关系类型：家族、师徒、敌对、盟友、友情、爱慕、主从、利益")
+    change: RelationChange = Field(description="变化类型：无变化、新建、强化、弱化、断裂")
+    evidence: str = Field(description="原文依据")
+
+
+class RelationExtractionResult(BaseModel):
+    """
+    关系抽取结果数据结构
+
+    创建时间: 2026-04-05
+    创建者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    说明: 用于 LLM 结构化输出的关系抽取结果模型
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    relations: list[RelationRecord] = Field(default_factory=list, description="关系列表")
 
 
 class HierarchicalRelation(BaseModel):
