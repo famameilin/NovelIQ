@@ -23,10 +23,16 @@ VALIDATION_MAX_RETRIES: int = 3
 
 SYMMETRIC_RELATION_TYPES: frozenset[str] = frozenset({"家族", "友情", "盟友"})
 
+VALID_RELATION_TYPES: frozenset[str] = frozenset({"家族", "师徒", "敌对", "盟友", "友情", "爱慕", "主从", "利益"})
+
+VALID_CHANGE_TYPES: frozenset[str] = frozenset({"无变化", "新建", "强化", "弱化", "断裂"})
+
 __all__ = [
     "EMOTION_SCORE_MAPPING",
     "PHASE_MAX_RETRIES",
     "PHASE3_MAX_RETRIES",
     "VALIDATION_MAX_RETRIES",
     "SYMMETRIC_RELATION_TYPES",
+    "VALID_RELATION_TYPES",
+    "VALID_CHANGE_TYPES",
 ]
