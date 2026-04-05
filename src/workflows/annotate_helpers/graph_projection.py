@@ -6,7 +6,10 @@ from loguru import logger
 from sqlalchemy import text
 
 from src.config import settings
-from src.config.constants.annotation import SYMMETRIC_RELATION_TYPES
+from src.config.constants.annotation import (
+    SYMMETRIC_RELATION_TYPES,
+    VALID_CHANGE_TYPES,
+)
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
@@ -15,8 +18,6 @@ from src.workflows.annotate_helpers.disambiguation.checkpoint import (
 )
 
 PENDING_RETRY_LIMIT = 200
-
-VALID_CHANGE_TYPES = frozenset({"强化", "弱化", "新建", "断裂", "无变化"})
 
 
 def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases: dict[str, str]) -> str | None:

@@ -20,10 +20,15 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
-from src.config.constants import PHASE_MAX_RETRIES, VALID_CHANGE_TYPES, VALID_RELATION_TYPES
+from src.config.constants import (
+    PHASE_MAX_RETRIES,
+    SYMMETRIC_RELATION_TYPES,
+    VALID_CHANGE_TYPES,
+    VALID_RELATION_TYPES,
+)
 from src.models.interactions import record_model_interaction
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
-from src.models.local.schema import RelationChangeSnapshot, RelationExtractionResult
+from src.models.local.schema import Directionality, RelationChangeSnapshot, RelationExtractionResult
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
@@ -120,8 +125,28 @@ def _convert_to_snapshots(
                 confidence=_DEFAULT_RELATION_CONFIDENCE,
                 source_model=source_model,
                 projection_status="pending",
+                directionality="symmetric" if record.type in SYMMETRIC_RELATION_TYPES else "directed",
             )
         )
+
+        # 对称关系自动生成反向边（A→B 变成 A→B + B→A）
+        if record.type in SYMMETRIC_RELATION_TYPES and record.from_name != record.to_name:
+            reverse_key = (record.to_name, record.from_name, record.type)
+            if reverse_key not in seen_keys:
+                seen_keys.add(reverse_key)
+                snapshots.append(
+                    RelationChangeSnapshot(
+                        from_name=record.to_name,
+                        to_name=record.from_name,
+                        type=record.type,
+                        change=record.change,
+                        evidence=record.evidence,
+                        confidence=_DEFAULT_RELATION_CONFIDENCE,
+                        source_model=source_model,
+                        projection_status="pending",
+                        directionality="symmetric",
+                    )
+                )
 
     return snapshots
 

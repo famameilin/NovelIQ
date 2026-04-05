@@ -12,6 +12,9 @@ from __future__ import annotations
 import re
 
 from src.config.constants.annotation import (
+    DIRECTIONALITY_DIRECTED,
+    DIRECTIONALITY_SYMMETRIC,
+    Directionality,
     EMOTION_SCORE_MAPPING,
     PHASE3_MAX_RETRIES,
     PHASE_MAX_RETRIES,

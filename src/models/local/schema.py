@@ -99,8 +99,8 @@ class RelationChangeSnapshot(BaseModel):
 
     from_name: str
     to_name: str
-    type: str
-    change: str
+    type: RelationType
+    change: RelationChange
     evidence: str
     confidence: float
     source_model: str | None = None

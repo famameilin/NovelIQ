@@ -7,7 +7,9 @@
 说明: 从各模块提取的标注相关硬编码常量
 """
 
-from __future__ import annotations
+from __future__ annotations
+
+from typing import Literal
 
 EMOTION_SCORE_MAPPING: dict[str, int] = {
     "strong_positive": 2,
@@ -27,6 +29,10 @@ VALID_RELATION_TYPES: frozenset[str] = frozenset({"家族", "师徒", "敌对", 
 
 VALID_CHANGE_TYPES: frozenset[str] = frozenset({"无变化", "新建", "强化", "弱化", "断裂"})
 
+DIRECTIONALITY_DIRECTED: Literal["directed"] = "directed"
+DIRECTIONALITY_SYMMETRIC: Literal["symmetric"] = "symmetric"
+Directionality: Literal["directed", "symmetric"] = Literal["directed", "symmetric"]
+
 __all__ = [
     "EMOTION_SCORE_MAPPING",
     "PHASE_MAX_RETRIES",
@@ -35,4 +41,7 @@ __all__ = [
     "SYMMETRIC_RELATION_TYPES",
     "VALID_RELATION_TYPES",
     "VALID_CHANGE_TYPES",
+    "DIRECTIONALITY_DIRECTED",
+    "DIRECTIONALITY_SYMMETRIC",
+    "Directionality",
 ]
