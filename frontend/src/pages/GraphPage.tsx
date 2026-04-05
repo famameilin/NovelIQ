@@ -18,7 +18,6 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { getGraph, getCharacters } from "@/api/results";
 import { getNovel } from "@/api/novels";
-import type { Character } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
@@ -29,7 +28,7 @@ import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeD
 import { GraphLegend } from "@/components/charts/GraphLegend";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
-import type { GraphNode, GraphData, GraphNodeObject } from "@/api/types";
+import type { GraphNode, GraphNodeObject } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
