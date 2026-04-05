@@ -50,7 +50,7 @@ export interface RhythmCurveChartProps {
   className?: string;
   visibleSeries?: Set<string>;
   onSeriesToggle?: (series: Set<string>) => void;
-  zoomRange?: [number, number];
+  zoomRange?: [number, number] | null;
   onZoomChange?: (range: [number, number] | null) => void;
   height?: number | string;
 }
@@ -114,7 +114,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
         const isActive = activeSeries.has(config.key);
 
-        const markLineData: echarts.MarkLineComponentDataItem[] = [];
+        const markLineData: Array<{ xAxis: number; label?: object; lineStyle?: object }> = [];
 
         if (isActive) {
           if (act1End > 0 && act1End < totalChunks) {

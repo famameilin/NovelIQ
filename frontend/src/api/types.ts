@@ -123,23 +123,99 @@ export interface DiagnosisResult {
 // Knowledge Graph
 // ============================================================
 
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-A 人物关系图谱 API 类型定义
+// 说明: 更新图谱节点类型，添加实体详细信息字段
+
 export interface GraphNode {
-  id: string;
+  entity_id: string;
   name: string;
   entity_type: string;
-  count?: number;
+  first_seen_chunk?: number;
+  last_seen_chunk?: number;
+  role?: string;
+  emotion_score?: number;
+  status?: string;
 }
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-A 人物关系图谱 API 类型定义
+// 说明: 更新图谱边类型，relation_type 改为可选
 
 export interface GraphEdge {
   source: string;
   target: string;
-  relation_type: string;
+  relation_type?: string;
   weight?: number;
 }
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-A 人物关系图谱 API 类型定义
+// 说明: 添加图谱事件类型定义
+
+export interface GraphEvent {
+  event_id: string;
+  event_type: string;
+  source_entity: string;
+  target_entity: string;
+  relation_type?: string;
+  chunk_index?: number;
+  timestamp?: string;
+}
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-A 人物关系图谱 API 类型定义
+// 说明: 更新图谱数据类型，添加 events, summary, quality 字段
 
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  events?: GraphEvent[];
+  summary?: Record<string, unknown>;
+  quality?: Record<string, unknown>;
+}
+
+// ============================================================
+// Force Graph Runtime Types (react-force-graph-2d)
+// ============================================================
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: 修复 ForceGraph TypeScript 类型错误
+// 说明: 扩展 GraphNode 以包含 react-force-graph-2d 运行时属性 (x, y, vx, vy 等)
+
+import type { NodeObject, LinkObject } from "react-force-graph-2d";
+
+export interface GraphNodeObject extends GraphNode, NodeObject {}
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: 修复 ForceGraph TypeScript 类型错误
+// 说明: 扩展 GraphEdge 以匹配 react-force-graph-2d 的 LinkObject，
+//       source 和 target 在运行时会被解析为节点对象
+
+export interface GraphLinkObject extends LinkObject<GraphNodeObject> {
+  source: string | GraphNodeObject;
+  target: string | GraphNodeObject;
+  relation_type?: string;
+  weight?: number;
+}
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: 修复 ForceGraph TypeScript 类型错误
+// 说明: 供 ForceGraph 组件使用的图谱数据类型，使用 links 而不是 edges
+
+export interface ForceGraphData {
+  nodes: GraphNodeObject[];
+  links: GraphLinkObject[];
+  events?: GraphEvent[];
+  summary?: Record<string, unknown>;
+  quality?: Record<string, unknown>;
 }
 
 // ============================================================
@@ -173,19 +249,28 @@ export interface TimelineData {
 // ============================================================
 
 export interface NarrativeStructureMetrics {
-  act1_ratio: number;
-  act2_ratio: number;
-  act3_ratio: number;
-  climax_positions: number[];
-  cliffhanger_rate: number;
-  middle_collapse_index: number;
+  act1_ratio?: number;
+  act2_ratio?: number;
+  act3_ratio?: number;
+  climax_spacing?: number;
+  middle_collapse_index?: number;
+  event_density?: Record<string, number>;
+  cliffhanger_rate?: number;
+  climax_count?: number;
+  climax_positions?: number[];
+  climax_heights?: number[];
+  peak_escalation?: string;
+  dominant_climax_pos?: number;
 }
 
 export interface EmotionStatsMetrics {
-  pivot_moment_density: number;
-  recovery_speed: number;
-  emotional_range: number;
-  mean_sentiment: number;
+  pos_neg_ratio?: number;
+  positive_ratio?: number;
+  negative_ratio?: number;
+  neutral_ratio?: number;
+  recovery_speed?: number;
+  pivot_moment_density?: number;
+  lexical_emotion_trend?: string;
 }
 
 export interface CharacterStatsMetrics {
