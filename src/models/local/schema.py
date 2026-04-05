@@ -40,7 +40,7 @@ class LocationAppearance(BaseModel):
     说明: 用于 Phase1 标注阶段识别的地点信息
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     raw_name: str
     location_type: LocationType | None = None
@@ -260,7 +260,7 @@ class RelationRecord(BaseModel):
     说明: 用于存储 LLM 识别的人物关系
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     from_name: str = Field(alias="from", description="关系发起者")
     to_name: str = Field(alias="to", description="关系接受者")
