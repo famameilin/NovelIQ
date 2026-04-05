@@ -14,6 +14,7 @@ RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者"
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
 RelationChange = Literal["强化", "弱化", "新建", "断裂", "无变化"]
 ProjectionStatus = Literal["pending", "projected", "failed"]
+Directionality = Literal["directed", "symmetric"]
 EntityType = Literal["character", "group", "organization", "creature", "artifact"]
 ClueType = Literal[
     "none",
@@ -106,7 +107,7 @@ class RelationChangeSnapshot(BaseModel):
     projection_status: ProjectionStatus = "pending"
     projected_at: str | None = None
     projection_error: str | None = None
-    directionality: str = "directed"
+    directionality: Directionality = "directed"
 
 
 class DialogueSnapshot(BaseModel):
@@ -264,7 +265,7 @@ class RelationRecord(BaseModel):
     from_name: str = Field(alias="from", description="关系发起者")
     to_name: str = Field(alias="to", description="关系接受者")
     type: RelationType = Field(description="关系类型：家族、师徒、敌对、盟友、友情、爱慕、主从、利益")
-    change: str = Field(description="变化类型：无、新建、强化、弱化、断裂（Prompt输出值，代码层会映射为RelationChange枚举）")
+    change: str = Field(description="变化类型：无变化、新建、强化、弱化、断裂")
     evidence: str = Field(description="原文依据")
 
 

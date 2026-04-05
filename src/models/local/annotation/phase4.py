@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
-from src.config.constants import PHASE_MAX_RETRIES
+from src.config.constants import PHASE_MAX_RETRIES, VALID_CHANGE_TYPES, VALID_RELATION_TYPES
 from src.models.interactions import record_model_interaction
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import RelationChangeSnapshot, RelationExtractionResult
@@ -38,9 +38,6 @@ class Phase4MaxRetriesExceededError(Exception):
 # 默认置信度（LLM 不输出置信度时的回退值）
 _DEFAULT_RELATION_CONFIDENCE: float = 0.85
 
-# Prompt 输出值 → RelationChange 枚举值的映射
-_CHANGE_TYPE_MAP: dict[str, str] = {"无": "无变化"}
-
 
 def _build_phase4_messages(
     text: str,
@@ -52,10 +49,20 @@ def _build_phase4_messages(
     创建时间: 2026-04-05
     创建者: TraeAI
     任务: refactor-phase4-relation-extraction
+
+    修改时间: 2026-04-05
+    修改者: TraeAI
+    任务: phase4-code-review-fix
+    修改内容: 添加 Prompt 空值运行时校验
     """
     prompts = settings.prompts
     system_prompt = prompts.phase4.system
     user_template = prompts.phase4.user_template
+
+    if not system_prompt:
+        raise ValueError("Phase4 system prompt is empty, check config/prompts/phase4.txt")
+    if not user_template:
+        raise ValueError("Phase4 user template is empty, check config/prompts/phase4.txt")
 
     known_chars = "、".join(known_characters) if known_characters else "无"
 
@@ -90,14 +97,25 @@ def _convert_to_snapshots(
             continue
         seen_keys.add(key)
 
-        change_type = _CHANGE_TYPE_MAP.get(record.change, record.change)
+        if record.type not in VALID_RELATION_TYPES:
+            logger.warning(
+                "Invalid relation type '{}' from LLM, expected one of {}",
+                record.type,
+                VALID_RELATION_TYPES,
+            )
+        if record.change not in VALID_CHANGE_TYPES:
+            logger.warning(
+                "Invalid change type '{}' from LLM, expected one of {}",
+                record.change,
+                VALID_CHANGE_TYPES,
+            )
 
         snapshots.append(
             RelationChangeSnapshot(
                 from_name=record.from_name,
                 to_name=record.to_name,
                 type=record.type,
-                change=change_type,
+                change=record.change,
                 evidence=record.evidence,
                 confidence=_DEFAULT_RELATION_CONFIDENCE,
                 source_model=source_model,
@@ -197,7 +215,9 @@ def annotate_chunk_phase4(
     Returns:
         RelationChangeSnapshot 列表
     """
-    if not text or not known_characters:
+    if not text:
+        return []
+    if not known_characters:
         return []
 
     messages = _build_phase4_messages(text, known_characters)
