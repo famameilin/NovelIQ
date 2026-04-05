@@ -24,22 +24,25 @@ import type { TimelineNode as TimelineNodeType } from "@/api/types";
 
 const NODE_TYPE_CONFIG: Record<
   string,
-  { icon: LucideIcon; colorClass: string; label: string }
+  { icon: LucideIcon; bgClass: string; textClass: string; label: string }
 > = {
-  plot: { icon: Zap, colorClass: "bg-primary text-primary", label: "情节" },
+  plot: { icon: Zap, bgClass: "bg-primary", textClass: "text-primary", label: "情节" },
   character_entry: {
     icon: User,
-    colorClass: "bg-chart-positive text-chart-positive",
+    bgClass: "bg-chart-positive",
+    textClass: "text-chart-positive",
     label: "角色登场",
   },
   character_exit: {
     icon: UserMinus,
-    colorClass: "bg-chart-negative text-chart-negative",
+    bgClass: "bg-chart-negative",
+    textClass: "text-chart-negative",
     label: "角色退场",
   },
   relation_change: {
     icon: Link2,
-    colorClass: "bg-chart-2 text-chart-2",
+    bgClass: "bg-chart-2",
+    textClass: "text-chart-2",
     label: "关系变化",
   },
 };
@@ -54,6 +57,7 @@ const NODE_SIZE_MAX = 28;
 export interface TimelineNodeProps {
   node: TimelineNodeType;
   isSelected?: boolean;
+  isHighlighted?: boolean;
   onClick?: () => void;
   showLabel?: boolean;
 }
@@ -65,6 +69,7 @@ export interface TimelineNodeProps {
 export function TimelineNode({
   node,
   isSelected,
+  isHighlighted,
   onClick,
   showLabel = false,
 }: TimelineNodeProps) {
@@ -99,14 +104,13 @@ export function TimelineNode({
         className={cn(
           "flex items-center justify-center rounded-full",
           "bg-opacity-20",
-          config.colorClass.split(" ")[0]
+          config.bgClass,
+          isHighlighted && "ring-2 ring-offset-1 ring-chart-4"
         )}
         style={{ width: size, height: size }}
       >
         <Icon
-          className={cn(
-            config.colorClass.split(" ")[1]
-          )}
+          className={cn(config.textClass)}
           style={{
             width: size * 0.5,
             height: size * 0.5,

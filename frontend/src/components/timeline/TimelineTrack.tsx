@@ -8,7 +8,7 @@
  */
 
 import { motion } from "framer-motion";
-import { useRef } from "react";
+import { useRef, useMemo } from "react";
 import { cn } from "@/lib/cn";
 import type { TimelineNode as TimelineNodeType } from "@/api/types";
 import { TimelineNode } from "./TimelineNode";
@@ -19,6 +19,8 @@ import { TimelineNode } from "./TimelineNode";
 
 export interface TimelineTrackProps {
   nodes: TimelineNodeType[];
+  phases?: { name: string; start: number; end: number; ratio: number }[];
+  activePhase?: string;
   selectedNodeId?: number;
   onNodeClick?: (node: TimelineNodeType) => void;
   className?: string;
@@ -30,11 +32,26 @@ export interface TimelineTrackProps {
 
 export function TimelineTrack({
   nodes,
+  phases,
+  activePhase,
   selectedNodeId,
   onNodeClick,
   className,
 }: TimelineTrackProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 预计算当前激活阶段的 chunk 范围，用于节点高亮
+  const highlightedRange = useMemo(() => {
+    if (!activePhase || !phases) return null;
+    const phase = phases.find((p) => p.name === activePhase);
+    return phase ? [phase.start, phase.end] as [number, number] : null;
+  }, [activePhase, phases]);
+
+  // 判断某个节点是否属于高亮阶段
+  const isNodeInHighlight = (node: TimelineNodeType): boolean => {
+    if (!highlightedRange) return false;
+    return node.chunk_id >= highlightedRange[0] && node.chunk_id <= highlightedRange[1];
+  };
 
   const sortedNodes = [...nodes].sort((a, b) => a.progress - b.progress);
 
@@ -76,6 +93,7 @@ export function TimelineTrack({
             key={node.chunk_id}
             node={node}
             isSelected={selectedNodeId === node.chunk_id}
+            isHighlighted={isNodeInHighlight(node)}
             onClick={() => onNodeClick?.(node)}
           />
         ))}

@@ -7,7 +7,7 @@
  * 说明: 使用 ECharts 实现张力曲线面积图，叠加在时间轴下方
  */
 
-import { useRef } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts";
 import { cn } from "@/lib/cn";
@@ -35,7 +35,22 @@ export function TensionOverlay({
   className,
 }: TensionOverlayProps) {
   const chartRef = useRef<ReactEChartsCore>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const chartColor = getCSSColorVar("--chart-3") || "#888888";
+
+  // 响应式 resize：容器尺寸变化时通知 ECharts 重绘（§3.2 设计规范）
+  const handleResize = useCallback(() => {
+    chartRef.current?.getEchartsInstance()?.resize();
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(handleResize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [handleResize]);
 
   if (!tensionCurve || tensionCurve.length === 0) {
     return null;
@@ -87,7 +102,7 @@ export function TensionOverlay({
   };
 
   return (
-    <div className={cn("relative", className)}>
+    <div ref={containerRef} className={cn("relative", className)}>
       <div className="absolute left-2 top-0 text-xs text-text-muted">
         张力曲线
       </div>

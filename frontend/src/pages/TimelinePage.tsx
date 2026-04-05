@@ -253,6 +253,8 @@ export function TimelinePage() {
               ) : (
                 <TimelineTrack
                   nodes={nodes}
+                  phases={phases}
+                  activePhase={activePhase}
                   selectedNodeId={selectedNode?.chunk_id}
                   onNodeClick={handleNodeClick}
                 />
