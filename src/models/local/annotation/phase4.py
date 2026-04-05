@@ -35,9 +35,6 @@ class Phase4MaxRetriesExceededError(Exception):
     pass
 
 
-# 对称关系类型：from/to 方向可互换
-_SYMMETRIC_RELATION_TYPES: frozenset[str] = frozenset({"家族", "友情", "盟友"})
-
 # 默认置信度（LLM 不输出置信度时的回退值）
 _DEFAULT_RELATION_CONFIDENCE: float = 0.85
 
@@ -94,7 +91,6 @@ def _convert_to_snapshots(
         seen_keys.add(key)
 
         change_type = _CHANGE_TYPE_MAP.get(record.change, record.change)
-        directionality = "symmetric" if record.type in _SYMMETRIC_RELATION_TYPES else "directed"
 
         snapshots.append(
             RelationChangeSnapshot(
@@ -106,7 +102,6 @@ def _convert_to_snapshots(
                 confidence=_DEFAULT_RELATION_CONFIDENCE,
                 source_model=source_model,
                 projection_status="pending",
-                directionality=directionality,
             )
         )
 

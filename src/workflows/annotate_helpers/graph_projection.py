@@ -6,6 +6,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from src.config import settings
+from src.config.constants.annotation import SYMMETRIC_RELATION_TYPES
 from src.models.local.disambiguation import DisambiguationState
 from src.storage.models import ChunkCharacter, ChunkDialogue, ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
@@ -394,7 +395,7 @@ def project_graph_tables(
             evidence=relation.evidence,
             confidence=relation.confidence,
             source_relation_row_id=relation.id,
-            directionality="symmetric" if rel_type in {"盟友", "友情", "家族"} else "directed",
+            directionality="symmetric" if rel_type in SYMMETRIC_RELATION_TYPES else "directed",
         )
         if event is None:
             relation.projection_status = "failed"
