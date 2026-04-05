@@ -50,6 +50,9 @@ const NODE_TYPE_CONFIG: Record<
 const NODE_SIZE_MIN = 12;
 const NODE_SIZE_MAX = 28;
 
+/** 后端 importance_score 最大值（与 timeline.py Field(ge=0, le=13) 对齐） */
+const IMPORTANCE_SCORE_MAX = 13;
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
@@ -120,7 +123,7 @@ export function TimelineNode({
 
       {showLabel && (
         <span className="absolute top-full mt-1 whitespace-nowrap text-[10px] text-text-muted">
-          {node.event.slice(0, 10)}...
+          {(node.event ?? "").slice(0, 10)}...
         </span>
       )}
 
@@ -131,7 +134,12 @@ export function TimelineNode({
       )}
 
       {node.is_cliffhanger && (
-        <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-chart-3 text-[8px] text-white">
+        <span
+          className={cn(
+            "absolute flex h-3 w-3 items-center justify-center rounded-full bg-chart-3 text-[8px] text-white",
+            node.is_pivot ? "-right-4 -top-1" : "-right-1 -top-1"
+          )}
+        >
           ?
         </span>
       )}
@@ -144,8 +152,8 @@ export function TimelineNode({
 /* ------------------------------------------------------------------ */
 
 function calculateNodeSize(importanceScore: number): number {
-  const normalized = Math.min(Math.max(importanceScore, 0), 13);
-  const ratio = normalized / 13;
+  const normalized = Math.min(Math.max(importanceScore, 0), IMPORTANCE_SCORE_MAX);
+  const ratio = normalized / IMPORTANCE_SCORE_MAX;
   return NODE_SIZE_MIN + ratio * (NODE_SIZE_MAX - NODE_SIZE_MIN);
 }
 

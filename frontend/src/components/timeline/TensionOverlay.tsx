@@ -36,9 +36,11 @@ export function TensionOverlay({
 }: TensionOverlayProps) {
   const chartRef = useRef<ReactEChartsCore>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 获取当前主题色（不缓存：确保主题切换时颜色同步更新）
+  // getCSSColorVar 内部已做 DOM 查询优化（读一次 CSS 变量）
   const chartColor = getCSSColorVar("--chart-3") || "#888888";
 
-  // 响应式 resize：容器尺寸变化时通知 ECharts 重绘（§3.2 设计规范）
   const handleResize = useCallback(() => {
     chartRef.current?.getEchartsInstance()?.resize();
   }, []);
@@ -59,6 +61,8 @@ export function TensionOverlay({
   const xData = tensionCurve.map((_, i) => i);
   const yData = tensionCurve;
 
+  const safeTotalChunks = Math.max(1, totalChunks);
+
   const option: echarts.EChartsOption = {
     grid: {
       left: 0,
@@ -71,7 +75,7 @@ export function TensionOverlay({
       data: xData,
       show: false,
       min: 0,
-      max: totalChunks - 1,
+      max: safeTotalChunks - 1,
     },
     yAxis: {
       type: "value",
