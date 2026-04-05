@@ -69,7 +69,7 @@ def _get_last_projected_chunk(session, run_id: str) -> int:
         """),
         {"run_id": run_id},
     ).fetchone()
-    return result[0] if result else -1
+    return result._mapping[0] if result else -1
 
 
 def project_graph_tables(
@@ -171,7 +171,10 @@ def project_graph_tables(
             )
 
     if uncertain_names:
-        logger.info(f"Skipping {len(uncertain_names)} uncertain names from graph projection: {uncertain_names}")
+        logger.info(
+            "Skipping {} uncertain names from graph projection: {}",
+            uncertain_names,
+        )
 
     for row in chunk_characters:
         resolved_name = _resolve_name(row.name, alias_map, graph_alias_map)

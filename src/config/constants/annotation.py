@@ -7,7 +7,7 @@
 说明: 从各模块提取的标注相关硬编码常量
 """
 
-from __future__ annotations
+from __future__ import annotations
 
 from typing import Literal
 
@@ -31,7 +31,7 @@ VALID_CHANGE_TYPES: frozenset[str] = frozenset({"无变化", "新建", "强化",
 
 DIRECTIONALITY_DIRECTED: Literal["directed"] = "directed"
 DIRECTIONALITY_SYMMETRIC: Literal["symmetric"] = "symmetric"
-Directionality: Literal["directed", "symmetric"] = Literal["directed", "symmetric"]
+type Directionality = Literal["directed", "symmetric"]
 
 __all__ = [
     "EMOTION_SCORE_MAPPING",

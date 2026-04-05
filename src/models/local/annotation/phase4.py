@@ -28,14 +28,21 @@ from src.config.constants import (
 )
 from src.models.interactions import record_model_interaction
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
-from src.models.local.schema import Directionality, RelationChangeSnapshot, RelationExtractionResult
+from src.models.local.schema import RelationChangeSnapshot, RelationExtractionResult
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
 
 
 class Phase4MaxRetriesExceededError(Exception):
-    """Phase4 重试次数耗尽异常"""
+    """
+    Phase4 重试次数耗尽异常
+
+    创建时间: 2026-04-05
+    创建者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    说明: 当 Phase4 关系抽取重试次数耗尽时抛出此异常
+    """
 
     pass
 
@@ -47,7 +54,7 @@ _DEFAULT_RELATION_CONFIDENCE: float = 0.85
 def _build_phase4_messages(
     text: str,
     known_characters: list[str] | None,
-) -> list[dict]:
+) -> list[dict[str, str]]:
     """
     构建 Phase4 消息
 
