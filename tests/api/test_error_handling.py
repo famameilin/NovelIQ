@@ -1,12 +1,18 @@
+"""
+API 错误处理测试
+
+修改时间: 2026-04-05
+修改者: AI Assistant
+任务: fix-test-data-pollution
+修改内容: 使用 api_client fixture 确保测试使用测试数据库
+"""
 from fastapi.testclient import TestClient
-
-from src.api.main import app
-
-client = TestClient(app)
 
 
 class TestErrorHandling:
-    def test_error_response_format(self):
+    """测试错误处理"""
+
+    def test_error_response_format(self, api_client: TestClient):
         """测试错误响应格式
 
         修改时间: 2026-03-13
@@ -24,20 +30,20 @@ class TestErrorHandling:
         任务: API接口参数统一优化
         修改内容: 将run_id参数改回task_id，使用8位短UUID
         """
-        response = client.get("/api/novels/nonexistent/results?task_id=nonexist")
+        response = api_client.get("/api/novels/nonexistent/results?task_id=nonexist")
         assert response.status_code == 404
         data = response.json()
         assert "detail" in data
         assert "error_type" in data
         assert "status_code" in data
 
-    def test_404_error(self):
+    def test_404_error(self, api_client: TestClient):
         """测试 404 错误"""
-        response = client.get("/api/nonexistent")
+        response = api_client.get("/api/nonexistent")
         assert response.status_code == 404
 
-    def test_health_check(self):
+    def test_health_check(self, api_client: TestClient):
         """测试健康检查端点"""
-        response = client.get("/health")
+        response = api_client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "healthy"
