@@ -1,5 +1,6 @@
 import { Crosshair, Filter, Maximize, Search, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -178,17 +179,12 @@ export function GraphToolbar({
       {/* 节点搜索 */}
       <div className="relative flex items-center">
         <Search className="absolute left-2 h-3.5 w-3.5 text-text-muted pointer-events-none" />
-        <input
+        <Input
           type="text"
           placeholder="搜索节点..."
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          className={cn(
-            "h-8 w-40 rounded-md border border-border bg-transparent pl-7 pr-2 text-xs",
-            "text-text placeholder:text-text-muted",
-            "focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50",
-            "transition-colors duration-150"
-          )}
+          className="h-8 w-40 pl-7 pr-2 text-xs"
         />
       </div>
     </div>
