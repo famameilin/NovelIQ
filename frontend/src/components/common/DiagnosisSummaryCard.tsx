@@ -39,8 +39,8 @@ export function DiagnosisSummaryCard({
           {diagnosis.narrative_type && (
             <Badge variant="secondary">{diagnosis.narrative_type}</Badge>
           )}
-          {diagnosis.arc_type && (
-            <Badge variant="outline">{diagnosis.arc_type}</Badge>
+          {diagnosis.narrative_arc_type && (
+            <Badge variant="outline">{diagnosis.narrative_arc_type}</Badge>
           )}
         </div>
 

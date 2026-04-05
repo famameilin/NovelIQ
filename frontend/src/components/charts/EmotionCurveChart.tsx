@@ -48,7 +48,7 @@ export interface EmotionCurveChartProps {
   className?: string;
   visibleSeries?: Set<string>;
   onSeriesToggle?: (series: Set<string>) => void;
-  zoomRange?: [number, number];
+  zoomRange?: [number, number] | null;
   onZoomChange?: (range: [number, number] | null) => void;
   height?: number | string;
 }

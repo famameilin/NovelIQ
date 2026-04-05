@@ -49,9 +49,10 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
+        // @ts-expect-error Framer Motion ref type incompatibility with React 19
         ref={ref}
         {...motionProps}
-        {...props}
+        {...(props as React.ComponentProps<typeof Comp>)}
       />
     );
   }
