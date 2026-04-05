@@ -8,7 +8,7 @@
  */
 
 import { motion } from "framer-motion";
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useCallback } from "react";
 import { cn } from "@/lib/cn";
 import type { TimelineNode as TimelineNodeType } from "@/api/types";
 import { TimelineNode } from "./TimelineNode";
@@ -47,13 +47,19 @@ export function TimelineTrack({
     return phase ? [phase.start, phase.end] as [number, number] : null;
   }, [activePhase, phases]);
 
-  // 判断某个节点是否属于高亮阶段
-  const isNodeInHighlight = (node: TimelineNodeType): boolean => {
-    if (!highlightedRange) return false;
-    return node.chunk_id >= highlightedRange[0] && node.chunk_id <= highlightedRange[1];
-  };
+  // 判断某个节点是否属于高亮阶段（useCallback 避免每次 render 重创建）
+  const isNodeInHighlight = useCallback(
+    (node: TimelineNodeType): boolean => {
+      if (!highlightedRange) return false;
+      return node.chunk_id >= highlightedRange[0] && node.chunk_id <= highlightedRange[1];
+    },
+    [highlightedRange]
+  );
 
-  const sortedNodes = [...nodes].sort((a, b) => a.progress - b.progress);
+  const sortedNodes = useMemo(
+    () => [...(nodes || [])].sort((a, b) => a.progress - b.progress),
+    [nodes]
+  );
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>
