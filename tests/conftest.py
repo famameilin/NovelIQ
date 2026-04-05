@@ -9,6 +9,11 @@
 修改者: TraeAI
 任务: fix-duplicate-location-appearance
 修改内容: 添加 chunk_locations 表到清理列表
+
+修改时间: 2026-04-05
+修改者: AI Assistant
+任务: fix-test-data-pollution
+修改内容: 添加 api_client fixture，确保 API 测试使用测试数据库
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from collections.abc import Generator
 
 import pytest
 from dotenv import load_dotenv
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -26,6 +32,7 @@ from src.storage.models import Base
 load_dotenv()
 
 _test_engine = None
+_original_database_url: str | None = None
 
 
 def get_test_database_url() -> str:
@@ -131,3 +138,46 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
     finally:
         session.rollback()
         session.close()
+
+
+@pytest.fixture
+def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
+    """
+    API 测试客户端 fixture
+
+    创建时间: 2026-04-05
+    创建者: AI Assistant
+    任务: fix-test-data-pollution
+    说明: 确保 API 测试使用测试数据库，避免污染生产数据库
+
+    使用方式:
+        def test_something(api_client):
+            response = api_client.get("/api/novels/")
+            assert response.status_code == 200
+    """
+    global _original_database_url
+
+    test_url = get_test_database_url()
+    original_url = os.environ.get("DATABASE_URL")
+
+    os.environ["DATABASE_URL"] = test_url
+
+    from src.storage import db as db_module
+
+    db_module._engine = None
+    db_module._session_factory = None
+
+    from src.api.main import app
+
+    client = TestClient(app)
+
+    try:
+        yield client
+    finally:
+        if original_url is not None:
+            os.environ["DATABASE_URL"] = original_url
+        elif "DATABASE_URL" in os.environ:
+            del os.environ["DATABASE_URL"]
+
+        db_module._engine = None
+        db_module._session_factory = None
