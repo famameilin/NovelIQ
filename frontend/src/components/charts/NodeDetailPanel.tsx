@@ -49,14 +49,15 @@ const overlayVariants = {
 
 /* ------------------------------------------------------------------ */
 /*  Relation Type Color Mapping                                       */
+/*  与 ForceGraph.getRelationColorsFromCSS() 保持一致                  */
 /* ------------------------------------------------------------------ */
 
 const relationTypeColors: Record<string, string> = {
   友好: "bg-chart-positive/20 text-chart-positive",
   敌对: "bg-chart-negative/20 text-chart-negative",
-  从属: "bg-chart-1/20 text-chart-1",
+  从属: "bg-chart-neutral/20 text-chart-neutral",
   合作: "bg-chart-2/20 text-chart-2",
-  亲情: "bg-chart-3/20 text-chart-3",
+  亲情: "bg-chart-positive/20 text-chart-positive",
   爱情: "bg-chart-4/20 text-chart-4",
   师徒: "bg-chart-5/20 text-chart-5",
 };
@@ -64,9 +65,9 @@ const relationTypeColors: Record<string, string> = {
 const relationTypeBarColors: Record<string, string> = {
   友好: "bg-chart-positive",
   敌对: "bg-chart-negative",
-  从属: "bg-chart-1",
+  从属: "bg-chart-neutral",
   合作: "bg-chart-2",
-  亲情: "bg-chart-3",
+  亲情: "bg-chart-positive",
   爱情: "bg-chart-4",
   师徒: "bg-chart-5",
 };

@@ -91,11 +91,15 @@ export function GraphPage() {
     staleTime: STALE_TIME,
   });
 
-  // 构建节点名 → 出场次数的 Map（供 ForceGraph 使用）
-  const appearanceCountMap = useMemo((): Map<string, number> | undefined> => {
-    if (!charactersQuery.data) return new Map();
+  // 构建节点标识 → 出场次数的 Map（供 ForceGraph 使用）
+  // 注意：/characters API 返回的 Character 只有 name 字段（无 entity_id），
+  // 而 /graph API 返回的 GraphNode 有 entity_id 和 name。
+  // 这里使用 name 作为 key，ForceGraph.getNodeSize 会先按 entity_id 查，
+  // 查不到时再按 name 查。
+  const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
+    if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
     const map = new Map<string, number>();
-    charactersQuery.forEach((char) => {
+    charactersQuery.data.forEach((char) => {
       map.set(char.name, char.appearance_count);
     });
     return map;
