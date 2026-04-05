@@ -63,13 +63,13 @@ def _get_last_projected_chunk(session, run_id: str) -> int:
     """查询 ChunkRelation 表中已投影的最大 chunk_id。"""
     result = session.execute(
         text("""
-            SELECT COALESCE(MAX(chunk_id), -1)
+            SELECT COALESCE(MAX(chunk_id), -1) AS max_chunk_id
             FROM chunk_relations
             WHERE run_id = :run_id AND projection_status = 'projected'
         """),
         {"run_id": run_id},
     ).fetchone()
-    return result._mapping[0] if result else -1
+    return result._mapping["max_chunk_id"] if result else -1
 
 
 def project_graph_tables(
