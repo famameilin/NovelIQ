@@ -193,6 +193,7 @@ class NovelService:
             session_factory = get_session_factory()
             with session_factory() as session:
                 from src.storage.repositories import RunRepository
+
                 run_repo = RunRepository(session)
                 runs = run_repo.get_runs_by_novel(novel_id)
                 return [
@@ -341,6 +342,7 @@ class NovelService:
             session_factory = get_session_factory()
             with session_factory() as session:
                 from src.storage.repositories import RunRepository
+
                 run_repo = RunRepository(session)
                 return run_repo.count_distinct_novels()
         except Exception as e:
