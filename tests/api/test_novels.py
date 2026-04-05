@@ -38,4 +38,9 @@ class TestNovelUpload:
         """测试列出小说"""
         response = client.get("/api/novels/")
         assert response.status_code == 200
-        assert isinstance(response.json(), list)
+        data = response.json()
+        assert "items" in data
+        assert "total" in data
+        assert "page" in data
+        assert "page_size" in data
+        assert isinstance(data["items"], list)

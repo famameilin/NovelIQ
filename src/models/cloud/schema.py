@@ -87,6 +87,7 @@ class CloudAnalysis(BaseModel):
         v = v.strip()
         # 校验十六进制格式 (#RRGGBB 或 #RGB)
         import re
+
         if not re.match(r"^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$", v):
             return None  # 非法格式返回 None，由前端兜底
         return v

@@ -1,4 +1,16 @@
-from src.api.routes.results_converters import _convert_culture_stats, _convert_style_stats
+"""
+测试 results_converters 模块
+
+创建时间: 2026-03-13
+创建者: TraeAI
+任务: 测试结果转换器
+
+修改时间: 2026-04-05
+修改者: TraeAI
+任务: 移动废弃测试
+修改内容: 移除 culture_stats 相关测试（功能已废弃），移动到 deprecated/tests/api/
+"""
+from src.api.routes.results_converters import _convert_style_stats
 from src.metrics.aggregate import AggregateResult
 
 
@@ -9,21 +21,3 @@ def test_convert_style_stats_tone_distribution_default_empty_dict() -> None:
 
     assert style_stats is not None
     assert style_stats.tone_distribution == {}
-
-
-def test_convert_culture_stats_maps_imagery_density() -> None:
-    result = AggregateResult(traditional_culture={"imagery_density": 0.1234})
-
-    culture_stats = _convert_culture_stats(result)
-
-    assert culture_stats is not None
-    assert culture_stats.imagery_density == 0.1234
-
-
-def test_convert_culture_stats_imagery_density_default_zero() -> None:
-    result = AggregateResult(traditional_culture={"idiom_density": 0.0})
-
-    culture_stats = _convert_culture_stats(result)
-
-    assert culture_stats is not None
-    assert culture_stats.imagery_density == 0.0
