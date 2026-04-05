@@ -117,6 +117,11 @@ class ChunkRelation(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储分块中角色之间的关系变化
+
+    修改时间: 2026-04-05
+    修改者: TraeAI
+    任务: phase4-code-review-fix
+    修改内容: 添加 directionality 字段存储关系方向性
     """
 
     __tablename__ = "chunk_relations"
@@ -127,6 +132,7 @@ class ChunkRelation(Base):
     to_char: Mapped[str | None] = mapped_column(String(255), nullable=True)
     type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     change: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    directionality: Mapped[str | None] = mapped_column(String(20), nullable=True, default="directed")
     evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
