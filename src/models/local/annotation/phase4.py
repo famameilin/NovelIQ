@@ -23,8 +23,6 @@ from src.config import settings
 from src.config.constants import (
     PHASE_MAX_RETRIES,
     SYMMETRIC_RELATION_TYPES,
-    VALID_CHANGE_TYPES,
-    VALID_RELATION_TYPES,
 )
 from src.models.interactions import record_model_interaction
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
@@ -99,6 +97,11 @@ def _convert_to_snapshots(
     创建时间: 2026-04-05
     创建者: TraeAI
     任务: refactor-phase4-relation-extraction
+
+    修改时间: 2026-04-05
+    修改者: TraeAI
+    任务: phase4-code-review-fix
+    修改内容: 移除类型验证（已由 Pydantic Literal 约束处理）
     """
     snapshots: list[RelationChangeSnapshot] = []
     seen_keys: set[tuple[str, str, str]] = set()
@@ -108,19 +111,6 @@ def _convert_to_snapshots(
         if key in seen_keys:
             continue
         seen_keys.add(key)
-
-        if record.type not in VALID_RELATION_TYPES:
-            logger.warning(
-                "Invalid relation type '{}' from LLM, expected one of {}",
-                record.type,
-                VALID_RELATION_TYPES,
-            )
-        if record.change not in VALID_CHANGE_TYPES:
-            logger.warning(
-                "Invalid change type '{}' from LLM, expected one of {}",
-                record.change,
-                VALID_CHANGE_TYPES,
-            )
 
         snapshots.append(
             RelationChangeSnapshot(
