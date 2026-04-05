@@ -16,14 +16,16 @@ import type { TimelinePhase } from "@/api/types";
 /*  Constants                                                         */
 /* ------------------------------------------------------------------ */
 
-const PHASE_COLORS: Record<string, string> = {
+type PhaseName = "引入期" | "发展期" | "高潮期" | "收束期";
+
+const PHASE_COLORS: Record<PhaseName, string> = {
   引入期: "bg-chart-1",
   发展期: "bg-chart-2",
   高潮期: "bg-chart-3",
   收束期: "bg-chart-4",
 };
 
-const PHASE_BORDER_COLORS: Record<string, string> = {
+const PHASE_BORDER_COLORS: Record<PhaseName, string> = {
   引入期: "border-chart-1",
   发展期: "border-chart-2",
   高潮期: "border-chart-3",
