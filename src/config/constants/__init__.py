@@ -12,16 +12,13 @@ from __future__ import annotations
 import re
 
 from src.config.constants.annotation import (
-    DIRECTIONALITY_DIRECTED,
-    DIRECTIONALITY_SYMMETRIC,
-    Directionality,
     EMOTION_SCORE_MAPPING,
     PHASE3_MAX_RETRIES,
     PHASE_MAX_RETRIES,
     SYMMETRIC_RELATION_TYPES,
-    VALIDATION_MAX_RETRIES,
     VALID_CHANGE_TYPES,
     VALID_RELATION_TYPES,
+    VALIDATION_MAX_RETRIES,
 )
 from src.config.constants.disambiguation import MAX_DISAMBIG_RETRIES
 from src.config.constants.text_normalization import (
