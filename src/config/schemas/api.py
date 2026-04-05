@@ -175,6 +175,19 @@ class Phase3Prompts:
 
 
 @dataclass
+class Phase4Prompts:
+    """Phase4（关系抽取）Prompt 配置
+
+    创建时间: 2026-04-05
+    创建者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    """
+
+    system: str = ""
+    user_template: str = ""
+
+
+@dataclass
 class PathSettings:
     """路径配置"""
 
@@ -216,11 +229,17 @@ class PromptSettings:
     创建者: TraeAI
     任务: prompt-consolidation
     修改内容: 按任务重组 prompt 结构
+
+    修改时间: 2026-04-05
+    修改者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    修改内容: 添加 phase4 字段
     """
 
     phase1: Phase1Prompts = field(default_factory=Phase1Prompts)
     phase2: Phase2Prompts = field(default_factory=Phase2Prompts)
     phase3: Phase3Prompts = field(default_factory=Phase3Prompts)
+    phase4: Phase4Prompts = field(default_factory=Phase4Prompts)
     disambiguate: str = ""
     anonymous_disambig: str = ""
     diagnose: str = ""
@@ -322,6 +341,25 @@ def _load_phase3_prompts() -> Phase3Prompts:
     )
 
 
+def _load_phase4_prompts() -> Phase4Prompts:
+    """
+    加载 Phase4 prompt
+
+    创建时间: 2026-04-05
+    创建者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    """
+    content = load_prompt_from_file("phase4")
+    if not content:
+        return Phase4Prompts()
+
+    sections = parse_prompt_sections(content)
+    return Phase4Prompts(
+        system=sections.get("SYSTEM", ""),
+        user_template=sections.get("USER_TEMPLATE", ""),
+    )
+
+
 def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
     """
     解析 Prompt 配置
@@ -330,11 +368,17 @@ def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
     创建者: TraeAI
     任务: prompt-consolidation
     修改内容: 按任务从合并文件加载 prompt
+
+    修改时间: 2026-04-05
+    修改者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    修改内容: 添加 phase4 prompt 加载
     """
     return PromptSettings(
         phase1=_load_phase1_prompts(),
         phase2=_load_phase2_prompts(),
         phase3=_load_phase3_prompts(),
+        phase4=_load_phase4_prompts(),
         disambiguate=load_prompt_from_file("disambiguate"),
         anonymous_disambig=load_prompt_from_file("anonymous_disambig"),
         diagnose=load_prompt_from_file("diagnose"),

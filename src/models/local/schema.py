@@ -249,6 +249,40 @@ class DialogueAttributionResult(BaseModel):
     dialogues: list[DialogueRecord] = Field(default_factory=list, description="对话归属列表")
 
 
+class RelationRecord(BaseModel):
+    """
+    关系记录数据结构
+
+    创建时间: 2026-04-05
+    创建者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    说明: 用于存储 LLM 识别的人物关系
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    from_name: str = Field(alias="from", description="关系发起者")
+    to_name: str = Field(alias="to", description="关系接受者")
+    type: str = Field(description="关系类型：家族、师徒、敌对、盟友、友情、爱慕、主从、利益")
+    change: str = Field(description="变化类型：无、新建、强化、弱化、断裂")
+    evidence: str = Field(description="原文依据")
+
+
+class RelationExtractionResult(BaseModel):
+    """
+    关系抽取结果数据结构
+
+    创建时间: 2026-04-05
+    创建者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    说明: 用于 LLM 结构化输出的关系抽取结果模型
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    relations: list[RelationRecord] = Field(default_factory=list, description="关系列表")
+
+
 class HierarchicalRelation(BaseModel):
     """
     层级关系数据结构
