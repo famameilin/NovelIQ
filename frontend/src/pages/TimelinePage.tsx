@@ -48,13 +48,11 @@ export function TimelinePage() {
   const urlMaxLevel = searchParams.get("max_level");
   const urlShowTension = searchParams.get("show_tension");
 
-  const parsedMaxLevel = urlMaxLevel ? parseInt(urlMaxLevel) : 3;
-  const [maxLevel, setMaxLevel] = useState<1 | 2 | 3>(
-    [1, 2, 3].includes(parsedMaxLevel) ? (parsedMaxLevel as 1 | 2 | 3) : 3
-  );
-  const [showTension, setShowTension] = useState(
-    urlShowTension === "false" ? false : true
-  );
+  const [maxLevel, setMaxLevel] = useState<1 | 2 | 3>(() => {
+    const level = urlMaxLevel ? parseInt(urlMaxLevel, 10) : 3;
+    return [1, 2, 3].includes(level) ? (level as 1 | 2 | 3) : 3;
+  });
+  const [showTension, setShowTension] = useState(urlShowTension !== "false");
   const [selectedNode, setSelectedNode] = useState<TimelineNode | null>(null);
   const [activePhase, setActivePhase] = useState<string | undefined>();
 
@@ -68,13 +66,13 @@ export function TimelinePage() {
   }, [novelId, urlTaskId, setNovel, setTask]);
 
   useEffect(() => {
-    if (currentTaskId && searchParams.get("task_id") !== currentTaskId) {
+    if (currentTaskId && urlTaskId !== currentTaskId) {
       navigate(
         `/novels/${novelId}/timeline?task_id=${currentTaskId}&max_level=${maxLevel}&show_tension=${showTension}`,
         { replace: true }
       );
     }
-  }, [currentTaskId, novelId, navigate, searchParams, maxLevel, showTension]);
+  }, [currentTaskId, novelId, navigate, urlTaskId]);
 
   const enabled = !!novelId && !!currentTaskId;
 
@@ -142,6 +140,21 @@ export function TimelinePage() {
 
   const isLoading = timelineQuery.isLoading || novelQuery.isLoading;
   const isError = timelineQuery.isError || novelQuery.isError;
+
+  if (!novelId) {
+    return (
+      <PageContainer>
+        <div className="flex h-96 flex-col items-center justify-center gap-4">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-text">小说不存在</h3>
+            <p className="mt-1 text-sm text-text-muted">
+              请从小说列表中选择一本小说
+            </p>
+          </div>
+        </div>
+      </PageContainer>
+    );
+  }
 
   if (!currentTaskId) {
     return (
@@ -286,11 +299,13 @@ export function TimelinePage() {
           </motion.div>
         )}
 
-        <TimelineNodeDetail
-          node={selectedNode}
-          novelId={novelId!}
-          onClose={() => setSelectedNode(null)}
-        />
+        {novelId && (
+          <TimelineNodeDetail
+            node={selectedNode}
+            novelId={novelId}
+            onClose={() => setSelectedNode(null)}
+          />
+        )}
       </div>
     </PageContainer>
   );
