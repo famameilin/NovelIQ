@@ -263,8 +263,8 @@ class RelationRecord(BaseModel):
 
     from_name: str = Field(alias="from", description="关系发起者")
     to_name: str = Field(alias="to", description="关系接受者")
-    type: str = Field(description="关系类型：家族、师徒、敌对、盟友、友情、爱慕、主从、利益")
-    change: str = Field(description="变化类型：无、新建、强化、弱化、断裂")
+    type: RelationType = Field(description="关系类型：家族、师徒、敌对、盟友、友情、爱慕、主从、利益")
+    change: str = Field(description="变化类型：无、新建、强化、弱化、断裂（Prompt输出值，代码层会映射为RelationChange枚举）")
     evidence: str = Field(description="原文依据")
 
 
