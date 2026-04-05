@@ -35,6 +35,16 @@ class Phase4MaxRetriesExceededError(Exception):
     pass
 
 
+# 对称关系类型：from/to 方向可互换
+_SYMMETRIC_RELATION_TYPES: frozenset[str] = frozenset({"家族", "友情", "盟友"})
+
+# 默认置信度（LLM 不输出置信度时的回退值）
+_DEFAULT_RELATION_CONFIDENCE: float = 0.85
+
+# Prompt 输出值 → RelationChange 枚举值的映射
+_CHANGE_TYPE_MAP: dict[str, str] = {"无": "无变化"}
+
+
 def _build_phase4_messages(
     text: str,
     known_characters: list[str] | None,
@@ -83,9 +93,8 @@ def _convert_to_snapshots(
             continue
         seen_keys.add(key)
 
-        change_type = record.change
-        if change_type == "无":
-            change_type = "无变化"
+        change_type = _CHANGE_TYPE_MAP.get(record.change, record.change)
+        directionality = "symmetric" if record.type in _SYMMETRIC_RELATION_TYPES else "directed"
 
         snapshots.append(
             RelationChangeSnapshot(
@@ -94,10 +103,10 @@ def _convert_to_snapshots(
                 type=record.type,
                 change=change_type,
                 evidence=record.evidence,
-                confidence=0.85,
+                confidence=_DEFAULT_RELATION_CONFIDENCE,
                 source_model=source_model,
                 projection_status="pending",
-                directionality="directed",
+                directionality=directionality,
             )
         )
 
@@ -153,10 +162,10 @@ def execute_phase4_call(
     )
 
     logger.info(
-        f"phase4_relation_extraction: "
-        f"chunk_id={chunk_id} "
-        f"text_len={len(text)} "
-        f"relations_count={len(parsed.relations)}"
+        "phase4_relation_extraction: chunk_id={} text_len={} relations_count={}",
+        chunk_id,
+        len(text),
+        len(parsed.relations),
     )
 
     source_model = config.model or "phase4-llm"
@@ -228,6 +237,9 @@ def annotate_chunk_phase4(
     try:
         result = handler.execute(operation)
         return result if result else []
-    except Exception as e:
-        logger.warning(f"Phase4 relation extraction failed: {e}")
+    except Phase4MaxRetriesExceededError:
+        logger.warning("Phase4 max retries exceeded for chunk_id={}", chunk_id)
         return []
+    except Exception as e:
+        logger.error("Phase4 unexpected error for chunk_id={}: {}", chunk_id, e)
+        raise
