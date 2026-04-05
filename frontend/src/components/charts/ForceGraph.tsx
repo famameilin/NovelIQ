@@ -21,6 +21,8 @@ export interface ForceGraphProps {
   highlightedNodes: Set<string>;
   searchQuery: string;
   relationFilter: Set<string>;
+  /** 节点名 → 出场次数映射（来自 /characters API，用于更准确的节点大小计算） */
+  appearanceCountMap?: Map<string, number>;
   className?: string;
 }
 
@@ -139,6 +141,7 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
     highlightedNodes,
     searchQuery,
     relationFilter,
+    appearanceCountMap,
     className,
   }, ref) {
   const graphRef = useRef<ForceGraphMethods<GraphNodeObject, GraphLinkObject> | undefined>(undefined);
@@ -247,6 +250,18 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
 
   const getNodeSize = useCallback(
     (node: GraphNode): number => {
+      // 优先使用出场次数（来自 /characters API）计算节点大小
+      // 设计文档 §2.5 要求：节点大小根据"出场次数/度中心性"线性缩放
+      if (appearanceCountMap && appearanceCountMap.size > 0) {
+        const count = appearanceCountMap.get(node.entity_id) || 0;
+        const counts = Array.from(appearanceCountMap.values());
+        if (counts.length === 0) return (NODE_SIZE_MIN + NODE_SIZE_MAX) / 2;
+        const minCount = Math.min(...counts);
+        const maxCount = Math.max(...counts);
+        if (maxCount === minCount) return (NODE_SIZE_MIN + NODE_SIZE_MAX) / 2;
+        return mapValue(count, minCount, maxCount, NODE_SIZE_MIN, NODE_SIZE_MAX);
+      }
+      // Fallback：使用度中心性（图谱内部计算的连接数）
       const degree = nodeDegrees.get(node.entity_id) || 0;
       if (degreeRange.max === degreeRange.min) {
         return (NODE_SIZE_MIN + NODE_SIZE_MAX) / 2;
@@ -259,7 +274,7 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
         NODE_SIZE_MAX
       );
     },
-    [nodeDegrees, degreeRange]
+    [nodeDegrees, degreeRange, appearanceCountMap]
   );
 
   const getLinkWidth = useCallback(
