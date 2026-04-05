@@ -409,22 +409,6 @@ def project_graph_tables(
 
         affected_pairs.add((from_entity.entity_id, to_entity.entity_id))
 
-        if rel_type in SYMMETRIC_RELATION_TYPES:
-            reverse_event = graph_repo.insert_relation_event(
-                run_id=run_id,
-                from_entity_id=to_entity.entity_id,
-                to_entity_id=from_entity.entity_id,
-                relation_type=rel_type,
-                change_type=rel_change,
-                chunk_id=relation.chunk_id,
-                evidence=relation.evidence,
-                confidence=relation.confidence,
-                source_relation_row_id=relation.id,
-                directionality="symmetric",
-            )
-            if reverse_event is not None:
-                affected_pairs.add((to_entity.entity_id, from_entity.entity_id))
-
         relation.projection_status = "projected"
         relation.projected_at = datetime.now(UTC)
         relation.projection_error = None
