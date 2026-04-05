@@ -348,16 +348,31 @@ def _load_phase4_prompts() -> Phase4Prompts:
     创建时间: 2026-04-05
     创建者: TraeAI
     任务: refactor-phase4-relation-extraction
+
+    修改时间: 2026-04-05
+    修改者: TraeAI
+    任务: refactor-phase4-relation-extraction
+    修改内容: 移除 format 字段，添加配置验证
     """
+    from loguru import logger
+
     content = load_prompt_from_file("phase4")
     if not content:
+        logger.warning("Phase4 prompt file not found or empty")
         return Phase4Prompts()
 
     sections = parse_prompt_sections(content)
-    return Phase4Prompts(
+    prompts = Phase4Prompts(
         system=sections.get("SYSTEM", ""),
         user_template=sections.get("USER_TEMPLATE", ""),
     )
+
+    if not prompts.system:
+        logger.warning("Phase4 prompt: SYSTEM section is empty")
+    if not prompts.user_template:
+        logger.warning("Phase4 prompt: USER_TEMPLATE section is empty")
+
+    return prompts
 
 
 def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
