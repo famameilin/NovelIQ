@@ -324,7 +324,11 @@ export function NovelDetailPage() {
             />
             <DimensionMiniCard
               dimension="emotion"
-              data={emotionQuery.data ?? {}}
+              data={{
+                pos_neg_ratio: emotionQuery.data?.pos_neg_ratio,
+                positive_ratio: emotionQuery.data?.positive_ratio,
+                negative_ratio: emotionQuery.data?.negative_ratio,
+              }}
               novelId={novelId!}
               linkTo={`/novels/${novelId}/curves`}
             />
@@ -344,7 +348,7 @@ export function NovelDetailPage() {
               data={{
                 topic_count: topicsQuery.data?.length,
                 top_topics: topicsQuery.data?.slice(0, 3).map(t => ({
-                  words: t.words,
+                  words: t.keywords,
                   weight: t.weight,
                 })),
               }}
@@ -364,7 +368,6 @@ export function NovelDetailPage() {
               act1Ratio={narrativeQuery.data?.act1_ratio}
               act2Ratio={narrativeQuery.data?.act2_ratio}
               act3Ratio={narrativeQuery.data?.act3_ratio}
-              eventDensity={narrativeQuery.data?.event_density}
               novelId={novelId!}
             />
             <MiniCurvePreview
