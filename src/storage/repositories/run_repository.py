@@ -240,3 +240,36 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = select(func.count(func.distinct(AnalysisRun.novel_id))).select_from(AnalysisRun)
         result = self.session.execute(stmt)
         return result.scalar() or 0
+
+    def list_novels_with_latest_run(self) -> list[dict[str, Any]]:
+        """
+        获取所有有分析记录的小说列表
+
+        创建时间: 2026-04-05
+        创建者: AI Assistant
+        任务: fix-test-data-pollution
+        说明: 返回每个 novel_id 的最新运行记录，用于小说列表展示
+
+        Returns:
+            小说列表，每个元素包含 novel_id、title、author、status、created_at 等
+        """
+        from sqlalchemy import func, select
+
+        subquery = (
+            select(
+                AnalysisRun.novel_id,
+                func.max(AnalysisRun.created_at).label("latest_created_at"),
+            )
+            .group_by(AnalysisRun.novel_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(AnalysisRun)
+            .join(subquery, AnalysisRun.novel_id == subquery.c.novel_id)
+            .where(AnalysisRun.created_at == subquery.c.latest_created_at)
+            .order_by(AnalysisRun.created_at.desc())
+        )
+
+        runs = self.session.execute(stmt).scalars().all()
+        return [self._to_dict(run) for run in runs]
