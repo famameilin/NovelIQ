@@ -42,7 +42,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
           className={cn(baseClasses, className)}
           whileHover={{ y: -1 }}
           transition={{ duration: 0.3, ease: "easeOut" }}
-          {...props}
+          {...(props as React.ComponentProps<typeof motion.div>)}
         />
       );
     }

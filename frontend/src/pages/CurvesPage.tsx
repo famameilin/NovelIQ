@@ -22,6 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import ReactEChartsCore from "echarts-for-react";
 import { getChunkCurves, getNarrativeStructure } from "@/api/results";
+import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
@@ -102,6 +103,15 @@ export function CurvesPage() {
     enabled,
     staleTime: STALE_TIME,
   });
+
+  const novelQuery = useQuery({
+    queryKey: ["novel", novelId],
+    queryFn: () => getNovel(novelId!),
+    enabled: !!novelId,
+    staleTime: STALE_TIME,
+  });
+
+  const novelTitle = novelQuery.data?.title ?? "小说详情";
 
   const curvesData = curvesQuery.data ?? [];
   const narrativeData = narrativeQuery.data;
@@ -198,7 +208,7 @@ export function CurvesPage() {
   if (!currentTaskId) {
     return (
       <PageContainer>
-        <NovelHeader />
+        <NovelHeader title={novelTitle} />
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">请先选择分析任务</h3>
@@ -213,7 +223,7 @@ export function CurvesPage() {
 
   return (
     <PageContainer>
-      <NovelHeader />
+      <NovelHeader title={novelTitle} />
 
       <div className="space-y-6">
         <motion.div
