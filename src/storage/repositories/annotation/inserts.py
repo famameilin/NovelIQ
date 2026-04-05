@@ -76,7 +76,14 @@ def insert_chunk_characters(
 def insert_chunk_relations(
     session: Session, run_id: str, chunk_id: int, relations: Sequence[RelationChangeSnapshot]
 ) -> None:
-    """插入分块关系数据"""
+    """
+    插入分块关系数据
+
+    修改时间: 2026-04-05
+    修改者: TraeAI
+    任务: phase4-code-review-fix
+    修改内容: 添加 directionality 字段写入
+    """
     records = [
         ChunkRelation(
             chunk_id=chunk_id,
@@ -84,6 +91,7 @@ def insert_chunk_relations(
             to_char=r.to_name,
             type=r.type,
             change=r.change,
+            directionality=r.directionality,
             evidence=r.evidence,
             confidence=r.confidence,
             source_model=r.source_model,
