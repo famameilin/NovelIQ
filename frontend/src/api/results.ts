@@ -5,7 +5,7 @@ import type {
   Topic,
   DiagnosisResult,
   GraphData,
-  TimelineData,
+  TimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
   CharacterStatsMetrics,
@@ -85,12 +85,17 @@ export async function getGraph(
 
 // ---- Timeline ----
 
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-B 叙事时间轴
+// 说明: 获取叙事时间轴数据，支持 include_curve 和 max_level 参数
+
 export async function getTimeline(
   novelId: string,
   taskId: string,
   options?: { includeCurve?: boolean; maxLevel?: number }
-): Promise<TimelineData> {
-  const { data } = await apiClient.get<TimelineData>(
+): Promise<TimelineResponse> {
+  const { data } = await apiClient.get<TimelineResponse>(
     `/api/novels/${novelId}/timeline`,
     {
       params: {
