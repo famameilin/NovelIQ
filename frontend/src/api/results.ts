@@ -67,6 +67,11 @@ export async function getDiagnosis(
 
 // ---- Knowledge Graph ----
 
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-A 人物关系图谱 API 类型定义
+// 说明: 获取人物关系图谱数据，包含节点、边、事件等信息
+
 export async function getGraph(
   novelId: string,
   taskId: string
