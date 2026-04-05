@@ -160,11 +160,13 @@ function mapValue(
  *   - 新增 HIERARCHICAL_RELATION_TYPES 配置
  *
  * 修改时间: 2026-04-05
- * 修改者: Theme Optimization
+ * 修改者: Theme Optimization + Bug Fix Round 2
  * 修改内容:
  *   - 颜色系统从硬编码 HSL 值改为 CSS 变量（getCSSColorVar + useRef）
  *   - 使用 useThemeStore(seedColor) 监听主题变化，自动刷新颜色映射
- *   - 所有 Canvas 渲染颜色跟随"一书一色"主题变化
+ *   - 所有 Canvas 渲染颜色（包括辅助色）全部使用 ref 缓存，零运行时 getComputedStyle 调用
+ *   - getNodeSize 支持 entity_id / name 双 key 查找出场次数
+ *   - 修复 charactersQuery.forEach 运行时错误（应为 .data.forEach）
  */
 export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
   function ForceGraph({
@@ -207,26 +209,45 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
   // 绘制时直接读 ref.current，零运行时开销
   const { seedColor } = useThemeStore();
 
+  /** 辅助颜色（用于边框、标签、高亮等非实体/关系的渲染元素） */
+  interface AuxColors {
+    positive: string;   // 搜索高亮
+    background: string; // 边框色
+    text: string;       // 标签文字
+    neutral: string;    // 默认回退
+  }
+
+  function getAuxColorsFromCSS(): AuxColors {
+    return {
+      positive: getCSSColorVar("--chart-positive"),
+      background: getCSSColorVar("--background"),
+      text: getCSSColorVar("--text"),
+      neutral: getCSSColorVar("--chart-neutral"),
+    };
+  }
+
   // 颜色映射 ref（初始化 + 主题切换时更新）
   const entityColorsRef = useRef<EntityColors>(getEntityColorsFromCSS());
   const relationColorsRef = useRef<RelationColors>(getRelationColorsFromCSS());
+  const auxColorsRef = useRef<AuxColors>(getAuxColorsFromCSS());
 
   // 监听主题变化：当 seedColor 变化时重新解析 CSS 变量
   useEffect(() => {
     entityColorsRef.current = getEntityColorsFromCSS();
     relationColorsRef.current = getRelationColorsFromCSS();
+    auxColorsRef.current = getAuxColorsFromCSS();
   }, [seedColor]);
 
   /** 获取实体类型颜色（读 ref，零运行时开销） */
   const getEntityColor = useCallback((entityType: string): string => {
     return entityColorsRef.current[entityType as keyof EntityColors]
-      || getCSSColorVar("--chart-neutral");
+      || auxColorsRef.current.neutral;
   }, []);
 
   /** 获取关系类型颜色（读 ref，零运行时开销） */
   const getRelationColor = useCallback((relationType: string): string => {
     return relationColorsRef.current[relationType]
-      || getCSSColorVar("--chart-neutral");
+      || auxColorsRef.current.neutral;
   }, []);
 
   const graphDataWithLinks = useMemo((): ForceGraphData => {
@@ -314,13 +335,19 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
       // 优先使用出场次数（来自 /characters API）计算节点大小
       // 设计文档 §2.5 要求：节点大小根据"出场次数/度中心性"线性缩放
       if (appearanceCountMap && appearanceCountMap.size > 0) {
-        const count = appearanceCountMap.get(node.entity_id) || 0;
+        // 先按 entity_id 查找（图谱节点的唯一标识）
+        let count = appearanceCountMap.get(node.entity_id);
+        // 再按 name 查找（/characters API 用 name 作为标识）
+        if (count === undefined) {
+          count = appearanceCountMap.get(node.name);
+        }
+        const finalCount = count || 0;
         const counts = Array.from(appearanceCountMap.values());
         if (counts.length === 0) return (NODE_SIZE_MIN + NODE_SIZE_MAX) / 2;
         const minCount = Math.min(...counts);
         const maxCount = Math.max(...counts);
         if (maxCount === minCount) return (NODE_SIZE_MIN + NODE_SIZE_MAX) / 2;
-        return mapValue(count, minCount, maxCount, NODE_SIZE_MIN, NODE_SIZE_MAX);
+        return mapValue(finalCount, minCount, maxCount, NODE_SIZE_MIN, NODE_SIZE_MAX);
       }
       // Fallback：使用度中心性（图谱内部计算的连接数）
       const degree = nodeDegrees.get(node.entity_id) || 0;
@@ -405,7 +432,7 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
 
       // 搜索匹配：高亮显示为主题 positive 色
       if (searchQuery && isSearchMatched) {
-        nodeColor = getCSSColorVar("--chart-positive");
+        nodeColor = auxColorsRef.current.positive;
         opacity = 1;
       }
 
@@ -417,16 +444,16 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
       ctx.fillStyle = nodeColor;
       ctx.fill();
 
-      // 选中态白色边框
+      // 选中态边框
       if (isSelected) {
-        ctx.strokeStyle = getCSSColorVar("--background");
+        ctx.strokeStyle = auxColorsRef.current.background;
         ctx.lineWidth = 3;
         ctx.stroke();
       }
 
-      // 高亮态白色边框（非选中时较细）
+      // 高亮态边框（非选中时较细）
       if (isHighlighted && !isSelected) {
-        ctx.strokeStyle = getCSSColorVar("--background");
+        ctx.strokeStyle = auxColorsRef.current.background;
         ctx.lineWidth = 2;
         ctx.stroke();
       }
@@ -440,7 +467,7 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
         ctx.font = `${fontSize}px Sans-Serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillStyle = getCSSColorVar("--text");
+        ctx.fillStyle = auxColorsRef.current.text;
         ctx.fillText(label, node.x || 0, (node.y || 0) + size + 2);
       }
     },
