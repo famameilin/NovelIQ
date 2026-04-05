@@ -22,6 +22,25 @@ from src.models.local.annotation.phase4 import (
 from src.models.local.schema import RelationExtractionResult, RelationRecord
 
 
+def make_relation_record(
+    from_name: str,
+    to_name: str,
+    type: str,
+    change: str,
+    evidence: str,
+) -> RelationRecord:
+    """创建 RelationRecord 实例，使用 alias 名称避免 Python 关键字冲突"""
+    return RelationRecord.model_validate(
+        {
+            "from": from_name,
+            "to": to_name,
+            "type": type,
+            "change": change,
+            "evidence": evidence,
+        }
+    )
+
+
 class TestBuildPhase4Messages(unittest.TestCase):
     """
     测试 Phase4 消息构建
@@ -91,7 +110,7 @@ class TestConvertToSnapshots(unittest.TestCase):
         """转换单个关系"""
         result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="敌对",
@@ -115,14 +134,14 @@ class TestConvertToSnapshots(unittest.TestCase):
         """转换多个关系（盟友是对称类型，会生成反向边）"""
         result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="敌对",
                     change="新建",
                     evidence="证据1",
                 ),
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="王五",
                     to_name="赵六",
                     type="盟友",
@@ -140,14 +159,14 @@ class TestConvertToSnapshots(unittest.TestCase):
         """重复关系去重"""
         result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="敌对",
                     change="新建",
                     evidence="证据1",
                 ),
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="敌对",
@@ -165,7 +184,7 @@ class TestConvertToSnapshots(unittest.TestCase):
         """对称关系自动生成反向边"""
         result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="家族",
@@ -190,7 +209,7 @@ class TestConvertToSnapshots(unittest.TestCase):
         """自环对称关系不生成反向边"""
         result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="张三",
                     type="家族",
@@ -208,14 +227,14 @@ class TestConvertToSnapshots(unittest.TestCase):
         """反向边已存在时不重复生成"""
         result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="家族",
                     change="无变化",
                     evidence="证据1",
                 ),
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="李四",
                     to_name="张三",
                     type="家族",
@@ -234,7 +253,7 @@ class TestConvertToSnapshots(unittest.TestCase):
         for rel_type in SYMMETRIC_RELATION_TYPES:
             result = RelationExtractionResult(
                 relations=[
-                    RelationRecord(  # type: ignore[arg-type]
+                    make_relation_record(
                         from_name="A",
                         to_name="B",
                         type=rel_type,
@@ -252,7 +271,7 @@ class TestConvertToSnapshots(unittest.TestCase):
         """有向关系不生成反向边"""
         result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="敌对",
@@ -321,7 +340,7 @@ class TestAnnotateChunkPhase4(unittest.TestCase):
 
         mock_result = RelationExtractionResult(
             relations=[
-                RelationRecord(  # type: ignore[arg-type]
+                make_relation_record(
                     from_name="张三",
                     to_name="李四",
                     type="敌对",
