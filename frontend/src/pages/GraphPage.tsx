@@ -16,8 +16,9 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { getGraph } from "@/api/results";
+import { getGraph, getCharacters } from "@/api/results";
 import { getNovel } from "@/api/novels";
+import type { Character } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
@@ -80,6 +81,25 @@ export function GraphPage() {
     enabled,
     staleTime: STALE_TIME,
   });
+
+  // 调用 /characters API 获取出场次数，用于更准确的节点大小映射
+  // 设计文档 §2.5 要求：节点大小根据"出场次数/度中心性"线性缩放
+  const charactersQuery = useQuery({
+    queryKey: ["characters", novelId, currentTaskId],
+    queryFn: () => getCharacters(novelId!, currentTaskId!),
+    enabled,
+    staleTime: STALE_TIME,
+  });
+
+  // 构建节点名 → 出场次数的 Map（供 ForceGraph 使用）
+  const appearanceCountMap = useMemo((): Map<string, number> | undefined> => {
+    if (!charactersQuery.data) return new Map();
+    const map = new Map<string, number>();
+    charactersQuery.forEach((char) => {
+      map.set(char.name, char.appearance_count);
+    });
+    return map;
+  }, [charactersQuery.data]);
 
   const novelQuery = useQuery({
     queryKey: ["novel", novelId],
@@ -296,6 +316,7 @@ export function GraphPage() {
                 highlightedNodes={highlightedNodes}
                 searchQuery={searchQuery}
                 relationFilter={selectedRelationTypes}
+                appearanceCountMap={appearanceCountMap}
                 className="absolute inset-0"
               />
 
