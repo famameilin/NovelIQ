@@ -15,7 +15,10 @@ from src.config.constants.annotation import (
     EMOTION_SCORE_MAPPING,
     PHASE3_MAX_RETRIES,
     PHASE_MAX_RETRIES,
+    SYMMETRIC_RELATION_TYPES,
     VALIDATION_MAX_RETRIES,
+    VALID_CHANGE_TYPES,
+    VALID_RELATION_TYPES,
 )
 from src.config.constants.disambiguation import MAX_DISAMBIG_RETRIES
 from src.config.constants.text_normalization import (
@@ -91,4 +94,7 @@ __all__ = [
     "PHASE3_MAX_RETRIES",
     "VALIDATION_MAX_RETRIES",
     "MAX_DISAMBIG_RETRIES",
+    "SYMMETRIC_RELATION_TYPES",
+    "VALID_RELATION_TYPES",
+    "VALID_CHANGE_TYPES",
 ]
