@@ -12,6 +12,12 @@
  *   - 重构为动态生成模式，根据传入的实际 entityTypes/relationTypes 数据渲染图例
  *   - 解决之前硬编码 3 种节点类型、3 种英文 key 关系类型的 bug
  *   - 颜色映射与 ForceGraph.tsx 的 ENTITY_TYPE_COLORS / RELATION_TYPE_COLORS 保持一致
+ *
+ * 修改时间: 2026-04-05
+ * 修改者: Theme Optimization
+ * 修改内容:
+ *   - 颜色从硬编码 HSL 改为 CSS 变量（使用 var(--xxx) 内联样式）
+ *   - 与 ForceGraph 的"一书一色"主题系统完全同步
  */
 
 import { cn } from "@/lib/cn";
@@ -29,44 +35,51 @@ export interface GraphLegendProps {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Constants - 与 ForceGraph.tsx 保持一致的配色                       */
+/*  Constants - 使用 CSS 变量，跟随"一书一色"主题                       */
 /* ------------------------------------------------------------------ */
 
-/**
- * 实体类型显示名称和 Tailwind 色类
- * 注意：Canvas 渲染使用 HSL 硬编码值（Canvas API 限制），这里用近似的 Tailwind 类名展示
- */
-const ENTITY_TYPE_CONFIG: Record<string, { label: string; colorClass: string }> = {
-  character: { label: "角色", colorClass: "bg-[hsl(234,89%,55%)]" },
-  group: { label: "群体", colorClass: "bg-[hsl(274,79%,55%)]" },
-  organization: { label: "组织", colorClass: "bg-[hsl(194,79%,55%)]" },
-  location: { label: "地点", colorClass: "bg-[hsl(314,74%,55%)]" },
-  item: { label: "物品", colorClass: "bg-[hsl(154,74%,55%)]" },
-  event: { label: "事件", colorClass: "bg-[hsl(234,10%,60%)]" },
-  concept: { label: "概念", colorClass: "bg-[hsl(234,10%,40%)]" },
+/** 实体类型 → CSS 变量名映射（与 ForceGraph.getEntityColorsFromCSS 一致） */
+const ENTITY_CSS_VARS: Record<string, string> = {
+  character: "var(--primary)",
+  group: "var(--chart-2)",
+  organization: "var(--chart-3)",
+  location: "var(--chart-4)",
+  item: "var(--chart-5)",
+  event: "var(--chart-neutral)",
+  concept: "var(--chart-neutral)",
 };
 
-/**
- * 关系类型 Tailwind 色类（与 ForceGraph.RELATION_TYPE_COLORS 对应的近似色）
- */
-const RELATION_TYPE_COLOR_MAP: Record<string, string> = {
-  友好: "bg-[hsl(145,55%,48%)]",
-  敌对: "bg-[hsl(0,65%,55%)]",
-  从属: "bg-[hsl(234,10%,60%)]",
-  合作: "bg-[hsl(274,79%,55%)]",
-  亲情: "bg-[hsl(194,79%,55%)]",
-  爱情: "bg-[hsl(314,74%,55%)]",
-  师徒: "bg-[hsl(154,74%,55%)]",
+/** 实体类型显示名称 */
+const ENTITY_LABELS: Record<string, string> = {
+  character: "角色",
+  group: "群体",
+  organization: "组织",
+  location: "地点",
+  item: "物品",
+  event: "事件",
+  concept: "概念",
 };
 
-/**
- * 层级关系类型集合（与 ForceGraph.HIERARCHICAL_RELATION_TYPES 一致）
- * 用于在图例中标注虚线/实线样式
- */
+/** 关系类型 → CSS 变量名映射（与 ForceGraph.getRelationColorsFromCSS 一致） */
+const RELATION_CSS_VARS: Record<string, string> = {
+  "友好": "var(--chart-positive)",
+  "敌对": "var(--chart-negative)",
+  "从属": "var(--chart-neutral)",
+  "合作": "var(--chart-2)",
+  "亲情": "var(--chart-positive)",
+  "爱情": "var(--chart-4)",
+  "师徒": "var(--chart-5)",
+};
+
+/** 层级关系类型集合（与 ForceGraph.HIERARCHICAL_RELATION_TYPES 一致） */
 const HIERARCHICAL_TYPES = new Set(["从属", "师徒", "上下级", "隶属", "管理"]);
 
-function getRelationColorClass(relationType: string): string {
-  return RELATION_TYPE_COLOR_MAP[relationType] || "bg-[hsl(234,10%,60%)]";
+function getEntityCssVar(entityType: string): string {
+  return ENTITY_CSS_VARS[entityType] || "var(--chart-neutral)";
+}
+
+function getRelationCssVar(relationType: string): string {
+  return RELATION_CSS_VARS[relationType] || "var(--chart-neutral)";
 }
 
 /* ------------------------------------------------------------------ */
@@ -96,22 +109,17 @@ export function GraphLegend({
           <div>
             <h4 className="mb-2 text-xs font-medium text-text-muted">节点类型</h4>
             <div className="space-y-1.5">
-              {entityTypes.map((type) => {
-                const config = ENTITY_TYPE_CONFIG[type];
-                return (
-                  <div key={type} className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "h-2.5 w-2.5 rounded-full",
-                        config?.colorClass || "bg-text-muted"
-                      )}
-                    />
-                    <span className="text-sm text-text-secondary">
-                      {config?.label || type}
-                    </span>
-                  </div>
-                );
-              })}
+              {entityTypes.map((type) => (
+                <div key={type} className="flex items-center gap-2">
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: getEntityCssVar(type) }}
+                  />
+                  <span className="text-sm text-text-secondary">
+                    {ENTITY_LABELS[type] || type}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -132,16 +140,13 @@ export function GraphLegend({
                   <div key={type} className="flex items-center gap-2">
                     {/* 线条样式指示器：虚线或实线 */}
                     <span
-                      className={cn(
-                        "h-0.5 w-5 rounded-full",
-                        getRelationColorClass(type),
-                        isHierarchical && "border-dashed"
-                      )}
-                      style={
-                        isHierarchical
-                          ? { backgroundImage: `repeating-linear-gradient(90deg, transparent, transparent 3px, currentColor 3px, currentColor 6px)` }
-                          : undefined
-                      }
+                      className="h-0.5 w-5 rounded-full"
+                      style={{
+                        backgroundColor: getRelationCssVar(type),
+                        ...(isHierarchical && {
+                          backgroundImage: `repeating-linear-gradient(90deg, transparent, transparent 3px, currentColor 3px, currentColor 6px)`,
+                        }),
+                      }}
                     />
                     <span className="text-sm text-text-secondary">{type}</span>
                   </div>
