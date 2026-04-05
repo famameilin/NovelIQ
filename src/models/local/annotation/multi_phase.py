@@ -467,9 +467,11 @@ def annotate_chunk_parallel(
         )
         phase4_result = _Phase4Result(
             relations=annotate_chunk_phase4(
+                client=client,
                 text=text,
                 known_characters=known_characters,
-                source_model=getattr(getattr(client, "_config", None), "model", None),
+                chunk_id=chunk_id,
+                run_id=run_id,
             )
         )
 
@@ -580,9 +582,11 @@ def annotate_chunk_serial(
     )
     phase4_result = _Phase4Result(
         relations=annotate_chunk_phase4(
+            client=client,
             text=text,
             known_characters=known_characters,
-            source_model=getattr(getattr(client, "_config", None), "model", None),
+            chunk_id=chunk_id,
+            run_id=run_id,
         )
     )
 
