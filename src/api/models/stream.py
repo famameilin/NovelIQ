@@ -26,7 +26,7 @@ class StreamMessage(BaseModel):
     """
     流式消息模型
 
-    说明: WebSocket 推送的统一消息格式
+    说明: SSE 推送的统一消息格式
     """
 
     type: StreamMessageType = Field(description="消息类型")
