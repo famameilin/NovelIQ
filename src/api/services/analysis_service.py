@@ -121,9 +121,15 @@ class AnalysisService:
             async def annotate_progress_callback(
                 phase: str, status: str, current: int, total: int, percent: float
             ) -> None:
-                message_type = (
-                    StreamMessageType.stage_start if status == "start" else StreamMessageType.stage_progress
-                )
+                if status == "start":
+                    message_type = StreamMessageType.stage_start
+                    message = f"开始 {phase}"
+                elif status == "progress":
+                    message_type = StreamMessageType.stage_progress
+                    message = f"标注 chunk {current}/{total}"
+                else:  # complete
+                    message_type = StreamMessageType.stage_progress
+                    message = f"{phase} 完成"
                 await self.broadcaster.broadcast_progress(
                     task_id,
                     message_type,
@@ -133,7 +139,7 @@ class AnalysisService:
                     current=current,
                     total=total,
                     percent=percent,
-                    message=f"开始 {phase}" if status == "start" else f"标注 chunk {current}/{total}",
+                    message=message,
                 )
 
             async def stream_callback(content: str, content_type: str) -> None:
