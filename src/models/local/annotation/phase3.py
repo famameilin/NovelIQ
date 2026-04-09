@@ -232,9 +232,7 @@ async def attribute_dialogues_with_llm(
             )
 
             batch_results = await retry_handler.execute(
-                lambda bc=batch_candidates, bi=batch_idx, tb=total_batches: _execute_single_batch(
-                    current_client, bc, bi, tb
-                )
+                lambda _: _execute_single_batch(current_client, batch_candidates, batch_idx, total_batches)
             )
 
             if batch_results:
