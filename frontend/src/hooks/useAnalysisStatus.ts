@@ -39,15 +39,6 @@ function isMockEnabled(): boolean {
   );
 }
 
-/** 后端 stage → 前端显示状态映射 */
-const STAGE_STATUS_MAP: Record<string, string> = {
-  preprocess: "chunking",
-  annotate: "annotating",
-  aggregate: "aggregating",
-  "topic-model": "topic-modeling",
-  diagnose: "diagnosing",
-};
-
 export interface UseAnalysisStatusOptions {
   enabled?: boolean;
   onRunning?: () => void;
@@ -94,23 +85,10 @@ export function useAnalysisStatus(
       const opts = streamMessageOpts.current;
       if (!opts.novelId || !opts.taskId) return;
 
-      const status = STAGE_STATUS_MAP[data.stage] || data.stage;
-      if (prevStatusRef.current !== status) {
-        prevStatusRef.current = status;
-        if (
-          [
-            "pending",
-            "running",
-            "chunking",
-            "annotating",
-            "aggregating",
-            "topic-modeling",
-            "diagnosing",
-            "cancelling",
-          ].includes(status)
-        ) {
-          optionsRef.current?.onRunning?.();
-        }
+      // 阶段变化时触发 onRunning 回调
+      if (prevStatusRef.current !== data.stage) {
+        prevStatusRef.current = data.stage;
+        optionsRef.current?.onRunning?.();
       }
     },
     [updateProgress],
@@ -238,6 +216,19 @@ export function useAnalysisStatus(
 
       getAnalysisStatus(novelId, taskId)
         .then((status) => {
+          // 将 HTTP 返回的进度数据写入 streamStore，解决刷新后进度面板空白问题
+          if (status.status === "running" && status.stage) {
+            updateProgress({
+              stage: status.stage,
+              sub_stage: status.sub_stage ?? "",
+              phase: status.sub_stage ?? "",
+              current: status.current ?? 0,
+              total: status.total ?? 0,
+              percent: status.progress,
+              message: status.message ?? "",
+            });
+          }
+
           if (status.status === "running") {
             optionsRef.current?.onRunning?.();
             prevStatusRef.current = "running";

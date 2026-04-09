@@ -16,7 +16,6 @@
 //   - ErrorData 增加 stage 字段
 
 export type StreamMessageType =
-  | "task_start"
   | "stage_start"
   | "stage_progress"
   | "stage_complete"
