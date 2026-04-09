@@ -45,7 +45,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from typing import Any, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
 
 from loguru import logger
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestError
@@ -55,8 +55,8 @@ from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.parser.thinking import extract_thinking_unified
 
-# StreamEvent 仅在 _call_api_stream 内部使用（lazy import 避免循环依赖）
-# from src.api.models.events import StreamEvent
+if TYPE_CHECKING:
+    from src.api.models.events import StreamEvent
 
 T = TypeVar("T", bound=BaseModel)
 
