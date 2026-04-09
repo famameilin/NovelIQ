@@ -445,13 +445,14 @@ async def _process_chunks_phase(
     total_chunks = len(all_chunks)
 
     # 发送 annotate 阶段的 total 信息，让前端知道总 chunk 数
+    # 注意：不传 percent，让 stage 级别的起始 percent 保持有效
     if emitter and total_chunks > 0:
         await emitter(StreamEvent(
             action="progress",
             sub_stage="phase1",
             current=0,
             total=total_chunks,
-            percent=0.0,
+            sub_percent=0.0,
             message=f"共 {total_chunks} 个 chunk 待标注",
         ))
 
@@ -485,7 +486,8 @@ async def _process_chunks_phase(
                     sub_stage="phase1",
                     current=success_count,
                     total=total_chunks,
-                    percent=(success_count / total_chunks) * 100,
+                    percent=10 + (success_count / total_chunks) * 70,
+                    sub_percent=(success_count / total_chunks) * 100,
                     message=f"标注 chunk {success_count}/{total_chunks}",
                 ))
             if run_id and success_count % checkpoint_interval == 0:

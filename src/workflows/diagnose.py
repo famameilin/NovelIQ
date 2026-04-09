@@ -177,6 +177,6 @@ async def run_diagnose(
     _log_diagnosis_results(result)
 
     if emitter:
-        await emitter(StreamEvent(action="complete", stage="diagnose", current=1, total=1, percent=100.0))
+        await emitter(StreamEvent(action="complete", stage="diagnose", current=1, total=1, percent=100.0, sub_percent=100.0))
 
     return result

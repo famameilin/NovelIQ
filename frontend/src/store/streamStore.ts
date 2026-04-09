@@ -59,11 +59,25 @@ export const useStreamStore = create<StreamState>()((set) => ({
       };
     }),
 
-  updateProgress: (progress) => set({ progress }),
+  updateProgress: (progress) =>
+    set((state) => {
+      if (!state.progress) return { progress };
+      return {
+        progress: {
+          ...state.progress,
+          ...progress,
+          // None 表示"未传"，保留旧值
+          current: progress.current ?? state.progress.current,
+          total: progress.total ?? state.progress.total,
+          percent: progress.percent ?? state.progress.percent,
+          sub_percent: progress.sub_percent ?? state.progress.sub_percent,
+        },
+      };
+    }),
 
   appendLLMOutput: (data) =>
     set((state) => {
-      const key = `${data.sub_stage}-${data.chunk_id ?? 0}`;
+      const key = `${data.stage}-${data.chunk_id ?? 0}`;
       const newOutputs = new Map(state.llmOutputs);
       const existing = newOutputs.get(key) ?? [];
       newOutputs.set(key, [...existing, data.content]);

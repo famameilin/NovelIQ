@@ -70,9 +70,10 @@ class StreamEvent:
     stage: str = ""
     sub_stage: str = ""
     chunk_id: int | None = None
-    current: int = 0
-    total: int = 0
-    percent: float = 0.0
+    current: int | None = None
+    total: int | None = None
+    percent: float | None = None  # 全局进度（stage 级别）
+    sub_percent: float | None = None  # 子阶段进度（phase 级别，如 chunk 内的 phase1→4）
     content: str = ""
     message: str = ""
 
@@ -82,9 +83,10 @@ class StreamEvent:
             "stage": self.stage,
             "sub_stage": self.sub_stage,
             "chunk_id": self.chunk_id or 0,
-            "current": self.current,
-            "total": self.total,
-            "percent": self.percent,
+            "current": self.current or 0,
+            "total": self.total or 0,
+            "percent": self.percent or 0.0,
+            "sub_percent": self.sub_percent or 0.0,
             "content": self.content,
             "message": self.message,
         }
@@ -138,6 +140,10 @@ class AnalysisEventBus:
         self._stage: str = ""
         self._sub_stage: str = ""
         self._chunk_id: int = 0
+        self._current: int | None = None
+        self._total: int | None = None
+        self._percent: float | None = None
+        self._sub_percent: float | None = None
 
     async def emit(self, event: StreamEvent) -> None:
         """
@@ -161,15 +167,30 @@ class AnalysisEventBus:
             self._sub_stage = event.sub_stage
         if event.chunk_id is not None:
             self._chunk_id = event.chunk_id
+        if event.current is not None:
+            self._current = event.current
+        if event.total is not None:
+            self._total = event.total
+        if event.percent is not None:
+            self._percent = event.percent
+        if event.sub_percent is not None:
+            self._sub_percent = event.sub_percent
+
+        # None 值不覆盖已有的上下文值，保持语义："未传"不覆盖"已传"
+        resolved_current = event.current if event.current is not None else self._current
+        resolved_total = event.total if event.total is not None else self._total
+        resolved_percent = event.percent if event.percent is not None else self._percent
+        resolved_sub_percent = event.sub_percent if event.sub_percent is not None else self._sub_percent
 
         resolved_event = StreamEvent(
             action=event.action,
             stage=resolved_stage,
             sub_stage=resolved_sub_stage,
             chunk_id=resolved_chunk_id,
-            current=event.current,
-            total=event.total,
-            percent=event.percent,
+            current=resolved_current,
+            total=resolved_total,
+            percent=resolved_percent,
+            sub_percent=resolved_sub_percent,
             content=event.content,
             message=event.message,
         )
@@ -183,10 +204,11 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        logger.info(
+        log_level = logger.debug if resolved_event.action == "thinking" else logger.info
+        log_level(
             f"[EventBus] task_id={self.task_id}, action={resolved_event.action}, "
             f"stage={resolved_event.stage}, sub_stage={resolved_event.sub_stage}, "
-            f"chunk_id={resolved_event.chunk_id}"
+            f"chunk_id={resolved_event.chunk_id}, percent={resolved_percent}, sub_percent={resolved_sub_percent}"
         )
 
         # 唯一发送口（lazy import 避免循环依赖）
@@ -227,14 +249,16 @@ class AnalysisEventBus:
         self._stage = stage
         self._sub_stage = ""
         self._chunk_id = 0
+        self._sub_percent = 0.0
         await self.emit(StreamEvent(
-            action="start", stage=stage, message=message, percent=percent, total=total,
+            action="start", stage=stage, message=message, percent=percent, total=total, sub_percent=0.0,
         ))
 
     async def emit_stage_complete(self, stage: str) -> None:
         """发送阶段完成事件"""
+        self._sub_percent = 100.0
         await self.emit(StreamEvent(
-            action="complete", stage=stage, percent=100.0,
+            action="complete", stage=stage, percent=100.0, sub_percent=100.0,
             message=f"{stage} 完成",
         ))
 

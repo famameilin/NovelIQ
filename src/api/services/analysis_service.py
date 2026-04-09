@@ -61,18 +61,9 @@ class AnalysisService:
         """创建阶段 emitter：自动补全 stage 上下文"""
         async def emitter(event: StreamEvent) -> None:
             if not event.stage:
-                # 构建新事件对象，避免修改原始 event
-                event = StreamEvent(
-                    action=event.action,
-                    stage=stage,
-                    sub_stage=event.sub_stage,
-                    chunk_id=event.chunk_id,
-                    current=event.current,
-                    total=event.total,
-                    percent=event.percent,
-                    content=event.content,
-                    message=event.message,
-                )
+                # 用 dataclass replace 补全 stage，避免手动重建丢失字段
+                from dataclasses import replace
+                event = replace(event, stage=stage)
             await bus.emit(event)
         return emitter
 

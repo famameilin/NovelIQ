@@ -91,18 +91,13 @@ export interface ProgressDetailProps {
 export function ProgressDetail({ className }: ProgressDetailProps) {
   const progress = useStreamStore((state) => state.progress);
   const stageDurations = useStreamStore((state) => state.stageDurations);
-  const llmOutputs = useStreamStore((state) => state.llmOutputs);
 
   if (!progress) {
     return null;
   }
 
-  const { stage, sub_stage, current, total, percent, message } = progress;
+  const { stage, sub_stage, current, total, percent, sub_percent, message } = progress;
   const currentStageKey = getCurrentStageKey(percent);
-
-  // 取最新的 LLM 输出（Map 中最后一个 key 的内容）
-  const latestLLMKey = llmOutputs.size > 0 ? Array.from(llmOutputs.keys()).pop() : null;
-  const latestLLMLines = latestLLMKey ? llmOutputs.get(latestLLMKey) : null;
 
   return (
     <div className={cn("space-y-4", className)}>
@@ -122,11 +117,7 @@ export function ProgressDetail({ className }: ProgressDetailProps) {
       />
 
       {sub_stage && (
-        <SubTaskProgress subStage={sub_stage} current={current} total={total} />
-      )}
-
-      {latestLLMLines && latestLLMLines.length > 0 && (
-        <LLMOutput lines={latestLLMLines} />
+        <SubTaskProgress subStage={sub_stage} subPercent={sub_percent} />
       )}
     </div>
   );
@@ -281,36 +272,11 @@ function StageIcon({ status }: StageIconProps) {
 
 interface SubTaskProgressProps {
   subStage: string;
-  current: number;
-  total: number;
+  subPercent: number;
 }
 
-function SubTaskProgress({ subStage, current, total }: SubTaskProgressProps) {
+function SubTaskProgress({ subStage, subPercent }: SubTaskProgressProps) {
   const phaseLabel = PHASE_CONFIG[subStage]?.label ?? subStage;
-
-  // total=0 表示尚未开始处理 chunk，显示 loading 状态
-  if (total === 0) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="rounded-md bg-surface-hover p-3"
-      >
-        <div className="flex items-center gap-2">
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          >
-            <Loader2 className="h-3 w-3 text-primary" />
-          </motion.div>
-          <span className="text-xs font-medium text-text-secondary">{phaseLabel}</span>
-        </div>
-      </motion.div>
-    );
-  }
-
-  const subPercent = (current / total) * 100;
 
   return (
     <motion.div
@@ -321,6 +287,9 @@ function SubTaskProgress({ subStage, current, total }: SubTaskProgressProps) {
     >
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-medium text-text-secondary">{phaseLabel}</span>
+        {subPercent < 100 && (
+          <Loader2 className="h-3 w-3 text-primary animate-spin" />
+        )}
       </div>
 
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-border">
@@ -335,37 +304,4 @@ function SubTaskProgress({ subStage, current, total }: SubTaskProgressProps) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  LLM Output Display                                                */
-/* ------------------------------------------------------------------ */
 
-interface LLMOutputProps {
-  lines: string[];
-}
-
-function LLMOutput({ lines }: LLMOutputProps) {
-  // 只显示最后 50 行，避免内容过长
-  const displayLines = lines.slice(-50);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="rounded-md bg-surface-hover p-3"
-    >
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs font-medium text-text-secondary">LLM 输出</span>
-        {lines.length > 50 && (
-          <span className="text-xs text-text-muted">（最近 50 行）</span>
-        )}
-      </div>
-
-      <div className="max-h-48 overflow-y-auto">
-        <pre className="whitespace-pre-wrap break-all text-xs text-text-muted font-mono leading-relaxed">
-          {displayLines.join("\n")}
-        </pre>
-      </div>
-    </motion.div>
-  );
-}
