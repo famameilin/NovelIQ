@@ -19,19 +19,19 @@ from loguru import logger
 from src.storage.repositories import StatsRepository
 
 
-def extract_global_context(first_chunks: list[str], client=None) -> dict[str, Any]:
+async def extract_global_context(first_chunks: list[str], client=None) -> dict[str, Any]:
     if not first_chunks:
         return {"core_characters": [], "world_setting": ""}
 
     combined_text = "\n".join(first_chunks[:3])
 
     if client is not None:
-        return _extract_with_model(client, combined_text)
+        return await _extract_with_model(client, combined_text)
 
     return _extract_with_rules(combined_text)
 
 
-def _extract_with_model(client, text: str) -> dict[str, Any]:
+async def _extract_with_model(client, text: str) -> dict[str, Any]:
     try:
         prompt = f"""请从以下小说文本中提取：
 1. 核心角色（最多5个主要人物名称）
@@ -42,7 +42,7 @@ def _extract_with_model(client, text: str) -> dict[str, Any]:
 
 文本：
 {text[:3000]}"""
-        response = client._client.chat.completions.create(
+        response = await client._client.chat.completions.create(
             model=client._config.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
