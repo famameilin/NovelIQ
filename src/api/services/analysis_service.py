@@ -55,6 +55,15 @@ class AnalysisService:
             task_manager=task_manager,
         )
 
+    @staticmethod
+    def _make_stage_emitter(bus: AnalysisEventBus, stage: str) -> Callable[[StreamEvent], Awaitable[None]]:
+        """创建阶段 emitter：自动补全 stage 上下文"""
+        async def emitter(event: StreamEvent) -> None:
+            if not event.stage:
+                event.stage = stage
+            await bus.emit(event)
+        return emitter
+
     async def _execute_analysis_stages(
         self,
         bus: AnalysisEventBus,
@@ -79,14 +88,8 @@ class AnalysisService:
         if not skip_stages["skip_preprocess"]:
             await bus.emit_stage_start("preprocess", message="开始预处理", percent=settings.analysis.progress.preprocess.start)
 
-            async def preprocess_emitter(event: StreamEvent) -> None:
-                """预处理阶段的 emitter：自动补全 stage 上下文"""
-                if not event.stage:
-                    event.stage = "preprocess"
-                await bus.emit(event)
-
             await self.stage_executor.run_preprocess(
-                source_path, run_id, session, max_chars, overlap, preprocess_emitter
+                source_path, run_id, session, max_chars, overlap, self._make_stage_emitter(bus, "preprocess")
             )
             await bus.emit_stage_complete("preprocess")
 
@@ -98,15 +101,9 @@ class AnalysisService:
         if not skip_stages["skip_annotate"]:
             await bus.emit_stage_start("annotate", message="开始标注分析", percent=settings.analysis.progress.annotate.start)
 
-            async def annotate_emitter(event: StreamEvent) -> None:
-                """标注阶段的 emitter：自动补全 stage 上下文"""
-                if not event.stage:
-                    event.stage = "annotate"
-                await bus.emit(event)
-
             await self.stage_executor.run_annotate(
                 run_id, session, novel_id, analysis_logger, novel_title,
-                emitter=annotate_emitter,
+                emitter=self._make_stage_emitter(bus, "annotate"),
                 is_cancelled=lambda: self._is_cancelled(task_id),
             )
             await bus.emit_stage_complete("annotate")
@@ -119,13 +116,8 @@ class AnalysisService:
         if not skip_stages["skip_aggregate"]:
             await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.analysis.progress.aggregate.start)
 
-            async def aggregate_emitter(event: StreamEvent) -> None:
-                if not event.stage:
-                    event.stage = "aggregate"
-                await bus.emit(event)
-
             await self.stage_executor.run_aggregate(
-                run_id, session, aggregate_emitter
+                run_id, session, self._make_stage_emitter(bus, "aggregate")
             )
             await bus.emit_stage_complete("aggregate")
 
@@ -137,13 +129,8 @@ class AnalysisService:
         if not skip_stages["skip_topic_model"]:
             await bus.emit_stage_start("topic-model", message="开始主题建模", percent=settings.analysis.progress.topic_model.start)
 
-            async def topic_model_emitter(event: StreamEvent) -> None:
-                if not event.stage:
-                    event.stage = "topic-model"
-                await bus.emit(event)
-
             await self.stage_executor.run_topic_model(
-                run_id, session, num_topics, topic_model_emitter
+                run_id, session, num_topics, self._make_stage_emitter(bus, "topic-model")
             )
             await bus.emit_stage_complete("topic-model")
 
@@ -155,13 +142,8 @@ class AnalysisService:
         if not skip_stages["skip_diagnose"]:
             await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.analysis.progress.diagnose.start)
 
-            async def diagnose_emitter(event: StreamEvent) -> None:
-                if not event.stage:
-                    event.stage = "diagnose"
-                await bus.emit(event)
-
             await self.stage_executor.run_diagnose(
-                run_id, session, analysis_logger, diagnose_emitter
+                run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose")
             )
             await bus.emit_stage_complete("diagnose")
 
