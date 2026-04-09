@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -242,6 +243,7 @@ async def run_aggregate(
     session: Session,
     cache_path: Path | None = None,
     notify_callback: IProgressCallback | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
     """
     执行聚合流程
@@ -404,7 +406,9 @@ async def run_aggregate(
     logger.info(f"Global stats: {len(global_stats)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", stage="aggregate", current=1, total=1, percent=100.0))
+    elif notify_callback:
         await notify_callback(phase="aggregate", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, len(chunk_curves), len(chunk_curves)

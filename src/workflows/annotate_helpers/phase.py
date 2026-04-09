@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from src.api.models.events import StreamEvent
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.interfaces import AnnotationLike, DisambiguationLike
@@ -49,6 +50,7 @@ class AnnotationPhaseConfig:
     run_id: str = ""
     stream_callback: Callable[[str, str], Awaitable[None]] | None = None
     notify_callback: Callable | None = None
+    emitter: Callable | None = None
 
 
 class ChunkAnnotationMaxRetriesExceededError(Exception):
@@ -69,6 +71,8 @@ async def _annotate_chunk(
     known_aliases: str | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
+    notify_callback: Callable | None = None,
+    emitter: Callable | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     Chunk 标注函数
@@ -102,6 +106,11 @@ async def _annotate_chunk(
     - 云端失败直接终止整个任务
     """
     try:
+        # 设置回调到 client 上，供 multi_phase 内部使用
+        if hasattr(client, "_notify_callback"):
+            client._notify_callback = notify_callback  # type: ignore[attr-defined]
+        if hasattr(client, "_emitter"):
+            client._emitter = emitter  # type: ignore[attr-defined]
         return await client.annotate_chunk(
             text,
             prev_summary,
@@ -134,6 +143,7 @@ class AnnotationPhaseResult:
         global_context_str: str | None,
         alias_map: dict[str, str],
         notify_callback: Callable | None = None,
+        emitter: Callable | None = None,
     ) -> None:
         self.annotation_client = annotation_client
         self.cloud_annotation_client = cloud_annotation_client
@@ -144,6 +154,7 @@ class AnnotationPhaseResult:
         self.global_context_str = global_context_str
         self.alias_map = alias_map
         self.notify_callback = notify_callback
+        self.emitter = emitter
 
 
 def _set_client_session(client: Any, session: Any) -> None:
@@ -174,12 +185,20 @@ async def _init_annotation_phase_with_config(
     if not config.run_id:
         raise ValueError("run_id is required for annotation phase")
 
+    # 构建 stream_callback：如果传了 emitter，优先用 emitter 包装
+    effective_stream_callback = config.stream_callback
+    if config.emitter and not config.stream_callback:
+        async def _stream_via_emitter(content: str, content_type: str) -> None:
+            action = "output" if content_type == "content" else "thinking"
+            await config.emitter(StreamEvent(action=action, content=content))  # type: ignore[union-attr]
+        effective_stream_callback = _stream_via_emitter
+
     (annotation_client, cloud_annotation_client, incremental_client, full_client) = _init_annotation_clients(
         config.analysis_logger,
         config.annotate_client,
         config.incremental_disambig_client,
         config.full_disambig_client,
-        stream_callback=config.stream_callback,
+        stream_callback=effective_stream_callback,
     )
 
     # 设置 session 用于保存模型交互记录
@@ -227,6 +246,7 @@ async def _init_annotation_phase_with_config(
         global_context_str=global_context_str,
         alias_map={},
         notify_callback=config.notify_callback,
+        emitter=config.emitter,
     )
 
 
@@ -245,6 +265,7 @@ async def _init_annotation_phase(
     run_id: str = "",
     stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
     notify_callback: Callable | None = None,
+    emitter: Callable | None = None,
 ) -> AnnotationPhaseResult:
     """
     初始化标注阶段（向后兼容）
@@ -286,6 +307,7 @@ async def _init_annotation_phase(
         run_id=run_id,
         stream_callback=stream_callback,
         notify_callback=notify_callback,
+        emitter=emitter,
     )
     return await _init_annotation_phase_with_config(config)
 
@@ -365,6 +387,8 @@ async def _process_single_chunk(
         known_aliases=ctx.known_aliases_str,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
+        notify_callback=phase_result.notify_callback,
+        emitter=phase_result.emitter,
     )
 
     _store_annotation_results(
@@ -410,6 +434,7 @@ async def _process_chunks_phase(
     novel_id: str = "",
     resume: bool = False,
     notify_callback: Callable | None = None,
+    emitter: Callable | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, DisambiguationState]:
     """处理所有chunks阶段
@@ -479,7 +504,17 @@ async def _process_chunks_phase(
                 novel_id=novel_id,
             )
             success_count += 1
-            if notify_callback:
+            if emitter:
+                from src.api.models.events import StreamEvent
+                await emitter(StreamEvent(
+                    action="progress",
+                    sub_stage="phase1",
+                    current=success_count,
+                    total=total_chunks,
+                    percent=(success_count / total_chunks) * 100,
+                    message=f"标注 chunk {success_count}/{total_chunks}",
+                ))
+            elif notify_callback:
                 await notify_callback(
                     phase="phase1",
                     status="progress",

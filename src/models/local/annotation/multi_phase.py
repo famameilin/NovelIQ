@@ -30,6 +30,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from collections.abc import Awaitable, Callable
+
+from src.api.models.events import StreamEvent
+
 from loguru import logger
 
 from src.config import settings
@@ -340,6 +344,7 @@ async def annotate_chunk_multi_phase(
             rag_retriever=rag_retriever,
             active_entities=active_entities,
             notify_callback=notify_callback,
+            emitter=emitter,
         )
     else:
         return await annotate_chunk_serial(
@@ -358,6 +363,7 @@ async def annotate_chunk_multi_phase(
             rag_retriever=rag_retriever,
             active_entities=active_entities,
             notify_callback=notify_callback,
+            emitter=emitter,
         )
 
 
@@ -394,7 +400,10 @@ async def annotate_chunk_parallel(
 
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="start", sub_stage="phase1", chunk_id=chunk_id or 0, message="开始 phase1"))
+        await emitter(StreamEvent(action="start", sub_stage="phase2", chunk_id=chunk_id or 0, message="开始 phase2"))
+    elif notify_callback:
         await notify_callback(phase="phase1", status="start", current=1, total=1, percent=0)
         await notify_callback(phase="phase2", status="start", current=1, total=1, percent=0)
 
@@ -428,7 +437,10 @@ async def annotate_chunk_parallel(
         ),
     )
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", sub_stage="phase1", chunk_id=chunk_id or 0, percent=100, message="phase1 完成"))
+        await emitter(StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id or 0, percent=100, message="phase2 完成"))
+    elif notify_callback:
         await notify_callback(phase="phase1", status="complete", current=1, total=1, percent=100)
         await notify_callback(phase="phase2", status="complete", current=1, total=1, percent=100)
 
@@ -456,7 +468,10 @@ async def annotate_chunk_parallel(
         ),
     )
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", sub_stage="phase3", chunk_id=chunk_id or 0, percent=100, message="phase3 完成"))
+        await emitter(StreamEvent(action="complete", sub_stage="phase4", chunk_id=chunk_id or 0, percent=100, message="phase4 完成"))
+    elif notify_callback:
         await notify_callback(phase="phase3", status="complete", current=1, total=1, percent=100)
         await notify_callback(phase="phase4", status="complete", current=1, total=1, percent=100)
 
@@ -494,6 +509,7 @@ async def annotate_chunk_serial(
     run_id: str | None = None,
     rag_retriever: Any | None = None,
     notify_callback: Any | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     串行模式
@@ -543,7 +559,9 @@ async def annotate_chunk_serial(
         run_id=run_id,
         rag_retriever=rag_retriever,
     )
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id or 0, percent=100, message="phase2 完成"))
+    elif notify_callback:
         await notify_callback(phase="phase2", status="complete", current=1, total=1, percent=100)
 
     normalized_foreshadowing = _normalize_foreshadowing_result(
@@ -553,7 +571,9 @@ async def annotate_chunk_serial(
     )
     known_characters = [c.name for c in annotation.characters] if annotation.characters else None
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="start", sub_stage="phase3", chunk_id=chunk_id or 0, message="开始 phase3"))
+    elif notify_callback:
         await notify_callback(phase="phase3", status="start", current=1, total=1, percent=0)
     phase3_result = await _run_phase3_if_needed(
         client=client,
@@ -576,7 +596,9 @@ async def annotate_chunk_serial(
         run_id=run_id,
     )
     phase4_result = _Phase4Result(relations=phase4_relations)
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", sub_stage="phase4", chunk_id=chunk_id or 0, percent=100, message="phase4 完成"))
+    elif notify_callback:
         await notify_callback(phase="phase4", status="complete", current=1, total=1, percent=100)
     logger.info(f"Phase4 completed for chunk_id={chunk_id}")
 

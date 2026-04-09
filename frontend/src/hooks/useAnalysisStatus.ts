@@ -8,12 +8,11 @@
  *
  * 修改时间: 2026-04-09
  * 创建者: GLM-5
- * 任务: sse-architecture-review
+ * 任务: refactor/sse-unified-event-bus
  * 修改内容:
- * - 处理 stage_complete 事件，计算阶段耗时
- * - stage_start / stage_progress 重复逻辑提取为 _handleStageChange
- * - statusMap 增加 topic-model 独立文案
- * - 类型对齐：ErrorData 增加 stage 字段
+ * - 适配统一 SSE 事件格式（StreamEventData）
+ * - LLM 输出从 StreamEventData 读取 content/chunk_id/sub_stage
+ * - HTTP backfill 适配 StreamEventData 字段
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -22,9 +21,8 @@ import { useStreamStore } from "@/store/streamStore";
 import { appConfig } from "@/config";
 import { getAnalysisStatus } from "@/api/analysis";
 import type {
-  StreamMessageType,
-  ProgressDetail,
-  LLMOutputData,
+  SSEEventType,
+  StreamEventData,
   ErrorData,
 } from "@/api/streamTypes";
 
@@ -80,7 +78,7 @@ export function useAnalysisStatus(
 
   /** 处理阶段变化（stage_start / stage_progress 共用） */
   const _handleStageChange = useCallback(
-    (data: ProgressDetail) => {
+    (data: StreamEventData) => {
       updateProgress(data);
       const opts = streamMessageOpts.current;
       if (!opts.novelId || !opts.taskId) return;
@@ -95,24 +93,25 @@ export function useAnalysisStatus(
   );
 
   const handleMessage = useCallback(
-    (type: StreamMessageType, data: unknown) => {
+    (type: SSEEventType, data: unknown) => {
+      const eventData = data as StreamEventData;
+
       switch (type) {
         case "stage_start":
-          _handleStageChange(data as ProgressDetail);
+          _handleStageChange(eventData);
           // 记录阶段开始时间
           stageStartTimeRef.current = Date.now();
           break;
 
         case "stage_progress":
-          _handleStageChange(data as ProgressDetail);
+          _handleStageChange(eventData);
           break;
 
         case "stage_complete": {
-          const stageData = data as ProgressDetail;
           // 计算并记录阶段耗时
-          if (stageStartTimeRef.current && stageData.stage) {
+          if (stageStartTimeRef.current && eventData.stage) {
             const duration = Date.now() - stageStartTimeRef.current;
-            setStageDuration(stageData.stage, duration);
+            setStageDuration(eventData.stage, duration);
             stageStartTimeRef.current = null;
           }
           break;
@@ -120,7 +119,12 @@ export function useAnalysisStatus(
 
         case "llm_output":
         case "llm_thinking":
-          appendLLMOutput(data as LLMOutputData);
+          // 统一格式：LLM 输出也从 StreamEventData 读取
+          appendLLMOutput({
+            phase: eventData.sub_stage,
+            chunk_id: eventData.chunk_id,
+            content: eventData.content,
+          });
           break;
 
         case "task_error":
@@ -130,11 +134,14 @@ export function useAnalysisStatus(
 
         case "task_cancelled":
           updateProgress({
+            action: "complete",
             stage: "cancelled",
             sub_stage: "",
+            chunk_id: 0,
             current: 0,
             total: 0,
             percent: 0,
+            content: "",
             message: "任务已取消",
           });
           setError(null);
@@ -143,11 +150,14 @@ export function useAnalysisStatus(
 
         case "task_complete":
           updateProgress({
+            action: "complete",
             stage: "completed",
             sub_stage: "",
+            chunk_id: 0,
             current: 0,
             total: 0,
             percent: 100,
+            content: "",
             message: "分析完成",
           });
           optionsRef.current?.onCompleted?.();
@@ -165,7 +175,7 @@ export function useAnalysisStatus(
   const { isConnected, disconnect } = useSSEListener(sseUrl, {
     onEvent: (eventType, data) => {
       if (eventType === "message") {
-        const message = data as { type: StreamMessageType; task_id: string; data: unknown };
+        const message = data as { type: SSEEventType; task_id: string; data: unknown };
         if (message.task_id === taskId) {
           if (
             !sseReceivedMessageRef.current &&
@@ -190,7 +200,7 @@ export function useAnalysisStatus(
           sseReceivedMessageRef.current = true;
           setWsStable(true);
         }
-        handleMessage(eventType as StreamMessageType, data);
+        handleMessage(eventType as SSEEventType, data);
       }
     },
     onError: () => {
@@ -219,12 +229,14 @@ export function useAnalysisStatus(
           // 将 HTTP 返回的进度数据写入 streamStore，解决刷新后进度面板空白问题
           if (status.status === "running" && status.stage) {
             updateProgress({
+              action: "progress",
               stage: status.stage,
               sub_stage: status.sub_stage ?? "",
-              phase: status.sub_stage ?? "",
+              chunk_id: 0,
               current: status.current ?? 0,
               total: status.total ?? 0,
               percent: status.progress,
+              content: "",
               message: status.message ?? "",
             });
           }

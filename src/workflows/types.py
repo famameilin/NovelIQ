@@ -7,9 +7,12 @@
 说明: 定义工作流间共享的类型，如进度回调接口
 
 修改时间: 2026-04-09
-修改者: TraeAI
-任务: 修复 async notify_callback 类型不匹配
-修改内容: 返回类型改为 Awaitable[None]，支持同步和异步回调
+创建者: GLM-5
+任务: refactor/sse-unified-event-bus
+修改内容:
+  - 新增 StreamEmitter Protocol，替代 IProgressCallback + stream_callback 双回调
+  - StreamEmitter.emit() 接收 StreamEvent 统一格式
+  - 保留 IProgressCallback 向后兼容（标记 deprecated）
 """
 
 from __future__ import annotations
@@ -17,12 +20,32 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Literal, Protocol
 
+from src.api.models.events import StreamEvent
+
+
+class StreamEmitter(Protocol):
+    """
+    统一事件发送器接口
+
+    替代原来的 IProgressCallback + stream_callback 双回调模式。
+    所有层通过同一个 emit 方法发送事件，Event Bus 负责补全上下文和发送。
+
+    action 取值:
+        start    — 阶段/phase/chunk 开始
+        progress — 增量进度
+        complete — 阶段/phase/chunk 完成
+        output   — LLM 正式输出
+        thinking — LLM 思考过程输出
+    """
+
+    async def emit(self, event: StreamEvent) -> None: ...
+
 
 class IProgressCallback(Protocol):
     """
-    进度回调接口定义
+    进度回调接口定义 (deprecated, 保留向后兼容)
 
-    支持同步和异步回调函数
+    新代码应使用 StreamEmitter 替代。
     """
 
     def __call__(

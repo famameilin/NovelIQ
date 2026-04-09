@@ -118,6 +118,7 @@ async def run_diagnose(
     client: ConfiguredCloudModelClient | None = None,
     analysis_logger: AnalysisLogger | None = None,
     notify_callback: IProgressCallback | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> CloudAnalysis:
     """
     执行诊断流程
@@ -178,7 +179,9 @@ async def run_diagnose(
 
     _log_diagnosis_results(result)
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", stage="diagnose", current=1, total=1, percent=100.0))
+    elif notify_callback:
         await notify_callback(phase="diagnose", status="complete", current=1, total=1, percent=100.0)
 
     return result

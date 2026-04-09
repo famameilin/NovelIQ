@@ -7,9 +7,9 @@
 说明: 负责处理分析过程中的成功、失败和取消事件
 
 修改时间: 2026-04-09
-修改者: GLM-5
-任务: sse-architecture-review
-修改内容: 使用实际存在的 ProgressBroadcaster 替代 TYPE_CHECKING 引用
+创建者: GLM-5
+任务: refactor/sse-unified-event-bus
+修改内容: 使用 AnalysisEventBus 统一发送终止事件
 """
 
 from __future__ import annotations
@@ -19,11 +19,10 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.models.stream import StreamMessageType
-from src.api.services.event_manager import event_manager
 from src.storage.repositories import RunRepository
 
 if TYPE_CHECKING:
+    from src.api.models.events import AnalysisEventBus
     from src.api.services.novel_service import NovelService
     from src.api.services.task_manager import TaskManager
     from src.config.analysis_logger import AnalysisLogger
@@ -48,6 +47,7 @@ class AnalysisErrorHandler:
         analysis_logger: AnalysisLogger | None,
         session: Session,
         run_id: str,
+        bus: AnalysisEventBus | None = None,
         log_prefix: str = "Analysis",
     ) -> None:
         """处理分析成功"""
@@ -68,11 +68,8 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "completed")
         session.commit()
 
-        await event_manager.send(
-            task_id=task_id,
-            event_type=StreamMessageType.task_complete.value,
-            data={"stage": "completed", "percent": 100.0, "message": "分析完成"},
-        )
+        if bus:
+            await bus.emit_task_complete()
 
         logger.info(f"{log_prefix} completed: {task_id}")
 
@@ -85,6 +82,7 @@ class AnalysisErrorHandler:
         analysis_logger: AnalysisLogger | None,
         session: Session,
         run_id: str,
+        bus: AnalysisEventBus | None = None,
         log_prefix: str = "Analysis",
     ) -> None:
         """处理分析失败"""
@@ -107,11 +105,8 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "failed")
         session.commit()
 
-        await event_manager.send(
-            task_id=task_id,
-            event_type=StreamMessageType.task_error.value,
-            data={"error": str(error), "stage": "failed"},
-        )
+        if bus:
+            await bus.emit_task_error(str(error))
 
     async def handle_cancel(
         self,
@@ -120,6 +115,7 @@ class AnalysisErrorHandler:
         session: Session,
         run_id: str,
         analysis_logger: AnalysisLogger | None,
+        bus: AnalysisEventBus | None = None,
     ) -> None:
         """处理分析取消"""
         self.task_manager.cancel_completed_task(task_id, error="用户取消")
@@ -129,11 +125,8 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "cancelled")
         session.commit()
 
-        await event_manager.send(
-            task_id=task_id,
-            event_type=StreamMessageType.task_cancelled.value,
-            data={"stage": "cancelled", "message": "任务已取消"},
-        )
+        if bus:
+            await bus.emit_task_cancelled()
 
         if analysis_logger:
             analysis_logger.write_summary(

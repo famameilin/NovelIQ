@@ -45,6 +45,7 @@ async def run_annotate(
     notify_callback: Callable | None = None,
     stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
     """
     执行小说标注流程
@@ -139,6 +140,7 @@ async def run_annotate(
         run_id=run_id,
         stream_callback=stream_callback,
         notify_callback=notify_callback,
+        emitter=emitter,
     )
 
     incremental_interval = settings.analysis.incremental_disambig_interval
@@ -153,6 +155,7 @@ async def run_annotate(
         novel_id=novel_id,
         resume=resume,
         notify_callback=notify_callback,
+        emitter=emitter,
         is_cancelled=is_cancelled,
     )
 
