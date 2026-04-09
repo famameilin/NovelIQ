@@ -16,13 +16,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 from loguru import logger
 
-from src.api.models.stream import StreamMessageType
 from src.api.services.event_manager import event_manager
 from src.api.services.task_manager import TaskManager
+
+
+# ------------------------------------------------------------------ #
+#  StreamMessageType — SSE 事件类型枚举                                #
+# ------------------------------------------------------------------ #
+
+class StreamMessageType(StrEnum):
+    """流式消息类型枚举"""
+
+    stage_start = "stage_start"
+    stage_progress = "stage_progress"
+    stage_complete = "stage_complete"
+    llm_output = "llm_output"
+    llm_thinking = "llm_thinking"
+    task_complete = "task_complete"
+    task_error = "task_error"
+    task_cancelled = "task_cancelled"
 
 
 # ------------------------------------------------------------------ #
@@ -117,51 +134,65 @@ class AnalysisEventBus:
         - 调用 event_manager.send() 唯一发送口
         - 同步更新 TaskManager
         """
-        # 补全上下文：事件有值则更新总线，无值则用总线填充
+        # 补全上下文：构建新事件对象，避免修改原始事件
+        resolved_stage = event.stage or self._stage
+        resolved_sub_stage = event.sub_stage or self._sub_stage
+        resolved_chunk_id = event.chunk_id or self._chunk_id
+
         if event.stage:
             self._stage = event.stage
-        else:
-            event.stage = self._stage
-
         if event.sub_stage:
             self._sub_stage = event.sub_stage
-        else:
-            event.sub_stage = self._sub_stage
-
         if event.chunk_id:
             self._chunk_id = event.chunk_id
-        else:
-            event.chunk_id = self._chunk_id
+
+        resolved_event = StreamEvent(
+            action=event.action,
+            stage=resolved_stage,
+            sub_stage=resolved_sub_stage,
+            chunk_id=resolved_chunk_id,
+            current=event.current,
+            total=event.total,
+            percent=event.percent,
+            content=event.content,
+            message=event.message,
+        )
 
         # 翻译 action → SSE event type
-        sse_event_type = _ACTION_TO_SSE_EVENT.get(event.action, "message")
+        sse_event_type = _ACTION_TO_SSE_EVENT.get(resolved_event.action)
+        if sse_event_type is None:
+            logger.warning(
+                f"[EventBus] unknown action={resolved_event.action}, falling back to 'message'. "
+                f"Valid actions: {list(_ACTION_TO_SSE_EVENT.keys())}"
+            )
+            sse_event_type = "message"
 
         logger.info(
-            f"[EventBus] task_id={self.task_id}, action={event.action}, "
-            f"stage={event.stage}, sub_stage={event.sub_stage}, "
-            f"chunk_id={event.chunk_id}"
+            f"[EventBus] task_id={self.task_id}, action={resolved_event.action}, "
+            f"stage={resolved_event.stage}, sub_stage={resolved_event.sub_stage}, "
+            f"chunk_id={resolved_event.chunk_id}"
         )
 
         # 唯一发送口
         await event_manager.send(
             task_id=self.task_id,
             event_type=sse_event_type,
-            data=event.to_dict(),
+            data=resolved_event.to_dict(),
         )
 
-        # 同步更新 TaskManager（与 ProgressBroadcaster 原逻辑一致）
-        if event.action in ("start", "progress"):
+        # 同步更新 TaskManager
+        if resolved_event.action in ("start", "progress", "complete"):
             self.task_manager.update_task(
                 self.task_id,
-                stage=event.stage,
-                sub_stage=event.sub_stage,
-                current=event.current,
-                total=event.total,
-                progress=event.percent,
-                message=event.message,
+                stage=resolved_event.stage,
+                sub_stage=resolved_event.sub_stage,
+                current=resolved_event.current,
+                total=resolved_event.total,
+                progress=resolved_event.percent,
+                message=resolved_event.message,
             )
-        elif event.action == "output":
-            self.task_manager.append_llm_output(self.task_id, event.content)
+        elif resolved_event.action == "output":
+            self.task_manager.append_llm_output(self.task_id, resolved_event.content)
 
     # ------------------------------------------------------------------
     #  便捷方法：阶段级事件
@@ -180,6 +211,7 @@ class AnalysisEventBus:
         """发送阶段完成事件"""
         await self.emit(StreamEvent(
             action="complete", stage=stage, percent=100.0,
+            message=f"{stage} 完成",
         ))
 
     async def emit_task_complete(self) -> None:
