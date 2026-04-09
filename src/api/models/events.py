@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -46,6 +46,10 @@ class StreamMessageType(StrEnum):
 #  StreamEvent — 统一事件格式                                         #
 # ------------------------------------------------------------------ #
 
+StreamEventAction = Literal["start", "progress", "complete", "output", "thinking"]
+"""StreamEvent.action 的合法值"""
+
+
 @dataclass
 class StreamEvent:
     """
@@ -62,7 +66,7 @@ class StreamEvent:
         thinking — LLM 思考过程输出
     """
 
-    action: str   # start / progress / complete / output / thinking
+    action: StreamEventAction   # start / progress / complete / output / thinking
     stage: str = ""
     sub_stage: str = ""
     chunk_id: int | None = None
@@ -96,6 +100,9 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "complete": StreamMessageType.stage_complete.value,
     "output": StreamMessageType.llm_output.value,
     "thinking": StreamMessageType.llm_thinking.value,
+    # NOTE: task_complete / task_error / task_cancelled 由
+    # emit_task_complete / emit_task_error / emit_task_cancelled
+    # 直接调用 event_manager.send()，不经过此映射表。
 }
 
 

@@ -24,10 +24,15 @@ from src.api.models.events import StreamEvent
 
 class StreamEmitter(Protocol):
     """
-    统一事件发送器接口
+    统一事件发送器接口（Protocol 形式，用于类型标注）
 
     替代原来的 IProgressCallback + stream_callback 双回调模式。
     所有层通过同一个 emit 方法发送事件，Event Bus 负责补全上下文和发送。
+
+    注意: 实际使用中，emitter 参数多为 Callable[[StreamEvent], Awaitable[None]]
+    形式（闭包），而非实现此 Protocol 的类实例。两者签名不同但语义等价：
+    - Protocol: obj.emit(event)
+    - Callable: emitter(event)
 
     action 取值:
         start    — 阶段/phase/chunk 开始
