@@ -10,15 +10,14 @@
 创建者: GLM-5
 任务: refactor/sse-unified-event-bus
 修改内容:
-  - 新增 StreamEmitter Protocol，替代 IProgressCallback + stream_callback 双回调
+  - StreamEmitter Protocol 替代 IProgressCallback + stream_callback 双回调
   - StreamEmitter.emit() 接收 StreamEvent 统一格式
-  - 保留 IProgressCallback 向后兼容（标记 deprecated）
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable
-from typing import Literal, Protocol
+from typing import Protocol
 
 from src.api.models.events import StreamEvent
 
@@ -39,20 +38,3 @@ class StreamEmitter(Protocol):
     """
 
     async def emit(self, event: StreamEvent) -> None: ...
-
-
-class IProgressCallback(Protocol):
-    """
-    进度回调接口定义 (deprecated, 保留向后兼容)
-
-    新代码应使用 StreamEmitter 替代。
-    """
-
-    def __call__(
-        self,
-        phase: str,
-        status: Literal["start", "progress", "complete"],
-        current: int,
-        total: int,
-        percent: float,
-    ) -> Awaitable[None]: ...

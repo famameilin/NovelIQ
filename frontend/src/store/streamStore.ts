@@ -10,7 +10,7 @@
  * 修改内容: 适配统一 StreamEventData 格式
  */
 import { create } from "zustand";
-import type { StreamEventData, LLMOutputData } from "@/api/streamTypes";
+import type { StreamEventData } from "@/api/streamTypes";
 import { appConfig } from "@/config";
 
 interface StreamState {
@@ -24,7 +24,7 @@ interface StreamState {
   setConnected: (connected: boolean) => void;
   setTaskId: (taskId: string | null) => void;
   updateProgress: (progress: StreamEventData) => void;
-  appendLLMOutput: (data: LLMOutputData) => void;
+  appendLLMOutput: (data: StreamEventData) => void;
   setStageDuration: (stage: string, duration: number) => void;
   setError: (error: string | null) => void;
   reset: () => void;
@@ -63,7 +63,7 @@ export const useStreamStore = create<StreamState>()((set) => ({
 
   appendLLMOutput: (data) =>
     set((state) => {
-      const key = `${data.phase}-${data.chunk_id ?? 0}`;
+      const key = `${data.sub_stage}-${data.chunk_id ?? 0}`;
       const newOutputs = new Map(state.llmOutputs);
       const existing = newOutputs.get(key) ?? [];
       newOutputs.set(key, [...existing, data.content]);

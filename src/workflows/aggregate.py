@@ -37,7 +37,7 @@ from src.workflows.curve_metrics import (
     compute_rhythm_curve,
     compute_tension_signals,
 )
-from src.workflows.types import IProgressCallback
+from src.api.models.events import StreamEvent
 
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
@@ -242,7 +242,6 @@ async def run_aggregate(
     run_id: str,
     session: Session,
     cache_path: Path | None = None,
-    notify_callback: IProgressCallback | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
     """
@@ -265,16 +264,12 @@ async def run_aggregate(
         run_id: 运行ID
         session: 数据库连接
         cache_path: 缓存路径
-        notify_callback: 进度回调函数，签名为
-            (phase: str, status: Literal["start", "progress"], current: int, total: int, percent: float) -> None
+        emitter: 统一事件发送器，签名为 async (StreamEvent) -> None
 
     Returns:
         Tuple[int, int, int]: (总块数, 情感曲线条数, 节奏曲线条数)
     """
     start_time = time.time()
-
-    if notify_callback:
-        await notify_callback(phase="aggregate", status="start", current=0, total=1, percent=0.0)
 
     chunk_repo = ChunkRepository(session)
     stats_repo = StatsRepository(session)
@@ -408,7 +403,5 @@ async def run_aggregate(
 
     if emitter:
         await emitter(StreamEvent(action="complete", stage="aggregate", current=1, total=1, percent=100.0))
-    elif notify_callback:
-        await notify_callback(phase="aggregate", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, len(chunk_curves), len(chunk_curves)

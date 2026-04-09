@@ -48,7 +48,6 @@ async def run_preprocess(
     cache_path: Path | None = None,
     max_chars: int = 2000,
     overlap: int = 200,
-    notify_callback: IProgressCallback | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, float]:
     """
@@ -88,8 +87,6 @@ async def run_preprocess(
 
     if emitter:
         await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理"))
-    elif notify_callback:
-        await notify_callback(phase="preprocess", status="start", current=0, total=1, percent=0.0)
 
     chunk_repo = ChunkRepository(session)
     if chunk_repo.is_preprocess_complete(run_id):
@@ -163,7 +160,5 @@ async def run_preprocess(
 
     if emitter:
         await emitter(StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0))
-    elif notify_callback:
-        await notify_callback(phase="preprocess", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, total_chars, elapsed

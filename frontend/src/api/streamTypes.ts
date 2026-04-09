@@ -47,16 +47,6 @@ export interface StreamEventData {
 }
 
 // ============================================================
-// 向后兼容类型别名
-// ============================================================
-
-/** 进度详情 — 等同于 StreamEventData，保留向后兼容 */
-export type ProgressDetail = StreamEventData;
-
-/** LLM 输出数据 — 等同于 StreamEventData，保留向后兼容 */
-export type LLMOutputData = StreamEventData;
-
-// ============================================================
 // 终止事件数据格式（task_complete/task_error/task_cancelled）
 // ============================================================
 

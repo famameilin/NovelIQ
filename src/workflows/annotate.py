@@ -42,8 +42,6 @@ async def run_annotate(
     annotate_client: AnnotationLike | None = None,
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
-    notify_callback: Callable | None = None,
-    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
@@ -138,8 +136,6 @@ async def run_annotate(
         incremental_disambig_client=incremental_disambig_client,
         full_disambig_client=full_disambig_client,
         run_id=run_id,
-        stream_callback=stream_callback,
-        notify_callback=notify_callback,
         emitter=emitter,
     )
 
@@ -154,7 +150,6 @@ async def run_annotate(
         run_id=run_id,
         novel_id=novel_id,
         resume=resume,
-        notify_callback=notify_callback,
         emitter=emitter,
         is_cancelled=is_cancelled,
     )
