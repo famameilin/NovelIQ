@@ -395,8 +395,8 @@ async def annotate_chunk_parallel(
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
     if notify_callback:
-        await notify_callback(phase="phase1", status="start")
-        await notify_callback(phase="phase2", status="start")
+        await notify_callback(phase="phase1", status="start", current=1, total=1, percent=0)
+        await notify_callback(phase="phase2", status="start", current=1, total=1, percent=0)
 
     annotation, foreshadowing = await asyncio.gather(
         _run_phase1(
@@ -429,14 +429,14 @@ async def annotate_chunk_parallel(
     )
 
     if notify_callback:
-        await notify_callback(phase="phase1", status="progress")
-        await notify_callback(phase="phase2", status="progress")
+        await notify_callback(phase="phase1", status="complete", current=1, total=1, percent=100)
+        await notify_callback(phase="phase2", status="complete", current=1, total=1, percent=100)
 
     known_characters = [c.name for c in annotation.characters] if annotation.characters else None
 
     if notify_callback:
-        await notify_callback(phase="phase3", status="start")
-        await notify_callback(phase="phase4", status="start")
+        await notify_callback(phase="phase3", status="start", current=1, total=1, percent=0)
+        await notify_callback(phase="phase4", status="start", current=1, total=1, percent=0)
 
     phase3_result, phase4_relations = await asyncio.gather(
         _run_phase3_if_needed(
@@ -456,11 +456,11 @@ async def annotate_chunk_parallel(
         ),
     )
 
-    phase4_result = _Phase4Result(relations=phase4_relations)
-
     if notify_callback:
-        await notify_callback(phase="phase3", status="progress")
-        await notify_callback(phase="phase4", status="progress")
+        await notify_callback(phase="phase3", status="complete", current=1, total=1, percent=100)
+        await notify_callback(phase="phase4", status="complete", current=1, total=1, percent=100)
+
+    phase4_result = _Phase4Result(relations=phase4_relations)
 
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
@@ -510,9 +510,7 @@ async def annotate_chunk_serial(
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
 
     if notify_callback:
-        logger.info(f"notify_callback called with phase1 start for chunk_id={chunk_id}")
-        await notify_callback(phase="phase1", status="start")
-
+        await notify_callback(phase="phase1", status="start", current=1, total=1, percent=0)
     annotation = await _run_phase1(
         client=client,
         text=text,
@@ -527,8 +525,10 @@ async def annotate_chunk_serial(
         run_id=run_id,
     )
     if notify_callback:
-        await notify_callback(phase="phase1", status="progress")
+        await notify_callback(phase="phase1", status="complete", current=1, total=1, percent=100)
 
+    if notify_callback:
+        await notify_callback(phase="phase2", status="start", current=1, total=1, percent=0)
     foreshadowing = await _run_phase2(
         client=client,
         text=text,
@@ -543,22 +543,18 @@ async def annotate_chunk_serial(
         run_id=run_id,
         rag_retriever=rag_retriever,
     )
-
     if notify_callback:
-        await notify_callback(phase="phase2", status="start")
+        await notify_callback(phase="phase2", status="complete", current=1, total=1, percent=100)
 
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
         text=text,
         chunk_id=chunk_id,
     )
-    if notify_callback:
-        await notify_callback(phase="phase2", status="progress")
-
     known_characters = [c.name for c in annotation.characters] if annotation.characters else None
 
     if notify_callback:
-        await notify_callback(phase="phase3", status="start")
+        await notify_callback(phase="phase3", status="start", current=1, total=1, percent=0)
     phase3_result = await _run_phase3_if_needed(
         client=client,
         text=text,
@@ -568,11 +564,10 @@ async def annotate_chunk_serial(
         known_characters=known_characters,
     )
     if notify_callback:
-        await notify_callback(phase="phase3", status="progress")
-    logger.info(f"Phase3 completed for chunk_id={chunk_id}, starting Phase4")
+        await notify_callback(phase="phase3", status="complete", current=1, total=1, percent=100)
 
     if notify_callback:
-        await notify_callback(phase="phase4", status="start")
+        await notify_callback(phase="phase4", status="start", current=1, total=1, percent=0)
     phase4_relations = await annotate_chunk_phase4(
         client=client,
         text=text,
@@ -581,10 +576,9 @@ async def annotate_chunk_serial(
         run_id=run_id,
     )
     phase4_result = _Phase4Result(relations=phase4_relations)
-    logger.info(f"Phase4 completed for chunk_id={chunk_id}")
-
     if notify_callback:
-        await notify_callback(phase="phase4", status="progress")
+        await notify_callback(phase="phase4", status="complete", current=1, total=1, percent=100)
+    logger.info(f"Phase4 completed for chunk_id={chunk_id}")
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)
 

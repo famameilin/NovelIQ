@@ -158,6 +158,6 @@ async def run_preprocess(
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if notify_callback:
-        await notify_callback(phase="preprocess", status="progress", current=1, total=1, percent=100.0)
+        await notify_callback(phase="preprocess", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, total_chars, elapsed

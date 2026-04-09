@@ -405,6 +405,6 @@ async def run_aggregate(
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if notify_callback:
-        await notify_callback(phase="aggregate", status="progress", current=1, total=1, percent=100.0)
+        await notify_callback(phase="aggregate", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, len(chunk_curves), len(chunk_curves)
