@@ -353,15 +353,6 @@ async def _process_single_chunk(
     range_end = progress_range.end
     base_percent = range_start + ((idx + 1) / total_chunks) * (range_end - range_start)
 
-    if phase_result.notify_callback:
-        await phase_result.notify_callback(
-            phase="phase1",
-            status="start",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
-
     annotation_result = await _annotate_chunk(
         phase_result.annotation_client,
         chunk_text,
@@ -375,22 +366,6 @@ async def _process_single_chunk(
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
     )
-
-    if phase_result.notify_callback:
-        await phase_result.notify_callback(
-            phase="phase1",
-            status="progress",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
-        await phase_result.notify_callback(
-            phase="phase2",
-            status="start",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
 
     _store_annotation_results(
         conn,
@@ -420,43 +395,6 @@ async def _process_single_chunk(
         idx,
         incremental_interval,
     )
-
-    if phase_result.notify_callback:
-        await phase_result.notify_callback(
-            phase="phase2",
-            status="progress",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
-        await phase_result.notify_callback(
-            phase="phase3",
-            status="start",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
-        await phase_result.notify_callback(
-            phase="phase3",
-            status="progress",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
-        await phase_result.notify_callback(
-            phase="phase4",
-            status="start",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
-        await phase_result.notify_callback(
-            phase="phase4",
-            status="progress",
-            current=idx + 1,
-            total=total_chunks,
-            percent=base_percent,
-        )
 
     return state
 
@@ -541,6 +479,14 @@ async def _process_chunks_phase(
                 novel_id=novel_id,
             )
             success_count += 1
+            if notify_callback:
+                await notify_callback(
+                    phase="phase1",
+                    status="progress",
+                    current=success_count,
+                    total=total_chunks,
+                    percent=(success_count / total_chunks) * 100,
+                )
             if run_id and success_count % checkpoint_interval == 0:
                 _save_disambig_checkpoint(conn, run_id, state)
             if run_id and success_count % projection_interval == 0:

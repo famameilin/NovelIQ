@@ -179,6 +179,6 @@ async def run_diagnose(
     _log_diagnosis_results(result)
 
     if notify_callback:
-        await notify_callback(phase="diagnose", status="progress", current=1, total=1, percent=100.0)
+        await notify_callback(phase="diagnose", status="complete", current=1, total=1, percent=100.0)
 
     return result

@@ -149,6 +149,6 @@ async def run_topic_model(
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if notify_callback:
-        await notify_callback(phase="topic-model", status="progress", current=1, total=1, percent=100.0)
+        await notify_callback(phase="topic-model", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, topic_model.num_topics
