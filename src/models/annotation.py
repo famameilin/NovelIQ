@@ -26,6 +26,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from src.api.models.events import StreamEvent
 from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.base import BaseModelClient, TokenUsageCallback
@@ -97,6 +98,7 @@ class AnnotationClient(BaseModelClient):
         chapter_id: int | None = None,
         cloud_client: AnnotationClient | None = None,
         run_id: str | None = None,
+        emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> MultiPhaseAnnotationResult:
         ctx = AnnotationContext(
             text=text,
@@ -131,7 +133,7 @@ class AnnotationClient(BaseModelClient):
             chapter_id=ctx.chapter_id,
             cloud_client=ctx.cloud_client,
             run_id=ctx.run_id,
-            emitter=getattr(self, "_emitter", None),
+            emitter=emitter,
         )
 
     async def _call_annotation_api(

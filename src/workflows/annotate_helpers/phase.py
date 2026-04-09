@@ -48,7 +48,7 @@ class AnnotationPhaseConfig:
     incremental_disambig_client: DisambiguationLike | None = None
     full_disambig_client: DisambiguationLike | None = None
     run_id: str = ""
-    emitter: Callable | None = None
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None
 
 
 class ChunkAnnotationMaxRetriesExceededError(Exception):
@@ -69,7 +69,7 @@ async def _annotate_chunk(
     known_aliases: str | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
-    emitter: Callable | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     Chunk 标注函数
@@ -103,9 +103,6 @@ async def _annotate_chunk(
     - 云端失败直接终止整个任务
     """
     try:
-        # 设置 emitter 到 client 上，供 multi_phase 内部使用
-        if hasattr(client, "_emitter"):
-            client._emitter = emitter  # type: ignore[attr-defined]
         return await client.annotate_chunk(
             text,
             prev_summary,
@@ -117,6 +114,7 @@ async def _annotate_chunk(
             known_aliases=known_aliases,
             cloud_client=cloud_client,
             run_id=run_id,
+            emitter=emitter,
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
@@ -137,7 +135,7 @@ class AnnotationPhaseResult:
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
-        emitter: Callable | None = None,
+        emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> None:
         self.annotation_client = annotation_client
         self.cloud_annotation_client = cloud_annotation_client
@@ -242,7 +240,7 @@ async def _init_annotation_phase(
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
     run_id: str = "",
-    emitter: Callable | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> AnnotationPhaseResult:
     """
     初始化标注阶段
@@ -400,7 +398,7 @@ async def _process_chunks_phase(
     run_id: str = "",
     novel_id: str = "",
     resume: bool = False,
-    emitter: Callable | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, DisambiguationState]:
     """处理所有chunks阶段

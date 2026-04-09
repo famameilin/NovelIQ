@@ -121,9 +121,15 @@ export function useAnalysisStatus(
         case "llm_thinking":
           // 统一格式：LLM 输出也从 StreamEventData 读取
           appendLLMOutput({
-            phase: eventData.sub_stage,
+            action: eventData.action,
+            stage: eventData.stage,
+            sub_stage: eventData.sub_stage,
             chunk_id: eventData.chunk_id,
+            current: eventData.current,
+            total: eventData.total,
+            percent: eventData.percent,
             content: eventData.content,
+            message: eventData.message,
           });
           break;
 

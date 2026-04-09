@@ -21,6 +21,7 @@ from typing import Any, cast
 
 from loguru import logger
 
+from src.api.models.events import StreamEvent
 from src.config import TaskModelConfig, TaskType, settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.annotation import AnnotationClient
@@ -109,7 +110,7 @@ def _init_annotation_clients(
     annotate_client: AnnotationLike | None = None,
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
-    emitter: Callable | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端
     """
@@ -118,9 +119,6 @@ def _init_annotation_clients(
         annotate_client
         or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger),
     )
-    # 设置 emitter 到 client，供 multi_phase 内部使用
-    if emitter and hasattr(annotation_client, "_emitter"):
-        annotation_client._emitter = emitter  # type: ignore[attr-defined]
 
     cloud_annotation_client: AnnotationLike | None = None
     cloud_fallback_enabled = settings.analysis.cloud_annotation_fallback_enabled
@@ -130,8 +128,6 @@ def _init_annotation_clients(
             cloud_client = AnnotationClient(
                 task_type="cloud_annotation", analysis_logger=analysis_logger
             )
-            if emitter and hasattr(cloud_client, "_emitter"):
-                cloud_client._emitter = emitter  # type: ignore[attr-defined]
             cloud_annotation_client = cast(AnnotationLike, cloud_client)
             logger.info(
                 f"cloud annotation client initialized for fallback (thinking={cloud_client._config.thinking_enabled})"
