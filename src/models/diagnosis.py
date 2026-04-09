@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -69,7 +70,7 @@ class DiagnosisClient(BaseModelClient):
             session=session,
         )
 
-    def diagnose(self, payload: dict) -> CloudAnalysis:
+    async def diagnose(self, payload: dict) -> CloudAnalysis:
         if not self._config.model:
             raise ValueError("model is required for diagnosis")
         novel_id = payload.get("novel_id")
@@ -103,7 +104,7 @@ class DiagnosisClient(BaseModelClient):
             operation_name="diagnosis",
         )
 
-        return operation.execute(
+        return await operation.execute(
             self._diagnose_once,
             payload,
             messages,
@@ -138,59 +139,33 @@ class DiagnosisClient(BaseModelClient):
 
         return response_model.model_validate(json_data)
 
-    def _call_api_stream(self, request_params: dict[str, Any], enable_console_output: bool = True) -> Any:
-        request_params["stream"] = True
+    async def _call_api_stream(
+        self,
+        request_params: dict[str, Any],
+        is_cloud: bool = False,
+        stream_callback: Callable[[str, str], None] | None = None,
+    ) -> Any:
+        """
+        非流式API调用（async 版本）
 
-        is_cloud = self.is_cloud_api()
-        logger.debug("Using streaming mode for diagnosis API call")
-
-        content_chunks: list[str] = []
-        reasoning_chunks: list[str] = []
-        chunk_count = 0
-
-        if is_cloud:
-            print(
-                f"[Stream] Starting diagnosis API call with model={request_params.get('model', 'unknown')}", flush=True
-            )
-
-        for chunk in self._client.chat.completions.create(**request_params):
-            chunk_count += 1
-            if chunk.choices:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    content_chunks.append(delta.content)
-                    if is_cloud:
-                        print(delta.content, end="", flush=True)
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    reasoning_chunks.append(delta.reasoning_content)
-                    if is_cloud:
-                        print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)
+        创建时间: 2026-04-09
+        创建者: TraeAI
+        任务: 支持 AsyncOpenAI
+        """
+        logger.debug("Using non-streaming mode for diagnosis API call")
 
         if is_cloud:
-            print(f"\n[Stream] Completed: received {chunk_count} chunks", flush=True)
+            model_name = request_params.get("model", "unknown")
+            print(f"[Non-Stream] Starting diagnosis API call with model={model_name}", flush=True)
 
-        full_content = "".join(content_chunks)
-        full_reasoning = "".join(reasoning_chunks) if reasoning_chunks else None
+        response = await self._client.chat.completions.create(**request_params)
 
-        from types import SimpleNamespace
+        if is_cloud:
+            print("\n[Non-Stream] Completed", flush=True)
 
-        message = SimpleNamespace(
-            content=full_content,
-            reasoning_content=full_reasoning,
-            role="assistant",
-        )
-        choice = SimpleNamespace(
-            message=message,
-            finish_reason="stop",
-            index=0,
-        )
-        response = SimpleNamespace(
-            choices=[choice],
-            model=request_params.get("model", "unknown"),
-        )
         return response
 
-    def _diagnose_once(
+    async def _diagnose_once(
         self,
         payload: dict,
         messages: list[dict[str, str]],
@@ -205,7 +180,7 @@ class DiagnosisClient(BaseModelClient):
         if self._client is None:
             raise ValueError("client is required")
 
-        response = self._call_api_stream(request_params)
+        response = await self._call_api_stream(request_params, is_cloud=self.is_cloud_api())
         result = self._parse_structured_response(response, CloudAnalysis)
 
         duration_ms = int((time.time() - start_time) * 1000)

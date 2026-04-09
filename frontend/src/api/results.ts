@@ -17,11 +17,18 @@ import type {
 
 export async function getCharacters(
   novelId: string,
-  taskId: string
+  taskId: string,
+  options?: { page?: number; page_size?: number }
 ): Promise<Character[]> {
   const { data } = await apiClient.get<Character[]>(
     `/api/novels/${novelId}/characters`,
-    { params: { task_id: taskId } }
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.page != null && { page: options.page }),
+        ...(options?.page_size != null && { page_size: options.page_size }),
+      },
+    }
   );
   return data;
 }
@@ -30,11 +37,18 @@ export async function getCharacters(
 
 export async function getChunkCurves(
   novelId: string,
-  taskId: string
+  taskId: string,
+  options?: { page?: number; page_size?: number }
 ): Promise<ChunkCurvePoint[]> {
   const { data } = await apiClient.get<ChunkCurvePoint[]>(
     `/api/novels/${novelId}/chunk-curves`,
-    { params: { task_id: taskId } }
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.page != null && { page: options.page }),
+        ...(options?.page_size != null && { page_size: options.page_size }),
+      },
+    }
   );
   return data;
 }

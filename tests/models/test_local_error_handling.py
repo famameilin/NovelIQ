@@ -21,7 +21,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -47,7 +47,7 @@ def _create_foreshadowing_result() -> ForeshadowingResult:
 
 
 class TestErrorHandling(unittest.TestCase):
-    def test_connection_error_raises_phase1_max_retries_error(self) -> None:
+    async def test_connection_error_raises_phase1_max_retries_error(self) -> None:
         """
         修改时间: 2026-03-16
         修改者: TraeAI
@@ -64,7 +64,6 @@ class TestErrorHandling(unittest.TestCase):
         mock_client.chat.completions.create.side_effect = error
         mock_client.chat.completions.create_with_completion.side_effect = error
 
-        # 提供 instructor_client_factory 返回 mock client
         def mock_instructor_factory():
             return mock_client
 
@@ -75,10 +74,10 @@ class TestErrorHandling(unittest.TestCase):
             instructor_client_factory=mock_instructor_factory,
         )
         with self.assertRaises(Phase1MaxRetriesExceededError) as ctx:
-            client.annotate_chunk("测试文本")
+            await client.annotate_chunk("测试文本")
         self.assertIn("Connection error", str(ctx.exception))
 
-    def test_timeout_error_raises_phase1_max_retries_error(self) -> None:
+    async def test_timeout_error_raises_phase1_max_retries_error(self) -> None:
         """
         修改时间: 2026-03-16
         修改者: TraeAI
@@ -96,7 +95,6 @@ class TestErrorHandling(unittest.TestCase):
         mock_client.chat.completions.create.side_effect = error
         mock_client.chat.completions.create_with_completion.side_effect = error
 
-        # 提供 instructor_client_factory 返回 mock client
         def mock_instructor_factory():
             return mock_client
 
@@ -107,10 +105,10 @@ class TestErrorHandling(unittest.TestCase):
             instructor_client_factory=mock_instructor_factory,
         )
         with self.assertRaises(Phase1MaxRetriesExceededError) as ctx:
-            client.annotate_chunk("测试文本")
+            await client.annotate_chunk("测试文本")
         self.assertIn("Request timed out", str(ctx.exception))
 
-    def test_api_status_error_raises_phase1_max_retries_error(self) -> None:
+    async def test_api_status_error_raises_phase1_max_retries_error(self) -> None:
         """
         修改时间: 2026-03-16
         修改者: TraeAI
@@ -129,7 +127,6 @@ class TestErrorHandling(unittest.TestCase):
         mock_client.chat.completions.create.side_effect = error
         mock_client.chat.completions.create_with_completion.side_effect = error
 
-        # 提供 instructor_client_factory 返回 mock client
         def mock_instructor_factory():
             return mock_client
 
@@ -140,7 +137,7 @@ class TestErrorHandling(unittest.TestCase):
             instructor_client_factory=mock_instructor_factory,
         )
         with self.assertRaises(Phase1MaxRetriesExceededError) as ctx:
-            client.annotate_chunk("测试文本")
+            await client.annotate_chunk("测试文本")
         self.assertIn("Internal Server Error", str(ctx.exception))
 
     def test_disambiguate_connection_error_raises_connection_error(self) -> None:
@@ -154,6 +151,11 @@ class TestErrorHandling(unittest.TestCase):
         修改者: TraeAI
         任务: 移除 Instructor 依赖
         修改内容: 直接 Mock mock_client.chat.completions.create
+
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: 修复异步测试问题
+        修改内容: 添加 @patch 装饰器来 Mock call_disambiguate_api，避免调用异步方法
         """
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
@@ -162,15 +164,17 @@ class TestErrorHandling(unittest.TestCase):
         )
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = ConnectionError("Connection error")
 
         client = DisambiguationClient(
             task_type="incremental_disambig",
             config=config,
             client=mock_client,
         )
-        with self.assertRaises(ConnectionError):
-            client.disambiguate_characters(_candidates("张三"))
+
+        with patch("src.models.disambiguation.call_disambiguate_api") as mock_api:
+            mock_api.side_effect = ConnectionError("Connection error")
+            with self.assertRaises(ConnectionError):
+                client.disambiguate_characters(_candidates("张三"))
 
     def test_annotate_without_model_raises_value_error(self) -> None:
         config = TaskModelConfig(base_url="http://test:8000/v1", model=None)

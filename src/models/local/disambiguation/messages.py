@@ -13,7 +13,8 @@ from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROM
 from .evidence import build_evidence_profile, format_evidence_profile
 
 if TYPE_CHECKING:
-    from ..annotate_helpers.disambiguation.candidate_filter import CandidateClassification
+    from src.workflows.annotate_helpers.disambiguation.candidate_filter import CandidateClassification
+
     from .evidence import EvidenceProfile
 
 _EVIDENCE_MARKERS = {

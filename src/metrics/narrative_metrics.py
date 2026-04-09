@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 from src.config import settings
+from src.metrics.fourier_filter import fourier_smooth
 
 
 def find_global_peak(scores: list[float]) -> int:
@@ -48,21 +49,27 @@ def compute_three_act_ratio_by_tension(
     任务: 叙事时间轴功能设计评估
     修改内容: 增加边界保护（最小比例 5%）+ 归一化，处理单调序列、峰在开头/结尾等退化场景
 
+    修改时间: 2026-04-07
+    修改者: GLM-5
+    任务: 张力曲线傅里叶平滑 - 配置抽离
+    修改内容: keep_ratio 从配置读取
+
     理论依据:
     - Act1 = 开始 → 峰前谷底（铺垫期，张力积累前的平静）
     - Act2 = 谷底 → 全局峰值（上升期+高潮，张力爬坡）
     - Act3 = 峰值 → 结束（收束期）
     - 典型黄金比例: 25%–50%–25%
     """
-    if not tension_composite_scores:
+    smoothed_scores = fourier_smooth(tension_composite_scores, keep_ratio=settings.metrics.fourier_smooth_keep_ratio)
+    if not smoothed_scores:
         return {"act1_ratio": 0.0, "act2_ratio": 0.0, "act3_ratio": 0.0}
 
-    total = len(tension_composite_scores)
+    total = len(smoothed_scores)
     if total < 3:
         return {"act1_ratio": 1 / 3, "act2_ratio": 1 / 3, "act3_ratio": 1 / 3}
 
-    peak_idx = find_global_peak(tension_composite_scores)
-    valley_idx = find_valley_before_peak(tension_composite_scores, peak_idx)
+    peak_idx = find_global_peak(smoothed_scores)
+    valley_idx = find_valley_before_peak(smoothed_scores, peak_idx)
 
     act1_raw = valley_idx / total
     if peak_idx == total - 1:

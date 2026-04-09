@@ -88,7 +88,6 @@ def setup_test_database(test_database_url: str) -> Generator[None, None, None]:
         "analysis_runs",
         "global_context",
         "token_usage",
-        "graph_storage",
         "graph_relations_current",
         "graph_relation_events",
         "graph_entity_aliases",

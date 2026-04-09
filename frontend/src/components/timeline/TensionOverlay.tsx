@@ -11,7 +11,7 @@ import { useRef, useEffect, useCallback } from "react";
 import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts";
 import { cn } from "@/lib/cn";
-import { getCSSColorVar } from "@/lib/theme";
+import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -63,6 +63,11 @@ export function TensionOverlay({
 
   const safeTotalChunks = Math.max(1, totalChunks);
 
+  // 动态计算 Y 轴范围，适配不同数据源（tension_proxy / tension_composite）
+  const yMin = Math.min(...yData);
+  const yMax = Math.max(...yData);
+  const yPadding = Math.max((yMax - yMin) * 0.1, 0.01); // 至少 10% 边距
+
   const option: echarts.EChartsOption = {
     grid: {
       left: 0,
@@ -80,8 +85,8 @@ export function TensionOverlay({
     yAxis: {
       type: "value",
       show: false,
-      min: 0,
-      max: 1,
+      min: yMin - yPadding,
+      max: yMax + yPadding,
     },
     series: [
       {
@@ -95,8 +100,8 @@ export function TensionOverlay({
         },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: `${chartColor}40` },
-            { offset: 1, color: `${chartColor}05` },
+            { offset: 0, color: hslToHsla(chartColor, 0.25) },
+            { offset: 1, color: hslToHsla(chartColor, 0.02) },
           ]),
         },
       },

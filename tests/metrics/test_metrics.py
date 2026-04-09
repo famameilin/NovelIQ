@@ -1,3 +1,11 @@
+"""
+Metrics 模块测试
+
+修改时间: 2026-04-06
+修改者: GLM-5
+任务: 移除向后兼容代码
+修改内容: 移除旧版精确匹配函数测试，保留 phrase 模式匹配测试
+"""
 import sys
 import unittest
 from pathlib import Path
@@ -6,15 +14,11 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.metrics.emotion_metrics import (
     lexical_sentiment_density,
-    moving_average,
     pos_neg_ratio,
 )
 from src.metrics.lexicon_metrics import (
-    count_hits,
-    count_token_hits,
-    density,
-    term_counts,
-    token_density,
+    count_mixed_hits,
+    term_mixed_counts,
 )
 from src.metrics.rhythm_metrics import tension_composite, tension_proxy
 from src.metrics.style_metrics import (
@@ -36,24 +40,34 @@ from src.metrics.text_utils import dialogue_length, split_sentences, tokenize_wo
 
 
 class TestLexiconMetrics(unittest.TestCase):
-    def test_term_counts(self) -> None:
+    def test_count_mixed_hits_basic(self) -> None:
         text = "斩击斩击爆裂"
-        counts = term_counts(text, ["斩击", "爆裂", "格挡"])
+        tokens = ["斩击", "斩击", "爆裂"]
+        hits = count_mixed_hits(text, tokens, ["斩击", "爆裂", "格挡"])
+        self.assertEqual(hits, 3)
+
+    def test_count_mixed_hits_empty_text(self) -> None:
+        hits = count_mixed_hits("", [], ["斩击"])
+        self.assertEqual(hits, 0)
+
+    def test_count_mixed_hits_phrase_mode(self) -> None:
+        text = "青衫剑客踏月而来"
+        tokens = ["青衫", "剑客", "踏月", "而来"]
+        hits = count_mixed_hits(text, tokens, ["青衫剑客"])
+        self.assertEqual(hits, 1)
+
+    def test_count_mixed_hits_no_overlap(self) -> None:
+        text = "渡劫飞升"
+        tokens = ["渡劫", "飞升"]
+        hits = count_mixed_hits(text, tokens, ["渡劫", "飞升", "渡劫飞升"])
+        self.assertEqual(hits, 1)
+
+    def test_term_mixed_counts(self) -> None:
+        text = "斩击爆裂斩击"
+        tokens = ["斩击", "爆裂", "斩击"]
+        counts = term_mixed_counts(text, tokens, ["斩击", "爆裂"])
         self.assertEqual(counts["斩击"], 2)
         self.assertEqual(counts["爆裂"], 1)
-        self.assertNotIn("格挡", counts)
-
-    def test_density_empty(self) -> None:
-        self.assertEqual(density("", ["斩击"]), 0.0)
-
-    def test_count_hits(self) -> None:
-        text = "斩击爆裂斩击"
-        self.assertEqual(count_hits(text, ["斩击", "爆裂"]), 3)
-
-    def test_token_density(self) -> None:
-        tokens = ["斩击", "爆裂", "斩击"]
-        self.assertEqual(count_token_hits(tokens, ["斩击"]), 2)
-        self.assertAlmostEqual(token_density(tokens, ["斩击"]), 2 / 3, places=6)
 
 
 class TestTextUtils(unittest.TestCase):
@@ -74,24 +88,29 @@ class TestTextUtils(unittest.TestCase):
 class TestEmotionMetrics(unittest.TestCase):
     def test_lexical_sentiment_density(self) -> None:
         text = "good bad good"
-        result = lexical_sentiment_density(text, ["good"], ["bad"])
+        result = lexical_sentiment_density(text, {"good": 1}, {"bad": 1})
         self.assertGreater(result["pos_density"], 0)
         self.assertGreater(result["neg_density"], 0)
-        self.assertGreater(pos_neg_ratio(text, ["good"], ["bad"]), 0)
-        self.assertEqual(moving_average([1.0, 2.0, 3.0], 2), [1.0, 1.5, 2.5])
+        self.assertGreater(pos_neg_ratio(text, {"good": 1}, {"bad": 1}), 0)
 
 
 class TestRhythmMetrics(unittest.TestCase):
     def test_tension_proxy(self) -> None:
         text = "「杀」！斩击。你好吗？"
-        result = tension_proxy(text, ["斩击", "杀"])
+        result = tension_proxy(text, {"斩击": 1, "杀": 1})
         self.assertGreater(result["avg_sent_len"], 0)
         self.assertGreater(result["fight_density"], 0)
         self.assertGreater(result["dialogue_ratio"], 0)
         self.assertGreater(result["question_density"], 0)
         self.assertGreaterEqual(result["exclaim_density"], 0)
-        composite = tension_composite([result, result])
-        self.assertEqual(len(composite), 2)
+        composite = tension_composite(
+            result["fight_density"],
+            result["exclaim_density"],
+            result["question_density"],
+            result["dialogue_ratio"],
+            result["avg_sent_len"],
+        )
+        self.assertGreaterEqual(composite, 0)
 
     def test_tension_proxy_no_overlap_count(self) -> None:
         """
@@ -101,7 +120,7 @@ class TestRhythmMetrics(unittest.TestCase):
         修改内容: 新增测试用例，验证重叠词不被重复计数
         """
         text = "仙道杀招"
-        result = tension_proxy(text, ["杀招", "道杀招", "仙道杀招"])
+        result = tension_proxy(text, {"杀招": 1, "道杀招": 1, "仙道杀招": 1})
         tokens = tokenize_words(text)
         self.assertEqual(len(tokens), 2)
         self.assertAlmostEqual(result["fight_density"], 1.0 / len(tokens), places=6)

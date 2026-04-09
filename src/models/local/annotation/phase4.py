@@ -65,18 +65,21 @@ def _build_phase4_messages(
     任务: phase4-code-review-fix
     修改内容: 添加 Prompt 空值运行时校验
     """
+    from string import Template
+
     prompts = settings.prompts
     system_prompt = prompts.phase4.system
-    user_template = prompts.phase4.user_template
+    user_template_str = prompts.phase4.user_template
 
     if not system_prompt:
         raise ValueError("Phase4 system prompt is empty, check config/prompts/phase4.txt")
-    if not user_template:
+    if not user_template_str:
         raise ValueError("Phase4 user template is empty, check config/prompts/phase4.txt")
 
     known_chars = "、".join(known_characters) if known_characters else "无"
 
-    user_prompt = user_template.format(
+    user_template = Template(user_template_str)
+    user_prompt = user_template.substitute(
         chunk_text=text,
         known_characters=known_chars,
     )
@@ -148,7 +151,7 @@ def _convert_to_snapshots(
     return snapshots
 
 
-def execute_phase4_call(
+async def execute_phase4_call(
     client: AnnotationClient,
     text: str,
     known_characters: list[str] | None,
@@ -163,6 +166,11 @@ def execute_phase4_call(
     创建时间: 2026-04-05
     创建者: TraeAI
     任务: refactor-phase4-relation-extraction
+
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -170,7 +178,7 @@ def execute_phase4_call(
 
     enable_thinking = config.thinking_enabled
 
-    parsed, response = client._call_annotation_api(
+    parsed, response = await client._call_annotation_api(
         messages=messages,
         enable_thinking=enable_thinking,
         chunk_id=chunk_id,
@@ -207,7 +215,7 @@ def execute_phase4_call(
     return _convert_to_snapshots(parsed, source_model)
 
 
-def annotate_chunk_phase4(
+async def annotate_chunk_phase4(
     client: AnnotationClient,
     text: str,
     known_characters: list[str] | None = None,
@@ -227,20 +235,20 @@ def annotate_chunk_phase4(
     任务: refactor-phase4-relation-extraction
     修改内容: 从启发式规则改为LLM调用，统一处理静态关系和关系变化
 
-    Args:
-        client: 统一模型客户端
-        text: chunk 原文
-        known_characters: 已知人物列表
-        chunk_id: chunk ID（用于交互记录）
-        run_id: 运行 ID（用于交互记录）
-
-    Returns:
-        RelationChangeSnapshot 列表
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     if not text:
         return []
     if not known_characters:
         return []
+
+    logger.info(
+        f"Phase4 annotate_chunk_phase4 STARTING for chunk_id={chunk_id}, "
+        f"text_len={len(text)}, known_characters={known_characters}"
+    )
 
     messages = _build_phase4_messages(text, known_characters)
 
@@ -256,12 +264,12 @@ def annotate_chunk_phase4(
         exception_type=Phase4MaxRetriesExceededError,
     )
 
-    def operation(
+    async def operation(
         local_client: AnnotationClient,
         retry_messages: list[dict] | None = None,
     ) -> list[RelationChangeSnapshot]:
         current_messages = retry_messages if retry_messages else messages
-        return execute_phase4_call(
+        return await execute_phase4_call(
             client=local_client,
             text=text,
             known_characters=known_characters,
@@ -272,7 +280,7 @@ def annotate_chunk_phase4(
         )
 
     try:
-        result = handler.execute(operation)
+        result = await handler.execute(operation)
         return result if result else []
     except Phase4MaxRetriesExceededError:
         logger.warning("Phase4 max retries exceeded for chunk_id={}", chunk_id)

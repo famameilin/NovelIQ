@@ -20,7 +20,7 @@ export function PageContainer({ children, className }: PageContainerProps) {
       initial="initial"
       animate="animate"
       exit="exit"
-      className={cn("mx-auto w-full max-w-[1400px] px-6 py-6", className)}
+      className={cn("mx-auto flex h-full w-full max-w-[1400px] flex-col px-6 py-6", className)}
     >
       {children}
     </motion.main>

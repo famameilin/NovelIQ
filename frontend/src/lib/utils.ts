@@ -53,10 +53,9 @@ export interface TaskStatusDisplay {
 
 export const taskStatusConfig: Record<TaskStatus, TaskStatusDisplay> = {
   pending: { label: "等待中", variant: "outline" },
-  chunking: { label: "分块中", variant: "secondary" },
-  annotating: { label: "标注中", variant: "secondary" },
-  aggregating: { label: "聚合中", variant: "secondary" },
-  diagnosing: { label: "诊断中", variant: "secondary" },
+  running: { label: "运行中", variant: "secondary" },
+  cancelling: { label: "取消中", variant: "secondary" },
+  cancelled: { label: "已取消", variant: "outline" },
   completed: { label: "已完成", variant: "success" },
   failed: { label: "失败", variant: "destructive" },
 };

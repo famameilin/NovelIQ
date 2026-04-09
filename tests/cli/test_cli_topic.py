@@ -80,10 +80,11 @@ class TestTopicModel:
         ]
         chunk_repo.insert_chunks(self.run_id, chunks)
 
-    def test_topic_model_basic(self) -> None:
+    @pytest.mark.asyncio()
+    async def test_topic_model_basic(self) -> None:
         self._create_chunks(10)
 
-        chunks, topics = run_topic_model(
+        chunks, topics = await run_topic_model(
             run_id=self.run_id,
             session=self.db_session,
             num_topics=3,
@@ -101,10 +102,11 @@ class TestTopicModel:
         ).scalar()
         assert topic_count > 0
 
-    def test_topic_model_force_rerun(self) -> None:
+    @pytest.mark.asyncio()
+    async def test_topic_model_force_rerun(self) -> None:
         self._create_chunks(5)
 
-        chunks1, topics1 = run_topic_model(
+        chunks1, topics1 = await run_topic_model(
             run_id=self.run_id,
             session=self.db_session,
             num_topics=2,
@@ -122,7 +124,7 @@ class TestTopicModel:
         ).scalar()
         assert topic_count1 > 0
 
-        chunks2, topics2 = run_topic_model(
+        chunks2, topics2 = await run_topic_model(
             run_id=self.run_id,
             session=self.db_session,
             num_topics=2,
@@ -139,7 +141,7 @@ class TestTopicModel:
         ).scalar()
         assert topic_count2 > 0
 
-        chunks3, topics3 = run_topic_model(
+        chunks3, topics3 = await run_topic_model(
             run_id=self.run_id,
             session=self.db_session,
             num_topics=2,
@@ -151,8 +153,9 @@ class TestTopicModel:
         assert chunks3 == 5
         assert topics3 == 2
 
-    def test_topic_model_empty_db(self) -> None:
-        chunks, topics = run_topic_model(
+    @pytest.mark.asyncio()
+    async def test_topic_model_empty_db(self) -> None:
+        chunks, topics = await run_topic_model(
             run_id=self.run_id,
             session=self.db_session,
             num_topics=3,

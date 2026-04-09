@@ -19,7 +19,7 @@ from typing import Any, Literal, cast
 
 from loguru import logger
 
-from src.metrics.narrative_metrics import find_global_peak
+from src.metrics.narrative_metrics import find_global_peak, find_local_peaks
 
 # Literal 类型定义
 TimelineNodeType = Literal["plot", "character_entry", "character_exit", "relation_change"]
@@ -187,18 +187,22 @@ def compute_four_phases(
     chunk_ids: list[int],
 ) -> list[NarrativePhase]:
     """
-    计算四阶段划分。
+    计算四阶段划分（多峰模型）。
 
-    基于 Freytag 金字塔理论，将叙事划分为四个阶段:
-    - 引入期: 从开始到张力谷底
-    - 发展期: 从谷底到高潮峰值前
-    - 高潮期: 峰值周围区域
-    - 收束期: 高潮后到结束
+    基于 Freytag 金字塔理论 + 网络小说多波次叠加结构，使用局部峰值
+    检测确定高潮位置，而非单一全局峰值。
+
+    核心设计决策:
+    - 网络小说通常有多个小高潮 + 一个最终大高潮（"逐步升级"模式）
+    - 使用 find_local_peaks() 找出所有局部峰值
+    - 取「后 50% 区间内的最强峰」作为主高潮位置
+    - 这比全局最大值更能反映网文的叙事节奏
 
     边界保护:
     - MIN_PHASE_LENGTH = 1: 每个阶段至少 1 个 chunk
     - 高潮期半径: 至少 3 个 chunk，最多 5%（但不超过总长度的 10%）
     - 小说太短时 (< 20 chunks): 使用固定比例 15%-35%-30%-20%
+    - 无有效局部峰值时: 回退到全局最大值
 
     Args:
         tension_scores: 张力分数列表（与 chunk_ids 一一对应）
@@ -216,11 +220,9 @@ def compute_four_phases(
 
     # 短小说固定比例划分
     if total < 20:
-        # 计算边界索引（确保各阶段至少 1 个 chunk 且不越界）
-        # b3 最大为 total - 2，因为后面要访问 chunk_ids[b3 + 1]
-        b1 = max(1, min(int(total * 0.15), total - 3))  # 引入期结束
-        b2 = max(b1 + 1, min(int(total * 0.50), total - 2))  # 发展期结束
-        b3 = max(b2 + 1, min(int(total * 0.80), total - 2))  # 高潮期结束
+        b1 = max(1, min(int(total * 0.15), total - 3))
+        b2 = max(b1 + 1, min(int(total * 0.50), total - 2))
+        b3 = max(b2 + 1, min(int(total * 0.80), total - 2))
         return [
             NarrativePhase("引入期", chunk_ids[0], chunk_ids[b1], (b1 + 1) / total),
             NarrativePhase("发展期", chunk_ids[b1 + 1], chunk_ids[b2], (b2 - b1) / total),
@@ -228,31 +230,58 @@ def compute_four_phases(
             NarrativePhase("收束期", chunk_ids[b3 + 1], chunk_ids[-1], (total - b3 - 1) / total),
         ]
 
-    # 长小说基于张力曲线动态划分
-    peak_idx = find_global_peak(tension_scores)
+    # ── 多峰模型：用 find_local_peaks 找出所有局部峰值 ──
+    local_peaks = find_local_peaks(tension_scores, total)
 
+    # 选择高潮位置的策略：
+    # 1. 如果找到局部峰值 → 取后半部分（>=50%）中的最高峰
+    #    （符合网文"逐步升级"模式：最终大高潮在全书后半段）
+    # 2. 如果无局部峰值或后半部分无峰 → 回退到全局最大值
+    # 3. 如果所有峰都在前半段 → 取最靠后的那个峰
+    half_idx = total // 2
+
+    if local_peaks:
+        # 后半部分的峰值
+        late_peaks = [p for p in local_peaks if p >= half_idx]
+        if late_peaks:
+            # 后半部分有峰：取其中张力值最高的
+            peak_idx = max(late_peaks, key=lambda p: tension_scores[p])
+        else:
+            # 所有峰都在前半段：取最靠后的峰（最后一个局部峰）
+            peak_idx = local_peaks[-1]
+    else:
+        # 无任何局部峰值：回退到全局最大值
+        logger.warning("No local peaks found in tension_scores, falling back to global peak")
+        peak_idx = find_global_peak(tension_scores)
+
+    logger.debug(
+        "Multi-peak phase detection: local_peaks=%s, selected_peak=%d/%d (%.1f%%)",
+        local_peaks,
+        peak_idx,
+        total,
+        peak_idx / total,
+    )
+
+    # 峰值前的谷底
     if peak_idx == 0:
         valley_idx = max(MIN_PHASE_LENGTH, int(total * 0.15))
     else:
         before_peak = tension_scores[:peak_idx]
         valley_idx = max(MIN_PHASE_LENGTH, min(range(len(before_peak)), key=lambda i: before_peak[i]))
 
-    # 高潮期半径：至少 3 个，最多 5%（但不超过总长度的 10%）
+    # 高潮期半径
     max_climax_radius = int(total * 0.10)
     climax_radius = min(max(3, int(total * 0.05)), max_climax_radius)
     climax_start = max(valley_idx + MIN_PHASE_LENGTH, peak_idx - climax_radius)
     climax_end = min(total - 1 - MIN_PHASE_LENGTH, peak_idx + climax_radius)
 
-    # 确保 valley_idx < climax_start，保留至少 MIN_PHASE_LENGTH 给发展期
     valley_idx = min(valley_idx, climax_start - MIN_PHASE_LENGTH)
     valley_idx = max(valley_idx, MIN_PHASE_LENGTH)
 
     phases: list[NarrativePhase] = []
 
-    # 引入期（始终存在）
     phases.append(NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total))
 
-    # 发展期
     dev_start_idx = valley_idx + 1
     dev_end_idx = climax_start - 1
     if dev_end_idx >= dev_start_idx:
@@ -266,10 +295,8 @@ def compute_four_phases(
         )
     else:
         logger.warning(f"发展期被跳过: valley_idx={valley_idx}, climax_start={climax_start}, total={total}")
-        # 退化处理：在引入期和高潮期之间插入空发展期
         phases.append(NarrativePhase("发展期", chunk_ids[valley_idx], chunk_ids[valley_idx], 0.0))
 
-    # 高潮期（始终存在）
     phases.append(
         NarrativePhase(
             "高潮期",
@@ -279,7 +306,6 @@ def compute_four_phases(
         )
     )
 
-    # 收束期（始终存在，即使长度为0）
     if climax_end < total - 1 - MIN_PHASE_LENGTH:
         phases.append(
             NarrativePhase(
@@ -586,10 +612,15 @@ def build_timeline_candidates(
     # Fix-3: 预构建 chunk_id → index 映射，O(1) 替代 O(N)
     chunk_id_to_idx: dict[int, int] = {cid: idx for idx, cid in enumerate(chunk_ids)}
 
-    # 获取张力曲线
+    # 获取张力曲线（使用 tension_composite 而非 tension_proxy）
+    # 原因: tension_proxy 是原始指标均值，缺乏归一化，容易呈单调趋势；
+    #        tension_composite 是经 min-max 归一化后的综合分数，波动性更好，
+    #        更适合用于四阶段划分和峰值检测。
     chunk_curves = stats_repo.fetch_chunk_curves_full(run_id)
     tension_scores = (
-        [row.tension_proxy if row else 0.0 for row in chunk_curves] if chunk_curves else [0.5] * total_chunks
+        [row.tension_composite if row and row.tension_composite is not None else 0.5 for row in chunk_curves]
+        if chunk_curves
+        else [0.5] * total_chunks
     )
 
     # 确保张力数据长度匹配

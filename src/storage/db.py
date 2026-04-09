@@ -106,11 +106,13 @@ def get_engine():
 
     @event.listens_for(_engine, "checkout")
     def on_checkout(dbapi_conn, conn_record, conn_proxy):
-        logger.debug(f"Pool checkout: active={_engine.pool.status()}")
+        if _engine is not None:
+            logger.debug(f"Pool checkout: active={_engine.pool.status()}")
 
     @event.listens_for(_engine, "checkin")
     def on_checkin(dbapi_conn, conn_record):
-        logger.debug(f"Pool checkin: active={_engine.pool.status()}")
+        if _engine is not None:
+            logger.debug(f"Pool checkin: active={_engine.pool.status()}")
 
     logger.info(
         f"Created SQLAlchemy engine for {database_url.split(':')[0]} "

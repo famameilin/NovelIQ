@@ -20,6 +20,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.storage.repositories import ChunkRepository, RunRepository
@@ -34,7 +36,7 @@ class MockEmbeddingClient:
         import random
         return [random.random() for _ in range(768)]
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         import random
         return [[random.random() for _ in range(768)] for _ in texts]
 
@@ -49,8 +51,9 @@ class TestPreprocess:
         source_path.write_text(content, encoding="utf-8")
         return source_path
 
+    @pytest.mark.asyncio()
     @patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient)
-    def test_preprocess_basic(self, db_session, tmp_path) -> None:
+    async def test_preprocess_basic(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
         run_repo = RunRepository(db_session)
@@ -60,7 +63,7 @@ class TestPreprocess:
             title="Test Novel",
         )
 
-        chunks_inserted, total_chars, _ = run_preprocess(
+        chunks_inserted, total_chars, _ = await run_preprocess(
             source_path=source_path,
             run_id=run_id,
             session=db_session,
@@ -75,8 +78,9 @@ class TestPreprocess:
         rows = chunk_repo.fetch_chunk_texts(run_id)
         assert len(rows) == chunks_inserted
 
+    @pytest.mark.asyncio()
     @patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient)
-    def test_preprocess_empty_file(self, db_session, tmp_path) -> None:
+    async def test_preprocess_empty_file(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "")
 
         run_repo = RunRepository(db_session)
@@ -86,7 +90,7 @@ class TestPreprocess:
             title="Empty Novel",
         )
 
-        chunks_inserted, total_chars, _ = run_preprocess(
+        chunks_inserted, total_chars, _ = await run_preprocess(
             source_path=source_path,
             run_id=run_id,
             session=db_session,
@@ -95,8 +99,9 @@ class TestPreprocess:
         assert chunks_inserted == 0
         assert total_chars == 0
 
+    @pytest.mark.asyncio()
     @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClient)
-    def test_preprocess_chapter_split(self, db_session, tmp_path) -> None:
+    async def test_preprocess_chapter_split(self, db_session, tmp_path) -> None:
         content = "第一章 测试\n" + "内容" * 200 + "\n\n第二章 测试\n" + "内容" * 200
         source_path = self._create_source_file(str(tmp_path), content)
 
@@ -107,7 +112,7 @@ class TestPreprocess:
             title="Chapter Novel",
         )
 
-        chunks_inserted, total_chars, _ = run_preprocess(
+        chunks_inserted, total_chars, _ = await run_preprocess(
             source_path=source_path,
             run_id=run_id,
             session=db_session,
@@ -115,8 +120,9 @@ class TestPreprocess:
         )
         assert chunks_inserted > 0
 
+    @pytest.mark.asyncio()
     @patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient)
-    def test_preprocess_resume(self, db_session, tmp_path) -> None:
+    async def test_preprocess_resume(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
         run_repo = RunRepository(db_session)
@@ -126,7 +132,7 @@ class TestPreprocess:
             title="Resume Novel",
         )
 
-        chunks1, _, _ = run_preprocess(
+        chunks1, _, _ = await run_preprocess(
             source_path=source_path,
             run_id=run_id,
             session=db_session,
@@ -134,7 +140,7 @@ class TestPreprocess:
         )
         assert chunks1 > 0
 
-        chunks2, _, _ = run_preprocess(
+        chunks2, _, _ = await run_preprocess(
             source_path=source_path,
             run_id=run_id,
             session=db_session,

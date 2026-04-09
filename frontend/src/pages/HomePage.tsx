@@ -1,17 +1,32 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { RefreshCw } from "lucide-react";
-import { BookOpen } from "lucide-react";
+import { RefreshCw, BookOpen, Search, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NovelCard, type NovelCardData } from "@/components/common/NovelCard";
 import { UploadDialog, type UploadFileInfo } from "@/components/home/UploadDialog";
 import { useHomeContext } from "@/components/layout/AppLayout";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-import { getNovels, uploadNovel, deleteNovel } from "@/api/novels";
+import { getNovels, uploadNovel, deleteNovel, getNovel } from "@/api/novels";
 import type { Novel } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
+import { appConfig } from "@/config";
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                             */
+/* ------------------------------------------------------------------ */
+
+type SortKey = "title" | "updatedAt" | "fileSize";
+type SortOrder = "asc" | "desc";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -41,6 +56,16 @@ function mapNovelToCardData(novel: Novel): NovelCardData {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Sort options                                                      */
+/* ------------------------------------------------------------------ */
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: "updatedAt", label: "最近上传" },
+  { value: "title", label: "书名" },
+  { value: "fileSize", label: "文件大小" },
+];
+
+/* ------------------------------------------------------------------ */
 /*  Component                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -59,6 +84,9 @@ export function HomePage() {
   const setTotalPages = homeContext?.setTotalPages;
 
   const [uploadFiles, setUploadFiles] = useState<UploadFileInfo[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
   const { data: novelsData, isLoading, isError, refetch } = useQuery({
     queryKey: ["novels", page],
@@ -86,14 +114,16 @@ export function HomePage() {
   }, [total, isLoading, totalPages, setTotal, setIsLoading, setTotalPages]);
 
   const uploadMutation = useMutation({
-    mutationFn: async (files: UploadFileInfo[]) => {
+    mutationFn: async ({ files, signal }: { files: UploadFileInfo[]; signal: AbortSignal }) => {
       const results = [];
       for (const fileInfo of files) {
         if (fileInfo.status !== "pending") continue;
         try {
-          const result = await uploadNovel(fileInfo.file);
+          const result = await uploadNovel(fileInfo.file, { signal });
           results.push({ success: true, result });
         } catch (error) {
+          // 取消上传时不记录为失败
+          if (signal.aborted) break;
           results.push({
             success: false,
             error: error instanceof Error ? error.message : "上传失败",
@@ -127,7 +157,50 @@ export function HomePage() {
     },
   });
 
-  const novelCards: NovelCardData[] = novels.map((n) => mapNovelToCardData(n));
+  const handlePrefetchNovel = useCallback(
+    (novelId: string) => {
+      queryClient.prefetchQuery({
+        queryKey: ["novel", novelId],
+        queryFn: () => getNovel(novelId),
+        staleTime: appConfig.prefetchStaleTime,
+      });
+    },
+    [queryClient]
+  );
+
+  const novelCards: NovelCardData[] = useMemo(() => {
+    let cards = novels.map((n) => mapNovelToCardData(n));
+
+    // 搜索过滤
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase();
+      cards = cards.filter(
+        (c) =>
+          c.title.toLowerCase().includes(query) ||
+          (c.author && c.author.toLowerCase().includes(query)) ||
+          c.filename.toLowerCase().includes(query)
+      );
+    }
+
+    // 排序
+    cards = [...cards].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "title":
+          cmp = a.title.localeCompare(b.title, "zh-CN");
+          break;
+        case "updatedAt":
+          cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+          break;
+        case "fileSize":
+          cmp = (a.fileSize ?? 0) - (b.fileSize ?? 0);
+          break;
+      }
+      return sortOrder === "asc" ? cmp : -cmp;
+    });
+
+    return cards;
+  }, [novels, searchQuery, sortKey, sortOrder]);
 
   if (isError) {
     return (
@@ -146,6 +219,48 @@ export function HomePage() {
 
   return (
     <div className="h-full overflow-auto p-8">
+      {/* 搜索栏和排序 */}
+      {!isLoading && novels.length > 0 && (
+        <div className="mb-6 flex items-center gap-3">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+            <Input
+              placeholder="搜索书名、作者..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 h-9"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ArrowUpDown className="h-3.5 w-3.5 text-text-muted" />
+            <Select
+              value={sortKey}
+              onValueChange={(v) => {
+                setSortKey(v as SortKey);
+                if (v === sortKey) setSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+                else setSortOrder("desc");
+              }}
+            >
+              <SelectTrigger className="h-9 w-28">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                    {sortKey === opt.value && (
+                      <span className="ml-1 text-text-muted">
+                        {sortOrder === "asc" ? "↑" : "↓"}
+                      </span>
+                    )}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="grid gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {Array.from({ length: 10 }).map((_, i) => (
@@ -167,7 +282,13 @@ export function HomePage() {
               key={novel.id ?? `novel-${index}`}
               novel={novel}
               onView={(id) => navigate(`/novels/${id}`)}
-              onDelete={(id) => deleteMutation.mutate(id)}
+              onPrefetch={handlePrefetchNovel}
+              onDelete={(id) => {
+                const title = novel.title || novel.filename;
+                if (window.confirm(`确定要删除「${title}」吗？此操作不可恢复。`)) {
+                  deleteMutation.mutate(id);
+                }
+              }}
             />
           ))}
         </div>
@@ -181,8 +302,8 @@ export function HomePage() {
         }}
         files={uploadFiles}
         onFilesChange={setUploadFiles}
-        onUpload={async () => {
-          await uploadMutation.mutateAsync(uploadFiles);
+        onUpload={async (signal) => {
+          await uploadMutation.mutateAsync({ files: uploadFiles, signal });
         }}
       />
     </div>

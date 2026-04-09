@@ -117,7 +117,7 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
     return candidates
 
 
-def attribute_dialogues_with_llm(
+async def attribute_dialogues_with_llm(
     client: AnnotationClient,
     chunk_text: str,
     candidates: list[QuoteCandidate],
@@ -134,41 +134,10 @@ def attribute_dialogues_with_llm(
     任务: analyze-dialogue-length-zero
     说明: 调用 LLM 根据上下文判断每段对话的说话者
 
-    修改时间: 2026-03-20
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: fix-dialogue-attribution-parsing
-    修改内容: 使用正确的 API 调用方式，直接解析 LLM 返回的 JSON 为 DialogueAttributionResult
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: refactor-phase3-to-annotation-layer
-    修改内容: 迁移到 models/local/annotation/phase3.py，添加 chunk_id 和 run_id 参数支持交互记录保存
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: fix-phase3-speaker-alias-mapping
-    修改内容: known_characters 改为可选参数，支持 None 让 LLM 自由判断说话者
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
-    修改内容:
-    - 接收 QuoteCandidate 列表替代 tuple 列表
-    - 返回 DialogueRecord 列表替代 dict
-    - 添加失败重试机制
-    - 添加后处理验证
-
-    Args:
-        client: 统一模型客户端
-        chunk_text: chunk 原文
-        candidates: 引号候选列表 [QuoteCandidate, ...]
-        known_characters: 已知人物列表，None 时 LLM 自由判断
-        alias_map: 别名映射表，用于说话者归一化
-        chunk_id: chunk ID（用于交互记录）
-        run_id: 运行 ID（用于交互记录）
-
-    Returns:
-        DialogueRecord 列表
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     if not candidates:
         return []
@@ -180,7 +149,7 @@ def attribute_dialogues_with_llm(
     is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
 
-    def _execute_call(
+    async def _execute_call(
         current_client: AnnotationClient,
         retry_messages: list[dict] | None = None,
     ) -> list[DialogueRecord]:
@@ -202,7 +171,7 @@ def attribute_dialogues_with_llm(
         ]
 
         start_time = time.time()
-        parsed, response = current_client._call_annotation_api(
+        parsed, response = await current_client._call_annotation_api(
             messages=messages,
             enable_thinking=enable_thinking,
             chunk_id=chunk_id,
@@ -250,7 +219,7 @@ def attribute_dialogues_with_llm(
     )
 
     try:
-        result = retry_handler.execute(_execute_call)
+        result = await retry_handler.execute(_execute_call)
         if result is None:
             return []
         return _post_process_validation(result, candidates, known_characters, alias_map, chunk_id)
@@ -311,6 +280,11 @@ def _post_process_validation(
     - unknown speaker 保留为 null 而非丢弃整条记录
     - 增加 identity_clue 与 speaker 一致性校验
     - 从 identity_clue 反推 speaker 修正错误归属
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: speaker 改为 list[str]，适配多人说话场景
     """
     valid_records = []
     candidate_indices = {c.index for c in candidates}
@@ -319,7 +293,6 @@ def _post_process_validation(
         known_set = {alias_map.get(name, name) if alias_map else name for name in known_characters}
 
     correction_count = 0
-    nullify_count = 0
     kept_count = 0
 
     for record in records:
@@ -330,58 +303,53 @@ def _post_process_validation(
             )
             continue
 
-        canonical_speaker = record.speaker
-        if canonical_speaker and alias_map:
-            canonical_speaker = alias_map.get(canonical_speaker, canonical_speaker)
-
-        if known_set and canonical_speaker and canonical_speaker not in known_set:
-            inferred = None
-            if record.identity_clue:
-                inferred = _extract_speaker_from_clue(record.identity_clue, known_set=None)
-            if inferred:
-                correction_count += 1
-                logger.warning(
-                    f"phase3_validation: speaker '{record.speaker}' not in known_set, "
-                    f"identity_clue implies '{inferred}', correcting. "
-                    f"chunk_id={chunk_id} index={record.index}"
-                )
-                valid_records.append(record.model_copy(update={"speaker": inferred}))
-            else:
-                kept_count += 1
-                valid_records.append(record)
+        if not record.speaker:
+            valid_records.append(record)
             continue
 
-        if record.identity_clue and canonical_speaker:
-            inferred = _extract_speaker_from_clue(record.identity_clue, None)
-            if inferred and inferred != canonical_speaker:
-                if not known_set or inferred in known_set:
-                    correction_count += 1
-                    logger.warning(
-                        f"phase3_validation: identity_clue implies '{inferred}' "
-                        f"but speaker is '{canonical_speaker}', correcting. "
-                        f"chunk_id={chunk_id} index={record.index}"
-                    )
-                    valid_records.append(record.model_copy(update={"speaker": inferred}))
-                else:
-                    nullify_count += 1
-                    valid_records.append(record.model_copy(update={"identity_clue": None}))
-                continue
+        canonical_speakers: list[str] = []
+        for s in record.speaker:
+            canonical = alias_map.get(s, s) if alias_map else s
+            canonical_speakers.append(canonical)
 
-        if canonical_speaker != record.speaker:
-            valid_records.append(record.model_copy(update={"speaker": canonical_speaker}))
+        if known_set:
+            validated_speakers: list[str] = []
+            for i, s in enumerate(canonical_speakers):
+                if s in known_set:
+                    validated_speakers.append(s)
+                else:
+                    if record.identity_clue and i == 0:
+                        inferred = _extract_speaker_from_clue(record.identity_clue, known_set)
+                        if inferred:
+                            correction_count += 1
+                            logger.warning(
+                                f"phase3_validation: speaker '{s}' not in known_set, "
+                                f"identity_clue implies '{inferred}', correcting. "
+                                f"chunk_id={chunk_id} index={record.index}"
+                            )
+                            validated_speakers.append(inferred)
+                        else:
+                            kept_count += 1
+                            validated_speakers.append(s)
+                    else:
+                        validated_speakers.append(s)
+            canonical_speakers = validated_speakers
+
+        if canonical_speakers != record.speaker:
+            valid_records.append(record.model_copy(update={"speaker": canonical_speakers}))
         else:
             valid_records.append(record)
 
-    if correction_count > 0 or nullify_count > 0 or kept_count > 0:
+    if correction_count > 0 or kept_count > 0:
         logger.info(
             f"phase3_validation summary: corrections={correction_count}, "
-            f"nullified_clues={nullify_count}, kept_original={kept_count}, chunk_id={chunk_id}"
+            f"kept_original={kept_count}, chunk_id={chunk_id}"
         )
 
     return valid_records
 
 
-def compute_dialogue_lengths_with_llm(
+async def compute_dialogue_lengths_with_llm(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
@@ -389,15 +357,11 @@ def compute_dialogue_lengths_with_llm(
     run_id: str | None = None,
     known_characters: list[str] | None = None,
     return_tones: bool = False,
-    return_evidences: bool = False,
     return_identity_clues: bool = False,
 ) -> (
     tuple[dict[str, int], dict[int, str], list[tuple[int, str]]]
     | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]]
-    | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str]]
-    | tuple[
-        dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str], dict[int, str | None]
-    ]
+    | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str | None]]
 ):
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
@@ -407,64 +371,16 @@ def compute_dialogue_lengths_with_llm(
     任务: analyze-dialogue-length-zero
     说明: 调用 LLM 根据上下文判断每段对话的说话者
 
-    修改时间: 2026-03-20
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: fix-dialogue-attribution-parsing
-    修改内容: 使用正确的 API 调用方式，直接解析 LLM 返回的 JSON 为 DialogueAttributionResult
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: refactor-phase3-to-annotation-layer
-    修改内容: 迁移到 models/local/annotation/phase3.py，添加 chunk_id 和 run_id 参数支持交互记录保存
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: fix-phase3-speaker-alias-mapping
-    修改内容: known_characters 改为可选参数，支持 None 让 LLM 自由判断说话者
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
-    修改内容:
-    - 接收 QuoteCandidate 列表替代 tuple 列表
-    - 返回 DialogueRecord 列表替代 dict
-    - 添加失败重试机制
-    - 添加后处理验证
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: return-attribution-for-storage
-    修改内容: 返回 attribution mapping 供 storage 使用
-
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    修改内容: 返回 dialogue_tones 字典存储对话语气类型
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-unknown-speaker-context
-    修改内容: 返回 dialogue_evidences 字典存储对话判断依据
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: add-identity-clue-to-dialogue-record
-    修改内容: 添加 return_identity_clues 参数，返回 dialogue_identity_clues 字典存储身份线索
-
-    Returns:
-        根据 return_tones/return_evidences/return_identity_clues 参数返回不同长度的元组:
-        - 默认: ({说话者: 总长度}, {dialogue_idx: 说话者}, [(dialogue_idx, content), ...])
-        - return_tones: (+ {dialogue_idx: tone, ...})
-        - return_evidences: (+ {dialogue_idx: evidence, ...})
-        - return_identity_clues: (+ {dialogue_idx: identity_clue, ...})
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     logger.info(f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}")
 
     if not text:
         logger.info("compute_dialogue_lengths_with_llm: early return - text_empty=True")
         if return_identity_clues:
-            return ({}, {}, [], {}, {}, {})
-        if return_evidences:
             return ({}, {}, [], {}, {})
         if return_tones:
             return ({}, {}, [], {})
@@ -474,14 +390,12 @@ def compute_dialogue_lengths_with_llm(
     logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(candidates)} candidates")
     if not candidates:
         if return_identity_clues:
-            return ({}, {}, [], {}, {}, {})
-        if return_evidences:
             return ({}, {}, [], {}, {})
         if return_tones:
             return ({}, {}, [], {})
         return ({}, {}, [])
 
-    records = attribute_dialogues_with_llm(
+    records = await attribute_dialogues_with_llm(
         client,
         text,
         candidates,
@@ -496,7 +410,6 @@ def compute_dialogue_lengths_with_llm(
     canonical_attribution: dict[int, str] = {}
     dialogues: list[tuple[int, str]] = []
     dialogue_tones: dict[int, str] = {}
-    dialogue_evidences: dict[int, str] = {}
     dialogue_identity_clues: dict[int, str | None] = {}
     seen_indices: set[int] = set()
 
@@ -521,16 +434,15 @@ def compute_dialogue_lengths_with_llm(
         if record.tone:
             dialogue_tones[record.index] = record.tone
 
-        if record.evidence:
-            dialogue_evidences[record.index] = record.evidence
-
         if record.identity_clue:
             dialogue_identity_clues[record.index] = record.identity_clue
 
-        if record.speaker and record.speaker != "未知":
-            canonical = alias_map.get(record.speaker, record.speaker) if alias_map else record.speaker
-            speaker_lengths[canonical] = speaker_lengths.get(canonical, 0) + len(content)
-            canonical_attribution[record.index] = canonical
+        if record.speaker:
+            speakers_str = "、".join(record.speaker)
+            if speakers_str != "未知":
+                canonical = alias_map.get(speakers_str, speakers_str) if alias_map else speakers_str
+                speaker_lengths[canonical] = speaker_lengths.get(canonical, 0) + len(content)
+                canonical_attribution[record.index] = canonical
 
     logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
     if return_identity_clues:
@@ -539,11 +451,8 @@ def compute_dialogue_lengths_with_llm(
             canonical_attribution,
             dialogues,
             dialogue_tones,
-            dialogue_evidences,
             dialogue_identity_clues,
         )
-    if return_evidences:
-        return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones, dialogue_evidences)
     if return_tones:
         return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones)
     return (speaker_lengths, canonical_attribution, dialogues)

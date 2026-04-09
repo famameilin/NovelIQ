@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -116,17 +117,29 @@ class LDATrainer:
         output_dir.mkdir(parents=True, exist_ok=True)
         topic_model.lda_model.save(str(output_dir / "lda_model"))
         topic_model.dictionary.save(str(output_dir / "dictionary"))
+        if topic_model.labels:
+            labels_path = output_dir / "labels.json"
+            with open(labels_path, "w", encoding="utf-8") as f:
+                json.dump({str(k): v for k, v in topic_model.labels.items()}, f, ensure_ascii=False, indent=2)
+            logger.info("主题标签已保存: {}", labels_path)
         logger.info("LDA模型已保存: {}", output_dir)
 
     def load_model(self, input_dir: Path) -> TopicModel:
         lda_model = LdaModel.load(str(input_dir / "lda_model"))
         dictionary = Dictionary.load(str(input_dir / "dictionary"))
+        labels: dict[int, str] = {}
+        labels_path = input_dir / "labels.json"
+        if labels_path.exists():
+            with open(labels_path, encoding="utf-8") as f:
+                labels = {int(k): v for k, v in json.load(f).items()}
+            logger.info("主题标签已加载: {}", labels_path)
         logger.info("LDA模型已加载: {}", input_dir)
         return TopicModel(
             num_topics=lda_model.num_topics,
             dictionary=dictionary,
             lda_model=lda_model,
             corpus=None,
+            labels=labels,
         )
 
 

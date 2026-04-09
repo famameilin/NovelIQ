@@ -12,10 +12,10 @@
 任务: workflows 使用 Repository 模式重构
 修改内容: 添加 run_id/session 参数支持，使用 ChunkRepository 替代直接调用 operations 函数
 
-修改时间: 2026-03-15
+修改时间: 2026-04-09
 修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 移除向后兼容代码，只保留 Repository 模式
+任务: 重构其他 workflow 为 async
+修改内容: run_topic_model 改为 async def，所有内部调用改为 await
 """
 
 from __future__ import annotations
@@ -28,9 +28,10 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.storage.repositories import ChunkRepository
+from src.workflows.types import IProgressCallback
 
 
-def run_topic_model(
+async def run_topic_model(
     run_id: str,
     session: Session,
     num_topics: int | None = None,
@@ -39,6 +40,7 @@ def run_topic_model(
     top_n: int = 5,
     force: bool = False,
     cache_path: Path | None = None,
+    notify_callback: IProgressCallback | None = None,
 ) -> tuple[int, int]:
     """
     执行主题建模流程
@@ -70,6 +72,9 @@ def run_topic_model(
     _iterations = iterations if iterations is not None else settings.topic_model.single_book.iterations
 
     start_time = time.time()
+
+    if notify_callback:
+        await notify_callback(phase="topic-model", status="start", current=0, total=1, percent=0.0)
 
     chunk_repo = ChunkRepository(session)
 
@@ -142,5 +147,8 @@ def run_topic_model(
     logger.info(f"Topics: {topic_model.num_topics}")
     logger.info(f"Topic assignments: {len(topic_rows)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
+
+    if notify_callback:
+        await notify_callback(phase="topic-model", status="progress", current=1, total=1, percent=100.0)
 
     return total_chunks, topic_model.num_topics

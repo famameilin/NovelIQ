@@ -124,7 +124,6 @@ export function CharactersPage() {
       {/* Header */}
       <NovelHeader
         title="角色分析"
-        status={characters ? "completed" : undefined}
         className="mb-6"
       />
 

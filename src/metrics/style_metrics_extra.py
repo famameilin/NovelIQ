@@ -71,9 +71,10 @@ def _load_classical_imagery() -> set[str]:
         return CLASSICAL_IMAGERY
 
     try:
-        from src.lexicons.loader import load_lexicon
+        from src.lexicons.registry import LexiconRegistry
 
-        chars = load_lexicon("classical_imagery")
+        reg = LexiconRegistry()
+        chars = reg.get("culture.classical_imagery")
         CLASSICAL_IMAGERY = set(chars)
     except FileNotFoundError:
         CLASSICAL_IMAGERY = {
@@ -140,9 +141,10 @@ def _load_idiom_set() -> set[str]:
         return IDIOM_SET
 
     try:
-        from src.lexicons.loader import load_lexicon
+        from src.lexicons.registry import LexiconRegistry
 
-        idioms = load_lexicon("idioms")
+        reg = LexiconRegistry()
+        idioms = reg.get("culture.idioms")
         IDIOM_SET = set(idioms)
     except FileNotFoundError:
         IDIOM_SET = {

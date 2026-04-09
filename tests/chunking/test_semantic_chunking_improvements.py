@@ -54,42 +54,56 @@ class TestOnomatopoeiaDetection(unittest.TestCase):
         self.assertEqual(indices, {0, 2})
 
 
-class TestSemanticChunkerBasic(unittest.TestCase):
+class TestSemanticChunkerBasic(unittest.IsolatedAsyncioTestCase):
     """测试 SemanticChunker 基本功能"""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.mock_embedding_client = MagicMock()
 
-    def test_chunk_text_semantic_with_mock(self):
+    async def asyncSetUp(self) -> None:
+        pass
+
+    async def test_chunk_text_semantic_with_mock(self):
         """测试使用 mock embedding client 进行语义分块"""
-        self.mock_embedding_client.embed_texts.return_value = [
-            [0.1] * 10,
-            [0.9] * 10,
-            [0.1] * 10,
-        ]
+        async def mock_embed_texts(texts):
+            return [
+                [0.1] * 10,
+                [0.9] * 10,
+                [0.1] * 10,
+            ]
+
+        self.mock_embedding_client.embed_texts = mock_embed_texts
 
         chunker = SemanticChunker(embedding_client=self.mock_embedding_client)
         text = "段落一内容。" * 50 + "\n\n" + "段落二内容。" * 50 + "\n\n" + "段落三内容。" * 50
-        chunks = chunker.chunk_text_semantic(text)
+        chunks = await chunker.chunk_text_semantic(text)
 
         self.assertTrue(len(chunks) >= 1)
         for chunk in chunks:
             self.assertIsInstance(chunk, Chunk)
             self.assertTrue(len(chunk.text) > 0)
 
-    def test_chunk_text_semantic_empty_text(self):
+    async def test_chunk_text_semantic_empty_text(self):
         """测试空文本返回空列表"""
+        async def mock_embed_texts(texts):
+            return []
+
+        self.mock_embedding_client.embed_texts = mock_embed_texts
+
         chunker = SemanticChunker(embedding_client=self.mock_embedding_client)
-        chunks = chunker.chunk_text_semantic("")
+        chunks = await chunker.chunk_text_semantic("")
         self.assertEqual(len(chunks), 0)
 
-    def test_chunk_text_semantic_single_paragraph(self):
+    async def test_chunk_text_semantic_single_paragraph(self):
         """测试单段落文本"""
-        self.mock_embedding_client.embed_texts.return_value = [[0.1] * 10]
+        async def mock_embed_texts(texts):
+            return [[0.1] * 10]
+
+        self.mock_embedding_client.embed_texts = mock_embed_texts
 
         chunker = SemanticChunker(embedding_client=self.mock_embedding_client)
         text = "只有一个段落的内容。" * 100
-        chunks = chunker.chunk_text_semantic(text)
+        chunks = await chunker.chunk_text_semantic(text)
 
         self.assertEqual(len(chunks), 1)
         self.assertTrue(len(chunks[0].text) > 0)

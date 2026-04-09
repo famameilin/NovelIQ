@@ -163,10 +163,10 @@
 请从以下文本中识别人物关系：
 
 【文本】
-{chunk_text}
+${chunk_text}
 
 【已知人物】
-{known_characters}
+${known_characters}
 
 请输出 JSON 格式结果，不要输出任何其他内容。
 

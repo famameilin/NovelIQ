@@ -23,6 +23,7 @@ from .client_init import (
 )
 from .context import (
     ChunkContext,
+    _init_disambig_provider,
     _prepare_chunk_context,
 )
 from .disambiguation import (
@@ -41,7 +42,6 @@ from .sentence import (
     _annotate_dialogue_structure,
     _build_sentence_pool,
     _extract_and_save_global_context,
-    _load_alias_keywords,
 )
 from .storage import _store_annotation_results
 
@@ -62,6 +62,5 @@ __all__ = [
     "_build_sentence_pool",
     "_annotate_dialogue_structure",
     "_add_identity_clues",
-    "_load_alias_keywords",
     "_extract_and_save_global_context",
 ]

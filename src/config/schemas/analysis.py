@@ -47,14 +47,36 @@ class DatabaseSettings:
 
 
 @dataclass
-class ProgressSettings:
-    """分析进度配置"""
+class StageProgressRange:
+    """
+    阶段进度范围配置
 
-    preprocess: int = 10
-    annotate: int = 25
-    aggregate: int = 50
-    topic_model: int = 70
-    diagnose: int = 85
+    创建时间: 2026-04-08
+    创建者: TraeAI
+    任务: 统一前后端进度配置
+    说明: 定义每个阶段的进度百分比范围 [start, end]
+    """
+
+    start: float = 0.0
+    end: float = 100.0
+
+
+@dataclass
+class ProgressSettings:
+    """
+    分析进度配置
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: 统一前后端进度配置
+    修改内容: 将单一进度值改为范围配置，支持更精确的进度计算
+    """
+
+    preprocess: StageProgressRange = field(default_factory=lambda: StageProgressRange(0, 10))
+    annotate: StageProgressRange = field(default_factory=lambda: StageProgressRange(10, 85))
+    aggregate: StageProgressRange = field(default_factory=lambda: StageProgressRange(50, 70))
+    topic_model: StageProgressRange = field(default_factory=lambda: StageProgressRange(70, 85))
+    diagnose: StageProgressRange = field(default_factory=lambda: StageProgressRange(85, 100))
 
 
 @dataclass
@@ -132,7 +154,7 @@ class AnalysisSettings:
 class SingleBookTopicSettings:
     """单书籍主题模型配置"""
 
-    num_topics: int = 25
+    num_topics: int = 20
     passes: int = 10
     iterations: int = 500
 
@@ -170,13 +192,19 @@ class TopicModelSettings:
 
 @dataclass
 class TextLimitsSettings:
-    """文本截断限制配置"""
+    """
+    文本截断限制配置
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: 移除未使用的 summary 配置
+    修改内容: 移除 summary 字段，该字段仅用于已删除的 build_cloud_payload 函数
+    """
 
     pivot_block: int = 300
     pivot_moment: int = 400
     high_tension: int = 300
     foreshadowing: int = 200
-    summary: int = 4000
 
 
 @dataclass
@@ -195,7 +223,14 @@ class DiagnosisSettings:
 
 @dataclass
 class MetricsSettings:
-    """指标计算配置"""
+    """
+    指标计算配置
+
+    修改时间: 2026-04-07
+    修改者: GLM-5
+    任务: 张力曲线傅里叶平滑 - 配置抽离
+    修改内容: 添加 fourier_smooth_keep_ratio 参数
+    """
 
     mtld_threshold: float = 0.72
     emotion_recovery_threshold: float = 0.3
@@ -203,6 +238,7 @@ class MetricsSettings:
     std_dev_threshold: float = 0.15
     middle_collapse_min_chunks: int = 10
     character_max_iter: int = 100
+    fourier_smooth_keep_ratio: float = 0.1
 
 
 @dataclass
@@ -256,16 +292,43 @@ def _parse_database_settings(data: dict[str, Any] | None) -> DatabaseSettings:
     )
 
 
+def _parse_stage_progress_range(
+    data: dict[str, Any] | None,
+    default_start: float,
+    default_end: float,
+) -> StageProgressRange:
+    """
+    解析阶段进度范围配置
+
+    创建时间: 2026-04-08
+    创建者: TraeAI
+    任务: 统一前后端进度配置
+    """
+    if data is None:
+        return StageProgressRange(default_start, default_end)
+    return StageProgressRange(
+        start=data.get("start", default_start),
+        end=data.get("end", default_end),
+    )
+
+
 def _parse_progress_settings(data: dict[str, Any] | None) -> ProgressSettings:
-    """解析进度配置"""
+    """
+    解析进度配置
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: 统一前后端进度配置
+    修改内容: 支持解析范围配置
+    """
     if not data:
         return ProgressSettings()
     return ProgressSettings(
-        preprocess=data.get("preprocess", 10),
-        annotate=data.get("annotate", 25),
-        aggregate=data.get("aggregate", 50),
-        topic_model=data.get("topic_model", 70),
-        diagnose=data.get("diagnose", 85),
+        preprocess=_parse_stage_progress_range(data.get("preprocess"), 0, 10),
+        annotate=_parse_stage_progress_range(data.get("annotate"), 10, 50),
+        aggregate=_parse_stage_progress_range(data.get("aggregate"), 50, 70),
+        topic_model=_parse_stage_progress_range(data.get("topic_model"), 70, 85),
+        diagnose=_parse_stage_progress_range(data.get("diagnose"), 85, 100),
     )
 
 
@@ -377,7 +440,14 @@ def _parse_topic_model_settings(data: dict[str, Any] | None) -> TopicModelSettin
 
 
 def _parse_diagnosis_settings(data: dict[str, Any] | None) -> DiagnosisSettings:
-    """解析诊断配置"""
+    """
+    解析诊断配置
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: 移除未使用的 summary 配置
+    修改内容: 移除 summary 参数解析
+    """
     if not data:
         return DiagnosisSettings()
 
@@ -387,7 +457,6 @@ def _parse_diagnosis_settings(data: dict[str, Any] | None) -> DiagnosisSettings:
         pivot_moment=text_limits_data.get("pivot_moment", 400),
         high_tension=text_limits_data.get("high_tension", 300),
         foreshadowing=text_limits_data.get("foreshadowing", 200),
-        summary=text_limits_data.get("summary", 4000),
     )
 
     return DiagnosisSettings(
@@ -403,7 +472,14 @@ def _parse_diagnosis_settings(data: dict[str, Any] | None) -> DiagnosisSettings:
 
 
 def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
-    """解析指标配置"""
+    """
+    解析指标配置
+
+    修改时间: 2026-04-07
+    修改者: GLM-5
+    任务: 张力曲线傅里叶平滑 - 配置抽离
+    修改内容: 添加 fourier_smooth_keep_ratio 解析
+    """
     if not data:
         return MetricsSettings()
     return MetricsSettings(
@@ -413,6 +489,7 @@ def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
         std_dev_threshold=data.get("std_dev_threshold", 0.15),
         middle_collapse_min_chunks=data.get("middle_collapse_min_chunks", 10),
         character_max_iter=data.get("character_max_iter", 100),
+        fourier_smooth_keep_ratio=data.get("fourier_smooth_keep_ratio", 0.1),
     )
 
 

@@ -12,6 +12,11 @@
 修改者: TraeAI
 任务: simplify-phase1-prompt
 修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
+
+修改时间: 2026-04-09
+修改者: TraeAI
+任务: refactor/annotate-async
+修改内容: annotate_chunk 改为返回 Awaitable[MultiPhaseAnnotationResult]
 """
 
 from __future__ import annotations
@@ -35,7 +40,7 @@ class AnnotationLike(Protocol):
 
     def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None: ...
 
-    def annotate_chunk(
+    async def annotate_chunk(
         self,
         text: str,
         prev_summary: str | None = None,
@@ -62,7 +67,7 @@ class DisambiguationLike(Protocol):
 
     def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None: ...
 
-    def disambiguate_characters(
+    async def disambiguate_characters(
         self,
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
@@ -71,3 +76,5 @@ class DisambiguationLike(Protocol):
     ) -> ExtendedDisambigResult: ...
 
     def is_cloud_api(self) -> bool: ...
+
+    def generate_summary(self, messages: list[dict[str, str]], max_tokens: int = 150) -> str: ...

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +47,8 @@ class AnnotationPhaseConfig:
     incremental_disambig_client: DisambiguationLike | None = None
     full_disambig_client: DisambiguationLike | None = None
     run_id: str = ""
+    stream_callback: Callable[[str, str], Awaitable[None]] | None = None
+    notify_callback: Callable | None = None
 
 
 class ChunkAnnotationMaxRetriesExceededError(Exception):
@@ -54,7 +57,7 @@ class ChunkAnnotationMaxRetriesExceededError(Exception):
     pass
 
 
-def _annotate_chunk(
+async def _annotate_chunk(
     client: AnnotationLike,
     text: str,
     prev_summary: str | None = None,
@@ -70,6 +73,10 @@ def _annotate_chunk(
     """
     Chunk 标注函数
 
+    创建时间: 2025-03-11
+    创建者: TraeAI
+    任务: 标注流程
+
     修改时间: 2026-03-19
     修改者: TraeAI
     任务: 统一字段命名，添加 run_id 支持
@@ -84,13 +91,18 @@ def _annotate_chunk(
     任务: simplify-phase1-prompt
     修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
 
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: refactor/annotate-async
+    修改内容: 改为 async def
+
     重试策略:
     - 内层: 本地模型最多3次（任何错误类型）
     - 内层: 本地失败后云端1次
     - 云端失败直接终止整个任务
     """
     try:
-        return client.annotate_chunk(
+        return await client.annotate_chunk(
             text,
             prev_summary,
             alias_map=alias_map,
@@ -104,6 +116,7 @@ def _annotate_chunk(
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
+        logger.error(f"exception type: {type(e).__name__}, repr: {repr(e)}, args: {e.args}")
         raise ChunkAnnotationMaxRetriesExceededError(str(e)) from e
 
 
@@ -120,6 +133,7 @@ class AnnotationPhaseResult:
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
+        notify_callback: Callable | None = None,
     ) -> None:
         self.annotation_client = annotation_client
         self.cloud_annotation_client = cloud_annotation_client
@@ -129,6 +143,7 @@ class AnnotationPhaseResult:
         self.alias_keywords = alias_keywords
         self.global_context_str = global_context_str
         self.alias_map = alias_map
+        self.notify_callback = notify_callback
 
 
 def _set_client_session(client: Any, session: Any) -> None:
@@ -145,10 +160,16 @@ def _set_client_session(client: Any, session: Any) -> None:
 def _init_annotation_phase_with_config(
     config: AnnotationPhaseConfig,
 ) -> AnnotationPhaseResult:
-    """初始化标注阶段（使用配置对象）"""
+    """初始化标注阶段（使用配置对象）
+
+    修改时间: 2026-04-07
+    修改者: TraeAI
+    任务: websocket-streaming-progress
+    修改内容: 传递 stream_callback 到客户端初始化
+    """
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
     from .context import _init_disambig_provider
-    from .sentence import _extract_and_save_global_context, _load_alias_keywords
+    from .sentence import _extract_and_save_global_context
 
     if not config.run_id:
         raise ValueError("run_id is required for annotation phase")
@@ -158,6 +179,7 @@ def _init_annotation_phase_with_config(
         config.annotate_client,
         config.incremental_disambig_client,
         config.full_disambig_client,
+        stream_callback=config.stream_callback,
     )
 
     # 设置 session 用于保存模型交互记录
@@ -175,7 +197,7 @@ def _init_annotation_phase_with_config(
     ]
     _setup_token_usage_callback(config.conn, clients, config.novel_id, annotation_client, run_id=config.run_id)
 
-    alias_keywords = _load_alias_keywords()
+    alias_keywords: list[str] = ["某", "名", "号", "就是", "称号", "全名"]
 
     rag_retriever = _init_disambig_provider(
         config.conn,
@@ -204,10 +226,11 @@ def _init_annotation_phase_with_config(
         alias_keywords=alias_keywords,
         global_context_str=global_context_str,
         alias_map={},
+        notify_callback=config.notify_callback,
     )
 
 
-def _init_annotation_phase(
+async def _init_annotation_phase(
     conn,
     all_chunks: list,
     novel_id: str,
@@ -220,14 +243,30 @@ def _init_annotation_phase(
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
     run_id: str = "",
+    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
+    notify_callback: Callable | None = None,
 ) -> AnnotationPhaseResult:
     """
     初始化标注阶段（向后兼容）
+
+    创建时间: 2026-03-13
+    创建者: TraeAI
+    任务: 标注流程阶段化
 
     修改时间: 2026-03-17
     修改者: TraeAI
     任务: code-quality-refactor - 简化多参数函数
     修改内容: 改为调用 _init_annotation_phase_with_config，保持向后兼容
+
+    修改时间: 2026-04-07
+    修改者: TraeAI
+    任务: websocket-streaming-progress
+    修改内容: 添加 stream_callback 参数
+
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: refactor/annotate-async
+    修改内容: 改为 async def
 
     Returns:
         AnnotationPhaseResult: 包含所有初始化后的资源
@@ -245,11 +284,13 @@ def _init_annotation_phase(
         incremental_disambig_client=incremental_disambig_client,
         full_disambig_client=full_disambig_client,
         run_id=run_id,
+        stream_callback=stream_callback,
+        notify_callback=notify_callback,
     )
     return _init_annotation_phase_with_config(config)
 
 
-def _process_single_chunk(
+async def _process_single_chunk(
     conn,
     chunk_id: int,
     chunk_text: str,
@@ -263,6 +304,10 @@ def _process_single_chunk(
     novel_id: str = "",
 ) -> DisambiguationState:
     """处理单个chunk
+
+    创建时间: 2026-03-13
+    创建者: TraeAI
+    任务: 标注流程阶段化
 
     修改时间: 2026-03-18
     修改者: TraeAI
@@ -283,6 +328,11 @@ def _process_single_chunk(
     修改者: TraeAI
     任务: disambiguation-state-three-layer
     修改内容: 使用 DisambiguationState 替代 alias_map，使用 _run_incremental_disambiguation_with_state
+
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: refactor/annotate-async
+    修改内容: 改为 async def，await annotate_chunk
     """
     from .context import _prepare_chunk_context
     from .disambiguation import _run_incremental_disambiguation_with_state
@@ -296,7 +346,23 @@ def _process_single_chunk(
         conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.rag_retriever, run_id=run_id
     )
 
-    annotation_result = _annotate_chunk(
+    logger.info(f"_process_single_chunk: notify_callback={phase_result.notify_callback is not None}, idx={idx}")
+
+    progress_range = settings.analysis.progress.annotate
+    range_start = progress_range.start
+    range_end = progress_range.end
+    base_percent = range_start + ((idx + 1) / total_chunks) * (range_end - range_start)
+
+    if phase_result.notify_callback:
+        await phase_result.notify_callback(
+            phase="phase1",
+            status="start",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+
+    annotation_result = await _annotate_chunk(
         phase_result.annotation_client,
         chunk_text,
         None,
@@ -310,6 +376,22 @@ def _process_single_chunk(
         run_id=run_id,
     )
 
+    if phase_result.notify_callback:
+        await phase_result.notify_callback(
+            phase="phase1",
+            status="progress",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+        await phase_result.notify_callback(
+            phase="phase2",
+            status="start",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+
     _store_annotation_results(
         conn,
         chunk_id,
@@ -322,7 +404,6 @@ def _process_single_chunk(
         dialogue_speakers=annotation_result.dialogue_speakers,
         dialogues=annotation_result.dialogues,
         dialogue_tones=annotation_result.dialogue_tones,
-        dialogue_evidences=annotation_result.dialogue_evidences,
         dialogue_identity_clues=annotation_result.dialogue_identity_clues,
         relations=annotation_result.relations,
     )
@@ -340,10 +421,47 @@ def _process_single_chunk(
         incremental_interval,
     )
 
+    if phase_result.notify_callback:
+        await phase_result.notify_callback(
+            phase="phase2",
+            status="progress",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+        await phase_result.notify_callback(
+            phase="phase3",
+            status="start",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+        await phase_result.notify_callback(
+            phase="phase3",
+            status="progress",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+        await phase_result.notify_callback(
+            phase="phase4",
+            status="start",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+        await phase_result.notify_callback(
+            phase="phase4",
+            status="progress",
+            current=idx + 1,
+            total=total_chunks,
+            percent=base_percent,
+        )
+
     return state
 
 
-def _process_chunks_phase(
+async def _process_chunks_phase(
     conn,
     all_chunks: list,
     annotated_ids: set[int],
@@ -353,8 +471,14 @@ def _process_chunks_phase(
     run_id: str = "",
     novel_id: str = "",
     resume: bool = False,
+    notify_callback: Callable | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, DisambiguationState]:
     """处理所有chunks阶段
+
+    创建时间: 2026-03-13
+    创建者: TraeAI
+    任务: 标注流程阶段化
 
     修改时间: 2026-03-19
     修改者: TraeAI
@@ -365,6 +489,11 @@ def _process_chunks_phase(
     修改者: TraeAI
     任务: disambiguation-state-three-layer
     修改内容: 使用 _load_disambig_checkpoint 替代 _load_disambig_checkpoint，返回 DisambiguationState
+
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: refactor/annotate-async
+    修改内容: 改为 async def，await _process_single_chunk
     """
     from .disambiguation import (
         DisambiguationMaxRetriesExceededError,
@@ -393,8 +522,12 @@ def _process_chunks_phase(
             logger.debug(f"skipping already annotated chunk_id={chunk_id}")
             continue
 
+        if is_cancelled and is_cancelled():
+            logger.warning(f"Annotation cancelled at chunk {idx + 1}/{total_chunks}")
+            break
+
         try:
-            state = _process_single_chunk(
+            state = await _process_single_chunk(
                 conn,
                 chunk_id,
                 chunk_text,
@@ -412,6 +545,7 @@ def _process_chunks_phase(
                 _save_disambig_checkpoint(conn, run_id, state)
             if run_id and success_count % projection_interval == 0:
                 project_graph_tables(run_id, to_chunk=chunk_id, session=conn)
+
         except ChunkAnnotationMaxRetriesExceededError as e:
             logger.error(f"chunk annotation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
             raise

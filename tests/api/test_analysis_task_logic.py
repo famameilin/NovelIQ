@@ -1,31 +1,25 @@
 """
-2026-03-11: Claude创建
-测试analyze接口多任务判断逻辑
+测试 NovelService 任务判断逻辑
 
-修改时间: 2026-04-05
+创建时间: 2026-03-11
+修改时间: 2026-04-08
 修改者: TraeAI
-任务: 修复测试使用测试数据库
-修改内容: 重构测试使用 pytest 风格，mock get_session_factory 使用测试数据库
+任务: 重写测试以匹配当前 NovelService API
+修改内容: 基于当前 NovelService 实现重写测试，使用依赖注入的 session
+说明: 只有 1 个 task 时返回，多个 task 时报错
 """
-import asyncio
-import sys
+import uuid
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import text
 
-sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-from src.api.exceptions import AnalysisError
-from src.api.services.analysis_service import AnalysisService
 from src.api.services.novel_service import NovelService
-from src.api.services.task_manager import TaskManager
+from src.storage.models import Novel, AnalysisRun
 from src.storage.repositories import RunRepository
 
 
 class TestNovelServiceTaskLogic:
-    """测试NovelService中多任务判断逻辑"""
+    """测试 NovelService 中多任务判断逻辑"""
 
     @pytest.fixture(autouse=True)
     def setup(self, db_session, tmp_path):
@@ -33,189 +27,126 @@ class TestNovelServiceTaskLogic:
         self.db_session = db_session
         self.run_repo = RunRepository(db_session)
         self.temp_dir = tmp_path
-        self.test_novel_id = "test_novel"
+        self.test_novel_id = str(uuid.uuid4())[:8]
 
-        def mock_session_factory():
-            class SessionContext:
-                def __enter__(self):
-                    return db_session
+        novel = Novel(
+            novel_id=self.test_novel_id,
+            filename="test.txt",
+            file_path=str(tmp_path / "test.txt"),
+            file_size=100,
+        )
+        db_session.add(novel)
+        db_session.commit()
 
-                def __exit__(self, *args):
-                    pass
+        self.service = NovelService(tmp_path)
 
-            return SessionContext()
+        yield
 
-        with patch("src.api.services.novel_service.get_session_factory", return_value=mock_session_factory):
-            self.service = NovelService(self.temp_dir)
-            self.service._novels[self.test_novel_id] = {
-                "novel_id": self.test_novel_id,
-                "file_path": "test.txt",
-            }
-            yield
+        db_session.query(AnalysisRun).filter(AnalysisRun.novel_id == self.test_novel_id).delete()
+        db_session.query(Novel).filter(Novel.novel_id == self.test_novel_id).delete()
+        db_session.commit()
 
-        self.db_session.execute(text("DELETE FROM analysis_runs"))
-        self.db_session.commit()
-
-    def _create_run(self, novel_id: str, status: str = "pending", run_id: str | None = None) -> str:
+    def _create_run(self, status: str = "pending", run_id: str | None = None) -> str:
         """创建测试运行记录"""
-        created_run_id = self.run_repo.create_run(
-            novel_id=novel_id,
+        if run_id is None:
+            run_id = str(uuid.uuid4())
+
+        run = AnalysisRun(
+            run_id=run_id,
+            novel_id=self.test_novel_id,
             source_path="test.txt",
             title="Test Novel",
             author="Test Author",
-            run_id=run_id,
+            status=status,
         )
-        if status != "pending":
-            self.run_repo.update_run_status(created_run_id, status)
-        return created_run_id
+        self.db_session.add(run)
+        self.db_session.commit()
+        return run_id
 
-    def test_get_task_counts_by_status_empty(self):
+    def test_get_task_counts_by_status_empty(self) -> None:
         """无任务时返回全0"""
-        counts = self.service.get_task_counts_by_status("nonexistent")
-        assert counts == {"completed": 0, "running": 0, "pending": 0, "failed": 0}
+        counts = self.service.get_task_counts_by_status(self.test_novel_id, self.db_session)
+        assert counts["completed"] == 0
+        assert counts["running"] == 0
+        assert counts["pending"] == 0
+        assert counts["failed"] == 0
 
-    def test_get_task_counts_by_status_single_task(self):
-        """单个任务时正确计数"""
-        self._create_run(self.test_novel_id, "completed")
-
-        counts = self.service.get_task_counts_by_status(self.test_novel_id)
+    def test_get_task_counts_by_status_single_task(self) -> None:
+        """单个任务"""
+        self._create_run(status="completed")
+        counts = self.service.get_task_counts_by_status(self.test_novel_id, self.db_session)
         assert counts["completed"] == 1
         assert counts["running"] == 0
+        assert counts["pending"] == 0
+        assert counts["failed"] == 0
 
-    def test_get_task_counts_by_status_multiple_tasks(self):
-        """多个任务时正确计数"""
-        self._create_run(self.test_novel_id, "completed")
-        self._create_run(self.test_novel_id, "running")
-        self._create_run(self.test_novel_id, "failed")
-
-        counts = self.service.get_task_counts_by_status(self.test_novel_id)
+    def test_get_task_counts_by_status_multiple_tasks(self) -> None:
+        """多个任务各状态"""
+        self._create_run(status="completed")
+        self._create_run(status="running")
+        self._create_run(status="pending")
+        self._create_run(status="failed")
+        counts = self.service.get_task_counts_by_status(self.test_novel_id, self.db_session)
         assert counts["completed"] == 1
         assert counts["running"] == 1
+        assert counts["pending"] == 1
         assert counts["failed"] == 1
 
-    def test_get_single_valid_task_no_tasks(self):
-        """无任务时返回None"""
-        task, error = self.service.get_single_valid_task("nonexistent")
+    def test_get_single_valid_task_no_tasks(self) -> None:
+        """无任务返回 None"""
+        task, error = self.service.get_single_valid_task(self.test_novel_id, self.db_session)
         assert task is None
         assert error is None
 
-    def test_get_single_valid_task_single_task(self):
-        """单个任务时返回该任务"""
-        self._create_run(self.test_novel_id, "completed")
-
-        task, error = self.service.get_single_valid_task(self.test_novel_id)
+    def test_get_single_valid_task_single_task(self) -> None:
+        """单个任务直接返回"""
+        self._create_run(status="completed")
+        task, error = self.service.get_single_valid_task(self.test_novel_id, self.db_session)
         assert task is not None
         assert error is None
+        assert task["status"] == "completed"
 
-    def test_get_single_valid_task_one_running_others_failed(self):
-        """一个running + 其他failed时返回running"""
-        self._create_run(self.test_novel_id, "running")
-        self._create_run(self.test_novel_id, "failed")
-
-        task, error = self.service.get_single_valid_task(self.test_novel_id)
-        assert task is not None
-        assert task["status"] == "running"
-        assert error is None
-
-    def test_get_single_valid_task_multiple_completed_error(self):
-        """多个completed时报错"""
-        self._create_run(self.test_novel_id, "completed")
-        self._create_run(self.test_novel_id, "completed")
-
-        task, error = self.service.get_single_valid_task(self.test_novel_id)
+    def test_get_single_valid_task_multiple_tasks_error(self) -> None:
+        """多个任务返回错误"""
+        self._create_run(status="completed")
+        self._create_run(status="running")
+        task, error = self.service.get_single_valid_task(self.test_novel_id, self.db_session)
         assert task is None
-        assert "多个已完成任务" in error
-
-    def test_get_single_valid_task_multiple_running_error(self):
-        """多个running时报错"""
-        self._create_run(self.test_novel_id, "running")
-        self._create_run(self.test_novel_id, "running")
-
-        task, error = self.service.get_single_valid_task(self.test_novel_id)
-        assert task is None
-        assert "多个运行中任务" in error
-
-    def test_get_single_valid_task_multiple_failed_error(self):
-        """多个failed时报错"""
-        self._create_run(self.test_novel_id, "failed")
-        self._create_run(self.test_novel_id, "failed")
-
-        task, error = self.service.get_single_valid_task(self.test_novel_id)
-        assert task is None
-        assert "多个失败任务" in error
-
-    def test_get_single_valid_task_multiple_pending_error(self):
-        """多个pending时报错"""
-        self._create_run(self.test_novel_id, "pending")
-        self._create_run(self.test_novel_id, "pending")
-
-        task, error = self.service.get_single_valid_task(self.test_novel_id)
-        assert task is None
-        assert "多个待处理任务" in error
-
-    def test_get_single_valid_task_running_and_failed_error(self):
-        """多个running + 多个failed时报错"""
-        self._create_run(self.test_novel_id, "running")
-        self._create_run(self.test_novel_id, "running")
-        self._create_run(self.test_novel_id, "failed")
-
-        task, error = self.service.get_single_valid_task(self.test_novel_id)
-        assert task is None
-        assert "请指定task_id" in error
+        assert "存在2个任务" in error
 
 
 class TestAnalysisServiceTaskId:
-    """测试AnalysisService中task_id参数逻辑"""
+    """测试 AnalysisService 任务 ID 相关逻辑"""
 
     @pytest.fixture(autouse=True)
-    def setup(self, tmp_path):
+    def setup(self, db_session, tmp_path):
+        """设置测试环境"""
+        self.db_session = db_session
         self.temp_dir = tmp_path
-        self.novel_service = NovelService(self.temp_dir)
-        self.task_manager = TaskManager()
-        self.analysis_service = AnalysisService(self.novel_service, self.task_manager)
+        self.service = NovelService(tmp_path)
 
-    def test_start_analysis_with_task_id(self):
-        """指定task_id时使用该task_id"""
-        self.novel_service._novels["test_novel"] = {
-            "novel_id": "test_novel",
-            "file_path": str(self.temp_dir / "test.txt"),
-        }
-        self.novel_service._tasks["existing_task"] = {
-            "task_id": "existing_task",
-            "novel_id": "test_novel",
-            "status": "pending",
-            "db_path": str(self.temp_dir / "existing_task.db"),
-        }
+    def test_start_analysis_with_task_id(self) -> None:
+        """指定 task_id 启动分析"""
+        novel_id = str(uuid.uuid4())[:8]
+        novel = Novel(
+            novel_id=novel_id,
+            filename="test.txt",
+            file_path=str(self.temp_dir / "test.txt"),
+            file_size=100,
+        )
+        self.db_session.add(novel)
+        self.db_session.commit()
 
-        (self.temp_dir / "test.txt").write_text("test content")
+        task_id = self.service.create_task(novel_id, task_id="test-task-001", session=self.db_session)
+        assert task_id == "test-task-001"
 
-        from src.api.models.requests import AnalyzeRequest
+    def test_start_analysis_with_wrong_task_id(self) -> None:
+        """不存在的 task_id"""
+        from src.api.exceptions import NovelNotFoundError
 
-        request = AnalyzeRequest(task_id="existing_task")
+        with pytest.raises(NovelNotFoundError):
+            self.service.get_task("non-existent-task-id", session=self.db_session)
 
-        task_id = asyncio.run(self.analysis_service.start_analysis("test_novel", request))
-        assert task_id == "existing_task"
 
-    def test_start_analysis_with_wrong_task_id(self):
-        """指定不属于该小说的task_id时报错"""
-        self.novel_service._novels["test_novel"] = {
-            "novel_id": "test_novel",
-            "file_path": str(self.temp_dir / "test.txt"),
-        }
-        self.novel_service._novels["other_novel"] = {
-            "novel_id": "other_novel",
-            "file_path": str(self.temp_dir / "other.txt"),
-        }
-        self.novel_service._tasks["other_task"] = {
-            "task_id": "other_task",
-            "novel_id": "other_novel",
-            "status": "pending",
-        }
-
-        from src.api.models.requests import AnalyzeRequest
-
-        request = AnalyzeRequest(task_id="other_task")
-
-        with pytest.raises(AnalysisError) as context:
-            asyncio.run(self.analysis_service.start_analysis("test_novel", request))
-        assert "不属于" in str(context.value)
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

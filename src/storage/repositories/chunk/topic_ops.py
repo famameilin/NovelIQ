@@ -46,24 +46,22 @@ def clear_chunk_topics(session: Session, run_id: str) -> None:
 
 def fetch_chunk_topics_agg(session: Session, run_id: str) -> Sequence[Row]:
     """
-    获取聚合后的分块主题数据（每个分块的平均主题权重）
+    获取聚合后的主题数据（每个主题的全局总权重）
 
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: refactor-hardcoded-index-access
-    修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
+    使用 SUM 而非 AVG，使热门主题（高出现频率 × 高概率）获得更高权重，
+    归一化后能体现各主题在全书中的相对重要程度差异。
 
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
 
     Returns:
-        Row 对象序列，支持字段名访问：row.chunk_id, row.avg_weight
+        Row 对象序列，支持字段名访问：row.topic_id, row.total_weight
     """
     stmt = (
-        select(ChunkTopic.chunk_id, func.avg(ChunkTopic.topic_weight).label("avg_weight"))
+        select(ChunkTopic.topic_id, func.sum(ChunkTopic.topic_weight).label("total_weight"))
         .where(ChunkTopic.run_id == run_id)
-        .group_by(ChunkTopic.chunk_id)
+        .group_by(ChunkTopic.topic_id)
     )
     result = session.execute(stmt)
     return result.fetchall()
