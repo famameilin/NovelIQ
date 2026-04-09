@@ -227,6 +227,17 @@ class AnalysisService:
             "skip_diagnose": not request.force_diagnose,
         }
 
+    def _is_zombie_task(self, task_id: str) -> bool:
+        """检查 running 状态的任务是否为僵尸任务（服务重启后遗留的无效 running 状态）"""
+        task_info = self.task_manager.get_task(task_id)
+        if task_info is None:
+            # TaskManager 中无记录，说明是上次进程遗留的僵尸任务
+            return True
+        if task_info.asyncio_task is None or task_info.asyncio_task.done():
+            # asyncio task 不存在或已完成，但状态仍为 running → 僵尸
+            return True
+        return False
+
     async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
 
@@ -238,6 +249,11 @@ class AnalysisService:
             logger.info(f"Using specified task_id: {specified_task_id}")
 
             if specified_task.get("status") in ("pending", "failed"):
+                task = asyncio.create_task(self._run_analysis(specified_task_id, novel, request))
+                self.task_manager.store_asyncio_task(specified_task_id, task)
+            elif specified_task.get("status") == "running" and self._is_zombie_task(specified_task_id):
+                logger.warning(f"Detected zombie task {specified_task_id}, restarting analysis")
+                self.task_manager.create_task(specified_task_id, novel_id)
                 task = asyncio.create_task(self._run_analysis(specified_task_id, novel, request))
                 self.task_manager.store_asyncio_task(specified_task_id, task)
 
@@ -254,6 +270,11 @@ class AnalysisService:
             logger.info(f"Found existing task {task_id} (status={status}) for novel {novel_id}, reusing it")
 
             if status == "pending":
+                task = asyncio.create_task(self._run_analysis(task_id, novel, request))
+                self.task_manager.store_asyncio_task(task_id, task)
+            elif status == "running" and self._is_zombie_task(task_id):
+                logger.warning(f"Detected zombie task {task_id}, restarting analysis")
+                self.task_manager.create_task(task_id, novel_id)
                 task = asyncio.create_task(self._run_analysis(task_id, novel, request))
                 self.task_manager.store_asyncio_task(task_id, task)
 
