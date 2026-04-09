@@ -95,7 +95,7 @@ def build_context_sentences(
     return result
 
 
-def _extract_and_save_global_context(
+async def _extract_and_save_global_context(
     conn,
     all_chunks: list,
     novel_id: str,
@@ -116,7 +116,7 @@ def _extract_and_save_global_context(
         return None
 
     logger.info("extracting global context from first chunks")
-    global_context = extract_global_context(first_chunks, client=annotation_client)
+    global_context = await extract_global_context(first_chunks, client=annotation_client)
 
     if run_id:
         from src.storage.repositories import StatsRepository

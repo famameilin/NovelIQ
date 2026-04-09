@@ -157,7 +157,7 @@ def _set_client_session(client: Any, session: Any) -> None:
     client.set_session(session)
 
 
-def _init_annotation_phase_with_config(
+async def _init_annotation_phase_with_config(
     config: AnnotationPhaseConfig,
 ) -> AnnotationPhaseResult:
     """初始化标注阶段（使用配置对象）
@@ -206,7 +206,7 @@ def _init_annotation_phase_with_config(
         run_id=config.run_id,
     )
 
-    global_context_str = _extract_and_save_global_context(
+    global_context_str = await _extract_and_save_global_context(
         config.conn,
         config.all_chunks,
         config.novel_id,
@@ -287,7 +287,7 @@ async def _init_annotation_phase(
         stream_callback=stream_callback,
         notify_callback=notify_callback,
     )
-    return _init_annotation_phase_with_config(config)
+    return await _init_annotation_phase_with_config(config)
 
 
 async def _process_single_chunk(
