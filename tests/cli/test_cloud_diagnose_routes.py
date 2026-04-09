@@ -29,6 +29,11 @@
 修改者: TraeAI
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 字段相关测试
+
+修改时间: 2026-04-08
+修改者: GLM-5
+任务: summary-full-chain-refactor
+修改内容: 移除 first_chapter_summary/last_chapter_summary 测试，新增 summaries 测试
 """
 
 import json
@@ -198,8 +203,7 @@ class TestCloudDiagnose:
         assert "high_tension_paragraphs" in payload
         assert "character_relations" in payload
         assert "foreshadowing_list" in payload
-        assert "first_chapter_summary" in payload
-        assert "last_chapter_summary" in payload
+        assert "summaries" in payload
         assert "known_characters" in payload
         assert "alias_merges" in payload
         assert "graph_summary" in payload
@@ -254,14 +258,6 @@ class TestCloudDiagnose:
         chunks = diag_repo.fetch_foreshadowing_chunks(self.run_id)
         assert len(chunks) > 0
 
-    def test_fetch_first_last_chunk_summary(self) -> None:
-        self._create_full_data(5)
-
-        diag_repo = DiagnosisRepository(self.db_session)
-        first, last = diag_repo.fetch_first_last_chunk_summary(self.run_id)
-        assert len(first) > 0
-        assert len(last) > 0
-
     def test_fetch_pivot_moments(self) -> None:
         self._create_full_data(5)
 
@@ -269,10 +265,11 @@ class TestCloudDiagnose:
         moments = diag_repo.fetch_pivot_moments(self.run_id)
         assert len(moments) > 0
 
-    def test_run_diagnose_with_cloud(self) -> None:
+    @pytest.mark.asyncio()
+    async def test_run_diagnose_with_cloud(self) -> None:
         self._create_full_data(5)
 
-        analysis = run_diagnose(
+        analysis = await run_diagnose(
             run_id=self.run_id,
             session=self.db_session,
             client=FakeClient(),
@@ -287,10 +284,11 @@ class TestCloudDiagnose:
         ).scalar()
         assert rows > 0
 
-    def test_run_diagnose_persists_result(self) -> None:
+    @pytest.mark.asyncio()
+    async def test_run_diagnose_persists_result(self) -> None:
         self._create_full_data(3)
 
-        run_diagnose(
+        await run_diagnose(
             run_id=self.run_id,
             session=self.db_session,
             client=FakeClient(),

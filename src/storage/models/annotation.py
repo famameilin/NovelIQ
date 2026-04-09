@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
+from sqlalchemy import ARRAY, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -180,17 +180,21 @@ class ChunkDialogue(Base):
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 添加 identity_clue 字段，存储 Phase 3 提取的身份线索
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: speaker 改为 Text 存储 JSON 数组，删除 evidence 字段
     """
 
     __tablename__ = "chunk_dialogues"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     chunk_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    speaker: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    speaker: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     length: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     identity_clue: Mapped[str | None] = mapped_column(Text, nullable=True)
     run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True

@@ -22,6 +22,9 @@ dependencies = [
     "tiktoken>=0.7.0",
     "json5>=0.9.0",
     "gensim>=4.3.2",
+    "numpy>=1.24.0",
+    "pyahocorasick>=2.0.0",
+    "sse-starlette>=2.0.0",
 ]
 
 [dependency-groups]
@@ -38,7 +41,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-n 0 --ignore-glob=tests/test_*.py --ignore-glob=tests/*_test.py"
+pythonpath = ["."]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 120

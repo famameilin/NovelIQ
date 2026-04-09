@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 class TaskStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -29,6 +31,11 @@ class AnalyzeResponse(BaseModel):
 class StatusResponse(BaseModel):
     """
     2026-03-12: Claude修改，添加task_id字段
+
+    2026-04-07: TraeAI修改，添加详细进度字段
+    任务: implement-task-cancellation
+    说明: 添加 sub_stage, current, total, message, llm_outputs 字段，
+          使 HTTP 轮询也能返回详细进度信息，与 WebSocket 行为一致
     """
 
     novel_id: str
@@ -36,6 +43,11 @@ class StatusResponse(BaseModel):
     status: TaskStatus
     progress: float = Field(ge=0, le=100)
     stage: str | None = None
+    sub_stage: str | None = None
+    current: int | None = None
+    total: int | None = None
+    message: str | None = None
+    llm_outputs: list[str] | None = None
     error: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -111,7 +123,18 @@ class ChunkRelation(BaseModel):
 
 
 class ChunkDialogue(BaseModel):
-    speaker: str | None = None
+    """
+    创建时间: 2026-03-21
+    创建者: TraeAI
+    任务: ChunkAnnotation 新增字段
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: speaker 改为 list[str] 支持多人同时说话
+    """
+
+    speaker: list[str] | None = None
     length: int | None = None
 
 
@@ -236,6 +259,7 @@ class TopicInfo(BaseModel):
     topic_id: int
     words: list[str]
     weight: float
+    label: str | None = None
 
 
 class DiagnosisResult(BaseModel):

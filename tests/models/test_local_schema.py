@@ -44,7 +44,7 @@ class TestLocalSchema(unittest.TestCase):
             ],
             dialogues=[
                 DialogueSnapshot(
-                    speaker="张三",
+                    speaker=["张三"],
                 )
             ],
         )

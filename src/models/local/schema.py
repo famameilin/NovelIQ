@@ -138,14 +138,18 @@ class DialogueSnapshot(BaseModel):
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 添加 identity_clue 字段，存储 Phase 3 提取的身份线索
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: speaker 改为 list[str] 支持多人同时说话，删除 evidence 字段
     """
 
     model_config = ConfigDict(frozen=True)
 
-    speaker: str | None = None
+    speaker: list[str] | None = None
     content: str = ""
     tone: str | None = None
-    evidence: str = ""
     identity_clue: str | None = None
 
 
@@ -216,6 +220,11 @@ class DialogueRecord(BaseModel):
     修改者: TraeAI
     任务: add-identity-clue-to-dialogue-record
     修改内容: 添加 identity_clue 字段，用于存储对话中提取的身份线索
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: speaker 改为 list[str] 支持多人同时说话，删除 evidence 字段
     """
 
     model_config = ConfigDict(frozen=True)
@@ -223,10 +232,9 @@ class DialogueRecord(BaseModel):
     index: int = Field(description="候选序号（1开始）")
     content: str = Field(description="引号内的文字")
     is_dialogue: bool = Field(description="是否为真实对话")
-    speaker: str | None = Field(default=None, description="说话人，无法确定为 null")
+    speaker: list[str] | None = Field(default=None, description="说话人列表，支持多人同时说话，无法确定为 null")
     tone: str | None = Field(default=None, description="语气：强硬/温和/讽刺/恳求/命令/恐惧/惊慌")
     is_inner_monologue: bool = Field(default=False, description="是否为内心独白")
-    evidence: str = Field(default="", description="判断依据（用于调试）")
     identity_clue: str | None = Field(default=None, description="身份线索（如自报身份、称呼关系、别名揭示等）")
 
 

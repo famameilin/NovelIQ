@@ -16,10 +16,10 @@
 任务: storage-layer-decoupling
 修改内容: 移除向后兼容代码，只保留 Repository 模式
 
-修改时间: 2026-03-26
+修改时间: 2026-04-09
 修改者: TraeAI
-任务: 简化文化指标系统
-修改内容: 修复 culture_rows 类型注解，从 7 元组改为 2 元组 (chunk_id, imagery_lexicon_density)
+任务: 重构其他 workflow 为 async
+修改内容: run_preprocess 改为 async def，所有内部调用改为 await
 """
 
 from __future__ import annotations
@@ -36,9 +36,10 @@ from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import ChunkRepository, ChunkStyleData
+from src.workflows.types import IProgressCallback
 
 
-def run_preprocess(
+async def run_preprocess(
     source_path: Path,
     run_id: str,
     session: Session,
@@ -46,6 +47,7 @@ def run_preprocess(
     cache_path: Path | None = None,
     max_chars: int = 2000,
     overlap: int = 200,
+    notify_callback: IProgressCallback | None = None,
 ) -> tuple[int, int, float]:
     """
     执行预处理流程。
@@ -82,6 +84,9 @@ def run_preprocess(
 
     start_time = time.time()
 
+    if notify_callback:
+        await notify_callback(phase="preprocess", status="start", current=0, total=1, percent=0.0)
+
     chunk_repo = ChunkRepository(session)
     if chunk_repo.is_preprocess_complete(run_id):
         logger.info(f"preprocess already complete for run_id={run_id}, skipping")
@@ -107,7 +112,9 @@ def run_preprocess(
     use_semantic = settings.chunking.use_semantic_chunking
     if use_semantic:
         logger.info("启用语义分块")
-    all_chunks = chunk_documents(normalized_texts, max_chars=max_chars, overlap=overlap, use_semantic=use_semantic)
+    all_chunks = await chunk_documents(
+        normalized_texts, max_chars=max_chars, overlap=overlap, use_semantic=use_semantic
+    )
 
     total_chunks = len(all_chunks)
     total_chars = sum(len(chunk.text) for chunk in all_chunks)
@@ -149,4 +156,8 @@ def run_preprocess(
     logger.info(f"Total chunks: {total_chunks}")
     logger.info(f"Total characters: {total_chars}")
     logger.info(f"Processing time: {elapsed:.2f}s")
+
+    if notify_callback:
+        await notify_callback(phase="preprocess", status="progress", current=1, total=1, percent=100.0)
+
     return total_chunks, total_chars, elapsed

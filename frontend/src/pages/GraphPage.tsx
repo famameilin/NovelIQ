@@ -22,7 +22,7 @@ import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { ForceGraph } from "@/components/charts/ForceGraph";
-import { type ForceGraphHandle } from "@/components/charts/ForceGraph";
+import { type ForceGraphHandle } from "@/api/types";
 import { GraphToolbar } from "@/components/charts/GraphToolbar";
 import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeDetailPanel";
 import { GraphLegend } from "@/components/charts/GraphLegend";
@@ -52,7 +52,6 @@ export function GraphPage() {
   const forceGraphRef = useRef<ForceGraphHandle>(null);
 
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [highlightedNodes, setHighlightedNodes] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRelationTypes, setSelectedRelationTypes] = useState<Set<string>>(new Set());
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -205,28 +204,6 @@ export function GraphPage() {
     setIsPanelOpen(true);
   }, []);
 
-  const handleNodeHover = useCallback((node: GraphNodeObject | null) => {
-    if (!node) {
-      setHighlightedNodes(new Set());
-      return;
-    }
-
-    const highlighted = new Set<string>();
-    highlighted.add(node.entity_id);
-
-    if (graphData) {
-      graphData.edges.forEach((edge) => {
-        if (edge.source === node.entity_id) {
-          highlighted.add(edge.target);
-        } else if (edge.target === node.entity_id) {
-          highlighted.add(edge.source);
-        }
-      });
-    }
-
-    setHighlightedNodes(highlighted);
-  }, [graphData]);
-
   const handlePanelClose = useCallback(() => {
     setIsPanelOpen(false);
   }, []);
@@ -315,8 +292,6 @@ export function GraphPage() {
                 data={graphData!}
                 selectedNode={selectedNode}
                 onNodeClick={handleNodeClick}
-                onNodeHover={handleNodeHover}
-                highlightedNodes={highlightedNodes}
                 searchQuery={searchQuery}
                 relationFilter={selectedRelationTypes}
                 appearanceCountMap={appearanceCountMap}

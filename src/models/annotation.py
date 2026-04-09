@@ -11,6 +11,8 @@ AnnotationClient 模块
 - 2026-03-18: 拆分核心逻辑到 annotation/ 子包，简化此类
 - 2026-03-23: 移动到 src/models/annotation.py（统一客户端架构）
 - 2026-03-29: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
+- 2026-04-07: 添加 stream_callback 参数支持（websocket-streaming-progress）
+- 2026-04-09: 重构为 async def（适配 BaseModelClient._call_api_stream 异步化）
 
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
@@ -19,6 +21,7 @@ AnnotationClient 模块
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -66,6 +69,7 @@ class AnnotationClient(BaseModelClient):
         novel_id: str | None = None,
         instructor_client_factory: Any | None = None,
         session: Any | None = None,
+        stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(
             task_type=task_type,
@@ -77,8 +81,9 @@ class AnnotationClient(BaseModelClient):
             session=session,
         )
         self._instructor_client_factory = instructor_client_factory
+        self._stream_callback = stream_callback
 
-    def annotate_chunk(
+    async def annotate_chunk(
         self,
         text: str,
         prev_summary: str | None = None,
@@ -112,7 +117,7 @@ class AnnotationClient(BaseModelClient):
             run_id=run_id,
         )
 
-        return _annotate_chunk_multi_phase_impl(
+        return await _annotate_chunk_multi_phase_impl(
             client=self,
             text=ctx.text,
             prev_summary=ctx.prev_summary,
@@ -130,7 +135,7 @@ class AnnotationClient(BaseModelClient):
             run_id=ctx.run_id,
         )
 
-    def _call_annotation_api(
+    async def _call_annotation_api(
         self,
         messages: list[dict],
         enable_thinking: bool,
@@ -152,7 +157,6 @@ class AnnotationClient(BaseModelClient):
             "top_p": self._config.top_p,
         }
 
-        # Ollama 本地API支持 reasoning_effort 参数
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}
@@ -163,7 +167,7 @@ class AnnotationClient(BaseModelClient):
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
 
-        response = self._call_api_stream(request_params, is_cloud=is_cloud)
+        response = await self._call_api_stream(request_params, is_cloud=is_cloud, stream_callback=self._stream_callback)
 
         if response_model is not None:
             parsed_result = self._parse_structured_response(response, response_model)

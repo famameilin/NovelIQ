@@ -34,6 +34,7 @@ export interface NovelCardProps {
   novel: NovelCardData;
   onView?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onPrefetch?: (id: string) => void;
   className?: string;
 }
 
@@ -80,6 +81,7 @@ export function NovelCard({
   novel,
   onView,
   onDelete,
+  onPrefetch,
   className,
 }: NovelCardProps) {
   const [imageError, setImageError] = useState(false);
@@ -93,6 +95,7 @@ export function NovelCard({
         className
       )}
       onClick={() => onView?.(novel.id)}
+      onMouseEnter={() => onPrefetch?.(novel.id)}
     >
       <Card className="absolute inset-0 flex flex-col overflow-hidden border-0 shadow-md transition-shadow hover:shadow-xl">
         <div className="relative h-[75%] overflow-hidden bg-gradient-to-b from-surface-hover to-surface">

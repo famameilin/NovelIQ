@@ -81,7 +81,7 @@ def create_mock_annotation() -> MultiPhaseAnnotationResult:
                     index=1,
                     content="测试对话内容",
                     is_dialogue=True,
-                    speaker="张三",
+                    speaker=["张三"],
                     tone="neutral",
                     is_inner_monologue=False,
                     evidence="测试依据",
@@ -110,9 +110,10 @@ class TestAnnotate:
         chunks = [Chunk(index=i, start=0, end=10, text=f"测试文本{i}") for i in range(chunk_count)]
         chunk_repo.insert_chunks(self.run_id, chunks)
 
+    @pytest.mark.asyncio()
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
-    def test_annotate_basic(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
+    async def test_annotate_basic(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
@@ -127,7 +128,7 @@ class TestAnnotate:
 
         self._create_chunks(3)
 
-        success, errors, total = run_annotate(
+        success, errors, total = await run_annotate(
             run_id=self.run_id,
             session=self.db_session,
             resume=False,
@@ -152,9 +153,10 @@ class TestAnnotate:
         assert character_count == 3
         assert dialogue_count == 3
 
+    @pytest.mark.asyncio()
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
-    def test_annotate_resume(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
+    async def test_annotate_resume(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
@@ -169,7 +171,7 @@ class TestAnnotate:
 
         self._create_chunks(5)
 
-        success1, errors1, total1 = run_annotate(
+        success1, errors1, total1 = await run_annotate(
             run_id=self.run_id,
             session=self.db_session,
             resume=False,
@@ -190,7 +192,7 @@ class TestAnnotate:
         )
         self.db_session.commit()
 
-        success2, errors2, total2 = run_annotate(
+        success2, errors2, total2 = await run_annotate(
             run_id=self.run_id,
             session=self.db_session,
             resume=True,
@@ -204,9 +206,10 @@ class TestAnnotate:
         ).scalar()
         assert annotation_count == 5
 
+    @pytest.mark.asyncio()
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
-    def test_annotate_disambiguation(
+    async def test_annotate_disambiguation(
         self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock
     ) -> None:
         mock_annotation_client = MagicMock(spec=AnnotationClient)
@@ -223,7 +226,7 @@ class TestAnnotate:
 
         self._create_chunks(2)
 
-        success, errors, total = run_annotate(
+        success, errors, total = await run_annotate(
             run_id=self.run_id,
             session=self.db_session,
             resume=False,
@@ -236,7 +239,7 @@ class TestAnnotate:
         )
         self.db_session.commit()
 
-        success2, errors2, total2 = run_annotate(
+        success2, errors2, total2 = await run_annotate(
             run_id=self.run_id,
             session=self.db_session,
             resume=True,

@@ -173,7 +173,7 @@ export function ScoreOverviewCard({
   return (
     <Card variant="elevated" className={cn("rounded-xl", className)}>
       <CardContent className="flex flex-col gap-4 p-5">
-        <h3 className="text-sm font-semibold text-text">评分速览</h3>
+        <h3 className="text-xl font-semibold text-text">评分速览</h3>
 
         <div className="flex items-center gap-3">
           {foreshadowPct != null ? (

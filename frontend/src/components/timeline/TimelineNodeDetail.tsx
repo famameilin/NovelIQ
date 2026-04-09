@@ -7,7 +7,8 @@
  * 说明: 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
  */
 
-import { motion, AnimatePresence, useCallback } from "framer-motion";
+import { useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   X,

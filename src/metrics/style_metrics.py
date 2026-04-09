@@ -8,7 +8,7 @@ from pathlib import Path
 from src.config import settings
 from src.config.constants import SEMANTIC_CATEGORY_MAPPING
 
-from .lexicon_metrics import count_mixed_hits, count_token_hits
+from .lexicon_metrics import count_mixed_hits
 from .text_utils import dialogue_length, split_sentences, tokenize_words
 
 FUNCTION_WORDS_PATH = Path(__file__).parent.parent.parent / "data" / "lexicons" / "function_words.txt"
@@ -172,16 +172,19 @@ def metaphor_density(text: str) -> float:
     return hit / len(sentences)
 
 
-def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str | None = None) -> float:
-    total_tokens = len(tokens)
-    if text is None:
-        hit_count = count_token_hits(tokens, terms)
-        return min(hit_count / max(total_tokens, 1), 1.0)
+def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str) -> float:
+    """
+    计算词表密度（使用 phrase 模式匹配）。
 
+    修改时间: 2026-04-06
+    修改者: GLM-5
+    任务: 移除向后兼容代码
+    修改内容: 移除 text=None 死代码分支，统一使用 count_mixed_hits
+    """
+    total_tokens = len(tokens)
     hit_count = count_mixed_hits(text, tokens, terms)
     density = hit_count / max(total_tokens, 1)
 
-    # Keep positive density from collapsing to 0 on very short chunks.
     if hit_count > 0 and total_tokens <= SHORT_CHUNK_TOKEN_THRESHOLD:
         density = max(density, SHORT_CHUNK_MIN_POSITIVE_DENSITY)
 

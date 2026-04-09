@@ -23,7 +23,7 @@ interface NovelState {
   novelsCache: Novel[];
 
   setNovel: (novelId: string) => void;
-  setTask: (taskId: string) => void;
+  setTask: (taskId: string | null) => void;
   setNovelsCache: (novels: Novel[]) => void;
   getNovelById: (novelId: string) => Novel | undefined;
   clear: () => void;

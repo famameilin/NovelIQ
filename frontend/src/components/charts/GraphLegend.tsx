@@ -21,6 +21,7 @@
  */
 
 import { cn } from "@/lib/cn";
+import { getCSSColorVar } from "@/lib/theme";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -39,14 +40,14 @@ export interface GraphLegendProps {
 /* ------------------------------------------------------------------ */
 
 /** 实体类型 → CSS 变量名映射（与 ForceGraph.getEntityColorsFromCSS 一致） */
-const ENTITY_CSS_VARS: Record<string, string> = {
-  character: "var(--primary)",
-  group: "var(--chart-2)",
-  organization: "var(--chart-3)",
-  location: "var(--chart-4)",
-  item: "var(--chart-5)",
-  event: "var(--chart-neutral)",
-  concept: "var(--chart-neutral)",
+const ENTITY_CSS_VAR_NAMES: Record<string, string> = {
+  character: "--primary",
+  group: "--chart-2",
+  organization: "--chart-3",
+  location: "--chart-4",
+  item: "--chart-5",
+  event: "--chart-neutral",
+  concept: "--chart-neutral",
 };
 
 /** 实体类型显示名称 */
@@ -61,25 +62,26 @@ const ENTITY_LABELS: Record<string, string> = {
 };
 
 /** 关系类型 → CSS 变量名映射（与 ForceGraph.getRelationColorsFromCSS 一致） */
-const RELATION_CSS_VARS: Record<string, string> = {
-  "友好": "var(--chart-positive)",
-  "敌对": "var(--chart-negative)",
-  "从属": "var(--chart-neutral)",
-  "合作": "var(--chart-2)",
-  "亲情": "var(--chart-positive)",
-  "爱情": "var(--chart-4)",
-  "师徒": "var(--chart-5)",
+const RELATION_CSS_VAR_NAMES: Record<string, string> = {
+  "友好": "--chart-positive",
+  "敌对": "--chart-negative",
+  "从属": "--chart-neutral",
+  "合作": "--chart-2",
+  "亲情": "--chart-positive",
+  "爱情": "--chart-4",
+  "师徒": "--chart-5",
+  "爱慕": "--chart-positive",
+  "家族": "--chart-neutral",
 };
 
-/** 层级关系类型集合（与 ForceGraph.HIERARCHICAL_RELATION_TYPES 一致） */
-const HIERARCHICAL_TYPES = new Set(["从属", "师徒", "上下级", "隶属", "管理"]);
-
-function getEntityCssVar(entityType: string): string {
-  return ENTITY_CSS_VARS[entityType] || "var(--chart-neutral)";
+function getEntityColor(entityType: string): string {
+  const varName = ENTITY_CSS_VAR_NAMES[entityType];
+  return varName ? getCSSColorVar(varName) : getCSSColorVar("--chart-neutral");
 }
 
-function getRelationCssVar(relationType: string): string {
-  return RELATION_CSS_VARS[relationType] || "var(--chart-neutral)";
+function getRelationColor(relationType: string): string {
+  const varName = RELATION_CSS_VAR_NAMES[relationType];
+  return varName ? getCSSColorVar(varName) : getCSSColorVar("--chart-neutral");
 }
 
 /* ------------------------------------------------------------------ */
@@ -113,7 +115,7 @@ export function GraphLegend({
                 <div key={type} className="flex items-center gap-2">
                   <span
                     className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: getEntityCssVar(type) }}
+                    style={{ backgroundColor: getEntityColor(type) }}
                   />
                   <span className="text-sm text-text-secondary">
                     {ENTITY_LABELS[type] || type}
@@ -134,42 +136,15 @@ export function GraphLegend({
           <div>
             <h4 className="mb-2 text-xs font-medium text-text-muted">关系类型</h4>
             <div className="space-y-1.5">
-              {relationTypes.map((type) => {
-                const isHierarchical = HIERARCHICAL_TYPES.has(type);
-                return (
-                  <div key={type} className="flex items-center gap-2">
-                    {/* 线条样式指示器：虚线或实线 */}
-                    <span
-                      className="h-0.5 w-5 rounded-full"
-                      style={{
-                        backgroundColor: getRelationCssVar(type),
-                        ...(isHierarchical && {
-                          backgroundImage: `repeating-linear-gradient(90deg, transparent, transparent 3px, currentColor 3px, currentColor 6px)`,
-                        }),
-                      }}
-                    />
-                    <span className="text-sm text-text-secondary">{type}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* 样式说明 */}
-            <div className="mt-2 space-y-1 border-t border-border/40 pt-2">
-              <div className="flex items-center gap-2">
-                <span className="h-px w-5 bg-text-muted/50" />
-                <span className="text-[10px] text-text-muted">动态关系（实线）</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span
-                  className="h-px w-5 bg-text-muted/50"
-                  style={{
-                    backgroundImage:
-                      "repeating-linear-gradient(90deg, transparent, transparent 3px, currentColor 3px, currentColor 6px)",
-                  }}
-                />
-                <span className="text-[10px] text-text-muted">层级关系（虚线）</span>
-              </div>
+              {relationTypes.map((type) => (
+                <div key={type} className="flex items-center gap-2">
+                  <span
+                    className="h-0.5 w-5 rounded-full"
+                    style={{ backgroundColor: getRelationColor(type) }}
+                  />
+                  <span className="text-sm text-text-secondary">{type}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}

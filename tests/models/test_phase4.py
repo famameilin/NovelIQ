@@ -54,7 +54,7 @@ class TestBuildPhase4Messages(unittest.TestCase):
     def test_build_messages_success(self, mock_settings: MagicMock) -> None:
         """成功构建消息"""
         mock_settings.prompts.phase4.system = "你是关系抽取专家"
-        mock_settings.prompts.phase4.user_template = "文本：{chunk_text}\n人物：{known_characters}"
+        mock_settings.prompts.phase4.user_template = "文本：${chunk_text}\n人物：${known_characters}"
 
         messages = _build_phase4_messages("张三打了李四", ["张三", "李四"])
 
@@ -68,7 +68,7 @@ class TestBuildPhase4Messages(unittest.TestCase):
     def test_build_messages_with_no_characters(self, mock_settings: MagicMock) -> None:
         """无人物列表时显示'无'"""
         mock_settings.prompts.phase4.system = "system"
-        mock_settings.prompts.phase4.user_template = "{chunk_text}\n{known_characters}"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
 
         messages = _build_phase4_messages("文本内容", None)
 
@@ -304,35 +304,35 @@ class TestAnnotateChunkPhase4(unittest.TestCase):
     任务: phase4-code-review-fix
     """
 
-    def test_empty_text_returns_empty_list(self) -> None:
+    async def test_empty_text_returns_empty_list(self) -> None:
         """空文本返回空列表"""
         mock_client = MagicMock()
-        result = annotate_chunk_phase4(mock_client, "", ["张三"])
+        result = await annotate_chunk_phase4(mock_client, "", ["张三"])
         self.assertEqual(result, [])
 
-    def test_none_text_returns_empty_list(self) -> None:
+    async def test_none_text_returns_empty_list(self) -> None:
         """None 文本返回空列表"""
         mock_client = MagicMock()
-        result = annotate_chunk_phase4(mock_client, None, ["张三"])  # type: ignore[arg-type]
+        result = await annotate_chunk_phase4(mock_client, None, ["张三"])  # type: ignore[arg-type]
         self.assertEqual(result, [])
 
-    def test_empty_characters_returns_empty_list(self) -> None:
+    async def test_empty_characters_returns_empty_list(self) -> None:
         """空人物列表返回空列表"""
         mock_client = MagicMock()
-        result = annotate_chunk_phase4(mock_client, "文本内容", [])
+        result = await annotate_chunk_phase4(mock_client, "文本内容", [])
         self.assertEqual(result, [])
 
-    def test_none_characters_returns_empty_list(self) -> None:
+    async def test_none_characters_returns_empty_list(self) -> None:
         """None 人物列表返回空列表"""
         mock_client = MagicMock()
-        result = annotate_chunk_phase4(mock_client, "文本内容", None)
+        result = await annotate_chunk_phase4(mock_client, "文本内容", None)
         self.assertEqual(result, [])
 
     @patch("src.models.local.annotation.phase4.settings")
-    def test_successful_annotation(self, mock_settings: MagicMock) -> None:
+    async def test_successful_annotation(self, mock_settings: MagicMock) -> None:
         """成功调用关系抽取"""
         mock_settings.prompts.phase4.system = "system"
-        mock_settings.prompts.phase4.user_template = "{chunk_text}\n{known_characters}"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
 
         mock_client = MagicMock()
         mock_client._config.model = "test-model"
@@ -355,7 +355,7 @@ class TestAnnotateChunkPhase4(unittest.TestCase):
         mock_client._call_annotation_api.return_value = (mock_result, mock_response)
 
         with patch("src.models.local.annotation.phase4.record_model_interaction"):
-            result = annotate_chunk_phase4(
+            result = await annotate_chunk_phase4(
                 mock_client, "张三打了李四", ["张三", "李四"], chunk_id=1, run_id="test-run"
             )
 

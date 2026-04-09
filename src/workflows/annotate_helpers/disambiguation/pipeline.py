@@ -32,8 +32,10 @@ from src.models.local.disambiguation import (
     build_disambiguate_messages,
 )
 from src.models.local.disambiguation.result_builder import align_canonical_by_frequency
+from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
 from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
+from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
 
 from ..sentence import build_context_sentences
 from .candidate_filter import CandidateClassification
@@ -58,6 +60,78 @@ from .state_logic import (
 )
 
 DisambigStateSnapshot = dict[str, dict[str, str]]
+
+
+def _generate_and_save_stage_summary(
+    conn: Session,
+    run_id: str,
+    current_chunk_id: int,
+    disambig_interval: int,
+    client: DisambiguationLike,
+) -> None:
+    """
+    生成并保存阶段性摘要
+
+    创建时间: 2026-04-08
+    创建者: GLM-5
+    任务: summary-full-chain-refactor
+    说明: 在增量消歧时，获取最近N个chunk的summary，生成100字阶段性摘要
+
+    Args:
+        conn: 数据库会话
+        run_id: 运行ID
+        current_chunk_id: 当前chunk_id
+        disambig_interval: 消歧间隔（也是摘要区间大小）
+        client: 消歧客户端（用于调用LLM生成摘要）
+    """
+    start_chunk_id = current_chunk_id - disambig_interval + 1
+    if start_chunk_id < 0:
+        start_chunk_id = 0
+
+    summaries = fetch_chunk_summaries_by_range(conn, run_id, start_chunk_id, current_chunk_id)
+    if not summaries:
+        logger.debug(f"No chunk summaries found for range {start_chunk_id}-{current_chunk_id}")
+        return
+
+    summaries_text = "\n".join([f"[{cid}] {s}" for cid, s in summaries])
+    user_content = STAGE_SUMMARY_USER_TEMPLATE.format(
+        count=len(summaries),
+        summaries=summaries_text,
+    )
+    messages = [
+        {"role": "system", "content": STAGE_SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+    try:
+        start_time = time.time()
+        stage_summary = client.generate_summary(messages, max_tokens=150)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        if len(stage_summary) > 120:
+            stage_summary = stage_summary[:117] + "..."
+
+        insert_stage_summary(conn, run_id, start_chunk_id, current_chunk_id, stage_summary)
+        logger.info(
+            f"Generated stage summary for chunks {start_chunk_id}-{current_chunk_id}: {stage_summary[:50]}..."
+        )
+
+        record_model_interaction(
+            run_id=run_id,
+            chunk_id=None,
+            interaction_type="stage_summary",
+            phase="incremental",
+            attempt_number=1,
+            messages=messages,
+            response_text=stage_summary,
+            thinking_content=None,
+            duration_ms=duration_ms,
+            model_name=client._config.model,
+            model_provider="cloud" if client.is_cloud_api() else "local",
+            session=None,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to generate stage summary: {e}")
 
 
 def _inject_category_into_context(
@@ -372,6 +446,14 @@ def _run_incremental_disambiguation_with_state(
         new_state = new_state.with_updates(pending_relations=tuple(merged_relations))
 
         _save_disambig_checkpoint(conn, run_id, new_state)
+
+    _generate_and_save_stage_summary(
+        conn,
+        run_id,
+        chunk_id,
+        disambig_interval,
+        incremental_disambig_client,
+    )
 
     return new_state
 

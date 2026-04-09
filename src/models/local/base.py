@@ -32,6 +32,11 @@
 修改者: TraeAI
 修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
 
+修改时间: 2026-04-07
+修改者: TraeAI
+任务: code-review-fix
+修改内容: 移除 _call_api_stream 中发送剩余 buffer 时的冗余条件判断
+
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
@@ -43,7 +48,7 @@ from collections.abc import Callable
 from typing import Any, NamedTuple, TypeVar
 
 from loguru import logger
-from openai import APIConnectionError, APITimeoutError, BadRequestError, OpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestError
 from pydantic import BaseModel
 
 from src.config import TaskModelConfig, TaskType, load_task_config
@@ -102,7 +107,7 @@ class BaseModelClient:
         if client is not None:
             self._client = client
         else:
-            self._client = OpenAI(
+            self._client = AsyncOpenAI(
                 base_url=self._config.base_url,
                 api_key=self._config.api_key,
                 timeout=self._config.timeout_s,
@@ -257,7 +262,7 @@ class BaseModelClient:
             return "medium", {"think": True}
         return "none", {"think": False}
 
-    def _call_api(
+    async def _call_api(
         self,
         messages: list[dict],
         enable_thinking: bool = False,
@@ -271,15 +276,10 @@ class BaseModelClient:
         任务: code-quality-refactor - 提取API调用基类
         说明: 统一的非流式API调用方法
 
-        修改时间: 2026-03-21
+        修改时间: 2026-04-09
         修改者: TraeAI
-        任务: migrate-litellm-to-openai-sdk
-        修改内容: 使用 OpenAI SDK，移除 extra_body，添加 reasoning_effort 支持
-
-        修改时间: 2026-03-21
-        修改者: TraeAI
-        任务: migrate-litellm-to-openai-sdk - 修复 Ollama think 参数
-        修改内容: Ollama 使用 think 参数而非 reasoning_effort，需要通过 extra_body 传递
+        任务: 重构 BaseModelClient 使用 AsyncOpenAI
+        修改内容: 改为 async def，使用 await 调用
         """
         if not self._config.model:
             raise ValueError("model is required")
@@ -291,7 +291,6 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        # Ollama 本地API支持 reasoning_effort 参数
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}
@@ -302,12 +301,13 @@ class BaseModelClient:
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
 
-        return self._client.chat.completions.create(**request_params)
+        return await self._client.chat.completions.create(**request_params)
 
-    def _call_api_stream(
+    async def _call_api_stream(
         self,
         request_params: dict[str, Any],
         is_cloud: bool = False,
+        stream_callback: Callable[[str, str], Any] | None = None,
     ) -> Any:
         """
         流式API调用
@@ -316,7 +316,19 @@ class BaseModelClient:
         创建者: TraeAI
         任务: code-quality-refactor - 提取API调用基类
         说明: 统一的流式API调用方法，支持实时控制台输出（仅云端API）
+
+        修改时间: 2026-04-07
+        修改者: TraeAI
+        任务: websocket-streaming-progress
+        修改内容: 添加 stream_callback 参数，支持流式输出回调，添加节流机制
+
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: 重构 BaseModelClient 使用 AsyncOpenAI
+        修改内容: 改为 async def，使用 async for 迭代流，使用 await 调用 stream_callback
         """
+        import time
+
         request_params["stream"] = True
 
         logger.debug("Using streaming mode for API call")
@@ -325,27 +337,62 @@ class BaseModelClient:
         reasoning_chunks: list[str] = []
         chunk_count = 0
 
+        last_broadcast_time = 0.0
+        buffer_content = ""
+        char_count = 0
+
         if is_cloud:
             print(f"[Stream] Starting API call with model={request_params.get('model', 'unknown')}", flush=True)
 
-        for chunk in self._client.chat.completions.create(**request_params):
+        async for chunk in self._client.chat.completions.create(**request_params):
             chunk_count += 1
             if chunk.choices:
                 delta = chunk.choices[0].delta
                 if delta.content:
                     content_chunks.append(delta.content)
+                    buffer_content += delta.content
+                    char_count += len(delta.content)
+
                     if is_cloud:
                         print(delta.content, end="", flush=True)
+
+                    current_time = time.time()
+                    should_broadcast = current_time - last_broadcast_time >= 0.1 or char_count >= 50
+                    if stream_callback and should_broadcast:
+                        await stream_callback(buffer_content, "content")
+                        buffer_content = ""
+                        char_count = 0
+                        last_broadcast_time = current_time
+
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                     reasoning_chunks.append(delta.reasoning_content)
+                    buffer_content += delta.reasoning_content
+                    char_count += len(delta.reasoning_content)
+
                     if is_cloud:
                         print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)
+
+                    current_time = time.time()
+                    should_broadcast = current_time - last_broadcast_time >= 0.1 or char_count >= 50
+                    if stream_callback and should_broadcast:
+                        await stream_callback(buffer_content, "reasoning")
+                        buffer_content = ""
+                        char_count = 0
+                        last_broadcast_time = current_time
 
         if is_cloud:
             print(f"\n[Stream] Completed: received {chunk_count} chunks", flush=True)
 
+        if stream_callback and buffer_content:
+            last_type = "content" if content_chunks else "reasoning"
+            await stream_callback(buffer_content, last_type)
+
         full_content = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks) if reasoning_chunks else None
+
+        if not full_content and full_reasoning:
+            full_content = full_reasoning
+            full_reasoning = None
 
         return self._build_stream_response(full_content, full_reasoning)
 

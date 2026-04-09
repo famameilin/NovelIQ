@@ -95,7 +95,7 @@ export function generateThemePalette(seedHex: string): ThemePalette {
 
 /**
  * Convert a CSS hsl()/hsla() string to hsla() format with alpha.
- * Handles both hsl(H S% L%) space-separated and hsl(H,S%,L%) comma-separated.
+ * Handles both hsl(H S% L%) space-separated (Tailwind modern format) and hsl(H,S%,L%) comma-separated.
  */
 export function hslToHsla(hsl: string, alpha: number): string {
   const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -105,12 +105,25 @@ export function hslToHsla(hsl: string, alpha: number): string {
       : `hsla(0, 0%, 0%, ${alpha})`;
   }
 
-  const trimmed = hsl.trim();
-  const match = trimmed.match(/^(?:hsla?\(|\s*)(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%(?:\s*,\s*([\d.]+))?(?:\s*\))?$/);
-  if (!match) {
+  let normalized = hsl.trim();
+
+  if (normalized.startsWith("hsl(") || normalized.startsWith("hsla(")) {
+    normalized = normalized.replace(/^hsla?\(|\)$/g, "").trim();
+  }
+
+  const parts = normalized.split(/\s+/);
+  if (parts.length < 3) {
     return `hsla(0, 0%, 50%, ${alpha})`;
   }
-  const [, h, s, l] = match.map(Number);
+
+  const h = parseFloat(parts[0]);
+  const s = parseFloat(parts[1].replace("%", ""));
+  const l = parseFloat(parts[2].replace("%", ""));
+
+  if (isNaN(h) || isNaN(s) || isNaN(l)) {
+    return `hsla(0, 0%, 50%, ${alpha})`;
+  }
+
   return `hsla(${h}, ${s}%, ${l}%, ${alpha})`;
 }
 

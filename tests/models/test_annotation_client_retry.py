@@ -170,7 +170,7 @@ class TestPhase1Retry(unittest.TestCase):
     修改内容: 更新测试以调用子模块函数
     """
 
-    def test_phase1_success_on_first_attempt(self):
+    async def test_phase1_success_on_first_attempt(self):
         """Phase1 第一次尝试成功"""
         client = MockAnnotationClient()
         call_count = [0]
@@ -181,7 +181,7 @@ class TestPhase1Retry(unittest.TestCase):
 
         client._call_annotation_api = mock_call_api
 
-        result = annotate_chunk_phase1(
+        result = await annotate_chunk_phase1(
             client=client,
             text="测试文本",
             chunk_id=1,
@@ -190,7 +190,7 @@ class TestPhase1Retry(unittest.TestCase):
         self.assertEqual(call_count[0], 1)
         self.assertIsInstance(result, ChunkAnnotation)
 
-    def test_phase1_retry_on_connection_error(self):
+    async def test_phase1_retry_on_connection_error(self):
         """Phase1 连接错误时重试"""
         client = MockAnnotationClient()
         call_count = [0]
@@ -203,7 +203,7 @@ class TestPhase1Retry(unittest.TestCase):
 
         client._call_annotation_api = mock_call_api
 
-        result = annotate_chunk_phase1(
+        result = await annotate_chunk_phase1(
             client=client,
             text="测试文本",
             chunk_id=1,
@@ -212,7 +212,7 @@ class TestPhase1Retry(unittest.TestCase):
         self.assertEqual(call_count[0], 3)
         self.assertIsInstance(result, ChunkAnnotation)
 
-    def test_phase1_fallback_to_cloud(self):
+    async def test_phase1_fallback_to_cloud(self):
         """Phase1 本地失败后云端成功"""
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
@@ -231,7 +231,7 @@ class TestPhase1Retry(unittest.TestCase):
         local_client._call_annotation_api = local_call_api
         cloud_client._call_annotation_api = cloud_call_api
 
-        result = annotate_chunk_phase1(
+        result = await annotate_chunk_phase1(
             client=local_client,
             text="测试文本",
             chunk_id=1,
@@ -242,7 +242,7 @@ class TestPhase1Retry(unittest.TestCase):
         self.assertEqual(cloud_call_count[0], 1)
         self.assertIsInstance(result, ChunkAnnotation)
 
-    def test_phase1_all_retries_exhausted(self):
+    async def test_phase1_all_retries_exhausted(self):
         """Phase1 本地和云端都失败"""
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
@@ -254,7 +254,7 @@ class TestPhase1Retry(unittest.TestCase):
         cloud_client._call_annotation_api = always_fail
 
         with self.assertRaises(Phase1MaxRetriesExceededError):
-            annotate_chunk_phase1(
+            await annotate_chunk_phase1(
                 client=local_client,
                 text="测试文本",
                 chunk_id=1,
@@ -276,11 +276,11 @@ class TestPhase2Retry(unittest.TestCase):
     修改内容: 更新测试以调用子模块函数
     """
 
-    def test_phase2_success_on_first_attempt(self):
+    async def test_phase2_success_on_first_attempt(self):
         """Phase2 第一次尝试成功"""
         client = MockAnnotationClient()
 
-        result = annotate_chunk_phase2(
+        result = await annotate_chunk_phase2(
             client=client,
             text="测试文本",
             chunk_id=1,
@@ -288,7 +288,7 @@ class TestPhase2Retry(unittest.TestCase):
 
         self.assertIsInstance(result, ForeshadowingResult)
 
-    def test_phase2_retry_on_instructor_failure(self):
+    async def test_phase2_retry_on_instructor_failure(self):
         """Phase2 Instructor 调用失败时重试"""
         client = MockAnnotationClient()
         call_count = [0]
@@ -297,7 +297,7 @@ class TestPhase2Retry(unittest.TestCase):
             call_count[0] += 1
             if call_count[0] < 3:
                 raise ConnectionError("Instructor connection failed")
-            
+
             result = create_mock_foreshadowing()
             response = MagicMock()
             response.choices = [MagicMock(message=MagicMock(content="{}", reasoning_content="thinking"))]
@@ -305,7 +305,7 @@ class TestPhase2Retry(unittest.TestCase):
 
         client._call_annotation_api = mock_call_annotation_api
 
-        result = annotate_chunk_phase2(
+        result = await annotate_chunk_phase2(
             client=client,
             text="测试文本",
             chunk_id=1,
@@ -314,7 +314,7 @@ class TestPhase2Retry(unittest.TestCase):
         self.assertEqual(call_count[0], 3)
         self.assertIsInstance(result, ForeshadowingResult)
 
-    def test_phase2_fallback_to_cloud(self):
+    async def test_phase2_fallback_to_cloud(self):
         """Phase2 本地失败后云端成功"""
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
@@ -336,7 +336,7 @@ class TestPhase2Retry(unittest.TestCase):
         local_client._call_annotation_api = local_call_annotation_api
         cloud_client._call_annotation_api = cloud_call_annotation_api
 
-        result = annotate_chunk_phase2(
+        result = await annotate_chunk_phase2(
             client=local_client,
             text="测试文本",
             chunk_id=1,
@@ -347,7 +347,7 @@ class TestPhase2Retry(unittest.TestCase):
         self.assertEqual(cloud_call_count[0], 1)
         self.assertIsInstance(result, ForeshadowingResult)
 
-    def test_phase2_all_retries_exhausted(self):
+    async def test_phase2_all_retries_exhausted(self):
         """Phase2 本地和云端都失败"""
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
@@ -359,7 +359,7 @@ class TestPhase2Retry(unittest.TestCase):
         cloud_client._call_annotation_api = always_fail
 
         with self.assertRaises(Phase2MaxRetriesExceededError):
-            annotate_chunk_phase2(
+            await annotate_chunk_phase2(
                 client=local_client,
                 text="测试文本",
                 chunk_id=1,
@@ -382,14 +382,14 @@ class TestTwoPhaseIntegration(unittest.TestCase):
     """
 
     @patch('src.models.local.annotation.multi_phase.settings')
-    def test_two_phase_serial_passes_cloud_client(self, mock_settings):
+    async def test_two_phase_serial_passes_cloud_client(self, mock_settings):
         """串行模式传递 cloud_client 参数"""
         mock_settings.analysis.multi_phase_annotation.parallel = False
 
         client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        result = annotate_chunk_multi_phase(
+        result = await annotate_chunk_multi_phase(
             client=client,
             text="测试文本",
             chunk_id=1,
@@ -399,14 +399,14 @@ class TestTwoPhaseIntegration(unittest.TestCase):
         self.assertIsInstance(result.annotation, ChunkAnnotation)
 
     @patch('src.models.local.annotation.multi_phase.settings')
-    def test_two_phase_parallel_passes_cloud_client(self, mock_settings):
+    async def test_two_phase_parallel_passes_cloud_client(self, mock_settings):
         """并行模式传递 cloud_client 参数"""
         mock_settings.analysis.multi_phase_annotation.parallel = True
 
         client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        result = annotate_chunk_multi_phase(
+        result = await annotate_chunk_multi_phase(
             client=client,
             text="测试文本",
             chunk_id=1,
