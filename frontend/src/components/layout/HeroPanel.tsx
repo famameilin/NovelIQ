@@ -61,7 +61,7 @@ export function HeroPanel({
           上传小说
         </Button>
 
-        {totalPages && totalPages > 1 && onPageChange && (
+        {totalPages && totalPages > 1 && onPageChange ? (
           <div className="mt-auto pt-6">
             <div className="flex items-center justify-between">
               <Button
@@ -85,7 +85,7 @@ export function HeroPanel({
               </Button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </aside>
   );
