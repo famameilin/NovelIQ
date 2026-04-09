@@ -347,9 +347,13 @@ class BaseModelClient:
         reasoning_chunks: list[str] = []
         chunk_count = 0
 
-        last_broadcast_time = 0.0
-        buffer_content = ""
-        char_count = 0
+        last_output_broadcast_time = 0.0
+        output_buffer = ""
+        output_char_count = 0
+
+        last_thinking_broadcast_time = 0.0
+        thinking_buffer = ""
+        thinking_char_count = 0
 
         if is_cloud:
             print(f"[Stream] Starting API call with model={request_params.get('model', 'unknown')}", flush=True)
@@ -361,42 +365,43 @@ class BaseModelClient:
                 delta = chunk.choices[0].delta
                 if delta.content:
                     content_chunks.append(delta.content)
-                    buffer_content += delta.content
-                    char_count += len(delta.content)
+                    output_buffer += delta.content
+                    output_char_count += len(delta.content)
 
                     if is_cloud:
                         print(delta.content, end="", flush=True)
 
                     current_time = time.time()
-                    should_broadcast = current_time - last_broadcast_time >= 0.1 or char_count >= 50
+                    should_broadcast = current_time - last_output_broadcast_time >= 0.1 or output_char_count >= 50
                     if emitter and should_broadcast:
-                        await emitter(StreamEvent(action="output", content=buffer_content))
-                        buffer_content = ""
-                        char_count = 0
-                        last_broadcast_time = current_time
+                        await emitter(StreamEvent(action="output", content=output_buffer))
+                        output_buffer = ""
+                        output_char_count = 0
+                        last_output_broadcast_time = current_time
 
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                     reasoning_chunks.append(delta.reasoning_content)
-                    buffer_content += delta.reasoning_content
-                    char_count += len(delta.reasoning_content)
+                    thinking_buffer += delta.reasoning_content
+                    thinking_char_count += len(delta.reasoning_content)
 
                     if is_cloud:
                         print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)
 
                     current_time = time.time()
-                    should_broadcast = current_time - last_broadcast_time >= 0.1 or char_count >= 50
+                    should_broadcast = current_time - last_thinking_broadcast_time >= 0.1 or thinking_char_count >= 50
                     if emitter and should_broadcast:
-                        await emitter(StreamEvent(action="thinking", content=buffer_content))
-                        buffer_content = ""
-                        char_count = 0
-                        last_broadcast_time = current_time
+                        await emitter(StreamEvent(action="thinking", content=thinking_buffer))
+                        thinking_buffer = ""
+                        thinking_char_count = 0
+                        last_thinking_broadcast_time = current_time
 
         if is_cloud:
             print(f"\n[Stream] Completed: received {chunk_count} chunks", flush=True)
 
-        if emitter and buffer_content:
-            action = "output" if content_chunks else "thinking"
-            await emitter(StreamEvent(action=action, content=buffer_content))
+        if emitter and output_buffer:
+            await emitter(StreamEvent(action="output", content=output_buffer))
+        if emitter and thinking_buffer:
+            await emitter(StreamEvent(action="thinking", content=thinking_buffer))
 
         full_content = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks) if reasoning_chunks else None
