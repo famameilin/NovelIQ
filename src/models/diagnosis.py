@@ -33,7 +33,6 @@ from pydantic import BaseModel
 
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
-from src.api.models.events import StreamEvent
 from src.models.cloud.schema import CloudAnalysis
 from src.models.interactions import record_model_interaction
 from src.models.local.base import BaseModelClient, TokenUsageCallback
@@ -140,11 +139,10 @@ class DiagnosisClient(BaseModelClient):
 
         return response_model.model_validate(json_data)
 
-    async def _call_api_stream(
+    async def _call_api(
         self,
         request_params: dict[str, Any],
         is_cloud: bool = False,
-        emitter: Callable[[StreamEvent], Any] | None = None,
     ) -> Any:
         """
         非流式API调用（async 版本）
@@ -181,7 +179,7 @@ class DiagnosisClient(BaseModelClient):
         if self._client is None:
             raise ValueError("client is required")
 
-        response = await self._call_api_stream(request_params, is_cloud=self.is_cloud_api())
+        response = await self._call_api(request_params, is_cloud=self.is_cloud_api())
         result = self._parse_structured_response(response, CloudAnalysis)
 
         duration_ms = int((time.time() - start_time) * 1000)

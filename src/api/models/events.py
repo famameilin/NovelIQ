@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -65,7 +65,7 @@ class StreamEvent:
     action: str   # start / progress / complete / output / thinking
     stage: str = ""
     sub_stage: str = ""
-    chunk_id: int = 0
+    chunk_id: int | None = None
     current: int = 0
     total: int = 0
     percent: float = 0.0
@@ -77,7 +77,7 @@ class StreamEvent:
             "action": self.action,
             "stage": self.stage,
             "sub_stage": self.sub_stage,
-            "chunk_id": self.chunk_id,
+            "chunk_id": self.chunk_id or 0,
             "current": self.current,
             "total": self.total,
             "percent": self.percent,
@@ -137,13 +137,13 @@ class AnalysisEventBus:
         # 补全上下文：构建新事件对象，避免修改原始事件
         resolved_stage = event.stage or self._stage
         resolved_sub_stage = event.sub_stage or self._sub_stage
-        resolved_chunk_id = event.chunk_id or self._chunk_id
+        resolved_chunk_id = event.chunk_id if event.chunk_id is not None else self._chunk_id
 
         if event.stage:
             self._stage = event.stage
         if event.sub_stage:
             self._sub_stage = event.sub_stage
-        if event.chunk_id:
+        if event.chunk_id is not None:
             self._chunk_id = event.chunk_id
 
         resolved_event = StreamEvent(
