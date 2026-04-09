@@ -86,7 +86,7 @@ async def run_preprocess(
     start_time = time.time()
 
     if emitter:
-        await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理"))
+        await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理", sub_percent=0.0))
 
     chunk_repo = ChunkRepository(session)
     if chunk_repo.is_preprocess_complete(run_id):
@@ -159,6 +159,6 @@ async def run_preprocess(
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if emitter:
-        await emitter(StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0))
+        await emitter(StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0, sub_percent=100.0))
 
     return total_chunks, total_chars, elapsed
