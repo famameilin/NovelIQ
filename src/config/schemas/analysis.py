@@ -325,10 +325,10 @@ def _parse_progress_settings(data: dict[str, Any] | None) -> ProgressSettings:
         return ProgressSettings()
     return ProgressSettings(
         preprocess=_parse_stage_progress_range(data.get("preprocess"), 0, 10),
-        annotate=_parse_stage_progress_range(data.get("annotate"), 10, 50),
-        aggregate=_parse_stage_progress_range(data.get("aggregate"), 50, 70),
-        topic_model=_parse_stage_progress_range(data.get("topic_model"), 70, 85),
-        diagnose=_parse_stage_progress_range(data.get("diagnose"), 85, 100),
+        annotate=_parse_stage_progress_range(data.get("annotate"), 10, 80),
+        aggregate=_parse_stage_progress_range(data.get("aggregate"), 80, 90),
+        topic_model=_parse_stage_progress_range(data.get("topic_model"), 90, 95),
+        diagnose=_parse_stage_progress_range(data.get("diagnose"), 95, 100),
     )
 
 

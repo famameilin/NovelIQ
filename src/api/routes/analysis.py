@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
@@ -44,28 +46,30 @@ def _map_status_to_task_status(status: str) -> TaskStatus:
     return _STATUS_MAP.get(status, TaskStatus.PENDING)
 
 
-def _get_task_status_from_db(task_id: str) -> TaskStatus:
+def _get_task_detail_from_db(task_id: str) -> dict[str, Any] | None:
     """
-    从数据库获取任务状态
+    从数据库获取任务详情
 
     创建时间: 2026-03-26
     创建者: TraeAI
     任务: 修复代码异味，提取数据库查询逻辑
 
+    修改时间: 2026-04-09
+    修改者: GLM-5
+    任务: sse-architecture-review
+    修改内容: 返回完整 run 记录而非仅 TaskStatus，使 DB fallback 也能恢复 stage/progress
+
     当任务不在内存中时，从数据库查询状态
-    返回: TaskStatus枚举值
+    返回: run 记录字典（含 status/progress/stage），不存在则返回 None
     """
     session_factory = get_session_factory()
     with session_factory() as session:
         try:
             run_id = task_id_to_run_id(task_id, session.connection())
         except (TaskIDNotFoundError, ValueError):
-            return TaskStatus.PENDING
+            return None
         run_repo = RunRepository(session)
-        run = run_repo.get_run(run_id)
-        if run:
-            return _map_status_to_task_status(run["status"])
-        return TaskStatus.PENDING
+        return run_repo.get_run(run_id)
 
 
 router = APIRouter(prefix="/novels", tags=["analysis"])
@@ -319,13 +323,21 @@ async def get_analysis_status(
     if task_id:
         task_info = task_manager.get_task(task_id)
         if task_info is None:
-            task_status = _get_task_status_from_db(task_id)
+            run = _get_task_detail_from_db(task_id)
+            if run is None:
+                return StatusResponse(
+                    novel_id=novel_id,
+                    task_id=task_id,
+                    status=TaskStatus.PENDING,
+                    progress=0.0,
+                )
+            mapped_status = _map_status_to_task_status(run["status"])
             return StatusResponse(
                 novel_id=novel_id,
                 task_id=task_id,
-                status=task_status,
-                progress=100.0 if task_status == TaskStatus.COMPLETED else 0.0,
-                stage="completed" if task_status == TaskStatus.COMPLETED else "unknown",
+                status=mapped_status,
+                progress=run.get("progress", 0.0),
+                stage=run.get("stage"),
             )
         return StatusResponse(
             novel_id=novel_id,
@@ -354,13 +366,20 @@ async def get_analysis_status(
 
     task_info = task_manager.get_task(task_id)
     if task_info is None:
-        mapped_status = _map_status_to_task_status(task_status)
+        run = _get_task_detail_from_db(task_id)
+        if run is None:
+            return StatusResponse(
+                novel_id=novel_id,
+                task_id=task_id,
+                status=_map_status_to_task_status(task_status),
+                progress=0.0,
+            )
         return StatusResponse(
             novel_id=novel_id,
             task_id=task_id,
-            status=mapped_status,
-            progress=100.0 if task_status == "completed" else 0.0,
-            stage=task_status,
+            status=_map_status_to_task_status(run["status"]),
+            progress=run.get("progress", 0.0),
+            stage=run.get("stage"),
         )
 
     return StatusResponse(
