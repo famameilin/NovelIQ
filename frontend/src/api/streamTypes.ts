@@ -1,11 +1,19 @@
 // ============================================================
-// Stream Types (WebSocket)
+// Stream Types (SSE)
 // ============================================================
 
 // 创建时间: 2026-04-07
 // 创建者: GLM-5
 // 任务: WebSocket 流式消息类型定义
-// 说明: 定义后端 WebSocket 推送的流式消息类型，用于任务进度实时展示
+// 说明: 定义后端 SSE 推送的流式消息类型，用于任务进度实时展示
+
+// 修改时间: 2026-04-09
+// 创建者: GLM-5
+// 任务: sse-architecture-review
+// 修改内容: 前后端类型对齐
+//   - stage_complete 加入 StreamMessageType
+//   - ProgressDetail: sub_stage 和 phase 改为必填（后端总是传空字符串）
+//   - ErrorData 增加 stage 字段
 
 export type StreamMessageType =
   | "task_start"
@@ -22,29 +30,19 @@ export type StreamMessageType =
 // Progress Detail
 // ============================================================
 
-// 创建时间: 2026-04-07
-// 创建者: GLM-5
-// 任务: WebSocket 流式消息类型定义
-// 说明: 阶段进度详情，用于 stage_progress 消息
-
 export interface ProgressDetail {
   stage: string;
-  sub_stage?: string;
-  phase?: string;  // 当前 phase 名称（如 "phase1", "phase2", "phase3", "phase4"）
+  sub_stage: string;
+  phase: string;
   current: number;
   total: number;
   percent: number;
-  message?: string;
+  message: string;
 }
 
 // ============================================================
 // LLM Output Data
 // ============================================================
-
-// 创建时间: 2026-04-07
-// 创建者: GLM-5
-// 任务: WebSocket 流式消息类型定义
-// 说明: LLM 输出数据，用于 llm_output 和 llm_thinking 消息
 
 export interface LLMOutputData {
   phase: string;
@@ -56,11 +54,6 @@ export interface LLMOutputData {
 // Error Data
 // ============================================================
 
-// 创建时间: 2026-04-07
-// 创建者: GLM-5
-// 任务: WebSocket 流式消息类型定义
-// 说明: 错误数据，用于 task_error 消息
-
 export interface ErrorData {
   error: string;
   stage?: string;
@@ -69,11 +62,6 @@ export interface ErrorData {
 // ============================================================
 // Stream Message
 // ============================================================
-
-// 创建时间: 2026-04-07
-// 创建者: GLM-5
-// 任务: WebSocket 流式消息类型定义
-// 说明: WebSocket 消息统一格式，data 字段根据 type 不同对应不同类型
 
 export interface StreamMessage {
   type: StreamMessageType;
