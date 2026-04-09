@@ -280,6 +280,7 @@ function SubTaskProgress({ subStage, current, total }: SubTaskProgressProps) {
   if (total === 0) return null;
 
   const subPercent = (current / total) * 100;
+  const phaseLabel = PHASE_CONFIG[subStage]?.label ?? subStage;
 
   return (
     <motion.div
@@ -289,10 +290,7 @@ function SubTaskProgress({ subStage, current, total }: SubTaskProgressProps) {
       className="rounded-md bg-surface-hover p-3"
     >
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium text-text-secondary">{subStage}</span>
-        <span className="text-xs tabular-nums text-text-muted">
-          {current} / {total}
-        </span>
+        <span className="text-xs font-medium text-text-secondary">{phaseLabel}</span>
       </div>
 
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-border">
