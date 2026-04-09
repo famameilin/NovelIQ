@@ -459,6 +459,11 @@ class BaseModelClient:
         创建者: TraeAI
         任务: code-quality-refactor - 提取API调用基类
         说明: 从响应中提取 JSON 并解析为 Pydantic 模型
+
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: fix-phase3-validation-error-logging
+        修改内容: 在 ValidationError 发生前记录原始 JSON 数据，便于调试
         """
         from src.models.local.parser import try_parse_json
 
@@ -476,7 +481,18 @@ class BaseModelClient:
         if json_data is None:
             raise ValueError(f"Failed to parse JSON from response: {content[:200]}")
 
-        return response_model.model_validate(json_data)
+        try:
+            return response_model.model_validate(json_data)
+        except Exception as e:
+            logger.error(
+                "Structured response validation failed: model={}, error={}, "
+                "json_data={}, raw_content={}",
+                response_model.__name__,
+                str(e),
+                json_data,
+                content,
+            )
+            raise
 
     def _build_request_params(self, messages: list[dict], enable_thinking: bool = False) -> dict[str, Any]:
         """

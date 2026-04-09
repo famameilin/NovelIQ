@@ -204,7 +204,27 @@ class QuoteCandidate(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     index: int = Field(description="候选序号（1开始）")
-    content: str = Field(description="引号内的文字")
+    content: str | None = Field(default=None, description="引号内的文字（可为空，从 candidates 匹配获取）")
+
+
+class DialogueRecordSchema(BaseModel):
+    """
+    LLM 结构化输出用的 Schema，不包含 content（content 从 candidates 获取）
+
+    创建时间: 2026-04-09
+    创建者: TraeAI
+    任务: fix-phase3-content-field
+    说明: 避免 LLM 返回多余带引号的 content，减少 token 消耗
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    index: int = Field(description="候选序号（1开始）")
+    is_dialogue: bool = Field(description="是否为真实对话")
+    speaker: list[str] | None = Field(default=None, description="说话人列表，支持多人同时说话，无法确定为 null")
+    tone: str | None = Field(default=None, description="语气：强硬/温和/讽刺/恳求/命令/恐惧/惊慌")
+    is_inner_monologue: bool = Field(default=False, description="是否为内心独白")
+    identity_clue: str | None = Field(default=None, description="身份线索（如自报身份、称呼关系、别名揭示等）")
 
 
 class DialogueRecord(BaseModel):
@@ -217,12 +237,12 @@ class DialogueRecord(BaseModel):
     说明: 用于存储 LLM 判断后的对话结果，包含是否为对话、说话者、语气等信息
 
     修改时间: 2026-03-29
-    修改者: TraeAI
+    创建者: TraeAI
     任务: add-identity-clue-to-dialogue-record
     修改内容: 添加 identity_clue 字段，用于存储对话中提取的身份线索
 
     修改时间: 2026-04-08
-    修改者: TraeAI
+    创建者: TraeAI
     任务: fix-multi-speaker-support
     修改内容: speaker 改为 list[str] 支持多人同时说话，删除 evidence 字段
     """
@@ -230,7 +250,7 @@ class DialogueRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     index: int = Field(description="候选序号（1开始）")
-    content: str = Field(description="引号内的文字")
+    content: str | None = Field(default=None, description="引号内的文字（可为空，从 candidates 匹配获取）")
     is_dialogue: bool = Field(description="是否为真实对话")
     speaker: list[str] | None = Field(default=None, description="说话人列表，支持多人同时说话，无法确定为 null")
     tone: str | None = Field(default=None, description="语气：强硬/温和/讽刺/恳求/命令/恐惧/惊慌")
@@ -247,15 +267,15 @@ class DialogueAttributionResult(BaseModel):
     任务: analyze-dialogue-length-zero
     说明: 用于 LLM 结构化输出的对话归属判断结果模型
 
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
-    修改内容: 使用 DialogueRecord 替代 DialogueAttribution
+    修改时间: 2026-04-09
+    创建者: TraeAI
+    任务: fix-phase3-content-field
+    修改内容: 使用 DialogueRecordSchema 替代 DialogueRecord，避免 LLM 返回 content
     """
 
     model_config = ConfigDict(frozen=True)
 
-    dialogues: list[DialogueRecord] = Field(default_factory=list, description="对话归属列表")
+    dialogues: list[DialogueRecordSchema] = Field(default_factory=list, description="对话归属列表")
 
 
 class RelationRecord(BaseModel):

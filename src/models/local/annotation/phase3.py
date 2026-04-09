@@ -46,7 +46,7 @@ from src.config.constants import PHASE3_MAX_RETRIES
 from src.models.interactions import record_model_interaction
 from src.models.local.annotation.context import DialogueAttributionError
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
-from src.models.local.schema import DialogueAttributionResult, DialogueRecord, QuoteCandidate
+from src.models.local.schema import DialogueAttributionResult, DialogueRecord, DialogueRecordSchema, QuoteCandidate
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
@@ -148,12 +148,15 @@ async def attribute_dialogues_with_llm(
 
     is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
+    batch_size = settings.thinking.phase3_candidates_per_batch
 
-    async def _execute_call(
+    async def _execute_single_batch(
         current_client: AnnotationClient,
-        retry_messages: list[dict] | None = None,
-    ) -> list[DialogueRecord]:
-        dialogue_list = "\n".join([f'{c.index}. content: "{c.content}"' for c in candidates])
+        batch_candidates: list[QuoteCandidate],
+        batch_idx: int,
+        total_batches: int,
+    ) -> list[DialogueRecordSchema]:
+        dialogue_list = "\n".join([f'{c.index}. content: "{c.content}"' for c in batch_candidates])
         known_chars = "、".join(known_characters) if known_characters else "无"
 
         prompts = settings.prompts
@@ -186,7 +189,7 @@ async def attribute_dialogues_with_llm(
             chunk_id=chunk_id,
             interaction_type="dialogue_attribution",
             phase="phase3",
-            attempt_number=1,
+            attempt_number=batch_idx + 1,
             messages=messages,
             response_text=content_clean,
             thinking_content=None,
@@ -197,32 +200,54 @@ async def attribute_dialogues_with_llm(
         )
 
         logger.info(
-            f"dialogue_attribution: "
-            f"chunk_text_len={len(chunk_text)} "
-            f"candidates={len(candidates)} "
+            f"dialogue_attribution batch: "
+            f"batch={batch_idx + 1}/{total_batches} "
+            f"candidates={len(batch_candidates)} "
             f"result_count={len(parsed.dialogues)}"
         )
 
         return parsed.dialogues
 
-    retry_config = RetryConfig(
-        max_retries=PHASE3_MAX_RETRIES,
-        operation_name="phase3_dialogue_attribution",
-        chunk_id=chunk_id,
-    )
+    async def _execute_all_batches(
+        current_client: AnnotationClient,
+    ) -> list[DialogueRecord]:
+        all_results: list[DialogueRecord] = []
+        total_batches = (len(candidates) + batch_size - 1) // batch_size
 
-    retry_handler: AnnotationRetryHandler[list[DialogueRecord]] = AnnotationRetryHandler(
-        config=retry_config,
-        local_client=client,
-        cloud_client=None,
-        exception_type=DialogueAttributionError,
-    )
+        for i in range(0, len(candidates), batch_size):
+            batch_candidates = candidates[i : i + batch_size]
+            batch_idx = i // batch_size
+
+            retry_config = RetryConfig(
+                max_retries=PHASE3_MAX_RETRIES,
+                operation_name=f"phase3_dialogue_attribution_batch_{batch_idx}",
+                chunk_id=chunk_id,
+            )
+
+            retry_handler: AnnotationRetryHandler[list[DialogueRecordSchema]] = AnnotationRetryHandler(
+                config=retry_config,
+                local_client=current_client,
+                cloud_client=None,
+                exception_type=DialogueAttributionError,
+            )
+
+            batch_results = await retry_handler.execute(
+                lambda bc=batch_candidates, bi=batch_idx, tb=total_batches: _execute_single_batch(
+                    current_client, bc, bi, tb
+                )
+            )
+
+            if batch_results:
+                batch_records = _post_process_validation(
+                    batch_results, batch_candidates, known_characters, alias_map, chunk_id
+                )
+                all_results.extend(batch_records)
+
+        return all_results
 
     try:
-        result = await retry_handler.execute(_execute_call)
-        if result is None:
-            return []
-        return _post_process_validation(result, candidates, known_characters, alias_map, chunk_id)
+        result = await _execute_all_batches(client)
+        return result
     except Exception as e:
         logger.warning(f"Failed to attribute dialogues with LLM: {e}")
         raise DialogueAttributionError(f"对话归属判断失败: {e}") from e
@@ -254,7 +279,7 @@ def _extract_speaker_from_clue(clue: str, known_set: set[str] | None) -> str | N
 
 
 def _post_process_validation(
-    records: list[DialogueRecord],
+    records: list[DialogueRecordSchema],
     candidates: list[QuoteCandidate],
     known_characters: list[str] | None,
     alias_map: dict[str, str] | None,
@@ -286,7 +311,7 @@ def _post_process_validation(
     任务: fix-multi-speaker-support
     修改内容: speaker 改为 list[str]，适配多人说话场景
     """
-    valid_records = []
+    valid_records: list[DialogueRecord] = []
     candidate_indices = {c.index for c in candidates}
     known_set = None
     if known_characters:
@@ -295,13 +320,26 @@ def _post_process_validation(
     correction_count = 0
     kept_count = 0
 
-    for record in records:
-        if record.index not in candidate_indices:
+    candidate_map = {c.index: c.content for c in candidates}
+
+    for schema_record in records:
+        if schema_record.index not in candidate_indices:
             logger.warning(
-                f"phase3_validation: invalid index {record.index}, "
+                f"phase3_validation: invalid index {schema_record.index}, "
                 f"not in candidates range, skipping, chunk_id={chunk_id}"
             )
             continue
+
+        content = candidate_map.get(schema_record.index)
+        record = DialogueRecord(
+            index=schema_record.index,
+            content=content,
+            is_dialogue=schema_record.is_dialogue,
+            speaker=schema_record.speaker,
+            tone=schema_record.tone,
+            is_inner_monologue=schema_record.is_inner_monologue,
+            identity_clue=schema_record.identity_clue,
+        )
 
         if not record.speaker:
             valid_records.append(record)
