@@ -344,7 +344,8 @@ class BaseModelClient:
         if is_cloud:
             print(f"[Stream] Starting API call with model={request_params.get('model', 'unknown')}", flush=True)
 
-        async for chunk in self._client.chat.completions.create(**request_params):
+        stream = await self._client.chat.completions.create(**request_params)
+        async for chunk in stream:
             chunk_count += 1
             if chunk.choices:
                 delta = chunk.choices[0].delta
