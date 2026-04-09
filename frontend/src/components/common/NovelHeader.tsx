@@ -93,7 +93,7 @@ export function NovelHeader({
   }, [taskPanelOpen]);
 
   const runningCount = tasks.filter((t) =>
-    ["pending", "chunking", "annotating", "aggregating", "diagnosing", "cancelling"].includes(t.status)
+    ["pending", "running", "cancelling"].includes(t.status)
   ).length;
 
   const currentTaskDisplay = getCurrentTaskDisplay(tasks, currentTaskId);

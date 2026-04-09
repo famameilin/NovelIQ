@@ -120,11 +120,11 @@ function startSimulation(novelId: string, taskId: string) {
         sim.currentStep = `${stage.label} - ${stage.steps[stepIdx]}`;
 
         const statusMap: Record<string, TaskStatus> = {
-          preprocess: "chunking",
-          annotate: "annotating",
-          aggregate: "aggregating",
-          "topic-model": "aggregating",
-          diagnose: "diagnosing",
+          preprocess: "running",
+          annotate: "running",
+          aggregate: "running",
+          "topic-model": "running",
+          diagnose: "running",
         };
         sim.status = statusMap[stage.key] ?? "pending";
 
@@ -270,7 +270,7 @@ export const analysisStatusHandler = http.get(
 
     const tasks = taskDb.get(novelId as string) ?? [];
     const runningTask = tasks.find((t) =>
-      ["pending", "chunking", "annotating", "aggregating", "diagnosing", "cancelling"].includes(t.status)
+      ["pending", "running", "cancelling"].includes(t.status)
     );
 
     if (runningTask) {

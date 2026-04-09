@@ -5,13 +5,30 @@
  * 创建者: TraeAI
  * 任务: implement-task-cancellation
  * 说明: 显示单个任务的状态、时间和操作按钮
+ *
+ * 修改时间: 2026-04-09
+ * 创建者: GLM-5
+ * 任务: sse-architecture-review
+ * 修改内容:
+ * - 移除伪状态 (chunking/annotating/...)，统一使用后端 TaskStatus
+ * - 运行中任务从 streamStore 读取 progress.stage 显示具体阶段
  */
 import { Circle, CheckCircle, XCircle, Loader2, Square, Eye, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { taskStatusConfig } from "@/lib/utils";
+import { useStreamStore } from "@/store/streamStore";
 import type { TaskStatus } from "@/api/types";
+
+/** 后端 stage → 前端显示文案 */
+const STAGE_LABELS: Record<string, string> = {
+  preprocess: "预处理",
+  annotate: "标注分析",
+  aggregate: "数据聚合",
+  "topic-model": "主题建模",
+  diagnose: "诊断报告",
+};
 
 export interface TaskRowProps {
   task: {
@@ -29,10 +46,7 @@ function getStatusIcon(status: TaskStatus) {
   switch (status) {
     case "pending":
       return <Circle className="h-4 w-4 text-text-muted" />;
-    case "chunking":
-    case "annotating":
-    case "aggregating":
-    case "diagnosing":
+    case "running":
       return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
     case "cancelling":
       return <Loader2 className="h-4 w-4 animate-spin text-warning" />;
@@ -63,7 +77,7 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 function isRunningStatus(status: TaskStatus): boolean {
-  return ["pending", "chunking", "annotating", "aggregating", "diagnosing", "cancelling"].includes(status);
+  return ["pending", "running", "cancelling"].includes(status);
 }
 
 export function TaskRow({
@@ -75,6 +89,16 @@ export function TaskRow({
 }: TaskRowProps) {
   const config = taskStatusConfig[task.status] ?? taskStatusConfig.pending;
   const isRunning = isRunningStatus(task.status);
+
+  // 从 streamStore 读取当前 SSE 推送的 stage，仅对活跃的运行中任务生效
+  const progress = useStreamStore((s) => s.progress);
+  const currentTaskId = useStreamStore((s) => s.currentTaskId);
+
+  // 活跃的运行中任务显示具体阶段，否则用默认 label
+  const isActiveRunning = isActive && isRunning && currentTaskId === task.task_id && progress?.stage;
+  const displayLabel = isActiveRunning && progress?.stage
+    ? `${STAGE_LABELS[progress.stage] ?? progress.stage}中`
+    : config.label;
 
   return (
     <div
@@ -93,7 +117,7 @@ export function TaskRow({
             {task.task_id.slice(0, 8)}
           </span>
           <Badge variant={config.variant} className="text-[10px] px-1 py-0">
-            {config.label}
+            {displayLabel}
           </Badge>
         </div>
         <div className="text-[10px] text-text-muted">

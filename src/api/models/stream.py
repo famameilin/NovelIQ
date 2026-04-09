@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field
 class StreamMessageType(StrEnum):
     """流式消息类型枚举"""
 
-    task_start = "task_start"
     stage_start = "stage_start"
     stage_progress = "stage_progress"
     stage_complete = "stage_complete"

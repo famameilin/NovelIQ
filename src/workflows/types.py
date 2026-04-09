@@ -28,7 +28,7 @@ class IProgressCallback(Protocol):
     def __call__(
         self,
         phase: str,
-        status: Literal["start", "progress"],
+        status: Literal["start", "complete"],
         current: int,
         total: int,
         percent: float,

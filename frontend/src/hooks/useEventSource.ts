@@ -22,7 +22,6 @@ import { useEffect, useRef, useCallback, useState } from "react";
 /* ------------------------------------------------------------------ */
 
 export type SSEEventType =
-  | "task_start"
   | "stage_start"
   | "stage_progress"
   | "stage_complete"
@@ -83,7 +82,6 @@ export function useSSEListener(
     };
 
     const defaultEventTypes: SSEEventType[] = [
-      "task_start",
       "stage_start",
       "stage_progress",
       "stage_complete",
