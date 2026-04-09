@@ -111,7 +111,16 @@ class AnalysisService:
 
         # ── 标注 ──
         if not skip_stages["skip_annotate"]:
-            await bus.emit_stage_start("annotate", message="开始标注分析", percent=settings.analysis.progress.annotate.start)
+            # 查询 chunk 总数，让前端知道进度规模
+            total_chunks = 0
+            try:
+                from src.storage.repositories import ChunkRepository
+                chunk_repo = ChunkRepository(session)
+                total_chunks = chunk_repo.count_chunks(run_id)
+            except Exception:
+                pass
+
+            await bus.emit_stage_start("annotate", message="开始标注分析", percent=settings.analysis.progress.annotate.start, total=total_chunks)
 
             await self.stage_executor.run_annotate(
                 run_id, session, novel_id, analysis_logger, novel_title,

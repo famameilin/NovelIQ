@@ -183,15 +183,14 @@
   ],
   "group_appearances": [
     {
-      "raw_name": "群体名称",
-      "group_type": "group",
-      "affiliation_hint": "所属组织名称（如贺家等，无则为空字符串）"
+      "raw_name": "群体并称",
+      "entity_type": "group"
     }
   ],
   "organization_appearances": [
     {
       "raw_name": "组织名称",
-      "organization_type": "organization"
+      "entity_type": "organization"
     }
   ],
   "location_appearances": [
@@ -210,3 +209,4 @@
 【严格限制】
 - characters[].name 必须是文本中逐字出现的词语
 - 禁止使用任何文本中未出现的描述性词语作为名字
+- group_appearances 仅限特定几人的并称/合称（如侠义七子、中原五侠、江南七怪），泛指类别（如蛊仙、修士、凡人、武林人士）不算 group

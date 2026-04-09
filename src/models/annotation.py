@@ -81,6 +81,7 @@ class AnnotationClient(BaseModelClient):
             session=session,
         )
         self._instructor_client_factory = instructor_client_factory
+        self._emitter: Callable[[StreamEvent], Awaitable[None]] | None = None
 
     async def annotate_chunk(
         self,
@@ -100,6 +101,9 @@ class AnnotationClient(BaseModelClient):
         run_id: str | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> MultiPhaseAnnotationResult:
+        # 设置当前 emitter，供所有 phase 调用链使用
+        self._emitter = emitter
+
         ctx = AnnotationContext(
             text=text,
             prev_summary=prev_summary,
@@ -142,6 +146,7 @@ class AnnotationClient(BaseModelClient):
         enable_thinking: bool,
         chunk_id: int | None,
         response_model: type[T] | None = None,
+        emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> Any:
         if not self._config.model:
             raise ValueError("model is required")
@@ -168,7 +173,8 @@ class AnnotationClient(BaseModelClient):
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
 
-        response = await self._call_api_stream(request_params, is_cloud=is_cloud)
+        active_emitter = emitter or self._emitter
+        response = await self._call_api_stream(request_params, is_cloud=is_cloud, emitter=active_emitter)
 
         if response_model is not None:
             parsed_result = self._parse_structured_response(response, response_model)

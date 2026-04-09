@@ -220,7 +220,7 @@ def project_graph_tables(
             graph_alias_map[row.name] = resolved_name
 
     for row in chunk_dialogues:
-        speakers = row.speaker if row.speaker else []
+        speakers = row.speaker or []
         if not speakers:
             continue
         for speaker_name in speakers:

@@ -373,7 +373,7 @@ async def _process_single_chunk(
     )
     logger.debug(f"annotated chunk_id={chunk_id}")
 
-    state = _run_incremental_disambiguation_with_state(
+    state = await _run_incremental_disambiguation_with_state(
         conn,
         state,
         phase_result.incremental_disambig_client,
@@ -444,6 +444,17 @@ async def _process_chunks_phase(
 
     total_chunks = len(all_chunks)
 
+    # 发送 annotate 阶段的 total 信息，让前端知道总 chunk 数
+    if emitter and total_chunks > 0:
+        await emitter(StreamEvent(
+            action="progress",
+            sub_stage="phase1",
+            current=0,
+            total=total_chunks,
+            percent=0.0,
+            message=f"共 {total_chunks} 个 chunk 待标注",
+        ))
+
     for idx, (chunk_id, chunk_text) in enumerate(all_chunks):
         if chunk_id in annotated_ids:
             logger.debug(f"skipping already annotated chunk_id={chunk_id}")
@@ -496,7 +507,7 @@ async def _process_chunks_phase(
     return success_count, state
 
 
-def _run_disambiguation_phase(
+async def _run_disambiguation_phase(
     conn,
     state: DisambiguationState,
     phase_result: AnnotationPhaseResult,
@@ -513,7 +524,7 @@ def _run_disambiguation_phase(
     """
     from .disambiguation import _run_final_disambiguation_with_state
 
-    state = _run_final_disambiguation_with_state(
+    state = await _run_final_disambiguation_with_state(
         conn, state, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id
     )
 

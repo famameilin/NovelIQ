@@ -316,7 +316,7 @@ def _post_process_validation(
         known_set = {alias_map.get(name, name) if alias_map else name for name in known_characters}
 
     correction_count = 0
-    kept_count = 0
+    dropped_count = 0
 
     candidate_map = {c.index: c.content for c in candidates}
 
@@ -365,10 +365,18 @@ def _post_process_validation(
                             )
                             validated_speakers.append(inferred)
                         else:
-                            kept_count += 1
-                            validated_speakers.append(s)
+                            dropped_count += 1
+                            logger.warning(
+                                f"phase3_validation: speaker '{s}' not in known_set and "
+                                f"no valid inference from identity_clue, dropping. "
+                                f"chunk_id={chunk_id} index={record.index}"
+                            )
                     else:
-                        validated_speakers.append(s)
+                        dropped_count += 1
+                        logger.warning(
+                            f"phase3_validation: speaker '{s}' not in known_set, dropping. "
+                            f"chunk_id={chunk_id} index={record.index}"
+                        )
             canonical_speakers = validated_speakers
 
         if canonical_speakers != record.speaker:
@@ -376,10 +384,10 @@ def _post_process_validation(
         else:
             valid_records.append(record)
 
-    if correction_count > 0 or kept_count > 0:
+    if correction_count > 0 or dropped_count > 0:
         logger.info(
             f"phase3_validation summary: corrections={correction_count}, "
-            f"kept_original={kept_count}, chunk_id={chunk_id}"
+            f"dropped_unknown={dropped_count}, chunk_id={chunk_id}"
         )
 
     return valid_records

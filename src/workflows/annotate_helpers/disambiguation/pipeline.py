@@ -255,7 +255,7 @@ def _build_disambig_response_text(result: Any) -> str:
     return json.dumps(response_dict, ensure_ascii=False)
 
 
-def _retry_disambig(
+async def _retry_disambig(
     client: DisambiguationLike,
     candidates: list[NameCountCandidate],
     context_sentences: dict[str, str],
@@ -287,7 +287,7 @@ def _retry_disambig(
     for attempt in range(1, max_retries + 1):
         start_time = time.time()
         try:
-            result = client.disambiguate_characters(
+            result = await client.disambiguate_characters(
                 candidates=candidates,
                 context_sentences=context_sentences,
                 existing_names=existing_names if existing_names else None,
@@ -344,7 +344,7 @@ def _retry_disambig(
                 raise last_exception from None
 
 
-def _run_incremental_disambiguation_with_state(
+async def _run_incremental_disambiguation_with_state(
     conn,
     state: DisambiguationState,
     incremental_disambig_client: DisambiguationLike,
@@ -401,7 +401,7 @@ def _run_incremental_disambiguation_with_state(
         graph_repo=GraphRepository(conn),
     )
 
-    result = _retry_disambig(
+    result = await _retry_disambig(
         incremental_disambig_client,
         all_disambig_candidates,
         context_sentences,
@@ -458,7 +458,7 @@ def _run_incremental_disambiguation_with_state(
     return new_state
 
 
-def _run_final_disambiguation_with_state(
+async def _run_final_disambiguation_with_state(
     conn: Session,
     state: DisambiguationState,
     full_disambig_client: DisambiguationLike,
@@ -540,7 +540,7 @@ def _run_final_disambiguation_with_state(
             run_id,
             graph_repo=GraphRepository(conn),
         )
-        result = _retry_disambig(
+        result = await _retry_disambig(
             full_disambig_client,
             candidate_payload,
             context_sentences,
