@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -53,7 +54,7 @@ class TestLocalDisambiguate(unittest.TestCase):
             client=MagicMock(),
         )
 
-        result = client.disambiguate_characters(_candidates("zhang_san", "third_brother", "young_master_zhang"))
+        result = asyncio.run(client.disambiguate_characters(_candidates("zhang_san", "third_brother", "young_master_zhang")))
 
         self.assertIsInstance(result, ExtendedDisambigResult)
         self.assertEqual(result.canonical_decisions["third_brother"], "zhang_san")
@@ -75,10 +76,10 @@ class TestLocalDisambiguate(unittest.TestCase):
             client=MagicMock(),
         )
 
-        result = client.disambiguate_characters(
+        result = asyncio.run(client.disambiguate_characters(
             _candidates("hou_fei_bai", "monkey"),
             context_sentences={"monkey": "monkey smiled and said he was hou_fei_bai"},
-        )
+        ))
 
         self.assertIsInstance(result, ExtendedDisambigResult)
         self.assertEqual(result.canonical_decisions["monkey"], "hou_fei_bai")
@@ -95,7 +96,7 @@ class TestLocalDisambiguate(unittest.TestCase):
             client=MagicMock(),
         )
 
-        result = client.disambiguate_characters([])
+        result = asyncio.run(client.disambiguate_characters([]))
 
         self.assertIsInstance(result, ExtendedDisambigResult)
         self.assertEqual(result.canonical_decisions, {})
@@ -113,7 +114,7 @@ class TestLocalDisambiguate(unittest.TestCase):
             config=config,
             client=MagicMock(),
         )
-        result = client.disambiguate_characters(_candidates("zhang_san"), existing_names=["li_si", "wang_wu"])
+        result = asyncio.run(client.disambiguate_characters(_candidates("zhang_san"), existing_names=["li_si", "wang_wu"]))
         self.assertIsInstance(result, ExtendedDisambigResult)
 
 

@@ -1,7 +1,8 @@
+import asyncio
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -33,7 +34,6 @@ class TestNullTopicNamer(unittest.TestCase):
 
 class TestCloudTopicNamer(unittest.TestCase):
     def test_name_topic_success(self) -> None:
-        mock_client = MagicMock(spec=NullCloudModelClient)
         mock_analysis = CloudAnalysis(
             novel_id=None,
             foreshadow_rate=None,
@@ -42,7 +42,8 @@ class TestCloudTopicNamer(unittest.TestCase):
             topic_labels=["修仙"],
             diagnosis=None,
         )
-        mock_client.diagnose.return_value = mock_analysis
+        mock_client = MagicMock()
+        mock_client.diagnose = AsyncMock(return_value=mock_analysis)
 
         namer = CloudTopicNamer(mock_client)
         words = [TopicWord(word="修炼", weight=0.1), TopicWord(word="境界", weight=0.05)]
@@ -57,14 +58,13 @@ class TestCloudTopicNamer(unittest.TestCase):
 
     def test_name_topic_exception(self) -> None:
         mock_client = MagicMock()
-        mock_client.diagnose.side_effect = Exception("API error")
+        mock_client.diagnose = AsyncMock(side_effect=Exception("API error"))
         namer = CloudTopicNamer(mock_client)
         words = [TopicWord(word="词1", weight=0.5)]
         label = namer.name_topic(0, words)
         self.assertEqual(label, "主题1")
 
     def test_name_topic_caches_result(self) -> None:
-        mock_client = MagicMock()
         mock_analysis = CloudAnalysis(
             novel_id=None,
             foreshadow_rate=None,
@@ -73,7 +73,8 @@ class TestCloudTopicNamer(unittest.TestCase):
             topic_labels=["测试"],
             diagnosis=None,
         )
-        mock_client.diagnose.return_value = mock_analysis
+        mock_client = MagicMock()
+        mock_client.diagnose = AsyncMock(return_value=mock_analysis)
 
         namer = CloudTopicNamer(mock_client)
         words = [TopicWord(word="词1", weight=0.5)]

@@ -28,7 +28,7 @@ from src.models.local.schema import (
 
 
 class FakeClient(CloudModelClient):
-    def diagnose(self, payload: dict) -> CloudAnalysis:
+    async def diagnose(self, payload: dict) -> CloudAnalysis:
         return CloudAnalysis(
             novel_id=payload.get("novel_id"),
             foreshadow_rate=0.1,

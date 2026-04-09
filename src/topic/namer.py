@@ -59,7 +59,8 @@ class CloudTopicNamer(TopicNamer):
 
     def _call_cloud(self, prompt: str) -> str:
         payload = {"messages": [{"role": "user", "content": prompt}]}
-        analysis = self._client.diagnose(payload)
+        import asyncio
+        analysis = asyncio.run(self._client.diagnose(payload))
         if analysis.topic_labels:
             return analysis.topic_labels[0]
         return ""

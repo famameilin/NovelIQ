@@ -1,8 +1,9 @@
+import asyncio
 import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -34,7 +35,7 @@ def create_mock_stream_response(content: str):
 class TestCloudStub(unittest.TestCase):
     def test_null_client(self) -> None:
         client = NullCloudModelClient()
-        analysis = client.diagnose({"summary": "test"})
+        analysis = asyncio.run(client.diagnose({"summary": "test"}))
         payload = analysis.to_dict()
         self.assertIn("foreshadow_rate", payload)
 
@@ -50,13 +51,15 @@ class TestCloudStub(unittest.TestCase):
             }
         )
 
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content=content))]
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = create_mock_stream_response(content)
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         config = TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k")
         client = ConfiguredCloudModelClient(config, client=mock_client)
 
-        analysis = client.diagnose({"novel_id": "n1", "summary": "test"})
+        analysis = asyncio.run(client.diagnose({"novel_id": "n1", "summary": "test"}))
 
         self.assertEqual(analysis.novel_id, "n1")
         self.assertEqual(analysis.foreshadow_rate, 0.5)
@@ -71,11 +74,11 @@ class TestCloudStub(unittest.TestCase):
         fake_result = MagicMock(canonical_decisions=expected_canonical_decisions)
 
         with patch.object(client._disambiguation_client, "disambiguate_characters", return_value=fake_result) as mock_disambiguate:
-            result = client.disambiguate_characters(
+            result = asyncio.run(client.disambiguate_characters(
                 candidates=_candidates("zhangsan", "alias_a"),
                 context_sentences={"alias_a": "alias_a smiled"},
                 existing_names=["zhangsan"],
-            )
+            ))
 
         self.assertEqual(result, expected_canonical_decisions)
         mock_disambiguate.assert_called_once_with(

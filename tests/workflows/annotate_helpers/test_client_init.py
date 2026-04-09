@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from src.models.annotation import AnnotationClient
@@ -107,7 +108,7 @@ def test_init_annotation_clients_uses_noop_fallback_for_lightweight_annotation_s
     assert isinstance(incremental_client, DisambiguationLike)
     assert isinstance(full_client, DisambiguationLike)
 
-    incremental_result = incremental_client.disambiguate_characters(candidates=_candidates("a_jia"))
-    full_result = full_client.disambiguate_characters(candidates=_candidates("a_yi"))
+    incremental_result = asyncio.run(incremental_client.disambiguate_characters(candidates=_candidates("a_jia")))
+    full_result = asyncio.run(full_client.disambiguate_characters(candidates=_candidates("a_yi")))
     assert incremental_result.canonical_decisions == {}
     assert full_result.canonical_decisions == {}
