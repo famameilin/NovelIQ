@@ -55,6 +55,9 @@ from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.parser.thinking import extract_thinking_unified
 
+# StreamEvent 仅在 _call_api_stream 内部使用（lazy import 避免循环依赖）
+# from src.api.models.events import StreamEvent
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -307,7 +310,7 @@ class BaseModelClient:
         self,
         request_params: dict[str, Any],
         is_cloud: bool = False,
-        stream_callback: Callable[[str, str], Any] | None = None,
+        emitter: Callable[[StreamEvent], Any] | None = None,
     ) -> Any:
         """
         流式API调用
@@ -326,8 +329,15 @@ class BaseModelClient:
         修改者: TraeAI
         任务: 重构 BaseModelClient 使用 AsyncOpenAI
         修改内容: 改为 async def，使用 async for 迭代流，使用 await 调用 stream_callback
+
+        修改时间: 2026-04-09
+        修改者: GLM-5
+        任务: refactor/sse-unified-event-bus
+        修改内容: stream_callback → emitter (StreamEvent 统一回调)
         """
         import time
+
+        from src.api.models.events import StreamEvent
 
         request_params["stream"] = True
 
@@ -359,8 +369,8 @@ class BaseModelClient:
 
                     current_time = time.time()
                     should_broadcast = current_time - last_broadcast_time >= 0.1 or char_count >= 50
-                    if stream_callback and should_broadcast:
-                        await stream_callback(buffer_content, "content")
+                    if emitter and should_broadcast:
+                        await emitter(StreamEvent(action="output", content=buffer_content))
                         buffer_content = ""
                         char_count = 0
                         last_broadcast_time = current_time
@@ -375,8 +385,8 @@ class BaseModelClient:
 
                     current_time = time.time()
                     should_broadcast = current_time - last_broadcast_time >= 0.1 or char_count >= 50
-                    if stream_callback and should_broadcast:
-                        await stream_callback(buffer_content, "reasoning")
+                    if emitter and should_broadcast:
+                        await emitter(StreamEvent(action="thinking", content=buffer_content))
                         buffer_content = ""
                         char_count = 0
                         last_broadcast_time = current_time
@@ -384,9 +394,9 @@ class BaseModelClient:
         if is_cloud:
             print(f"\n[Stream] Completed: received {chunk_count} chunks", flush=True)
 
-        if stream_callback and buffer_content:
-            last_type = "content" if content_chunks else "reasoning"
-            await stream_callback(buffer_content, last_type)
+        if emitter and buffer_content:
+            action = "output" if content_chunks else "thinking"
+            await emitter(StreamEvent(action=action, content=buffer_content))
 
         full_content = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks) if reasoning_chunks else None

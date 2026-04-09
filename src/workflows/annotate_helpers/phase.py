@@ -48,8 +48,6 @@ class AnnotationPhaseConfig:
     incremental_disambig_client: DisambiguationLike | None = None
     full_disambig_client: DisambiguationLike | None = None
     run_id: str = ""
-    stream_callback: Callable[[str, str], Awaitable[None]] | None = None
-    notify_callback: Callable | None = None
     emitter: Callable | None = None
 
 
@@ -71,7 +69,6 @@ async def _annotate_chunk(
     known_aliases: str | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
-    notify_callback: Callable | None = None,
     emitter: Callable | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
@@ -106,9 +103,7 @@ async def _annotate_chunk(
     - 云端失败直接终止整个任务
     """
     try:
-        # 设置回调到 client 上，供 multi_phase 内部使用
-        if hasattr(client, "_notify_callback"):
-            client._notify_callback = notify_callback  # type: ignore[attr-defined]
+        # 设置 emitter 到 client 上，供 multi_phase 内部使用
         if hasattr(client, "_emitter"):
             client._emitter = emitter  # type: ignore[attr-defined]
         return await client.annotate_chunk(
@@ -142,7 +137,6 @@ class AnnotationPhaseResult:
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
-        notify_callback: Callable | None = None,
         emitter: Callable | None = None,
     ) -> None:
         self.annotation_client = annotation_client
@@ -153,7 +147,6 @@ class AnnotationPhaseResult:
         self.alias_keywords = alias_keywords
         self.global_context_str = global_context_str
         self.alias_map = alias_map
-        self.notify_callback = notify_callback
         self.emitter = emitter
 
 
@@ -172,11 +165,6 @@ async def _init_annotation_phase_with_config(
     config: AnnotationPhaseConfig,
 ) -> AnnotationPhaseResult:
     """初始化标注阶段（使用配置对象）
-
-    修改时间: 2026-04-07
-    修改者: TraeAI
-    任务: websocket-streaming-progress
-    修改内容: 传递 stream_callback 到客户端初始化
     """
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
     from .context import _init_disambig_provider
@@ -185,20 +173,12 @@ async def _init_annotation_phase_with_config(
     if not config.run_id:
         raise ValueError("run_id is required for annotation phase")
 
-    # 构建 stream_callback：如果传了 emitter，优先用 emitter 包装
-    effective_stream_callback = config.stream_callback
-    if config.emitter and not config.stream_callback:
-        async def _stream_via_emitter(content: str, content_type: str) -> None:
-            action = "output" if content_type == "content" else "thinking"
-            await config.emitter(StreamEvent(action=action, content=content))  # type: ignore[union-attr]
-        effective_stream_callback = _stream_via_emitter
-
     (annotation_client, cloud_annotation_client, incremental_client, full_client) = _init_annotation_clients(
         config.analysis_logger,
         config.annotate_client,
         config.incremental_disambig_client,
         config.full_disambig_client,
-        stream_callback=effective_stream_callback,
+        emitter=config.emitter,
     )
 
     # 设置 session 用于保存模型交互记录
@@ -245,7 +225,6 @@ async def _init_annotation_phase_with_config(
         alias_keywords=alias_keywords,
         global_context_str=global_context_str,
         alias_map={},
-        notify_callback=config.notify_callback,
         emitter=config.emitter,
     )
 
@@ -263,12 +242,10 @@ async def _init_annotation_phase(
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
     run_id: str = "",
-    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
-    notify_callback: Callable | None = None,
     emitter: Callable | None = None,
 ) -> AnnotationPhaseResult:
     """
-    初始化标注阶段（向后兼容）
+    初始化标注阶段
 
     创建时间: 2026-03-13
     创建者: TraeAI
@@ -278,11 +255,6 @@ async def _init_annotation_phase(
     修改者: TraeAI
     任务: code-quality-refactor - 简化多参数函数
     修改内容: 改为调用 _init_annotation_phase_with_config，保持向后兼容
-
-    修改时间: 2026-04-07
-    修改者: TraeAI
-    任务: websocket-streaming-progress
-    修改内容: 添加 stream_callback 参数
 
     修改时间: 2026-04-09
     修改者: TraeAI
@@ -305,8 +277,6 @@ async def _init_annotation_phase(
         incremental_disambig_client=incremental_disambig_client,
         full_disambig_client=full_disambig_client,
         run_id=run_id,
-        stream_callback=stream_callback,
-        notify_callback=notify_callback,
         emitter=emitter,
     )
     return await _init_annotation_phase_with_config(config)
@@ -368,8 +338,6 @@ async def _process_single_chunk(
         conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.rag_retriever, run_id=run_id
     )
 
-    logger.info(f"_process_single_chunk: notify_callback={phase_result.notify_callback is not None}, idx={idx}")
-
     progress_range = settings.analysis.progress.annotate
     range_start = progress_range.start
     range_end = progress_range.end
@@ -387,7 +355,6 @@ async def _process_single_chunk(
         known_aliases=ctx.known_aliases_str,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
-        notify_callback=phase_result.notify_callback,
         emitter=phase_result.emitter,
     )
 
@@ -433,7 +400,6 @@ async def _process_chunks_phase(
     run_id: str = "",
     novel_id: str = "",
     resume: bool = False,
-    notify_callback: Callable | None = None,
     emitter: Callable | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, DisambiguationState]:
@@ -514,14 +480,6 @@ async def _process_chunks_phase(
                     percent=(success_count / total_chunks) * 100,
                     message=f"标注 chunk {success_count}/{total_chunks}",
                 ))
-            elif notify_callback:
-                await notify_callback(
-                    phase="phase1",
-                    status="progress",
-                    current=success_count,
-                    total=total_chunks,
-                    percent=(success_count / total_chunks) * 100,
-                )
             if run_id and success_count % checkpoint_interval == 0:
                 _save_disambig_checkpoint(conn, run_id, state)
             if run_id and success_count % projection_interval == 0:

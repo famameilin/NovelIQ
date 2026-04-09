@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from loguru import logger
@@ -34,7 +35,7 @@ from src.models.cloud import ConfiguredCloudModelClient, build_diagnosis_payload
 from src.models.cloud.schema import CloudAnalysis
 from src.pipeline.pipeline import FileCache, MemoryCache
 from src.storage.repositories import StatsRepository
-from src.workflows.types import IProgressCallback
+from src.api.models.events import StreamEvent
 
 
 def _setup_diagnose_callback(
@@ -117,7 +118,6 @@ async def run_diagnose(
     cache_path: Path | None = None,
     client: ConfiguredCloudModelClient | None = None,
     analysis_logger: AnalysisLogger | None = None,
-    notify_callback: IProgressCallback | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> CloudAnalysis:
     """
@@ -161,9 +161,6 @@ async def run_diagnose(
 
     _setup_diagnose_callback(cloud_client, session, novel_id, run_id=run_id)
 
-    if notify_callback:
-        await notify_callback(phase="diagnose", status="start", current=0, total=1, percent=0.0)
-
     cache_key = f"{cache_key_base}:result"
     if cache and cache.has(cache_key):
         result = cache.get(cache_key)
@@ -181,7 +178,5 @@ async def run_diagnose(
 
     if emitter:
         await emitter(StreamEvent(action="complete", stage="diagnose", current=1, total=1, percent=100.0))
-    elif notify_callback:
-        await notify_callback(phase="diagnose", status="complete", current=1, total=1, percent=100.0)
 
     return result

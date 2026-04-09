@@ -9,7 +9,7 @@
 修改时间: 2026-04-09
 创建者: GLM-5
 任务: refactor/sse-unified-event-bus
-修改内容: notify_callback + stream_callback → emitter (StreamEvent 统一回调)
+修改内容: emitter (StreamEvent 统一回调)
 """
 
 from __future__ import annotations
@@ -39,7 +39,6 @@ class StageExecutor:
         """执行预处理阶段"""
         from src.workflows import run_preprocess
 
-        # 向后兼容：如果传入旧的 notify_callback，包装为 emitter
         await run_preprocess(
             source_path=source_path,
             run_id=run_id,

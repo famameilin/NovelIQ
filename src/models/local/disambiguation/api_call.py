@@ -25,9 +25,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+from src.api.models.events import StreamEvent
 
 from src.utils.token_counter import count_messages_tokens, count_tokens
 
@@ -44,7 +46,7 @@ async def call_disambiguate_api(
     config: TaskModelConfig,
     messages: list[dict[str, str]],
     log_type: str,
-    stream_callback: Callable[[str, str], None] | None = None,
+    emitter: Callable[[StreamEvent], Any] | None = None,
 ) -> DisambiguateResponseModel:
     """
     统一调用消歧API，处理响应字符串/对象两种情况
@@ -100,7 +102,7 @@ async def call_disambiguate_api(
     response = await client._call_api_stream(
         request_params,
         is_cloud=client.is_cloud_api(),
-        stream_callback=stream_callback,
+        emitter=emitter,
     )
 
     thinking_content = None
