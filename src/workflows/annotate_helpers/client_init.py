@@ -109,20 +109,18 @@ def _init_annotation_clients(
     annotate_client: AnnotationLike | None = None,
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
-    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
+    emitter: Callable | None = None,
 ) -> tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
     """初始化标注客户端
-
-    修改时间: 2026-04-07
-    修改者: TraeAI
-    任务: websocket-streaming-progress
-    修改内容: 添加 stream_callback 参数，传递到 AnnotationClient
     """
     annotation_client = cast(
         AnnotationLike,
         annotate_client
-        or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger, stream_callback=stream_callback),
+        or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger),
     )
+    # 设置 emitter 到 client，供 multi_phase 内部使用
+    if emitter and hasattr(annotation_client, "_emitter"):
+        annotation_client._emitter = emitter  # type: ignore[attr-defined]
 
     cloud_annotation_client: AnnotationLike | None = None
     cloud_fallback_enabled = settings.analysis.cloud_annotation_fallback_enabled
@@ -130,8 +128,10 @@ def _init_annotation_clients(
     if cloud_fallback_enabled:
         try:
             cloud_client = AnnotationClient(
-                task_type="cloud_annotation", analysis_logger=analysis_logger, stream_callback=stream_callback
+                task_type="cloud_annotation", analysis_logger=analysis_logger
             )
+            if emitter and hasattr(cloud_client, "_emitter"):
+                cloud_client._emitter = emitter  # type: ignore[attr-defined]
             cloud_annotation_client = cast(AnnotationLike, cloud_client)
             logger.info(
                 f"cloud annotation client initialized for fallback (thinking={cloud_client._config.thinking_enabled})"

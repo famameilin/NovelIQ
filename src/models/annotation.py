@@ -69,7 +69,6 @@ class AnnotationClient(BaseModelClient):
         novel_id: str | None = None,
         instructor_client_factory: Any | None = None,
         session: Any | None = None,
-        stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(
             task_type=task_type,
@@ -81,7 +80,6 @@ class AnnotationClient(BaseModelClient):
             session=session,
         )
         self._instructor_client_factory = instructor_client_factory
-        self._stream_callback = stream_callback
 
     async def annotate_chunk(
         self,
@@ -133,7 +131,6 @@ class AnnotationClient(BaseModelClient):
             chapter_id=ctx.chapter_id,
             cloud_client=ctx.cloud_client,
             run_id=ctx.run_id,
-            notify_callback=getattr(self, "_notify_callback", None),
             emitter=getattr(self, "_emitter", None),
         )
 
@@ -169,7 +166,7 @@ class AnnotationClient(BaseModelClient):
         if response_model is not None:
             request_params["response_format"] = self._build_json_schema(response_model)
 
-        response = await self._call_api_stream(request_params, is_cloud=is_cloud, stream_callback=self._stream_callback)
+        response = await self._call_api_stream(request_params, is_cloud=is_cloud)
 
         if response_model is not None:
             parsed_result = self._parse_structured_response(response, response_model)

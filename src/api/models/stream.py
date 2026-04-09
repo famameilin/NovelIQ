@@ -29,36 +29,6 @@ class StreamMessageType(StrEnum):
     task_cancelled = "task_cancelled"
 
 
-class ProgressDetail(BaseModel):
-    """
-    进度详情模型 (deprecated)
-
-    已被 StreamEvent 统一格式替代（src/api/models/events.py）。
-    保留供向后兼容，新代码应使用 StreamEvent。
-    """
-
-    stage: str = Field(description="当前阶段名称")
-    sub_stage: str = Field(description="子阶段名称/phase名称")
-    phase: str = Field(default="", description="当前执行的phase（如 phase1/phase2/phase3/phase4）")
-    current: int = Field(ge=0, description="当前进度值")
-    total: int = Field(ge=0, description="总进度值")
-    percent: float = Field(ge=0, le=100, description="完成百分比")
-    message: str = Field(description="进度描述信息")
-
-
-class LLMOutputData(BaseModel):
-    """
-    LLM 输出数据模型 (deprecated)
-
-    已被 StreamEvent 统一格式替代（src/api/models/events.py）。
-    保留供向后兼容，新代码应使用 StreamEvent。
-    """
-
-    phase: str = Field(description="生成阶段标识")
-    chunk_id: int = Field(ge=0, description="数据块 ID")
-    content: str = Field(description="输出内容")
-
-
 class StreamMessage(BaseModel):
     """
     流式消息模型

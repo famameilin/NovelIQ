@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from src.config import TaskModelConfig
 from src.config.analysis_logger import AnalysisLogger
+from src.api.models.events import StreamEvent
 from src.models.cloud.schema import CloudAnalysis
 from src.models.interactions import record_model_interaction
 from src.models.local.base import BaseModelClient, TokenUsageCallback
@@ -143,7 +144,7 @@ class DiagnosisClient(BaseModelClient):
         self,
         request_params: dict[str, Any],
         is_cloud: bool = False,
-        stream_callback: Callable[[str, str], None] | None = None,
+        emitter: Callable[[StreamEvent], Any] | None = None,
     ) -> Any:
         """
         非流式API调用（async 版本）
