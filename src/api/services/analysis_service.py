@@ -64,9 +64,8 @@ from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import TaskStatus
 from src.api.models.stream import StreamMessageType
 from src.api.services.analysis.environment_initializer import EnvironmentInitializer
-from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.analysis.stage_executor import StageExecutor
-from src.api.services.broadcast.progress_broadcaster import ProgressBroadcaster
+from src.api.services.event_manager import event_manager
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.config import settings
@@ -84,14 +83,8 @@ class AnalysisService:
         self.novel_service = novel_service
         self.task_manager = task_manager
         self.session_factory = session_factory or SessionFactory()
-        self.broadcaster = ProgressBroadcaster()
         self.env_initializer = EnvironmentInitializer(self.session_factory)
         self.stage_executor = StageExecutor()
-        self.error_handler = AnalysisErrorHandler(
-            broadcaster=self.broadcaster,
-            novel_service=novel_service,
-            task_manager=task_manager,
-        )
 
     async def _broadcast_progress(
         self,
@@ -106,34 +99,36 @@ class AnalysisService:
         message: str = "",
     ) -> None:
         """
-        广播进度消息到 WebSocket 并更新 TaskInfo
+        广播进度消息到 SSE 并更新 TaskInfo
 
         创建时间: 2026-04-07
         创建者: TraeAI
         任务: websocket-streaming-progress
-        说明: 通过 WebSocket 向前端推送进度更新
+        说明: 通过 SSE 向前端推送进度更新
 
         修改时间: 2026-04-07
         修改者: TraeAI
         任务: implement-task-cancellation
         修改内容: 同时更新 TaskInfo 的详细进度字段，使 HTTP 轮询也能获取进度
 
-        修改时间: 2026-04-07
-        修改者: GLM-5
-        任务: AnalysisService 重构 - 提取 WebSocket 广播职责
-        修改内容: 使用 ProgressBroadcaster 进行广播
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: 迁移到 SSE
+        修改内容: 使用 event_manager 进行广播
         """
         logger.info(f"[_broadcast_progress] task_id={task_id}, type={message_type}, stage={stage}")
-        await self.broadcaster.broadcast_progress(
+        await event_manager.send(
             task_id=task_id,
-            message_type=message_type,
-            stage=stage,
-            sub_stage=sub_stage,
-            phase=phase,
-            current=current,
-            total=total,
-            percent=percent,
-            message=message,
+            event_type=message_type.value,
+            data={
+                "stage": stage,
+                "sub_stage": sub_stage,
+                "phase": phase,
+                "current": current,
+                "total": total,
+                "percent": percent,
+                "message": message,
+            },
         )
 
         if message_type in (StreamMessageType.stage_start, StreamMessageType.stage_progress):
@@ -156,29 +151,31 @@ class AnalysisService:
         chunk_id: int = 0,
     ) -> None:
         """
-        广播 LLM 输出消息到 WebSocket 并更新 TaskInfo
+        广播 LLM 输出消息到 SSE 并更新 TaskInfo
 
         创建时间: 2026-04-07
         创建者: TraeAI
         任务: websocket-streaming-progress
-        说明: 通过 WebSocket 向前端推送 LLM 输出
+        说明: 通过 SSE 向前端推送 LLM 输出
 
         修改时间: 2026-04-07
         修改者: TraeAI
         任务: implement-task-cancellation
         修改内容: 同时更新 TaskInfo 的 llm_outputs 字段，使 HTTP 轮询也能获取输出
 
-        修改时间: 2026-04-07
-        修改者: GLM-5
-        任务: AnalysisService 重构 - 提取 WebSocket 广播职责
-        修改内容: 使用 ProgressBroadcaster 进行广播
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: 迁移到 SSE
+        修改内容: 使用 event_manager 进行广播
         """
-        await self.broadcaster.broadcast_llm_output(
+        await event_manager.send(
             task_id=task_id,
-            message_type=message_type,
-            phase=phase,
-            content=content,
-            chunk_id=chunk_id,
+            event_type=message_type.value,
+            data={
+                "phase": phase,
+                "content": content,
+                "chunk_id": chunk_id,
+            },
         )
 
         self.task_manager.append_llm_output(task_id, content)

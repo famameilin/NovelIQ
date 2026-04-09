@@ -73,10 +73,10 @@ class ProgressSettings:
     """
 
     preprocess: StageProgressRange = field(default_factory=lambda: StageProgressRange(0, 10))
-    annotate: StageProgressRange = field(default_factory=lambda: StageProgressRange(10, 85))
-    aggregate: StageProgressRange = field(default_factory=lambda: StageProgressRange(50, 70))
-    topic_model: StageProgressRange = field(default_factory=lambda: StageProgressRange(70, 85))
-    diagnose: StageProgressRange = field(default_factory=lambda: StageProgressRange(85, 100))
+    annotate: StageProgressRange = field(default_factory=lambda: StageProgressRange(10, 80))
+    aggregate: StageProgressRange = field(default_factory=lambda: StageProgressRange(80, 90))
+    topic_model: StageProgressRange = field(default_factory=lambda: StageProgressRange(90, 95))
+    diagnose: StageProgressRange = field(default_factory=lambda: StageProgressRange(95, 100))
 
 
 @dataclass

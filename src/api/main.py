@@ -60,7 +60,6 @@ setup_logging(verbose=True, debug=False)
 from src.api.middleware import register_exception_handlers, register_middlewares
 from src.api.routes import analysis_router, novels_router, results_router, timeline_router
 from src.api.routes.sse import router as sse_router
-from src.api.routes.websocket import router as websocket_router
 
 
 @asynccontextmanager
@@ -133,7 +132,6 @@ app.include_router(novels_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(results_router, prefix="/api")
 app.include_router(timeline_router, prefix="/api")
-app.include_router(websocket_router, prefix="/api", tags=["WebSocket"])
 app.include_router(sse_router, prefix="/api", tags=["SSE"])
 
 register_exception_handlers(app)
