@@ -469,7 +469,6 @@ async def _process_chunks_phase(
             )
             success_count += 1
             if emitter:
-                from src.api.models.events import StreamEvent
                 await emitter(StreamEvent(
                     action="progress",
                     sub_stage="phase1",
