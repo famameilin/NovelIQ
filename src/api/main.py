@@ -65,6 +65,18 @@ from src.api.routes.sse import router as sse_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
+
+    # 清理僵尸任务：将上次进程遗留的 running 状态标记为 failed
+    try:
+        from src.storage.db import get_session
+        from src.storage.repositories import RunRepository
+
+        with get_session() as session:
+            repo = RunRepository(session)
+            repo.mark_running_as_failed()
+    except Exception as e:
+        logger.warning(f"Failed to clean up zombie tasks on startup: {e}")
+
     yield
     logger.info("FastAPI application shutting down...")
 

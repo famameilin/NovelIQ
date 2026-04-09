@@ -295,6 +295,30 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         result = self.session.execute(stmt)
         return result.scalar() or 0
 
+    def mark_running_as_failed(self) -> int:
+        """
+        将所有 running 状态的任务标记为 failed。
+
+        在服务启动时调用，清理上次进程异常退出遗留的僵尸任务。
+
+        Returns:
+            受影响的行数
+        """
+        from sqlalchemy import update
+
+        now = datetime.now()
+        stmt = (
+            update(AnalysisRun)
+            .where(AnalysisRun.status == "running")
+            .values(status="failed", updated_at=now)
+        )
+        result = self.session.execute(stmt)
+        self.session.commit()
+        count = result.rowcount
+        if count > 0:
+            logger.info(f"Marked {count} zombie running task(s) as failed on startup")
+        return count
+
     def list_novels_with_latest_run(self) -> list[dict[str, Any]]:
         """
         获取所有有分析记录的小说列表
