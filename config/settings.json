@@ -72,7 +72,8 @@
     "cloud_annotation": false,
     "incremental_disambig": true,
     "full_disambig": true,
-    "diagnosis": true
+    "diagnosis": true,
+    "phase3_candidates_per_batch": 5
   },
   "streaming": {
     "annotation": true,

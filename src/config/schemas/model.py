@@ -93,6 +93,11 @@ class ThinkingSettings:
     创建时间: 2026-03-12
     创建者: TraeAI
     任务: 将thinking配置从各模型配置中独立出来
+
+    修改时间: 2026-04-09
+    创建者: TraeAI
+    任务: fix-phase3-validation-error
+    修改内容: 添加 phase3_candidates_per_batch 配置，控制每批处理的候选数量
     """
 
     annotation: bool = False
@@ -100,6 +105,7 @@ class ThinkingSettings:
     incremental_disambig: bool = True
     full_disambig: bool = True
     diagnosis: bool = True
+    phase3_candidates_per_batch: int = 5
 
     def validate(self) -> None:
         """验证配置"""

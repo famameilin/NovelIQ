@@ -57,7 +57,6 @@
   "dialogues": [
     {
       "index": 1,
-      "content": "原文内容",
       "is_dialogue": true,
       "speaker": ["说话者"],
       "tone": "语气",
@@ -87,7 +86,6 @@
 输出：
 {
   "index": 23,
-  "content": "柳妹妹、柳姐姐。",
   "is_dialogue": true,
   "speaker": ["周凤兰", "赵兰英"],
   "tone": "温和",
@@ -97,7 +95,7 @@
 
 【规则】
 1. 如果无法确定说话者，speaker 为 null
-2. content 必须与输入的候选列表中的内容完全一致
+2. content 已通过 {dialogue_list} 提供，只需返回 is_dialogue、speaker 等判断结果
 3. speaker 必须是数组格式，即使只有一个人说话
 
 【身份线索提取规则】

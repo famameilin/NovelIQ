@@ -168,10 +168,16 @@ class Phase3Prompts:
     创建时间: 2026-03-23
     创建者: TraeAI
     任务: prompt-consolidation
+
+    修改时间: 2026-04-09
+    创建者: TraeAI
+    任务: fix-phase3-content-field
+    修改内容: 添加 dialogue_batch_size，每批处理的候选对话数量
     """
 
     system: str = ""
     user_template: str = ""
+    dialogue_batch_size: int = 5
 
 
 @dataclass
