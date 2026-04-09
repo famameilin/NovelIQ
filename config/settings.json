@@ -177,10 +177,10 @@
     },
     "progress": {
       "preprocess": { "start": 0, "end": 10 },
-      "annotate": { "start": 10, "end": 85 },
-      "aggregate": { "start": 50, "end": 70 },
-      "topic_model": { "start": 70, "end": 85 },
-      "diagnose": { "start": 85, "end": 100 }
+      "annotate": { "start": 10, "end": 80 },
+      "aggregate": { "start": 80, "end": 90 },
+      "topic_model": { "start": 90, "end": 95 },
+      "diagnose": { "start": 95, "end": 100 }
     },
     "valid_hierarchical_relation_types": [
       "belongs_to",
