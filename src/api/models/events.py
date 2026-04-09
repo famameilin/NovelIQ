@@ -94,15 +94,24 @@ class StreamEvent:
 #  Action → SSE event type 映射                                       #
 # ------------------------------------------------------------------ #
 
+# 终止类事件（task_complete / task_error / task_cancelled）不在此映射表中，
+# 原因如下：
+#   1. 语义差异：映射表中的 5 个 action 是「进行中」事件，需要 EventBus 补全
+#      stage/sub_stage/chunk_id 等上下文字段；而终止类事件表示任务级终态，
+#      不需要也不应携带 chunk 级上下文。
+#   2. 数据格式不同：终止类事件的 data 结构固定（如 {"error": ..., "stage": ...}），
+#      与 StreamEvent.to_dict() 的 10 字段格式不同，强行走 emit() 再翻译会丢失
+#      语义或产生冗余字段。
+#   3. 副作用控制：emit() 内部会同步调用 task_manager.update_task()，
+#      对终止事件而言这些更新既不必要也可能引发状态冲突。
+# 因此 emit_task_complete / emit_task_error / emit_task_cancelled 直接调用
+# event_manager.send()，跳过 emit() 的上下文补全和 TaskManager 同步逻辑。
 _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "start": StreamMessageType.stage_start.value,
     "progress": StreamMessageType.stage_progress.value,
     "complete": StreamMessageType.stage_complete.value,
     "output": StreamMessageType.llm_output.value,
     "thinking": StreamMessageType.llm_thinking.value,
-    # NOTE: task_complete / task_error / task_cancelled 由
-    # emit_task_complete / emit_task_error / emit_task_cancelled
-    # 直接调用 event_manager.send()，不经过此映射表。
 }
 
 
@@ -191,17 +200,23 @@ class AnalysisEventBus:
 
         # 同步更新 TaskManager
         if resolved_event.action in ("start", "progress", "complete"):
-            self.task_manager.update_task(
-                self.task_id,
-                stage=resolved_event.stage,
-                sub_stage=resolved_event.sub_stage,
-                current=resolved_event.current,
-                total=resolved_event.total,
-                progress=resolved_event.percent,
-                message=resolved_event.message,
-            )
+            try:
+                self.task_manager.update_task(
+                    self.task_id,
+                    stage=resolved_event.stage,
+                    sub_stage=resolved_event.sub_stage,
+                    current=resolved_event.current,
+                    total=resolved_event.total,
+                    progress=resolved_event.percent,
+                    message=resolved_event.message,
+                )
+            except Exception as e:
+                logger.error(f"Failed to update task status: {e}")
         elif resolved_event.action == "output":
-            self.task_manager.append_llm_output(self.task_id, resolved_event.content)
+            try:
+                self.task_manager.append_llm_output(self.task_id, resolved_event.content)
+            except Exception as e:
+                logger.error(f"Failed to append LLM output: {e}")
 
     # ------------------------------------------------------------------
     #  便捷方法：阶段级事件
