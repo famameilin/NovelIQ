@@ -5,33 +5,17 @@
 创建者: TraeAI
 任务: 任务管理
 
-修改时间: 2026-03-19
-修改者: TraeAI
-任务: ID系统统一优化
-修改内容: 确认统一使用task_id作为对外接口和内部存储标识
-
-修改时间: 2026-04-07
-修改者: TraeAI
-任务: websocket-streaming-progress
-修改内容: 添加进度回调支持，用于 WebSocket 广播
-
-修改时间: 2026-04-07
-修改者: TraeAI
-任务: implement-task-cancellation
-修改内容: 添加 cancel_event 和 asyncio_task 字段，新增 cancel_task() 和 store_asyncio_task() 方法
-
-修改时间: 2026-04-08
-修改者: TraeAI
-任务: 修复任务状态不更新数据库问题
-修改内容: update_task 和 complete_task 方法同步更新数据库
-
-说明: TaskManager统一使用task_id（8位短ID）作为任务标识，
-      不涉及run_id（36位UUID）的转换，转换逻辑由调用方处理。
+修改时间: 2026-04-09
+修改者: GLM-5
+任务: sse-architecture-review
+修改内容:
+- threading.Event → asyncio.Event，与异步分析流程语义一致
+- cancel_event.is_set() 和 set() 行为保持兼容
 """
+
 from __future__ import annotations
 
 import asyncio
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -62,7 +46,7 @@ class TaskInfo:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     result: Any = None
-    cancel_event: threading.Event | None = None
+    cancel_event: asyncio.Event | None = None
     asyncio_task: asyncio.Task | None = None
 
 
@@ -77,16 +61,7 @@ class TaskManager:
         self._db_session_factory = factory
 
     def _update_db(self, task_id: str, **kwargs) -> None:
-        """
-        更新数据库中的任务状态
-
-        创建时间: 2026-04-08
-        创建者: TraeAI
-        任务: 修复数据库更新方法缺少关键字段同步问题
-        修改时间: 2026-04-08
-        修改者: TraeAI
-        修改内容: 同步 progress 和 stage 字段到数据库
-        """
+        """更新数据库中的任务状态"""
         if self._db_session_factory is None:
             return
         try:
@@ -110,7 +85,7 @@ class TaskManager:
             novel_id=novel_id,
             status=TaskStatus.PENDING,
             started_at=datetime.now(),
-            cancel_event=threading.Event(),
+            cancel_event=asyncio.Event(),
         )
         self._tasks[task_id] = task
         logger.info(f"Task created: {task_id} for novel {novel_id}")
@@ -169,18 +144,7 @@ class TaskManager:
         return tasks
 
     def cancel_task(self, task_id: str) -> bool:
-        """
-        设置取消信号。
-
-        创建时间: 2026-04-07
-        创建者: TraeAI
-        任务: implement-task-cancellation
-        说明: 设置任务的取消信号，返回 True 表示信号已设置（任务仍在运行）
-
-        Returns:
-            True: 任务存在且状态允许取消，取消信号已设置
-            False: 任务不存在或状态不允许取消
-        """
+        """设置取消信号，返回 True 表示信号已设置"""
         task = self._tasks.get(task_id)
         if task is None:
             return False
@@ -194,12 +158,7 @@ class TaskManager:
         return True
 
     def cancel_completed_task(self, task_id: str, error: str | None = None) -> None:
-        """
-        将任务标记为已取消（区别于 failed）。
-
-        创建时间: 2026-04-07
-        说明: 取消流程完成后调用，设置 CANCELLED 状态而非 FAILED
-        """
+        """将任务标记为已取消"""
         if task_id not in self._tasks:
             return
         self.update_task(
@@ -219,14 +178,7 @@ class TaskManager:
                 task.llm_outputs = task.llm_outputs[-100:]
 
     def store_asyncio_task(self, task_id: str, asyncio_task: asyncio.Task) -> None:
-        """
-        保存 asyncio.Task 引用。
-
-        创建时间: 2026-04-07
-        创建者: TraeAI
-        任务: implement-task-cancellation
-        说明: 保存 asyncio.Task 引用，用于后续可能的取消操作
-        """
+        """保存 asyncio.Task 引用"""
         task_info = self._tasks.get(task_id)
         if task_info:
             task_info.asyncio_task = asyncio_task
