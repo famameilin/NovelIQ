@@ -6,13 +6,13 @@
 任务: 分析服务
 
 修改时间: 2026-04-09
-修改者: GLM-5
-任务: sse-architecture-review
+创建者: GLM-5
+任务: refactor/sse-unified-event-bus
 修改内容:
-- 统一广播路径：所有 SSE 推送走 ProgressBroadcaster，不再直接调用 event_manager
-- 修复 error_handler 未实例化的 AttributeError
-- threading.Event → asyncio.Event
-- 移除冗余的 task_manager.update_task 调用（ProgressBroadcaster 已处理）
+- 使用 AnalysisEventBus 替代 ProgressBroadcaster + 闭包回调
+- 所有 SSE 事件走 EventBus 统一发送，不再有双路径
+- 阶段级事件由 service 层 emit，内部进度由 workflow 层通过 emitter emit
+- error_handler 使用 EventBus 发送终止事件
 """
 
 from __future__ import annotations
@@ -25,13 +25,12 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.exceptions import AnalysisError
+from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import TaskStatus
-from src.api.models.stream import StreamMessageType
 from src.api.services.analysis.environment_initializer import EnvironmentInitializer
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.analysis.stage_executor import StageExecutor
-from src.api.services.broadcast.progress_broadcaster import ProgressBroadcaster
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.config import settings
@@ -51,7 +50,6 @@ class AnalysisService:
         self.session_factory = session_factory or SessionFactory()
         self.env_initializer = EnvironmentInitializer(self.session_factory)
         self.stage_executor = StageExecutor()
-        self.broadcaster = ProgressBroadcaster(task_manager)
         self.error_handler = AnalysisErrorHandler(
             novel_service=novel_service,
             task_manager=task_manager,
@@ -59,7 +57,7 @@ class AnalysisService:
 
     async def _execute_analysis_stages(
         self,
-        task_id: str,
+        bus: AnalysisEventBus,
         session: Session,
         run_id: str,
         source_path: Path,
@@ -71,205 +69,101 @@ class AnalysisService:
         max_chars: int = 2000,
         overlap: int = 200,
     ) -> None:
+        task_id = bus.task_id
+
         if self._is_cancelled(task_id):
-            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
 
+        # ── 预处理 ──
         if not skip_stages["skip_preprocess"]:
-            await self.broadcaster.broadcast_progress(
-                task_id, StreamMessageType.stage_start, stage="preprocess", message="开始预处理"
-            )
-            self.task_manager.update_task(
-                task_id, stage="preprocess", progress=settings.analysis.progress.preprocess.start
-            )
+            await bus.emit_stage_start("preprocess", message="开始预处理", percent=settings.analysis.progress.preprocess.start)
 
-            async def preprocess_progress_callback(
-                phase: str, status: str, current: int, total: int, percent: float
-            ) -> None:
-                if status == "start":
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_start,
-                        stage=phase,
-                        percent=percent,
-                        message="开始预处理",
-                    )
-                else:
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_progress,
-                        stage=phase,
-                        percent=percent,
-                        message="预处理完成",
-                    )
+            async def preprocess_emitter(event: StreamEvent) -> None:
+                """预处理阶段的 emitter：自动补全 stage 上下文"""
+                if not event.stage:
+                    event.stage = "preprocess"
+                await bus.emit(event)
 
             await self.stage_executor.run_preprocess(
-                source_path, run_id, session, max_chars, overlap, preprocess_progress_callback
+                source_path, run_id, session, max_chars, overlap, preprocess_emitter
             )
-            await self.broadcaster.broadcast_progress(task_id, StreamMessageType.stage_complete, stage="preprocess")
+            await bus.emit_stage_complete("preprocess")
 
         if self._is_cancelled(task_id):
-            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
 
+        # ── 标注 ──
         if not skip_stages["skip_annotate"]:
-            await self.broadcaster.broadcast_progress(
-                task_id, StreamMessageType.stage_start, stage="annotate", message="开始标注分析"
-            )
-            self.task_manager.update_task(task_id, stage="annotate", progress=settings.analysis.progress.annotate.start)
+            await bus.emit_stage_start("annotate", message="开始标注分析", percent=settings.analysis.progress.annotate.start)
 
-            async def annotate_progress_callback(
-                phase: str, status: str, current: int, total: int, percent: float
-            ) -> None:
-                if status == "start":
-                    message_type = StreamMessageType.stage_start
-                    message = f"开始 {phase}"
-                elif status == "progress":
-                    message_type = StreamMessageType.stage_progress
-                    message = f"标注 chunk {current}/{total}"
-                else:  # complete
-                    message_type = StreamMessageType.stage_progress
-                    message = f"{phase} 完成"
-                await self.broadcaster.broadcast_progress(
-                    task_id,
-                    message_type,
-                    stage="annotate",
-                    sub_stage=phase,
-                    phase=phase,
-                    current=current,
-                    total=total,
-                    percent=percent,
-                    message=message,
-                )
-
-            async def stream_callback(content: str, content_type: str) -> None:
-                message_type = (
-                    StreamMessageType.llm_output if content_type == "content" else StreamMessageType.llm_thinking
-                )
-                await self.broadcaster.broadcast_llm_output(
-                    task_id,
-                    message_type,
-                    phase="annotate",
-                    content=content,
-                )
+            async def annotate_emitter(event: StreamEvent) -> None:
+                """标注阶段的 emitter：自动补全 stage 上下文"""
+                if not event.stage:
+                    event.stage = "annotate"
+                await bus.emit(event)
 
             await self.stage_executor.run_annotate(
                 run_id, session, novel_id, analysis_logger, novel_title,
-                notify_callback=annotate_progress_callback, stream_callback=stream_callback,
+                emitter=annotate_emitter,
                 is_cancelled=lambda: self._is_cancelled(task_id),
             )
-            await self.broadcaster.broadcast_progress(task_id, StreamMessageType.stage_complete, stage="annotate")
+            await bus.emit_stage_complete("annotate")
 
         if self._is_cancelled(task_id):
-            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
 
+        # ── 聚合 ──
         if not skip_stages["skip_aggregate"]:
-            await self.broadcaster.broadcast_progress(
-                task_id, StreamMessageType.stage_start, stage="aggregate", message="开始数据聚合"
-            )
-            self.task_manager.update_task(
-                task_id, stage="aggregate", progress=settings.analysis.progress.aggregate.start
-            )
+            await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.analysis.progress.aggregate.start)
 
-            async def aggregate_progress_callback(
-                phase: str, status: str, current: int, total: int, percent: float
-            ) -> None:
-                if status == "start":
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_start,
-                        stage=phase,
-                        percent=percent,
-                        message="开始数据聚合",
-                    )
-                else:
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_progress,
-                        stage=phase,
-                        percent=percent,
-                        message="数据聚合完成",
-                    )
+            async def aggregate_emitter(event: StreamEvent) -> None:
+                if not event.stage:
+                    event.stage = "aggregate"
+                await bus.emit(event)
 
             await self.stage_executor.run_aggregate(
-                run_id, session, aggregate_progress_callback
+                run_id, session, aggregate_emitter
             )
-            await self.broadcaster.broadcast_progress(task_id, StreamMessageType.stage_complete, stage="aggregate")
+            await bus.emit_stage_complete("aggregate")
 
         if self._is_cancelled(task_id):
-            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
 
+        # ── 主题建模 ──
         if not skip_stages["skip_topic_model"]:
-            await self.broadcaster.broadcast_progress(
-                task_id, StreamMessageType.stage_start, stage="topic-model", message="开始主题建模"
-            )
-            self.task_manager.update_task(
-                task_id, stage="topic-model", progress=settings.analysis.progress.topic_model.start
-            )
+            await bus.emit_stage_start("topic-model", message="开始主题建模", percent=settings.analysis.progress.topic_model.start)
 
-            async def topic_model_progress_callback(
-                phase: str, status: str, current: int, total: int, percent: float
-            ) -> None:
-                if status == "start":
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_start,
-                        stage=phase,
-                        percent=percent,
-                        message="开始主题建模",
-                    )
-                else:
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_progress,
-                        stage=phase,
-                        percent=percent,
-                        message="主题建模完成",
-                    )
+            async def topic_model_emitter(event: StreamEvent) -> None:
+                if not event.stage:
+                    event.stage = "topic-model"
+                await bus.emit(event)
 
             await self.stage_executor.run_topic_model(
-                run_id, session, num_topics, topic_model_progress_callback
+                run_id, session, num_topics, topic_model_emitter
             )
-            await self.broadcaster.broadcast_progress(task_id, StreamMessageType.stage_complete, stage="topic-model")
+            await bus.emit_stage_complete("topic-model")
 
         if self._is_cancelled(task_id):
-            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger, bus)
             return
 
+        # ── 诊断 ──
         if not skip_stages["skip_diagnose"]:
-            await self.broadcaster.broadcast_progress(
-                task_id, StreamMessageType.stage_start, stage="diagnose", message="开始诊断报告"
-            )
-            self.task_manager.update_task(
-                task_id, stage="diagnose", progress=settings.analysis.progress.diagnose.start
-            )
+            await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.analysis.progress.diagnose.start)
 
-            async def diagnose_progress_callback(
-                phase: str, status: str, current: int, total: int, percent: float
-            ) -> None:
-                if status == "start":
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_start,
-                        stage=phase,
-                        percent=percent,
-                        message="开始诊断报告",
-                    )
-                else:
-                    await self.broadcaster.broadcast_progress(
-                        task_id,
-                        StreamMessageType.stage_progress,
-                        stage=phase,
-                        percent=percent,
-                        message="诊断报告完成",
-                    )
+            async def diagnose_emitter(event: StreamEvent) -> None:
+                if not event.stage:
+                    event.stage = "diagnose"
+                await bus.emit(event)
 
             await self.stage_executor.run_diagnose(
-                run_id, session, analysis_logger, diagnose_progress_callback
+                run_id, session, analysis_logger, diagnose_emitter
             )
-            await self.broadcaster.broadcast_progress(task_id, StreamMessageType.stage_complete, stage="diagnose")
+            await bus.emit_stage_complete("diagnose")
 
     def _is_cancelled(self, task_id: str) -> bool:
         """检查任务是否已被请求取消"""
@@ -395,6 +289,7 @@ class AnalysisService:
         analysis_logger: AnalysisLogger | None = None
         session: Session | None = None
         run_id: str | None = None
+        bus: AnalysisEventBus | None = None
         try:
             self.task_manager.update_task(task_id, cancel_event=asyncio.Event())
 
@@ -419,8 +314,11 @@ class AnalysisService:
 
             self.task_manager.update_task(task_id, status=TaskStatus.RUNNING, stage="preprocess", progress=0)
 
+            # 创建 EventBus：所有 SSE 事件的统一发送口
+            bus = AnalysisEventBus(task_id, self.task_manager)
+
             await self._execute_analysis_stages(
-                task_id=task_id,
+                bus=bus,
                 session=session,
                 run_id=run_id,
                 source_path=source_path,
@@ -438,24 +336,24 @@ class AnalysisService:
 
             elapsed = time.time() - start_time
             await self.error_handler.handle_success(
-                task_id, novel_id, elapsed, analysis_logger, session, run_id, log_prefix="Analysis"
+                task_id, novel_id, elapsed, analysis_logger, session, run_id, bus=bus, log_prefix="Analysis"
             )
 
         except asyncio.CancelledError:
             logger.info(f"Task {task_id} was cancelled via asyncio.Task.cancel()")
             if session and run_id:
                 await self.error_handler.handle_cancel(
-                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
                 )
         except Exception as e:
             elapsed = time.time() - start_time
             if self._is_cancelled(task_id) and session and run_id:
                 await self.error_handler.handle_cancel(
-                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
                 )
             elif session and run_id:
                 await self.error_handler.handle_failure(
-                    task_id, novel.get("novel_id", "unknown"), elapsed, e, analysis_logger, session, run_id
+                    task_id, novel.get("novel_id", "unknown"), elapsed, e, analysis_logger, session, run_id, bus=bus
                 )
             else:
                 self.novel_service.update_task_status(task_id, "failed")
@@ -471,6 +369,7 @@ class AnalysisService:
         analysis_logger: AnalysisLogger | None = None
         session: Session | None = None
         run_id: str | None = None
+        bus: AnalysisEventBus | None = None
         try:
             self.task_manager.update_task(task_id, cancel_event=asyncio.Event())
 
@@ -489,8 +388,10 @@ class AnalysisService:
 
             self.task_manager.update_task(task_id, status=TaskStatus.RUNNING, stage="preprocess", progress=0)
 
+            bus = AnalysisEventBus(task_id, self.task_manager)
+
             await self._execute_analysis_stages(
-                task_id=task_id,
+                bus=bus,
                 session=session,
                 run_id=run_id,
                 source_path=source_path,
@@ -506,20 +407,20 @@ class AnalysisService:
 
             elapsed = time.time() - start_time
             await self.error_handler.handle_success(
-                task_id, novel_id, elapsed, analysis_logger, session, run_id, log_prefix="Reanalysis"
+                task_id, novel_id, elapsed, analysis_logger, session, run_id, bus=bus, log_prefix="Reanalysis"
             )
 
         except asyncio.CancelledError:
             logger.info(f"Reanalysis task {task_id} was cancelled via asyncio.Task.cancel()")
             if session and run_id:
                 await self.error_handler.handle_cancel(
-                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
                 )
         except Exception as e:
             elapsed = time.time() - start_time
             if self._is_cancelled(task_id) and session and run_id:
                 await self.error_handler.handle_cancel(
-                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
                 )
             elif session and run_id:
                 await self.error_handler.handle_failure(
@@ -530,6 +431,7 @@ class AnalysisService:
                     analysis_logger,
                     session,
                     run_id,
+                    bus=bus,
                     log_prefix="Reanalysis",
                 )
             else:

@@ -133,6 +133,8 @@ class AnnotationClient(BaseModelClient):
             chapter_id=ctx.chapter_id,
             cloud_client=ctx.cloud_client,
             run_id=ctx.run_id,
+            notify_callback=getattr(self, "_notify_callback", None),
+            emitter=getattr(self, "_emitter", None),
         )
 
     async def _call_annotation_api(

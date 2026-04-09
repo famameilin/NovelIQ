@@ -3,22 +3,27 @@
  * 创建者: GLM-5
  * 任务: WebSocket 流式数据状态管理
  * 说明: 管理流式数据连接状态、任务进度、LLM 输出缓冲和阶段完成时间
+ *
+ * 修改时间: 2026-04-09
+ * 创建者: GLM-5
+ * 任务: refactor/sse-unified-event-bus
+ * 修改内容: 适配统一 StreamEventData 格式
  */
 import { create } from "zustand";
-import type { ProgressDetail, LLMOutputData } from "@/api/streamTypes";
+import type { StreamEventData, LLMOutputData } from "@/api/streamTypes";
 import { appConfig } from "@/config";
 
 interface StreamState {
   isConnected: boolean;
   currentTaskId: string | null;
-  progress: ProgressDetail | null;
+  progress: StreamEventData | null;
   llmOutputs: Map<string, string[]>;
   stageDurations: Map<string, number>;
   error: string | null;
 
   setConnected: (connected: boolean) => void;
   setTaskId: (taskId: string | null) => void;
-  updateProgress: (progress: ProgressDetail) => void;
+  updateProgress: (progress: StreamEventData) => void;
   appendLLMOutput: (data: LLMOutputData) => void;
   setStageDuration: (stage: string, duration: number) => void;
   setError: (error: string | null) => void;

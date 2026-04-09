@@ -41,6 +41,7 @@ async def run_topic_model(
     force: bool = False,
     cache_path: Path | None = None,
     notify_callback: IProgressCallback | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int]:
     """
     执行主题建模流程
@@ -148,7 +149,9 @@ async def run_topic_model(
     logger.info(f"Topic assignments: {len(topic_rows)}")
     logger.info(f"Processing time: {elapsed:.2f}s")
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", stage="topic-model", current=1, total=1, percent=100.0))
+    elif notify_callback:
         await notify_callback(phase="topic-model", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, topic_model.num_topics
