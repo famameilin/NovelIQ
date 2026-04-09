@@ -5,6 +5,11 @@
 创建者: GLM-5
 任务: AnalysisService 重构 - 提取错误处理职责
 说明: 负责处理分析过程中的成功、失败和取消事件
+
+修改时间: 2026-04-09
+修改者: GLM-5
+任务: sse-architecture-review
+修改内容: 使用实际存在的 ProgressBroadcaster 替代 TYPE_CHECKING 引用
 """
 
 from __future__ import annotations
@@ -15,10 +20,10 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.models.stream import StreamMessageType
+from src.api.services.event_manager import event_manager
 from src.storage.repositories import RunRepository
 
 if TYPE_CHECKING:
-    from src.api.services.broadcast.progress_broadcaster import ProgressBroadcaster
     from src.api.services.novel_service import NovelService
     from src.api.services.task_manager import TaskManager
     from src.config.analysis_logger import AnalysisLogger
@@ -29,11 +34,9 @@ class AnalysisErrorHandler:
 
     def __init__(
         self,
-        broadcaster: ProgressBroadcaster,
         novel_service: NovelService,
         task_manager: TaskManager,
     ):
-        self.broadcaster = broadcaster
         self.novel_service = novel_service
         self.task_manager = task_manager
 
@@ -65,8 +68,10 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "completed")
         session.commit()
 
-        await self.broadcaster.broadcast_progress(
-            task_id, StreamMessageType.task_complete, percent=100.0, message="分析完成"
+        await event_manager.send(
+            task_id=task_id,
+            event_type=StreamMessageType.task_complete.value,
+            data={"stage": "completed", "percent": 100.0, "message": "分析完成"},
         )
 
         logger.info(f"{log_prefix} completed: {task_id}")
@@ -102,8 +107,10 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "failed")
         session.commit()
 
-        await self.broadcaster.broadcast_progress(
-            task_id, StreamMessageType.task_error, message=str(error)
+        await event_manager.send(
+            task_id=task_id,
+            event_type=StreamMessageType.task_error.value,
+            data={"error": str(error), "stage": "failed"},
         )
 
     async def handle_cancel(
@@ -122,8 +129,10 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "cancelled")
         session.commit()
 
-        await self.broadcaster.broadcast_progress(
-            task_id, StreamMessageType.task_cancelled, message="任务已取消"
+        await event_manager.send(
+            task_id=task_id,
+            event_type=StreamMessageType.task_cancelled.value,
+            data={"stage": "cancelled", "message": "任务已取消"},
         )
 
         if analysis_logger:

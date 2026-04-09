@@ -5,87 +5,20 @@
  * 创建者: TraeAI
  * 任务: 前端适配 SSE
  * 说明: 提供 SSE 连接管理，支持自动重连（浏览器原生）、事件监听
+ *
+ * 修改时间: 2026-04-09
+ * 创建者: GLM-5
+ * 任务: sse-architecture-review
+ * 修改内容:
+ * - 删除未使用的 useEventSource 基础 Hook（死代码）
+ * - useSSEListener: onEvent/onError 用 useRef 包裹，避免依赖不稳定导致 EventSource 频繁重建
+ * - onerror 中不主动 close，让浏览器原生自动重连
  */
+
 import { useEffect, useRef, useCallback, useState } from "react";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
-/* ------------------------------------------------------------------ */
-
-interface UseEventSourceOptions {
-  onMessage?: (event: MessageEvent) => void;
-  onError?: (error: Event) => void;
-  onOpen?: (event: Event) => void;
-}
-
-interface UseEventSourceReturn {
-  isConnected: boolean;
-  disconnect: () => void;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Hook                                                              */
-/* ------------------------------------------------------------------ */
-
-export function useEventSource(
-  url: string | null,
-  options: UseEventSourceOptions = {}
-): UseEventSourceReturn {
-  const { onMessage, onError, onOpen } = options;
-
-  const [isConnected, setIsConnected] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const isManualCloseRef = useRef(false);
-
-  const disconnect = useCallback(() => {
-    isManualCloseRef.current = true;
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setIsConnected(false);
-  }, []);
-
-  useEffect(() => {
-    if (!url) return;
-
-    isManualCloseRef.current = false;
-
-    const eventSource = new EventSource(url);
-    eventSourceRef.current = eventSource;
-
-    eventSource.onopen = (event: Event) => {
-      setIsConnected(true);
-      onOpen?.(event);
-    };
-
-    eventSource.onmessage = (event: MessageEvent) => {
-      onMessage?.(event);
-    };
-
-    eventSource.onerror = (error: Event) => {
-      setIsConnected(false);
-      onError?.(error);
-      if (!isManualCloseRef.current) {
-        eventSource.close();
-        eventSourceRef.current = null;
-      }
-    };
-
-    return () => {
-      eventSource.close();
-      eventSourceRef.current = null;
-    };
-  }, [url, onMessage, onError, onOpen]);
-
-  return {
-    isConnected,
-    disconnect,
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/*  SSE Event Types Helper                                            */
 /* ------------------------------------------------------------------ */
 
 export type SSEEventType =
@@ -106,13 +39,24 @@ interface SSEEventListenerOptions {
   eventTypes?: SSEEventType[];
 }
 
+/* ------------------------------------------------------------------ */
+/*  Hook                                                              */
+/* ------------------------------------------------------------------ */
+
 export function useSSEListener(
   url: string | null,
   options: SSEEventListenerOptions = {}
 ) {
-  const { onEvent, onError, eventTypes } = options;
+  const { eventTypes } = options;
   const eventSourceRef = useRef<EventSource | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+
+  // 用 ref 存储 callback，避免依赖变化导致 EventSource 重建
+  const onEventRef = useRef(options.onEvent);
+  onEventRef.current = options.onEvent;
+
+  const onErrorRef = useRef(options.onError);
+  onErrorRef.current = options.onError;
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {
@@ -132,9 +76,10 @@ export function useSSEListener(
       setIsConnected(true);
     };
 
+    // 不在 onerror 中主动 close，让浏览器原生自动重连
     eventSource.onerror = (error: Event) => {
       setIsConnected(false);
-      onError?.(error);
+      onErrorRef.current?.(error);
     };
 
     const defaultEventTypes: SSEEventType[] = [
@@ -160,7 +105,7 @@ export function useSSEListener(
         } catch {
           data = event.data;
         }
-        onEvent?.(eventType as SSEEventType, data);
+        onEventRef.current?.(eventType as SSEEventType, data);
       });
     }
 
@@ -168,7 +113,7 @@ export function useSSEListener(
       eventSource.close();
       eventSourceRef.current = null;
     };
-  }, [url, onEvent, onError, eventTypes]);
+  }, [url, eventTypes]);
 
   return {
     isConnected,
