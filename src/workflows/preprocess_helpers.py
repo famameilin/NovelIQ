@@ -19,10 +19,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from loguru import logger
-
 from src.chunking.chunker import Chunk
-from src.lexicons.loader import load_lexicon
+from src.lexicons.registry import LexiconRegistry
 from src.metrics.style_metrics import (
     dialogue_ratio,
     function_word_distribution,
@@ -46,37 +44,25 @@ def _load_all_lexicons_for_preprocess(lexicon_dir: Path) -> dict[str, list[str] 
     任务: refactor-analysis-layer-functions
     说明: 从 run_preprocess 中提取，负责加载所有需要的词典
 
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 删除文化词表加载，只保留 imagery 词表
+    修改时间: 2026-04-06
+    修改者: 重构
+    修改内容: 迁移至 LexiconRegistry v2
     """
+    registry = LexiconRegistry(base_dir=lexicon_dir)
+    registry.load()
+
     lexicons: dict[str, list[str] | dict[str, list[str]]] = {}
+    lexicons["sensory"] = registry.get("style.sensory_5sense")
+    lexicons["function_words"] = registry.get("style.function_words")
+    lexicons["imagery"] = registry.get("culture.imagery")
 
-    try:
-        lexicons["sensory"] = load_lexicon("sensory", lexicon_dir)
-    except FileNotFoundError:
-        lexicons["sensory"] = []
-        logger.warning("sensory lexicon not found")
-
-    try:
-        lexicons["function_words"] = load_lexicon("function_words", lexicon_dir)
-    except FileNotFoundError:
-        lexicons["function_words"] = []
-        logger.warning("function_words lexicon not found")
-
-    try:
-        lexicons["imagery"] = load_lexicon("imagery", lexicon_dir)
-    except FileNotFoundError:
-        lexicons["imagery"] = []
-        logger.warning("imagery lexicon not found")
+    # semantic_category 需要解析为分类字典
 
     semantic_category_file = lexicon_dir / "semantic_category.txt"
     if semantic_category_file.exists():
         lexicons["semantic_categories"] = parse_semantic_category_lexicon(str(semantic_category_file))
     else:
         lexicons["semantic_categories"] = {}
-        logger.warning("semantic_category lexicon not found")
 
     return lexicons
 

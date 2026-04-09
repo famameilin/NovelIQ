@@ -54,6 +54,7 @@ python -m src.api.main --port 8001
 | GET | `/api/novels/{novel_id}/tasks` | 获取所有分析任务 |
 | DELETE | `/api/novels/{novel_id}/tasks/{task_id}` | 删除特定分析任务 |
 | POST | `/api/novels/{novel_id}/tasks/batch-delete` | 批量删除分析任务 |
+| POST | `/api/novels/{novel_id}/tasks/{task_id}/cancel` | 取消正在运行的分析任务 |
 
 ### ID 体系说明
 
@@ -423,6 +424,37 @@ python -m src.api.main --port 8001
 
 ---
 
+#### POST /api/novels/{novel_id}/tasks/{task_id}/cancel
+
+取消正在运行的分析任务。
+
+> **创建时间**: 2026-04-07  
+> **说明**: 采用协作式取消，任务将在当前阶段完成后停止，不会强制中断正在执行的 LLM 调用。
+
+**请求**：无请求体
+
+**响应示例**：
+```json
+{
+  "task_id": "a1b2c3d4",
+  "status": "cancelling",
+  "message": "任务将在当前阶段完成后停止"
+}
+```
+
+**错误处理**：
+| 状态码 | 场景 |
+|--------|------|
+| 400 | 任务已完成、已取消或正在取消 |
+| 404 | 任务不存在 |
+
+**行为说明**：
+- 取消请求发出后，任务状态先变为 `cancelling`，当前阶段执行完毕后变为 `cancelled`
+- 取消后数据库中已有部分数据（如部分 chunks/annotations），后续可通过 `POST /analyze` 利用断点续传功能继续
+- 任务不在内存中时（服务重启后），直接更新数据库状态为 `cancelled`
+
+---
+
 #### GET /api/novels/{novel_id}/status
 
 查询分析任务进度。
@@ -462,6 +494,8 @@ python -m src.api.main --port 8001
 **状态值**:
 - `pending`: 等待执行
 - `running`: 执行中
+- `cancelling`: 正在取消（等待当前阶段完成后停止）
+- `cancelled`: 已取消
 - `completed`: 已完成
 - `failed`: 执行失败
 

@@ -202,11 +202,11 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
             foreshadowing_desc="",
             characters=[],
             dialogues=[
-                DialogueSnapshot(speaker="张三"),
+                DialogueSnapshot(speaker=["张三"]),
             ],
         )
         result = replace_invalid_names_with_anonymous(annotation, ["张三"], 3)
-        self.assertEqual(result.dialogues[0].speaker, "匿名_C3_0")
+        self.assertEqual(result.dialogues[0].speaker, ["匿名_C3_0"])
 
     def test_same_invalid_name_same_anonymous(self) -> None:
         annotation = ChunkAnnotation(
@@ -221,12 +221,12 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
                 CharacterSnapshot(name="张三", role_function="主体", action="行走", action_type="移动", emotion_score="neutral"),
             ],
             dialogues=[
-                DialogueSnapshot(speaker="张三"),
+                DialogueSnapshot(speaker=["张三"]),
             ],
         )
         result = replace_invalid_names_with_anonymous(annotation, ["张三"], 4)
         self.assertEqual(result.characters[0].name, "匿名_C4_0")
-        self.assertEqual(result.dialogues[0].speaker, "匿名_C4_0")
+        self.assertEqual(result.dialogues[0].speaker, ["匿名_C4_0"])
 
 
 class TestCharacterConsistencyValidation(unittest.TestCase):
@@ -260,7 +260,7 @@ class TestCharacterConsistencyValidation(unittest.TestCase):
                 )
             ],
             dialogues=[
-                DialogueSnapshot(speaker="赵哥"),
+                DialogueSnapshot(speaker=["赵哥"]),
             ],
         )
 

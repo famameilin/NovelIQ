@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from loguru import logger
 from sqlalchemy import select
 
 from src.storage.models import AnalysisRun
@@ -120,6 +121,48 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run.updated_at = now
             self.session.commit()
 
+    def update_run_progress(self, run_id: str, progress: float) -> None:
+        """
+        更新运行进度
+
+        创建时间: 2026-04-08
+        创建者: TraeAI
+        任务: 修复数据库更新方法缺少关键字段同步问题
+        说明: 同步 progress 字段到数据库
+
+        Args:
+            run_id: 运行ID
+            progress: 进度值 (0-100)
+        """
+        now = datetime.now()
+        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
+        run = self.session.execute(stmt).scalar_one_or_none()
+        if run:
+            run.progress = progress
+            run.updated_at = now
+            self.session.commit()
+
+    def update_run_stage(self, run_id: str, stage: str) -> None:
+        """
+        更新运行阶段
+
+        创建时间: 2026-04-08
+        创建者: TraeAI
+        任务: 修复数据库更新方法缺少关键字段同步问题
+        说明: 同步 stage 字段到数据库
+
+        Args:
+            run_id: 运行ID
+            stage: 阶段名称
+        """
+        now = datetime.now()
+        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
+        run = self.session.execute(stmt).scalar_one_or_none()
+        if run:
+            run.stage = stage
+            run.updated_at = now
+            self.session.commit()
+
     def get_runs_by_novel(self, novel_id: str) -> list[dict[str, Any]]:
         """
         获取指定小说的所有运行记录
@@ -191,37 +234,48 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         创建者: TraeAI
         任务: 修复删除任务不删除数据库数据的问题
 
-        Args:
-            run_id: 运行ID
-
-        Returns:
-            是否成功删除
+        修改时间: 2026-04-08
+        修改者: TraeAI
+        任务: fix-delete-task-failure
+        修改内容: 修正表名列表以匹配实际数据库架构
         """
         from sqlalchemy import text
 
-        # 删除相关数据（使用 CASCADE 或手动删除）
         tables = [
-            "annotations",
-            "chunk_topics",
-            "chunk_styles",
-            "chunk_cultures",
+            "stage_summaries",
+            "token_usage",
+            "model_interactions",
+            "chunk_summaries",
             "chunk_curves",
-            "character_relations",
-            "entity_relations",
-            "entities",
-            "cloud_analysis",
-            "disambig_checkpoint",
+            "global_stats",
             "global_context",
+            "chunk_annotation",
+            "chunk_characters",
+            "chunk_dialogues",
+            "chunk_foreshadowing",
+            "chunk_locations",
+            "chunk_relations",
+            "chunk_style",
+            "chunk_topics",
             "chunks",
+            "character_appearances",
+            "graph_entity_aliases",
+            "graph_relation_events",
+            "graph_relations_current",
+            "graph_entities",
+            "disambig_checkpoint",
+            "cloud_analysis",
             "analysis_runs",
         ]
 
         for table in tables:
             try:
                 self.session.execute(text(f"DELETE FROM {table} WHERE run_id = :run_id"), {"run_id": run_id})
-            except Exception:
-                # 表可能不存在或没有run_id字段，忽略错误
-                pass
+            except Exception as e:
+                if "relation" in str(e).lower() or "column" in str(e).lower():
+                    pass
+                else:
+                    logger.warning(f"Failed to delete from {table}: {e}")
 
         self.session.commit()
         return True

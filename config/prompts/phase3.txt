@@ -59,30 +59,46 @@
       "index": 1,
       "content": "原文内容",
       "is_dialogue": true,
-      "speaker": "说话者",
+      "speaker": ["说话者"],
       "tone": "语气",
       "is_inner_monologue": false,
-      "evidence": "判断依据",
       "identity_clue": "身份线索（如果有）或 null"
     }
   ]
 }
 
+【speaker 字段说明】
+1. speaker 是数组格式，支持多人同时说话
+2. 单人说话：speaker: ["周凤兰"]
+3. 多人同时说话：speaker: ["周凤兰", "赵兰英"]
+4. 无法确定说话者：speaker: null
+
+【多人同时说话示例】
+原文：
+"二妈妈！"
+"柳妹妹、柳姐姐。"
+贺伯安张开双臂跑着过去...
+
+分析：
+- "柳妹妹"是赵兰英对二妈妈的称呼
+- "柳姐姐"是周凤兰对二妈妈的称呼
+- 两人在同一时刻说了这句话
+
+输出：
+{
+  "index": 23,
+  "content": "柳妹妹、柳姐姐。",
+  "is_dialogue": true,
+  "speaker": ["周凤兰", "赵兰英"],
+  "tone": "温和",
+  "is_inner_monologue": false,
+  "identity_clue": null
+}
+
 【规则】
 1. 如果无法确定说话者，speaker 为 null
 2. content 必须与输入的候选列表中的内容完全一致
-3. evidence 简要说明判断依据
-
-【evidence 格式要求 - 必须包含完整推理】
-必须说明判断依据的原文线索：
-- 说话者判断：引用原文中的提示语或上下文线索
-- 语气判断：说明语气特征的原文依据
-
-示例：
-- ✅ "原文有'喊道'提示语，且'绝了！'是感叹句，故判断说话者为猴子，语气为兴奋"
-- ✅ "上下文'他心想'表明是内心独白，故is_inner_monologue为true"
-- ❌ "看起来是他说的话"（缺少原文依据）
-- ❌ "语气很激动"（未引用原文特征）
+3. speaker 必须是数组格式，即使只有一个人说话
 
 【身份线索提取规则】
 从对话内容中提取人物身份相关信息，记录在 identity_clue 字段：
@@ -120,7 +136,7 @@
 6. 如果能确定说话者但该名字不在【已知人物】列表中，使用原文中的名字作为 speaker（这可能是新出场角色的首次对话，应如实填写而非猜测其他角色）
 7. identity_clue 只在对话中包含身份信息时填写，否则为 null
 8. identity_clue 需明确人物关系，避免使用代词
-9. identity_clue 中提到的人物必须与 speaker 一致：如果 identity_clue 说"白芷自称..."，speaker 应该是白芷；禁止出现 identity_clue 提及的人物与 speaker 不同的情况
+9. 多人同时说话时，identity_clue 可以省略或设为 null
 
 【多人交替对话场景处理】
 当多人在同一场景中交替对话、且缺少明确提示语时：

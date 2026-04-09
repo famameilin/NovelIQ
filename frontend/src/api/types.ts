@@ -23,10 +23,9 @@ export interface NovelUploadResponse {
 
 export type TaskStatus =
   | "pending"
-  | "chunking"
-  | "annotating"
-  | "aggregating"
-  | "diagnosing"
+  | "running"
+  | "cancelling"
+  | "cancelled"
   | "completed"
   | "failed";
 
@@ -37,6 +36,12 @@ export interface TaskStatusResponse {
   progress: number;
   current_step: string;
   error?: string;
+  stage?: string;
+  sub_stage?: string;
+  current?: number;
+  total?: number;
+  message?: string;
+  llm_outputs?: string[];
 }
 
 export interface AnalysisTask {
@@ -87,10 +92,17 @@ export interface ChunkCurvePoint {
 // Topics
 // ============================================================
 
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-C 主题分布
+// 说明: LDA 主题建模结果类型定义。label 字段为可选预留字段，
+//       后端当前不返回，供未来 LLM 诊断阶段生成主题命名时使用。
+
 export interface Topic {
   topic_id: number;
-  keywords: string[];
+  words: string[];
   weight: number;
+  // 可选字段：后端暂未返回，预留供 LLM 诊断阶段生成主题命名时使用
   label?: string;
 }
 
@@ -180,25 +192,27 @@ export interface GraphData {
 }
 
 // ============================================================
-// Force Graph Runtime Types (react-force-graph-2d)
+// Force Graph Runtime Types (G6)
 // ============================================================
 
 // 创建时间: 2026-04-05
 // 创建者: GLM-5
-// 任务: 修复 ForceGraph TypeScript 类型错误
-// 说明: 扩展 GraphNode 以包含 react-force-graph-2d 运行时属性 (x, y, vx, vy 等)
+// 任务: Phase 2-A 人物关系图谱
+// 说明: 运行时节点对象，包含力模拟/布局后的坐标
 
-import type { NodeObject, LinkObject } from "react-force-graph-2d";
-
-export interface GraphNodeObject extends GraphNode, NodeObject {}
+export interface GraphNodeObject extends GraphNode {
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+}
 
 // 创建时间: 2026-04-05
 // 创建者: GLM-5
-// 任务: 修复 ForceGraph TypeScript 类型错误
-// 说明: 扩展 GraphEdge 以匹配 react-force-graph-2d 的 LinkObject，
-//       source 和 target 在运行时会被解析为节点对象
+// 任务: Phase 2-A 人物关系图谱
+// 说明: 运行时边对象（G6 兼容格式）
 
-export interface GraphLinkObject extends LinkObject<GraphNodeObject> {
+export interface GraphLinkObject {
   source: string | GraphNodeObject;
   target: string | GraphNodeObject;
   relation_type?: string;
@@ -216,6 +230,33 @@ export interface ForceGraphData {
   events?: GraphEvent[];
   summary?: Record<string, unknown>;
   quality?: Record<string, unknown>;
+}
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-A 人物关系图谱
+// 说明: ForceGraph 组件 Props 类型定义
+
+export interface ForceGraphProps {
+  data: GraphData;
+  selectedNode?: GraphNode | null;
+  onNodeClick: (node: GraphNodeObject) => void;
+  searchQuery: string;
+  relationFilter: Set<string>;
+  appearanceCountMap?: Map<string, number>;
+  className?: string;
+}
+
+// 创建时间: 2026-04-05
+// 创建者: GLM-5
+// 任务: Phase 2-A 人物关系图谱
+// 说明: ForceGraph 组件暴露的方法句柄
+
+export interface ForceGraphHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fitToScreen: () => void;
+  center: () => void;
 }
 
 // ============================================================

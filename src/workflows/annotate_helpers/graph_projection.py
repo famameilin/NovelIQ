@@ -220,42 +220,48 @@ def project_graph_tables(
             graph_alias_map[row.name] = resolved_name
 
     for row in chunk_dialogues:
-        resolved_name = _resolve_name(row.speaker, alias_map, graph_alias_map)
-        if resolved_name is None:
+        speakers = row.speaker if row.speaker else []
+        if not speakers:
             continue
-        entity = graph_repo.upsert_entity(
-            run_id=run_id,
-            canonical_name=resolved_name,
-            entity_type=existing_types.get(resolved_name, "character"),
-            first_seen_chunk=row.chunk_id,
-            last_seen_chunk=row.chunk_id,
-            source_confidence=0.8,
-        )
-        if entity.entity_id is None:
-            continue
-        graph_repo.upsert_alias(
-            run_id=run_id,
-            entity_id=entity.entity_id,
-            alias=resolved_name,
-            source_chunk_id=row.chunk_id,
-            evidence=row.evidence or row.content,
-            confidence=0.8,
-            source_type="dialogue",
-            is_primary=resolved_name == row.speaker,
-        )
-        graph_alias_map[resolved_name] = resolved_name
-        if row.speaker and row.speaker != resolved_name:
+        for speaker_name in speakers:
+            if not speaker_name:
+                continue
+            resolved_name = _resolve_name(speaker_name, alias_map, graph_alias_map)
+            if resolved_name is None:
+                continue
+            entity = graph_repo.upsert_entity(
+                run_id=run_id,
+                canonical_name=resolved_name,
+                entity_type=existing_types.get(resolved_name, "character"),
+                first_seen_chunk=row.chunk_id,
+                last_seen_chunk=row.chunk_id,
+                source_confidence=0.8,
+            )
+            if entity.entity_id is None:
+                continue
             graph_repo.upsert_alias(
                 run_id=run_id,
                 entity_id=entity.entity_id,
-                alias=row.speaker,
+                alias=resolved_name,
                 source_chunk_id=row.chunk_id,
-                evidence=row.evidence or row.content,
+                evidence=row.content,
                 confidence=0.8,
                 source_type="dialogue",
-                is_primary=False,
+                is_primary=True,
             )
-            graph_alias_map[row.speaker] = resolved_name
+            graph_alias_map[resolved_name] = resolved_name
+            if speaker_name != resolved_name:
+                graph_repo.upsert_alias(
+                    run_id=run_id,
+                    entity_id=entity.entity_id,
+                    alias=speaker_name,
+                    source_chunk_id=row.chunk_id,
+                    evidence=row.content,
+                    confidence=0.8,
+                    source_type="dialogue",
+                    is_primary=False,
+                )
+                graph_alias_map[speaker_name] = resolved_name
 
     projected_count = 0
     pending_count = 0

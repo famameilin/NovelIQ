@@ -203,3 +203,41 @@ class ChunkSummary(Base):
 
     def __repr__(self) -> str:
         return f"<ChunkSummary(chunk_id={self.chunk_id}, run_id={self.run_id})>"
+
+
+class StageSummary(Base):
+    """
+    阶段性摘要表
+
+    创建时间: 2026-04-08
+    创建者: TraeAI
+    任务: fix-stage-summary-missing
+    说明: 存储增量消歧阶段生成的阶段性摘要
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    修改内容: 修正主键为 stage_id 以匹配数据库实际结构
+    """
+
+    __tablename__ = "stage_summaries"
+
+    stage_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    start_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["analysis_runs.run_id"],
+            ondelete="CASCADE",
+        ),
+        Index("idx_stage_summaries_run_id", "run_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<StageSummary(stage_id={self.stage_id}, run_id={self.run_id})>"

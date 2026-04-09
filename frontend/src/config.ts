@@ -1,0 +1,41 @@
+/**
+ * 前端应用配置
+ *
+ * 与构建时环境变量（VITE_*）不同，这里的值写在源码中，
+ * 修改后需重新部署前端，但不需要重新构建。
+ */
+
+export const appConfig = {
+  /** 后端 API 地址 */
+  apiBaseUrl: "http://localhost:8000",
+
+  /** 上传：单个文件最大字节数 */
+  maxUploadSizeBytes: 10 * 1024 * 1024, // 10 MB
+
+  /** 上传：允许的文件扩展名 */
+  acceptedFileTypes: [".txt"],
+
+  /** 数据预加载：hover 后缓存的 staleTime（ms） */
+  prefetchStaleTime: 5 * 60 * 1000, // 5 min
+
+  /** WebSocket 心跳间隔（ms） */
+  wsHeartbeatInterval: 30 * 1000, // 30 s
+
+  /** WebSocket pong 超时（ms） */
+  wsPongTimeout: 10 * 1000, // 10 s
+
+  /** WebSocket 指数退避：初始延迟（ms） */
+  wsReconnectBaseDelay: 1000,
+
+  /** WebSocket 指数退避：最大延迟（ms） */
+  wsReconnectMaxDelay: 30 * 1000,
+
+  /** WebSocket 最大重连次数 */
+  wsMaxReconnectAttempts: 10,
+
+  /** LLM 输出缓冲区最大 chunk key 数量（LRU 上限） */
+  maxLLMOutputKeys: 500,
+
+  /** 是否启用 MSW Mock API（仅开发模式生效，生产构建自动忽略） */
+  enableMock: false,
+} as const;

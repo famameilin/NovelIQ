@@ -26,6 +26,21 @@ FORESHADOWING_EXAMPLES = settings.prompts.phase2.examples
 DISAMBIGUATE_SYSTEM_PROMPT = settings.prompts.disambiguate
 ANONYMOUS_DISAMBIG_SYSTEM_PROMPT = settings.prompts.anonymous_disambig
 
+STAGE_SUMMARY_SYSTEM_PROMPT = """你是一个小说分析助手。请根据以下分块摘要，生成一个100字以内的阶段性摘要。
+
+要求：
+1. 保留关键事件和人物名称
+2. 突出情节发展脉络
+3. 不包含人物关系推断，只总结事件
+4. 控制在100字以内
+5. 输出纯文本，不要包含任何标记或格式"""
+
+STAGE_SUMMARY_USER_TEMPLATE = """以下是连续{count}个分块的摘要：
+
+{summaries}
+
+请生成一个100字以内的阶段性摘要，概括这一段情节的发展。"""
+
 
 def build_retry_prompt(
     original_user_prompt: str,

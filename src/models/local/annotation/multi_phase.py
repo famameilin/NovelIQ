@@ -27,7 +27,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -64,13 +63,17 @@ class _Phase3Result:
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 添加 dialogue_identity_clues 字段存储身份线索
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: 删除 dialogue_evidences 字段
     """
 
     dialogue_lengths: dict[str, int] | None = None
     dialogue_speakers: dict[int, str] | None = None
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
-    dialogue_evidences: dict[int, str] | None = None
     dialogue_identity_clues: dict[int, str | None] | None = None
 
 
@@ -79,7 +82,7 @@ class _Phase4Result:
     relations: list[RelationChangeSnapshot] | None = None
 
 
-def _run_phase1(
+async def _run_phase1(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None,
@@ -98,12 +101,12 @@ def _run_phase1(
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
 
-    修改时间: 2026-03-29
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
-    return annotate_chunk_phase1(
+    return await annotate_chunk_phase1(
         client=client,
         text=text,
         alias_map=alias_map,
@@ -118,7 +121,7 @@ def _run_phase1(
     )
 
 
-def _run_phase2(
+async def _run_phase2(
     client: AnnotationClient,
     text: str,
     chunk_id: int | None,
@@ -137,8 +140,13 @@ def _run_phase2(
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
+
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
-    return annotate_chunk_phase2(
+    return await annotate_chunk_phase2(
         client=client,
         text=text,
         chunk_id=chunk_id,
@@ -154,7 +162,7 @@ def _run_phase2(
     )
 
 
-def _run_phase3_if_needed(
+async def _run_phase3_if_needed(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None,
@@ -168,15 +176,10 @@ def _run_phase3_if_needed(
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
 
-    修改时间: 2026-03-28
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: fix-unknown-speaker-context
-    修改内容: 启用 return_evidences=True 返回对话判断依据
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: use-phase3-identity-clue-in-disambiguation
-    修改内容: 启用 return_identity_clues=True 返回身份线索
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     result = _Phase3Result()
 
@@ -190,7 +193,7 @@ def _run_phase3_if_needed(
         chunk_id,
     )
 
-    result_tuple = compute_dialogue_lengths_with_llm(
+    result_tuple = await compute_dialogue_lengths_with_llm(
         client=client,
         text=text,
         alias_map=alias_map,
@@ -198,7 +201,6 @@ def _run_phase3_if_needed(
         run_id=run_id,
         known_characters=known_characters,
         return_tones=True,
-        return_evidences=True,
         return_identity_clues=True,
     )
 
@@ -206,17 +208,16 @@ def _run_phase3_if_needed(
     result.dialogue_speakers = result_tuple[1]
     result.dialogues = result_tuple[2]
     result.dialogue_tones = result_tuple[3] if len(result_tuple) > 3 else None
-    result.dialogue_evidences = result_tuple[4] if len(result_tuple) > 4 else None
-    result.dialogue_identity_clues = result_tuple[5] if len(result_tuple) > 5 else None
+    result.dialogue_identity_clues = result_tuple[4] if len(result_tuple) > 4 else None
 
     logger.debug(
         "Phase3: dialogue_lengths={} dialogue_speakers={} "
-        "dialogues={} dialogue_tones={} dialogue_evidences={} chunk_id={}",
+        "dialogues={} dialogue_tones={} dialogue_identity_clues={} chunk_id={}",
         result.dialogue_lengths,
         result.dialogue_speakers,
         result.dialogues,
         result.dialogue_tones,
-        result.dialogue_evidences,
+        result.dialogue_identity_clues,
         chunk_id,
     )
 
@@ -269,6 +270,11 @@ def _build_multi_phase_result(
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 添加 dialogue_identity_clues 字段
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: 删除 dialogue_evidences 字段
     """
     return MultiPhaseAnnotationResult(
         annotation=annotation,
@@ -277,13 +283,12 @@ def _build_multi_phase_result(
         dialogue_speakers=phase3_result.dialogue_speakers,
         dialogues=phase3_result.dialogues,
         dialogue_tones=phase3_result.dialogue_tones,
-        dialogue_evidences=phase3_result.dialogue_evidences,
         dialogue_identity_clues=phase3_result.dialogue_identity_clues,
         relations=phase4_result.relations,
     )
 
 
-def annotate_chunk_multi_phase(
+async def annotate_chunk_multi_phase(
     client: AnnotationClient,
     text: str,
     prev_summary: str | None = None,
@@ -302,6 +307,7 @@ def annotate_chunk_multi_phase(
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
+    notify_callback: Any | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     多阶段标注模式
@@ -310,29 +316,15 @@ def annotate_chunk_multi_phase(
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
 
-    修改时间: 2026-03-19
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text，添加 run_id 支持
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: rename-two-phase-to-multi-phase
-    修改内容: 重命名为 annotate_chunk_multi_phase
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: Phase1 不再使用 prev_chunk_text 和 next_chunk_text，仅 Phase2 使用
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def，使用 asyncio.gather 并行执行
     """
     parallel = settings.analysis.multi_phase_annotation.parallel
 
     if parallel:
-        return annotate_chunk_parallel(
+        return await annotate_chunk_parallel(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -347,9 +339,10 @@ def annotate_chunk_multi_phase(
             run_id=run_id,
             rag_retriever=rag_retriever,
             active_entities=active_entities,
+            notify_callback=notify_callback,
         )
     else:
-        return annotate_chunk_serial(
+        return await annotate_chunk_serial(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -364,10 +357,11 @@ def annotate_chunk_multi_phase(
             run_id=run_id,
             rag_retriever=rag_retriever,
             active_entities=active_entities,
+            notify_callback=notify_callback,
         )
 
 
-def annotate_chunk_parallel(
+async def annotate_chunk_parallel(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
@@ -382,6 +376,7 @@ def annotate_chunk_parallel(
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
+    notify_callback: Any | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     并行模式：Phase1 和 Phase2 并行执行，Phase3 在 Phase1 完成后执行
@@ -390,41 +385,21 @@ def annotate_chunk_parallel(
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
 
-    修改时间: 2026-03-14
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: Phase1/Phase2独立重试机制
-    修改内容: 添加 cloud_client 参数传递
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 添加 run_id 支持
-    修改内容: 添加 run_id 参数传递
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: parallel-three-phase
-    修改内容: 扩展为三阶段并行：Phase1+Phase2 并行，Phase3 在 Phase1 完成后执行
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-    修改内容: 提取私有函数，简化为调度函数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: Phase1 不再使用 prev_chunk_text 和 next_chunk_text
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def，使用 asyncio.gather 替代 ThreadPoolExecutor
     """
+    import asyncio
+
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        phase1_future = executor.submit(
-            _run_phase1,
+    if notify_callback:
+        await notify_callback(phase="phase1", status="start")
+        await notify_callback(phase="phase2", status="start")
+
+    annotation, foreshadowing = await asyncio.gather(
+        _run_phase1(
             client=client,
             text=text,
             alias_map=alias_map,
@@ -436,9 +411,8 @@ def annotate_chunk_parallel(
             active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
-        )
-        phase2_future = executor.submit(
-            _run_phase2,
+        ),
+        _run_phase2(
             client=client,
             text=text,
             chunk_id=chunk_id,
@@ -451,33 +425,42 @@ def annotate_chunk_parallel(
             cloud_client=cloud_client,
             run_id=run_id,
             rag_retriever=rag_retriever,
-        )
+        ),
+    )
 
-        annotation = phase1_future.result()
-        foreshadowing = phase2_future.result()
+    if notify_callback:
+        await notify_callback(phase="phase1", status="progress")
+        await notify_callback(phase="phase2", status="progress")
 
-        known_characters = [c.name for c in annotation.characters] if annotation.characters else None
+    known_characters = [c.name for c in annotation.characters] if annotation.characters else None
 
-        phase3_future = executor.submit(
-            _run_phase3_if_needed,
+    if notify_callback:
+        await notify_callback(phase="phase3", status="start")
+        await notify_callback(phase="phase4", status="start")
+
+    phase3_result, phase4_relations = await asyncio.gather(
+        _run_phase3_if_needed(
             client=client,
             text=text,
             alias_map=alias_map,
             chunk_id=chunk_id,
             run_id=run_id,
             known_characters=known_characters,
-        )
-        phase4_future = executor.submit(
-            annotate_chunk_phase4,
+        ),
+        annotate_chunk_phase4(
             client=client,
             text=text,
             known_characters=known_characters,
             chunk_id=chunk_id,
             run_id=run_id,
-        )
+        ),
+    )
 
-        phase3_result = phase3_future.result()
-        phase4_result = _Phase4Result(relations=phase4_future.result())
+    phase4_result = _Phase4Result(relations=phase4_relations)
+
+    if notify_callback:
+        await notify_callback(phase="phase3", status="progress")
+        await notify_callback(phase="phase4", status="progress")
 
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
@@ -495,7 +478,7 @@ def annotate_chunk_parallel(
     )
 
 
-def annotate_chunk_serial(
+async def annotate_chunk_serial(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
@@ -510,6 +493,7 @@ def annotate_chunk_serial(
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
+    notify_callback: Any | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     串行模式
@@ -518,29 +502,18 @@ def annotate_chunk_serial(
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
 
-    修改时间: 2026-03-14
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: Phase1/Phase2独立重试机制
-    修改内容: 添加 cloud_client 参数传递
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 添加 run_id 支持
-    修改内容: 添加 run_id 参数传递
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-    修改内容: 提取私有函数，简化为调度函数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 character_appearances 参数
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
 
-    annotation = _run_phase1(
+    if notify_callback:
+        logger.info(f"notify_callback called with phase1 start for chunk_id={chunk_id}")
+        await notify_callback(phase="phase1", status="start")
+
+    annotation = await _run_phase1(
         client=client,
         text=text,
         alias_map=alias_map,
@@ -553,8 +526,10 @@ def annotate_chunk_serial(
         cloud_client=cloud_client,
         run_id=run_id,
     )
+    if notify_callback:
+        await notify_callback(phase="phase1", status="progress")
 
-    foreshadowing = _run_phase2(
+    foreshadowing = await _run_phase2(
         client=client,
         text=text,
         chunk_id=chunk_id,
@@ -569,14 +544,22 @@ def annotate_chunk_serial(
         rag_retriever=rag_retriever,
     )
 
+    if notify_callback:
+        await notify_callback(phase="phase2", status="start")
+
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
         text=text,
         chunk_id=chunk_id,
     )
+    if notify_callback:
+        await notify_callback(phase="phase2", status="progress")
 
     known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-    phase3_result = _run_phase3_if_needed(
+
+    if notify_callback:
+        await notify_callback(phase="phase3", status="start")
+    phase3_result = await _run_phase3_if_needed(
         client=client,
         text=text,
         alias_map=alias_map,
@@ -584,15 +567,24 @@ def annotate_chunk_serial(
         run_id=run_id,
         known_characters=known_characters,
     )
-    phase4_result = _Phase4Result(
-        relations=annotate_chunk_phase4(
-            client=client,
-            text=text,
-            known_characters=known_characters,
-            chunk_id=chunk_id,
-            run_id=run_id,
-        )
+    if notify_callback:
+        await notify_callback(phase="phase3", status="progress")
+    logger.info(f"Phase3 completed for chunk_id={chunk_id}, starting Phase4")
+
+    if notify_callback:
+        await notify_callback(phase="phase4", status="start")
+    phase4_relations = await annotate_chunk_phase4(
+        client=client,
+        text=text,
+        known_characters=known_characters,
+        chunk_id=chunk_id,
+        run_id=run_id,
     )
+    phase4_result = _Phase4Result(relations=phase4_relations)
+    logger.info(f"Phase4 completed for chunk_id={chunk_id}")
+
+    if notify_callback:
+        await notify_callback(phase="phase4", status="progress")
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)
 

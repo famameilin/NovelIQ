@@ -120,7 +120,6 @@ export function DiagnosisPage() {
       {/* Header */}
       <NovelHeader
         title={diagnosis?.narrative_type ? `${diagnosis.narrative_type}诊断报告` : "诊断报告"}
-        status={diagnosis ? "completed" : undefined}
         className="mb-6"
       />
 

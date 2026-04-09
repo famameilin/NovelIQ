@@ -23,6 +23,7 @@ from src.storage.models.analysis import (
     CloudAnalysis,
     GlobalContext,
     GlobalStats,
+    StageSummary,
 )
 from src.storage.models.annotation import (
     CharacterAppearance,
@@ -43,6 +44,7 @@ from src.storage.models.graph import (
 )
 from src.storage.models.location import ChunkLocation
 from src.storage.models.model_interaction import ModelInteraction
+from src.storage.models.novel import Novel
 from src.storage.models.rag import TokenUsage
 
 __all__ = [
@@ -67,7 +69,9 @@ __all__ = [
     "GlobalStats",
     "GlobalContext",
     "ChunkSummary",
+    "StageSummary",
     "TokenUsage",
     "ModelInteraction",
     "ChunkLocation",
+    "Novel",
 ]

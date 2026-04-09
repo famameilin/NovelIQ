@@ -78,7 +78,7 @@ class TestAggregateAllMetrics:
         self.db_session.execute(
             text(
                 "INSERT INTO chunk_dialogues (chunk_id, speaker, tone, run_id) "
-                "VALUES (0, '主角', '强硬', :run_id)"
+                "VALUES (0, ARRAY['主角']::TEXT[], '强硬', :run_id)"
             ),
             {"run_id": self.run_id},
         )

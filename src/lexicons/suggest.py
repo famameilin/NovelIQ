@@ -357,17 +357,23 @@ def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> dict[str, list[s
     创建者: TraeAI
     任务: 知识增强层函数重构
     从文本中扩展词库，返回各类候选词
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    修改原因: 重构为调用子函数，使用模块级常量
+    修改时间: 2026-04-06
+    修改者: 重构
+    修改内容: 使用 LexiconRegistry v2 加载基础词表
     """
     tokens, full_text = _collect_and_clean_tokens(texts, _STOPWORDS)
     freq = Counter(tokens)
+
+    from .registry import LexiconRegistry
+
+    reg = LexiconRegistry(base_dir=lexicon_dir)
+    reg.load()
+
     lexicons = {
-        "proper_nouns": read_lexicon(lexicon_dir / "proper_nouns.txt"),
-        "combat": read_lexicon(lexicon_dir / "combat.txt"),
-        "sensory": read_lexicon(lexicon_dir / "sensory.txt"),
-        "semantic_category": read_lexicon(lexicon_dir / "semantic_category.txt"),
+        "proper_nouns": set(reg.get("auxiliary.proper_nouns")),
+        "combat": set(reg.get("tension.action_terms")),
+        "sensory": set(reg.get("style.sensory_5sense")),
+        "semantic_category": set(reg.get("style.semantic_10cat")),
     }
     additions: dict[str, list[str]] = {}
     additions["proper_nouns"] = _extract_proper_nouns(

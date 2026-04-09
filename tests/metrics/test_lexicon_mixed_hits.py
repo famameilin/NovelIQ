@@ -1,11 +1,18 @@
-from src.metrics.lexicon_metrics import count_mixed_hits, count_token_hits
+"""
+phrase 模式匹配测试
+
+修改时间: 2026-04-06
+修改者: GLM-5
+任务: 移除向后兼容代码
+修改内容: 移除对 count_token_hits 的引用，仅使用 count_mixed_hits
+"""
+from src.metrics.lexicon_metrics import count_mixed_hits
 
 
 def test_mixed_hits_detects_phrase_substring_when_token_miss() -> None:
     text = "青衫剑客踏月而来"
     tokens = ["青衫", "剑客", "踏月", "而来"]
 
-    assert count_token_hits(tokens, ["青衫剑客"]) == 0
     assert count_mixed_hits(text, tokens, ["青衫剑客"]) == 1
 
 
@@ -13,7 +20,6 @@ def test_mixed_hits_detects_multi_word_phrase() -> None:
     text = "the golden core remains stable"
     tokens = ["the", "golden", "core", "remains", "stable"]
 
-    assert count_token_hits(tokens, ["golden core"]) == 0
     assert count_mixed_hits(text, tokens, ["golden core"]) == 1
 
 

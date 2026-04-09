@@ -26,6 +26,16 @@ FastAPI 应用入口模块
 修改者: AI Assistant
 任务: fix-backend-stability
 修改内容: 增强健康检查端点，添加数据库连接检测和降级响应
+
+修改时间: 2026-04-07
+修改者: TraeAI
+任务: websocket-streaming-progress
+修改内容: 注册 WebSocket 路由，支持实时进度推送
+
+修改时间: 2026-04-09
+修改者: TraeAI
+任务: 实现 SSE 路由和事件管理器
+修改内容: 注册 SSE 路由，支持 Server-Sent Events 实时推送
 """
 
 from __future__ import annotations
@@ -49,6 +59,8 @@ setup_logging(verbose=True, debug=False)
 # ruff: noqa: E402
 from src.api.middleware import register_exception_handlers, register_middlewares
 from src.api.routes import analysis_router, novels_router, results_router, timeline_router
+from src.api.routes.sse import router as sse_router
+from src.api.routes.websocket import router as websocket_router
 
 
 @asynccontextmanager
@@ -121,6 +133,8 @@ app.include_router(novels_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(results_router, prefix="/api")
 app.include_router(timeline_router, prefix="/api")
+app.include_router(websocket_router, prefix="/api", tags=["WebSocket"])
+app.include_router(sse_router, prefix="/api", tags=["SSE"])
 
 register_exception_handlers(app)
 

@@ -20,7 +20,13 @@
 修改者: TraeAI
 任务: postgresql-migration-cleanup
 修改内容: 重命名测试文件，移除 sqlite 相关命名
+
+修改时间: 2026-04-09
+修改者: TraeAI
+任务: async-reconstruction
+修改内容: chunk_text 改为 async，添加 asyncio.run() 包装
 """
+import asyncio
 import sys
 import uuid
 from pathlib import Path
@@ -64,7 +70,7 @@ def mock_embedding():
 
 def test_create_and_insert(db_session, mock_embedding) -> None:
     text_content = "\n\n".join(["a" * 600] * 2)
-    chunks = chunk_text(text_content, max_chars=1000, split_by_chapter=False)
+    chunks = asyncio.run(chunk_text(text_content, max_chars=1000, split_by_chapter=False))
 
     run_repo = RunRepository(db_session)
     run_id = run_repo.create_run(novel_id=f"test_novel_{uuid.uuid4().hex[:8]}", source_path="test", title="Test Novel")

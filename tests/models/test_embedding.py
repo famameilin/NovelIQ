@@ -65,8 +65,8 @@ class TestEmbeddingClient(unittest.TestCase):
         expected = 1.0 / np.sqrt(2)
         self.assertAlmostEqual(similarity, expected, places=5)
 
-    @patch("src.models.local.embedding.OpenAI")
-    def test_get_embedding_success(self, mock_openai: MagicMock) -> None:
+    @patch("src.models.local.embedding.AsyncOpenAI")
+    async def test_get_embedding_success(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
 
@@ -78,18 +78,18 @@ class TestEmbeddingClient(unittest.TestCase):
         mock_client.embeddings.create.return_value = mock_response
 
         client = EmbeddingClient(base_url="http://test", model="test-model", api_key="test-key")
-        result = client.get_embedding("测试文本")
+        result = await client.get_embedding("测试文本")
 
         self.assertEqual(result, [0.1, 0.2, 0.3])
         mock_client.embeddings.create.assert_called_once()
 
-    @patch("src.models.local.embedding.OpenAI")
-    def test_get_embedding_empty_text(self, mock_openai: MagicMock) -> None:
+    @patch("src.models.local.embedding.AsyncOpenAI")
+    async def test_get_embedding_empty_text(self, mock_openai: MagicMock) -> None:
         mock_client = MagicMock()
         mock_openai.return_value = mock_client
 
         client = EmbeddingClient(base_url="http://test", model="test-model", api_key="test-key")
-        result = client.get_embedding("")
+        result = await client.get_embedding("")
 
         self.assertEqual(result, [])
         mock_client.embeddings.create.assert_not_called()

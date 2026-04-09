@@ -9,12 +9,14 @@
 - 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
 - 2026-03-14: 添加 run_id 参数，使用 Repository 模式
 - 2026-03-15: 移除向后兼容代码，只使用 Repository 模式
+- 2026-04-07: 添加 stream_callback 参数支持（websocket-streaming-progress）
 
 说明: 本模块包含标注相关的客户端初始化函数。
 """
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from loguru import logger
@@ -44,7 +46,7 @@ class _NoopDisambiguationClient:
         self._novel_id = novel_id
         self._token_usage_callback = token_usage_callback
 
-    def disambiguate_characters(
+    async def disambiguate_characters(
         self,
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
@@ -55,6 +57,9 @@ class _NoopDisambiguationClient:
 
     def is_cloud_api(self) -> bool:
         return False
+
+    def generate_summary(self, messages: list[dict[str, str]], max_tokens: int = 150) -> str:
+        return ""
 
 
 def _resolve_disambiguation_fallback(
@@ -104,11 +109,19 @@ def _init_annotation_clients(
     annotate_client: AnnotationLike | None = None,
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
+    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
-    """初始化标注客户端"""
+    """初始化标注客户端
+
+    修改时间: 2026-04-07
+    修改者: TraeAI
+    任务: websocket-streaming-progress
+    修改内容: 添加 stream_callback 参数，传递到 AnnotationClient
+    """
     annotation_client = cast(
         AnnotationLike,
-        annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger),
+        annotate_client
+        or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger, stream_callback=stream_callback),
     )
 
     cloud_annotation_client: AnnotationLike | None = None
@@ -116,7 +129,9 @@ def _init_annotation_clients(
 
     if cloud_fallback_enabled:
         try:
-            cloud_client = AnnotationClient(task_type="cloud_annotation", analysis_logger=analysis_logger)
+            cloud_client = AnnotationClient(
+                task_type="cloud_annotation", analysis_logger=analysis_logger, stream_callback=stream_callback
+            )
             cloud_annotation_client = cast(AnnotationLike, cloud_client)
             logger.info(
                 f"cloud annotation client initialized for fallback (thinking={cloud_client._config.thinking_enabled})"

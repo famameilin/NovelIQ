@@ -168,6 +168,11 @@ class MultiPhaseAnnotationResult:
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 添加 dialogue_identity_clues 字段存储身份线索
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: 删除 dialogue_evidences 字段
     """
 
     annotation: ChunkAnnotation
@@ -176,6 +181,5 @@ class MultiPhaseAnnotationResult:
     dialogue_speakers: dict[int, str] | None = None
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
-    dialogue_evidences: dict[int, str] | None = None
     dialogue_identity_clues: dict[int, str | None] | None = None
     relations: list[RelationChangeSnapshot] | None = None

@@ -207,7 +207,8 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str,
     rows = chunk_repo.fetch_chunk_topics_agg(run_id)
 
     model_dir = Path("models") / "topic" / run_id
-    topic_words_map = {}
+    topic_words_map: dict[int, list[str]] = {}
+    topic_labels_map: dict[int, str] = {}
 
     if model_dir.exists():
         try:
@@ -218,16 +219,35 @@ def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str,
             for topic_id in range(topic_model.num_topics):
                 topic_words = topic_model.get_topic_words(topic_id, top_n=10)
                 topic_words_map[topic_id] = [w.word for w in topic_words]
+                if topic_model.labels:
+                    label = topic_model.labels.get(topic_id)
+                    if label:
+                        topic_labels_map[topic_id] = label
         except (FileNotFoundError, ImportError, OSError, ValueError) as e:
             logger.warning(f"Failed to load topic model: {e}")
 
     result: list[TopicInfo] = []
     for row in rows:
-        topic_id = row.chunk_id
+        topic_id = row.topic_id
         words: list[str] = topic_words_map.get(topic_id, [])
         words = _normalize_name_list(words, alias_map) or []
+        label = topic_labels_map.get(topic_id)
         if words:
-            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.avg_weight))
+            result.append(TopicInfo(topic_id=topic_id, words=words, weight=row.total_weight, label=label))
+
+    # 归一化权重：使所有主题权重之和为 1.0，便于前端展示为百分比分布
+    if result:
+        total_weight = sum(r.weight for r in result)
+        if total_weight > 0:
+            result = [
+                TopicInfo(
+                    topic_id=r.topic_id,
+                    words=r.words,
+                    weight=round(r.weight / total_weight, 6),
+                    label=r.label,
+                )
+                for r in result
+            ]
 
     return result
 
@@ -427,16 +447,32 @@ def _fetch_chunk_annotations(
     dialogues_by_chunk: dict[int, list[ChunkDialogue]] = defaultdict(list)
     for row in dialogues_raw:
         cid = row.chunk_id
-        speaker = row.speaker if row.speaker else None
-        normalized_speaker = _normalize_name(speaker, alias_map)
-        if normalized_speaker and valid_character_names is not None and normalized_speaker not in valid_character_names:
-            logger.warning("将分块对话中的悬空 speaker 置空: chunk_id={}, speaker={}", cid, normalized_speaker)
-            normalized_speaker = None
-        if normalized_speaker is None:
+        speakers = row.speaker or []
+        if not speakers:
+            continue
+        normalized_speakers = [
+            _normalize_name(s, alias_map) for s in speakers
+        ]
+        valid_speakers = []
+        for normalized_speaker in normalized_speakers:
+            if (
+                normalized_speaker
+                and valid_character_names is not None
+                and normalized_speaker not in valid_character_names
+            ):
+                logger.warning(
+                    "将分块对话中的悬空 speaker 置空: chunk_id={}, speaker={}",
+                    cid,
+                    normalized_speaker,
+                )
+                continue
+            if normalized_speaker:
+                valid_speakers.append(normalized_speaker)
+        if not valid_speakers:
             continue
         dialogues_by_chunk[cid].append(
             ChunkDialogue(
-                speaker=normalized_speaker,
+                speaker=valid_speakers,
                 length=int(row.length) if row.length is not None else None,
             )
         )
@@ -699,7 +735,12 @@ def _fetch_graph_snapshot(
     run_id: str,
     annotation_repo: AnnotationRepository,
 ) -> dict[str, Any]:
-    """获取知识图谱快照（nodes/edges/events/summary）。"""
+    """获取知识图谱快照（nodes/edges/events/summary）。
+
+    修改时间: 2026-04-05
+    修改者: GLM-5
+    修改内容: 将边数据转换为前端期望的格式（source/target/relation_type/weight）
+    """
     graph_repo = GraphRepository(annotation_repo.session)
     pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
     if pending_relations:
@@ -708,7 +749,7 @@ def _fetch_graph_snapshot(
     node_rows = graph_repo.fetch_entities(run_id)
     nodes = [
         {
-            "entity_id": row.entity_id,
+            "entity_id": str(row.entity_id),
             "name": row.canonical_name,
             "entity_type": row.entity_type,
             "first_seen_chunk": row.first_seen_chunk,
@@ -720,7 +761,22 @@ def _fetch_graph_snapshot(
         for row in node_rows
     ]
 
-    edges = graph_repo.fetch_current_relations(run_id, active_only=False)
+    raw_edges = graph_repo.fetch_current_relations(run_id, active_only=False)
+    edges = [
+        {
+            "source": str(edge["from_entity_id"]),
+            "target": str(edge["to_entity_id"]),
+            "relation_type": edge.get("type"),
+            "weight": edge.get("support_count", 1),
+            "from_name": edge.get("from_name"),
+            "to_name": edge.get("to_name"),
+            "change_count": edge.get("change_count"),
+            "tension_index": edge.get("tension_index"),
+            "is_active": edge.get("is_active"),
+        }
+        for edge in raw_edges
+    ]
+
     events = graph_repo.fetch_relation_events(run_id, limit=200)
     summary = DiagnosisRepository(annotation_repo.session).fetch_graph_summary(run_id)
 

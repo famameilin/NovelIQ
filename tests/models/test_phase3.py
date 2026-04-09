@@ -103,14 +103,14 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
     修改内容: 更新测试用例，适配 DialogueRecord 返回格式
     """
 
-    def test_empty_dialogues_returns_empty_list(self) -> None:
+    async def test_empty_dialogues_returns_empty_list(self) -> None:
         """空对话列表返回空列表"""
         mock_client = MagicMock()
-        result = attribute_dialogues_with_llm(mock_client, "text", [], ["张三"])
+        result = await attribute_dialogues_with_llm(mock_client, "text", [], ["张三"])
         self.assertEqual(result, [])
 
     @patch("src.models.local.annotation.phase3.settings")
-    def test_successful_attribution(self, mock_settings: MagicMock) -> None:
+    async def test_successful_attribution(self, mock_settings: MagicMock) -> None:
         """成功归属对话"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
@@ -126,21 +126,21 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_annotation_client._call_api_stream.return_value = MagicMock()
         mock_response = MagicMock(
             dialogues=[
-                DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="张三"),
-                DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker="李四"),
+                DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
+                DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker=["李四"]),
             ],
             model_dump=MagicMock(return_value={}),
         )
         mock_annotation_client._call_annotation_api.return_value = (mock_response, "{}")
         candidates = [QuoteCandidate(index=1, content="你好"), QuoteCandidate(index=2, content="你好啊")]
-        result = attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三", "李四"])
+        result = await attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三", "李四"])
 
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[0].speaker, "张三")
-        self.assertEqual(result[1].speaker, "李四")
+        self.assertEqual(result[0].speaker, ["张三"])
+        self.assertEqual(result[1].speaker, ["李四"])
 
     @patch("src.models.local.annotation.phase3.settings")
-    def test_exception_raises_dialogue_attribution_error(self, mock_settings: MagicMock) -> None:
+    async def test_exception_raises_dialogue_attribution_error(self, mock_settings: MagicMock) -> None:
         """异常时抛出 ValueError（model 未配置）"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
@@ -151,10 +151,10 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         candidates = [QuoteCandidate(index=1, content="你好")]
 
         with self.assertRaises(ValueError):
-            attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三"])
+            await attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三"])
 
     @patch("src.models.local.annotation.phase3.settings")
-    def test_alias_speaker_normalized_before_known_filter(self, mock_settings: MagicMock) -> None:
+    async def test_alias_speaker_normalized_before_known_filter(self, mock_settings: MagicMock) -> None:
         """说话者别名在 known_characters 校验前先归一化"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
@@ -170,13 +170,13 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         mock_annotation_client._call_api_stream.return_value = MagicMock()
         mock_response = MagicMock(
             dialogues=[
-                DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="猴子"),
+                DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["猴子"]),
             ],
             model_dump=MagicMock(return_value={}),
         )
         mock_annotation_client._call_annotation_api.return_value = (mock_response, "{}")
         candidates = [QuoteCandidate(index=1, content="你好")]
-        result = attribute_dialogues_with_llm(
+        result = await attribute_dialogues_with_llm(
             mock_annotation_client,
             "对话文本",
             candidates,
@@ -185,7 +185,7 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         )
 
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].speaker, "侯飞白")
+        self.assertEqual(result[0].speaker, ["侯飞白"])
 
 
 class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
@@ -201,35 +201,35 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
     修改内容: 更新测试用例，适配新的返回格式
     """
 
-    def test_empty_text_returns_empty_dict(self) -> None:
+    async def test_empty_text_returns_empty_dict(self) -> None:
         """空文本返回空字典"""
         mock_client = MagicMock()
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, "")
+        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, "")
         self.assertEqual(speaker_lengths, {})
         self.assertEqual(attribution, {})
         self.assertEqual(dialogues, [])
 
-    def test_no_dialogues_returns_empty_dict(self) -> None:
+    async def test_no_dialogues_returns_empty_dict(self) -> None:
         """没有对话返回空字典"""
         mock_client = MagicMock()
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, "没有对话的文本")
+        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, "没有对话的文本")
         self.assertEqual(speaker_lengths, {})
         self.assertEqual(attribution, {})
         self.assertEqual(dialogues, [])
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    def test_compute_lengths_with_attribution(self, mock_attribute: MagicMock) -> None:
+    async def test_compute_lengths_with_attribution(self, mock_attribute: MagicMock) -> None:
         """根据归属结果计算对话长度 - 使用中文双引号"""
         mock_attribute.return_value = [
-            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="张三"),
-            DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker="李四"),
-            DialogueRecord(index=3, content="再见", is_dialogue=True, speaker="张三"),
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
+            DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker=["李四"]),
+            DialogueRecord(index=3, content="再见", is_dialogue=True, speaker=["张三"]),
         ]
 
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。\u201c你好啊\u201d她回答。\u201c再见\u201d他说。"
 
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
+        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertIsInstance(speaker_lengths, dict)
         self.assertEqual(speaker_lengths.get("张三", 0), 4)
@@ -237,64 +237,64 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         self.assertIsInstance(attribution, dict)
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    def test_unknown_speaker_not_counted(self, mock_attribute: MagicMock) -> None:
+    async def test_unknown_speaker_not_counted(self, mock_attribute: MagicMock) -> None:
         """未知说话者的对话不计入 - 使用中文双引号"""
         mock_attribute.return_value = [
-            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="张三"),
-            DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker="王五"),
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
+            DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker=["王五"]),
         ]
 
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。\u201c你好啊\u201d她回答。"
 
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
+        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertEqual(speaker_lengths.get("张三", 0), 2)
         self.assertNotIn("李四", speaker_lengths)
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    def test_non_dialogue_filtered(self, mock_attribute: MagicMock) -> None:
+    async def test_non_dialogue_filtered(self, mock_attribute: MagicMock) -> None:
         """非对话内容被过滤 - 使用中文双引号"""
         mock_attribute.return_value = [
             DialogueRecord(index=1, content="精打细算", is_dialogue=False, speaker=None),
-            DialogueRecord(index=2, content="你好", is_dialogue=True, speaker="张三"),
+            DialogueRecord(index=2, content="你好", is_dialogue=True, speaker=["张三"]),
         ]
 
         mock_client = MagicMock()
         text = "\u201c精打细算\u201d的折扇。\u201c你好\u201d他说道。"
 
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
+        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertEqual(len(dialogues), 1)
         self.assertEqual(speaker_lengths.get("张三", 0), 2)
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    def test_source_content_preferred_over_model_content(self, mock_attribute: MagicMock) -> None:
+    async def test_source_content_preferred_over_model_content(self, mock_attribute: MagicMock) -> None:
         """长度统计优先使用原文提取内容，避免模型改写影响"""
         mock_attribute.return_value = [
-            DialogueRecord(index=1, content="你好你好你好", is_dialogue=True, speaker="张三"),
+            DialogueRecord(index=1, content="你好你好你好", is_dialogue=True, speaker=["张三"]),
         ]
 
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。"
 
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
+        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertEqual(speaker_lengths.get("张三", 0), 2)
         self.assertEqual(dialogues, [(1, "你好")])
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    def test_duplicate_index_counted_once(self, mock_attribute: MagicMock) -> None:
+    async def test_duplicate_index_counted_once(self, mock_attribute: MagicMock) -> None:
         """重复 index 只计一次，避免长度膨胀"""
         mock_attribute.return_value = [
-            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="张三"),
-            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="张三"),
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
         ]
 
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。"
 
-        speaker_lengths, attribution, dialogues = compute_dialogue_lengths_with_llm(mock_client, text)
+        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertEqual(speaker_lengths.get("张三", 0), 2)
         self.assertEqual(attribution, {1: "张三"})
@@ -302,16 +302,16 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
 
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    def test_return_tones_when_requested(self, mock_attribute: MagicMock) -> None:
-        """鏄惧紡璇锋眰鏃惰繑鍥炲璇濊姘旀槧灏?"""
+    async def test_return_tones_when_requested(self, mock_attribute: MagicMock) -> None:
+        """鏄惧紡璇锋眰鏃惰繑鍥炲\u0192瀵硅櫥鍚屻€?"""
         mock_attribute.return_value = [
-            DialogueRecord(index=1, content="浣犲ソ", is_dialogue=True, speaker="寮犱笁", tone="寮虹‖"),
+            DialogueRecord(index=1, content="浣犲ソ", is_dialogue=True, speaker=["寮犱笁"], tone="寮虹‖"),
         ]
 
         mock_client = MagicMock()
-        text = '"浣犲ソ"浠栬閬撱€?'
+        text = '"浣犲ソ"浠栬垂閬撱€?'
 
-        speaker_lengths, attribution, dialogues, tones = compute_dialogue_lengths_with_llm(
+        speaker_lengths, attribution, dialogues, tones = await compute_dialogue_lengths_with_llm(
             mock_client,
             text,
             return_tones=True,
@@ -378,100 +378,96 @@ class TestPostProcessValidationFix(unittest.TestCase):
     def test_unknown_speaker_kept_as_null(self) -> None:
         """unknown speaker 保留 LLM 原始判断而非强制设为 null"""
         records = [
-            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="新角色"),
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["新角色"]),
         ]
         result = self._call_validation(records, known_characters=["伯安"])
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].speaker, "新角色")
+        self.assertEqual(result[0].speaker, ["新角色"])
 
-    def test_identity_clue_corrects_speaker(self) -> None:
-        """identity_clue 提示正确 speaker 时修正"""
+    def test_identity_clue_not_used_when_speaker_in_known_set(self) -> None:
+        """speaker 已在 known_set 中时，identity_clue 不用于修正"""
         records = [
             DialogueRecord(
                 index=1, content="我叫白芷。", is_dialogue=True,
-                speaker="伯安", identity_clue="白芷自称名为白芷",
+                speaker=["伯安"], identity_clue="白芷自称名为白芷",
             ),
         ]
         result = self._call_validation(records, known_characters=["伯安", "白芷"])
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].speaker, "白芷")
-        self.assertEqual(result[0].identity_clue, "白芷自称名为白芷")
+        self.assertEqual(result[0].speaker, ["伯安"])
 
-    def test_identity_clue_nullified_when_inferred_not_in_known_set(self) -> None:
-        """identity_clue 推理出的名字不在 known_set 时，清空 clue 并保留原 speaker"""
+    def test_identity_clue_used_when_speaker_not_in_known_set(self) -> None:
+        """speaker 不在 known_set 中时，使用 identity_clue 修正"""
         records = [
             DialogueRecord(
                 index=1, content="我叫白芷。", is_dialogue=True,
-                speaker="伯安", identity_clue="白芷自称名为白芷",
+                speaker=["未知角色"], identity_clue="白芷自称名为白芷",
             ),
         ]
-        # known_characters=None 让 _extract_speaker_from_clue 不过滤 known_set
-        result = self._call_validation(records, known_characters=None)
+        result = self._call_validation(records, known_characters=["伯安", "白芷"])
         self.assertEqual(len(result), 1)
-        # inferred="白芷" 不等于 canonical_speaker="伯安" 且不在空 known_set 中
-        # 应修正 speaker 为白芷
-        self.assertEqual(result[0].speaker, "白芷")
+        self.assertEqual(result[0].speaker, ["白芷"])
 
     def test_consistent_identity_clue_passes_through(self) -> None:
         """identity_clue 与 speaker 一致时正常通过"""
         records = [
             DialogueRecord(
                 index=1, content="我叫白芷。", is_dialogue=True,
-                speaker="白芷", identity_clue="白芷自称名为白芷",
+                speaker=["白芷"], identity_clue="白芷自称名为白芷",
             ),
         ]
         result = self._call_validation(records, known_characters=["白芷"])
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].speaker, "白芷")
+        self.assertEqual(result[0].speaker, ["白芷"])
         self.assertEqual(result[0].identity_clue, "白芷自称名为白芷")
 
     def test_no_identity_clue_passes_through(self) -> None:
         """无 identity_clue 时正常通过"""
         records = [
-            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker="伯安"),
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["伯安"]),
         ]
         result = self._call_validation(records, known_characters=["伯安"])
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].speaker, "伯安")
+        self.assertEqual(result[0].speaker, ["伯安"])
 
     def test_unknown_speaker_corrected_by_clue(self) -> None:
         """unknown speaker 通过 identity_clue 反推修正（不限制 known_set）"""
         records = [
             DialogueRecord(
                 index=1, content="我叫白芷。", is_dialogue=True,
-                speaker="白芷", identity_clue="白芷自称名为白芷",
+                speaker=["白芷"], identity_clue="白芷自称名为白芷",
             ),
         ]
         result = self._call_validation(records, known_characters=["伯安", "贺铮"])
         self.assertEqual(len(result), 1)
         # 白芷不在 known_set，但 clue 明确说"白芷自称"，应保留为白芷而非 null
-        self.assertEqual(result[0].speaker, "白芷")
+        self.assertEqual(result[0].speaker, ["白芷"])
 
     def test_unknown_speaker_null_when_no_clue_match(self) -> None:
         """unknown speaker 无有效 clue 时保留 LLM 原始判断"""
         records = [
             DialogueRecord(
                 index=1, content="来者何人？", is_dialogue=True,
-                speaker="灰衣人", identity_clue="某人从远处走来",
+                speaker=["灰衣人"], identity_clue="某人从远处走来",
             ),
         ]
         result = self._call_validation(records, known_characters=["伯安"])
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].speaker, "灰衣人")
+        self.assertEqual(result[0].speaker, ["灰衣人"])
 
     def test_unknown_speaker_with_clue_describing_others(self) -> None:
         """clue 描述的是对方而非说话者时，speaker 仍为 null"""
         records = [
             DialogueRecord(
                 index=1, content="伯安少爷，那位是来应聘做您先生的。", is_dialogue=True,
-                speaker="赤甲卫", identity_clue="赤甲卫称呼贺重明为伯安少爷",
+                speaker=["赤甲卫"], identity_clue="赤甲卫称呼贺重明为伯安少爷",
             ),
         ]
         # clue 说赤甲卫在称呼别人，但说话者就是赤甲卫本人
         # _extract_speaker_from_clue 匹配 "赤甲卫称呼..." → 赤甲卫
         result = self._call_validation(records, known_characters=["伯安"])
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].speaker, "赤甲卫")
+        self.assertEqual(result[0].speaker, ["赤甲卫"])
 
 
 if __name__ == "__main__":

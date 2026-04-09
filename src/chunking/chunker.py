@@ -122,7 +122,7 @@ def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
     return chapters if chapters else [(None, text)]
 
 
-def chunk_text(
+async def chunk_text(
     text: str,
     max_chars: int = 1000,
     overlap: int = 100,
@@ -130,7 +130,7 @@ def chunk_text(
     use_semantic: bool = False,
 ) -> list[Chunk]:
     """
-    将文本分割成块
+    将文本分割成块（async 版本）
 
     Args:
         text: 输入文本
@@ -150,7 +150,7 @@ def chunk_text(
 
         embedding_client = EmbeddingClient()
         chunker = SemanticChunker(embedding_client=embedding_client)
-        return chunker.chunk_text_semantic(text)
+        return await chunker.chunk_text_semantic(text)
 
     if split_by_chapter:
         return _chunk_by_chapters(text, max_chars, overlap)
@@ -235,9 +235,9 @@ def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> list[Chunk]:
 class SemanticChunker:
     """语义分块器
 
-    修改时间: 2026-03-20
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: 添加长度限制，当累计长度超过 max_chars 时强制分割
+    任务: 改为 async 实现，移除 asyncio.run()
     """
 
     def __init__(self, embedding_client: EmbeddingClient | None = None):
@@ -248,8 +248,8 @@ class SemanticChunker:
         self._max_chars = settings.chunking.semantic_max_chars
         self._use_dynamic_threshold = settings.chunking.semantic_use_dynamic_threshold
 
-    def chunk_text_semantic(self, text: str) -> list[Chunk]:
-        """基于语义相似度的文本分块"""
+    async def chunk_text_semantic(self, text: str) -> list[Chunk]:
+        """基于语义相似度的文本分块（async 版本）"""
         if not text.strip():
             return []
 
@@ -257,11 +257,20 @@ class SemanticChunker:
         if len(paragraphs) <= 1:
             return [Chunk(index=0, text=text.strip(), start=0, end=len(text))]
 
-        paragraph_embeddings = self._compute_paragraph_embeddings(paragraphs)
+        paragraph_embeddings = await self._compute_paragraph_embeddings(paragraphs)
         boundaries = self._find_semantic_boundaries(paragraphs, paragraph_embeddings)
         chunks = self._create_chunks_from_boundaries(text, paragraphs, boundaries)
 
         return _reindex(chunks)
+
+    async def _compute_paragraph_embeddings(
+        self, paragraphs: list[tuple[int, int, str]]
+    ) -> list[list[float]]:
+        """计算段落的嵌入向量（async 版本）"""
+        if self._embedding_client is None:
+            return []
+        texts = [text for _, _, text in paragraphs]
+        return await self._embedding_client.embed_texts(texts)
 
     def _split_into_paragraphs(self, text: str) -> list[tuple[int, int, str]]:
         """将文本分割成段落"""
@@ -281,13 +290,6 @@ class SemanticChunker:
                 paragraphs.append((start, len(text), paragraph_text))
 
         return paragraphs
-
-    def _compute_paragraph_embeddings(self, paragraphs: list[tuple[int, int, str]]) -> list[list[float]]:
-        """计算段落的嵌入向量"""
-        if self._embedding_client is None:
-            return []
-        texts = [text for _, _, text in paragraphs]
-        return self._embedding_client.embed_texts(texts)
 
     def _find_semantic_boundaries(
         self,
@@ -495,7 +497,7 @@ class SemanticChunker:
 # =============================================================================
 
 
-def chunk_documents(
+async def chunk_documents(
     texts: Iterable[str],
     max_chars: int = 1000,
     overlap: int = 100,
@@ -503,7 +505,7 @@ def chunk_documents(
     use_semantic: bool = False,
 ) -> list[Chunk]:
     """
-    分块多个文档
+    分块多个文档（async 版本）
 
     Args:
         texts: 文本迭代器
@@ -519,7 +521,7 @@ def chunk_documents(
     offset = 0
 
     for text in texts:
-        chunks = chunk_text(text, max_chars, overlap, split_by_chapter, use_semantic)
+        chunks = await chunk_text(text, max_chars, overlap, split_by_chapter, use_semantic)
         for chunk in chunks:
             all_chunks.append(
                 Chunk(

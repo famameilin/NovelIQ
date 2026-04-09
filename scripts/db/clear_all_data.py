@@ -61,7 +61,6 @@ def clear_database() -> None:
         "cloud_analysis",
         "global_stats",
         "global_context",
-        "graph_storage",
         "token_usage",
         "disambig_checkpoint",
         "model_interactions",

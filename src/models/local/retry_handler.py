@@ -6,10 +6,10 @@
 任务: code-quality-refactor - 统一重试机制
 说明: 提供AnnotationClient专用的重试逻辑，支持本地重试和云端fallback
 
-修改时间: 2026-03-18
+修改时间: 2026-04-09
 修改者: TraeAI
-任务: code-quality-refactor - Task 3 统一重试机制
-修改内容: 修复循环导入问题，异常类型通过参数传入
+任务: 重构 AnnotationClient 使用 async
+修改内容: execute 方法改为 async def
 """
 
 from __future__ import annotations
@@ -52,10 +52,10 @@ class AnnotationRetryHandler[T]:
     任务: code-quality-refactor - 统一重试机制
     说明: 处理标注客户端的复杂重试逻辑，包括本地重试和云端fallback
 
-    修改时间: 2026-03-18
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: code-quality-refactor - Task 3 统一重试机制
-    修改内容: 添加异常类型参数避免循环导入
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: execute 方法改为 async def，支持 async operation
     """
 
     def __init__(
@@ -71,9 +71,9 @@ class AnnotationRetryHandler[T]:
         self.exception_type = exception_type
         self.state = RetryState()
 
-    def execute(
+    async def execute(
         self,
-        operation: Callable[..., T],
+        operation: Callable[..., Any],
         build_retry_messages: Callable[[], Any] | None = None,
     ) -> T:
         """
@@ -82,8 +82,12 @@ class AnnotationRetryHandler[T]:
         创建时间: 2026-03-17
         创建者: TraeAI
         任务: code-quality-refactor - 统一重试机制
+
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: 重构 AnnotationClient 使用 async
+        修改内容: 改为 async def，使用 await 调用 operation
         """
-        # 本地重试
         for attempt in range(self.config.max_retries):
             self.state.attempt = attempt + 1
             try:
@@ -95,12 +99,11 @@ class AnnotationRetryHandler[T]:
                     self.config.chunk_id,
                 )
 
-                # 如果有重试消息构建函数，使用它
                 if build_retry_messages and self.state.last_bad_output:
                     messages = build_retry_messages()
-                    result = operation(self.local_client, messages)
+                    result = await operation(self.local_client, messages)
                 else:
-                    result = operation(self.local_client)
+                    result = await operation(self.local_client)
 
                 if attempt > 0:
                     logger.info(
@@ -115,22 +118,18 @@ class AnnotationRetryHandler[T]:
                 self.state.last_error = e
                 self._handle_error(e)
 
-        # 云端fallback
         if self.cloud_client is not None:
-            return self._try_cloud_fallback(operation, build_retry_messages)
+            return await self._try_cloud_fallback(operation, build_retry_messages)
 
-        # 所有重试失败
         self._raise_max_retries_error()
 
     def _handle_error(self, error: Exception) -> None:
         """处理错误，提取重试信息"""
-        # 检查是否有invalid_names属性（NameValidationMaxRetriesExceededError）
         if hasattr(error, "invalid_names"):
             self.state.last_invalid_names = error.invalid_names
             self.state.last_bad_output = getattr(error, "bad_output", "")
             self.state.last_validation_details = getattr(error, "validation_details", None)
 
-        # 检查是否是重复输出错误
         if error.__class__.__name__ == "RepetitiveOutputError":
             self.state.last_bad_output = str(error)
 
@@ -143,9 +142,9 @@ class AnnotationRetryHandler[T]:
             self.config.chunk_id,
         )
 
-    def _try_cloud_fallback(
+    async def _try_cloud_fallback(
         self,
-        operation: Callable[..., T],
+        operation: Callable[..., Any],
         build_retry_messages: Callable[[], Any] | None = None,
     ) -> T:
         """尝试云端fallback"""
@@ -165,9 +164,9 @@ class AnnotationRetryHandler[T]:
 
             if build_retry_messages and self.state.last_bad_output:
                 messages = build_retry_messages()
-                result = operation(self.cloud_client, messages)
+                result = await operation(self.cloud_client, messages)
             else:
-                result = operation(self.cloud_client)
+                result = await operation(self.cloud_client)
 
             logger.info(
                 "{} cloud succeeded chunk_id={}",
@@ -200,11 +199,9 @@ class AnnotationRetryHandler[T]:
             str(self.state.last_error),
         )
 
-        # 使用传入的异常类型或默认异常
         if self.exception_type is not None:
             raise self.exception_type(error_msg)
         else:
-            # 根据操作名选择异常类型
             if "phase2" in self.config.operation_name.lower():
                 from src.models.local.annotation import Phase2MaxRetriesExceededError
 

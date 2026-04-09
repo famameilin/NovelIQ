@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
 
 
-def _do_phase2(
+async def _do_phase2(
     client: AnnotationClient,
     messages: list[dict],
     text: str,
@@ -53,10 +53,10 @@ def _do_phase2(
     创建者: TraeAI
     任务: code-quality-refactor - 提取Phase2单次调用逻辑
 
-    修改时间: 2026-03-19
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: 添加模型交互记录保存
-    修改内容: 添加 run_id 和 attempt_number 参数，保存交互记录
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -64,7 +64,7 @@ def _do_phase2(
 
     enable_thinking = client._config.thinking_enabled
 
-    result, response = client._call_annotation_api(
+    result, response = await client._call_annotation_api(
         messages=messages,
         enable_thinking=enable_thinking,
         chunk_id=chunk_id,
@@ -101,7 +101,7 @@ def _do_phase2(
     return result
 
 
-def annotate_chunk_phase2(
+async def annotate_chunk_phase2(
     client: AnnotationClient,
     text: str,
     prev_chunk_summary: str | None = None,
@@ -123,25 +123,10 @@ def annotate_chunk_phase2(
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
 
-    修改时间: 2026-03-14
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: Phase1/Phase2独立重试机制
-    修改内容: 添加独立重试逻辑，本地3次失败后云端fallback
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 重构本地标注客户端集成 Instructor
-    修改内容: 使用 Instructor 结构化输出，直接返回 ForeshadowingResult
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 3 统一重试机制
-    修改内容: 使用 AnnotationRetryHandler 替代自定义重试逻辑
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 添加模型交互记录保存
-    修改内容: 添加 run_id 参数，传递 attempt_number
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     messages = _build_foreshadowing_messages(
         text=text,
@@ -169,9 +154,11 @@ def annotate_chunk_phase2(
         exception_type=Phase2MaxRetriesExceededError,
     )
 
-    def operation(local_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ForeshadowingResult:
+    async def operation(
+        local_client: AnnotationClient, retry_messages: list[dict] | None = None
+    ) -> ForeshadowingResult:
         """执行单次Phase2调用"""
         msgs = retry_messages if retry_messages else messages
-        return _do_phase2(local_client, msgs, text, prev_chunk_summary, chunk_id, run_id, handler.state.attempt)
+        return await _do_phase2(local_client, msgs, text, prev_chunk_summary, chunk_id, run_id, handler.state.attempt)
 
-    return handler.execute(operation)
+    return await handler.execute(operation)

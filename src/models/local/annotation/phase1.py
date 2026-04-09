@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from src.models.local.schema import ChunkAnnotation
 
 
-def execute_phase1_call(
+async def execute_phase1_call(
     client: AnnotationClient,
     text: str,
     messages: list[dict],
@@ -63,20 +63,10 @@ def execute_phase1_call(
     任务: code-quality-refactor - 提取_do_phase1_method
     说明: 从_annotate_chunk_phase1中提取的内嵌函数
 
-    修改时间: 2026-03-19
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: 添加模型交互记录保存
-    修改内容: 添加 run_id 和 attempt_number 参数，保存交互记录
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -85,7 +75,7 @@ def execute_phase1_call(
     current_messages = retry_messages if retry_messages else messages
 
     enable_thinking = client._config.thinking_enabled
-    response = client._call_annotation_api(current_messages, enable_thinking, chunk_id)
+    response = await client._call_annotation_api(current_messages, enable_thinking, chunk_id)
 
     content_clean, thinking_content, extraction = client._process_annotation_response(
         response, is_cloud, chunk_id, "phase1"
@@ -125,7 +115,7 @@ def execute_phase1_call(
     return result, content_clean
 
 
-def execute_phase1_with_retry(
+async def execute_phase1_with_retry(
     client: AnnotationClient,
     text: str,
     messages: list[dict],
@@ -142,25 +132,10 @@ def execute_phase1_with_retry(
     创建者: TraeAI
     任务: code-quality-refactor - 提取重试逻辑
 
-    修改时间: 2026-03-18
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: code-quality-refactor - Task 3 统一重试机制
-    修改内容: 使用 AnnotationRetryHandler 替代自定义重试逻辑
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 添加模型交互记录保存
-    修改内容: 添加 run_id 参数，传递 attempt_number
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     from src.models.local.schema import ChunkAnnotation
 
@@ -176,9 +151,9 @@ def execute_phase1_with_retry(
         exception_type=Phase1MaxRetriesExceededError,
     )
 
-    def operation(local_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ChunkAnnotation:
+    async def operation(local_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ChunkAnnotation:
         """执行单次Phase1调用"""
-        result, _ = execute_phase1_call(
+        result, _ = await execute_phase1_call(
             local_client,
             text,
             messages,
@@ -209,10 +184,10 @@ def execute_phase1_with_retry(
             return messages[:-1] + [{"role": "user", "content": retry_prompt}]
         return messages
 
-    return handler.execute(operation, build_retry_messages)
+    return await handler.execute(operation, build_retry_messages)
 
 
-def annotate_chunk_phase1(
+async def annotate_chunk_phase1(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
@@ -232,27 +207,10 @@ def annotate_chunk_phase1(
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
 
-    修改时间: 2026-03-17
+    修改时间: 2026-04-09
     修改者: TraeAI
-    任务: code-quality-refactor - 重构_annotate_chunk_phase1
-    修改内容:
-    - 提取_execute_phase1_call方法
-    - 简化重试逻辑
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 添加模型交互记录保存
-    修改内容: 添加 run_id 参数传递
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
+    任务: 重构 AnnotationClient 使用 async
+    修改内容: 改为 async def
     """
     messages = _build_annotation_messages_v2(
         text=text,
@@ -265,7 +223,7 @@ def annotate_chunk_phase1(
         active_entities=active_entities,
     )
 
-    return execute_phase1_with_retry(
+    return await execute_phase1_with_retry(
         client=client,
         text=text,
         messages=messages,

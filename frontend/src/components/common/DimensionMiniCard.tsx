@@ -342,11 +342,16 @@ function TopicVisualization({
     return <EmptyState />;
   }
 
+  const validTopics = topTopics.filter((t) => t.words && t.words.length > 0);
+  if (validTopics.length === 0) {
+    return <EmptyState />;
+  }
+
   return (
     <div ref={ref} className="flex h-full w-full flex-col items-center justify-center gap-1.5">
       <span className="text-[8px] text-text-muted">热门主题</span>
       <div className="flex flex-wrap items-center justify-center gap-1">
-        {topTopics.slice(0, 3).map((topic, i) => (
+        {validTopics.slice(0, 3).map((topic, i) => (
           <motion.span
             key={i}
             className={cn(

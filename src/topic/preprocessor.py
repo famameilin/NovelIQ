@@ -5,7 +5,7 @@ from pathlib import Path
 import jieba
 from loguru import logger
 
-from src.lexicons.loader import load_lexicon
+from src.lexicons.registry import LexiconRegistry
 
 
 def _default_stopwords_path() -> Path:
@@ -47,10 +47,11 @@ class TopicPreprocessor:
 
     def _load_stopwords(self) -> None:
         try:
-            words = load_lexicon("stopwords", self._stopwords_path.parent)
+            reg = LexiconRegistry(base_dir=self._stopwords_path.parent)
+            words = reg.get("auxiliary.stopwords")
             self._stopwords = set(words)
             logger.debug("加载停用词: 数量={}, 路径={}", len(self._stopwords), self._stopwords_path)
-        except FileNotFoundError:
+        except (FileNotFoundError, Exception):
             logger.warning("停用词文件不存在: {}, 使用空集合", self._stopwords_path)
             self._stopwords = set()
 

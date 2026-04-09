@@ -35,7 +35,7 @@ from collections.abc import Callable
 
 import numpy as np
 from loguru import logger
-from openai import APIConnectionError, APITimeoutError, BadRequestError, OpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestError
 
 from src.config import settings
 
@@ -88,7 +88,7 @@ class EmbeddingClient:
         self._novel_id = novel_id
         self._is_cloud = self._check_is_cloud()
 
-        self._client = OpenAI(
+        self._client = AsyncOpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
             timeout=self._timeout_s,
@@ -147,7 +147,7 @@ class EmbeddingClient:
                 log_func = getattr(logger, level, logger.debug)
         log_func(msg, *args)
 
-    def get_embedding(self, text: str, chunk_id: int | None = None) -> list[float]:
+    async def get_embedding(self, text: str, chunk_id: int | None = None) -> list[float]:
         """
         获取文本的embedding向量
 
@@ -159,6 +159,11 @@ class EmbeddingClient:
         修改者: TraeAI
         任务: migrate-litellm-to-openai-sdk
         修改内容: 使用 OpenAI SDK 替代 LiteLLM
+
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: 重构 EmbeddingClient 使用 AsyncOpenAI
+        修改内容: 将 get_embedding 改为异步方法，使用 await 调用 embeddings.create
         """
         if not self._model:
             raise ValueError("embedding model is required")
@@ -175,7 +180,7 @@ class EmbeddingClient:
             chunk_id,
         )
         try:
-            response = self._client.embeddings.create(
+            response = await self._client.embeddings.create(
                 model=self._model,
                 input=text,
                 encoding_format="float",
@@ -240,13 +245,18 @@ class EmbeddingClient:
             )
             raise
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """
         批量获取文本的embedding向量
 
         创建时间: 2026-03-18
         创建者: TraeAI
         任务: 支持语义分块的批量embedding
+
+        修改时间: 2026-04-09
+        修改者: TraeAI
+        任务: 重构 EmbeddingClient 使用 AsyncOpenAI
+        修改内容: 将 embed_texts 改为异步方法
 
         Args:
             texts: 文本列表
@@ -256,7 +266,7 @@ class EmbeddingClient:
         """
         embeddings = []
         for text in texts:
-            embedding = self.get_embedding(text)
+            embedding = await self.get_embedding(text)
             embeddings.append(embedding)
         return embeddings
 

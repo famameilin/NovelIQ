@@ -29,11 +29,30 @@
 修改内容:
 - 对外接口使用task_id，内部方法使用run_id
 - 导入id_mapping模块进行ID转换
+
+修改时间: 2026-04-07
+修改者: TraeAI
+任务: websocket-streaming-progress
+修改内容: 集成 WebSocket 广播，支持实时进度推送
+
+修改时间: 2026-04-07
+修改者: TraeAI
+任务: implement-task-cancellation
+修改内容: 添加取消检查逻辑，保存 asyncio.Task 引用，创建 cancel_event
+
+修改时间: 2026-04-09
+修改者: TraeAI
+任务: 重构 API 层简化（移除 run_in_executor）
+修改内容:
+- 移除所有 run_in_executor 调用
+- 移除 asyncio.get_running_loop() 获取
+- 回调函数直接使用 await 而非 run_coroutine_threadsafe
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 
@@ -43,11 +62,15 @@ from sqlalchemy.orm import Session
 from src.api.exceptions import AnalysisError
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import TaskStatus
+from src.api.models.stream import StreamMessageType
+from src.api.services.analysis.environment_initializer import EnvironmentInitializer
+from src.api.services.analysis.error_handler import AnalysisErrorHandler
+from src.api.services.analysis.stage_executor import StageExecutor
+from src.api.services.broadcast.progress_broadcaster import ProgressBroadcaster
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
-from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
 from src.storage.session import SessionFactory
 
 
@@ -61,6 +84,104 @@ class AnalysisService:
         self.novel_service = novel_service
         self.task_manager = task_manager
         self.session_factory = session_factory or SessionFactory()
+        self.broadcaster = ProgressBroadcaster()
+        self.env_initializer = EnvironmentInitializer(self.session_factory)
+        self.stage_executor = StageExecutor()
+        self.error_handler = AnalysisErrorHandler(
+            broadcaster=self.broadcaster,
+            novel_service=novel_service,
+            task_manager=task_manager,
+        )
+
+    async def _broadcast_progress(
+        self,
+        task_id: str,
+        message_type: StreamMessageType,
+        stage: str = "",
+        sub_stage: str = "",
+        phase: str = "",
+        current: int = 0,
+        total: int = 0,
+        percent: float = 0.0,
+        message: str = "",
+    ) -> None:
+        """
+        广播进度消息到 WebSocket 并更新 TaskInfo
+
+        创建时间: 2026-04-07
+        创建者: TraeAI
+        任务: websocket-streaming-progress
+        说明: 通过 WebSocket 向前端推送进度更新
+
+        修改时间: 2026-04-07
+        修改者: TraeAI
+        任务: implement-task-cancellation
+        修改内容: 同时更新 TaskInfo 的详细进度字段，使 HTTP 轮询也能获取进度
+
+        修改时间: 2026-04-07
+        修改者: GLM-5
+        任务: AnalysisService 重构 - 提取 WebSocket 广播职责
+        修改内容: 使用 ProgressBroadcaster 进行广播
+        """
+        logger.info(f"[_broadcast_progress] task_id={task_id}, type={message_type}, stage={stage}")
+        await self.broadcaster.broadcast_progress(
+            task_id=task_id,
+            message_type=message_type,
+            stage=stage,
+            sub_stage=sub_stage,
+            phase=phase,
+            current=current,
+            total=total,
+            percent=percent,
+            message=message,
+        )
+
+        if message_type in (StreamMessageType.stage_start, StreamMessageType.stage_progress):
+            self.task_manager.update_task(
+                task_id,
+                stage=stage,
+                sub_stage=sub_stage,
+                current=current,
+                total=total,
+                progress=percent,
+                message=message,
+            )
+
+    async def _broadcast_llm_output(
+        self,
+        task_id: str,
+        message_type: StreamMessageType,
+        phase: str,
+        content: str,
+        chunk_id: int = 0,
+    ) -> None:
+        """
+        广播 LLM 输出消息到 WebSocket 并更新 TaskInfo
+
+        创建时间: 2026-04-07
+        创建者: TraeAI
+        任务: websocket-streaming-progress
+        说明: 通过 WebSocket 向前端推送 LLM 输出
+
+        修改时间: 2026-04-07
+        修改者: TraeAI
+        任务: implement-task-cancellation
+        修改内容: 同时更新 TaskInfo 的 llm_outputs 字段，使 HTTP 轮询也能获取输出
+
+        修改时间: 2026-04-07
+        修改者: GLM-5
+        任务: AnalysisService 重构 - 提取 WebSocket 广播职责
+        修改内容: 使用 ProgressBroadcaster 进行广播
+        """
+        await self.broadcaster.broadcast_llm_output(
+            task_id=task_id,
+            message_type=message_type,
+            phase=phase,
+            content=content,
+            chunk_id=chunk_id,
+        )
+
+        self.task_manager.append_llm_output(task_id, content)
 
     async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
@@ -73,7 +194,8 @@ class AnalysisService:
             logger.info(f"Using specified task_id: {specified_task_id}")
 
             if specified_task.get("status") in ("pending", "failed"):
-                asyncio.create_task(self._run_analysis(specified_task_id, novel, request))
+                task = asyncio.create_task(self._run_analysis(specified_task_id, novel, request))
+                self.task_manager.store_asyncio_task(specified_task_id, task)
 
             return specified_task_id
 
@@ -88,14 +210,16 @@ class AnalysisService:
             logger.info(f"Found existing task {task_id} (status={status}) for novel {novel_id}, reusing it")
 
             if status == "pending":
-                asyncio.create_task(self._run_analysis(task_id, novel, request))
+                task = asyncio.create_task(self._run_analysis(task_id, novel, request))
+                self.task_manager.store_asyncio_task(task_id, task)
 
             return task_id
 
         task_id = self.novel_service.create_task(novel_id)
         self.task_manager.create_task(task_id, novel_id)
 
-        asyncio.create_task(self._run_analysis(task_id, novel, request))
+        task = asyncio.create_task(self._run_analysis(task_id, novel, request))
+        self.task_manager.store_asyncio_task(task_id, task)
 
         return task_id
 
@@ -105,132 +229,10 @@ class AnalysisService:
         task_id = self.novel_service.create_task(novel_id)
         self.task_manager.create_task(task_id, novel_id)
 
-        asyncio.create_task(self._run_reanalysis(task_id, novel, request))
+        task = asyncio.create_task(self._run_reanalysis(task_id, novel, request))
+        self.task_manager.store_asyncio_task(task_id, task)
 
         return task_id
-
-    def _init_analysis_environment(
-        self,
-        task_id: str,
-        novel: dict,
-    ) -> tuple[str, Path, str | None, Session, AnalysisLogger, str]:
-        """
-        初始化分析环境
-
-        返回: (novel_id, source_path, novel_title, session, analysis_logger, run_id)
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: decouple-migration-progress-evaluation
-        修改内容: 使用 SessionFactory 替代 connect_db/create_tables
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: postgresql-migration
-        修改内容: 移除 INSERT OR REPLACE SQLite 方言，改用 StatsRepository
-
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: 修复task_id和run_id不关联的问题
-        修改内容: run_id以task_id为前缀生成，确保task_id = run_id[:8]
-
-        修改时间: 2026-03-25
-        修改者: TraeAI
-        任务: fix-resume-feature - 断点续传功能修复
-        修改内容: 先检查是否已存在该task_id对应的run_id，存在则复用
-
-        修改时间: 2026-04-03
-        修改者: TraeAI
-        任务: 统一日志目录使用完整run_id
-        修改内容: 先确定run_id，再创建AnalysisLogger，确保logs目录与run_id一致
-        """
-        novel_id = novel["novel_id"]
-        source_path = Path(novel["file_path"])
-        novel_title = novel.get("filename", "").replace(".txt", "") if novel.get("filename") else None
-
-        db_session = self.session_factory.get_session(init_tables=True)
-        conn = db_session.connection
-
-        run_repo = RunRepository(conn)
-
-        existing_run = run_repo.get_run_by_run_id_prefix(task_id)
-        if existing_run:
-            run_id = existing_run["run_id"]
-            logger.info(f"Reusing existing run_id: {run_id} for task_id: {task_id}")
-        else:
-            import uuid
-
-            run_id = f"{task_id}{str(uuid.uuid4())[8:]}"
-
-            run_repo.create_run(
-                novel_id=novel_id,
-                source_path=str(source_path),
-                title=novel_title,
-                run_id=run_id,
-            )
-            logger.info(f"Created analysis run: run_id={run_id} for novel_id={novel_id}")
-
-        log_base_dir = settings.paths.log_dir
-        analysis_logger = AnalysisLogger(log_base_dir, run_id)
-        logger.info(f"Task ID: {task_id}")
-        logger.info(f"Run ID: {run_id}")
-        logger.info(f"Log directory: {analysis_logger.log_dir}")
-
-        stats_repo = StatsRepository(conn)
-        if not stats_repo.has_global_context(run_id):
-            stats_repo.insert_global_context(
-                run_id=run_id,
-                novel_id=novel_id,
-                novel_title=novel_title,
-                core_characters="[]",
-                world_setting="",
-            )
-            logger.info(f"Created database with novel_id={novel_id}")
-
-        return novel_id, source_path, novel_title, conn, analysis_logger, run_id
-
-    def _check_stage_completion_status(self, session: Session, run_id: str) -> dict[str, bool]:
-        """
-        检查各阶段完成状态
-
-        修改时间: 2026-03-15
-        修改者: TraeAI
-        任务: storage-layer-decoupling
-        修改内容: 使用 Repository 替代 operations 函数，添加 run_id 参数
-        """
-        chunk_repo = ChunkRepository(session)
-        ann_repo = AnnotationRepository(session)
-        stats_repo = StatsRepository(session)
-
-        skip_preprocess = False
-        skip_annotate = False
-        skip_aggregate = False
-        skip_topic_model = False
-        skip_diagnose = False
-
-        if chunk_repo.is_preprocess_complete(run_id):
-            logger.info("Preprocess complete, skipping")
-            skip_preprocess = True
-        if skip_preprocess and ann_repo.is_annotate_complete(run_id):
-            logger.info("Annotate complete, skipping")
-            skip_annotate = True
-        if skip_annotate and stats_repo.is_aggregate_complete(run_id):
-            logger.info("Aggregate complete, skipping")
-            skip_aggregate = True
-        if skip_aggregate and stats_repo.has_topic_data(run_id):
-            logger.info("Topic model complete, skipping")
-            skip_topic_model = True
-        if skip_topic_model and stats_repo.has_diagnosis_data(run_id):
-            logger.info("Diagnose complete, skipping")
-            skip_diagnose = True
-
-        return {
-            "skip_preprocess": skip_preprocess,
-            "skip_annotate": skip_annotate,
-            "skip_aggregate": skip_aggregate,
-            "skip_topic_model": skip_topic_model,
-            "skip_diagnose": skip_diagnose,
-        }
 
     async def _execute_analysis_stages(
         self,
@@ -246,90 +248,213 @@ class AnalysisService:
         max_chars: int = 2000,
         overlap: int = 200,
     ) -> None:
-        loop = asyncio.get_event_loop()
+        if self._is_cancelled(task_id):
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            return
 
         if not skip_stages["skip_preprocess"]:
-            self.task_manager.update_task(task_id, stage="preprocess", progress=settings.analysis.progress.preprocess)
-            await loop.run_in_executor(
-                None,
-                lambda: self._run_preprocess(source_path, run_id, session, max_chars, overlap),
+            await self._broadcast_progress(
+                task_id, StreamMessageType.stage_start, stage="preprocess", message="开始预处理"
             )
+            self.task_manager.update_task(
+                task_id, stage="preprocess", progress=settings.analysis.progress.preprocess.start
+            )
+
+            async def preprocess_progress_callback(
+                phase: str, status: str, current: int, total: int, percent: float
+            ) -> None:
+                if status == "start":
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_start,
+                        stage=phase,
+                        percent=percent,
+                        message="开始预处理",
+                    )
+                else:
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_progress,
+                        stage=phase,
+                        percent=percent,
+                        message="预处理完成",
+                    )
+
+            await self.stage_executor.run_preprocess(
+                source_path, run_id, session, max_chars, overlap, preprocess_progress_callback
+            )
+            await self._broadcast_progress(task_id, StreamMessageType.stage_complete, stage="preprocess")
+
+        if self._is_cancelled(task_id):
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            return
 
         if not skip_stages["skip_annotate"]:
-            self.task_manager.update_task(task_id, stage="annotate", progress=settings.analysis.progress.annotate)
-            await loop.run_in_executor(
-                None,
-                lambda: self._run_annotate(run_id, session, novel_id, analysis_logger, novel_title),
+            await self._broadcast_progress(
+                task_id, StreamMessageType.stage_start, stage="annotate", message="开始标注分析"
             )
+            self.task_manager.update_task(task_id, stage="annotate", progress=settings.analysis.progress.annotate.start)
+
+            async def annotate_progress_callback(
+                phase: str, status: str, current: int, total: int, percent: float
+            ) -> None:
+                message_type = (
+                    StreamMessageType.stage_start if status == "start" else StreamMessageType.stage_progress
+                )
+                await self._broadcast_progress(
+                    task_id,
+                    message_type,
+                    stage="annotate",
+                    sub_stage=phase,
+                    phase=phase,
+                    current=current,
+                    total=total,
+                    percent=percent,
+                    message=f"开始 {phase}" if status == "start" else f"标注 chunk {current}/{total}",
+                )
+
+            async def stream_callback(content: str, content_type: str) -> None:
+                message_type = (
+                    StreamMessageType.llm_output if content_type == "content" else StreamMessageType.llm_thinking
+                )
+                await self._broadcast_llm_output(
+                    task_id,
+                    message_type,
+                    phase="annotate",
+                    content=content,
+                )
+
+            await self.stage_executor.run_annotate(
+                run_id, session, novel_id, analysis_logger, novel_title,
+                notify_callback=annotate_progress_callback, stream_callback=stream_callback,
+                is_cancelled=lambda: self._is_cancelled(task_id),
+            )
+            await self._broadcast_progress(task_id, StreamMessageType.stage_complete, stage="annotate")
+
+        if self._is_cancelled(task_id):
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            return
 
         if not skip_stages["skip_aggregate"]:
-            self.task_manager.update_task(task_id, stage="aggregate", progress=settings.analysis.progress.aggregate)
-            await loop.run_in_executor(None, lambda: self._run_aggregate(run_id, session))
+            await self._broadcast_progress(
+                task_id, StreamMessageType.stage_start, stage="aggregate", message="开始数据聚合"
+            )
+            self.task_manager.update_task(
+                task_id, stage="aggregate", progress=settings.analysis.progress.aggregate.start
+            )
+
+            async def aggregate_progress_callback(
+                phase: str, status: str, current: int, total: int, percent: float
+            ) -> None:
+                if status == "start":
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_start,
+                        stage=phase,
+                        percent=percent,
+                        message="开始数据聚合",
+                    )
+                else:
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_progress,
+                        stage=phase,
+                        percent=percent,
+                        message="数据聚合完成",
+                    )
+
+            await self.stage_executor.run_aggregate(
+                run_id, session, aggregate_progress_callback
+            )
+            await self._broadcast_progress(task_id, StreamMessageType.stage_complete, stage="aggregate")
+
+        if self._is_cancelled(task_id):
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            return
 
         if not skip_stages["skip_topic_model"]:
-            self.task_manager.update_task(task_id, stage="topic-model", progress=settings.analysis.progress.topic_model)
-            await loop.run_in_executor(None, lambda: self._run_topic_model(run_id, session, num_topics))
+            await self._broadcast_progress(
+                task_id, StreamMessageType.stage_start, stage="topic-model", message="开始主题建模"
+            )
+            self.task_manager.update_task(
+                task_id, stage="topic-model", progress=settings.analysis.progress.topic_model.start
+            )
+
+            async def topic_model_progress_callback(
+                phase: str, status: str, current: int, total: int, percent: float
+            ) -> None:
+                if status == "start":
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_start,
+                        stage=phase,
+                        percent=percent,
+                        message="开始主题建模",
+                    )
+                else:
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_progress,
+                        stage=phase,
+                        percent=percent,
+                        message="主题建模完成",
+                    )
+
+            await self.stage_executor.run_topic_model(
+                run_id, session, num_topics, topic_model_progress_callback
+            )
+            await self._broadcast_progress(task_id, StreamMessageType.stage_complete, stage="topic-model")
+
+        if self._is_cancelled(task_id):
+            await self.error_handler.handle_cancel(task_id, novel_id, session, run_id, analysis_logger)
+            return
 
         if not skip_stages["skip_diagnose"]:
-            self.task_manager.update_task(task_id, stage="diagnose", progress=settings.analysis.progress.diagnose)
-            await loop.run_in_executor(None, lambda: self._run_diagnose(run_id, session, analysis_logger))
-
-    def _handle_analysis_success(
-        self,
-        task_id: str,
-        novel_id: str,
-        elapsed: float,
-        analysis_logger: AnalysisLogger | None,
-        session: Session,
-        run_id: str,
-        log_prefix: str = "Analysis",
-    ) -> None:
-        if analysis_logger:
-            analysis_logger.write_summary(
-                {
-                    "novel_id": novel_id,
-                    "task_id": task_id,
-                    "run_id": run_id,
-                    "total_time": elapsed,
-                    "status": "completed",
-                }
+            await self._broadcast_progress(
+                task_id, StreamMessageType.stage_start, stage="diagnose", message="开始诊断报告"
             )
-        self.novel_service.update_task_status(task_id, "completed")
-        self.task_manager.complete_task(task_id, success=True)
-
-        run_repo = RunRepository(session)
-        run_repo.update_run_status(run_id, "completed")
-
-        logger.info(f"{log_prefix} completed: {task_id}")
-
-    def _handle_analysis_failure(
-        self,
-        task_id: str,
-        novel_id: str,
-        elapsed: float,
-        error: Exception,
-        analysis_logger: AnalysisLogger | None,
-        session: Session,
-        run_id: str,
-        log_prefix: str = "Analysis",
-    ) -> None:
-        if analysis_logger:
-            analysis_logger.write_summary(
-                {
-                    "novel_id": novel_id,
-                    "task_id": task_id,
-                    "run_id": run_id,
-                    "total_time": elapsed,
-                    "status": "failed",
-                    "error": str(error),
-                }
+            self.task_manager.update_task(
+                task_id, stage="diagnose", progress=settings.analysis.progress.diagnose.start
             )
-        self.novel_service.update_task_status(task_id, "failed")
-        logger.error(f"{log_prefix} failed: {task_id} - {error}")
-        self.task_manager.complete_task(task_id, success=False, error=str(error))
 
-        run_repo = RunRepository(session)
-        run_repo.update_run_status(run_id, "failed")
+            async def diagnose_progress_callback(
+                phase: str, status: str, current: int, total: int, percent: float
+            ) -> None:
+                if status == "start":
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_start,
+                        stage=phase,
+                        percent=percent,
+                        message="开始诊断报告",
+                    )
+                else:
+                    await self._broadcast_progress(
+                        task_id,
+                        StreamMessageType.stage_progress,
+                        stage=phase,
+                        percent=percent,
+                        message="诊断报告完成",
+                    )
+
+            await self.stage_executor.run_diagnose(
+                run_id, session, analysis_logger, diagnose_progress_callback
+            )
+            await self._broadcast_progress(task_id, StreamMessageType.stage_complete, stage="diagnose")
+
+    def _is_cancelled(self, task_id: str) -> bool:
+        """
+        检查任务是否已被请求取消
+
+        创建时间: 2026-04-07
+        创建者: TraeAI
+        任务: implement-task-cancellation
+        说明: 检查 cancel_event 是否被设置
+        """
+        task_info = self.task_manager.get_task(task_id)
+        if task_info and task_info.cancel_event and task_info.cancel_event.is_set():
+            return True
+        return False
 
     def _check_all_stages_completed(self, skip_stages: dict[str, bool]) -> bool:
         return (
@@ -398,15 +523,22 @@ class AnalysisService:
         session: Session | None = None
         run_id: str | None = None
         try:
-            novel_id, source_path, novel_title, session, analysis_logger, run_id = self._init_analysis_environment(
-                task_id, novel
-            )
+            self.task_manager.update_task(task_id, cancel_event=threading.Event())
+
+            (
+                novel_id,
+                source_path,
+                novel_title,
+                session,
+                analysis_logger,
+                run_id,
+            ) = self.env_initializer.init_analysis_environment(task_id, novel)
 
             num_topics = settings.topic_model.single_book.num_topics
             max_chars = settings.chunking.max_chars
             overlap = settings.chunking.overlap
 
-            skip_stages = self._check_stage_completion_status(session, run_id)
+            skip_stages = self.env_initializer.check_stage_completion_status(session, run_id)
 
             if self._check_all_stages_completed(skip_stages):
                 self._handle_already_completed(task_id, novel_id, analysis_logger)
@@ -428,13 +560,28 @@ class AnalysisService:
                 overlap=overlap,
             )
 
-            elapsed = time.time() - start_time
-            self._handle_analysis_success(task_id, novel_id, elapsed, analysis_logger, session, run_id)
+            if self._is_cancelled(task_id):
+                return
 
+            elapsed = time.time() - start_time
+            await self.error_handler.handle_success(
+                task_id, novel_id, elapsed, analysis_logger, session, run_id, log_prefix="Analysis"
+            )
+
+        except asyncio.CancelledError:
+            logger.info(f"Task {task_id} was cancelled via asyncio.Task.cancel()")
+            if session and run_id:
+                await self.error_handler.handle_cancel(
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                )
         except Exception as e:
             elapsed = time.time() - start_time
-            if session and run_id:
-                self._handle_analysis_failure(
+            if self._is_cancelled(task_id) and session and run_id:
+                await self.error_handler.handle_cancel(
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                )
+            elif session and run_id:
+                await self.error_handler.handle_failure(
                     task_id, novel.get("novel_id", "unknown"), elapsed, e, analysis_logger, session, run_id
                 )
             else:
@@ -452,9 +599,16 @@ class AnalysisService:
         session: Session | None = None
         run_id: str | None = None
         try:
-            novel_id, source_path, novel_title, session, analysis_logger, run_id = self._init_analysis_environment(
-                task_id, novel
-            )
+            self.task_manager.update_task(task_id, cancel_event=threading.Event())
+
+            (
+                novel_id,
+                source_path,
+                novel_title,
+                session,
+                analysis_logger,
+                run_id,
+            ) = self.env_initializer.init_analysis_environment(task_id, novel)
 
             skip_stages = self._build_reanalysis_skip_stages(request)
             logger.info(f"Reanalysis skip_stages: {skip_stages}")
@@ -474,15 +628,28 @@ class AnalysisService:
                 num_topics=num_topics,
             )
 
+            if self._is_cancelled(task_id):
+                return
+
             elapsed = time.time() - start_time
-            self._handle_analysis_success(
+            await self.error_handler.handle_success(
                 task_id, novel_id, elapsed, analysis_logger, session, run_id, log_prefix="Reanalysis"
             )
 
+        except asyncio.CancelledError:
+            logger.info(f"Reanalysis task {task_id} was cancelled via asyncio.Task.cancel()")
+            if session and run_id:
+                await self.error_handler.handle_cancel(
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                )
         except Exception as e:
             elapsed = time.time() - start_time
-            if session and run_id:
-                self._handle_analysis_failure(
+            if self._is_cancelled(task_id) and session and run_id:
+                await self.error_handler.handle_cancel(
+                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger
+                )
+            elif session and run_id:
+                await self.error_handler.handle_failure(
                     task_id,
                     novel.get("novel_id", "unknown"),
                     elapsed,
@@ -500,51 +667,6 @@ class AnalysisService:
                 analysis_logger.close()
             if session:
                 session.close()
-
-    def _run_preprocess(
-        self, source_path: Path, run_id: str, session: Session, max_chars: int = 2000, overlap: int = 200
-    ) -> None:
-        from src.workflows import run_preprocess
-
-        run_preprocess(source_path=source_path, run_id=run_id, session=session, max_chars=max_chars, overlap=overlap)
-
-    def _run_annotate(
-        self,
-        run_id: str,
-        session: Session,
-        novel_id: str,
-        analysis_logger: AnalysisLogger | None,
-        novel_title: str | None = None,
-    ) -> None:
-        from src.workflows import run_annotate
-
-        run_annotate(
-            run_id=run_id,
-            session=session,
-            resume=True,
-            analysis_logger=analysis_logger,
-            novel_id=novel_id,
-            novel_title=novel_title,
-        )
-
-    def _run_aggregate(self, run_id: str, session: Session) -> None:
-        from src.workflows import run_aggregate
-
-        run_aggregate(run_id=run_id, session=session)
-
-    def _run_topic_model(self, run_id: str, session: Session, num_topics: int | None = None) -> None:
-        from src.workflows import run_topic_model
-
-        if num_topics is None:
-            num_topics = settings.topic_model.single_book.num_topics
-        run_topic_model(run_id=run_id, session=session, num_topics=num_topics)
-
-    def _run_diagnose(self, run_id: str, session: Session, analysis_logger: AnalysisLogger | None) -> None:
-        from src.models.cloud import ConfiguredCloudModelClient
-        from src.workflows import run_diagnose
-
-        diagnose_client = ConfiguredCloudModelClient(analysis_logger=analysis_logger)
-        run_diagnose(run_id=run_id, session=session, analysis_logger=analysis_logger, client=diagnose_client)
 
     def get_task_status(self, task_id: str) -> dict | None:
         task = self.task_manager.get_task(task_id)

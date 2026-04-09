@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Dialog,
@@ -14,6 +14,7 @@ import { Progress } from "@/components/ui/progress";
 import { FileText, Upload, CheckCircle2, AlertCircle, X, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { formatFileSize } from "@/lib/utils";
+import { appConfig } from "@/config";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -32,7 +33,7 @@ export interface UploadDialogProps {
   onOpenChange: (open: boolean) => void;
   files: UploadFileInfo[];
   onFilesChange?: (files: UploadFileInfo[]) => void;
-  onUpload?: () => Promise<void>;
+  onUpload?: (signal: AbortSignal) => Promise<void>;
   maxFileSize?: number;
   acceptedTypes?: string[];
 }
@@ -145,13 +146,14 @@ export function UploadDialog({
   files,
   onFilesChange,
   onUpload,
-  maxFileSize = 10 * 1024 * 1024, // 10MB
+  maxFileSize = appConfig.maxUploadSizeBytes,
   acceptedTypes = [".txt"],
 }: UploadDialogProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -197,6 +199,8 @@ export function UploadDialog({
   const handleUpload = async () => {
     if (files.length === 0) return;
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setIsUploading(true);
 
     // Update all pending files to uploading
@@ -206,7 +210,7 @@ export function UploadDialog({
     onFilesChange?.(uploadingFiles);
 
     try {
-      await onUpload?.();
+      await onUpload?.(controller.signal);
 
       // Mark as success
       onFilesChange?.(
@@ -217,21 +221,36 @@ export function UploadDialog({
         )
       );
     } catch {
-      onFilesChange?.(
-        uploadingFiles.map((f) =>
-          f.status === "uploading"
-            ? {
-                ...f,
-                status: "error" as const,
-                error: "上传失败，请重试",
-              }
-            : f
-        )
-      );
+      if (controller.signal.aborted) {
+        onFilesChange?.(
+          uploadingFiles.map((f) =>
+            f.status === "uploading"
+              ? { ...f, status: "pending" as const, progress: 0 }
+              : f
+          )
+        );
+      } else {
+        onFilesChange?.(
+          uploadingFiles.map((f) =>
+            f.status === "uploading"
+              ? {
+                  ...f,
+                  status: "error" as const,
+                  error: "上传失败，请重试",
+                }
+              : f
+          )
+        );
+      }
     } finally {
+      abortControllerRef.current = null;
       setIsUploading(false);
     }
   };
+
+  const handleCancel = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -290,7 +309,7 @@ export function UploadDialog({
               {dragActive ? "松开以上传文件" : "拖拽文件到此处"}
             </p>
             <p className="mt-1 text-xs text-text-muted">
-              支持 .txt 格式，单个文件最大 10MB
+              支持 .txt 格式，单个文件最大 {formatFileSize(maxFileSize)}
             </p>
 
             <Button
@@ -324,11 +343,17 @@ export function UploadDialog({
         )}
 
         <DialogFooter>
-          {files.filter((f) => f.status === "pending").length > 0 && (
-            <Button onClick={handleUpload} disabled={isUploading}>
-              {isUploading ? "上传中..." : "开始上传"}
+          {isUploading ? (
+            <Button variant="destructive" size="sm" onClick={handleCancel}>
+              <X className="mr-2 h-4 w-4" />
+              取消上传
             </Button>
-          )}
+          ) : files.filter((f) => f.status === "pending").length > 0 ? (
+            <Button onClick={handleUpload}>
+              <Upload className="mr-2 h-4 w-4" />
+              开始上传
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

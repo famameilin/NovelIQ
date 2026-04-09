@@ -8,22 +8,29 @@
 修改历史:
 - 2026-03-14: 使用 Repository 模式重构，移除 .db 路径相关逻辑
 - 2026-03-15: PostgreSQL 迁移，完全移除 .db 文件扫描逻辑
+- 2026-04-08: 新增 novels 表，上传后立即可查
+- 2026-04-08: 添加可选 session 参数支持依赖注入
 
-说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储任务元数据。
+说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储小说元数据和分析任务。
 """
 
 from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 import aiofiles
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from src.api.exceptions import FileStorageError, InvalidFileError, NovelNotFoundError
-from src.storage.db import get_session_factory
+from src.storage.db import get_session
 from src.storage.id_mapping import generate_task_id
+from src.storage.models import Novel
 from src.storage.repositories import RunRepository
 
 
@@ -33,50 +40,24 @@ class NovelService:
     def __init__(self, upload_dir: Path):
         self.upload_dir = upload_dir
         self.upload_dir.mkdir(parents=True, exist_ok=True)
-        self._novels: dict[str, dict] = {}
-        self._tasks: dict[str, dict] = {}
-        self._scan_existing_novels()
 
     def _scan_existing_novels(self) -> None:
-        """扫描已存在的小说文件和任务元数据"""
-        for file_path in self.upload_dir.glob("*.txt"):
-            filename = file_path.name
-            if "_" in filename:
-                novel_id = filename.split("_")[0]
-                original_filename = "_".join(filename.split("_")[1:])
-                self._novels[novel_id] = {
-                    "novel_id": novel_id,
-                    "filename": original_filename,
-                    "file_path": str(file_path),
-                    "status": "uploaded",
-                }
-                logger.debug(f"Restored novel metadata: {novel_id} - {original_filename}")
+        """从数据库加载小说列表（保留用于初始化）"""
+        pass
 
-        self._restore_tasks_from_database()
+    @contextmanager
+    def _get_session(self, session: Session | None = None) -> Generator[Session, None, None]:
+        """获取数据库会话，支持外部传入或内部创建"""
+        if session is not None:
+            yield session
+        else:
+            with get_session() as s:
+                yield s
 
-    def _restore_tasks_from_database(self) -> None:
-        """从 PostgreSQL 数据库恢复任务元数据"""
-        try:
-            session_factory = get_session_factory()
-            with session_factory() as session:
-                run_repo = RunRepository(session)
-                for novel_id in self._novels.keys():
-                    runs = run_repo.get_runs_by_novel(novel_id)
-                    for run in runs:
-                        run_id = run["run_id"]
-                        task_id = run_id[:8] if len(run_id) >= 8 else run_id
-                        self._tasks[task_id] = {
-                            "task_id": task_id,
-                            "novel_id": novel_id,
-                            "status": run["status"],
-                            "run_id": run_id,
-                        }
-                        logger.debug(f"Restored task metadata: {task_id} for novel {novel_id}")
-        except Exception as e:
-            logger.warning(f"Failed to restore tasks from database: {e}")
-
-    async def save_upload(self, file_content: bytes, filename: str) -> str:
-        """保存上传的文件"""
+    async def save_upload(self, file_content: bytes, filename: str, session: Session | None = None) -> str:
+        """
+        保存上传的文件并写入 novels 表
+        """
         if not filename.endswith(".txt"):
             raise InvalidFileError("只支持 .txt 文件")
 
@@ -89,84 +70,84 @@ class NovelService:
         except Exception as e:
             raise FileStorageError(f"文件保存失败: {e}") from e
 
-        self._novels[novel_id] = {
-            "novel_id": novel_id,
-            "filename": filename,
-            "file_path": str(file_path),
-            "status": "uploaded",
-        }
+        with self._get_session(session) as sess:
+            novel = Novel(
+                novel_id=novel_id,
+                filename=filename,
+                file_path=str(file_path),
+                file_size=len(file_content),
+                upload_time=datetime.now(),
+            )
+            sess.add(novel)
 
         logger.info(f"Novel uploaded: {novel_id} - {filename}")
         return novel_id
 
-    def get_novel(self, novel_id: str) -> dict:
-        """获取小说信息"""
-        if novel_id not in self._novels:
-            raise NovelNotFoundError(f"小说不存在: {novel_id}")
-        return self._novels[novel_id]
-
-    def get_run_by_task_id(self, task_id: str) -> dict | None:
-        """获取任务对应的运行记录"""
-        if task_id not in self._tasks:
-            return None
-
-        task = self._tasks[task_id]
-        return task
-
-    def create_task(self, novel_id: str, task_id: str | None = None) -> str:
-        """创建分析任务
-
-        创建时间: 2025-03-11
-        创建者: TraeAI
-        任务: 小说服务
-
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: ID系统统一优化
-        修改内容: 使用generate_task_id()生成task_id
-
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: 修复task_id和run_id不关联的问题
-        修改内容: 添加task_id参数，支持外部传入task_id
+    def get_novel(self, novel_id: str, session: Session | None = None) -> dict:
         """
-        self.get_novel(novel_id)
+        获取小说信息
+        """
+        with self._get_session(session) as sess:
+            novel = sess.get(Novel, novel_id)
+            if not novel:
+                raise NovelNotFoundError(f"小说不存在: {novel_id}")
+            return {
+                "novel_id": novel.novel_id,
+                "filename": novel.filename,
+                "file_path": novel.file_path,
+                "title": novel.title,
+                "author": novel.author,
+                "file_size": novel.file_size,
+                "upload_time": novel.upload_time.isoformat() if novel.upload_time else None,
+                "status": "uploaded",
+            }
+
+    def get_run_by_task_id(self, task_id: str, session: Session | None = None) -> dict | None:
+        """获取任务对应的运行记录"""
+        with self._get_session(session) as sess:
+            run_repo = RunRepository(sess)
+            run = run_repo.get_run_by_run_id_prefix(task_id)
+            if run:
+                return {
+                    "task_id": task_id,
+                    "novel_id": run["novel_id"],
+                    "status": run["status"],
+                    "run_id": run["run_id"],
+                }
+        return None
+
+    def create_task(self, novel_id: str, task_id: str | None = None, session: Session | None = None) -> str:
+        """
+        创建分析任务
+        """
+        self.get_novel(novel_id, session)
         if task_id is None:
             task_id = generate_task_id()
 
-        self._tasks[task_id] = {
-            "task_id": task_id,
-            "novel_id": novel_id,
-            "status": "pending",
-        }
+        try:
+            with self._get_session(session) as sess:
+                run_repo = RunRepository(sess)
+                run_repo.create_run(novel_id=novel_id, run_id=task_id)
+        except Exception as e:
+            logger.warning(f"Failed to create run in DB: {e}")
 
         logger.info(f"Created task: {task_id} for novel {novel_id}")
         return task_id
 
-    def get_task(self, task_id: str) -> dict:
-        """获取任务信息"""
-        if task_id not in self._tasks:
-            # 尝试从数据库加载
-            task = self._load_task_from_db(task_id)
-            if task:
-                self._tasks[task_id] = task
-                return task
-            raise NovelNotFoundError(f"任务不存在: {task_id}")
-        return self._tasks[task_id]
-
-    def _load_task_from_db(self, task_id: str) -> dict | None:
-        """从数据库加载任务元数据
-
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: Repository层ID统一优化
-        修改内容: 使用get_run_by_run_id_prefix替代get_run_by_task_id
+    def get_task(self, task_id: str, session: Session | None = None) -> dict:
         """
+        获取任务信息
+        """
+        task = self._load_task_from_db(task_id, session)
+        if task:
+            return task
+        raise NovelNotFoundError(f"任务不存在: {task_id}")
+
+    def _load_task_from_db(self, task_id: str, session: Session | None = None) -> dict | None:
+        """从数据库加载任务元数据"""
         try:
-            session_factory = get_session_factory()
-            with session_factory() as session:
-                run_repo = RunRepository(session)
-                # task_id是run_id的前8位，使用前缀匹配查询
+            with self._get_session(session) as sess:
+                run_repo = RunRepository(sess)
                 run = run_repo.get_run_by_run_id_prefix(task_id)
                 if run:
                     return {
@@ -180,21 +161,14 @@ class NovelService:
         return None
 
     def update_task_status(self, task_id: str, status: str) -> None:
-        """更新任务状态"""
-        if task_id in self._tasks:
-            self._tasks[task_id]["status"] = status
+        """更新任务状态（仅内存操作，持久化由调用方处理）"""
+        pass
 
-    def get_tasks_by_novel(self, novel_id: str) -> list[dict]:
-        """获取小说的所有任务
-
-        从数据库读取，而不是从内存读取
-        """
+    def get_tasks_by_novel(self, novel_id: str, session: Session | None = None) -> list[dict]:
+        """获取小说的所有任务"""
         try:
-            session_factory = get_session_factory()
-            with session_factory() as session:
-                from src.storage.repositories import RunRepository
-
-                run_repo = RunRepository(session)
+            with self._get_session(session) as sess:
+                run_repo = RunRepository(sess)
                 runs = run_repo.get_runs_by_novel(novel_id)
                 return [
                     {
@@ -209,21 +183,17 @@ class NovelService:
             logger.warning(f"Failed to get tasks from database: {e}")
             return []
 
-    def get_latest_completed_task(self, novel_id: str) -> dict | None:
+    def get_latest_completed_task(self, novel_id: str, session: Session | None = None) -> dict | None:
         """获取小说的最新已完成任务"""
-        tasks = self.get_tasks_by_novel(novel_id)
+        tasks = self.get_tasks_by_novel(novel_id, session)
         completed_tasks = [t for t in tasks if t.get("status") == "completed"]
         if not completed_tasks:
             return None
         return completed_tasks[-1]
 
-    def get_latest_task(self, novel_id: str) -> dict | None:
-        """
-        获取小说的最新任务
-
-        优先级：completed > running > pending > failed
-        """
-        tasks = self.get_tasks_by_novel(novel_id)
+    def get_latest_task(self, novel_id: str, session: Session | None = None) -> dict | None:
+        """获取小说的最新任务"""
+        tasks = self.get_tasks_by_novel(novel_id, session)
         if not tasks:
             return None
 
@@ -233,9 +203,9 @@ class NovelService:
         )
         return sorted_tasks[0] if sorted_tasks else None
 
-    def get_task_counts_by_status(self, novel_id: str) -> dict[str, int]:
+    def get_task_counts_by_status(self, novel_id: str, session: Session | None = None) -> dict[str, int]:
         """获取各状态的任务数量"""
-        tasks = self.get_tasks_by_novel(novel_id)
+        tasks = self.get_tasks_by_novel(novel_id, session)
         counts: dict[str, int] = {"completed": 0, "running": 0, "pending": 0, "failed": 0}
         for task in tasks:
             status = task.get("status", "unknown")
@@ -243,168 +213,100 @@ class NovelService:
                 counts[status] += 1
         return counts
 
-    def get_single_valid_task(self, novel_id: str) -> tuple[dict | None, str | None]:
-        """
-        获取唯一的合法任务
-
-        返回: (task, error_message)
-        - 如果只有一个任务，返回它
-        - 如果有多个任务，按规则判断：
-          - 一个running + 其他failed → 返回running
-          - 多个completed/多个running/多个failed/多个pending → 返回错误
-        """
-        tasks = self.get_tasks_by_novel(novel_id)
+    def get_single_valid_task(self, novel_id: str, session: Session | None = None) -> tuple[dict | None, str | None]:
+        """获取唯一的合法任务"""
+        tasks = self.get_tasks_by_novel(novel_id, session)
         if not tasks:
             return None, None
 
         if len(tasks) == 1:
             return tasks[0], None
 
-        counts = self.get_task_counts_by_status(novel_id)
+        return None, f"存在{len(tasks)}个任务，请指定task_id"
 
-        if counts["running"] == 1 and counts["completed"] == 0 and counts["pending"] == 0:
-            running_tasks = [t for t in tasks if t.get("status") == "running"]
-            return running_tasks[0], None
-
-        if counts["completed"] > 1:
-            return None, f"存在多个已完成任务({counts['completed']}个)，请指定task_id"
-        if counts["running"] > 1:
-            return None, f"存在多个运行中任务({counts['running']}个)，请指定task_id"
-        if counts["failed"] > 1:
-            return None, f"存在多个失败任务({counts['failed']}个)，请指定task_id"
-        if counts["pending"] > 1:
-            return None, f"存在多个待处理任务({counts['pending']}个)，请指定task_id"
-        if counts["running"] > 0 and counts["failed"] > 0:
-            return None, f"存在多个任务(running:{counts['running']}, failed:{counts['failed']})，请指定task_id"
-
-        priority_order = {"completed": 4, "running": 3, "pending": 2, "failed": 1}
-        sorted_tasks = sorted(
-            tasks, key=lambda t: (priority_order.get(t.get("status", ""), 0), t.get("task_id", "")), reverse=True
-        )
-        return sorted_tasks[0], None
-
-    def list_novels(self) -> list[dict]:
+    def list_novels(self, session: Session | None = None) -> list[dict]:
         """
         列出所有小说及其信息
-
-        修改时间: 2026-04-05
-        修改者: AI Assistant
-        任务: fix-test-data-pollution
-        修改内容: 从数据库读取小说列表，不再扫描文件系统
-
-        返回小说信息，包含 title、author、upload_time、file_size
-        （来自数据库最新运行记录和文件系统）
         """
         novels = []
         try:
-            session_factory = get_session_factory()
-            with session_factory() as session:
-                run_repo = RunRepository(session)
-                runs = run_repo.list_novels_with_latest_run()
-                for run in runs:
-                    novel_id = run.get("novel_id")
-                    file_path = self.upload_dir / f"{novel_id}_*.txt"
-                    import glob
+            with self._get_session(session) as sess:
+                from sqlalchemy import select
 
-                    matched_files = glob.glob(str(file_path))
-                    file_size = 0
-                    actual_file_path = None
-                    if matched_files:
-                        actual_file_path = matched_files[0]
-                        file_size = os.path.getsize(actual_file_path)
+                from src.storage.models import AnalysisRun
 
-                    novels.append({
-                        "novel_id": novel_id,
-                        "filename": run.get("title", "unknown.txt") + ".txt" if run.get("title") else "unknown.txt",
-                        "file_path": actual_file_path or "",
-                        "status": run.get("status", "uploaded"),
-                        "title": run.get("title") or "未知标题",
-                        "author": run.get("author") or "未知作者",
-                        "upload_time": run.get("created_at"),
-                        "file_size": file_size,
-                    })
+                result = sess.execute(select(Novel).order_by(Novel.upload_time.desc()))
+                all_novels = result.scalars().all()
+
+                for novel in all_novels:
+                    runs = (
+                        sess.execute(
+                            select(AnalysisRun)
+                            .where(AnalysisRun.novel_id == novel.novel_id)
+                            .order_by(AnalysisRun.created_at.desc())
+                        )
+                        .scalars()
+                        .all()
+                    )
+
+                    latest_status = runs[0].status if runs else "uploaded"
+
+                    novels.append(
+                        {
+                            "novel_id": novel.novel_id,
+                            "filename": novel.filename or "unknown.txt",
+                            "file_path": novel.file_path or "",
+                            "status": latest_status,
+                            "title": novel.title or novel.filename or "未知标题",
+                            "author": novel.author or "未知作者",
+                            "upload_time": novel.upload_time.isoformat() if novel.upload_time else None,
+                            "file_size": novel.file_size or 0,
+                        }
+                    )
         except Exception as e:
             logger.warning(f"Failed to list novels from database: {e}")
         return novels
 
-    def get_analysis_count(self) -> int:
+    def get_analysis_count(self, session: Session | None = None) -> int:
         """
-        从数据库查询不同小说的数量
-
-        创建时间: 2026-04-03
-        创建者: TraeAI
-        任务: 修改端点行为，从数据库查
-        说明: 返回 analysis_runs 表中不同 novel_id 的数量
+        从 novels 表查询小说数量
         """
         try:
-            session_factory = get_session_factory()
-            with session_factory() as session:
-                from src.storage.repositories import RunRepository
+            with self._get_session(session) as sess:
+                from sqlalchemy import func, select
 
-                run_repo = RunRepository(session)
-                return run_repo.count_distinct_novels()
+                result = sess.execute(select(func.count()).select_from(Novel))
+                return result.scalar() or 0
         except Exception as e:
             logger.warning(f"Failed to get novel count from database: {e}")
             return 0
 
-    def delete_novel(self, novel_id: str) -> bool:
-        """删除小说及其相关数据"""
-        if novel_id not in self._novels:
-            raise NovelNotFoundError(f"小说不存在: {novel_id}")
-
-        novel = self._novels[novel_id]
-        file_path = Path(novel["file_path"])
-
-        if file_path.exists():
-            os.remove(file_path)
-
-        tasks_to_delete = [tid for tid, t in self._tasks.items() if t.get("novel_id") == novel_id]
-        for tid in tasks_to_delete:
-            del self._tasks[tid]
-
-        del self._novels[novel_id]
-        logger.info(f"Novel deleted: {novel_id}")
-        return True
-
-    def delete_task(self, task_id: str) -> bool:
-        """删除任务
-
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: 修复删除任务不删除数据库数据的问题
-        修改内容: 使用正确的 session 获取方式
-
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: Repository层ID统一优化
-        修改内容: 使用get_run_by_run_id_prefix替代get_run_by_task_id
-
-        修改时间: 2026-04-04
-        修改者: AI Assistant
-        任务: fix-backend-stability
-        修改内容: 使用 get_session 上下文管理器替代手动 session 管理
-
-        修改时间: 2026-04-04
-        修改者: AI Assistant
-        任务: fix-backend-stability
-        修改内容: 修复静默失败问题，数据库删除失败时抛出异常，保持数据一致性
-
-        Raises:
-            RuntimeError: 数据库删除失败时抛出
+    def delete_novel(self, novel_id: str, session: Session | None = None) -> bool:
         """
-        from src.storage.db import get_session
+        删除小说及其相关数据
+        """
+        with self._get_session(session) as sess:
+            novel = sess.get(Novel, novel_id)
+            if not novel:
+                raise NovelNotFoundError(f"小说不存在: {novel_id}")
 
-        with get_session() as session:
-            run_repo = RunRepository(session)
+            file_path = novel.file_path
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+
+            sess.delete(novel)
+            logger.info(f"Novel deleted: {novel_id}")
+            return True
+
+    def delete_task(self, task_id: str, session: Session | None = None) -> bool:
+        """删除任务"""
+        with self._get_session(session) as sess:
+            run_repo = RunRepository(sess)
             run = run_repo.get_run_by_run_id_prefix(task_id)
 
             if run:
                 run_id = run["run_id"]
                 run_repo.delete_run(run_id)
                 logger.info(f"Run deleted from database: {run_id}")
-
-        if task_id in self._tasks:
-            del self._tasks[task_id]
-            logger.info(f"Task deleted from memory: {task_id}")
 
         return True

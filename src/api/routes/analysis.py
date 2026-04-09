@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from src.api.exceptions import AnalysisError
@@ -28,6 +28,8 @@ _STATUS_MAP: dict[str, TaskStatus] = {
     "running": TaskStatus.RUNNING,
     "pending": TaskStatus.PENDING,
     "failed": TaskStatus.FAILED,
+    "cancelling": TaskStatus.CANCELLING,
+    "cancelled": TaskStatus.CANCELLED,
 }
 
 
@@ -69,6 +71,7 @@ def _get_task_status_from_db(task_id: str) -> TaskStatus:
 router = APIRouter(prefix="/novels", tags=["analysis"])
 
 _task_manager = TaskManager()
+_task_manager.set_db_session_factory(lambda: get_session_factory()())
 
 
 def get_task_manager() -> TaskManager:
@@ -134,11 +137,72 @@ async def delete_task(novel_id: str, task_id: str, novel_service: NovelService =
     return {"message": "任务删除成功", "novel_id": novel_id, "task_id": task_id}
 
 
+@router.post("/{novel_id}/tasks/{task_id}/cancel")
+async def cancel_task(
+    novel_id: str,
+    task_id: str,
+    task_manager: TaskManager = Depends(get_task_manager),
+    novel_service: NovelService = Depends(get_novel_service),
+):
+    """
+    取消正在运行的分析任务
+
+    创建时间: 2026-04-07
+    创建者: TraeAI
+    任务: implement-task-cancellation
+    说明: 设置取消信号，任务将在当前阶段完成后停止
+
+    修改时间: 2026-04-07
+    修改者: TraeAI
+    任务: code-review-fix
+    修改内容: 任务不在内存时同步更新 run 表状态，确保数据一致性
+    """
+    try:
+        task = novel_service.get_task(task_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="任务不存在") from None
+
+    if task.get("novel_id") != novel_id:
+        raise HTTPException(status_code=400, detail="任务不属于该小说")
+
+    task_status = task.get("status", "")
+    if task_status in ("completed", "cancelled", "cancelling"):
+        raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
+    if task_status == "failed":
+        raise HTTPException(status_code=400, detail="任务已失败，无法取消")
+
+    cancelled = task_manager.cancel_task(task_id)
+
+    if cancelled:
+        return {"task_id": task_id, "status": "cancelling", "message": "任务将在当前处理单元完成后停止"}
+
+    if task_status in ("pending", "running"):
+        novel_service.update_task_status(task_id, "cancelled")
+
+        session_factory = get_session_factory()
+        try:
+            with session_factory() as session:
+                run_id = task_id_to_run_id(task_id, session.connection())
+                run_repo = RunRepository(session)
+                run_repo.update_run_status(run_id, "cancelled")
+                session.commit()
+        except (TaskIDNotFoundError, ValueError):
+            logger.warning(f"Task {task_id} run_id not found, skipping run table update")
+        except Exception as e:
+            logger.warning(f"Failed to update run status for cancelled task {task_id}: {e}")
+
+        logger.info(f"Task {task_id} cancelled (not in memory), status updated to cancelled")
+        return {"task_id": task_id, "status": "cancelled", "message": "任务已标记为取消"}
+
+    raise HTTPException(status_code=400, detail=f"任务状态为 {task_status}，无法取消")
+
+
 @router.post("/{novel_id}/tasks/batch-delete", response_model=BatchDeleteTasksResponse)
 async def batch_delete_tasks(
     novel_id: str,
     request: BatchDeleteTasksRequest,
     novel_service: NovelService = Depends(get_novel_service),  # noqa: B008
+    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
 ) -> BatchDeleteTasksResponse:
     """
     批量删除任务
@@ -156,12 +220,9 @@ async def batch_delete_tasks(
     for task_id in request.task_ids:
         try:
             # 验证任务是否属于该小说
-            task = novel_service.get_run_by_task_id(task_id)
-            if task is None:
-                # 尝试从数据库加载
-                task = novel_service._load_task_from_db(task_id)
-
-            if task is None:
+            try:
+                task = novel_service.get_task(task_id)
+            except Exception:
                 failed_ids.append({"task_id": task_id, "reason": "任务不存在"})
                 logger.warning(f"Batch delete task: task {task_id} not found")
                 continue
@@ -171,6 +232,31 @@ async def batch_delete_tasks(
                 logger.warning(f"Batch delete task: task {task_id} does not belong to novel {novel_id}")
                 continue
 
+            # 先取消运行中的任务，再删除
+            running_statuses = ("pending", "running", "cancelling")
+            if task.get("status") in running_statuses:
+                task_manager.cancel_task(task_id)
+            # 取消 asyncio.Task，使用 gather + return_exceptions 避免异常泄露
+            task_info = task_manager.get_task(task_id)
+            if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():
+                task_info.asyncio_task.cancel()
+                try:
+                    import asyncio
+
+                    await asyncio.wait_for(
+                        asyncio.gather(task_info.asyncio_task, return_exceptions=True),
+                        timeout=5.0,
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        f"Batch delete: task {task_id} cancel timed out, "
+                        "background coroutine may still be running"
+                    )
+                except Exception as e:
+                    logger.warning(f"Batch delete: unexpected error cancelling task {task_id}: {e}")
+
+            # 先从内存中移除，防止后台协程继续更新已删除的数据
+            task_manager.delete_task(task_id)
             novel_service.delete_task(task_id)
             deleted_ids.append(task_id)
             logger.info(f"Batch delete: task {task_id} deleted successfully")
@@ -224,6 +310,11 @@ async def get_analysis_status(
     - 移除函数内导入，使用模块顶部导入
     - 提取状态映射逻辑为辅助函数
     - 提取数据库查询逻辑为辅助函数
+
+    修改时间: 2026-04-07
+    修改者: TraeAI
+    任务: implement-task-cancellation
+    修改内容: 返回详细进度字段，使 HTTP 轮询与 WebSocket 行为一致
     """
     if task_id:
         task_info = task_manager.get_task(task_id)
@@ -242,6 +333,11 @@ async def get_analysis_status(
             status=task_info.status,
             progress=task_info.progress,
             stage=task_info.stage,
+            sub_stage=task_info.sub_stage,
+            current=task_info.current,
+            total=task_info.total,
+            message=task_info.message,
+            llm_outputs=task_info.llm_outputs[-20:] if task_info.llm_outputs else None,
             error=task_info.error,
         )
 
@@ -273,5 +369,10 @@ async def get_analysis_status(
         status=task_info.status,
         progress=task_info.progress,
         stage=task_info.stage,
+        sub_stage=task_info.sub_stage,
+        current=task_info.current,
+        total=task_info.total,
+        message=task_info.message,
+        llm_outputs=task_info.llm_outputs[-20:] if task_info.llm_outputs else None,
         error=task_info.error,
     )

@@ -5,6 +5,11 @@ Metrics 模块入口
 修改者: TraeAI
 任务: consolidate-codebase-architecture
 修改内容: PROPP_FUNCTIONS, CLASSICAL_PATTERNS 改为从 src.config.constants 导入
+
+修改时间: 2026-04-06
+修改者: GLM-5
+任务: 移除向后兼容代码
+修改内容: 移除 count_hits, count_token_hits, density, term_counts, token_density 导出
 """
 
 from src.config.constants import CLASSICAL_PATTERNS, PROPP_FUNCTIONS
@@ -29,7 +34,7 @@ from .character_metrics import (
     compute_relation_change_frequency,
     compute_relation_network_density,
 )
-from .emotion_metrics import lexical_sentiment_density, moving_average, pos_neg_ratio
+from .emotion_metrics import lexical_sentiment_density, pos_neg_ratio
 from .emotion_metrics_extra import (
     compute_arc_delta,
     compute_emotion_polarity_distribution,
@@ -38,7 +43,7 @@ from .emotion_metrics_extra import (
     compute_pivot_moment_density,
     compute_pos_neg_ratio,
 )
-from .lexicon_metrics import count_hits, count_token_hits, density, term_counts, token_density
+from .lexicon_metrics import count_mixed_hits, term_mixed_counts
 from .narrative_metrics import (
     compute_cliffhanger_rate,
     compute_climax_profile,
@@ -142,10 +147,9 @@ __all__ = [
     "compute_sent_len_std",
     "compute_three_act_ratio_by_tension",
     "compute_vocab_breadth",
-    "count_hits",
-    "count_token_hits",
+    "count_mixed_hits",
+    "term_mixed_counts",
     "average_word_length",
-    "density",
     "dialogue_length",
     "dialogue_ratio",
     "find_global_peak",
@@ -155,7 +159,6 @@ __all__ = [
     "lexical_sentiment_density",
     "lexicon_density",
     "metaphor_density",
-    "moving_average",
     "mtld",
     "pause_density",
     "pos_neg_ratio",
@@ -165,8 +168,6 @@ __all__ = [
     "split_sentences",
     "tension_composite",
     "tension_proxy",
-    "term_counts",
-    "token_density",
     "tokenize_words",
     "ttr",
     "word_frequency_breadth",

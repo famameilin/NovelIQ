@@ -6,7 +6,7 @@
   "foreshadow_rate": 0.0,
   "arc_scores": {"人物名1": 8.0, "人物名2": 7.0, "人物名3": 6.0},
   "narrative_type": "寓言",
-  "topic_labels": ["困境", "希望"],
+  "topic_labels": ["困境求生", "少年成长", "师徒情谊", "家族传承", "...共N个（每个主题一个）"],
   "diagnosis": "诊断内容...",
   "power_stance_score": 3,
   "power_stance_reason": "代表性段落依据...",
@@ -66,16 +66,24 @@
 重要约束：
 1. value_logic_type 只能是「善义有价值」「强者为王」「混合型」三者之一，不允许其他值
 2. power_stance_score、common_people_dignity、cultural_depth_score 必须是整数，不允许小数
-3. 所有九个字段都必须输出，不能缺失
+3. 所有字段都必须输出，不能缺失
 4. narrative_arc_type 只能是六种原型之一，不允许其他值
 5. arc_scores 必须是字典格式，Key为人物名称
 6. protagonist 必须是 arc_scores 中存在的人物名
 7. main_characters 和 core_cast 中的人物名必须与 arc_scores 的 key 一致
+8. **topic_labels 数组长度必须等于 total_topics 字段的值（单书模式通常25个），每个主题一个名称，不允许省略或只命名部分**
 
 主题命名规则：
-输入中的topic_words字段包含LDA分析出的主题词列表。
-请为每个主题生成一个简洁的主题名称（2-4个汉字），
+输入中的topic_words字段包含LDA分析出的主题词列表（每个元素对应一个主题，按权重从高到低排序）。
+total_topics字段表示实际主题总数。
+
+必须为topic_words中的**每一个**主题都生成一个简洁的名称（2-4个汉字），
 并按权重从高到低排序返回topic_labels数组。
+**数组长度必须等于topic_words数组的长度（即len(topic_words)），不允许省略。**
+注意：如果 total_topics > len(topic_words)，说明只要求你命名权重最高的部分主题，
+此时只需为收到的这些主题命名即可，不需要补齐到 total_topics 个。
+
+如果某个主题无法从上下文推断出明确含义，可使用通用名称如"其他情节"、"背景描写"、"人物互动"等。
 
 主题色生成（必须输出以下字段）：
 - theme_color: 小说主题色，十六进制格式，如 "#4A90D9"

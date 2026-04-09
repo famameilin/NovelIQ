@@ -17,6 +17,7 @@ Extracted from CLI to workflows to reduce coupling.
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from loguru import logger
@@ -28,7 +29,7 @@ from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.storage.repositories import AnnotationRepository, ChunkRepository
 
 
-def run_annotate(
+async def run_annotate(
     run_id: str,
     session: Session,
     resume: bool = False,
@@ -41,6 +42,9 @@ def run_annotate(
     annotate_client: AnnotationLike | None = None,
     incremental_disambig_client: DisambiguationLike | None = None,
     full_disambig_client: DisambiguationLike | None = None,
+    notify_callback: Callable | None = None,
+    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[int, int, int]:
     """
     执行小说标注流程
@@ -53,14 +57,17 @@ def run_annotate(
     修改者: TraeAI
     任务: fix-annotation-disambiguation-issues
     修改内容: 添加 novel_title 参数，用于保存到 global_context 表
+
     修改时间: 2026-03-13
     修改者: TraeAI
     任务: refactor-analysis-layer-functions
     修改内容: 重构函数，使用辅助函数拆解职责，确保函数行数不超过 200 行
+
     修改时间: 2026-03-13
     修改者: TraeAI
     任务: refactor-cli-layer-functions
     修改内容: 进一步重构，使用 _init_annotation_phase、_process_chunks_phase、_run_disambiguation_phase
+
     修改时间: 2026-03-14
     修改者: TraeAI
     任务: workflows 使用 Repository 模式重构
@@ -70,6 +77,11 @@ def run_annotate(
     修改者: TraeAI
     任务: storage-layer-decoupling
     修改内容: 添加 incremental_disambig_client 和 full_disambig_client 参数，支持测试注入 mock
+
+    修改时间: 2026-04-09
+    修改者: TraeAI
+    任务: refactor/annotate-async
+    修改内容: 改为 async def
 
     Args:
         run_id: 运行ID
@@ -112,7 +124,7 @@ def run_annotate(
         annotated_ids = ann_repo.fetch_annotated_chunk_ids(run_id)
         logger.info(f"resume mode: {len(annotated_ids)} chunks already annotated")
 
-    phase_result = _init_annotation_phase(
+    phase_result = await _init_annotation_phase(
         session,
         all_chunks,
         novel_id,
@@ -125,10 +137,12 @@ def run_annotate(
         incremental_disambig_client=incremental_disambig_client,
         full_disambig_client=full_disambig_client,
         run_id=run_id,
+        stream_callback=stream_callback,
+        notify_callback=notify_callback,
     )
 
     incremental_interval = settings.analysis.incremental_disambig_interval
-    success_count, state = _process_chunks_phase(
+    success_count, state = await _process_chunks_phase(
         session,
         all_chunks,
         annotated_ids,
@@ -138,6 +152,8 @@ def run_annotate(
         run_id=run_id,
         novel_id=novel_id,
         resume=resume,
+        notify_callback=notify_callback,
+        is_cancelled=is_cancelled,
     )
 
     state = _run_disambiguation_phase(session, state, phase_result, novel_id, use_rag, run_id=run_id)

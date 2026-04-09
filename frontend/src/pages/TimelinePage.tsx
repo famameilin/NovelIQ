@@ -72,7 +72,7 @@ export function TimelinePage() {
         { replace: true }
       );
     }
-  }, [currentTaskId, novelId, navigate, urlTaskId]);
+  }, [currentTaskId, novelId, navigate, urlTaskId, maxLevel, showTension]);
 
   const enabled = !!novelId && !!currentTaskId;
 

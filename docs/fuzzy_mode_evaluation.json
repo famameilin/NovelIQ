@@ -1,0 +1,50 @@
+{
+  "total_samples": 10,
+  "total_hits": {
+    "exact": 7,
+    "phrase": 7,
+    "fuzzy": 38
+  },
+  "recall_improvement_percent": {
+    "phrase_vs_exact": 0.0,
+    "fuzzy_vs_exact": 442.8571428571429,
+    "fuzzy_vs_phrase": 442.8571428571429
+  },
+  "sample_results": [
+    {
+      "exact": 0,
+      "phrase": 0,
+      "fuzzy": 2,
+      "text_preview": "太日阳莽继续刺激他们：“你们就算得了永生，也不会有我美丽！你们看我的头发，和火焰一样的颜色，一样的动...",
+      "source": "《人祖传》.txt"
+    },
+    {
+      "exact": 0,
+      "phrase": 0,
+      "fuzzy": 1,
+      "text_preview": "“没有用的。”仇恨蛊道，“仇恨是杀不死的，冤冤相报何时了，你这样对待我，你心中的仇恨只会越来越壮大。...",
+      "source": "《人祖传》.txt"
+    },
+    {
+      "exact": 0,
+      "phrase": 0,
+      "fuzzy": 0,
+      "text_preview": "他忽然间明白，原来他梦到的一切都是假的，幸福不在，迎接他的是炙热的火蛊。但他却泪流满面，感到冰冷和刺...",
+      "source": "《人祖传》.txt"
+    },
+    {
+      "exact": 1,
+      "phrase": 1,
+      "fuzzy": 5,
+      "text_preview": "有些地方是泥泞沼泽，十分容易泥足深陷，而且恶臭熏人。有些地方是荆棘满布，尖刺密密麻麻，人祖被刺得伤痕...",
+      "source": "《人祖传》.txt"
+    },
+    {
+      "exact": 0,
+      "phrase": 0,
+      "fuzzy": 6,
+      "text_preview": "无数花鸟鱼虫交汇成斑斓炫影，充斥大力真武的视野。海浪声、轰雷声、鸟鸣声在他耳畔一起荡漾，清新的、甘甜...",
+      "source": "《人祖传》.txt"
+    }
+  ]
+}

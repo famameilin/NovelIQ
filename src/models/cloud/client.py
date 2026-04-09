@@ -23,6 +23,11 @@
 修改者: TraeAI
 任务: unify-model-client-architecture
 修改内容: 使用统一的 DiagnosisClient（从 src.models.diagnosis 导入）
+
+修改时间: 2026-04-08
+修改者: TraeAI
+任务: 修复诊断交互记录未保存问题
+修改内容: 添加 session 参数，传递给 DiagnosisClient 以支持保存交互记录
 """
 
 from __future__ import annotations
@@ -45,6 +50,11 @@ class ConfiguredCloudModelClient(CloudModelClient):
 
     这是一个兼容层，提供诊断功能。消歧功能已统一使用 DisambiguationClient。
     保持原有接口不变，确保向后兼容。
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: 修复诊断交互记录未保存问题
+    修改内容: 添加 session 参数，传递给 DiagnosisClient 以支持保存交互记录
     """
 
     def __init__(
@@ -54,6 +64,7 @@ class ConfiguredCloudModelClient(CloudModelClient):
         analysis_logger: AnalysisLogger | None = None,
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
+        session: Any | None = None,
     ) -> None:
         self._diagnosis_client = DiagnosisClient(
             config=config,
@@ -61,6 +72,7 @@ class ConfiguredCloudModelClient(CloudModelClient):
             analysis_logger=analysis_logger,
             token_usage_callback=token_usage_callback,
             novel_id=novel_id,
+            session=session,
         )
         self._disambiguation_client = DisambiguationClient(
             task_type="incremental_disambig",
@@ -75,17 +87,17 @@ class ConfiguredCloudModelClient(CloudModelClient):
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
 
-    def diagnose(self, payload: dict) -> CloudAnalysis:
-        return self._diagnosis_client.diagnose(payload)
+    async def diagnose(self, payload: dict) -> CloudAnalysis:
+        return await self._diagnosis_client.diagnose(payload)
 
-    def disambiguate_characters(
+    async def disambiguate_characters(
         self,
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
         rag_hint: str | None = None,
     ) -> dict[str, str]:
-        result = self._disambiguation_client.disambiguate_characters(
+        result = await self._disambiguation_client.disambiguate_characters(
             candidates=candidates,
             context_sentences=context_sentences,
             existing_names=existing_names,

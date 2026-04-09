@@ -78,7 +78,8 @@ def extract_names_from_annotation(annotation: ChunkAnnotation) -> list[str]:
             names.add(character.name)
     for dialogue in annotation.dialogues:
         if dialogue.speaker:
-            names.add(dialogue.speaker)
+            for s in dialogue.speaker:
+                names.add(s)
     return list(names)
 
 

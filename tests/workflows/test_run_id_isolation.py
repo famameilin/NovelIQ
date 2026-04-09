@@ -73,13 +73,13 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
     ann_repo.insert_chunk_dialogues(
         run_1,
         2,
-        [DialogueSnapshot(speaker="zhangsan", content="test", identity_clue="run1-clue")],
+        [DialogueSnapshot(speaker=["zhangsan"], content="test", identity_clue="run1-clue")],
         [10],
     )
     ann_repo.insert_chunk_dialogues(
         run_2,
         100,
-        [DialogueSnapshot(speaker="zhangsan", content="test", identity_clue="run2-clue")],
+        [DialogueSnapshot(speaker=["zhangsan"], content="test", identity_clue="run2-clue")],
         [10],
     )
 

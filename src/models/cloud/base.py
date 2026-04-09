@@ -51,10 +51,10 @@ TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None],
 class CloudModelClient:
     """云端模型客户端基类"""
 
-    def diagnose(self, payload: dict) -> CloudAnalysis:
+    async def diagnose(self, payload: dict) -> CloudAnalysis:
         raise NotImplementedError
 
-    def disambiguate_characters(
+    async def disambiguate_characters(
         self,
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
@@ -67,10 +67,10 @@ class CloudModelClient:
 class NullCloudModelClient(CloudModelClient):
     """空云端模型客户端，用于测试"""
 
-    def diagnose(self, payload: dict) -> CloudAnalysis:
+    async def diagnose(self, payload: dict) -> CloudAnalysis:
         return make_empty_analysis()
 
-    def disambiguate_characters(
+    async def disambiguate_characters(
         self,
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,

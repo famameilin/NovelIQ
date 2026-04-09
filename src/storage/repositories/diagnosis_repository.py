@@ -27,6 +27,7 @@ from src.storage.models import (
     GraphEntity,
     GraphRelationCurrent,
     GraphRelationEvent,
+    StageSummary,
 )
 from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.base import BaseRepository
@@ -220,32 +221,6 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.text, row.foreshadowing_type, row.foreshadowing_desc) for row in result]
-
-    def fetch_first_last_chunk_summary(self, run_id: str, max_chars: int | None = None) -> tuple[str, str]:
-        """
-        获取首尾分块摘要
-
-        Args:
-            run_id: 运行ID
-            max_chars: 最大字符数
-
-        Returns:
-            (首分块摘要, 尾分块摘要) 元组
-        """
-        if max_chars is None:
-            max_chars = settings.diagnosis.first_last_max_chars
-
-        stmt = select(Chunk.chunk_id, Chunk.text).where(Chunk.run_id == run_id).order_by(Chunk.chunk_id)
-
-        result = self.session.execute(stmt)
-        chunks = result.fetchall()
-
-        if not chunks:
-            return "", ""
-
-        first_text = chunks[0].text[:max_chars] if chunks[0].text else ""
-        last_text = chunks[-1].text[:max_chars] if chunks[-1].text else ""
-        return first_text, last_text
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
         """
@@ -486,3 +461,38 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
                 "low_confidence_samples": low_confidence_events[:5],
             },
         }
+
+    def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:
+        """
+        获取所有阶段性摘要
+
+        创建时间: 2026-04-08
+        创建者: GLM-5
+        任务: summary-full-chain-refactor
+        说明: 从 stage_summaries 表读取所有阶段性摘要，用于云端诊断
+
+        Args:
+            run_id: 运行ID
+
+        Returns:
+            包含 start_chunk_id, end_chunk_id, summary 的字典列表
+        """
+        stmt = (
+            select(
+                StageSummary.start_chunk_id,
+                StageSummary.end_chunk_id,
+                StageSummary.summary,
+            )
+            .where(StageSummary.run_id == run_id)
+            .order_by(StageSummary.start_chunk_id)
+        )
+        result = self.session.execute(stmt)
+        return [
+            {
+                "start_chunk_id": row.start_chunk_id,
+                "end_chunk_id": row.end_chunk_id,
+                "summary": row.summary,
+            }
+            for row in result
+            if row.summary
+        ]

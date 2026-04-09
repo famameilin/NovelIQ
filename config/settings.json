@@ -176,11 +176,11 @@
       "parallel": false
     },
     "progress": {
-      "preprocess": 10,
-      "annotate": 25,
-      "aggregate": 50,
-      "topic_model": 70,
-      "diagnose": 85
+      "preprocess": { "start": 0, "end": 10 },
+      "annotate": { "start": 10, "end": 85 },
+      "aggregate": { "start": 50, "end": 70 },
+      "topic_model": { "start": 70, "end": 85 },
+      "diagnose": { "start": 85, "end": 100 }
     },
     "valid_hierarchical_relation_types": [
       "belongs_to",

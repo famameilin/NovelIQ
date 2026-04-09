@@ -46,6 +46,8 @@ class AnalysisRun(Base):
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
+    progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    stage: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -55,7 +57,10 @@ class AnalysisRun(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<AnalysisRun(run_id={self.run_id}, novel_id={self.novel_id}, status={self.status})>"
+        return (
+            f"<AnalysisRun(run_id={self.run_id}, novel_id={self.novel_id}, "
+            f"status={self.status}, progress={self.progress})>"
+        )
 
 
 class DisambigCheckpoint(Base):

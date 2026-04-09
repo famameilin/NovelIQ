@@ -161,5 +161,60 @@ class TestBuildSentencePoolWithVariants(unittest.TestCase):
             self.assertIn("李四", result)
 
 
+class TestBuildSentencePoolWithSpeakerArray(unittest.TestCase):
+    """
+    创建时间: 2026-04-08
+    创建者: TraeAI
+    任务: fix-multi-speaker-support
+    说明: 测试 speaker 字段为 list 类型时的稀有名字计数逻辑
+    """
+
+    def test_rare_name_counting_with_speaker_array(self) -> None:
+        """
+        稀有名（出现次数≤2）应包含来自 chunk_characters 和 chunk_dialogues speaker 数组的统计
+        speaker 是 text[] 类型，应正确处理列表中的每个元素
+        """
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.side_effect = [
+            [("贺重明走进了房间。",)],
+            [],
+        ]
+
+        class MockCharacterRow:
+            def __init__(self, name):
+                self.name = name
+
+        class MockDialogueRow:
+            def __init__(self, speaker):
+                self.speaker = speaker
+
+        def mock_query(model):
+            if hasattr(model, "__name__") and model.__name__ == "ChunkCharacter":
+                mock_q = MagicMock()
+                mock_q.filter.return_value.filter.return_value.all.return_value = [
+                    MockCharacterRow("贺重明"),
+                    MockCharacterRow("贺重明"),
+                    MockCharacterRow("李四"),
+                ]
+                return mock_q
+            elif hasattr(model, "__name__") and model.__name__ == "ChunkDialogue":
+                mock_q = MagicMock()
+                mock_q.filter.return_value.filter.return_value.all.return_value = [
+                    MockDialogueRow(["王五", "赵六"]),
+                    MockDialogueRow(["贺重明", "王五"]),
+                ]
+                return mock_q
+            return MagicMock()
+
+        mock_conn.query.side_effect = mock_query
+
+        with patch("src.metrics.text_utils.split_sentences") as mock_split:
+            mock_split.side_effect = lambda text: [text]
+
+            result = _build_sentence_pool(mock_conn, ["贺重明", "李四", "王五"], [], "run-test")
+
+            self.assertIn("贺重明", result)
+
+
 if __name__ == "__main__":
     unittest.main()

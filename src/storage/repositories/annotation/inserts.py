@@ -157,7 +157,13 @@ def insert_chunk_dialogues(
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 保存 identity_clue 字段，存储 Phase 3 提取的身份线索
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: speaker 存储为 JSON 数组字符串，删除 evidence 字段
     """
+
     records: list[ChunkDialogue] = []
     for idx, dialogue in enumerate(dialogues):
         length = lengths[idx] if lengths is not None and idx < len(lengths) else None
@@ -168,7 +174,6 @@ def insert_chunk_dialogues(
                 length=length,
                 tone=dialogue.tone,
                 content=dialogue.content,
-                evidence=dialogue.evidence,
                 identity_clue=dialogue.identity_clue,
                 run_id=run_id,
             )

@@ -17,13 +17,17 @@
 修改内容: 将对话归属判断相关函数迁移到 models/local/annotation/phase3.py，
          保留向后兼容的导入
 
+修改时间: 2026-04-06
+修改者: GLM-5
+任务: 移除向后兼容代码
+修改内容: 移除 _load_alias_keywords 死代码和旧 loader 导入
+
 说明: 本模块包含例句构建、全局上下文抽取等辅助函数。
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -31,7 +35,6 @@ from sqlalchemy import text
 
 from src.config import settings
 from src.config.schemas import ANNOTATION_CONFIG
-from src.lexicons.loader import load_lexicon
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interfaces import AnnotationLike
 
@@ -90,16 +93,6 @@ def build_context_sentences(
     _add_identity_clues(conn, result, name_list, run_id)
 
     return result
-
-
-def _load_alias_keywords() -> list[str]:
-    """加载别名关键词词典"""
-    lexicon_dir = Path("data/lexicons")
-    try:
-        return load_lexicon("alias_keywords", lexicon_dir)
-    except FileNotFoundError:
-        logger.warning("alias_keywords lexicon not found, using default")
-        return []
 
 
 def _extract_and_save_global_context(
@@ -247,20 +240,36 @@ def _build_sentence_pool(
 
     # 稀有名（≤2次出现）不受例句数量限制，确保包含所有可用上下文
     # 查询各名字的出现次数，对稀有名放宽限制
+    # 注意：speaker 是 text[] 类型，需要用 SQLAlchemy ORM 查询以正确处理数组
     if name_list:
-        counts = conn.execute(
-            text("""
-                SELECT name, count(*) FROM (
-                    SELECT name FROM chunk_characters
-                    WHERE run_id = :run_id AND name = ANY(:names)
-                    UNION ALL
-                    SELECT speaker AS name FROM chunk_dialogues
-                    WHERE run_id = :run_id AND speaker = ANY(:names)
-                ) t GROUP BY name
-            """),
-            {"names": name_list, "run_id": run_id},
-        ).fetchall()
-        rare_counts = {name: cnt for name, cnt in counts if cnt <= 2}
+        from src.storage.models.annotation import ChunkCharacter, ChunkDialogue
+
+        name_set_for_count = set(name_list)
+        counts_dict: dict[str, int] = {}
+
+        char_rows = (
+            conn.query(ChunkCharacter.name)
+            .filter(ChunkCharacter.run_id == run_id)
+            .filter(ChunkCharacter.name.in_(name_list))
+            .all()
+        )
+        for row in char_rows:
+            if row.name:
+                counts_dict[row.name] = counts_dict.get(row.name, 0) + 1
+
+        dialogue_rows = (
+            conn.query(ChunkDialogue.speaker)
+            .filter(ChunkDialogue.run_id == run_id)
+            .filter(ChunkDialogue.speaker.isnot(None))
+            .all()
+        )
+        for row in dialogue_rows:
+            if row.speaker:
+                for s in row.speaker:
+                    if s in name_set_for_count:
+                        counts_dict[s] = counts_dict.get(s, 0) + 1
+
+        rare_counts = {name: cnt for name, cnt in counts_dict.items() if cnt <= 2}
         for name in rare_counts:
             # 稀有名：重新扫描所有句子，不受 pool 大小限制
             rare_sentences: list[str] = []
@@ -295,25 +304,30 @@ def _add_identity_clues(
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 从 chunk_dialogues 表获取 Phase 3 提取的身份线索，替代 character_appearances 表
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: speaker 改为 text[] 数组，使用 ORM 查询替代 unnest() SQL
     """
     if not name_list:
         return
 
-    dialogues = conn.execute(
-        text("""
-            SELECT speaker, identity_clue 
-            FROM chunk_dialogues 
-            WHERE speaker = ANY(:names)
-              AND identity_clue IS NOT NULL
-              AND identity_clue != ''
-              AND run_id = :run_id
-        """),
-        {"names": name_list, "run_id": run_id},
-    ).fetchall()
+    from src.storage.models.annotation import ChunkDialogue
 
-    for speaker, clue in dialogues:
-        if clue:
-            if speaker in result:
-                result[speaker] += f" | 【身份线索】{clue}"
-            else:
-                result[speaker] = f"【身份线索】{clue}"
+    name_set = set(name_list)
+    dialogues = (
+        conn.query(ChunkDialogue.speaker, ChunkDialogue.identity_clue)
+        .filter(ChunkDialogue.run_id == run_id)
+        .filter(ChunkDialogue.identity_clue.isnot(None))
+        .filter(ChunkDialogue.identity_clue != "")
+        .all()
+    )
+
+    for row in dialogues:
+        if row.speaker and row.identity_clue:
+            for speaker_name in row.speaker:
+                if speaker_name in name_set and speaker_name in result:
+                    result[speaker_name] += f" | 【身份线索】{row.identity_clue}"
+                elif speaker_name in name_set:
+                    result[speaker_name] = f"【身份线索】{row.identity_clue}"

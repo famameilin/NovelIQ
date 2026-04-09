@@ -72,7 +72,7 @@ class DisambiguationClient(BaseModelClient):
         )
         self._instructor_client_factory = instructor_client_factory
 
-    def disambiguate_characters(
+    async def disambiguate_characters(
         self,
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
@@ -98,7 +98,7 @@ class DisambiguationClient(BaseModelClient):
         )
         messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
         try:
-            response = call_disambiguate_api(
+            response = await call_disambiguate_api(
                 client=self,
                 config=self._config,
                 messages=messages,
@@ -126,7 +126,7 @@ class DisambiguationClient(BaseModelClient):
             logger.error("disambiguate_characters unexpected error: {}", str(e))
             raise
 
-    def disambiguate_anonymous(
+    async def disambiguate_anonymous(
         self,
         anonymous_names: list[str],
         anonymous_contexts: dict[str, str],
@@ -152,7 +152,7 @@ class DisambiguationClient(BaseModelClient):
         )
 
         try:
-            response = call_disambiguate_api(
+            response = await call_disambiguate_api(
                 client=self,
                 config=self._config,
                 messages=messages,
@@ -180,6 +180,51 @@ class DisambiguationClient(BaseModelClient):
 
             logger.error("disambiguate_anonymous unexpected error: {}", str(e))
             raise
+
+    def generate_summary(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 150,
+    ) -> str:
+        """
+        生成摘要
+
+        创建时间: 2026-04-08
+        创建者: GLM-5
+        任务: summary-full-chain-refactor
+        说明: 调用 LLM 生成阶段性摘要
+
+        Args:
+            messages: 消息列表
+            max_tokens: 最大 token 数
+
+        Returns:
+            生成的摘要文本
+        """
+        import time
+
+        start_time = time.time()
+        response = self._client.chat.completions.create(
+            model=self._config.model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=max_tokens,
+        )
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        summary = response.choices[0].message.content.strip()
+
+        self._record_token_usage(response, "stage_summary")
+
+        from loguru import logger
+
+        logger.debug(
+            "Generated summary in {}ms: {} chars",
+            duration_ms,
+            len(summary),
+        )
+
+        return summary
 
 
 __all__ = ["DisambiguationClient"]

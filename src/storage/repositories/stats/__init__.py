@@ -40,7 +40,12 @@ from .runs import (
     has_topic_data,
     is_aggregate_complete,
 )
-from .summaries import insert_character_appearances, insert_chunk_summary
+from .summaries import (
+    fetch_chunk_summaries_by_range,
+    insert_character_appearances,
+    insert_chunk_summary,
+    insert_stage_summary,
+)
 
 __all__ = [
     "StatsRepository",
@@ -69,4 +74,6 @@ __all__ = [
     # summaries
     "insert_chunk_summary",
     "insert_character_appearances",
+    "insert_stage_summary",
+    "fetch_chunk_summaries_by_range",
 ]

@@ -51,7 +51,6 @@ def _store_annotation_results(
     dialogue_speakers: dict[int, str] | None = None,
     dialogues: list[tuple[int, str]] | None = None,
     dialogue_tones: dict[int, str] | None = None,
-    dialogue_evidences: dict[int, str] | None = None,
     dialogue_identity_clues: dict[int, str | None] | None = None,
     relations=None,
 ) -> None:
@@ -100,7 +99,14 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: use-phase3-identity-clue-in-disambiguation
     修改内容: 添加 dialogue_identity_clues 参数，传递身份线索
+
+    修改时间: 2026-04-08
+    修改者: TraeAI
+    任务: fix-multi-speaker-support
+    修改内容: 删除 dialogue_evidences 参数，speaker 改为 list[str]
     """
+    import json
+
     from src.models.local.schema import DialogueSnapshot
     from src.storage.repositories import AnnotationRepository
 
@@ -134,16 +140,20 @@ def _store_annotation_results(
     if dialogues:
         effective_dialogues = []
         for dialogue_idx, content in dialogues:
-            speaker = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
+            speaker_str = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
+            speaker_list: list[str] | None = None
+            if speaker_str:
+                try:
+                    speaker_list = json.loads(speaker_str)
+                except (json.JSONDecodeError, TypeError):
+                    speaker_list = [speaker_str]
             tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
-            evidence = dialogue_evidences.get(dialogue_idx) if dialogue_evidences else None
             identity_clue = dialogue_identity_clues.get(dialogue_idx) if dialogue_identity_clues else None
             effective_dialogues.append(
                 DialogueSnapshot(
-                    speaker=speaker,
+                    speaker=speaker_list,
                     content=content,
                     tone=tone,
-                    evidence=evidence or "",
                     identity_clue=identity_clue,
                 )
             )

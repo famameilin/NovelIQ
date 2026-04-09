@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 import {
   getNarrativeStructure,
   getEmotionStats,
@@ -12,8 +14,10 @@ import {
   getChunkCurves,
 } from "@/api/results";
 import { getNovel } from "@/api/novels";
+import { startAnalysis, batchDeleteTasks, cancelAnalysisTask } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
 import { useThemeStore } from "@/store/themeStore";
+import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { DiagnosisSummaryCard } from "@/components/common/DiagnosisSummaryCard";
@@ -21,6 +25,7 @@ import { ScoreOverviewCard } from "@/components/common/ScoreOverviewCard";
 import { DimensionMiniCard } from "@/components/common/DimensionMiniCard";
 import { NarrativeStructureBar } from "@/components/common/NarrativeStructureBar";
 import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
+import { AnalysisProgressPanel } from "@/components/analysis/AnalysisProgressPanel";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_SEED, HEX_COLOR_RE } from "@/store/themeStore";
@@ -90,7 +95,10 @@ function SkeletonGrid() {
   );
 }
 
-function EmptyTaskPrompt() {
+function EmptyTaskPrompt({ onAnalyze, isAnalyzing }: {
+  onAnalyze: () => void;
+  isAnalyzing: boolean;
+}) {
   return (
     <div className="flex h-96 flex-col items-center justify-center gap-4">
       <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary-subtle">
@@ -100,11 +108,15 @@ function EmptyTaskPrompt() {
         </svg>
       </div>
       <div className="text-center">
-        <h3 className="text-lg font-semibold text-text">请选择分析任务</h3>
+        <h3 className="text-lg font-semibold text-text">尚未分析</h3>
         <p className="mt-1 text-sm text-text-muted">
-          使用顶部任务选择器选择一个已完成的任务以查看分析结果
+          点击下方按钮开始对这本小说进行量化分析
         </p>
       </div>
+      <Button onClick={onAnalyze} disabled={isAnalyzing}>
+        {isAnalyzing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        {isAnalyzing ? "正在创建分析任务..." : "开始分析"}
+      </Button>
     </div>
   );
 }
@@ -117,8 +129,30 @@ export function NovelDetailPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { currentTaskId, setNovel, setTask } = useNovelStore();
   const { seedColor: currentSeed, setSeedColor } = useThemeStore();
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // 使用 useAnalysisStatus hook 进行轮询并同步进度到 store
+  useAnalysisStatus(novelId ?? null, currentTaskId, {
+    enabled: !!novelId && !!currentTaskId,
+    onRunning: () => {
+      setIsAnalyzing(true);
+    },
+    onCompleted: () => {
+      setIsAnalyzing(false);
+      toast.success("分析完成");
+    },
+    onCancelled: () => {
+      setIsAnalyzing(false);
+      toast.info("分析任务已取消");
+    },
+    onFailed: (error) => {
+      setIsAnalyzing(false);
+      toast.error(`分析失败: ${error}`);
+    },
+  });
 
   const urlTaskId = searchParams.get("task_id");
 
@@ -138,6 +172,52 @@ export function NovelDetailPage() {
       navigate(`/novels/${novelId}?task_id=${currentTaskId}`, { replace: true });
     }
   }, [currentTaskId, novelId, navigate]);
+
+  // Reset isAnalyzing when task is cleared
+  useEffect(() => {
+    if (!currentTaskId) {
+      setIsAnalyzing(false);
+    }
+  }, [currentTaskId]);
+
+  /** 启动分析：调用 startAnalysis → 设置 taskId → 设置 isAnalyzing */
+  const handleStartAnalysis = useCallback(async () => {
+    if (!novelId || isAnalyzing) return;
+    setIsAnalyzing(true);
+    try {
+      const result = await startAnalysis(novelId);
+      const taskId = result.task_id;
+      setTask(taskId);
+      toast.info("分析任务已创建，正在执行...");
+    } catch {
+      setIsAnalyzing(false);
+      toast.error("创建分析任务失败");
+    }
+  }, [novelId, isAnalyzing, setTask]);
+
+  const handleDeleteTask = useCallback(async () => {
+    if (!novelId || !currentTaskId) return;
+    if (!window.confirm("确定要删除当前分析任务吗？此操作不可恢复。")) return;
+    try {
+      await batchDeleteTasks(novelId, [currentTaskId]);
+      setTask(null);
+      setIsAnalyzing(false);
+      queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
+      toast.success("任务已删除");
+    } catch {
+      toast.error("删除任务失败");
+    }
+  }, [novelId, currentTaskId, setTask, queryClient]);
+
+  const handleCancelTask = useCallback(async (taskId: string) => {
+    if (!novelId) return;
+    try {
+      await cancelAnalysisTask(novelId, taskId);
+      toast.success("任务取消请求已发送");
+    } catch {
+      toast.error("取消任务失败");
+    }
+  }, [novelId]);
 
   // Parallel data fetching
   const enabled = !!novelId && !!currentTaskId;
@@ -256,19 +336,33 @@ export function NovelDetailPage() {
       {/* Header */}
       <NovelHeader
         title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
-        status={diagnosisQuery.data ? "completed" : undefined}
-        showTaskSelector={true}
-        className="mb-6"
+        novelId={novelId}
+        onReanalyze={handleStartAnalysis}
+        onDelete={currentTaskId ? handleDeleteTask : undefined}
+        isReanalyzing={isAnalyzing}
+        className="mb-4"
       />
 
-      {/* No task selected */}
-      {!currentTaskId && <EmptyTaskPrompt />}
+      {/* No task selected — offer start analysis */}
+      {!currentTaskId && (
+        <EmptyTaskPrompt onAnalyze={handleStartAnalysis} isAnalyzing={isAnalyzing} />
+      )}
 
-      {/* Loading skeleton */}
-      {isLoading && currentTaskId && <SkeletonGrid />}
+      {/* Analysis in progress — show progress panel, hide everything else */}
+      {isAnalyzing && currentTaskId && (
+        <motion.div className="flex flex-1 flex-col min-h-0">
+          <AnalysisProgressPanel
+            taskId={currentTaskId}
+            onCancel={() => handleCancelTask(currentTaskId)}
+          />
+        </motion.div>
+      )}
 
-      {/* Error state — check all queries */}
-      {hasAnyError && !isLoading && currentTaskId && (
+      {/* Loading skeleton - only when not analyzing */}
+      {!isAnalyzing && isLoading && currentTaskId && <SkeletonGrid />}
+
+      {/* Error state — only when not analyzing */}
+      {!isAnalyzing && hasAnyError && !isLoading && currentTaskId && (
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-text-muted">数据加载失败</p>
           <Button variant="ghost" size="sm" onClick={retryAll}>
@@ -277,14 +371,14 @@ export function NovelDetailPage() {
         </div>
       )}
 
-      {/* Main content */}
-      {allMetricsLoaded && !isLoading && currentTaskId && (
+      {/* Main content - only when not analyzing */}
+      {!isAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && (
         <div className="space-y-6">
           {/* Row 1: 诊断画像 + 评分速览 */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
+            transition={{ duration: 0.15 }}
             className="grid grid-cols-1 gap-6 lg:grid-cols-2"
           >
             {diagnosisQuery.data ? (
@@ -313,7 +407,7 @@ export function NovelDetailPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.1 }}
+            transition={{ duration: 0.15, delay: 0.1 }}
             className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5"
           >
             <DimensionMiniCard
@@ -346,11 +440,11 @@ export function NovelDetailPage() {
             <DimensionMiniCard
               dimension="topic"
               data={{
-                topic_count: topicsQuery.data?.length,
-                top_topics: topicsQuery.data?.slice(0, 3).map(t => ({
-                  words: t.keywords,
+                topic_count: Array.isArray(topicsQuery.data) ? topicsQuery.data.length : 0,
+                top_topics: Array.isArray(topicsQuery.data) ? topicsQuery.data.slice(0, 3).map(t => ({
+                  words: t.words,
                   weight: t.weight,
-                })),
+                })) : [],
               }}
               novelId={novelId!}
               linkTo={`/novels/${novelId}/topics`}
@@ -361,7 +455,7 @@ export function NovelDetailPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
+            transition={{ duration: 0.15, delay: 0.2 }}
             className="grid grid-cols-1 gap-6 lg:grid-cols-2"
           >
             <NarrativeStructureBar

@@ -29,13 +29,19 @@ export async function getNovel(novelId: string): Promise<Novel | null> {
   return data.items.find((novel) => novel.novel_id === novelId) || null;
 }
 
-export async function uploadNovel(file: File): Promise<NovelUploadResponse> {
+export async function uploadNovel(
+  file: File,
+  options?: { signal?: AbortSignal }
+): Promise<NovelUploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
   const { data } = await apiClient.post<NovelUploadResponse>(
     "/api/novels/upload",
     formData,
-    { headers: { "Content-Type": "multipart/form-data" } }
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      signal: options?.signal,
+    }
   );
   return data;
 }
