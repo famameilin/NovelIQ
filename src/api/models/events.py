@@ -222,13 +222,13 @@ class AnalysisEventBus:
     #  便捷方法：阶段级事件
     # ------------------------------------------------------------------
 
-    async def emit_stage_start(self, stage: str, message: str = "", percent: float = 0.0) -> None:
+    async def emit_stage_start(self, stage: str, message: str = "", percent: float = 0.0, total: int = 0) -> None:
         """发送阶段开始事件"""
         self._stage = stage
         self._sub_stage = ""
         self._chunk_id = 0
         await self.emit(StreamEvent(
-            action="start", stage=stage, message=message, percent=percent,
+            action="start", stage=stage, message=message, percent=percent, total=total,
         ))
 
     async def emit_stage_complete(self, stage: str) -> None:
