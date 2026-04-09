@@ -26,10 +26,10 @@ type StageKey = "preprocess" | "annotate" | "aggregate" | "topic-model" | "diagn
 
 const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   preprocess: { label: "预处理", range: [0, 10] },
-  annotate: { label: "标注分析", range: [10, 85] },
-  aggregate: { label: "数据聚合", range: [50, 70] },
-  "topic-model": { label: "主题建模", range: [70, 85] },
-  diagnose: { label: "诊断报告", range: [85, 100] },
+  annotate: { label: "标注分析", range: [10, 80] },
+  aggregate: { label: "数据聚合", range: [80, 90] },
+  "topic-model": { label: "主题建模", range: [90, 95] },
+  diagnose: { label: "诊断报告", range: [95, 100] },
 };
 
 const PHASE_CONFIG: Record<string, { label: string }> = {
