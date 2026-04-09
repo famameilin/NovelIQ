@@ -15,9 +15,9 @@
 
 修改时间: 2026-03-16
 修改者: TraeAI
-任务: 修复测试耗时异常
-修改内容: 直接 Mock litellm.completion 而非使用 LiteLLM 异常，避免内部重试延迟
-"""
+任务: 修复测试耗时问题
+修改内容: 直接 Mock litellm.completion 而非使用 LiteLLM 类，避免内部重试"""
+import asyncio
 import sys
 import unittest
 from pathlib import Path
@@ -174,7 +174,7 @@ class TestErrorHandling(unittest.TestCase):
         with patch("src.models.disambiguation.call_disambiguate_api") as mock_api:
             mock_api.side_effect = ConnectionError("Connection error")
             with self.assertRaises(ConnectionError):
-                client.disambiguate_characters(_candidates("张三"))
+                asyncio.run(client.disambiguate_characters(_candidates("张三")))
 
     def test_annotate_without_model_raises_value_error(self) -> None:
         config = TaskModelConfig(base_url="http://test:8000/v1", model=None)
