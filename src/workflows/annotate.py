@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
+from src.api.models.events import StreamEvent
 from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.storage.repositories import AnnotationRepository, ChunkRepository
 

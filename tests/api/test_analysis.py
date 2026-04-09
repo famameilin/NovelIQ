@@ -31,8 +31,8 @@ class TestAnalysis:
         assert data["status"] == "pending"
         assert data["progress"] == 0.0
 
-    def test_get_task_status_from_db_returns_pending_for_unknown_task_id(self):
-        """测试未知 task_id 查询状态时返回 pending"""
+    def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
+        """测试未知 task_id 查询详情时返回 None"""
         mock_session = MagicMock()
         mock_session.__enter__.return_value = mock_session
         mock_session.__exit__.return_value = None
@@ -42,9 +42,9 @@ class TestAnalysis:
             patch.object(analysis_mod, "get_session_factory", return_value=lambda: mock_session),
             patch.object(analysis_mod, "task_id_to_run_id", side_effect=TaskIDNotFoundError("not found")),
         ):
-            status = analysis_mod._get_task_status_from_db("deadbeef")
+            result = analysis_mod._get_task_detail_from_db("deadbeef")
 
-        assert status == analysis_mod.TaskStatus.PENDING
+        assert result is None
 
 
 class TestReanalysis:

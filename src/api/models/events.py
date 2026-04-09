@@ -17,12 +17,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from src.api.services.event_manager import event_manager
-from src.api.services.task_manager import TaskManager
+if TYPE_CHECKING:
+    from src.api.services.task_manager import TaskManager
 
 
 # ------------------------------------------------------------------ #
@@ -173,7 +173,9 @@ class AnalysisEventBus:
             f"chunk_id={resolved_event.chunk_id}"
         )
 
-        # 唯一发送口
+        # 唯一发送口（lazy import 避免循环依赖）
+        from src.api.services.event_manager import event_manager
+
         await event_manager.send(
             task_id=self.task_id,
             event_type=sse_event_type,
@@ -216,6 +218,8 @@ class AnalysisEventBus:
 
     async def emit_task_complete(self) -> None:
         """发送任务完成事件（使用 task_complete SSE 事件类型）"""
+        from src.api.services.event_manager import event_manager
+
         await event_manager.send(
             task_id=self.task_id,
             event_type=StreamMessageType.task_complete.value,
@@ -224,6 +228,8 @@ class AnalysisEventBus:
 
     async def emit_task_error(self, error: str, stage: str = "failed") -> None:
         """发送任务错误事件"""
+        from src.api.services.event_manager import event_manager
+
         await event_manager.send(
             task_id=self.task_id,
             event_type=StreamMessageType.task_error.value,
@@ -232,6 +238,8 @@ class AnalysisEventBus:
 
     async def emit_task_cancelled(self) -> None:
         """发送任务取消事件"""
+        from src.api.services.event_manager import event_manager
+
         await event_manager.send(
             task_id=self.task_id,
             event_type=StreamMessageType.task_cancelled.value,
