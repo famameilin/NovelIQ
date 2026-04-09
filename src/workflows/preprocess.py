@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import cast
 
@@ -35,8 +36,8 @@ from src.chunking.chunker import chunk_documents
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
+from src.api.models.events import StreamEvent
 from src.storage.repositories import ChunkRepository, ChunkStyleData
-from src.workflows.types import IProgressCallback
 
 
 async def run_preprocess(
@@ -48,6 +49,7 @@ async def run_preprocess(
     max_chars: int = 2000,
     overlap: int = 200,
     notify_callback: IProgressCallback | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, float]:
     """
     执行预处理流程。
@@ -84,7 +86,9 @@ async def run_preprocess(
 
     start_time = time.time()
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="start", stage="preprocess", message="开始预处理"))
+    elif notify_callback:
         await notify_callback(phase="preprocess", status="start", current=0, total=1, percent=0.0)
 
     chunk_repo = ChunkRepository(session)
@@ -157,7 +161,9 @@ async def run_preprocess(
     logger.info(f"Total characters: {total_chars}")
     logger.info(f"Processing time: {elapsed:.2f}s")
 
-    if notify_callback:
+    if emitter:
+        await emitter(StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0))
+    elif notify_callback:
         await notify_callback(phase="preprocess", status="complete", current=1, total=1, percent=100.0)
 
     return total_chunks, total_chars, elapsed

@@ -96,14 +96,14 @@ export function ProgressDetail({ className }: ProgressDetailProps) {
     return null;
   }
 
-  const { stage, sub_stage, phase, current, total, percent, message } = progress;
+  const { stage, sub_stage, current, total, percent, message } = progress;
   const currentStageKey = getCurrentStageKey(percent);
 
   return (
     <div className={cn("space-y-4", className)}>
       <ProgressBar
         stage={stage}
-        phase={phase}
+        phase={sub_stage}
         current={current}
         total={total}
         percent={percent}

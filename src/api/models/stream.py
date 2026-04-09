@@ -31,13 +31,10 @@ class StreamMessageType(StrEnum):
 
 class ProgressDetail(BaseModel):
     """
-    进度详情模型
+    进度详情模型 (deprecated)
 
-    说明: 用于描述任务执行过程中的进度信息
-
-    新增字段:
-        phase: str - 当前 phase 名称（如 "phase1", "phase2", "phase3", "phase4"）
-                 用于在 annotate 阶段内细分进度
+    已被 StreamEvent 统一格式替代（src/api/models/events.py）。
+    保留供向后兼容，新代码应使用 StreamEvent。
     """
 
     stage: str = Field(description="当前阶段名称")
@@ -51,9 +48,10 @@ class ProgressDetail(BaseModel):
 
 class LLMOutputData(BaseModel):
     """
-    LLM 输出数据模型
+    LLM 输出数据模型 (deprecated)
 
-    说明: 用于封装 LLM 生成过程中的输出数据
+    已被 StreamEvent 统一格式替代（src/api/models/events.py）。
+    保留供向后兼容，新代码应使用 StreamEvent。
     """
 
     phase: str = Field(description="生成阶段标识")
