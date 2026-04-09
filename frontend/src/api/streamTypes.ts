@@ -39,10 +39,11 @@ export interface StreamEventData {
   stage: string;         // preprocess / annotate / aggregate / topic-model / diagnose
   sub_stage: string;     // phase1 / phase2 / phase3 / phase4
   chunk_id: number;      // 当前 chunk ID（annotate 阶段有效）
-  current: number;       // 当前进度值
-  total: number;         // 总进度值
-  percent: number;       // 完成百分比
-  content: string;       // LLM 输出内容（output/thinking 时有值）
+  current: number;       // 当前 chunk 编号
+  total: number;        // 总 chunk 数
+  percent: number;      // 全局进度（stage 级别百分比）
+  sub_percent: number;  // 子阶段进度（chunk 内 phase 进度，0-100）
+  content: string;      // LLM 输出内容（output/thinking 时有值）
   message: string;       // 人类可读描述
 }
 
