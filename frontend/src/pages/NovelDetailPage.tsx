@@ -350,7 +350,7 @@ export function NovelDetailPage() {
 
       {/* Analysis in progress — show progress panel, hide everything else */}
       {isAnalyzing && currentTaskId && (
-        <motion.div className="flex flex-1 flex-col min-h-0">
+        <motion.div className="flex min-h-0 flex-1 flex-col">
           <AnalysisProgressPanel
             taskId={currentTaskId}
             onCancel={() => handleCancelTask(currentTaskId)}
