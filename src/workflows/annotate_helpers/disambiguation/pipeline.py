@@ -17,10 +17,13 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from src.rag import DisambigContextProvider
 
 from src.config.constants import MAX_DISAMBIG_RETRIES
 from src.models.disambiguation_types import NameCountCandidate
@@ -33,7 +36,7 @@ from src.models.local.disambiguation import (
 )
 from src.models.local.disambiguation.result_builder import align_canonical_by_frequency
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
-from src.storage.repositories import AnnotationRepository, GraphRepository
+from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
 
@@ -354,6 +357,7 @@ async def _run_incremental_disambiguation_with_state(
     chunk_id: int,
     current_idx: int,
     disambig_interval: int,
+    disambig_provider: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
@@ -398,7 +402,7 @@ async def _run_incremental_disambiguation_with_state(
         existing_names,
         alias_keywords,
         run_id,
-        graph_repo=GraphRepository(conn),
+        disambig_provider=disambig_provider,
     )
 
     result = await _retry_disambig(
@@ -465,6 +469,7 @@ async def _run_final_disambiguation_with_state(
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
+    disambig_provider: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行最终消歧（使用新的三层状态）
@@ -538,7 +543,7 @@ async def _run_final_disambiguation_with_state(
             existing_names,
             alias_keywords,
             run_id,
-            graph_repo=GraphRepository(conn),
+            disambig_provider=disambig_provider,
         )
         result = await _retry_disambig(
             full_disambig_client,
