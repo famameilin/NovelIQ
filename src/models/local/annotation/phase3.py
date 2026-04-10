@@ -232,7 +232,9 @@ async def attribute_dialogues_with_llm(
             )
 
             batch_results = await retry_handler.execute(
-                lambda _: _execute_single_batch(current_client, batch_candidates, batch_idx, total_batches)
+                lambda _, bc=batch_candidates, bi=batch_idx, tb=total_batches: _execute_single_batch(
+                    current_client, bc, bi, tb
+                )
             )
 
             if batch_results:
@@ -467,7 +469,7 @@ async def compute_dialogue_lengths_with_llm(
         if not record.is_dialogue:
             continue
 
-        content = candidate_map.get(record.index, "").strip()
+        content = (candidate_map.get(record.index) or "").strip()
         if not content:
             content = (record.content or "").strip()
         if not content:
