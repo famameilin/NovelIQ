@@ -13,7 +13,7 @@
  * - 移除伪状态 (chunking/annotating/...)，统一使用后端 TaskStatus
  * - 运行中任务从 streamStore 读取 progress.stage 显示具体阶段
  */
-import { Circle, CheckCircle, XCircle, Loader2, Square, Eye, Trash2 } from "lucide-react";
+import { Circle, CheckCircle, XCircle, Loader2, Square, Eye, Trash2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
@@ -40,6 +40,7 @@ export interface TaskRowProps {
   onSelect: (taskId: string) => void;
   onCancel: (taskId: string) => void;
   onDelete: (taskId: string) => void;
+  onRetry?: (taskId: string) => void;
 }
 
 function getStatusIcon(status: TaskStatus) {
@@ -86,6 +87,7 @@ export function TaskRow({
   onSelect,
   onCancel,
   onDelete,
+  onRetry,
 }: TaskRowProps) {
   const config = taskStatusConfig[task.status] ?? taskStatusConfig.pending;
   const isRunning = isRunningStatus(task.status);
@@ -154,7 +156,7 @@ export function TaskRow({
           </Button>
         )}
 
-        {!isRunning && (
+        {!isRunning && task.status !== "failed" && (
           <Button
             variant="ghost"
             size="icon"
@@ -166,6 +168,34 @@ export function TaskRow({
           >
             <Trash2 className="h-3 w-3" />
           </Button>
+        )}
+
+        {task.status === "failed" && (
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-primary hover:text-primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetry?.(task.task_id);
+              }}
+              title="继续分析"
+            >
+              <RotateCcw className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-text-muted hover:text-destructive"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(task.task_id);
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </>
         )}
       </div>
     </div>

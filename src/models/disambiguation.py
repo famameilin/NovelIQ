@@ -181,7 +181,7 @@ class DisambiguationClient(BaseModelClient):
             logger.error("disambiguate_anonymous unexpected error: {}", str(e))
             raise
 
-    def generate_summary(
+    async def generate_summary(
         self,
         messages: list[dict[str, str]],
         max_tokens: int = 150,
@@ -204,7 +204,7 @@ class DisambiguationClient(BaseModelClient):
         import time
 
         start_time = time.time()
-        response = self._client.chat.completions.create(
+        response = await self._client.chat.completions.create(
             model=self._config.model,
             messages=messages,
             temperature=0.3,

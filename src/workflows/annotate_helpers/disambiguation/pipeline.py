@@ -65,7 +65,7 @@ from .state_logic import (
 DisambigStateSnapshot = dict[str, dict[str, str]]
 
 
-def _generate_and_save_stage_summary(
+async def _generate_and_save_stage_summary(
     conn: Session,
     run_id: str,
     current_chunk_id: int,
@@ -108,7 +108,7 @@ def _generate_and_save_stage_summary(
 
     try:
         start_time = time.time()
-        stage_summary = client.generate_summary(messages, max_tokens=150)
+        stage_summary = await client.generate_summary(messages, max_tokens=150)
         duration_ms = int((time.time() - start_time) * 1000)
 
         if len(stage_summary) > 120:
@@ -449,7 +449,7 @@ async def _run_incremental_disambiguation_with_state(
 
         _save_disambig_checkpoint(conn, run_id, new_state)
 
-    _generate_and_save_stage_summary(
+    await _generate_and_save_stage_summary(
         conn,
         run_id,
         chunk_id,

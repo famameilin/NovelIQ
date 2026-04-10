@@ -421,7 +421,9 @@ async def _process_chunks_phase(
     )
     from .graph_projection import project_graph_tables
 
-    success_count = 0
+    already_annotated = len(annotated_ids)
+    success_count = already_annotated
+    newly_annotated = 0  # 本次运行新标注的 chunk 数，用于 checkpoint/projection 间隔
 
     checkpoint_interval = max(1, settings.analysis.checkpoint_interval)
     projection_interval = max(1, settings.analysis.projection_interval)
@@ -443,10 +445,10 @@ async def _process_chunks_phase(
             StreamEvent(
                 action="progress",
                 sub_stage="phase1",
-                current=0,
+                current=already_annotated,
                 total=total_chunks,
-                sub_percent=0.0,
-                message=f"共 {total_chunks} 个 chunk 待标注",
+                sub_percent=(already_annotated / total_chunks) * 100 if total_chunks > 0 else 0.0,
+                message=f"共 {total_chunks} 个 chunk，{already_annotated} 个已标注，剩余 {total_chunks - already_annotated} 个待标注",
             )
         )
 
@@ -474,6 +476,7 @@ async def _process_chunks_phase(
                 novel_id=novel_id,
             )
             success_count += 1
+            newly_annotated += 1
             if emitter:
                 await emitter(
                     StreamEvent(
@@ -486,9 +489,9 @@ async def _process_chunks_phase(
                         message=f"标注 chunk {success_count}/{total_chunks}",
                     )
                 )
-            if run_id and success_count % checkpoint_interval == 0:
+            if run_id and newly_annotated % checkpoint_interval == 0:
                 _save_disambig_checkpoint(conn, run_id, state)
-            if run_id and success_count % projection_interval == 0:
+            if run_id and newly_annotated % projection_interval == 0:
                 project_graph_tables(run_id, to_chunk=chunk_id, session=conn)
                 # projection 更新了别名表，需刷新消歧缓存
                 if phase_result.rag_retriever:
