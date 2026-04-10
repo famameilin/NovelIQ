@@ -9,7 +9,7 @@
  * 修改时间: 2026-04-10
  * 修改者: TraeAI
  * 任务: 前端流式输出markdown渲染
- * 修改内容: 新增 react-markdown + remark-gfm 支持 GFM 渲染，默认保留最近 1000 行
+ * 修改内容: 新增 react-markdown + remark-gfm 支持 GFM 渲染，默认保留最近 200 行
  */
 import { useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -34,7 +34,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 export function StreamOutput({
   taskId,
-  maxLines = 1000,
+  maxLines = 200,
   className,
 }: StreamOutputProps) {
   const containerRef = useRef<HTMLDivElement>(null);
