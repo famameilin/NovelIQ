@@ -32,6 +32,7 @@ def _build_annotation_messages_v2(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
+    disambig_context: str | None = None,
 ) -> list[dict]:
     """
     构建第一次调用（基础标注）的messages
@@ -85,6 +86,9 @@ def _build_annotation_messages_v2(
 
     if chunk_id is not None:
         user_content += f"\n\n<Current_Chunk_ID>{chunk_id}</Current_Chunk_ID>"
+
+    if disambig_context:
+        user_content += f"\n\n{disambig_context}"
 
     messages.append({"role": "user", "content": user_content})
     return messages
