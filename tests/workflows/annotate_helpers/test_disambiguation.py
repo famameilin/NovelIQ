@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from src.models.local.disambiguation import ExtendedDisambigResult, build_evidence_profile
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 
@@ -16,7 +18,7 @@ class _FakeDisambigClient:
         self._config = SimpleNamespace(model="test-model")
         self.received_existing_names: list[str] | None = None
 
-    def disambiguate_characters(self, candidates, context_sentences=None, existing_names=None, rag_hint=None):
+    async def disambiguate_characters(self, candidates, context_sentences=None, existing_names=None, rag_hint=None):
         self.received_existing_names = existing_names
         return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 
@@ -24,11 +26,12 @@ class _FakeDisambigClient:
         return False
 
 
-def test_retry_disambig_passes_existing_names_to_client() -> None:
+@pytest.mark.asyncio
+async def test_retry_disambig_passes_existing_names_to_client() -> None:
     client = _FakeDisambigClient()
-    
+
     with patch("src.workflows.annotate_helpers.disambiguation.pipeline.record_model_interaction"):
-        disambig_mod._retry_disambig(
+        await disambig_mod._retry_disambig(
             client=client,
             candidates=_candidates("masked_person"),
             context_sentences={"masked_person": "identity reveal in scene"},
@@ -106,11 +109,12 @@ def test_collect_final_disambiguation_candidates_rereviews_self_resolved_extensi
     assert candidates == ["贺伯安"]
 
 
-def test_record_model_interaction_with_disambiguation() -> None:
+@pytest.mark.asyncio
+async def test_record_model_interaction_with_disambiguation() -> None:
     client = _FakeDisambigClient()
-    
+
     with patch("src.workflows.annotate_helpers.disambiguation.pipeline.record_model_interaction") as mock_record:
-        disambig_mod._retry_disambig(
+        await disambig_mod._retry_disambig(
             client=client,
             candidates=_candidates("masked_person"),
             context_sentences={"masked_person": "scene"},
