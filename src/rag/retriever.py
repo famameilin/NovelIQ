@@ -162,20 +162,6 @@ class DisambigContextProvider:
 
         return "<Disambig_Candidates>\n" + "\n".join(disambig_parts) + "\n</Disambig_Candidates>"
 
-    def get_known_aliases(self) -> dict[str, str]:
-        """获取所有已知别名映射。"""
-        aliases = self._alias_lookup.get_alias_map()
-        return aliases
-
-    def format_known_aliases_for_prompt(self) -> str:
-        """格式化别名映射为 prompt 格式。"""
-        aliases = self.get_known_aliases()
-        if not aliases:
-            return ""
-
-        alias_pairs = [f"{alias} → {canonical}" for alias, canonical in sorted(aliases.items())[:20]]
-        return f"<Known_Aliases>\n{chr(10).join(alias_pairs)}\n</Known_Aliases>"
-
     def build_graph_feedback_hint(
         self,
         existing_names: list[str],
