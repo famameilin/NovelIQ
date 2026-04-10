@@ -65,11 +65,10 @@ async def _annotate_chunk(
     chunk_id: int | None = None,
     global_context: str | None = None,
     active_entities: str | None = None,
-    rag_evidence: str | None = None,
-    known_aliases: str | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    disambig_context: str | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     Chunk 标注函数
@@ -110,11 +109,10 @@ async def _annotate_chunk(
             chunk_id=chunk_id,
             global_context=global_context,
             active_entities=active_entities,
-            rag_evidence=rag_evidence,
-            known_aliases=known_aliases,
             cloud_client=cloud_client,
             run_id=run_id,
             emitter=emitter,
+            disambig_context=disambig_context,
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
@@ -162,8 +160,7 @@ def _set_client_session(client: Any, session: Any) -> None:
 async def _init_annotation_phase_with_config(
     config: AnnotationPhaseConfig,
 ) -> AnnotationPhaseResult:
-    """初始化标注阶段（使用配置对象）
-    """
+    """初始化标注阶段（使用配置对象）"""
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
     from .context import _init_disambig_provider
     from .sentence import _extract_and_save_global_context
@@ -336,11 +333,6 @@ async def _process_single_chunk(
         conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.rag_retriever, run_id=run_id
     )
 
-    progress_range = settings.analysis.progress.annotate
-    range_start = progress_range.start
-    range_end = progress_range.end
-    base_percent = range_start + ((idx + 1) / total_chunks) * (range_end - range_start)
-
     annotation_result = await _annotate_chunk(
         phase_result.annotation_client,
         chunk_text,
@@ -349,8 +341,7 @@ async def _process_single_chunk(
         chunk_id=chunk_id,
         global_context=phase_result.global_context_str,
         active_entities=ctx.active_entities_str,
-        rag_evidence=ctx.rag_evidence_str,
-        known_aliases=ctx.known_aliases_str,
+        disambig_context=ctx.disambig_context_str,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
         emitter=phase_result.emitter,
@@ -447,14 +438,16 @@ async def _process_chunks_phase(
     # 发送 annotate 阶段的 total 信息，让前端知道总 chunk 数
     # 注意：不传 percent，让 stage 级别的起始 percent 保持有效
     if emitter and total_chunks > 0:
-        await emitter(StreamEvent(
-            action="progress",
-            sub_stage="phase1",
-            current=0,
-            total=total_chunks,
-            sub_percent=0.0,
-            message=f"共 {total_chunks} 个 chunk 待标注",
-        ))
+        await emitter(
+            StreamEvent(
+                action="progress",
+                sub_stage="phase1",
+                current=0,
+                total=total_chunks,
+                sub_percent=0.0,
+                message=f"共 {total_chunks} 个 chunk 待标注",
+            )
+        )
 
     for idx, (chunk_id, chunk_text) in enumerate(all_chunks):
         if chunk_id in annotated_ids:
@@ -481,15 +474,17 @@ async def _process_chunks_phase(
             )
             success_count += 1
             if emitter:
-                await emitter(StreamEvent(
-                    action="progress",
-                    sub_stage="phase1",
-                    current=success_count,
-                    total=total_chunks,
-                    percent=10 + (success_count / total_chunks) * 70,
-                    sub_percent=(success_count / total_chunks) * 100,
-                    message=f"标注 chunk {success_count}/{total_chunks}",
-                ))
+                await emitter(
+                    StreamEvent(
+                        action="progress",
+                        sub_stage="phase1",
+                        current=success_count,
+                        total=total_chunks,
+                        percent=10 + (success_count / total_chunks) * 70,
+                        sub_percent=(success_count / total_chunks) * 100,
+                        message=f"标注 chunk {success_count}/{total_chunks}",
+                    )
+                )
             if run_id and success_count % checkpoint_interval == 0:
                 _save_disambig_checkpoint(conn, run_id, state)
             if run_id and success_count % projection_interval == 0:

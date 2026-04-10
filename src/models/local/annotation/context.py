@@ -57,8 +57,7 @@ class AnnotationContext:
     chunk_id: int | None = None
     global_context: str | None = None
     active_entities: str | None = None
-    rag_evidence: str | None = None
-    known_aliases: str | None = None
+    disambig_context: str | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None

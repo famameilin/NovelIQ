@@ -91,8 +91,6 @@ class AnnotationClient(BaseModelClient):
         chunk_id: int | None = None,
         global_context: str | None = None,
         active_entities: str | None = None,
-        rag_evidence: str | None = None,
-        known_aliases: str | None = None,
         novel_title: str | None = None,
         main_characters: str | None = None,
         position_pct: float | None = None,
@@ -100,6 +98,7 @@ class AnnotationClient(BaseModelClient):
         cloud_client: AnnotationClient | None = None,
         run_id: str | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+        disambig_context: str | None = None,
     ) -> MultiPhaseAnnotationResult:
         # 设置当前 emitter，供所有 phase 调用链使用
         self._emitter = emitter
@@ -111,8 +110,7 @@ class AnnotationClient(BaseModelClient):
             chunk_id=chunk_id,
             global_context=global_context,
             active_entities=active_entities,
-            rag_evidence=rag_evidence,
-            known_aliases=known_aliases,
+            disambig_context=disambig_context,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
@@ -129,8 +127,7 @@ class AnnotationClient(BaseModelClient):
             chunk_id=ctx.chunk_id,
             global_context=ctx.global_context,
             active_entities=ctx.active_entities,
-            rag_evidence=ctx.rag_evidence,
-            known_aliases=ctx.known_aliases,
+            disambig_context=ctx.disambig_context,
             novel_title=ctx.novel_title,
             main_characters=ctx.main_characters,
             position_pct=ctx.position_pct,
