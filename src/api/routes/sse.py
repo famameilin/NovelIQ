@@ -23,7 +23,7 @@ from fastapi import APIRouter, Request
 try:
     from sse_starlette import EventSourceResponse
 except ImportError:
-    from starlette.responses import EventSourceResponse  # type: ignore[no-redef]
+    from starlette.responses import EventSourceResponse  # type: ignore[no-redef,attr-defined]
 
 from src.api.services.event_manager import event_manager
 

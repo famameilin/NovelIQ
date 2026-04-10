@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
 from typing import Any, TypeVar
 
 from loguru import logger
@@ -139,7 +138,7 @@ class DiagnosisClient(BaseModelClient):
 
         return response_model.model_validate(json_data)
 
-    async def _call_api(
+    async def _call_api(  # type: ignore[override]
         self,
         request_params: dict[str, Any],
         is_cloud: bool = False,

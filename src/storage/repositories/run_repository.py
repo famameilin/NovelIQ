@@ -307,14 +307,10 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         from sqlalchemy import update
 
         now = datetime.now()
-        stmt = (
-            update(AnalysisRun)
-            .where(AnalysisRun.status == "running")
-            .values(status="failed", updated_at=now)
-        )
+        stmt = update(AnalysisRun).where(AnalysisRun.status == "running").values(status="failed", updated_at=now)
         result = self.session.execute(stmt)
         self.session.commit()
-        count = result.rowcount
+        count = result.rowcount  # type: ignore[attr-defined]
         if count > 0:
             logger.info(f"Marked {count} zombie running task(s) as failed on startup")
         return count
