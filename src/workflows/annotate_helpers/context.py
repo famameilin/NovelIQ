@@ -43,14 +43,12 @@ class ChunkContext:
         self,
         prev_chunk_text: str | None = None,
         active_entities_str: str | None = None,
-        rag_evidence_str: str | None = None,
-        known_aliases_str: str | None = None,
+        disambig_context_str: str | None = None,
         next_chunk_text: str | None = None,
     ) -> None:
         self.prev_chunk_text = prev_chunk_text
         self.active_entities_str = active_entities_str
-        self.rag_evidence_str = rag_evidence_str
-        self.known_aliases_str = known_aliases_str
+        self.disambig_context_str = disambig_context_str
         self.next_chunk_text = next_chunk_text
 
 
@@ -78,6 +76,13 @@ def _init_disambig_provider(
     )
 
     return provider
+
+
+def _extract_names_from_text(text: str) -> list[str]:
+    """从文本中提取可能的人名候选（简化版：2-4字中文字符串）"""
+    import re
+
+    return re.findall(r"[\u4e00-\u9fff]{2,4}", text)
 
 
 def _prepare_chunk_context(
@@ -121,13 +126,9 @@ def _prepare_chunk_context(
             context.active_entities_str = format_entities_for_prompt(active_entities)
 
     if disambig_provider:
-        context.known_aliases_str = disambig_provider.format_known_aliases_for_prompt()
-        if settings.rag.level2_enabled:
-            all_aliases = disambig_provider.get_known_aliases()
-            if all_aliases:
-                candidate_names = list(set(all_aliases.values()))[:5]
-                context.rag_evidence_str = (
-                    f"<Known_Alias_Candidates>{'、'.join(candidate_names)}</Known_Alias_Candidates>"
-                )
+        names_in_chunk = _extract_names_from_text(chunk_text)
+        context.disambig_context_str = disambig_provider.build_disambig_context(
+            names_in_chunk, current_chunk=chunk_id
+        )
 
     return context
