@@ -6,13 +6,15 @@
  * 任务: LLM 输出实时显示组件
  * 说明: 实时显示 LLM 流式输出内容，支持自动滚动和行数限制
  *
- * 修改时间: 2026-04-07
+ * 修改时间: 2026-04-10
  * 修改者: TraeAI
- * 任务: implement-task-cancellation
- * 修改内容: 无 LLM 输出时显示进度信息，支持 Mock 环境
+ * 任务: 前端流式输出markdown渲染
+ * 修改内容: 新增 react-markdown + remark-gfm 支持 GFM 渲染
  */
 import { useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useStreamStore } from "@/store/streamStore";
 import { cn } from "@/lib/cn";
 
@@ -100,14 +102,14 @@ export function StreamOutput({
         transition={{ duration: 0.3, ease: "easeOut" }}
         className={cn(
           "h-full min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-surface-secondary p-4",
-          "font-mono text-sm text-text-secondary whitespace-pre-wrap break-words",
+          "text-sm text-text-secondary",
           className
         )}
         aria-label="LLM 输出内容"
         aria-live="polite"
         aria-atomic="false"
       >
-        {outputContent}
+        <Markdown remarkPlugins={[remarkGfm]}>{outputContent}</Markdown>
       </motion.div>
     </AnimatePresence>
   );
