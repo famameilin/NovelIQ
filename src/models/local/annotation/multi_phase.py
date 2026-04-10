@@ -73,7 +73,7 @@ class _Phase3Result:
     """
 
     dialogue_lengths: dict[str, int] | None = None
-    dialogue_speakers: dict[int, str] | None = None
+    dialogue_speakers: dict[int, list[str]] | None = None
     dialogues: list[tuple[int, str]] | None = None
     dialogue_tones: dict[int, str] | None = None
     dialogue_identity_clues: dict[int, str | None] | None = None
