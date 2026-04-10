@@ -175,13 +175,19 @@ export function NovelCard({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-32">
-              <DropdownMenuItem onClick={() => onView?.(novel.id)}>
+              <DropdownMenuItem onClick={(e) => {
+                e.stopPropagation();
+                onView?.(novel.id);
+              }}>
                 <Eye className="mr-2 h-3.5 w-3.5" />
                 查看
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => onDelete?.(novel.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete?.(novel.id);
+                }}
                 className="text-destructive"
               >
                 <Trash2 className="mr-2 h-3.5 w-3.5" />
