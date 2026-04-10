@@ -62,7 +62,7 @@ class DialogueLengthResult:
     """
 
     speaker_lengths: dict[str, int] = field(default_factory=dict)
-    canonical_attribution: dict[int, str] = field(default_factory=dict)
+    canonical_attribution: dict[int, list[str]] = field(default_factory=dict)
     dialogues: list[tuple[int, str]] = field(default_factory=list)
     dialogue_tones: dict[int, str] = field(default_factory=dict)
     dialogue_identity_clues: dict[int, str | None] = field(default_factory=dict)
@@ -425,7 +425,7 @@ async def compute_dialogue_lengths_with_llm(
     logger.info(f"compute_dialogue_lengths_with_llm: got {len(records)} records")
 
     speaker_lengths: dict[str, int] = {}
-    canonical_attribution: dict[int, str] = {}
+    canonical_attribution: dict[int, list[str]] = {}
     dialogues: list[tuple[int, str]] = []
     dialogue_tones: dict[int, str] = {}
     dialogue_identity_clues: dict[int, str | None] = {}
@@ -455,16 +455,14 @@ async def compute_dialogue_lengths_with_llm(
         if record.identity_clue and return_identity_clues:
             dialogue_identity_clues[record.index] = record.identity_clue
 
-        # record.speaker 已在 _post_process_validation 中完成别名归一化，
-        # 此处逐人累加长度，不再对拼接字符串做二次 alias_map 查找
-        # 注意：speaker_lengths 按归一化后的人名独立累加（多人对话每人各计一次），
-        # canonical_attribution 存顿号拼接字符串供下游展示用，非单名 key
+        # record.speaker 已在 _post_process_validation 中完成别名归一化
+        # speaker_lengths 按归一化后的人名独立累加（多人对话每人各计一次）
+        # canonical_attribution 直接存数组，保持 LLM 返回的原始结构
         if record.speaker:
-            speakers_str = "、".join(record.speaker)
-            if speakers_str != "未知":
+            if record.speaker != ["未知"]:
                 for s in record.speaker:
                     speaker_lengths[s] = speaker_lengths.get(s, 0) + len(content)
-                canonical_attribution[record.index] = speakers_str
+                canonical_attribution[record.index] = record.speaker
 
     logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
     return DialogueLengthResult(
