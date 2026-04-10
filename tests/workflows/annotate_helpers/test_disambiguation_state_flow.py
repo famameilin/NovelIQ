@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
@@ -23,7 +25,8 @@ def test_apply_disambiguation_decisions_keeps_uncertain_self_map_in_review() -> 
     assert "masked_person" not in state.known_canonical_names
 
 
-def test_run_final_disambiguation_with_state_persists_canonicals_before_relations() -> None:
+@pytest.mark.asyncio
+async def test_run_final_disambiguation_with_state_persists_canonicals_before_relations() -> None:
     captured: dict[str, object] = {}
 
     class _DummyAnnRepo:
@@ -58,7 +61,7 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
         patch.object(pipeline_mod, "_process_entity_relations", return_value=(1, [])) as process_mock,
         patch.object(pipeline_mod, "_save_disambig_checkpoint", return_value=None),
     ):
-        new_state = disambig_mod._run_final_disambiguation_with_state(
+        new_state = await disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
             state=state,
             full_disambig_client=MagicMock(),
@@ -73,7 +76,8 @@ def test_run_final_disambiguation_with_state_persists_canonicals_before_relation
     process_mock.assert_called_once()
 
 
-def test_run_final_disambiguation_with_state_skips_known_canonical_without_review_record() -> None:
+@pytest.mark.asyncio
+async def test_run_final_disambiguation_with_state_skips_known_canonical_without_review_record() -> None:
     class _DummyConn:
         def commit(self):
             pass
@@ -94,7 +98,7 @@ def test_run_final_disambiguation_with_state_skips_known_canonical_without_revie
         patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
         patch.object(pipeline_mod, "_save_disambig_checkpoint", return_value=None),
     ):
-        new_state = disambig_mod._run_final_disambiguation_with_state(
+        new_state = await disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
             state=state,
             full_disambig_client=MagicMock(),
