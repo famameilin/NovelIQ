@@ -263,9 +263,7 @@ class SemanticChunker:
 
         return _reindex(chunks)
 
-    async def _compute_paragraph_embeddings(
-        self, paragraphs: list[tuple[int, int, str]]
-    ) -> list[list[float]]:
+    async def _compute_paragraph_embeddings(self, paragraphs: list[tuple[int, int, str]]) -> list[list[float]]:
         """计算段落的嵌入向量（async 版本）"""
         if self._embedding_client is None:
             return []
