@@ -146,7 +146,10 @@ _RELATION_TYPE_DESCRIPTIONS: dict[str, str] = {
 
 _ENTITY_TYPE_DESCRIPTIONS: dict[str, str] = {
     "character": "具体人物角色（如伯安、贺重明、柳婉儿）",
-    "group": "特定几人的并称/合称（如侠义七子、中原五侠、江南七怪），指向明确的个体集合；泛指类别（如蛊仙、修士、凡人）不算 group",
+    "group": (
+        "特定几人的并称/合称（如侠义七子、中原五侠、江南七怪），"
+        "指向明确的个体集合；泛指类别（如蛊仙、修士、凡人）不算 group"
+    ),
     "organization": "组织/门派/家族（如贺家、玄天道宗）",
     "creature": "灵兽/物种泛称（如灵禽、赤焰驹、白鹤）",
     "artifact": "法宝/器物（如灵剑、玉佩、符箓）",

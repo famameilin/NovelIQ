@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 #  StreamMessageType — SSE 事件类型枚举                                #
 # ------------------------------------------------------------------ #
 
+
 class StreamMessageType(StrEnum):
     """流式消息类型枚举"""
 
@@ -66,7 +67,7 @@ class StreamEvent:
         thinking — LLM 思考过程输出
     """
 
-    action: StreamEventAction   # start / progress / complete / output / thinking
+    action: StreamEventAction  # start / progress / complete / output / thinking
     stage: str = ""
     sub_stage: str = ""
     chunk_id: int | None = None
@@ -120,6 +121,7 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
 # ------------------------------------------------------------------ #
 #  AnalysisEventBus — 上下文保持器 + 统一发送口                        #
 # ------------------------------------------------------------------ #
+
 
 class AnalysisEventBus:
     """
@@ -250,17 +252,29 @@ class AnalysisEventBus:
         self._sub_stage = ""
         self._chunk_id = 0
         self._sub_percent = 0.0
-        await self.emit(StreamEvent(
-            action="start", stage=stage, message=message, percent=percent, total=total, sub_percent=0.0,
-        ))
+        await self.emit(
+            StreamEvent(
+                action="start",
+                stage=stage,
+                message=message,
+                percent=percent,
+                total=total,
+                sub_percent=0.0,
+            )
+        )
 
     async def emit_stage_complete(self, stage: str) -> None:
         """发送阶段完成事件"""
         self._sub_percent = 100.0
-        await self.emit(StreamEvent(
-            action="complete", stage=stage, percent=100.0, sub_percent=100.0,
-            message=f"{stage} 完成",
-        ))
+        await self.emit(
+            StreamEvent(
+                action="complete",
+                stage=stage,
+                percent=100.0,
+                sub_percent=100.0,
+                message=f"{stage} 完成",
+            )
+        )
 
     async def emit_task_complete(self) -> None:
         """发送任务完成事件（使用 task_complete SSE 事件类型）"""

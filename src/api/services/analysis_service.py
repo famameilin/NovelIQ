@@ -59,12 +59,15 @@ class AnalysisService:
     @staticmethod
     def _make_stage_emitter(bus: AnalysisEventBus, stage: str) -> Callable[[StreamEvent], Awaitable[None]]:
         """创建阶段 emitter：自动补全 stage 上下文"""
+
         async def emitter(event: StreamEvent) -> None:
             if not event.stage:
                 # 用 dataclass replace 补全 stage，避免手动重建丢失字段
                 from dataclasses import replace
+
                 event = replace(event, stage=stage)
             await bus.emit(event)
+
         return emitter
 
     async def _execute_analysis_stages(
@@ -89,7 +92,9 @@ class AnalysisService:
 
         # ── 预处理 ──
         if not skip_stages["skip_preprocess"]:
-            await bus.emit_stage_start("preprocess", message="开始预处理", percent=settings.analysis.progress.preprocess.start)
+            await bus.emit_stage_start(
+                "preprocess", message="开始预处理", percent=settings.analysis.progress.preprocess.start
+            )
 
             await self.stage_executor.run_preprocess(
                 source_path, run_id, session, max_chars, overlap, self._make_stage_emitter(bus, "preprocess")
@@ -106,15 +111,25 @@ class AnalysisService:
             total_chunks = 0
             try:
                 from src.storage.repositories import ChunkRepository
+
                 chunk_repo = ChunkRepository(session)
                 total_chunks = chunk_repo.count_chunks(run_id)
             except Exception:
                 pass
 
-            await bus.emit_stage_start("annotate", message="开始标注分析", percent=settings.analysis.progress.annotate.start, total=total_chunks)
+            await bus.emit_stage_start(
+                "annotate",
+                message="开始标注分析",
+                percent=settings.analysis.progress.annotate.start,
+                total=total_chunks,
+            )
 
             await self.stage_executor.run_annotate(
-                run_id, session, novel_id, analysis_logger, novel_title,
+                run_id,
+                session,
+                novel_id,
+                analysis_logger,
+                novel_title,
                 emitter=self._make_stage_emitter(bus, "annotate"),
                 is_cancelled=lambda: self._is_cancelled(task_id),
             )
@@ -126,11 +141,11 @@ class AnalysisService:
 
         # ── 聚合 ──
         if not skip_stages["skip_aggregate"]:
-            await bus.emit_stage_start("aggregate", message="开始数据聚合", percent=settings.analysis.progress.aggregate.start)
-
-            await self.stage_executor.run_aggregate(
-                run_id, session, self._make_stage_emitter(bus, "aggregate")
+            await bus.emit_stage_start(
+                "aggregate", message="开始数据聚合", percent=settings.analysis.progress.aggregate.start
             )
+
+            await self.stage_executor.run_aggregate(run_id, session, self._make_stage_emitter(bus, "aggregate"))
             await bus.emit_stage_complete("aggregate")
 
         if self._is_cancelled(task_id):
@@ -139,7 +154,9 @@ class AnalysisService:
 
         # ── 主题建模 ──
         if not skip_stages["skip_topic_model"]:
-            await bus.emit_stage_start("topic-model", message="开始主题建模", percent=settings.analysis.progress.topic_model.start)
+            await bus.emit_stage_start(
+                "topic-model", message="开始主题建模", percent=settings.analysis.progress.topic_model.start
+            )
 
             await self.stage_executor.run_topic_model(
                 run_id, session, num_topics, self._make_stage_emitter(bus, "topic-model")
@@ -152,7 +169,9 @@ class AnalysisService:
 
         # ── 诊断 ──
         if not skip_stages["skip_diagnose"]:
-            await bus.emit_stage_start("diagnose", message="开始诊断报告", percent=settings.analysis.progress.diagnose.start)
+            await bus.emit_stage_start(
+                "diagnose", message="开始诊断报告", percent=settings.analysis.progress.diagnose.start
+            )
 
             await self.stage_executor.run_diagnose(
                 run_id, session, analysis_logger, self._make_stage_emitter(bus, "diagnose")

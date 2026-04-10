@@ -112,12 +112,10 @@ def _init_annotation_clients(
     full_disambig_client: DisambiguationLike | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[AnnotationLike, AnnotationLike | None, DisambiguationLike, DisambiguationLike]:
-    """初始化标注客户端
-    """
+    """初始化标注客户端"""
     annotation_client = cast(
         AnnotationLike,
-        annotate_client
-        or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger),
+        annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger),
     )
 
     cloud_annotation_client: AnnotationLike | None = None
@@ -125,9 +123,7 @@ def _init_annotation_clients(
 
     if cloud_fallback_enabled:
         try:
-            cloud_client = AnnotationClient(
-                task_type="cloud_annotation", analysis_logger=analysis_logger
-            )
+            cloud_client = AnnotationClient(task_type="cloud_annotation", analysis_logger=analysis_logger)
             cloud_annotation_client = cast(AnnotationLike, cloud_client)
             logger.info(
                 f"cloud annotation client initialized for fallback (thinking={cloud_client._config.thinking_enabled})"

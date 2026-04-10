@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from src.api.models.events import StreamEvent
-
 from src.utils.token_counter import count_messages_tokens, count_tokens
 
 from ..schema import DisambiguateResponseModel

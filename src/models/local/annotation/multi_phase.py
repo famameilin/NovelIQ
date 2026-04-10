@@ -27,15 +27,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from collections.abc import Awaitable, Callable
-
-from src.api.models.events import StreamEvent
-
 from loguru import logger
 
+from src.api.models.events import StreamEvent
 from src.config import settings
 from src.models.local.parser import validate_foreshadowing_result
 
@@ -301,8 +299,7 @@ async def annotate_chunk_multi_phase(
     global_context: str | None = None,
     prev_chunk_text: str | None = None,
     active_entities: str | None = None,
-    rag_evidence: str | None = None,
-    known_aliases: str | None = None,
+    disambig_context: str | None = None,
     next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
@@ -399,8 +396,12 @@ async def annotate_chunk_parallel(
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
 
     if emitter:
-        await emitter(StreamEvent(action="start", sub_stage="phase1", chunk_id=chunk_id, sub_percent=0, message="开始 phase1"))
-        await emitter(StreamEvent(action="start", sub_stage="phase2", chunk_id=chunk_id, sub_percent=0, message="开始 phase2"))
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase1", chunk_id=chunk_id, sub_percent=0, message="开始 phase1")
+        )
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase2", chunk_id=chunk_id, sub_percent=0, message="开始 phase2")
+        )
 
     annotation, foreshadowing = await asyncio.gather(
         _run_phase1(
@@ -433,14 +434,22 @@ async def annotate_chunk_parallel(
     )
 
     if emitter:
-        await emitter(StreamEvent(action="complete", sub_stage="phase1", chunk_id=chunk_id, sub_percent=25, message="phase1 完成"))
-        await emitter(StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id, sub_percent=50, message="phase2 完成"))
+        await emitter(
+            StreamEvent(action="complete", sub_stage="phase1", chunk_id=chunk_id, sub_percent=25, message="phase1 完成")
+        )
+        await emitter(
+            StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id, sub_percent=50, message="phase2 完成")
+        )
 
     known_characters = [c.name for c in annotation.characters] if annotation.characters else None
 
     if emitter:
-        await emitter(StreamEvent(action="start", sub_stage="phase3", chunk_id=chunk_id, sub_percent=50, message="开始 phase3"))
-        await emitter(StreamEvent(action="start", sub_stage="phase4", chunk_id=chunk_id, sub_percent=75, message="开始 phase4"))
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase3", chunk_id=chunk_id, sub_percent=50, message="开始 phase3")
+        )
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase4", chunk_id=chunk_id, sub_percent=75, message="开始 phase4")
+        )
 
     phase3_result, phase4_relations = await asyncio.gather(
         _run_phase3_if_needed(
@@ -461,8 +470,14 @@ async def annotate_chunk_parallel(
     )
 
     if emitter:
-        await emitter(StreamEvent(action="complete", sub_stage="phase3", chunk_id=chunk_id, sub_percent=75, message="phase3 完成"))
-        await emitter(StreamEvent(action="complete", sub_stage="phase4", chunk_id=chunk_id, sub_percent=100, message="phase4 完成"))
+        await emitter(
+            StreamEvent(action="complete", sub_stage="phase3", chunk_id=chunk_id, sub_percent=75, message="phase3 完成")
+        )
+        await emitter(
+            StreamEvent(
+                action="complete", sub_stage="phase4", chunk_id=chunk_id, sub_percent=100, message="phase4 完成"
+            )
+        )
 
     phase4_result = _Phase4Result(relations=phase4_relations)
 
@@ -514,7 +529,9 @@ async def annotate_chunk_serial(
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
 
     if emitter:
-        await emitter(StreamEvent(action="start", sub_stage="phase1", chunk_id=chunk_id, sub_percent=0, message="开始 phase1"))
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase1", chunk_id=chunk_id, sub_percent=0, message="开始 phase1")
+        )
     annotation = await _run_phase1(
         client=client,
         text=text,
@@ -529,10 +546,14 @@ async def annotate_chunk_serial(
         run_id=run_id,
     )
     if emitter:
-        await emitter(StreamEvent(action="complete", sub_stage="phase1", chunk_id=chunk_id, sub_percent=25, message="phase1 完成"))
+        await emitter(
+            StreamEvent(action="complete", sub_stage="phase1", chunk_id=chunk_id, sub_percent=25, message="phase1 完成")
+        )
 
     if emitter:
-        await emitter(StreamEvent(action="start", sub_stage="phase2", chunk_id=chunk_id, sub_percent=25, message="开始 phase2"))
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase2", chunk_id=chunk_id, sub_percent=25, message="开始 phase2")
+        )
     foreshadowing = await _run_phase2(
         client=client,
         text=text,
@@ -548,7 +569,9 @@ async def annotate_chunk_serial(
         rag_retriever=rag_retriever,
     )
     if emitter:
-        await emitter(StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id, sub_percent=50, message="phase2 完成"))
+        await emitter(
+            StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id, sub_percent=50, message="phase2 完成")
+        )
 
     normalized_foreshadowing = _normalize_foreshadowing_result(
         foreshadowing=foreshadowing,
@@ -558,7 +581,9 @@ async def annotate_chunk_serial(
     known_characters = [c.name for c in annotation.characters] if annotation.characters else None
 
     if emitter:
-        await emitter(StreamEvent(action="start", sub_stage="phase3", chunk_id=chunk_id, sub_percent=50, message="开始 phase3"))
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase3", chunk_id=chunk_id, sub_percent=50, message="开始 phase3")
+        )
     phase3_result = await _run_phase3_if_needed(
         client=client,
         text=text,
@@ -568,10 +593,14 @@ async def annotate_chunk_serial(
         known_characters=known_characters,
     )
     if emitter:
-        await emitter(StreamEvent(action="complete", sub_stage="phase3", chunk_id=chunk_id, sub_percent=75, message="phase3 完成"))
+        await emitter(
+            StreamEvent(action="complete", sub_stage="phase3", chunk_id=chunk_id, sub_percent=75, message="phase3 完成")
+        )
 
     if emitter:
-        await emitter(StreamEvent(action="start", sub_stage="phase4", chunk_id=chunk_id, sub_percent=75, message="开始 phase4"))
+        await emitter(
+            StreamEvent(action="start", sub_stage="phase4", chunk_id=chunk_id, sub_percent=75, message="开始 phase4")
+        )
     phase4_relations = await annotate_chunk_phase4(
         client=client,
         text=text,
@@ -581,7 +610,11 @@ async def annotate_chunk_serial(
     )
     phase4_result = _Phase4Result(relations=phase4_relations)
     if emitter:
-        await emitter(StreamEvent(action="complete", sub_stage="phase4", chunk_id=chunk_id, sub_percent=100, message="phase4 完成"))
+        await emitter(
+            StreamEvent(
+                action="complete", sub_stage="phase4", chunk_id=chunk_id, sub_percent=100, message="phase4 完成"
+            )
+        )
     logger.info(f"Phase4 completed for chunk_id={chunk_id}")
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)

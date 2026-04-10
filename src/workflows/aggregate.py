@@ -27,6 +27,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.models.events import StreamEvent
 from src.config import settings
 from src.lexicons.registry import LexiconRegistry
 from src.metrics.aggregate import aggregate_all_metrics
@@ -37,7 +38,6 @@ from src.workflows.curve_metrics import (
     compute_rhythm_curve,
     compute_tension_signals,
 )
-from src.api.models.events import StreamEvent
 
 QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
@@ -402,6 +402,8 @@ async def run_aggregate(
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if emitter:
-        await emitter(StreamEvent(action="complete", stage="aggregate", current=1, total=1, percent=100.0, sub_percent=100.0))
+        await emitter(
+            StreamEvent(action="complete", stage="aggregate", current=1, total=1, percent=100.0, sub_percent=100.0)
+        )
 
     return total_chunks, len(chunk_curves), len(chunk_curves)
