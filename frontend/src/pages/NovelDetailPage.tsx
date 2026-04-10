@@ -143,6 +143,10 @@ export function NovelDetailPage() {
     onCompleted: () => {
       setIsAnalyzing(false);
       toast.success("分析完成");
+      // 刷新所有指标数据，确保仪表盘显示最新结果
+      queryClient.invalidateQueries({ queryKey: ["metrics", novelId, currentTaskId] });
+      queryClient.invalidateQueries({ queryKey: ["topics", novelId, currentTaskId] });
+      queryClient.invalidateQueries({ queryKey: ["results", novelId, currentTaskId] });
     },
     onCancelled: () => {
       setIsAnalyzing(false);
@@ -180,18 +184,18 @@ export function NovelDetailPage() {
     }
   }, [currentTaskId]);
 
-  /** 启动分析：调用 startAnalysis → 设置 taskId → 设置 isAnalyzing */
-  const handleStartAnalysis = useCallback(async () => {
+  /** 启动/继续分析：调用 startAnalysis → 设置 taskId → 设置 isAnalyzing */
+  const handleStartAnalysis = useCallback(async (taskId?: string) => {
     if (!novelId || isAnalyzing) return;
     setIsAnalyzing(true);
     try {
-      const result = await startAnalysis(novelId);
-      const taskId = result.task_id;
-      setTask(taskId);
-      toast.info("分析任务已创建，正在执行...");
+      const result = await startAnalysis(novelId, taskId);
+      const newTaskId = result.task_id;
+      setTask(newTaskId);
+      toast.info(taskId ? "继续分析任务已启动..." : "分析任务已创建，正在执行...");
     } catch {
       setIsAnalyzing(false);
-      toast.error("创建分析任务失败");
+      toast.error(taskId ? "继续分析失败" : "创建分析任务失败");
     }
   }, [novelId, isAnalyzing, setTask]);
 
@@ -337,9 +341,9 @@ export function NovelDetailPage() {
       <NovelHeader
         title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
         novelId={novelId}
-        onReanalyze={handleStartAnalysis}
+        onResumeAnalysis={handleStartAnalysis}
         onDelete={currentTaskId ? handleDeleteTask : undefined}
-        isReanalyzing={isAnalyzing}
+        isResuming={isAnalyzing}
         className="mb-4"
       />
 
