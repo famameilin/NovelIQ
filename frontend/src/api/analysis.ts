@@ -6,19 +6,12 @@ import type {
 } from "./types";
 
 export async function startAnalysis(
-  novelId: string
+  novelId: string,
+  taskId?: string
 ): Promise<AnalysisStartResponse> {
   const { data } = await apiClient.post<AnalysisStartResponse>(
-    `/api/novels/${novelId}/analyze`
-  );
-  return data;
-}
-
-export async function reanalyze(
-  novelId: string
-): Promise<AnalysisStartResponse> {
-  const { data } = await apiClient.post<AnalysisStartResponse>(
-    `/api/novels/${novelId}/reanalyze`
+    `/api/novels/${novelId}/analyze`,
+    taskId ? { task_id: taskId } : undefined
   );
   return data;
 }

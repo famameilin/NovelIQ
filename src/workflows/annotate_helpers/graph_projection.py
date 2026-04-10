@@ -173,6 +173,7 @@ def project_graph_tables(
     if uncertain_names:
         logger.info(
             "Skipping {} uncertain names from graph projection: {}",
+            len(uncertain_names),
             uncertain_names,
         )
 
