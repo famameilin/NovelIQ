@@ -500,8 +500,7 @@ class BaseModelClient:
             return response_model.model_validate(json_data)
         except Exception as e:
             logger.error(
-                "Structured response validation failed: model={}, error={}, "
-                "json_data={}, raw_content={}",
+                "Structured response validation failed: model={}, error={}, json_data={}, raw_content={}",
                 response_model.__name__,
                 str(e),
                 json_data,

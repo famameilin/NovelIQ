@@ -32,11 +32,11 @@ from typing import cast
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.models.events import StreamEvent
 from src.chunking.chunker import chunk_documents
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
-from src.api.models.events import StreamEvent
 from src.storage.repositories import ChunkRepository, ChunkStyleData
 
 
@@ -159,6 +159,8 @@ async def run_preprocess(
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if emitter:
-        await emitter(StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0, sub_percent=100.0))
+        await emitter(
+            StreamEvent(action="complete", stage="preprocess", current=1, total=1, percent=100.0, sub_percent=100.0)
+        )
 
     return total_chunks, total_chars, elapsed

@@ -291,4 +291,3 @@ class CharacterAppearance(Base):
 
     def __repr__(self) -> str:
         return f"<CharacterAppearance(chunk_id={self.chunk_id}, raw_name={self.raw_name})>"
-

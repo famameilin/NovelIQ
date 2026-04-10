@@ -253,8 +253,7 @@ async def batch_delete_tasks(
                     )
                 except TimeoutError:
                     logger.warning(
-                        f"Batch delete: task {task_id} cancel timed out, "
-                        "background coroutine may still be running"
+                        f"Batch delete: task {task_id} cancel timed out, background coroutine may still be running"
                     )
                 except Exception as e:
                     logger.warning(f"Batch delete: unexpected error cancelling task {task_id}: {e}")

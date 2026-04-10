@@ -30,12 +30,12 @@ from pathlib import Path
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
 from src.models.cloud import ConfiguredCloudModelClient, build_diagnosis_payload
 from src.models.cloud.schema import CloudAnalysis
 from src.pipeline.pipeline import FileCache, MemoryCache
 from src.storage.repositories import StatsRepository
-from src.api.models.events import StreamEvent
 
 
 def _setup_diagnose_callback(
@@ -177,6 +177,8 @@ async def run_diagnose(
     _log_diagnosis_results(result)
 
     if emitter:
-        await emitter(StreamEvent(action="complete", stage="diagnose", current=1, total=1, percent=100.0, sub_percent=100.0))
+        await emitter(
+            StreamEvent(action="complete", stage="diagnose", current=1, total=1, percent=100.0, sub_percent=100.0)
+        )
 
     return result

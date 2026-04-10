@@ -450,9 +450,7 @@ def _fetch_chunk_annotations(
         speakers = row.speaker or []
         if not speakers:
             continue
-        normalized_speakers = [
-            _normalize_name(s, alias_map) for s in speakers
-        ]
+        normalized_speakers = [_normalize_name(s, alias_map) for s in speakers]
         valid_speakers = []
         for normalized_speaker in normalized_speakers:
             if (

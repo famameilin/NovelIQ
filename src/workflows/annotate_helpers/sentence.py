@@ -264,7 +264,7 @@ def _build_sentence_pool(
             .all()
         )
         for row in dialogue_rows:
-            for s in (row.speaker or []):
+            for s in row.speaker or []:
                 if s in name_set_for_count:
                     counts_dict[s] = counts_dict.get(s, 0) + 1
 
@@ -325,7 +325,7 @@ def _add_identity_clues(
 
     for row in dialogues:
         if row.identity_clue:
-            for speaker_name in (row.speaker or []):
+            for speaker_name in row.speaker or []:
                 if speaker_name in name_set and speaker_name in result:
                     result[speaker_name] += f" | 【身份线索】{row.identity_clue}"
                 elif speaker_name in name_set:

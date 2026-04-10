@@ -115,9 +115,7 @@ def _generate_and_save_stage_summary(
             stage_summary = stage_summary[:117] + "..."
 
         insert_stage_summary(conn, run_id, start_chunk_id, current_chunk_id, stage_summary)
-        logger.info(
-            f"Generated stage summary for chunks {start_chunk_id}-{current_chunk_id}: {stage_summary[:50]}..."
-        )
+        logger.info(f"Generated stage summary for chunks {start_chunk_id}-{current_chunk_id}: {stage_summary[:50]}...")
 
         record_model_interaction(
             run_id=run_id,

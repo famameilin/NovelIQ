@@ -27,9 +27,9 @@ from pathlib import Path
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.models.events import StreamEvent
 from src.config import settings
 from src.storage.repositories import ChunkRepository
-from src.api.models.events import StreamEvent
 
 
 async def run_topic_model(
@@ -147,6 +147,8 @@ async def run_topic_model(
     logger.info(f"Processing time: {elapsed:.2f}s")
 
     if emitter:
-        await emitter(StreamEvent(action="complete", stage="topic-model", current=1, total=1, percent=100.0, sub_percent=100.0))
+        await emitter(
+            StreamEvent(action="complete", stage="topic-model", current=1, total=1, percent=100.0, sub_percent=100.0)
+        )
 
     return total_chunks, topic_model.num_topics
