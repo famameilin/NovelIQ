@@ -9,7 +9,7 @@
  * 修改时间: 2026-04-10
  * 修改者: TraeAI
  * 任务: 前端流式输出markdown渲染
- * 修改内容: 新增 react-markdown + remark-gfm 支持 GFM 渲染
+ * 修改内容: 新增 react-markdown + remark-gfm 支持 GFM 渲染，默认保留最近 1000 行
  */
 import { useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -34,7 +34,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 export function StreamOutput({
   taskId,
-  maxLines = 50,
+  maxLines = 1000,
   className,
 }: StreamOutputProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,9 +55,7 @@ export function StreamOutput({
     if (allChunks.length === 0) return null;
 
     const allLines = allChunks.join("\n").split("\n");
-    const limitedLines = allLines.slice(-maxLines);
-
-    return limitedLines.join("\n");
+    return allLines.slice(-maxLines).join("\n");
   }, [llmOutputs, progress, maxLines, currentTaskId, taskId]);
 
   useEffect(() => {
@@ -101,8 +99,8 @@ export function StreamOutput({
         exit={{ opacity: 0, y: -10 }}
         transition={{ duration: 0.3, ease: "easeOut" }}
         className={cn(
-          "h-full min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-surface-secondary p-4",
-          "text-sm text-text-secondary",
+          "flex-1 overflow-auto rounded-lg border border-border bg-surface-secondary p-4",
+          "font-mono text-sm text-text-secondary whitespace-pre-wrap break-words",
           className
         )}
         aria-label="LLM 输出内容"
