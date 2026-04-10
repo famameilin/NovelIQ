@@ -48,7 +48,7 @@ def _store_annotation_results(
     run_id: str,
     foreshadowing=None,
     alias_map: dict[str, str] | None = None,
-    dialogue_speakers: dict[int, str] | None = None,
+    dialogue_speakers: dict[int, list[str]] | None = None,
     dialogues: list[tuple[int, str]] | None = None,
     dialogue_tones: dict[int, str] | None = None,
     dialogue_identity_clues: dict[int, str | None] | None = None,
@@ -140,13 +140,7 @@ def _store_annotation_results(
     if dialogues:
         effective_dialogues = []
         for dialogue_idx, content in dialogues:
-            speaker_str = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
-            speaker_list: list[str] | None = None
-            if speaker_str:
-                try:
-                    speaker_list = json.loads(speaker_str)
-                except (json.JSONDecodeError, TypeError):
-                    speaker_list = [speaker_str]
+            speaker_list = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
             tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
             identity_clue = dialogue_identity_clues.get(dialogue_idx) if dialogue_identity_clues else None
             effective_dialogues.append(
