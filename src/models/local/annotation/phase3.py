@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -50,6 +51,21 @@ from src.models.local.schema import DialogueAttributionResult, DialogueRecord, D
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+
+
+@dataclass
+class DialogueLengthResult:
+    """compute_dialogue_lengths_with_llm 的结构化返回类型
+
+    替代原来基于元组长度的多返回类型，避免调用端用
+    len(result_tuple) 判断结构的脆弱模式。
+    """
+
+    speaker_lengths: dict[str, int] = field(default_factory=dict)
+    canonical_attribution: dict[int, str] = field(default_factory=dict)
+    dialogues: list[tuple[int, str]] = field(default_factory=list)
+    dialogue_tones: dict[int, str] = field(default_factory=dict)
+    dialogue_identity_clues: dict[int, str | None] = field(default_factory=dict)
 
 
 def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[QuoteCandidate]:
@@ -366,11 +382,7 @@ async def compute_dialogue_lengths_with_llm(
     known_characters: list[str] | None = None,
     return_tones: bool = False,
     return_identity_clues: bool = False,
-) -> (
-    tuple[dict[str, int], dict[int, str], list[tuple[int, str]]]
-    | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str]]
-    | tuple[dict[str, int], dict[int, str], list[tuple[int, str]], dict[int, str], dict[int, str | None]]
-):
+) -> DialogueLengthResult:
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
 
@@ -383,25 +395,23 @@ async def compute_dialogue_lengths_with_llm(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-10
+    修改者: GLM-5
+    任务: fix/disambig-retriever-integration
+    修改内容: 返回 DialogueLengthResult 替代多类型 tuple，
+              修复 speakers_str 二次归一化无效问题
     """
     logger.info(f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}")
 
     if not text:
         logger.info("compute_dialogue_lengths_with_llm: early return - text_empty=True")
-        if return_identity_clues:
-            return ({}, {}, [], {}, {})
-        if return_tones:
-            return ({}, {}, [], {})
-        return ({}, {}, [])
+        return DialogueLengthResult()
 
     candidates = extract_dialogues_from_text(text)
     logger.info(f"compute_dialogue_lengths_with_llm: extracted {len(candidates)} candidates")
     if not candidates:
-        if return_identity_clues:
-            return ({}, {}, [], {}, {})
-        if return_tones:
-            return ({}, {}, [], {})
-        return ({}, {}, [])
+        return DialogueLengthResult()
 
     records = await attribute_dialogues_with_llm(
         client,
@@ -439,28 +449,28 @@ async def compute_dialogue_lengths_with_llm(
 
         dialogues.append((record.index, content))
 
-        if record.tone:
+        if record.tone and return_tones:
             dialogue_tones[record.index] = record.tone
 
-        if record.identity_clue:
+        if record.identity_clue and return_identity_clues:
             dialogue_identity_clues[record.index] = record.identity_clue
 
+        # record.speaker 已在 _post_process_validation 中完成别名归一化，
+        # 此处逐人累加长度，不再对拼接字符串做二次 alias_map 查找
+        # 注意：speaker_lengths 按归一化后的人名独立累加（多人对话每人各计一次），
+        # canonical_attribution 存顿号拼接字符串供下游展示用，非单名 key
         if record.speaker:
             speakers_str = "、".join(record.speaker)
             if speakers_str != "未知":
-                canonical = alias_map.get(speakers_str, speakers_str) if alias_map else speakers_str
-                speaker_lengths[canonical] = speaker_lengths.get(canonical, 0) + len(content)
-                canonical_attribution[record.index] = canonical
+                for s in record.speaker:
+                    speaker_lengths[s] = speaker_lengths.get(s, 0) + len(content)
+                canonical_attribution[record.index] = speakers_str
 
     logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
-    if return_identity_clues:
-        return (
-            speaker_lengths,
-            canonical_attribution,
-            dialogues,
-            dialogue_tones,
-            dialogue_identity_clues,
-        )
-    if return_tones:
-        return (speaker_lengths, canonical_attribution, dialogues, dialogue_tones)
-    return (speaker_lengths, canonical_attribution, dialogues)
+    return DialogueLengthResult(
+        speaker_lengths=speaker_lengths,
+        canonical_attribution=canonical_attribution,
+        dialogues=dialogues,
+        dialogue_tones=dialogue_tones,
+        dialogue_identity_clues=dialogue_identity_clues,
+    )

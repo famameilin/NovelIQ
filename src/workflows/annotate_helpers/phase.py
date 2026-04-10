@@ -374,6 +374,7 @@ async def _process_single_chunk(
         chunk_id,
         idx,
         incremental_interval,
+        disambig_provider=phase_result.rag_retriever,
     )
 
     return state
@@ -495,6 +496,7 @@ async def _process_chunks_phase(
 
         except ChunkAnnotationMaxRetriesExceededError as e:
             logger.error(f"chunk annotation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
+            # 失败的 chunk 不触发 projection，别名缓存保持当前状态
             raise
         except DisambiguationMaxRetriesExceededError as e:
             logger.error(f"disambiguation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
@@ -527,7 +529,8 @@ async def _run_disambiguation_phase(
     from .disambiguation import _run_final_disambiguation_with_state
 
     state = await _run_final_disambiguation_with_state(
-        conn, state, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id
+        conn, state, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id,
+        disambig_provider=phase_result.rag_retriever,
     )
 
     return state

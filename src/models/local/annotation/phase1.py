@@ -199,6 +199,7 @@ async def annotate_chunk_phase1(
     active_entities: str | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
+    disambig_context: str | None = None,
 ) -> ChunkAnnotation:
     """
     第一次调用：基础标注（带独立重试机制）
@@ -221,6 +222,7 @@ async def annotate_chunk_phase1(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
+        disambig_context=disambig_context,
     )
 
     return await execute_phase1_with_retry(
