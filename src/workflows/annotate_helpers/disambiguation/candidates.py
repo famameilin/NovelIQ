@@ -170,10 +170,10 @@ def _augment_hint_with_graph(
     run_id: str,
     existing_names: list[str],
 ) -> str | None:
-    """Append graph authority data (aliases, relations) to rag_hint.
+    """将图谱权威数据（别名、关系）追加到 rag_hint。
 
-    This forms the feedback loop from graph tables back to disambiguation,
-    letting the LLM see already-resolved alias mappings and confirmed relations.
+    这形成了从图谱表回到消歧的反馈循环，
+    让 LLM 能看到已解析的别名映射和已确认的关系。
     """
     existing_set = set(existing_names)
     parts: list[str] = []
