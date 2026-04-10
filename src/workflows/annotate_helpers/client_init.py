@@ -59,7 +59,7 @@ class _NoopDisambiguationClient:
     def is_cloud_api(self) -> bool:
         return False
 
-    def generate_summary(self, messages: list[dict[str, str]], max_tokens: int = 150) -> str:
+    async def generate_summary(self, messages: list[dict[str, str]], max_tokens: int = 150) -> str:
         return ""
 
 

@@ -25,7 +25,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { RefreshCw, Trash2, ChevronDown, Plus } from "lucide-react";
+import { Trash2, ChevronDown, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,9 +39,9 @@ import type { AnalysisTask } from "@/api/types";
 export interface NovelHeaderProps {
   title: string;
   novelId?: string;
-  onReanalyze?: () => void;
+  onResumeAnalysis?: (taskId?: string) => void;
   onDelete?: () => void;
-  isReanalyzing?: boolean;
+  isResuming?: boolean;
   className?: string;
 }
 
@@ -60,9 +60,9 @@ function getCurrentTaskDisplay(tasks: AnalysisTask[], currentTaskId: string | nu
 export function NovelHeader({
   title,
   novelId: novelIdProp,
-  onReanalyze,
+  onResumeAnalysis,
   onDelete,
-  isReanalyzing = false,
+  isResuming = false,
   className,
 }: NovelHeaderProps) {
   const routeParams = useParams<{ novelId: string }>();
@@ -127,6 +127,10 @@ export function NovelHeader({
     } catch {
       toast.error("删除任务失败");
     }
+  };
+
+  const handleRetry = (taskId: string) => {
+    onResumeAnalysis?.(taskId);
   };
 
   return (
@@ -209,6 +213,7 @@ export function NovelHeader({
                             onSelect={handleSelect}
                             onCancel={handleCancel}
                             onDelete={handleDelete}
+                            onRetry={handleRetry}
                           />
                         ))
                       )}
@@ -220,8 +225,8 @@ export function NovelHeader({
                         variant="outline"
                         size="sm"
                         className="w-full"
-                        onClick={onReanalyze}
-                        disabled={isReanalyzing}
+                        onClick={() => onResumeAnalysis?.()}
+                        disabled={isResuming}
                       >
                         <Plus className="mr-1 h-3.5 w-3.5" />
                         新建分析任务
@@ -235,15 +240,15 @@ export function NovelHeader({
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {onReanalyze && (
+          {onResumeAnalysis && (
             <Button
               variant="outline"
               size="sm"
-              onClick={onReanalyze}
-              disabled={isReanalyzing}
+              onClick={() => onResumeAnalysis()}
+              disabled={isResuming}
             >
-              <RefreshCw className={cn("h-3.5 w-3.5", isReanalyzing && "animate-spin")} />
-              重新分析
+              <Plus className={cn("h-3.5 w-3.5")} />
+              新建分析
             </Button>
           )}
           {onDelete && (
