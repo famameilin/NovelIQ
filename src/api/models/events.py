@@ -181,7 +181,15 @@ class AnalysisEventBus:
         # None 值不覆盖已有的上下文值，保持语义："未传"不覆盖"已传"
         resolved_current = event.current if event.current is not None else self._current
         resolved_total = event.total if event.total is not None else self._total
-        resolved_percent = event.percent if event.percent is not None else self._percent
+
+        # 自动计算 percent：当事件没有提供 percent 时，根据 current/total 和当前阶段计算
+        if event.percent is not None:
+            resolved_percent = event.percent
+        elif resolved_current is not None and resolved_total is not None and resolved_total > 0:
+            resolved_percent = self._calculate_percent_for_stage(resolved_stage, resolved_current, resolved_total)
+        else:
+            resolved_percent = self._percent
+
         resolved_sub_percent = event.sub_percent if event.sub_percent is not None else self._sub_percent
 
         resolved_event = StreamEvent(
@@ -241,6 +249,38 @@ class AnalysisEventBus:
                 self.task_manager.append_llm_output(self.task_id, resolved_event.content)
             except Exception as e:
                 logger.error(f"Failed to append LLM output: {e}")
+
+    def _calculate_percent_for_stage(self, stage: str, current: int, total: int) -> float:
+        """
+        根据阶段和当前进度计算全局 percent
+
+        创建时间: 2026-04-11
+        创建者: GLM-5
+        任务: fix-thinking-percent-calculation
+        说明: 当事件没有提供 percent 时，根据 current/total 和阶段范围自动计算
+
+        各阶段进度范围:
+        - preprocess: 0-10%
+        - annotate: 10-80%
+        - aggregate: 80-90%
+        - topic-model: 90-95%
+        - diagnose: 95-100%
+        """
+        if total <= 0:
+            return 0.0
+
+        progress_ratio = current / total
+
+        stage_ranges = {
+            "preprocess": (0.0, 10.0),
+            "annotate": (10.0, 80.0),
+            "aggregate": (80.0, 90.0),
+            "topic-model": (90.0, 95.0),
+            "diagnose": (95.0, 100.0),
+        }
+
+        start, end = stage_ranges.get(stage, (0.0, 100.0))
+        return start + progress_ratio * (end - start)
 
     # ------------------------------------------------------------------
     #  便捷方法：阶段级事件
