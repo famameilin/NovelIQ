@@ -40,7 +40,7 @@ from src.models.local.parser import validate_foreshadowing_result
 from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
 from .phase2 import annotate_chunk_phase2
-from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_text
+from .phase3 import DialogueLengthResult, compute_dialogue_lengths_with_llm, extract_dialogues_from_text
 from .phase4 import annotate_chunk_phase4
 
 if TYPE_CHECKING:
@@ -96,6 +96,7 @@ async def _run_phase1(
     active_entities: str | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
+    disambig_context: str | None = None,
 ) -> ChunkAnnotation:
     """执行 Phase1 基础标注
 
@@ -120,6 +121,7 @@ async def _run_phase1(
         active_entities=active_entities,
         cloud_client=cloud_client,
         run_id=run_id,
+        disambig_context=disambig_context,
     )
 
 
@@ -195,7 +197,7 @@ async def _run_phase3_if_needed(
         chunk_id,
     )
 
-    result_tuple = await compute_dialogue_lengths_with_llm(
+    dlg_result = await compute_dialogue_lengths_with_llm(
         client=client,
         text=text,
         alias_map=alias_map,
@@ -206,11 +208,11 @@ async def _run_phase3_if_needed(
         return_identity_clues=True,
     )
 
-    result.dialogue_lengths = result_tuple[0]
-    result.dialogue_speakers = result_tuple[1]
-    result.dialogues = result_tuple[2]
-    result.dialogue_tones = result_tuple[3] if len(result_tuple) > 3 else None
-    result.dialogue_identity_clues = result_tuple[4] if len(result_tuple) > 4 else None
+    result.dialogue_lengths = dlg_result.speaker_lengths or None
+    result.dialogue_speakers = dlg_result.canonical_attribution or None
+    result.dialogues = dlg_result.dialogues or None
+    result.dialogue_tones = dlg_result.dialogue_tones or None
+    result.dialogue_identity_clues = dlg_result.dialogue_identity_clues or None
 
     logger.debug(
         "Phase3: dialogue_lengths={} dialogue_speakers={} "
@@ -378,6 +380,7 @@ async def annotate_chunk_parallel(
     run_id: str | None = None,
     rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    disambig_context: str | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     并行模式：Phase1 和 Phase2 并行执行，Phase3 在 Phase1 完成后执行
@@ -416,6 +419,7 @@ async def annotate_chunk_parallel(
             active_entities=active_entities,
             cloud_client=cloud_client,
             run_id=run_id,
+            disambig_context=disambig_context,
         ),
         _run_phase2(
             client=client,
@@ -513,6 +517,7 @@ async def annotate_chunk_serial(
     run_id: str | None = None,
     rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    disambig_context: str | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     串行模式
@@ -544,6 +549,7 @@ async def annotate_chunk_serial(
         active_entities=active_entities,
         cloud_client=cloud_client,
         run_id=run_id,
+        disambig_context=disambig_context,
     )
     if emitter:
         await emitter(

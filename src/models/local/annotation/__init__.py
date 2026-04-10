@@ -43,6 +43,7 @@ from src.models.local.annotation.messages import (
     _build_foreshadowing_messages,
 )
 from src.models.local.annotation.phase3 import (
+    DialogueLengthResult,
     attribute_dialogues_with_llm,
     compute_dialogue_lengths_with_llm,
     extract_dialogues_from_text,
@@ -70,6 +71,7 @@ __all__ = [
     "Phase1MaxRetriesExceededError",
     "Phase2MaxRetriesExceededError",
     "MultiPhaseAnnotationResult",
+    "DialogueLengthResult",
     "_build_annotation_messages_v2",
     "_build_foreshadowing_messages",
     "build_phase1_messages",
