@@ -489,6 +489,9 @@ async def _process_chunks_phase(
                 _save_disambig_checkpoint(conn, run_id, state)
             if run_id and success_count % projection_interval == 0:
                 project_graph_tables(run_id, to_chunk=chunk_id, session=conn)
+                # projection 更新了别名表，需刷新消歧缓存
+                if phase_result.rag_retriever:
+                    phase_result.rag_retriever.invalidate_cache()
 
         except ChunkAnnotationMaxRetriesExceededError as e:
             logger.error(f"chunk annotation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
@@ -500,6 +503,8 @@ async def _process_chunks_phase(
     if run_id and all_chunks:
         final_chunk_id = all_chunks[-1][0]
         project_graph_tables(run_id, to_chunk=final_chunk_id, session=conn)
+        if phase_result.rag_retriever:
+            phase_result.rag_retriever.invalidate_cache()
 
     return success_count, state
 
