@@ -253,31 +253,6 @@ async def attribute_dialogues_with_llm(
         raise DialogueAttributionError(f"对话归属判断失败: {e}") from e
 
 
-def _extract_speaker_from_clue(clue: str, known_set: set[str] | None) -> str | None:
-    """从 identity_clue 中提取实际说话者名。
-
-    匹配模式：
-    - "白芷自称..." → 白芷
-    - "赤甲卫自称属下" → 赤甲卫
-    - "说话者自称..." → None（无具体名字）
-
-    修改时间: 2026-03-31
-    修改者: CodeBuddy
-    任务: fix/phase3-speaker-identity-clue-mismatch
-    修改内容: 新增辅助函数，从 identity_clue 反推 speaker
-    """
-    if not clue:
-        return None
-    generic_terms = {"说话者", "被指代", "对方", "某人"}
-    for pattern in (r"^([\u4e00-\u9fff]{2,6})(自称|称呼|让|告诉|问)", r"^([\u4e00-\u9fff]{2,6})(说明|揭示|表示)"):
-        m = re.match(pattern, clue)
-        if m:
-            name = m.group(1)
-            if name not in generic_terms and (known_set is None or name in known_set):
-                return name
-    return None
-
-
 def _post_process_validation(
     records: list[DialogueRecordSchema],
     candidates: list[QuoteCandidate],
@@ -286,30 +261,35 @@ def _post_process_validation(
     chunk_id: int | None,
 ) -> list[DialogueRecord]:
     """
-    后处理验证：验证 index 范围、说话者有效性、identity_clue 一致性
+    后处理验证：验证 index 范围、别名归一化。
 
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
-    说明: 验证 LLM 返回的 speaker 是否在已知人物列表中，如果不在则记录警告日志
+    设计决策（2026-04-10）：
+    ─────────────────────────────
+    此函数只做两件事：1) 校验 index 有效性；2) 别名归一化。
+    不对 speaker 做任何丢弃或修正。原因：
 
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: fix-phase3-validation
-    修改内容: 添加 candidates 参数验证 index 范围，跳过未知说话者的记录
+    1. 漏标注(null) > 错标注(A→B)：
+       - 错标注是脏数据，静默污染下游指标（关系图谱、对话长度、情绪曲线）
+       - 漏标注是缺数据，有明确信号，消歧系统可以补全
+       - 因此"宁可漏，不可错"
 
-    修改时间: 2026-03-31
-    修改者: CodeBuddy
-    任务: fix/phase3-speaker-identity-clue-mismatch
-    修改内容:
-    - unknown speaker 保留为 null 而非丢弃整条记录
-    - 增加 identity_clue 与 speaker 一致性校验
-    - 从 identity_clue 反推 speaker 修正错误归属
+    2. identity_clue 不能用于修正 speaker：
+       - clue 和 speaker 是同一个 LLM 从同一段上下文推断的
+       - 能识别 speaker 时 clue 自然包含该信息，识别不出时 clue 也帮不上忙
+       - 用正则从自然语言 clue 中反推名字不可靠（格式不可控、覆盖面窄）
+       - 已删除 _extract_speaker_from_clue 函数
 
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: speaker 改为 list[str]，适配多人说话场景
+    3. Prompt 规则5/6 的分工：
+       - 规则5：LLM 不确定 → speaker=null（漏标不错标）
+       - 规则6：LLM 确定、名字不在已知列表 → 直接输出（不浪费信息）
+       - 后处理不再因"不在已知列表"而丢弃/修正 speaker
+
+    修改历史:
+    - 2026-03-23: 添加 candidates 参数验证 index 范围
+    - 2026-03-31: 增加 identity_clue 反推逻辑（后证明不可靠，已删除）
+    - 2026-04-08: speaker 改为 list[str]，适配多人说话场景
+    - 2026-04-10: 删除 _extract_speaker_from_clue 调用和所有 speaker
+      修正/丢弃逻辑，只保留别名归一化和日志记录
     """
     valid_records: list[DialogueRecord] = []
     candidate_indices = {c.index for c in candidates}
@@ -317,8 +297,7 @@ def _post_process_validation(
     if known_characters:
         known_set = {alias_map.get(name, name) if alias_map else name for name in known_characters}
 
-    correction_count = 0
-    dropped_count = 0
+    unknown_count = 0
 
     candidate_map = {c.index: c.content for c in candidates}
 
@@ -342,54 +321,37 @@ def _post_process_validation(
         )
 
         if not record.speaker:
+            # LLM 判断为 null → 保留 null（漏标不错标）
             valid_records.append(record)
             continue
 
+        # 别名归一化：将 LLM 输出的别名/外号映射到 canonical 名
+        # 例如 "猴子" → "侯飞白"，由消歧系统的 alias_map 提供
         canonical_speakers: list[str] = []
         for s in record.speaker:
             canonical = alias_map.get(s, s) if alias_map else s
             canonical_speakers.append(canonical)
 
+        # 记录不在 known_set 中的 speaker（仅日志，不丢弃）
+        # 这些 speaker 可能是新角色首次出现，也可能 LLM 判断有误，
+        # 但后处理无法区分，保留 LLM 判断交由下游决定
         if known_set:
-            validated_speakers: list[str] = []
-            for i, s in enumerate(canonical_speakers):
-                if s in known_set:
-                    validated_speakers.append(s)
-                else:
-                    if record.identity_clue and i == 0:
-                        inferred = _extract_speaker_from_clue(record.identity_clue, known_set)
-                        if inferred:
-                            correction_count += 1
-                            logger.warning(
-                                f"phase3_validation: speaker '{s}' not in known_set, "
-                                f"identity_clue implies '{inferred}', correcting. "
-                                f"chunk_id={chunk_id} index={record.index}"
-                            )
-                            validated_speakers.append(inferred)
-                        else:
-                            dropped_count += 1
-                            logger.warning(
-                                f"phase3_validation: speaker '{s}' not in known_set and "
-                                f"no valid inference from identity_clue, dropping. "
-                                f"chunk_id={chunk_id} index={record.index}"
-                            )
-                    else:
-                        dropped_count += 1
-                        logger.warning(
-                            f"phase3_validation: speaker '{s}' not in known_set, dropping. "
-                            f"chunk_id={chunk_id} index={record.index}"
-                        )
-            canonical_speakers = validated_speakers
+            for s in canonical_speakers:
+                if s not in known_set:
+                    unknown_count += 1
+                    logger.info(
+                        f"phase3_validation: speaker '{s}' not in known_set, "
+                        f"keeping LLM judgment. chunk_id={chunk_id} index={record.index}"
+                    )
 
         if canonical_speakers != record.speaker:
             valid_records.append(record.model_copy(update={"speaker": canonical_speakers}))
         else:
             valid_records.append(record)
 
-    if correction_count > 0 or dropped_count > 0:
+    if unknown_count > 0:
         logger.info(
-            f"phase3_validation summary: corrections={correction_count}, "
-            f"dropped_unknown={dropped_count}, chunk_id={chunk_id}"
+            f"phase3_validation summary: unknown_speakers={unknown_count}, chunk_id={chunk_id}"
         )
 
     return valid_records
