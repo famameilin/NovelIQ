@@ -243,8 +243,8 @@
     "character_max_iter": 100
   },
   "rag": {
-    "enabled": false,
-    "embedding_enabled": false,
+    "enabled": true,
+    "embedding_enabled": true,
     "similarity_threshold": 0.7,
     "lookback_chunks": 10,
     "top_k": 3,

@@ -132,12 +132,11 @@ def search_similar_chunks(
     Returns:
         相似 chunk 列表，每个元素包含 chunk_id, similarity, text
     """
-    similarity = (1 - ChunkEmbedding.embedding_vector.cosine_distance(query_embedding)).label("similarity")
-    stmt = (
+    run_scoped_chunks = (
         select(
-            ChunkEmbedding.chunk_id,
-            Chunk.text,
-            similarity,
+            ChunkEmbedding.chunk_id.label("chunk_id"),
+            Chunk.text.label("text"),
+            ChunkEmbedding.embedding_vector.label("embedding_vector"),
         )
         .join(
             Chunk,
@@ -146,13 +145,23 @@ def search_similar_chunks(
         .where(
             ChunkEmbedding.run_id == run_id,
             ChunkEmbedding.embedding_vector.is_not(None),
-            similarity >= similarity_threshold,
         )
+    )
+    if exclude_chunk_ids:
+        run_scoped_chunks = run_scoped_chunks.where(ChunkEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
+
+    run_scoped_chunks_subquery = run_scoped_chunks.subquery()
+    similarity = (1 - run_scoped_chunks_subquery.c.embedding_vector.cosine_distance(query_embedding)).label("similarity")
+    stmt = (
+        select(
+            run_scoped_chunks_subquery.c.chunk_id,
+            run_scoped_chunks_subquery.c.text,
+            similarity,
+        )
+        .where(similarity >= similarity_threshold)
         .order_by(similarity.desc())
         .limit(top_k)
     )
-    if exclude_chunk_ids:
-        stmt = stmt.where(ChunkEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
 
     result = session.execute(stmt)
     rows = result.fetchall()

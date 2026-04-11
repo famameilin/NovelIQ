@@ -54,6 +54,10 @@ class DisambigResult:
     used_levels: list[int] = field(default_factory=list)
 
 
+class Level3NotReadyError(RuntimeError):
+    """Level 3 向量检索未就绪。"""
+
+
 class AliasLookup:
     """Level1: 别名表精确匹配（带缓存）"""
 
@@ -150,18 +154,23 @@ class Level3VectorEvidence:
             return
 
         if self._embedding_client is None or self._session is None or self._run_id is None:
-            return
+            raise Level3NotReadyError("Level 3 requires embedding client, session, and run_id")
 
         actual_dim = await self._embedding_client.detect_embedding_dimension()
         if actual_dim != self._expected_embedding_dim:
-            raise ValueError(
+            raise Level3NotReadyError(
                 "Level 3 embedding dimension mismatch: "
                 f"configured={self._expected_embedding_dim}, actual={actual_dim}"
             )
 
-        from src.storage.vector_schema import ensure_chunk_embeddings_schema
+        from src.storage.repositories.chunk import has_embeddings
+        from src.storage.vector_schema import validate_chunk_embeddings_schema
 
-        ensure_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
+        validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
+        if not has_embeddings(self._session, self._run_id):
+            raise Level3NotReadyError(f"Level 3 embeddings not found for run_id={self._run_id}")
+
+        self._available = True
         self._setup_checked = True
 
     def is_available(self) -> bool:
@@ -408,6 +417,10 @@ class DisambigContextProvider:
     def is_level3_available(self) -> bool:
         """检查 Level 3 是否可用"""
         return self._level3_enabled and self._level3.is_available()
+
+    def requires_level3(self) -> bool:
+        """检查当前 provider 是否要求必须启用 Level 3。"""
+        return self._level3_enabled
 
     async def ensure_level3_ready(self) -> None:
         if self._level3_enabled:

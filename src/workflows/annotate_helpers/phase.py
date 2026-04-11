@@ -199,6 +199,8 @@ async def _init_annotation_phase_with_config(
         config.use_rag,
         run_id=config.run_id,
     )
+    if rag_retriever is not None:
+        await rag_retriever.ensure_level3_ready()
 
     global_context_str = await _extract_and_save_global_context(
         config.conn,

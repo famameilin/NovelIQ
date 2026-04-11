@@ -18,6 +18,7 @@ from src.rag.retriever import (
     AliasLookup,
     DisambigContextProvider,
     DisambigResult,
+    Level3NotReadyError,
     Level3VectorEvidence,
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     "DisambigResult",
     "AliasLookup",
     "ActiveEntityLookup",
+    "Level3NotReadyError",
     "Level3VectorEvidence",
 ]

@@ -45,12 +45,34 @@ def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None
             "ON public.chunk_embeddings USING btree (run_id)"
         )
     )
-    session.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_vector "
-            "ON public.chunk_embeddings USING hnsw (embedding_vector vector_cosine_ops)"
+    # Drop the legacy global ANN index so existing environments do not keep
+    # using an approximation path that mixes rows from different runs.
+    session.execute(text("DROP INDEX IF EXISTS public.idx_chunk_embeddings_vector"))
+
+
+def validate_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None:
+    if embedding_dim <= 0:
+        raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
+
+    extension_exists = session.execute(
+        text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+    ).scalar_one_or_none()
+    if extension_exists is None:
+        raise ValueError("pgvector extension 'vector' is not installed")
+
+    table_exists = session.execute(
+        text("SELECT to_regclass('public.chunk_embeddings')")
+    ).scalar_one_or_none()
+    if table_exists is None:
+        raise ValueError("chunk_embeddings table does not exist")
+
+    vector_type = _get_chunk_embeddings_vector_type(session)
+    expected_type = f"vector({embedding_dim})"
+    if vector_type != expected_type:
+        raise ValueError(
+            "chunk_embeddings.embedding_vector type mismatch: "
+            f"expected {expected_type}, got {vector_type or 'unknown'}"
         )
-    )
 
 
 def _get_chunk_embeddings_vector_type(session: Session) -> str | None:
