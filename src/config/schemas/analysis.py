@@ -508,5 +508,5 @@ def _parse_rag_settings(data: dict[str, Any] | None) -> RAGSettings:
         level1_enabled=data.get("level1_enabled", True),
         level2_enabled=data.get("level2_enabled", True),
         level3_enabled=data.get("level3_enabled", True),
-        level3_top_k=data.get("level3_top_k", 5),
+        level3_top_k=data.get("level3_top_k", data.get("top_k", 5)),
     )

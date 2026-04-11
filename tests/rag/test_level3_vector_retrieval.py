@@ -195,6 +195,40 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         provider._level3.set_session(mock_session, "test-run-id")
         self.assertTrue(provider.is_level3_available())
 
+    def test_level1_can_be_disabled(self) -> None:
+        """禁用 Level 1 后不应命中 alias lookup"""
+        graph_repo = MagicMock()
+        graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
+
+        provider = DisambigContextProvider(
+            graph_repo=graph_repo,
+            run_id="test-run-id",
+            level1_enabled=False,
+        )
+        result = provider.retrieve("灰衣人", current_chunk=3)
+
+        self.assertFalse(result.level1_hit)
+        self.assertIsNone(result.canonical_name)
+
+    def test_level2_can_be_disabled(self) -> None:
+        """禁用 Level 2 后不应返回活跃实体候选"""
+        graph_repo = MagicMock()
+        graph_repo.fetch_alias_map.return_value = {}
+        graph_repo.fetch_active_entities.return_value = [
+            {"name": "白芷"},
+            {"name": "侯飞白"},
+        ]
+
+        provider = DisambigContextProvider(
+            graph_repo=graph_repo,
+            run_id="test-run-id",
+            level2_enabled=False,
+        )
+        result = provider.retrieve("灰衣人", current_chunk=3)
+
+        self.assertEqual(result.level2_candidates, [])
+        self.assertNotIn(2, result.used_levels)
+
 
 if __name__ == "__main__":
     unittest.main()
