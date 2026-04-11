@@ -19,7 +19,7 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.rag.retriever import DisambigContextProvider, Level3VectorEvidence
+from src.rag.retriever import DisambigContextProvider, Level3NotReadyError, Level3VectorEvidence
 
 
 class TestLevel3VectorEvidence(unittest.TestCase):
@@ -121,7 +121,7 @@ class TestLevel3VectorEvidenceAsync:
 
         with (
             patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
-            patch("src.storage.vector_schema.ensure_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
         ):
             level3 = Level3VectorEvidence(
                 session=mock_session,
@@ -141,7 +141,7 @@ class TestLevel3VectorEvidenceAsync:
         mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
         mock_session = MagicMock()
 
-        with patch("src.storage.vector_schema.ensure_chunk_embeddings_schema"):
+        with patch("src.storage.vector_schema.validate_chunk_embeddings_schema"):
             level3 = Level3VectorEvidence(
                 session=mock_session,
                 run_id="test-run-id",
@@ -162,7 +162,25 @@ class TestLevel3VectorEvidenceAsync:
             embedding_client=mock_client,
         )
 
-        with pytest.raises(ValueError, match="dimension mismatch"):
+        with pytest.raises(Level3NotReadyError, match="dimension mismatch"):
+            await level3.ensure_level3_ready()
+
+    @pytest.mark.asyncio
+    @patch("src.storage.repositories.chunk.has_embeddings", return_value=False)
+    async def test_ensure_level3_ready_fails_when_embeddings_missing(self, mock_has: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
+        mock_session = MagicMock()
+        level3 = Level3VectorEvidence(
+            session=mock_session,
+            run_id="test-run-id",
+            embedding_client=mock_client,
+        )
+
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            pytest.raises(Level3NotReadyError, match="embeddings not found"),
+        ):
             await level3.ensure_level3_ready()
 
 

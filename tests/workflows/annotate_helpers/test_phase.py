@@ -3,6 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.rag import Level3NotReadyError
+from src.workflows.annotate_helpers.phase import AnnotationPhaseConfig
+from src.workflows.annotate_helpers.phase import _init_annotation_phase_with_config
 from src.workflows.annotate_helpers.phase import _process_single_chunk
 
 
@@ -70,3 +73,73 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     assert mock_annotate_chunk.await_args.kwargs["disambig_context"] == "vector-evidence"
     mock_store_results.assert_called_once()
     mock_run_disambig.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_init_annotation_phase_validates_level3_once_up_front() -> None:
+    rag_retriever = MagicMock()
+    rag_retriever.ensure_level3_ready = AsyncMock()
+
+    annotation_client = MagicMock()
+    cloud_annotation_client = MagicMock()
+    incremental_client = MagicMock()
+    full_client = MagicMock()
+
+    config = AnnotationPhaseConfig(
+        conn=MagicMock(),
+        all_chunks=[],
+        novel_id="novel-1",
+        use_rag=True,
+        run_id="run-1",
+    )
+
+    with (
+        patch(
+            "src.workflows.annotate_helpers.client_init._init_annotation_clients",
+            return_value=(annotation_client, cloud_annotation_client, incremental_client, full_client),
+        ),
+        patch("src.workflows.annotate_helpers.client_init._setup_token_usage_callback"),
+        patch("src.workflows.annotate_helpers.context._init_disambig_provider", return_value=rag_retriever),
+        patch(
+            "src.workflows.annotate_helpers.sentence._extract_and_save_global_context",
+            new=AsyncMock(return_value="global-context"),
+        ),
+    ):
+        result = await _init_annotation_phase_with_config(config)
+
+    assert result.rag_retriever is rag_retriever
+    rag_retriever.ensure_level3_ready.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_init_annotation_phase_fails_early_when_level3_not_ready() -> None:
+    rag_retriever = MagicMock()
+    rag_retriever.ensure_level3_ready = AsyncMock(side_effect=Level3NotReadyError("schema missing"))
+
+    annotation_client = MagicMock()
+    cloud_annotation_client = MagicMock()
+    incremental_client = MagicMock()
+    full_client = MagicMock()
+
+    config = AnnotationPhaseConfig(
+        conn=MagicMock(),
+        all_chunks=[],
+        novel_id="novel-1",
+        use_rag=True,
+        run_id="run-1",
+    )
+
+    with (
+        patch(
+            "src.workflows.annotate_helpers.client_init._init_annotation_clients",
+            return_value=(annotation_client, cloud_annotation_client, incremental_client, full_client),
+        ),
+        patch("src.workflows.annotate_helpers.client_init._setup_token_usage_callback"),
+        patch("src.workflows.annotate_helpers.context._init_disambig_provider", return_value=rag_retriever),
+        patch(
+            "src.workflows.annotate_helpers.sentence._extract_and_save_global_context",
+            new=AsyncMock(return_value="global-context"),
+        ),
+        pytest.raises(Level3NotReadyError, match="schema missing"),
+    ):
+        await _init_annotation_phase_with_config(config)

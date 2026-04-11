@@ -53,12 +53,6 @@ class ChunkEmbedding(Base):
             ondelete="CASCADE",
         ),
         Index("idx_chunk_embeddings_run_id", "run_id"),
-        Index(
-            "idx_chunk_embeddings_vector",
-            "embedding_vector",
-            postgresql_using="hnsw",
-            postgresql_ops={"embedding_vector": "vector_cosine_ops"},
-        ),
     )
 
     def __repr__(self) -> str:
