@@ -252,6 +252,8 @@ class RAGSettings:
     top_k: int = 3
     level1_enabled: bool = True
     level2_enabled: bool = True
+    level3_enabled: bool = True
+    level3_top_k: int = 5
 
 
 def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
