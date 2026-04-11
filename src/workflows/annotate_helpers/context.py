@@ -208,8 +208,16 @@ async def _prepare_chunk_context_with_level3(
 
     if disambig_provider:
         names_in_chunk = _extract_names_from_text(chunk_text)
-        await disambig_provider.ensure_level3_ready()
-        if disambig_provider.is_level3_available():
+        if disambig_provider.requires_level3():
+            if not disambig_provider.is_level3_available():
+                raise RuntimeError("Level 3 vector retrieval is required but not available")
+            context.disambig_context_str = await disambig_provider.build_disambig_context_with_level3(
+                names_in_chunk,
+                current_chunk=chunk_id,
+                context_text=chunk_text,
+                exclude_chunk_ids=[chunk_id],
+            )
+        elif disambig_provider.is_level3_available():
             context.disambig_context_str = await disambig_provider.build_disambig_context_with_level3(
                 names_in_chunk,
                 current_chunk=chunk_id,
