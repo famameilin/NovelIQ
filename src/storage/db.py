@@ -194,7 +194,7 @@ def get_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def init_db() -> None:
+def init_db(include_level3_tables: bool = False) -> None:
     """
     初始化数据库（创建所有表）
 
@@ -208,7 +208,10 @@ def init_db() -> None:
     from src.storage.models import Base
 
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
+    tables = list(Base.metadata.sorted_tables)
+    if not include_level3_tables:
+        tables = [table for table in tables if table.name != "chunk_embeddings"]
+    Base.metadata.create_all(bind=engine, tables=tables)
     logger.info("Database tables created successfully")
 
 
