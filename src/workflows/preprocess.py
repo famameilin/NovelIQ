@@ -39,10 +39,12 @@ from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
 from src.chunking.chunker import chunk_documents
+from src.config import settings
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import ChunkRepository, ChunkStyleData
+from src.storage.vector_schema import ensure_chunk_embeddings_schema
 
 
 async def run_preprocess(
@@ -111,9 +113,6 @@ async def run_preprocess(
     for doc in docs:
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
-
-    # 从配置读取是否启用语义分块
-    from src.config import settings
 
     use_semantic = settings.chunking.use_semantic_chunking
     if use_semantic:
@@ -207,6 +206,15 @@ async def _generate_chunk_embeddings(
         logger.warning(f"EmbeddingClient initialization failed, skipping embedding generation: {e}")
         return 0
 
+    expected_dim = settings.models.semantic_chunking.embedding_dim
+    actual_dim = await embedding_client.detect_embedding_dimension()
+    if actual_dim != expected_dim:
+        raise ValueError(
+            f"Level 3 embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}"
+        )
+
+    ensure_chunk_embeddings_schema(session, expected_dim)
+
     total_chunks = len(all_chunks)
     if emitter:
         await emitter(
@@ -220,6 +228,7 @@ async def _generate_chunk_embeddings(
 
     embeddings: list[tuple[int, list[float]]] = []
     for idx, chunk in enumerate(all_chunks):
+        chunk_id = chunk.index
         if total_chunks > 1 and idx % 10 == 0:
             logger.info(f"Generating embedding for chunk {idx + 1}/{total_chunks}")
             if emitter:
@@ -234,11 +243,11 @@ async def _generate_chunk_embeddings(
                 )
 
         try:
-            embedding = await embedding_client.get_embedding(chunk.text, chunk_id=chunk.chunk_id)
+            embedding = await embedding_client.get_embedding(chunk.text, chunk_id=chunk_id)
             if embedding:
-                embeddings.append((chunk.chunk_id, embedding))
+                embeddings.append((chunk_id, embedding))
         except Exception as e:
-            logger.warning(f"Failed to generate embedding for chunk {chunk.chunk_id}: {e}")
+            logger.warning(f"Failed to generate embedding for chunk {chunk_id}: {e}")
             continue
 
     if embeddings:

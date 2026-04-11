@@ -34,6 +34,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from src.config import settings
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
@@ -119,6 +121,7 @@ class Level3VectorEvidence:
         embedding_client: EmbeddingClient | None = None,
         similarity_threshold: float = 0.7,
         top_k: int = 5,
+        expected_embedding_dim: int | None = None,
     ):
         self._session = session
         self._run_id = run_id
@@ -126,17 +129,40 @@ class Level3VectorEvidence:
         self._similarity_threshold = similarity_threshold
         self._top_k = top_k
         self._available: bool | None = None
+        self._expected_embedding_dim = expected_embedding_dim or settings.models.semantic_chunking.embedding_dim
+        self._setup_checked = False
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
         """设置 Embedding 客户端"""
         self._embedding_client = client
         self._available = None
+        self._setup_checked = False
 
     def set_session(self, session: Session, run_id: str) -> None:
         """设置数据库会话"""
         self._session = session
         self._run_id = run_id
         self._available = None
+        self._setup_checked = False
+
+    async def ensure_level3_ready(self) -> None:
+        if self._setup_checked:
+            return
+
+        if self._embedding_client is None or self._session is None or self._run_id is None:
+            return
+
+        actual_dim = await self._embedding_client.detect_embedding_dimension()
+        if actual_dim != self._expected_embedding_dim:
+            raise ValueError(
+                "Level 3 embedding dimension mismatch: "
+                f"configured={self._expected_embedding_dim}, actual={actual_dim}"
+            )
+
+        from src.storage.vector_schema import ensure_chunk_embeddings_schema
+
+        ensure_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
+        self._setup_checked = True
 
     def is_available(self) -> bool:
         """
@@ -182,6 +208,8 @@ class Level3VectorEvidence:
         Returns:
             相似 chunk 列表，每个元素包含 chunk_id, similarity, text
         """
+        await self.ensure_level3_ready()
+
         if not self.is_available():
             return []
 
@@ -295,6 +323,7 @@ class DisambigContextProvider:
             embedding_client=embedding_client,
             similarity_threshold=similarity_threshold,
             top_k=level3_top_k,
+            expected_embedding_dim=settings.models.semantic_chunking.embedding_dim,
         )
 
         self._graph_repo = graph_repo
@@ -379,6 +408,10 @@ class DisambigContextProvider:
     def is_level3_available(self) -> bool:
         """检查 Level 3 是否可用"""
         return self._level3_enabled and self._level3.is_available()
+
+    async def ensure_level3_ready(self) -> None:
+        if self._level3_enabled:
+            await self._level3.ensure_level3_ready()
 
     def build_disambig_context(
         self,

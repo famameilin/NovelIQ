@@ -65,6 +65,7 @@ class EmbeddingModelSettings:
     api_key: str | None = None
     timeout_s: float | None = None
     max_retries: int = 2
+    embedding_dim: int = 1536
 
 
 @dataclass
@@ -208,6 +209,7 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
     env_api_key = _get_env_var(env_prefix, "API_KEY")
     env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
     env_max_retries = _get_env_var(env_prefix, "MAX_RETRIES")
+    env_embedding_dim = _get_env_var(env_prefix, "EMBEDDING_DIM")
 
     json_data = data or {}
 
@@ -229,12 +231,22 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
     else:
         max_retries_val = json_data.get("max_retries", 2)
 
+    embedding_dim_val = 1536
+    if env_embedding_dim:
+        try:
+            embedding_dim_val = int(env_embedding_dim)
+        except ValueError:
+            embedding_dim_val = json_data.get("embedding_dim", 1536)
+    else:
+        embedding_dim_val = json_data.get("embedding_dim", 1536)
+
     return EmbeddingModelSettings(
         base_url=env_base_url or json_data.get("base_url"),
         model=env_model or json_data.get("model"),
         api_key=env_api_key or json_data.get("api_key"),
         timeout_s=timeout_val,
         max_retries=max_retries_val,
+        embedding_dim=embedding_dim_val,
     )
 
 
