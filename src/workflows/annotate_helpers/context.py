@@ -100,6 +100,8 @@ def _init_disambig_provider(
         lookback_chunks=settings.rag.lookback_chunks,
         session=conn,
         embedding_client=embedding_client,
+        level1_enabled=settings.rag.level1_enabled,
+        level2_enabled=settings.rag.level2_enabled,
         level3_enabled=settings.rag.level3_enabled,
         similarity_threshold=settings.rag.similarity_threshold,
         level3_top_k=settings.rag.level3_top_k,
