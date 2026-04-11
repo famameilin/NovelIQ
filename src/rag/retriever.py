@@ -301,7 +301,7 @@ class DisambigContextProvider:
     支持三级检索：
     - Level1: 别名表精确匹配
     - Level2: 活跃实体候选
-    - Level3: 向量语义相似度检索（可选）
+    - Level3: 向量语义相似度检索（当前标注流程要求启用）
 
     同时提供图谱反馈能力：已裁决别名映射 + 已确认关系。
     """
@@ -419,7 +419,7 @@ class DisambigContextProvider:
         return self._level3_enabled and self._level3.is_available()
 
     def requires_level3(self) -> bool:
-        """检查当前 provider 是否要求必须启用 Level 3。"""
+        """检查当前 provider 是否按当前流程配置要求启用 Level 3。"""
         return self._level3_enabled
 
     async def ensure_level3_ready(self) -> None:

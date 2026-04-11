@@ -89,9 +89,12 @@ def _init_disambig_provider(
             from src.models.local.embedding import EmbeddingClient
 
             embedding_client = EmbeddingClient(novel_id=novel_id)
-            logger.info("Level 3 vector retrieval enabled")
+            logger.info("Level 3 vector retrieval enabled and required")
         except ValueError as e:
-            logger.warning(f"EmbeddingClient initialization failed, Level 3 disabled: {e}")
+            logger.error(
+                "EmbeddingClient initialization failed; Level 3 is required and annotation will fail readiness "
+                f"checks: {e}"
+            )
 
     provider = DisambigContextProvider(
         graph_repo=graph_repo,
