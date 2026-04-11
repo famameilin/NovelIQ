@@ -199,6 +199,8 @@ async def _init_annotation_phase_with_config(
         config.use_rag,
         run_id=config.run_id,
     )
+    if rag_retriever is not None:
+        await rag_retriever.ensure_level3_ready()
 
     global_context_str = await _extract_and_save_global_context(
         config.conn,
@@ -321,7 +323,7 @@ async def _process_single_chunk(
     任务: refactor/annotate-async
     修改内容: 改为 async def，await annotate_chunk
     """
-    from .context import _prepare_chunk_context
+    from .context import _prepare_chunk_context_with_level3
     from .disambiguation import _run_incremental_disambiguation_with_state
     from .storage import _store_annotation_results
 
@@ -329,7 +331,7 @@ async def _process_single_chunk(
 
     alias_map = state.get_alias_merges_dict()
 
-    ctx = _prepare_chunk_context(
+    ctx = await _prepare_chunk_context_with_level3(
         conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.rag_retriever, run_id=run_id
     )
 

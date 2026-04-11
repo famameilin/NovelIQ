@@ -42,7 +42,8 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2
+      "max_retries": 2,
+      "embedding_dim": 1536
     },
     "full_disambig": {
       "base_url": null,
@@ -242,13 +243,14 @@
     "character_max_iter": 100
   },
   "rag": {
-    "enabled": false,
-    "embedding_enabled": false,
+    "enabled": true,
+    "embedding_enabled": true,
     "similarity_threshold": 0.7,
     "lookback_chunks": 10,
     "top_k": 3,
     "level1_enabled": true,
     "level2_enabled": true,
-    "level3_enabled": true
+    "level3_enabled": true,
+    "level3_top_k": 5
   }
 }
