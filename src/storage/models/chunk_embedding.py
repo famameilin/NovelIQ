@@ -10,12 +10,15 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKeyConstraint, Index, Integer, String, Text
+from src.config import settings
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = settings.models.semantic_chunking.embedding_dim
 
 
 class ChunkEmbedding(Base):
@@ -35,7 +38,7 @@ class ChunkEmbedding(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
-    embedding_vector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
@@ -50,6 +53,12 @@ class ChunkEmbedding(Base):
             ondelete="CASCADE",
         ),
         Index("idx_chunk_embeddings_run_id", "run_id"),
+        Index(
+            "idx_chunk_embeddings_vector",
+            "embedding_vector",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding_vector": "vector_cosine_ops"},
+        ),
     )
 
     def __repr__(self) -> str:

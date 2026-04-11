@@ -12,12 +12,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import bindparam, delete, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.storage.models import Chunk, ChunkEmbedding
@@ -47,7 +46,7 @@ def insert_chunk_embeddings(
         rows.append({
             "chunk_id": chunk_id,
             "run_id": run_id,
-            "embedding_vector": json.dumps(embedding_vector),
+            "embedding_vector": embedding_vector,
             "created_at": created_at,
         })
 
@@ -106,8 +105,8 @@ def get_chunk_embedding(
         ChunkEmbedding.chunk_id == chunk_id,
     )
     result = session.execute(stmt).scalar_one_or_none()
-    if result:
-        return json.loads(result)
+    if result is not None:
+        return list(result)
     return None
 
 
@@ -133,39 +132,29 @@ def search_similar_chunks(
     Returns:
         相似 chunk 列表，每个元素包含 chunk_id, similarity, text
     """
-    query_vector_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
-
-    exclude_clause = ""
+    similarity = (1 - ChunkEmbedding.embedding_vector.cosine_distance(query_embedding)).label("similarity")
+    stmt = (
+        select(
+            ChunkEmbedding.chunk_id,
+            Chunk.text,
+            similarity,
+        )
+        .join(
+            Chunk,
+            (ChunkEmbedding.chunk_id == Chunk.chunk_id) & (ChunkEmbedding.run_id == Chunk.run_id),
+        )
+        .where(
+            ChunkEmbedding.run_id == run_id,
+            ChunkEmbedding.embedding_vector.is_not(None),
+            similarity >= similarity_threshold,
+        )
+        .order_by(similarity.desc())
+        .limit(top_k)
+    )
     if exclude_chunk_ids:
-        exclude_clause = "AND ce.chunk_id NOT IN :exclude_chunk_ids"
+        stmt = stmt.where(ChunkEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
 
-    sql = text(f"""
-        SELECT
-            ce.chunk_id,
-            c.text,
-            1 - (ce.embedding_vector::vector <=> :query_vector::vector) as similarity
-        FROM chunk_embeddings ce
-        JOIN chunks c ON ce.chunk_id = c.chunk_id AND ce.run_id = c.run_id
-        WHERE ce.run_id = :run_id
-        AND ce.embedding_vector IS NOT NULL
-        AND 1 - (ce.embedding_vector::vector <=> :query_vector::vector) >= :threshold
-        {exclude_clause}
-        ORDER BY similarity DESC
-        LIMIT :limit
-    """)
-    if exclude_chunk_ids:
-        sql = sql.bindparams(bindparam("exclude_chunk_ids", expanding=True))
-
-    params = {
-        "run_id": run_id,
-        "query_vector": query_vector_str,
-        "threshold": similarity_threshold,
-        "limit": top_k,
-    }
-    if exclude_chunk_ids:
-        params["exclude_chunk_ids"] = list(exclude_chunk_ids)
-
-    result = session.execute(sql, params)
+    result = session.execute(stmt)
     rows = result.fetchall()
 
     return [

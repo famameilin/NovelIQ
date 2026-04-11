@@ -42,7 +42,8 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2
+      "max_retries": 2,
+      "embedding_dim": 1536
     },
     "full_disambig": {
       "base_url": null,
