@@ -21,7 +21,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -30,7 +30,7 @@ import numpy as np
 from src.models.local.embedding import EmbeddingClient
 
 
-class TestEmbeddingClient(unittest.TestCase):
+class TestEmbeddingClient(unittest.IsolatedAsyncioTestCase):
     def test_compute_similarity_identical_vectors(self) -> None:
         vec = [1.0, 2.0, 3.0]
         similarity = EmbeddingClient.compute_similarity(vec, vec)
@@ -75,9 +75,14 @@ class TestEmbeddingClient(unittest.TestCase):
         mock_response.usage = MagicMock()
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.total_tokens = 20
-        mock_client.embeddings.create.return_value = mock_response
+        mock_client.embeddings.create = AsyncMock(return_value=mock_response)
 
-        client = EmbeddingClient(base_url="http://test", model="test-model", api_key="test-key")
+        client = EmbeddingClient(
+            base_url="http://test",
+            model="test-model",
+            api_key="test-key",
+            embedding_dim=3,
+        )
         result = await client.get_embedding("测试文本")
 
         self.assertEqual(result, [0.1, 0.2, 0.3])
@@ -93,6 +98,26 @@ class TestEmbeddingClient(unittest.TestCase):
 
         self.assertEqual(result, [])
         mock_client.embeddings.create.assert_not_called()
+
+    @patch("src.models.local.embedding.AsyncOpenAI")
+    async def test_get_embedding_raises_on_dimension_mismatch(self, mock_openai: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
+        mock_response.usage = None
+        mock_client.embeddings.create = AsyncMock(return_value=mock_response)
+
+        client = EmbeddingClient(
+            base_url="http://test",
+            model="test-model",
+            api_key="test-key",
+            embedding_dim=4,
+        )
+
+        with self.assertRaisesRegex(ValueError, "embedding dimension mismatch"):
+            await client.get_embedding("测试文本")
 
 
 if __name__ == "__main__":

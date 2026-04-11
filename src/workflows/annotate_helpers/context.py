@@ -208,6 +208,7 @@ async def _prepare_chunk_context_with_level3(
 
     if disambig_provider:
         names_in_chunk = _extract_names_from_text(chunk_text)
+        await disambig_provider.ensure_level3_ready()
         if disambig_provider.is_level3_available():
             context.disambig_context_str = await disambig_provider.build_disambig_context_with_level3(
                 names_in_chunk,

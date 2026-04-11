@@ -111,6 +111,7 @@ class TestLevel3VectorEvidenceAsync:
     async def test_search_similar_chunks_success(self, mock_search: MagicMock) -> None:
         """成功检索相似 chunk"""
         mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
         mock_client.get_embedding = AsyncMock(return_value=[0.1] * 1536)
         mock_session = MagicMock()
 
@@ -118,7 +119,10 @@ class TestLevel3VectorEvidenceAsync:
             {"chunk_id": 1, "text": "相似文本", "similarity": 0.9},
         ]
 
-        with patch("src.storage.repositories.chunk.has_embeddings", return_value=True):
+        with (
+            patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.vector_schema.ensure_chunk_embeddings_schema"),
+        ):
             level3 = Level3VectorEvidence(
                 session=mock_session,
                 run_id="test-run-id",
@@ -134,16 +138,32 @@ class TestLevel3VectorEvidenceAsync:
     async def test_search_similar_chunks_empty_query(self, mock_has: MagicMock) -> None:
         """空查询返回空列表"""
         mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
         mock_session = MagicMock()
 
+        with patch("src.storage.vector_schema.ensure_chunk_embeddings_schema"):
+            level3 = Level3VectorEvidence(
+                session=mock_session,
+                run_id="test-run-id",
+                embedding_client=mock_client,
+            )
+            results = await level3.search_similar_chunks("")
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_ensure_level3_ready_fails_on_dimension_mismatch(self) -> None:
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
+        mock_session = MagicMock()
         level3 = Level3VectorEvidence(
             session=mock_session,
             run_id="test-run-id",
             embedding_client=mock_client,
         )
-        results = await level3.search_similar_chunks("")
 
-        assert results == []
+        with pytest.raises(ValueError, match="dimension mismatch"):
+            await level3.ensure_level3_ready()
 
 
 class TestDisambigContextProviderLevel3(unittest.TestCase):
