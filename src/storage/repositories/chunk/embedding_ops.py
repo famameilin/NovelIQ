@@ -17,7 +17,7 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.orm import Session
 
 from src.storage.models import Chunk, ChunkEmbedding
@@ -135,7 +135,11 @@ def search_similar_chunks(
     """
     query_vector_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
 
-    sql = text("""
+    exclude_clause = ""
+    if exclude_chunk_ids:
+        exclude_clause = "AND ce.chunk_id NOT IN :exclude_chunk_ids"
+
+    sql = text(f"""
         SELECT
             ce.chunk_id,
             c.text,
@@ -145,9 +149,12 @@ def search_similar_chunks(
         WHERE ce.run_id = :run_id
         AND ce.embedding_vector IS NOT NULL
         AND 1 - (ce.embedding_vector::vector <=> :query_vector::vector) >= :threshold
+        {exclude_clause}
         ORDER BY similarity DESC
         LIMIT :limit
     """)
+    if exclude_chunk_ids:
+        sql = sql.bindparams(bindparam("exclude_chunk_ids", expanding=True))
 
     params = {
         "run_id": run_id,
@@ -155,22 +162,20 @@ def search_similar_chunks(
         "threshold": similarity_threshold,
         "limit": top_k,
     }
+    if exclude_chunk_ids:
+        params["exclude_chunk_ids"] = list(exclude_chunk_ids)
 
     result = session.execute(sql, params)
     rows = result.fetchall()
 
-    results = []
-    for row in rows:
-        chunk_id = row[0]
-        if exclude_chunk_ids and chunk_id in exclude_chunk_ids:
-            continue
-        results.append({
-            "chunk_id": chunk_id,
+    return [
+        {
+            "chunk_id": row[0],
             "text": row[1],
             "similarity": float(row[2]),
-        })
-
-    return results
+        }
+        for row in rows
+    ]
 
 
 def has_embeddings(session: Session, run_id: str) -> bool:
