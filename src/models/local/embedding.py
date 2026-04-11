@@ -59,6 +59,7 @@ class EmbeddingClient:
         api_key: str | None = None,
         timeout_s: float | None = None,
         max_retries: int | None = None,
+        embedding_dim: int | None = None,
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
     ) -> None:
@@ -73,6 +74,7 @@ class EmbeddingClient:
                 )
             self._timeout_s = timeout_s if timeout_s is not None else semantic_config.timeout_s
             self._max_retries = max_retries if max_retries is not None else semantic_config.max_retries
+            self._embedding_dim = embedding_dim if embedding_dim is not None else semantic_config.embedding_dim
         else:
             self._base_url = base_url
             self._model = model
@@ -83,6 +85,10 @@ class EmbeddingClient:
                 )
             self._timeout_s = timeout_s
             self._max_retries = max_retries if max_retries is not None else 2
+            self._embedding_dim = embedding_dim if embedding_dim is not None else settings.models.semantic_chunking.embedding_dim
+
+        if self._embedding_dim <= 0:
+            raise ValueError(f"embedding dimension must be positive, got {self._embedding_dim}")
 
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
@@ -187,6 +193,7 @@ class EmbeddingClient:
             )
 
             embedding = response.data[0].embedding
+            self._validate_embedding_dimension(embedding)
 
             if self._token_usage_callback and response.usage:
                 self._token_usage_callback(
@@ -244,6 +251,26 @@ class EmbeddingClient:
                 str(e),
             )
             raise
+
+    async def detect_embedding_dimension(self, probe_text: str = "dimension probe") -> int:
+        if not self._model:
+            raise ValueError("embedding model is required")
+
+        response = await self._client.embeddings.create(
+            model=self._model,
+            input=probe_text,
+            encoding_format="float",
+        )
+        embedding = response.data[0].embedding
+        return len(embedding)
+
+    def _validate_embedding_dimension(self, embedding: list[float]) -> None:
+        actual_dim = len(embedding)
+        if actual_dim != self._embedding_dim:
+            raise ValueError(
+                f"embedding dimension mismatch: expected {self._embedding_dim}, got {actual_dim} "
+                f"(model={self._model})"
+            )
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """

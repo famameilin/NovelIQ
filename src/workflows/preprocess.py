@@ -20,6 +20,11 @@
 修改者: TraeAI
 任务: 重构其他 workflow 为 async
 修改内容: run_preprocess 改为 async def，所有内部调用改为 await
+
+修改时间: 2026-04-10
+修改者: TraeAI
+任务: implement-level3-vector-retrieval
+修改内容: 添加 chunk embedding 生成功能
 """
 
 from __future__ import annotations
@@ -34,10 +39,12 @@ from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
 from src.chunking.chunker import chunk_documents
+from src.config import settings
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import ChunkRepository, ChunkStyleData
+from src.storage.vector_schema import ensure_chunk_embeddings_schema
 
 
 async def run_preprocess(
@@ -107,9 +114,6 @@ async def run_preprocess(
         normalized = normalize_text(doc.text)
         normalized_texts.append(normalized)
 
-    # 从配置读取是否启用语义分块
-    from src.config import settings
-
     use_semantic = settings.chunking.use_semantic_chunking
     if use_semantic:
         logger.info("启用语义分块")
@@ -151,6 +155,10 @@ async def run_preprocess(
     chunk_repo.insert_chunk_style(run_id, style_rows)
     chunk_repo.insert_chunk_culture(run_id, culture_rows)
 
+    if settings.rag.embedding_enabled and settings.rag.level3_enabled:
+        logger.info("generating chunk embeddings for Level 3 vector retrieval")
+        await _generate_chunk_embeddings(session, run_id, all_chunks, emitter=emitter)
+
     elapsed = time.time() - start_time
     logger.info(f"preprocess completed chunks={total_chunks} chars={total_chars} time={elapsed:.2f}s")
     logger.info("\n=== Preprocess Statistics ===")
@@ -164,3 +172,96 @@ async def run_preprocess(
         )
 
     return total_chunks, total_chars, elapsed
+
+
+async def _generate_chunk_embeddings(
+    session: Session,
+    run_id: str,
+    all_chunks: list,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+) -> int:
+    """
+    为所有 chunk 生成 embedding 并存入数据库
+
+    创建时间: 2026-04-10
+    创建者: TraeAI
+    任务: implement-level3-vector-retrieval
+    说明: 为 Level 3 向量检索生成 chunk embedding
+
+    Args:
+        session: 数据库连接
+        run_id: 运行ID
+        all_chunks: chunk 列表
+        emitter: 事件发射器
+
+    Returns:
+        生成的 embedding 数量
+    """
+    from src.models.local.embedding import EmbeddingClient
+    from src.storage.repositories.chunk import insert_chunk_embeddings
+
+    try:
+        embedding_client = EmbeddingClient()
+    except ValueError as e:
+        logger.warning(f"EmbeddingClient initialization failed, skipping embedding generation: {e}")
+        return 0
+
+    expected_dim = settings.models.semantic_chunking.embedding_dim
+    actual_dim = await embedding_client.detect_embedding_dimension()
+    if actual_dim != expected_dim:
+        raise ValueError(
+            f"Level 3 embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}"
+        )
+
+    ensure_chunk_embeddings_schema(session, expected_dim)
+
+    total_chunks = len(all_chunks)
+    if emitter:
+        await emitter(
+            StreamEvent(
+                action="start",
+                stage="preprocess",
+                message="生成向量嵌入",
+                sub_percent=0.0,
+            )
+        )
+
+    embeddings: list[tuple[int, list[float]]] = []
+    for idx, chunk in enumerate(all_chunks):
+        chunk_id = chunk.index
+        if total_chunks > 1 and idx % 10 == 0:
+            logger.info(f"Generating embedding for chunk {idx + 1}/{total_chunks}")
+            if emitter:
+                sub_percent = (idx / total_chunks) * 100
+                await emitter(
+                    StreamEvent(
+                        action="progress",
+                        stage="preprocess",
+                        message=f"生成向量嵌入 {idx + 1}/{total_chunks}",
+                        sub_percent=sub_percent,
+                    )
+                )
+
+        try:
+            embedding = await embedding_client.get_embedding(chunk.text, chunk_id=chunk_id)
+            if embedding:
+                embeddings.append((chunk_id, embedding))
+        except Exception as e:
+            logger.warning(f"Failed to generate embedding for chunk {chunk_id}: {e}")
+            continue
+
+    if embeddings:
+        insert_chunk_embeddings(session, run_id, embeddings)
+        logger.info(f"inserted {len(embeddings)} chunk embeddings into db (run_id={run_id})")
+
+    if emitter:
+        await emitter(
+            StreamEvent(
+                action="complete",
+                stage="preprocess",
+                message="向量嵌入生成完成",
+                sub_percent=100.0,
+            )
+        )
+
+    return len(embeddings)

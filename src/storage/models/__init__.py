@@ -35,6 +35,7 @@ from src.storage.models.annotation import (
 )
 from src.storage.models.base import Base
 from src.storage.models.chunk import Chunk, ChunkStyle, ChunkTopic
+from src.storage.models.chunk_embedding import EMBEDDING_DIM, ChunkEmbedding
 from src.storage.models.core import AnalysisRun, DisambigCheckpoint
 from src.storage.models.graph import (
     GraphEntity,
@@ -54,6 +55,8 @@ __all__ = [
     "Chunk",
     "ChunkStyle",
     "ChunkTopic",
+    "ChunkEmbedding",
+    "EMBEDDING_DIM",
     "ChunkAnnotation",
     "ChunkCharacter",
     "ChunkRelation",
