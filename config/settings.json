@@ -249,6 +249,7 @@
     "top_k": 3,
     "level1_enabled": true,
     "level2_enabled": true,
-    "level3_enabled": true
+    "level3_enabled": true,
+    "level3_top_k": 5
   }
 }
