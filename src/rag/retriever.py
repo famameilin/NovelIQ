@@ -277,6 +277,8 @@ class DisambigContextProvider:
         lookback_chunks: int = 10,
         session: Session | None = None,
         embedding_client: EmbeddingClient | None = None,
+        level1_enabled: bool = True,
+        level2_enabled: bool = True,
         level3_enabled: bool = True,
         similarity_threshold: float = 0.7,
         level3_top_k: int = 5,
@@ -300,6 +302,8 @@ class DisambigContextProvider:
         self._run_id = run_id
         self._lookback_chunks = lookback_chunks
         self._relations_cache: list[dict] | None = None
+        self._level1_enabled = level1_enabled
+        self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
@@ -329,15 +333,16 @@ class DisambigContextProvider:
         logger.debug(f"DisambigContextProvider retrieve: alias='{alias}', chunk={current_chunk}")
         result = DisambigResult()
 
-        canonical = self._alias_lookup.query(alias)
-        if canonical:
-            result.level1_hit = True
-            result.canonical_name = canonical
-            result.used_levels.append(1)
-            logger.debug(f"DisambigContextProvider: Level1 hit, canonical='{canonical}'")
-            return result
+        if self._level1_enabled:
+            canonical = self._alias_lookup.query(alias)
+            if canonical:
+                result.level1_hit = True
+                result.canonical_name = canonical
+                result.used_levels.append(1)
+                logger.debug(f"DisambigContextProvider: Level1 hit, canonical='{canonical}'")
+                return result
 
-        if current_chunk is not None:
+        if self._level2_enabled and current_chunk is not None:
             candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
             if candidates:
                 result.level2_candidates = candidates
