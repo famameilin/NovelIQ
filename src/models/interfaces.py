@@ -28,6 +28,7 @@ from src.api.models.events import StreamEvent
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.annotation import MultiPhaseAnnotationResult
 from src.models.local.disambiguation import ExtendedDisambigResult
+from src.rag import EvidenceBundle
 
 
 @runtime_checkable
@@ -53,6 +54,7 @@ class AnnotationLike(Protocol):
         cloud_client: AnnotationLike | None = None,
         run_id: str | None = None,
         disambig_context: str | None = None,
+        evidence_bundle: EvidenceBundle | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> MultiPhaseAnnotationResult: ...
 
