@@ -13,6 +13,16 @@
 修改内容: 重新导出 Level3VectorEvidence
 """
 
+from src.rag.authority import Level1AuthorityProvider
+from src.rag.evidence_types import (
+    AliasMapping,
+    CanonicalEntity,
+    ConfirmedRelation,
+    EntityTypeFact,
+    EvidenceBundle,
+    EvidenceItem,
+    Level1AuthoritySnapshot,
+)
 from src.rag.retriever import (
     ActiveEntityLookup,
     AliasLookup,
@@ -27,6 +37,14 @@ __all__ = [
     "DisambigResult",
     "AliasLookup",
     "ActiveEntityLookup",
+    "AliasMapping",
+    "CanonicalEntity",
+    "ConfirmedRelation",
+    "EntityTypeFact",
+    "EvidenceBundle",
+    "EvidenceItem",
+    "Level1AuthoritySnapshot",
+    "Level1AuthorityProvider",
     "Level3NotReadyError",
     "Level3VectorEvidence",
 ]
