@@ -4,11 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.rag import Level3NotReadyError
-from src.workflows.annotate_helpers.phase import (
-    AnnotationPhaseConfig,
-    _init_annotation_phase_with_config,
-    _process_single_chunk,
-)
+from src.workflows.annotate_helpers.phase import AnnotationPhaseConfig
+from src.workflows.annotate_helpers.phase import _init_annotation_phase_with_config
+from src.workflows.annotate_helpers.phase import _process_single_chunk
 
 
 @pytest.mark.asyncio
@@ -28,8 +26,8 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     )
     context = SimpleNamespace(
         active_entities_str="active-entities",
-        disambig_context_str=None,
-        evidence_bundle="bundle",
+        disambig_context_str="vector-evidence",
+        evidence_bundle={"structured_evidence": ["authority"]},
     )
     annotation_result = SimpleNamespace(
         annotation={"entities": []},
@@ -73,8 +71,8 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     assert result is next_state
     mock_prepare_context.assert_awaited_once()
     mock_annotate_chunk.assert_awaited_once()
-    assert mock_annotate_chunk.await_args.kwargs["disambig_context"] is None
-    assert mock_annotate_chunk.await_args.kwargs["evidence_bundle"] == "bundle"
+    assert mock_annotate_chunk.await_args.kwargs["disambig_context"] == "vector-evidence"
+    assert mock_annotate_chunk.await_args.kwargs["evidence_bundle"] == {"structured_evidence": ["authority"]}
     mock_store_results.assert_called_once()
     mock_run_disambig.assert_awaited_once()
 

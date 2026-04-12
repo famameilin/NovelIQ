@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
-from src.models.local.disambiguation import build_existing_character_hint
+from src.models.local.disambiguation import build_existing_character_hint, render_graph_feedback_hint
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
@@ -174,10 +174,10 @@ def _augment_hint_with_graph(
     这形成了从图谱表回到消歧的反馈循环，
     让 LLM 能看到已解析的别名映射和已确认的关系。
 
-    委托给 DisambigContextProvider.build_graph_feedback_hint() 执行，
-    避免重复图谱查询逻辑。
+    图谱事实通过 EvidenceBundle 收集，再由 disambiguation renderer 渲染。
     """
-    return disambig_provider.build_graph_feedback_hint(existing_names, base_hint=hint)
+    bundle = disambig_provider.collect_evidence(names_in_chunk=existing_names, current_chunk=None)
+    return render_graph_feedback_hint(bundle, existing_names, base_hint=hint)
 
 
 def _build_existing_character_hint_from_db(

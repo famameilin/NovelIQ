@@ -12,8 +12,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
 from src.models.local.prompts import (
     FEW_SHOT_EXAMPLES_V2,
     FORESHADOWING_EXAMPLES,
@@ -23,10 +22,38 @@ from src.models.local.prompts import (
     SYSTEM_PROMPT_V2,
     USER_TEMPLATE_V2,
 )
-from src.models.local.annotation.evidence_renderer import render_annotation_evidence_blocks
 
-if TYPE_CHECKING:
-    from src.rag import EvidenceBundle
+
+def _render_alias_map_text(
+    alias_map: dict[str, str] | None = None,
+    evidence_bundle=None,
+) -> str:
+    alias_rows: list[tuple[str, str]] = []
+
+    if alias_map:
+        alias_rows.extend(alias_map.items())
+    elif evidence_bundle is not None and evidence_bundle.level1_snapshot is not None:
+        alias_rows.extend(
+            (mapping.alias, mapping.canonical)
+            for mapping in evidence_bundle.level1_snapshot.alias_mappings
+        )
+
+    canonical_to_aliases: dict[str, list[str]] = {}
+    for alias, canonical in alias_rows:
+        if not alias or not canonical or alias == canonical:
+            continue
+        canonical_to_aliases.setdefault(canonical, [])
+        if alias not in canonical_to_aliases[canonical]:
+            canonical_to_aliases[canonical].append(alias)
+
+    if not canonical_to_aliases:
+        return "{}"
+
+    lines = []
+    for canonical, aliases in canonical_to_aliases.items():
+        alias_str = "、".join(aliases)
+        lines.append(f"- {alias_str} → {canonical}")
+    return "\n".join(lines)
 
 
 def _build_annotation_messages_v2(
@@ -39,7 +66,7 @@ def _build_annotation_messages_v2(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     disambig_context: str | None = None,
-    evidence_bundle: EvidenceBundle | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建第一次调用（基础标注）的messages
@@ -64,18 +91,14 @@ def _build_annotation_messages_v2(
         messages.append({"role": "user", "content": example["user"]})
         messages.append({"role": "assistant", "content": example["assistant"]})
 
-    alias_map_str = "{}"
-    if alias_map:
-        canonical_to_aliases: dict[str, list[str]] = {}
-        for alias, canonical in alias_map.items():
-            if canonical not in canonical_to_aliases:
-                canonical_to_aliases[canonical] = []
-            canonical_to_aliases[canonical].append(alias)
-        lines = []
-        for canonical, aliases in canonical_to_aliases.items():
-            alias_str = "、".join(aliases)
-            lines.append(f"- {alias_str} → {canonical}")
-        alias_map_str = "\n".join(lines)
+    alias_map_str = _render_alias_map_text(alias_map=alias_map, evidence_bundle=evidence_bundle)
+
+    if evidence_bundle is not None:
+        blocks = render_annotation_prompt_blocks(evidence_bundle)
+        if active_entities is None:
+            active_entities = blocks.active_entities
+        if disambig_context is None:
+            disambig_context = blocks.disambig_context
 
     active_entities_str = active_entities or "[]"
 
@@ -94,10 +117,7 @@ def _build_annotation_messages_v2(
     if chunk_id is not None:
         user_content += f"\n\n<Current_Chunk_ID>{chunk_id}</Current_Chunk_ID>"
 
-    if evidence_bundle is not None:
-        for block in render_annotation_evidence_blocks(evidence_bundle):
-            user_content += f"\n\n{block}"
-    elif disambig_context:
+    if disambig_context:
         user_content += f"\n\n{disambig_context}"
 
     messages.append({"role": "user", "content": user_content})

@@ -22,7 +22,6 @@ from src.models.local.annotation.messages import (
     _build_foreshadowing_messages,
 )
 from src.models.local.parser import parse_active_entities
-from src.rag import EvidenceBundle
 
 
 def build_phase1_messages(
@@ -35,7 +34,7 @@ def build_phase1_messages(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     disambig_context: str | None = None,
-    evidence_bundle: EvidenceBundle | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建Phase1消息

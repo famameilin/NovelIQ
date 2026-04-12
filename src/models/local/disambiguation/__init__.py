@@ -16,6 +16,11 @@ from __future__ import annotations
 
 from .api_call import call_disambiguate_api
 from .evidence import EvidenceProfile, build_evidence_profile, format_evidence_profile
+from .evidence_renderer import (
+    render_disambig_candidates,
+    render_disambig_prompt_context,
+    render_graph_feedback_hint,
+)
 from .logging import (
     log_disambiguate_response,
     log_disambiguate_result,
@@ -41,6 +46,9 @@ __all__ = [
     "build_evidence_profile",
     "format_evidence_profile",
     "EvidenceProfile",
+    "render_disambig_candidates",
+    "render_disambig_prompt_context",
+    "render_graph_feedback_hint",
     # result_builder
     "build_result_from_response",
     "build_extended_result_from_response",
