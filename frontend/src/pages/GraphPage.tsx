@@ -258,7 +258,7 @@ export function GraphPage() {
         </div>
 
         {/* 图谱区域 */}
-        <div className="relative flex-1 overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="relative min-h-[620px] flex-1 overflow-hidden rounded-lg border border-border bg-surface lg:min-h-[720px]">
           {isLoading ? (
             <div className="flex h-full min-h-[500px] w-full items-center justify-center">
               <div className="flex flex-col items-center gap-4">
@@ -290,7 +290,6 @@ export function GraphPage() {
               <ForceGraph
                 ref={forceGraphRef}
                 data={graphData!}
-                selectedNode={selectedNode}
                 onNodeClick={handleNodeClick}
                 searchQuery={searchQuery}
                 relationFilter={selectedRelationTypes}
