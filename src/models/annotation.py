@@ -31,6 +31,7 @@ from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.base import BaseModelClient, TokenUsageCallback
 from src.models.local.schema import ChunkAnnotation
+from src.rag import EvidenceBundle
 
 from .local.annotation import (
     AnnotationContext,
@@ -99,6 +100,7 @@ class AnnotationClient(BaseModelClient):
         run_id: str | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         disambig_context: str | None = None,
+        evidence_bundle: EvidenceBundle | None = None,
     ) -> MultiPhaseAnnotationResult:
         # 设置当前 emitter，供所有 phase 调用链使用
         self._emitter = emitter
@@ -111,6 +113,7 @@ class AnnotationClient(BaseModelClient):
             global_context=global_context,
             active_entities=active_entities,
             disambig_context=disambig_context,
+            evidence_bundle=evidence_bundle,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
@@ -128,6 +131,7 @@ class AnnotationClient(BaseModelClient):
             global_context=ctx.global_context,
             active_entities=ctx.active_entities,
             disambig_context=ctx.disambig_context,
+            evidence_bundle=ctx.evidence_bundle,
             novel_title=ctx.novel_title,
             main_characters=ctx.main_characters,
             position_pct=ctx.position_pct,
