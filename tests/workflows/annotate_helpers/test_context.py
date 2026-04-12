@@ -2,7 +2,7 @@
 创建时间: 2026-04-12
 创建者: TraeAI
 任务: 用户请求创建 ChunkContext 测试
-说明: 测试 ChunkContext.evidence_bundle 字段和 disambig_context_str 派生逻辑
+说明: 测试 ChunkContext.evidence_bundle 字段和遗留兼容字段
 """
 
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
@@ -58,7 +58,7 @@ def test_chunk_context_all_fields_default_none():
     assert context.evidence_bundle is None
 
 
-def test_chunk_context_disambig_context_str_derived_from_evidence_bundle():
+def test_chunk_context_keeps_legacy_fields_optional():
     bundle = EvidenceBundle(
         structured_evidence=[],
         local_evidence=[
@@ -76,53 +76,23 @@ def test_chunk_context_disambig_context_str_derived_from_evidence_bundle():
         ],
     )
 
-    blocks = bundle.to_prompt_blocks()
-
-    expected_disambig = (
-        "<Disambig_Candidates>\n"
-        "- 「张三」可能是：张三丰\n"
-        "- 「李四」可能是：李四郎\n"
-        "</Disambig_Candidates>"
-    )
-    assert blocks["disambig_candidates"] == expected_disambig
-
-    assert "<Vector_Evidence>" in blocks["vector_evidence"]
-    assert "[Chunk 42]" in blocks["vector_evidence"]
-
     context = ChunkContext(evidence_bundle=bundle)
-    disambig_parts = []
-    if blocks.get("disambig_candidates"):
-        disambig_parts.append(blocks["disambig_candidates"])
-    if blocks.get("vector_evidence"):
-        disambig_parts.append(blocks["vector_evidence"])
-    context.disambig_context_str = "\n\n".join(disambig_parts) if disambig_parts else None
-
-    assert context.disambig_context_str is not None
-    assert "<Disambig_Candidates>" in context.disambig_context_str
-    assert "<Vector_Evidence>" in context.disambig_context_str
+    assert context.evidence_bundle is bundle
+    assert context.disambig_context_str is None
 
 
-def test_chunk_context_disambig_context_str_empty_when_no_evidence():
+def test_chunk_context_allows_explicit_legacy_disambig_context():
     bundle = EvidenceBundle(
         structured_evidence=[],
         local_evidence=[],
         semantic_evidence=[],
     )
 
-    blocks = bundle.to_prompt_blocks()
-
-    assert blocks["disambig_candidates"] == ""
-    assert blocks["vector_evidence"] == ""
-
-    context = ChunkContext(evidence_bundle=bundle)
-    disambig_parts = []
-    if blocks.get("disambig_candidates"):
-        disambig_parts.append(blocks["disambig_candidates"])
-    if blocks.get("vector_evidence"):
-        disambig_parts.append(blocks["vector_evidence"])
-    context.disambig_context_str = "\n\n".join(disambig_parts) if disambig_parts else None
-
-    assert context.disambig_context_str is None
+    context = ChunkContext(
+        evidence_bundle=bundle,
+        disambig_context_str="<Legacy_Disambig />",
+    )
+    assert context.disambig_context_str == "<Legacy_Disambig />"
 
 
 def test_chunk_context_vector_evidence_str_deprecated():
