@@ -22,6 +22,7 @@ from loguru import logger
 
 from src.config import settings
 from src.config.schemas import ANNOTATION_CONFIG
+from src.rag.evidence_types import EvidenceBundle
 
 if TYPE_CHECKING:
     from src.rag import DisambigContextProvider
@@ -43,6 +44,19 @@ class ChunkContext:
     修改者: TraeAI
     任务: implement-level3-vector-retrieval
     修改内容: 添加 vector_evidence_str 字段
+
+    修改时间: 2026-04-12
+    修改者: TraeAI
+    任务: 用户请求添加 evidence_bundle 字段
+    修改内容: 添加 evidence_bundle 字段，用于存储结构化的证据数据
+
+    字段说明:
+        prev_chunk_text: 前一个 chunk 的文本
+        active_entities_str: 活跃实体字符串
+        disambig_context_str: 旧字符串兼容字段，主链路不再依赖
+        next_chunk_text: 下一个 chunk 的文本
+        vector_evidence_str: 旧向量证据兼容字段，主链路不再依赖
+        evidence_bundle: 结构化证据包，作为 annotation 主链路输入
     """
 
     def __init__(
@@ -52,12 +66,14 @@ class ChunkContext:
         disambig_context_str: str | None = None,
         next_chunk_text: str | None = None,
         vector_evidence_str: str | None = None,
+        evidence_bundle: EvidenceBundle | None = None,
     ) -> None:
         self.prev_chunk_text = prev_chunk_text
         self.active_entities_str = active_entities_str
         self.disambig_context_str = disambig_context_str
         self.next_chunk_text = next_chunk_text
         self.vector_evidence_str = vector_evidence_str
+        self.evidence_bundle = evidence_bundle
 
 
 def _init_disambig_provider(
@@ -162,9 +178,7 @@ def _prepare_chunk_context(
 
     if disambig_provider:
         names_in_chunk = _extract_names_from_text(chunk_text)
-        context.disambig_context_str = disambig_provider.build_disambig_context(
-            names_in_chunk, current_chunk=chunk_id
-        )
+        context.evidence_bundle = disambig_provider.collect_evidence(names_in_chunk, current_chunk=chunk_id)
 
     return context
 
@@ -184,6 +198,11 @@ async def _prepare_chunk_context_with_level3(
     创建者: TraeAI
     任务: implement-level3-vector-retrieval
     说明: 异步版本，支持 Level 3 向量检索
+
+    修改时间: 2026-04-12
+    修改者: TraeAI
+    任务: 重构上下文准备逻辑
+    修改内容: 使用 collect_evidence_async() 获取结构化证据，作为 annotation 主链路输入
     """
     from src.context import format_entities_for_prompt, get_active_entities
     from src.storage.repositories import ChunkRepository, GraphRepository
@@ -214,21 +233,21 @@ async def _prepare_chunk_context_with_level3(
         if disambig_provider.requires_level3():
             if not disambig_provider.is_level3_available():
                 raise RuntimeError("Level 3 vector retrieval is required but not available")
-            context.disambig_context_str = await disambig_provider.build_disambig_context_with_level3(
+            context.evidence_bundle = await disambig_provider.collect_evidence_async(
                 names_in_chunk,
                 current_chunk=chunk_id,
                 context_text=chunk_text,
                 exclude_chunk_ids=[chunk_id],
             )
         elif disambig_provider.is_level3_available():
-            context.disambig_context_str = await disambig_provider.build_disambig_context_with_level3(
+            context.evidence_bundle = await disambig_provider.collect_evidence_async(
                 names_in_chunk,
                 current_chunk=chunk_id,
                 context_text=chunk_text,
                 exclude_chunk_ids=[chunk_id],
             )
         else:
-            context.disambig_context_str = disambig_provider.build_disambig_context(
+            context.evidence_bundle = disambig_provider.collect_evidence(
                 names_in_chunk, current_chunk=chunk_id
             )
 
