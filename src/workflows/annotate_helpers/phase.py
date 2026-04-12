@@ -26,7 +26,6 @@ from src.config import settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.interfaces import AnnotationLike, DisambiguationLike
 from src.models.local.disambiguation import DisambiguationState
-from src.rag import EvidenceBundle
 
 if TYPE_CHECKING:
     from src.models.local.annotation import MultiPhaseAnnotationResult
@@ -66,11 +65,11 @@ async def _annotate_chunk(
     chunk_id: int | None = None,
     global_context: str | None = None,
     active_entities: str | None = None,
+    evidence_bundle: Any | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
-    evidence_bundle: EvidenceBundle | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     Chunk 标注函数
@@ -111,11 +110,11 @@ async def _annotate_chunk(
             chunk_id=chunk_id,
             global_context=global_context,
             active_entities=active_entities,
+            evidence_bundle=evidence_bundle,
             cloud_client=cloud_client,
             run_id=run_id,
             emitter=emitter,
             disambig_context=disambig_context,
-            evidence_bundle=evidence_bundle,
         )
     except Exception as e:
         logger.error(f"chunk annotation failed for chunk_id={chunk_id}: {str(e)}")
@@ -346,8 +345,8 @@ async def _process_single_chunk(
         chunk_id=chunk_id,
         global_context=phase_result.global_context_str,
         active_entities=ctx.active_entities_str,
-        disambig_context=ctx.disambig_context_str,
         evidence_bundle=ctx.evidence_bundle,
+        disambig_context=ctx.disambig_context_str,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
         emitter=phase_result.emitter,
@@ -447,7 +446,6 @@ async def _process_chunks_phase(
     # 发送 annotate 阶段的 total 信息，让前端知道总 chunk 数
     # 注意：不传 percent，让 stage 级别的起始 percent 保持有效
     if emitter and total_chunks > 0:
-        remaining_chunks = total_chunks - already_annotated
         await emitter(
             StreamEvent(
                 action="progress",
@@ -455,7 +453,7 @@ async def _process_chunks_phase(
                 current=already_annotated,
                 total=total_chunks,
                 sub_percent=(already_annotated / total_chunks) * 100 if total_chunks > 0 else 0.0,
-                message=f"共 {total_chunks} 个 chunk，{already_annotated} 个已标注，剩余 {remaining_chunks} 个待标注",
+                message=f"共 {total_chunks} 个 chunk，{already_annotated} 个已标注，剩余 {total_chunks - already_annotated} 个待标注",
             )
         )
 

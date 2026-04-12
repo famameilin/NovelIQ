@@ -35,7 +35,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
-from src.rag.evidence_types import EvidenceBundle, EvidenceItem
+from src.rag.authority import Level1AuthorityProvider
+from src.rag.evidence_types import EvidenceBundle, EvidenceItem, Level1AuthoritySnapshot
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -341,6 +342,10 @@ class DisambigContextProvider:
         self._run_id = run_id
         self._lookback_chunks = lookback_chunks
         self._relations_cache: list[dict] | None = None
+        self._authority_snapshot_cache: Level1AuthoritySnapshot | None = None
+        self._authority_provider = (
+            Level1AuthorityProvider(graph_repo) if graph_repo is not None and run_id is not None else None
+        )
         self._level1_enabled = level1_enabled
         self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
@@ -358,6 +363,155 @@ class DisambigContextProvider:
         """别名映射和关系缓存失效（每个 chunk 处理后调用，因为 projection 可能更新了别名表）"""
         self._alias_lookup.invalidate_cache()
         self._relations_cache = None
+        self._authority_snapshot_cache = None
+
+    def _get_authority_snapshot(self) -> Level1AuthoritySnapshot:
+        if not self._level1_enabled or self._authority_provider is None or self._run_id is None:
+            return Level1AuthoritySnapshot()
+        if self._authority_snapshot_cache is None:
+            self._authority_snapshot_cache = self._authority_provider.build_snapshot(self._run_id)
+        return self._authority_snapshot_cache
+
+    def _build_structured_evidence(self, names_in_chunk: list[str] | None = None) -> EvidenceBundle:
+        snapshot = self._get_authority_snapshot()
+        requested_names = [name for name in (names_in_chunk or []) if name]
+        relevant_names = set(requested_names)
+        if relevant_names:
+            related_canonicals = {mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names}
+            relevant_names |= related_canonicals
+
+        structured_evidence: list[EvidenceItem] = []
+
+        alias_mappings = snapshot.alias_mappings
+        if relevant_names:
+            alias_mappings = [
+                mapping
+                for mapping in snapshot.alias_mappings
+                if mapping.alias in relevant_names or mapping.canonical in relevant_names
+            ]
+        for mapping in alias_mappings:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="alias_mapping",
+                    source=mapping.source,
+                    content=f"{mapping.alias} → {mapping.canonical}",
+                    metadata={
+                        "alias": mapping.alias,
+                        "canonical": mapping.canonical,
+                        "confidence": mapping.confidence,
+                    },
+                )
+            )
+
+        canonical_entities = snapshot.canonical_entities
+        if relevant_names:
+            canonical_entities = [entity for entity in snapshot.canonical_entities if entity.name in relevant_names]
+        for entity in canonical_entities:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="canonical_entity",
+                    source=entity.source,
+                    content=entity.name,
+                    metadata={"name": entity.name, "entity_type": entity.entity_type},
+                )
+            )
+
+        relations = snapshot.confirmed_relations
+        if relevant_names:
+            relations = [
+                relation
+                for relation in snapshot.confirmed_relations
+                if relation.from_name in relevant_names or relation.to_name in relevant_names
+            ]
+        for relation in relations:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="confirmed_relation",
+                    source=relation.source,
+                    content=f"{relation.from_name}<{relation.relation_type}>{relation.to_name}",
+                    metadata={
+                        "from_name": relation.from_name,
+                        "to_name": relation.to_name,
+                        "relation_type": relation.relation_type,
+                        "is_active": relation.is_active,
+                        "first_seen_chunk": relation.first_seen_chunk,
+                        "last_seen_chunk": relation.last_seen_chunk,
+                        "support_count": relation.support_count,
+                        "latest_event_id": relation.latest_event_id,
+                    },
+                )
+            )
+
+        entity_types = snapshot.entity_types
+        if relevant_names:
+            entity_types = [item for item in snapshot.entity_types if item.name in relevant_names]
+        for item in entity_types:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="entity_type",
+                    source=item.source,
+                    content=f"{item.name}:{item.entity_type}",
+                    metadata={"name": item.name, "entity_type": item.entity_type},
+                )
+            )
+
+        return EvidenceBundle(
+            structured_evidence=structured_evidence,
+            requested_names=requested_names,
+            level1_snapshot=snapshot,
+        )
+
+    def collect_evidence(
+        self,
+        names_in_chunk: list[str] | None = None,
+        current_chunk: int | None = None,
+    ) -> EvidenceBundle:
+        bundle = self._build_structured_evidence(names_in_chunk=names_in_chunk)
+
+        if self._level2_enabled and current_chunk is not None:
+            candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
+            if self._graph_repo is not None and self._run_id is not None:
+                rows = self._graph_repo.fetch_active_entities(current_chunk, self._lookback_chunks, self._run_id)
+            else:
+                rows = [{"name": name} for name in candidates]
+
+            bundle.local_evidence.extend(
+                EvidenceItem(
+                    evidence_type="active_entity",
+                    source="graph_active_entities",
+                    content=str(row.get("name", "")),
+                    metadata=dict(row),
+                )
+                for row in rows
+            )
+
+        return bundle
+
+    async def collect_evidence_with_level3(
+        self,
+        names_in_chunk: list[str] | None = None,
+        current_chunk: int | None = None,
+        context_text: str | None = None,
+        exclude_chunk_ids: list[int] | None = None,
+    ) -> EvidenceBundle:
+        bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
+
+        if self._level3_enabled and context_text and self.is_level3_available():
+            level3_results = await self._level3.search_similar_chunks(
+                context_text,
+                exclude_chunk_ids=exclude_chunk_ids,
+            )
+            bundle.semantic_evidence.extend(
+                EvidenceItem(
+                    evidence_type="semantic_recall",
+                    source="chunk_embeddings",
+                    content=str(result.get("text", "")),
+                    metadata=dict(result),
+                )
+                for result in level3_results
+            )
+
+        return bundle
 
     def retrieve(
         self,
@@ -415,117 +569,6 @@ class DisambigContextProvider:
 
         return result
 
-    def collect_evidence(
-        self,
-        names_in_chunk: list[str],
-        current_chunk: int | None = None,
-        context_text: str | None = None,
-        exclude_chunk_ids: list[int] | None = None,
-    ) -> EvidenceBundle:
-        """
-        收集三层证据，返回结构化 EvidenceBundle。
-
-        创建时间: 2026-04-12
-        创建者: TraeAI
-        任务: 重构 DisambigContextProvider，实现证据收集方法
-        说明: 同步版本，仅处理 Level 1 和 Level 2
-
-        - structured_evidence: 来自 Level 1 的 alias 映射
-        - local_evidence: 来自 Level 2 的活跃实体候选
-        - semantic_evidence: 空（Level 3 需要异步调用）
-        """
-        structured_evidence: list[EvidenceItem] = []
-        local_evidence: list[EvidenceItem] = []
-        semantic_evidence: list[EvidenceItem] = []
-        level2_candidates: list[str] = []
-
-        if self._level2_enabled and current_chunk is not None:
-            level2_candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
-            if level2_candidates:
-                logger.debug(f"collect_evidence: Level2 candidates={level2_candidates[:5]}")
-
-        for name in names_in_chunk:
-            canonical_name: str | None = None
-            if self._level1_enabled:
-                canonical_name = self._alias_lookup.query(name)
-
-            if canonical_name:
-                item = EvidenceItem(
-                    evidence_type="alias_mapping",
-                    source="level1",
-                    content=f"{name} → {canonical_name}",
-                    confidence=1.0,
-                    metadata={"alias": name, "canonical": canonical_name},
-                )
-                structured_evidence.append(item)
-                logger.debug(f"collect_evidence: Level1 hit, {name} → {canonical_name}")
-
-            if level2_candidates:
-                candidates_str = "、".join(level2_candidates[:5])
-                item = EvidenceItem(
-                    evidence_type="disambig_candidate",
-                    source="level2",
-                    content=f"「{name}」可能是：{candidates_str}",
-                )
-                local_evidence.append(item)
-                logger.debug(f"collect_evidence: Level2 candidates for '{name}'")
-
-        return EvidenceBundle(
-            structured_evidence=structured_evidence,
-            local_evidence=local_evidence,
-            semantic_evidence=semantic_evidence,
-        )
-
-    async def collect_evidence_async(
-        self,
-        names_in_chunk: list[str],
-        current_chunk: int | None = None,
-        context_text: str | None = None,
-        exclude_chunk_ids: list[int] | None = None,
-    ) -> EvidenceBundle:
-        """
-        异步收集三层证据，返回结构化 EvidenceBundle。
-
-        创建时间: 2026-04-12
-        创建者: TraeAI
-        任务: 重构 DisambigContextProvider，实现证据收集方法
-        说明: 异步版本，处理 Level 1、Level 2 和 Level 3
-
-        - structured_evidence: 来自 Level 1 的 alias 映射
-        - local_evidence: 来自 Level 2 的活跃实体候选
-        - semantic_evidence: 来自 Level 3 的语义相似片段
-        """
-        bundle = self.collect_evidence(
-            names_in_chunk,
-            current_chunk=current_chunk,
-            context_text=context_text,
-            exclude_chunk_ids=exclude_chunk_ids,
-        )
-
-        if self._level3_enabled and context_text and self.is_level3_available():
-            level3_results = await self._level3.search_similar_chunks(
-                context_text,
-                exclude_chunk_ids=exclude_chunk_ids,
-            )
-            for r in level3_results:
-                text = r.get("text", "")
-                similarity = r.get("similarity", 0.0)
-                chunk_id = r.get("chunk_id")
-                if text:
-                    item = EvidenceItem(
-                        evidence_type="vector_evidence",
-                        source="level3",
-                        content=text,
-                        score=similarity,
-                        chunk_id=chunk_id,
-                    )
-                    bundle.semantic_evidence.append(item)
-
-            if level3_results:
-                logger.debug(f"collect_evidence_async: Level3 found {len(level3_results)} similar chunks")
-
-        return bundle
-
     def is_level3_available(self) -> bool:
         """检查 Level 3 是否可用"""
         return self._level3_enabled and self._level3.is_available()
@@ -545,30 +588,17 @@ class DisambigContextProvider:
     ) -> str:
         """对 chunk 中出现的名字逐个执行层级检索，生成消歧线索文本。
 
-        迁移说明:
-        - 这是旧字符串链路的兼容接口
-        - annotation 主链路应优先消费 collect_evidence() 返回的 EvidenceBundle
-        - 新代码不应再以该 helper 作为主数据入口
-
-        创建时间: 2025-03-12
-        创建者: TraeAI
-        任务: RAG 检索器实现
-
-        修改时间: 2026-04-12
-        修改者: TraeAI
-        任务: 重构 DisambigContextProvider
-        修改内容: 改为内部调用 collect_evidence() 并从 to_prompt_blocks() 派生
-
         - Level1 精确命中：直接追加到 alias_map，不生成额外线索
         - Level2 候选集：生成 <Disambig_Candidates> 供 LLM 参考
         - 未命中：不生成任何线索
         """
+        from src.models.local.disambiguation import render_disambig_prompt_context
+
         if not names_in_chunk:
             return ""
 
-        bundle = self.collect_evidence(names_in_chunk, current_chunk=current_chunk)
-        blocks = bundle.to_prompt_blocks()
-        return blocks.get("disambig_candidates", "")
+        bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
+        return render_disambig_prompt_context(bundle) or ""
 
     async def build_disambig_context_with_level3(
         self,
@@ -577,80 +607,24 @@ class DisambigContextProvider:
         context_text: str | None = None,
         exclude_chunk_ids: list[int] | None = None,
     ) -> str:
-        """异步版本的 build_disambig_context，支持 Level 3
+        """异步版本的 build_disambig_context，支持 Level 3"""
+        from src.models.local.disambiguation import render_disambig_prompt_context
 
-        迁移说明:
-        - 这是旧字符串链路的兼容接口
-        - annotation 主链路应优先消费 collect_evidence_async() 返回的 EvidenceBundle
-        - 新代码不应再以该 helper 作为主数据入口
-
-        创建时间: 2025-03-12
-        创建者: TraeAI
-        任务: RAG 检索器实现
-
-        修改时间: 2026-04-12
-        修改者: TraeAI
-        任务: 重构 DisambigContextProvider
-        修改内容: 改为内部调用 collect_evidence_async() 并从 to_prompt_blocks() 派生
-        """
-        if not names_in_chunk:
-            return ""
-
-        bundle = await self.collect_evidence_async(
-            names_in_chunk,
+        bundle = await self.collect_evidence_with_level3(
+            names_in_chunk=names_in_chunk,
             current_chunk=current_chunk,
             context_text=context_text,
             exclude_chunk_ids=exclude_chunk_ids,
         )
-        blocks = bundle.to_prompt_blocks()
-
-        disambig_candidates = blocks.get("disambig_candidates", "")
-        vector_evidence = blocks.get("vector_evidence", "")
-
-        if disambig_candidates and vector_evidence:
-            return disambig_candidates + "\n\n" + vector_evidence
-        return disambig_candidates or vector_evidence
+        return render_disambig_prompt_context(bundle) or ""
 
     def build_graph_feedback_hint(
         self,
         existing_names: list[str],
         base_hint: str | None = None,
     ) -> str | None:
-        """构建图谱反馈提示，包含已裁决别名映射和已确认关系。
+        """兼容接口：图谱反馈的渲染逻辑已迁移到 disambiguation renderer。"""
+        from src.models.local.disambiguation.evidence_renderer import render_graph_feedback_hint
 
-        统一消歧阶段和标注阶段的图谱数据查询逻辑，
-        替代散落在各处的直接 GraphRepository 调用。
-        """
-        if self._graph_repo is None or self._run_id is None:
-            return base_hint
-
-        existing_set = set(existing_names)
-        parts: list[str] = []
-
-        if base_hint:
-            parts.append(base_hint)
-
-        alias_map = self._alias_lookup.get_alias_map()
-        graph_aliases = {a: c for a, c in alias_map.items() if a != c and c in existing_set}
-        if graph_aliases:
-            alias_lines = ["【图谱已裁决的别名映射】"]
-            for alias, canonical in sorted(graph_aliases.items()):
-                alias_lines.append(f"- {alias} → {canonical}")
-            parts.append("\n".join(alias_lines))
-            logger.debug(f"Graph feedback: injected {len(graph_aliases)} alias mappings")
-
-        if self._relations_cache is None:
-            self._relations_cache = self._graph_repo.fetch_current_relations(self._run_id, active_only=True)
-        relations = self._relations_cache
-        relevant_rels = [r for r in relations if r["from_name"] in existing_set or r["to_name"] in existing_set]
-        if relevant_rels:
-            rel_lines = ["【图谱已确认的关系】"]
-            for r in relevant_rels[:10]:
-                rel_lines.append(f"- {r['from_name']} ←{r['type']}→ {r['to_name']}")
-            parts.append("\n".join(rel_lines))
-            logger.debug(f"Graph feedback: injected {len(relevant_rels)} relations")
-
-        if not parts:
-            return base_hint
-
-        return "\n".join(parts)
+        bundle = self.collect_evidence(names_in_chunk=existing_names, current_chunk=None)
+        return render_graph_feedback_hint(bundle, existing_names, base_hint=base_hint)

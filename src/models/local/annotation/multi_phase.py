@@ -36,12 +36,11 @@ from loguru import logger
 from src.api.models.events import StreamEvent
 from src.config import settings
 from src.models.local.parser import validate_foreshadowing_result
-from src.rag import EvidenceBundle
 
 from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
 from .phase2 import annotate_chunk_phase2
-from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_text
+from .phase3 import DialogueLengthResult, compute_dialogue_lengths_with_llm, extract_dialogues_from_text
 from .phase4 import annotate_chunk_phase4
 
 if TYPE_CHECKING:
@@ -95,10 +94,10 @@ async def _run_phase1(
     position_pct: float | None,
     chapter_id: int | None,
     active_entities: str | None,
+    evidence_bundle,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
     disambig_context: str | None = None,
-    evidence_bundle: EvidenceBundle | None = None,
 ) -> ChunkAnnotation:
     """执行 Phase1 基础标注
 
@@ -121,10 +120,10 @@ async def _run_phase1(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
         disambig_context=disambig_context,
-        evidence_bundle=evidence_bundle,
     )
 
 
@@ -304,8 +303,8 @@ async def annotate_chunk_multi_phase(
     global_context: str | None = None,
     prev_chunk_text: str | None = None,
     active_entities: str | None = None,
+    evidence_bundle=None,
     disambig_context: str | None = None,
-    evidence_bundle: EvidenceBundle | None = None,
     next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
@@ -346,9 +345,9 @@ async def annotate_chunk_multi_phase(
             run_id=run_id,
             rag_retriever=rag_retriever,
             active_entities=active_entities,
-            disambig_context=disambig_context,
             evidence_bundle=evidence_bundle,
             emitter=emitter,
+            disambig_context=disambig_context,
         )
     else:
         return await annotate_chunk_serial(
@@ -366,9 +365,9 @@ async def annotate_chunk_multi_phase(
             run_id=run_id,
             rag_retriever=rag_retriever,
             active_entities=active_entities,
-            disambig_context=disambig_context,
             evidence_bundle=evidence_bundle,
             emitter=emitter,
+            disambig_context=disambig_context,
         )
 
 
@@ -384,12 +383,12 @@ async def annotate_chunk_parallel(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
+    evidence_bundle=None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
-    evidence_bundle: EvidenceBundle | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     并行模式：Phase1 和 Phase2 并行执行，Phase3 在 Phase1 完成后执行
@@ -426,10 +425,10 @@ async def annotate_chunk_parallel(
             position_pct=position_pct,
             chapter_id=chapter_id,
             active_entities=active_entities,
+            evidence_bundle=evidence_bundle,
             cloud_client=cloud_client,
             run_id=run_id,
             disambig_context=disambig_context,
-            evidence_bundle=evidence_bundle,
         ),
         _run_phase2(
             client=client,
@@ -523,12 +522,12 @@ async def annotate_chunk_serial(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
+    evidence_bundle=None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
-    evidence_bundle: EvidenceBundle | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
     串行模式
@@ -558,10 +557,10 @@ async def annotate_chunk_serial(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
         disambig_context=disambig_context,
-        evidence_bundle=evidence_bundle,
     )
     if emitter:
         await emitter(
