@@ -239,7 +239,6 @@ export interface ForceGraphData {
 
 export interface ForceGraphProps {
   data: GraphData;
-  selectedNode?: GraphNode | null;
   onNodeClick: (node: GraphNodeObject) => void;
   searchQuery: string;
   relationFilter: Set<string>;

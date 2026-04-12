@@ -27,10 +27,16 @@ import type {
 /*  Constants                                                         */
 /* ------------------------------------------------------------------ */
 
-const NODE_SIZE_MIN = 48;
-const NODE_SIZE_MAX = 70;
+const NODE_SIZE_MIN = 44;
+const NODE_SIZE_MAX = 64;
 const LINK_WIDTH_MIN = 1.5;
 const LINK_WIDTH_MAX = 6;
+const NODE_SPACING_MIN = 14;
+const FIT_VIEW_PADDING = 24;
+const INNER_RING_RATIO = 0.18;
+const OUTER_RING_RATIO = 0.46;
+const PERIPHERAL_RING_RATIO = 0.54;
+const ISOLATED_RING_RATIO = 0.62;
 
 interface EntityColors {
   character: string;
@@ -121,6 +127,12 @@ function adjustColorDepth(cssColor: string, depth: number): string {
 function normalizeToRange(value: number, minVal: number, maxVal: number): number {
   if (maxVal <= minVal) return 0.3;
   return Math.max(0, Math.min(1, (value - minVal) / (maxVal - minVal)));
+}
+
+function getConfiguredNodeSize(nodeCfg: unknown, fallback: number = NODE_SIZE_MIN): number {
+  if (!nodeCfg || typeof nodeCfg !== "object") return fallback;
+  const size = (nodeCfg as { size?: unknown }).size;
+  return typeof size === "number" && Number.isFinite(size) ? size : fallback;
 }
 
 /* ------------------------------------------------------------------ */
@@ -233,6 +245,41 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
       return { nodes: filteredNodes, edges: filteredLinks };
     }, [data, relationFilter]);
 
+    const layoutDegrees = useMemo(() => {
+      const degrees = new Map<string, number>();
+      g6Data.nodes.forEach((node) => degrees.set(node.entity_id, 0));
+      g6Data.edges.forEach((edge: Record<string, unknown>) => {
+        const source = String(edge.source ?? "");
+        const target = String(edge.target ?? "");
+        if (degrees.has(source)) {
+          degrees.set(source, (degrees.get(source) || 0) + 1);
+        }
+        if (degrees.has(target)) {
+          degrees.set(target, (degrees.get(target) || 0) + 1);
+        }
+      });
+      return degrees;
+    }, [g6Data]);
+
+    const orderedLayoutNodes = useMemo(() => {
+      const nodes = [...g6Data.nodes];
+      const connectedNodes = nodes
+        .filter((node) => (layoutDegrees.get(node.entity_id) || 0) > 1)
+        .sort((a, b) => {
+          const degreeDiff = (layoutDegrees.get(b.entity_id) || 0) - (layoutDegrees.get(a.entity_id) || 0);
+          if (degreeDiff !== 0) return degreeDiff;
+          return a.name.localeCompare(b.name, "zh-CN");
+        });
+      const peripheralNodes = nodes
+        .filter((node) => (layoutDegrees.get(node.entity_id) || 0) === 1)
+        .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+      const isolatedNodes = nodes
+        .filter((node) => (layoutDegrees.get(node.entity_id) || 0) === 0)
+        .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+
+      return { connectedNodes, peripheralNodes, isolatedNodes };
+    }, [g6Data.nodes, layoutDegrees]);
+
     // ---- 初始化 G6 实例 ----
     useEffect(() => {
       if (!containerRef.current) return;
@@ -242,23 +289,34 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
 
       const width = container.clientWidth || 800;
       const height = container.clientHeight || 600;
+      const nodeCount = Math.max(g6Data.nodes.length, 1);
+      const densityScale = nodeCount >= 30 ? 1.25 : nodeCount >= 20 ? 1.1 : 1;
+      const linkDistance = Math.round(165 * densityScale);
+      const nodeStrength = Math.round(-210 * densityScale);
+      const edgeStrength = nodeCount >= 30 ? 0.06 : 0.1;
 
       const graph = new Graph({
         container,
         width,
         height,
         fitView: true,
+        fitViewPadding: FIT_VIEW_PADDING,
         modes: {
           default: ["drag-canvas", "zoom-canvas", "drag-node"],
         },
         layout: {
           type: "force",
-          preventOverlap: false,
-          collideStrength: 0,
-          nodeSpacing: 0,
-          linkDistance: 100,
-          nodeStrength: -80,
-          edgeStrength: 0.2,
+          center: [width / 2, height / 2],
+          preventOverlap: true,
+          nodeSize: (node?: unknown) => getConfiguredNodeSize(node),
+          collideStrength: 0.9,
+          nodeSpacing: (node?: unknown) =>
+            Math.max(NODE_SPACING_MIN, getConfiguredNodeSize(node) * 0.35),
+          linkDistance,
+          nodeStrength,
+          edgeStrength,
+          alphaDecay: 0.05,
+          alphaMin: 0.002,
         },
         animate: true,
         // 节点状态样式（G6 原生状态机，不经过 React）
@@ -294,27 +352,74 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
 
       // 注册数据（G6 GraphData 格式：nodes + edges）
       // 使用均匀圆环分布作为初始位置，避免随机导致的重叠问题
-      const nodeCount = g6Data.nodes.length;
       const cx = width / 2;
       const cy = height / 2;
-      const maxRadius = Math.min(width, height) * 0.38;
+      const shorterSide = Math.min(width, height);
+      const coreNodeCount = orderedLayoutNodes.connectedNodes.length;
+      const ringCount = Math.max(2, Math.ceil(Math.sqrt(Math.max(coreNodeCount, 1) / 2)));
+      const nodesPerRing = Math.max(5, Math.ceil(Math.max(coreNodeCount, 1) / ringCount));
+      const innerRadius = shorterSide * INNER_RING_RATIO;
+      const maxRadius = shorterSide * OUTER_RING_RATIO;
+      const ringStep = ringCount > 1 ? Math.max(42, (maxRadius - innerRadius) / (ringCount - 1)) : 0;
+      const peripheralRadius = shorterSide * PERIPHERAL_RING_RATIO;
+      const isolatedRadius = shorterSide * ISOLATED_RING_RATIO;
+
+      const positionedNodes = new Map<string, GraphNode & { id: string; size: number; x: number; y: number }>();
+
+      orderedLayoutNodes.connectedNodes.forEach((node, index) => {
+        const ringIndex = Math.floor(index / nodesPerRing);
+        const indexInRing = index % nodesPerRing;
+        const nodesInCurrentRing = Math.max(1, Math.min(nodesPerRing, coreNodeCount - ringIndex * nodesPerRing));
+        const angle = (2 * Math.PI * indexInRing) / nodesInCurrentRing + ringIndex * 0.45 + (Math.random() - 0.5) * 0.12;
+        const baseRadius = Math.min(maxRadius, innerRadius + ringIndex * ringStep);
+        const radius = Math.min(maxRadius, baseRadius + (Math.random() - 0.5) * 18);
+        positionedNodes.set(node.entity_id, {
+          ...node,
+          id: node.entity_id,
+          size: getNodeSize(node),
+          x: cx + Math.cos(angle) * radius,
+          y: cy + Math.sin(angle) * radius,
+        });
+      });
+
+      orderedLayoutNodes.peripheralNodes.forEach((node, index) => {
+        const count = Math.max(orderedLayoutNodes.peripheralNodes.length, 1);
+        const angle = (2 * Math.PI * index) / count + Math.PI / 10 + (Math.random() - 0.5) * 0.08;
+        const radius = peripheralRadius + (Math.random() - 0.5) * 14;
+        positionedNodes.set(node.entity_id, {
+          ...node,
+          id: node.entity_id,
+          size: getNodeSize(node),
+          x: cx + Math.cos(angle) * radius,
+          y: cy + Math.sin(angle) * radius,
+        });
+      });
+
+      orderedLayoutNodes.isolatedNodes.forEach((node, index) => {
+        const count = Math.max(orderedLayoutNodes.isolatedNodes.length, 1);
+        const angle = (2 * Math.PI * index) / count - Math.PI / 6 + (Math.random() - 0.5) * 0.05;
+        const radius = isolatedRadius + (Math.random() - 0.5) * 10;
+        positionedNodes.set(node.entity_id, {
+          ...node,
+          id: node.entity_id,
+          size: getNodeSize(node),
+          x: cx + Math.cos(angle) * radius,
+          y: cy + Math.sin(angle) * radius,
+        });
+      });
 
       graph.data({
-        nodes: g6Data.nodes.map((n, i) => {
-          // 均匀分布在同心圆上（类似极坐标网格）
-          // 第 i 个节点的角度：均匀分布
-          const angle = (2 * Math.PI * i) / nodeCount + (Math.random() - 0.5) * 0.3;
-          // 半径：按索引分层，内圈小索引，外圈大索引（加随机扰动）
-          const ringIndex = Math.floor(i / Math.max(1, Math.ceil(nodeCount / 4)));
-          const baseRadius = maxRadius * (ringIndex + 1) / 4;
-          const radius = baseRadius + (Math.random() - 0.5) * 30;
-
-          return {
-            ...n,
-            size: getNodeSize(n),
-            x: cx + Math.cos(angle) * radius,
-            y: cy + Math.sin(angle) * radius,
-          };
+        nodes: g6Data.nodes.map((node) => {
+          const positionedNode = positionedNodes.get(node.entity_id);
+          return (
+            positionedNode ?? {
+              ...node,
+              id: node.entity_id,
+              size: getNodeSize(node),
+              x: cx,
+              y: cy,
+            }
+          );
         }),
         edges: g6Data.edges as unknown as Record<string, unknown>[],
       });
@@ -458,7 +563,19 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
         graph.destroy();
         graphRef.current = null;
       };
-    }); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [
+      appearanceCountMap,
+      degreeRange,
+      g6Data,
+      getEntityColor,
+      getNodeSize,
+      getRelationColor,
+      isSearchMatched,
+      nodeDegrees,
+      onNodeClick,
+      orderedLayoutNodes,
+      weightRange,
+    ]);
 
     // ---- imperative handle ----
     useImperativeHandle(ref, () => ({
