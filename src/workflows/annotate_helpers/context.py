@@ -53,10 +53,10 @@ class ChunkContext:
     字段说明:
         prev_chunk_text: 前一个 chunk 的文本
         active_entities_str: 活跃实体字符串
-        disambig_context_str: 消歧上下文字符串
+        disambig_context_str: 旧字符串兼容字段，主链路不再依赖
         next_chunk_text: 下一个 chunk 的文本
-        vector_evidence_str: 向量检索证据字符串（已废弃，使用 evidence_bundle）
-        evidence_bundle: 结构化证据包，包含 Level 1/2/3 证据
+        vector_evidence_str: 旧向量证据兼容字段，主链路不再依赖
+        evidence_bundle: 结构化证据包，作为 annotation 主链路输入
     """
 
     def __init__(
@@ -178,9 +178,7 @@ def _prepare_chunk_context(
 
     if disambig_provider:
         names_in_chunk = _extract_names_from_text(chunk_text)
-        context.disambig_context_str = disambig_provider.build_disambig_context(
-            names_in_chunk, current_chunk=chunk_id
-        )
+        context.evidence_bundle = disambig_provider.collect_evidence(names_in_chunk, current_chunk=chunk_id)
 
     return context
 
@@ -204,8 +202,7 @@ async def _prepare_chunk_context_with_level3(
     修改时间: 2026-04-12
     修改者: TraeAI
     任务: 重构上下文准备逻辑
-    修改内容: 使用 collect_evidence_async() 获取结构化证据，存入 evidence_bundle，
-              从 to_prompt_blocks() 派生 disambig_context_str
+    修改内容: 使用 collect_evidence_async() 获取结构化证据，作为 annotation 主链路输入
     """
     from src.context import format_entities_for_prompt, get_active_entities
     from src.storage.repositories import ChunkRepository, GraphRepository
@@ -253,14 +250,5 @@ async def _prepare_chunk_context_with_level3(
             context.evidence_bundle = disambig_provider.collect_evidence(
                 names_in_chunk, current_chunk=chunk_id
             )
-
-        if context.evidence_bundle:
-            blocks = context.evidence_bundle.to_prompt_blocks()
-            disambig_parts = []
-            if blocks.get("disambig_candidates"):
-                disambig_parts.append(blocks["disambig_candidates"])
-            if blocks.get("vector_evidence"):
-                disambig_parts.append(blocks["vector_evidence"])
-            context.disambig_context_str = "\n\n".join(disambig_parts) if disambig_parts else None
 
     return context
