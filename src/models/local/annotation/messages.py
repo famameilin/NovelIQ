@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.models.local.prompts import (
     FEW_SHOT_EXAMPLES_V2,
     FORESHADOWING_EXAMPLES,
@@ -21,6 +23,9 @@ from src.models.local.prompts import (
     SYSTEM_PROMPT_V2,
     USER_TEMPLATE_V2,
 )
+
+if TYPE_CHECKING:
+    from src.rag import EvidenceBundle
 
 
 def _build_annotation_messages_v2(
@@ -33,6 +38,7 @@ def _build_annotation_messages_v2(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     disambig_context: str | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
 ) -> list[dict]:
     """
     构建第一次调用（基础标注）的messages
@@ -87,7 +93,13 @@ def _build_annotation_messages_v2(
     if chunk_id is not None:
         user_content += f"\n\n<Current_Chunk_ID>{chunk_id}</Current_Chunk_ID>"
 
-    if disambig_context:
+    if evidence_bundle is not None:
+        blocks = evidence_bundle.to_prompt_blocks()
+        for block_name in ("structured_evidence", "disambig_candidates", "vector_evidence"):
+            block = blocks.get(block_name)
+            if block:
+                user_content += f"\n\n{block}"
+    elif disambig_context:
         user_content += f"\n\n{disambig_context}"
 
     messages.append({"role": "user", "content": user_content})
