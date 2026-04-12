@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
+from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -414,6 +415,108 @@ class DisambigContextProvider:
 
         return result
 
+    def collect_evidence(
+        self,
+        names_in_chunk: list[str],
+        current_chunk: int | None = None,
+        context_text: str | None = None,
+        exclude_chunk_ids: list[int] | None = None,
+    ) -> EvidenceBundle:
+        """
+        收集三层证据，返回结构化 EvidenceBundle。
+
+        创建时间: 2026-04-12
+        创建者: TraeAI
+        任务: 重构 DisambigContextProvider，实现证据收集方法
+        说明: 同步版本，仅处理 Level 1 和 Level 2
+
+        - structured_evidence: 来自 Level 1 的 alias 映射
+        - local_evidence: 来自 Level 2 的活跃实体候选
+        - semantic_evidence: 空（Level 3 需要异步调用）
+        """
+        structured_evidence: list[EvidenceItem] = []
+        local_evidence: list[EvidenceItem] = []
+        semantic_evidence: list[EvidenceItem] = []
+
+        for name in names_in_chunk:
+            result = self.retrieve(name, current_chunk=current_chunk)
+
+            if result.level1_hit and result.canonical_name:
+                item = EvidenceItem(
+                    evidence_type="alias_mapping",
+                    source="level1",
+                    content=f"{name} → {result.canonical_name}",
+                    confidence=1.0,
+                )
+                structured_evidence.append(item)
+                logger.debug(f"collect_evidence: Level1 hit, {name} → {result.canonical_name}")
+
+            if result.level2_candidates:
+                candidates_str = "、".join(result.level2_candidates[:5])
+                item = EvidenceItem(
+                    evidence_type="disambig_candidate",
+                    source="level2",
+                    content=f"「{name}」可能是：{candidates_str}",
+                )
+                local_evidence.append(item)
+                logger.debug(f"collect_evidence: Level2 candidates for '{name}'")
+
+        return EvidenceBundle(
+            structured_evidence=structured_evidence,
+            local_evidence=local_evidence,
+            semantic_evidence=semantic_evidence,
+        )
+
+    async def collect_evidence_async(
+        self,
+        names_in_chunk: list[str],
+        current_chunk: int | None = None,
+        context_text: str | None = None,
+        exclude_chunk_ids: list[int] | None = None,
+    ) -> EvidenceBundle:
+        """
+        异步收集三层证据，返回结构化 EvidenceBundle。
+
+        创建时间: 2026-04-12
+        创建者: TraeAI
+        任务: 重构 DisambigContextProvider，实现证据收集方法
+        说明: 异步版本，处理 Level 1、Level 2 和 Level 3
+
+        - structured_evidence: 来自 Level 1 的 alias 映射
+        - local_evidence: 来自 Level 2 的活跃实体候选
+        - semantic_evidence: 来自 Level 3 的语义相似片段
+        """
+        bundle = self.collect_evidence(
+            names_in_chunk,
+            current_chunk=current_chunk,
+            context_text=context_text,
+            exclude_chunk_ids=exclude_chunk_ids,
+        )
+
+        if self._level3_enabled and context_text and self.is_level3_available():
+            level3_results = await self._level3.search_similar_chunks(
+                context_text,
+                exclude_chunk_ids=exclude_chunk_ids,
+            )
+            for r in level3_results:
+                text = r.get("text", "")
+                similarity = r.get("similarity", 0.0)
+                chunk_id = r.get("chunk_id")
+                if text:
+                    item = EvidenceItem(
+                        evidence_type="vector_evidence",
+                        source="level3",
+                        content=text,
+                        score=similarity,
+                        chunk_id=chunk_id,
+                    )
+                    bundle.semantic_evidence.append(item)
+
+            if level3_results:
+                logger.debug(f"collect_evidence_async: Level3 found {len(level3_results)} similar chunks")
+
+        return bundle
+
     def is_level3_available(self) -> bool:
         """检查 Level 3 是否可用"""
         return self._level3_enabled and self._level3.is_available()
@@ -433,6 +536,15 @@ class DisambigContextProvider:
     ) -> str:
         """对 chunk 中出现的名字逐个执行层级检索，生成消歧线索文本。
 
+        创建时间: 2025-03-12
+        创建者: TraeAI
+        任务: RAG 检索器实现
+
+        修改时间: 2026-04-12
+        修改者: TraeAI
+        任务: 重构 DisambigContextProvider
+        修改内容: 改为内部调用 collect_evidence() 并从 to_prompt_blocks() 派生
+
         - Level1 精确命中：直接追加到 alias_map，不生成额外线索
         - Level2 候选集：生成 <Disambig_Candidates> 供 LLM 参考
         - 未命中：不生成任何线索
@@ -440,20 +552,9 @@ class DisambigContextProvider:
         if not names_in_chunk:
             return ""
 
-        disambig_parts: list[str] = []
-
-        for name in names_in_chunk:
-            result = self.retrieve(name, current_chunk=current_chunk)
-            if result.level1_hit:
-                pass
-            elif result.level2_candidates:
-                candidates_str = "、".join(result.level2_candidates[:5])
-                disambig_parts.append(f"- 「{name}」可能是：{candidates_str}")
-
-        if not disambig_parts:
-            return ""
-
-        return "<Disambig_Candidates>\n" + "\n".join(disambig_parts) + "\n</Disambig_Candidates>"
+        bundle = self.collect_evidence(names_in_chunk, current_chunk=current_chunk)
+        blocks = bundle.to_prompt_blocks()
+        return blocks.get("disambig_candidates", "")
 
     async def build_disambig_context_with_level3(
         self,
@@ -462,21 +563,34 @@ class DisambigContextProvider:
         context_text: str | None = None,
         exclude_chunk_ids: list[int] | None = None,
     ) -> str:
-        """异步版本的 build_disambig_context，支持 Level 3"""
-        base_context = self.build_disambig_context(names_in_chunk, current_chunk)
+        """异步版本的 build_disambig_context，支持 Level 3
 
-        if self._level3_enabled and context_text and self.is_level3_available():
-            level3_results = await self._level3.search_similar_chunks(
-                context_text,
-                exclude_chunk_ids=exclude_chunk_ids,
-            )
-            if level3_results:
-                level3_evidence = self._level3.format_evidence_for_prompt(level3_results)
-                if base_context:
-                    return base_context + "\n\n" + level3_evidence
-                return level3_evidence
+        创建时间: 2025-03-12
+        创建者: TraeAI
+        任务: RAG 检索器实现
 
-        return base_context
+        修改时间: 2026-04-12
+        修改者: TraeAI
+        任务: 重构 DisambigContextProvider
+        修改内容: 改为内部调用 collect_evidence_async() 并从 to_prompt_blocks() 派生
+        """
+        if not names_in_chunk:
+            return ""
+
+        bundle = await self.collect_evidence_async(
+            names_in_chunk,
+            current_chunk=current_chunk,
+            context_text=context_text,
+            exclude_chunk_ids=exclude_chunk_ids,
+        )
+        blocks = bundle.to_prompt_blocks()
+
+        disambig_candidates = blocks.get("disambig_candidates", "")
+        vector_evidence = blocks.get("vector_evidence", "")
+
+        if disambig_candidates and vector_evidence:
+            return disambig_candidates + "\n\n" + vector_evidence
+        return disambig_candidates or vector_evidence
 
     def build_graph_feedback_hint(
         self,
