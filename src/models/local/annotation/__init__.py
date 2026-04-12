@@ -38,6 +38,7 @@ from src.models.local.annotation.context import (
     Phase1MaxRetriesExceededError,
     Phase2MaxRetriesExceededError,
 )
+from src.models.local.annotation.evidence_renderer import render_annotation_evidence_blocks
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
     _build_foreshadowing_messages,
@@ -72,6 +73,7 @@ __all__ = [
     "Phase2MaxRetriesExceededError",
     "MultiPhaseAnnotationResult",
     "DialogueLengthResult",
+    "render_annotation_evidence_blocks",
     "_build_annotation_messages_v2",
     "_build_foreshadowing_messages",
     "build_phase1_messages",

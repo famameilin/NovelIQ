@@ -23,6 +23,7 @@ from src.models.local.prompts import (
     SYSTEM_PROMPT_V2,
     USER_TEMPLATE_V2,
 )
+from src.models.local.annotation.evidence_renderer import render_annotation_evidence_blocks
 
 if TYPE_CHECKING:
     from src.rag import EvidenceBundle
@@ -94,11 +95,8 @@ def _build_annotation_messages_v2(
         user_content += f"\n\n<Current_Chunk_ID>{chunk_id}</Current_Chunk_ID>"
 
     if evidence_bundle is not None:
-        blocks = evidence_bundle.to_prompt_blocks()
-        for block_name in ("structured_evidence", "disambig_candidates", "vector_evidence"):
-            block = blocks.get(block_name)
-            if block:
-                user_content += f"\n\n{block}"
+        for block in render_annotation_evidence_blocks(evidence_bundle):
+            user_content += f"\n\n{block}"
     elif disambig_context:
         user_content += f"\n\n{disambig_context}"
 

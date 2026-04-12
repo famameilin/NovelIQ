@@ -537,6 +537,11 @@ class DisambigContextProvider:
     ) -> str:
         """对 chunk 中出现的名字逐个执行层级检索，生成消歧线索文本。
 
+        迁移说明:
+        - 这是旧字符串链路的兼容接口
+        - annotation 主链路应优先消费 collect_evidence() 返回的 EvidenceBundle
+        - 新代码不应再以该 helper 作为主数据入口
+
         创建时间: 2025-03-12
         创建者: TraeAI
         任务: RAG 检索器实现
@@ -565,6 +570,11 @@ class DisambigContextProvider:
         exclude_chunk_ids: list[int] | None = None,
     ) -> str:
         """异步版本的 build_disambig_context，支持 Level 3
+
+        迁移说明:
+        - 这是旧字符串链路的兼容接口
+        - annotation 主链路应优先消费 collect_evidence_async() 返回的 EvidenceBundle
+        - 新代码不应再以该 helper 作为主数据入口
 
         创建时间: 2025-03-12
         创建者: TraeAI

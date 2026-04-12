@@ -28,7 +28,7 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     )
     context = SimpleNamespace(
         active_entities_str="active-entities",
-        disambig_context_str="vector-evidence",
+        disambig_context_str=None,
         evidence_bundle="bundle",
     )
     annotation_result = SimpleNamespace(
@@ -73,7 +73,7 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     assert result is next_state
     mock_prepare_context.assert_awaited_once()
     mock_annotate_chunk.assert_awaited_once()
-    assert mock_annotate_chunk.await_args.kwargs["disambig_context"] == "vector-evidence"
+    assert mock_annotate_chunk.await_args.kwargs["disambig_context"] is None
     assert mock_annotate_chunk.await_args.kwargs["evidence_bundle"] == "bundle"
     mock_store_results.assert_called_once()
     mock_run_disambig.assert_awaited_once()
