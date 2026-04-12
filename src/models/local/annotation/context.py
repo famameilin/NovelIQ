@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from src.rag import EvidenceBundle
+
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
@@ -58,6 +60,7 @@ class AnnotationContext:
     global_context: str | None = None
     active_entities: str | None = None
     disambig_context: str | None = None
+    evidence_bundle: EvidenceBundle | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None

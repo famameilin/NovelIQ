@@ -5,8 +5,6 @@
 说明: 测试 EvidenceItem、EvidenceBundle 和 Level1AuthoritySnapshot 等数据类型
 """
 
-import pytest
-
 from src.rag.evidence_types import (
     AliasMapping,
     CanonicalEntity,
@@ -49,8 +47,28 @@ def test_to_prompt_blocks_empty():
         semantic_evidence=[],
     )
     blocks = bundle.to_prompt_blocks()
+    assert blocks["structured_evidence"] == ""
     assert blocks["disambig_candidates"] == ""
     assert blocks["vector_evidence"] == ""
+
+
+def test_to_prompt_blocks_structured_evidence():
+    bundle = EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="alias_mapping",
+                source="level1",
+                content="张三 → 张三丰",
+                metadata={"alias": "张三", "canonical": "张三丰"},
+            ),
+        ],
+        local_evidence=[],
+        semantic_evidence=[],
+    )
+    blocks = bundle.to_prompt_blocks()
+    assert "<Structured_Evidence>" in blocks["structured_evidence"]
+    assert "张三 → 张三丰" in blocks["structured_evidence"]
+    assert bundle.structured_alias_map() == {"张三": "张三丰"}
 
 
 def test_to_prompt_blocks_disambig_candidates():
@@ -85,6 +103,26 @@ def test_to_prompt_blocks_vector_evidence():
     assert "<Vector_Evidence>" in blocks["vector_evidence"]
     assert "[Chunk 42]" in blocks["vector_evidence"]
     assert "0.85" in blocks["vector_evidence"]
+
+
+def test_to_prompt_blocks_vector_evidence_is_bounded_like_legacy_formatter():
+    bundle = EvidenceBundle(
+        structured_evidence=[],
+        local_evidence=[],
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="vector_evidence",
+                source="level3",
+                content="甲" * 250,
+                chunk_id=index,
+                score=0.9,
+            )
+            for index in range(5)
+        ],
+    )
+    blocks = bundle.to_prompt_blocks()
+    assert blocks["vector_evidence"].count("[Chunk") == 3
+    assert ("甲" * 200) + "..." in blocks["vector_evidence"]
 
 
 def test_level1_authority_snapshot_creation():

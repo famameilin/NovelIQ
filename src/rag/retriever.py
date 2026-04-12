@@ -447,6 +447,7 @@ class DisambigContextProvider:
                     source="level1",
                     content=f"{name} → {result.canonical_name}",
                     confidence=1.0,
+                    metadata={"alias": name, "canonical": result.canonical_name},
                 )
                 structured_evidence.append(item)
                 logger.debug(f"collect_evidence: Level1 hit, {name} → {result.canonical_name}")

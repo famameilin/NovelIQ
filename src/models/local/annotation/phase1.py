@@ -35,6 +35,7 @@ from src.models.interactions import record_model_interaction
 from src.models.local.parser import parse_active_entities
 from src.models.local.prompts import build_retry_prompt
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
+from src.rag import EvidenceBundle
 
 from .context import Phase1MaxRetriesExceededError
 from .messages import _build_annotation_messages_v2
@@ -200,6 +201,7 @@ async def annotate_chunk_phase1(
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     disambig_context: str | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
 ) -> ChunkAnnotation:
     """
     第一次调用：基础标注（带独立重试机制）
@@ -223,6 +225,7 @@ async def annotate_chunk_phase1(
         chapter_id=chapter_id,
         active_entities=active_entities,
         disambig_context=disambig_context,
+        evidence_bundle=evidence_bundle,
     )
 
     return await execute_phase1_with_retry(
