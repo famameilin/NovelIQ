@@ -267,6 +267,29 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         self.assertEqual(result.level2_candidates, [])
         self.assertNotIn(2, result.used_levels)
 
+    def test_collect_evidence_keeps_level2_when_level1_hits(self) -> None:
+        """结构化证据收集应并行保留 Level 1 和 Level 2"""
+        graph_repo = MagicMock()
+        graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
+        graph_repo.fetch_active_entities.return_value = [
+            {"name": "白芷"},
+            {"name": "侯飞白"},
+        ]
+
+        provider = DisambigContextProvider(
+            graph_repo=graph_repo,
+            run_id="test-run-id",
+            level1_enabled=True,
+            level2_enabled=True,
+        )
+
+        bundle = provider.collect_evidence(["灰衣人"], current_chunk=3)
+
+        self.assertEqual(len(bundle.structured_evidence), 1)
+        self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 → 白芷")
+        self.assertEqual(len(bundle.local_evidence), 1)
+        self.assertIn("「灰衣人」可能是：白芷、侯飞白", bundle.local_evidence[0].content)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -437,23 +437,31 @@ class DisambigContextProvider:
         structured_evidence: list[EvidenceItem] = []
         local_evidence: list[EvidenceItem] = []
         semantic_evidence: list[EvidenceItem] = []
+        level2_candidates: list[str] = []
+
+        if self._level2_enabled and current_chunk is not None:
+            level2_candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
+            if level2_candidates:
+                logger.debug(f"collect_evidence: Level2 candidates={level2_candidates[:5]}")
 
         for name in names_in_chunk:
-            result = self.retrieve(name, current_chunk=current_chunk)
+            canonical_name: str | None = None
+            if self._level1_enabled:
+                canonical_name = self._alias_lookup.query(name)
 
-            if result.level1_hit and result.canonical_name:
+            if canonical_name:
                 item = EvidenceItem(
                     evidence_type="alias_mapping",
                     source="level1",
-                    content=f"{name} → {result.canonical_name}",
+                    content=f"{name} → {canonical_name}",
                     confidence=1.0,
-                    metadata={"alias": name, "canonical": result.canonical_name},
+                    metadata={"alias": name, "canonical": canonical_name},
                 )
                 structured_evidence.append(item)
-                logger.debug(f"collect_evidence: Level1 hit, {name} → {result.canonical_name}")
+                logger.debug(f"collect_evidence: Level1 hit, {name} → {canonical_name}")
 
-            if result.level2_candidates:
-                candidates_str = "、".join(result.level2_candidates[:5])
+            if level2_candidates:
+                candidates_str = "、".join(level2_candidates[:5])
                 item = EvidenceItem(
                     evidence_type="disambig_candidate",
                     source="level2",
