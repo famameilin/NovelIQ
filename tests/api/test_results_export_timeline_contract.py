@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.api.services.results_export_service import _fetch_timeline_data, build_export_payload
+from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
@@ -93,3 +96,22 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
     assert payload["graph_summary"] == {"node_count": 3, "edge_count": 1}
     assert payload["graph_quality_report"] == {"conflict_count": 2}
     assert "quality" not in payload["graph_summary"]
+
+
+def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunk_repo = MagicMock()
+    annotation_repo = MagicMock()
+    stats_repo = MagicMock()
+
+    def _raise_contract_error(*_args, **_kwargs):
+        raise TimelineAuthorityContractError("broken authority contract")
+
+    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_candidates", _raise_contract_error)
+
+    with pytest.raises(TimelineAuthorityContractError, match="broken authority contract"):
+        _fetch_timeline_data(
+            run_id="run-1",
+            chunk_repo=chunk_repo,
+            annotation_repo=annotation_repo,
+            stats_repo=stats_repo,
+        )

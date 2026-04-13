@@ -29,7 +29,13 @@ from src.api.routes.results_fetchers import (
 )
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.metrics.aggregate import aggregate_all_metrics
-from src.metrics.timeline_metrics import build_timeline_candidates, convert_to_timeline_nodes, select_timeline_nodes
+from src.metrics.timeline_metrics import (
+    TimelineAuthorityContractError,
+    TimelineDataUnavailableError,
+    build_timeline_candidates,
+    convert_to_timeline_nodes,
+    select_timeline_nodes,
+)
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -229,9 +235,12 @@ def _fetch_timeline_data(
             major_character_entries,
             relation_break_events,
         ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
-    except ValueError as e:
+    except TimelineDataUnavailableError as e:
         logger.warning(f"No chunk data for run {run_id}: {e}")
         return None
+    except TimelineAuthorityContractError:
+        logger.error(f"Timeline authority contract violated for run {run_id}")
+        raise
     except Exception as e:
         logger.error(f"Unexpected error building timeline for run {run_id}: {e}")
         return None
