@@ -51,3 +51,15 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
         "low_confidence_samples",
     }
 
+    node = snapshot["nodes"][0]
+    # GraphAuthorityView nodes now expose stable state only; transient emotion no longer belongs to the contract.
+    assert set(node.keys()) == {
+        "entity_id",
+        "name",
+        "entity_type",
+        "first_seen_chunk",
+        "last_seen_chunk",
+        "role",
+        "status",
+    }
+    assert "emotion_score" not in node
