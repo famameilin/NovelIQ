@@ -580,6 +580,12 @@ def build_timeline_candidates(
     统一 timeline.py 路由和 results_export_service.py 的数据获取 + 候选构建逻辑，
     消除两处 ~150 行的重复代码。
 
+    Shared contract notes:
+    - 角色登场/退场只来自 TimelineAuthorityView.entity_lifecycles
+    - 关系变化只来自 TimelineAuthorityView.relation_events
+    - timeline 不直接消费 GraphRepository 的原始 ORM / dict 形状
+    - timeline 只看 character subgraph，不接受 organization/group 边渗透进来
+
     数据获取全部通过 Repository 方法，不使用裸 session.query()。
     chunk_id 查找使用预构建 dict，O(1) 替代 list.index() O(N)。
 
@@ -647,10 +653,13 @@ def build_timeline_candidates(
 
     authority_service = KnowledgeGraphAuthorityService.from_session(chunk_repo.session)
     timeline_view = authority_service.build_timeline_view(run_id)
-    entities = timeline_view.character_entities
+    character_entities = timeline_view.character_entities
+    entity_lifecycles = timeline_view.entity_lifecycles
 
-    # 时间轴只消费角色子图，避免直接依赖 GraphRepository 的原始 ORM/dict 形状。
-    entity_name_map: dict[int, str] = {e.entity_id: e.name for e in entities if e.entity_id is not None}
+    # Timeline is pinned to the authority-owned character subgraph contract.
+    # Lifecycle spans remain the single source of truth for entry/exit nodes,
+    # while relation history is already filtered to character-character edges.
+    entity_name_map: dict[int, str] = {item.entity_id: item.name for item in entity_lifecycles}
     relation_events = timeline_view.relation_events
 
     # 计算四阶段划分
@@ -658,7 +667,7 @@ def build_timeline_candidates(
     timeline_phases = convert_to_timeline_phases(phases)
 
     # 获取主要角色（基于活跃跨度）
-    major_characters = get_major_characters_by_span(entities, top_n=3)
+    major_characters = get_major_characters_by_span(entity_lifecycles, top_n=3)
     major_character_entries: list[tuple[str, int]] = []
     for char in major_characters:
         if char.first_seen_chunk is not None:
@@ -711,7 +720,7 @@ def build_timeline_candidates(
         # 检查是否有角色登场/退场
         character_entries: list[str] = []
         character_exits: list[str] = []
-        for char in entities:
+        for char in entity_lifecycles:
             if char.first_seen_chunk == chunk_id:
                 character_entries.append(char.name)
             if char.last_seen_chunk == chunk_id:

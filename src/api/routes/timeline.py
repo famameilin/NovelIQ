@@ -176,7 +176,13 @@ async def get_timeline(
     include_curve: Annotated[bool, Query(description="是否包含张力曲线数据")] = False,
     max_level: Annotated[int, Query(ge=1, le=3, description="显示重要性级别 ≤ 此值的节点")] = 3,
 ) -> TimelineResponse:
-    """获取叙事时间轴数据"""
+    """
+    获取叙事时间轴数据。
+
+    The public response shape stays stable, but the underlying data is
+    intentionally sourced from the authority-backed shared helper in
+    ``timeline_metrics`` so API consumers and export consumers stay aligned.
+    """
 
     # 1. 验证小说存在
     novels = service.list_novels()
@@ -209,6 +215,8 @@ async def get_timeline(
         raise AnalysisNotCompleteError(f"分析尚未完成，当前状态: {run_data['status']}")
 
     # 4. 构建时间轴候选节点（共享函数）
+    #    这里显式复用 authority-backed helper，避免 /timeline 直接依赖
+    #    graph repository 的原始 schema，保证与导出链路保持同口径。
     chunk_repo = ChunkRepository(session)
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
