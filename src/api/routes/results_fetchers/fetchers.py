@@ -42,6 +42,7 @@ from src.api.routes.results_fetchers.parsers import _parse_int_field, _parse_jso
 from src.api.routes.results_fetchers.scoring import _calculate_protagonist_scores, _normalize_arc_scores
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
+from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -739,49 +740,66 @@ def _fetch_graph_snapshot(
     修改者: GLM-5
     修改内容: 将边数据转换为前端期望的格式（source/target/relation_type/weight）
     """
-    graph_repo = GraphRepository(annotation_repo.session)
     pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
     if pending_relations:
         raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
 
-    node_rows = graph_repo.fetch_entities(run_id)
+    graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_graph_view(
+        run_id,
+        event_limit=200,
+    )
     nodes = [
         {
             "entity_id": str(row.entity_id),
-            "name": row.canonical_name,
+            "name": row.name,
             "entity_type": row.entity_type,
             "first_seen_chunk": row.first_seen_chunk,
             "last_seen_chunk": row.last_seen_chunk,
             "role": row.primary_role_function,
-            "emotion_score": row.last_emotion_score,
+            "emotion_score": None,
             "status": row.status,
         }
-        for row in node_rows
+        for row in graph_view.stable_states
     ]
 
-    raw_edges = graph_repo.fetch_current_relations(run_id, active_only=False)
     edges = [
         {
-            "source": str(edge["from_entity_id"]),
-            "target": str(edge["to_entity_id"]),
-            "relation_type": edge.get("type"),
-            "weight": edge.get("support_count", 1),
-            "from_name": edge.get("from_name"),
-            "to_name": edge.get("to_name"),
-            "change_count": edge.get("change_count"),
-            "tension_index": edge.get("tension_index"),
-            "is_active": edge.get("is_active"),
+            "source": str(edge.from_entity_id) if edge.from_entity_id is not None else edge.from_name,
+            "target": str(edge.to_entity_id) if edge.to_entity_id is not None else edge.to_name,
+            "relation_type": edge.relation_type,
+            "weight": edge.support_count or 1,
+            "from_name": edge.from_name,
+            "to_name": edge.to_name,
+            "change_count": edge.change_count,
+            "tension_index": edge.tension_index,
+            "is_active": edge.is_active,
         }
-        for edge in raw_edges
+        for edge in graph_view.confirmed_relations
     ]
 
-    events = graph_repo.fetch_relation_events(run_id, limit=200)
-    summary = DiagnosisRepository(annotation_repo.session).fetch_graph_summary(run_id)
+    events = [
+        {
+            "relation_event_id": event.relation_event_id,
+            "chunk_id": event.chunk_id,
+            "from_entity_id": event.from_entity_id,
+            "to_entity_id": event.to_entity_id,
+            "from_name": event.from_name,
+            "to_name": event.to_name,
+            "relation_type": event.relation_type,
+            "change_type": event.change_type,
+            "evidence": event.evidence,
+            "confidence": event.confidence,
+            "source_relation_row_id": event.source_relation_row_id,
+            "directionality": event.directionality,
+        }
+        for event in graph_view.relation_events
+    ]
+    summary = graph_view.summary
 
     return {
         "nodes": nodes,
         "edges": edges,
         "events": events,
         "summary": summary,
-        "quality": summary.get("quality", {}),
+        "quality": graph_view.quality,
     }
