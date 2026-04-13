@@ -27,12 +27,12 @@ from src.api.routes.results_fetchers import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
+from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.metrics.aggregate import aggregate_all_metrics
 from src.metrics.timeline_metrics import build_timeline_candidates, convert_to_timeline_nodes, select_timeline_nodes
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
-    DiagnosisRepository,
     GraphRepository,
     StatsRepository,
 )
@@ -141,12 +141,20 @@ def load_aggregate_bundle(
     graph_repo: GraphRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
-) -> tuple[list, list, Any, Any, dict[str, Any], dict[str, Any]]:
+) -> tuple[list, list, Any, Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
     """
     加载聚合统计数据
 
     Returns:
-        (character_relations, hierarchical_relations, global_stats, token_usage_stats, aggregate_metrics, graph_summary)
+        (
+            character_relations,
+            hierarchical_relations,
+            global_stats,
+            token_usage_stats,
+            aggregate_metrics,
+            graph_summary,
+            graph_quality_report,
+        )
     """
     character_relations = _fetch_character_relations(
         run_id,
@@ -179,7 +187,9 @@ def load_aggregate_bundle(
     }
 
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
-    graph_summary = DiagnosisRepository(stats_repo.session).fetch_graph_summary(run_id)
+    graph_view = KnowledgeGraphAuthorityService.from_session(stats_repo.session).build_graph_view(run_id)
+    graph_summary = graph_view.summary
+    graph_quality_report = graph_view.quality
 
     return (
         character_relations,
@@ -188,6 +198,7 @@ def load_aggregate_bundle(
         token_usage_stats,
         aggregate_metrics,
         graph_summary,
+        graph_quality_report,
     )
 
 
@@ -263,6 +274,7 @@ def build_export_payload(
     aggregate_metrics: dict[str, Any],
     token_usage_stats: Any,
     graph_summary: dict[str, Any] | None = None,
+    graph_quality_report: dict[str, Any] | None = None,
     timeline_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
@@ -286,7 +298,7 @@ def build_export_payload(
         "aggregate_metrics": aggregate_metrics,
         "token_usage_stats": token_usage_stats.model_dump(exclude_none=True),
         "graph_summary": graph_summary or {},
-        "graph_quality_report": (graph_summary or {}).get("quality", {}),
+        "graph_quality_report": graph_quality_report or {},
         "timeline": timeline_data,
     }
 
@@ -328,6 +340,7 @@ def fetch_all_results_data(
         token_usage_stats,
         aggregate_metrics,
         graph_summary,
+        graph_quality_report,
     ) = load_aggregate_bundle(
         run_id, novel_id, stats_repo, annotation_repo, chunk_repo, graph_repo, alias_map, valid_character_names
     )
@@ -360,6 +373,7 @@ def fetch_all_results_data(
         aggregate_metrics=aggregate_metrics,
         token_usage_stats=token_usage_stats,
         graph_summary=graph_summary,
+        graph_quality_report=graph_quality_report,
         timeline_data=timeline_data,
     )
 

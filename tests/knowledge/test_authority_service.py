@@ -125,7 +125,8 @@ def test_build_graph_view_exposes_stable_states_without_transient_local_context(
     assert all(not hasattr(state, "last_action") for state in view.stable_states)
     assert all(not hasattr(state, "last_emotion_score") for state in view.stable_states)
     assert view.summary["node_count"] == 2
-    assert "quality" in view.summary
+    assert "quality" not in view.summary
+    assert "recent_events" not in view.summary
 
 
 def test_build_active_entity_view_normalizes_repository_rows_into_authority_contract(db_session) -> None:
@@ -140,7 +141,7 @@ def test_build_active_entity_view_normalizes_repository_rows_into_authority_cont
     graph_repo.upsert_entity(
         run_id=run_id,
         canonical_name="白芷",
-        entity_type="character",
+        entity_type="organization",
         last_seen_chunk=12,
         primary_role_function="helper",
         last_action="观察",
@@ -158,6 +159,8 @@ def test_build_active_entity_view_normalizes_repository_rows_into_authority_cont
     assert len(view) == 1
     assert view[0].name == "白芷"
     assert view[0].role == "helper"
+    assert view[0].entity_type == "organization"
+    assert view[0].status == "active"
     assert view[0].recent_action == "观察"
     assert view[0].recent_emotion == "平静"
     assert view[0].last_seen_chunk == 12
