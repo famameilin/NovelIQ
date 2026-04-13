@@ -63,3 +63,51 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
         "status",
     }
     assert "emotion_score" not in node
+
+
+def test_fetch_graph_snapshot_summary_counts_match_rendered_inactive_edges(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Snapshot Summary Contract",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=8)
+    rival = graph_repo.upsert_entity(run_id=run_id, canonical_name="柳婉儿", first_seen_chunk=2, last_seen_chunk=8)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手查案",
+        confidence=0.88,
+        source_relation_row_id=9301,
+        directionality="directed",
+    )
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="盟友",
+        change_type="断裂",
+        chunk_id=8,
+        evidence="分道扬镳",
+        confidence=0.57,
+        source_relation_row_id=9302,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    db_session.commit()
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = db_session
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
+
+    assert len(snapshot["edges"]) == snapshot["summary"]["edge_count"] == 1
+    assert snapshot["quality"]["low_confidence_count"] == 1
