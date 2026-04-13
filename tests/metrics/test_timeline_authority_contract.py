@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.metrics.timeline_metrics import _resolve_timeline_authority_contract, build_timeline_candidates
+from src.metrics.timeline_metrics import (
+    TimelineAuthorityContractError,
+    _resolve_timeline_authority_contract,
+    build_timeline_candidates,
+)
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
@@ -85,7 +89,7 @@ def test_resolve_timeline_authority_contract_rejects_missing_lifecycle_for_chara
         relation_events=[],
     )
 
-    with pytest.raises(ValueError, match="exactly align with character_entities"):
+    with pytest.raises(TimelineAuthorityContractError, match="exactly align with character_entities"):
         _resolve_timeline_authority_contract(timeline_view)
 
 
@@ -106,5 +110,55 @@ def test_resolve_timeline_authority_contract_rejects_lifecycle_name_drift() -> N
         relation_events=[],
     )
 
-    with pytest.raises(ValueError, match="names must match character_entities"):
+    with pytest.raises(TimelineAuthorityContractError, match="names must match character_entities"):
+        _resolve_timeline_authority_contract(timeline_view)
+
+
+def test_resolve_timeline_authority_contract_rejects_duplicate_lifecycle_entity_ids() -> None:
+    timeline_view = SimpleNamespace(
+        character_entities=[
+            SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
+        ],
+        entity_lifecycles=[
+            SimpleNamespace(
+                entity_id=1,
+                name="顾承渊",
+                entity_type="character",
+                first_seen_chunk=0,
+                last_seen_chunk=4,
+            ),
+            SimpleNamespace(
+                entity_id=1,
+                name="顾承渊",
+                entity_type="character",
+                first_seen_chunk=0,
+                last_seen_chunk=4,
+            ),
+        ],
+        relation_events=[],
+    )
+
+    with pytest.raises(TimelineAuthorityContractError, match="must not duplicate entity_id"):
+        _resolve_timeline_authority_contract(timeline_view)
+
+
+def test_resolve_timeline_authority_contract_rejects_duplicate_character_entity_ids() -> None:
+    timeline_view = SimpleNamespace(
+        character_entities=[
+            SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
+            SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
+        ],
+        entity_lifecycles=[
+            SimpleNamespace(
+                entity_id=1,
+                name="顾承渊",
+                entity_type="character",
+                first_seen_chunk=0,
+                last_seen_chunk=4,
+            ),
+        ],
+        relation_events=[],
+    )
+
+    with pytest.raises(TimelineAuthorityContractError, match="must not duplicate entity_id"):
         _resolve_timeline_authority_contract(timeline_view)
