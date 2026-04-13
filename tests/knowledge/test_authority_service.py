@@ -63,15 +63,29 @@ def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db
     db_session.commit()
 
     view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(run_id)
+    character_ids = {entity.entity_id for entity in view.character_entities}
 
     assert {entity.name for entity in view.character_entities} == {"叶青", "沈昭"}
+    assert all(entity.entity_type == "character" for entity in view.character_entities)
     assert {(event.from_name, event.to_name, event.change_type) for event in view.relation_events} == {
         ("叶青", "沈昭", "断裂")
     }
+    assert {
+        (event.chunk_id, event.relation_type, event.change_type, event.evidence)
+        for event in view.relation_events
+    } == {
+        (9, "盟友", "断裂", "二人决裂")
+    }
+    assert all(
+        event.from_entity_id in character_ids and event.to_entity_id in character_ids
+        for event in view.relation_events
+    )
     assert {(item.name, item.first_seen_chunk, item.last_seen_chunk) for item in view.entity_lifecycles} == {
         ("叶青", 1, 8),
         ("沈昭", 2, 9),
     }
+    assert all(item.entity_type == "character" for item in view.entity_lifecycles)
+    assert all(item.entity_id in character_ids for item in view.entity_lifecycles)
 
 
 def test_build_graph_view_exposes_stable_states_without_transient_local_context(db_session) -> None:

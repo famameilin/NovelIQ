@@ -74,3 +74,50 @@ def test_get_timeline_max_level_filter_only_changes_node_subset(api_client: Test
     assert {
         node["chunk_id"] for node in filtered_payload["nodes"]
     }.issubset({node["chunk_id"] for node in full_payload["nodes"]})
+
+
+def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_shapes(
+    api_client: TestClient,
+    db_session,
+) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{scenario.novel_id}/timeline",
+        params={"task_id": scenario.task_id, "include_curve": "true"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    nodes_by_chunk = index_by_chunk_id(payload["nodes"])
+    relation_change = nodes_by_chunk[2]["relation_changes"][0]
+
+    # Public /timeline payload should stay stable and must not leak authority view internals.
+    assert set(payload) == {"meta", "phases", "nodes", "tension_curve"}
+    assert "character_entities" not in payload
+    assert "entity_lifecycles" not in payload
+    assert "relation_events" not in payload
+
+    assert set(nodes_by_chunk[2]) == {
+        "chunk_id",
+        "progress",
+        "importance_score",
+        "level",
+        "event",
+        "characters",
+        "is_pivot",
+        "is_cliffhanger",
+        "tension_percentile",
+        "node_type",
+        "relation_changes",
+        "character_entries",
+        "character_exits",
+    }
+    assert set(relation_change) == {"from_char", "to_char", "relation_type", "change_type", "evidence"}
+    assert relation_change == {
+        "from_char": scenario.hero_name,
+        "to_char": scenario.rival_name,
+        "relation_type": "盟友",
+        "change_type": "新建",
+        "evidence": "二人正式结盟",
+    }
