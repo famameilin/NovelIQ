@@ -43,3 +43,6 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
         "masked_person": "bai_zhi",
         "monkey": "hou_fei_bai",
     }
+    assert "graph_summary" in payload
+    assert "graph_quality_report" in payload
+    assert "quality" not in payload["graph_summary"]
