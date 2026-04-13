@@ -15,6 +15,7 @@
 
 from src.rag.authority import Level1AuthorityProvider
 from src.rag.evidence_types import (
+    ActiveEntityContext,
     AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
@@ -37,6 +38,7 @@ __all__ = [
     "DisambigResult",
     "AliasLookup",
     "ActiveEntityLookup",
+    "ActiveEntityContext",
     "AliasMapping",
     "CanonicalEntity",
     "ConfirmedRelation",

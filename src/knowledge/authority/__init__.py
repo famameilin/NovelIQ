@@ -1,5 +1,6 @@
 from .service import KnowledgeGraphAuthorityService
 from .types import (
+    ActiveEntityContext,
     AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
@@ -13,6 +14,7 @@ from .types import (
 )
 
 __all__ = [
+    "ActiveEntityContext",
     "AliasMapping",
     "CanonicalEntity",
     "ConfirmedRelation",

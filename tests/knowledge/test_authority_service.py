@@ -128,6 +128,43 @@ def test_build_graph_view_exposes_stable_states_without_transient_local_context(
     assert "quality" in view.summary
 
 
+def test_build_active_entity_view_normalizes_repository_rows_into_authority_contract(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Active Entity Authority View",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    graph_repo.upsert_entity(
+        run_id=run_id,
+        canonical_name="白芷",
+        entity_type="character",
+        last_seen_chunk=12,
+        primary_role_function="helper",
+        last_action="观察",
+        last_emotion_score="平静",
+        status="active",
+    )
+    db_session.commit()
+
+    view = KnowledgeGraphAuthorityService.from_session(db_session).build_active_entity_view(
+        run_id,
+        current_chunk=12,
+        lookback=5,
+    )
+
+    assert len(view) == 1
+    assert view[0].name == "白芷"
+    assert view[0].role == "helper"
+    assert view[0].recent_action == "观察"
+    assert view[0].recent_emotion == "平静"
+    assert view[0].last_seen_chunk == 12
+    assert not hasattr(view[0], "last_action")
+    assert not hasattr(view[0], "last_emotion")
+
+
 def test_build_level1_snapshot_entities_exclude_transient_prompt_local_state(db_session) -> None:
     novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
     run_id = RunRepository(db_session).create_run(
@@ -269,7 +306,59 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
 
     view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
 
-    assert len(view.confirmed_relations) == 2
-    assert view.summary["edge_count"] == 2
-    assert view.summary["density"] == 0.3333
+    # Current graph view should expose only active relations; broken history stays in relation_events.
+    assert len(view.confirmed_relations) == 1
+    assert {(item.from_name, item.to_name, item.relation_type) for item in view.confirmed_relations} == {
+        ("林渡", "顾霜", "盟友")
+    }
+    assert view.summary["edge_count"] == 1
+    assert view.summary["density"] == 0.1667
     assert view.quality["low_confidence_count"] == 2
+
+
+def test_build_graph_view_keeps_history_in_events_while_current_relations_stay_active_only(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph View Current vs History",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
+    rival = graph_repo.upsert_entity(run_id=run_id, canonical_name="谢危", first_seen_chunk=2, last_seen_chunk=8)
+
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="敌对",
+        change_type="新建",
+        chunk_id=4,
+        evidence="结下仇怨",
+        confidence=0.58,
+        source_relation_row_id=16001,
+        directionality="directed",
+    )
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="敌对",
+        change_type="断裂",
+        chunk_id=8,
+        evidence="恩怨了结",
+        confidence=0.55,
+        source_relation_row_id=16002,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    db_session.commit()
+
+    view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+
+    assert view.confirmed_relations == []
+    assert {(event.from_name, event.to_name, event.change_type) for event in view.relation_events} == {
+        ("林渡", "谢危", "断裂"),
+        ("林渡", "谢危", "新建"),
+    }

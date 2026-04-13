@@ -267,6 +267,64 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         self.assertEqual(result.level2_candidates, [])
         self.assertNotIn(2, result.used_levels)
 
+    def test_collect_evidence_keeps_level2_rows_when_level1_hits(self) -> None:
+        """结构化证据收集应保留 Level 2 活跃实体，即使 Level 1 已命中。"""
+        graph_repo = MagicMock()
+        graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
+        graph_repo.fetch_active_entities.return_value = [
+            {"name": "白芷", "last_action": "观察", "last_emotion": "平静", "chunk_id": 3},
+            {"name": "侯飞白", "last_action": "戒备", "last_emotion": "紧张", "chunk_id": 2},
+        ]
+
+        provider = DisambigContextProvider(
+            graph_repo=graph_repo,
+            run_id="test-run-id",
+            level1_enabled=True,
+            level2_enabled=True,
+        )
+
+        bundle = provider.collect_evidence(["灰衣人"], current_chunk=3)
+
+        self.assertEqual(len(bundle.structured_evidence), 1)
+        self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 → 白芷")
+        self.assertEqual(
+            [
+                item.metadata.get("name", item.content)
+                for item in bundle.local_evidence
+                if item.evidence_type == "active_entity"
+            ],
+            ["白芷", "侯飞白"],
+        )
+        self.assertEqual(bundle.local_evidence[0].metadata["recent_action"], "观察")
+        self.assertEqual(bundle.local_evidence[0].metadata["recent_emotion"], "平静")
+        self.assertEqual(bundle.local_evidence[0].metadata["last_seen_chunk"], 3)
+        self.assertNotIn("last_action", bundle.local_evidence[0].metadata)
+        self.assertNotIn("last_emotion", bundle.local_evidence[0].metadata)
+        self.assertEqual(bundle.to_prompt_blocks()["disambig_candidates"], "")
+
+    def test_build_disambig_context_renders_legacy_candidate_items_via_disambig_renderer(self) -> None:
+        provider = DisambigContextProvider()
+        provider.collect_evidence = MagicMock(
+            return_value=MagicMock(
+                to_prompt_blocks=MagicMock(
+                    return_value={
+                        "structured_evidence": "",
+                        "disambig_candidates": (
+                            "<Disambig_Candidates>\n"
+                            "- 「灰衣人」可能是：白芷\n"
+                            "</Disambig_Candidates>"
+                        ),
+                        "vector_evidence": "",
+                    }
+                )
+            )
+        )
+
+        context = provider.build_disambig_context(["灰衣人"], current_chunk=3)
+
+        self.assertIn("<Disambig_Candidates>", context)
+        self.assertIn("「灰衣人」可能是：白芷", context)
+
 
 if __name__ == "__main__":
     unittest.main()

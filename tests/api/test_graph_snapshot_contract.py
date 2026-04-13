@@ -65,7 +65,7 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
     assert "emotion_score" not in node
 
 
-def test_fetch_graph_snapshot_summary_counts_match_rendered_inactive_edges(db_session) -> None:
+def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_session) -> None:
     novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
@@ -109,5 +109,10 @@ def test_fetch_graph_snapshot_summary_counts_match_rendered_inactive_edges(db_se
 
     snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
 
-    assert len(snapshot["edges"]) == snapshot["summary"]["edge_count"] == 1
+    assert snapshot["edges"] == []
+    assert snapshot["summary"]["edge_count"] == 0
     assert snapshot["quality"]["low_confidence_count"] == 1
+    assert {(event["from_name"], event["to_name"], event["change_type"]) for event in snapshot["events"]} == {
+        ("贺伯安", "柳婉儿", "断裂"),
+        ("贺伯安", "柳婉儿", "新建"),
+    }

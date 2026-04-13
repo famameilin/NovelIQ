@@ -91,6 +91,26 @@ class EntityLifecycle:
 
 
 @dataclass(slots=True)
+class ActiveEntityContext:
+    """
+    Level 2 local context contract for nearby active entities.
+
+    This keeps prompt consumers off the repository row shape while still
+    exposing the recent local state they need for annotation/disambiguation.
+    """
+
+    name: str
+    entity_id: int | None = None
+    role: str | None = None
+    entity_type: str = "character"
+    status: str = "active"
+    last_seen_chunk: int | None = None
+    recent_action: str | None = None
+    recent_emotion: str | None = None
+    source: str = "graph_active_entities"
+
+
+@dataclass(slots=True)
 class StableState:
     """
     Cross-chunk stable entity state.
