@@ -217,7 +217,6 @@ export function createGraph(): GraphData {
     first_seen_chunk: Math.floor(Math.random() * 10 + 1),
     last_seen_chunk: Math.floor(Math.random() * 100 + 50),
     role: i === 0 ? "protagonist" : i < 3 ? "main" : "supporting",
-    emotion_score: +(Math.random() * 2 - 0.5).toFixed(2),
     status: i === 0 ? "active" : "active",
   }));
 

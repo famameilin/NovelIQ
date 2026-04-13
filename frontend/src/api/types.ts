@@ -147,7 +147,6 @@ export interface GraphNode {
   first_seen_chunk?: number;
   last_seen_chunk?: number;
   role?: string;
-  emotion_score?: number;
   status?: string;
 }
 
