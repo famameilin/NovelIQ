@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 from loguru import logger
 
@@ -25,6 +25,22 @@ from src.metrics.narrative_metrics import find_global_peak, find_local_peaks
 TimelineNodeType = Literal["plot", "character_entry", "character_exit", "relation_change"]
 TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
 ImportanceLevel = Literal[1, 2, 3]
+
+# Timeline 对 authority 的共享依赖字段清单。
+# 这份清单用于把“timeline 实际依赖什么”固定在消费者侧，避免后续改动时
+# 又退回去读取 repository 原始 row / ORM 形状。
+TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "character_entities": ("entity_id", "name", "entity_type"),
+    "entity_lifecycles": ("entity_id", "name", "entity_type", "first_seen_chunk", "last_seen_chunk"),
+    "relation_events": (
+        "chunk_id",
+        "from_entity_id",
+        "to_entity_id",
+        "relation_type",
+        "change_type",
+        "evidence",
+    ),
+}
 
 
 # ==================== DTO 定义 ====================
@@ -560,6 +576,58 @@ def convert_to_timeline_nodes(candidates: list[TimelineCandidate]) -> list[Timel
     ]
 
 
+def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any], list[Any], dict[int, str]]:
+    """
+    Validate the authority-backed timeline contract before building candidates.
+
+    Timeline is intentionally allowed to depend on only three authority surfaces:
+    - ``character_entities``: use ``entity_id/name/entity_type`` to freeze the character subgraph
+    - ``entity_lifecycles``: use ``entity_id/name/first_seen_chunk/last_seen_chunk`` as entry/exit truth
+    - ``relation_events``: use ``chunk_id/from_entity_id/to_entity_id/relation_type/change_type/evidence``
+
+    If any non-character entity or cross-subgraph relation leaks into this view, we
+    fail fast so the shared contract regression is visible in tests and API behavior.
+    """
+
+    character_entities = list(timeline_view.character_entities)
+    entity_lifecycles = list(timeline_view.entity_lifecycles)
+    relation_events = list(timeline_view.relation_events)
+
+    if any(entity.entity_type != "character" for entity in character_entities):
+        raise ValueError("TimelineAuthorityView.character_entities must contain only character entities")
+
+    # Entry/exit spans and relation rendering must talk about the exact same
+    # character set, otherwise timeline can silently emit different names for
+    # the same entity across node types.
+    character_map = {
+        int(entity.entity_id): entity
+        for entity in character_entities
+        if getattr(entity, "entity_id", None) is not None
+    }
+    lifecycle_map = {int(lifecycle.entity_id): lifecycle for lifecycle in entity_lifecycles}
+    character_ids = set(character_map)
+
+    for lifecycle in entity_lifecycles:
+        if lifecycle.entity_type != "character":
+            raise ValueError("TimelineAuthorityView.entity_lifecycles must contain only character lifecycles")
+        if lifecycle.entity_id not in character_ids:
+            raise ValueError("TimelineAuthorityView.entity_lifecycles must align with character_entities")
+
+    if set(lifecycle_map) != character_ids:
+        raise ValueError("TimelineAuthorityView.entity_lifecycles must exactly align with character_entities")
+
+    for entity_id, entity in character_map.items():
+        lifecycle = lifecycle_map[entity_id]
+        if lifecycle.name != entity.name:
+            raise ValueError("TimelineAuthorityView.entity_lifecycles names must match character_entities")
+
+    for event in relation_events:
+        if event.from_entity_id not in character_ids or event.to_entity_id not in character_ids:
+            raise ValueError("TimelineAuthorityView.relation_events must stay inside the character subgraph")
+
+    return entity_lifecycles, relation_events, {entity_id: entity.name for entity_id, entity in character_map.items()}
+
+
 def build_timeline_candidates(
     run_id: str,
     chunk_repo: Any,
@@ -581,6 +649,7 @@ def build_timeline_candidates(
     消除两处 ~150 行的重复代码。
 
     Shared contract notes:
+    - timeline 依赖 authority 的字段清单见 ``TIMELINE_AUTHORITY_DEPENDENCY_FIELDS``
     - 角色登场/退场只来自 TimelineAuthorityView.entity_lifecycles
     - 关系变化只来自 TimelineAuthorityView.relation_events
     - timeline 不直接消费 GraphRepository 的原始 ORM / dict 形状
@@ -653,14 +722,8 @@ def build_timeline_candidates(
 
     authority_service = KnowledgeGraphAuthorityService.from_session(chunk_repo.session)
     timeline_view = authority_service.build_timeline_view(run_id)
-    character_entities = timeline_view.character_entities
-    entity_lifecycles = timeline_view.entity_lifecycles
-
-    # Timeline is pinned to the authority-owned character subgraph contract.
-    # Lifecycle spans remain the single source of truth for entry/exit nodes,
-    # while relation history is already filtered to character-character edges.
-    entity_name_map: dict[int, str] = {item.entity_id: item.name for item in entity_lifecycles}
-    relation_events = timeline_view.relation_events
+    # Timeline is pinned to the authority-owned shared contract instead of raw graph rows.
+    entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
 
     # 计算四阶段划分
     phases = compute_four_phases(tension_scores, chunk_ids)
