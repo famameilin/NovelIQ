@@ -118,3 +118,36 @@ class TestLevel1AuthoritySnapshot:
         snapshot = Level1AuthorityProvider(graph_repo).build_snapshot(run_id)
 
         assert snapshot.confirmed_relations == []
+
+    def test_build_active_entity_contexts_expose_level2_contract(self, db_session) -> None:
+        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Active Entity Context",
+        )
+
+        graph_repo = GraphRepository(db_session)
+        graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name="白芷",
+            entity_type="character",
+            last_seen_chunk=8,
+            primary_role_function="helper",
+            last_action="观察局势",
+            last_emotion_score="警惕",
+            status="active",
+        )
+        db_session.commit()
+
+        contexts = Level1AuthorityProvider(graph_repo).build_active_entity_contexts(
+            run_id,
+            current_chunk=8,
+            lookback=3,
+        )
+
+        assert len(contexts) == 1
+        assert contexts[0].name == "白芷"
+        assert contexts[0].recent_action == "观察局势"
+        assert contexts[0].recent_emotion == "警惕"
+        assert contexts[0].last_seen_chunk == 8

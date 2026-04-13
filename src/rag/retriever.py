@@ -41,6 +41,7 @@ from src.rag.evidence_types import EvidenceBundle, EvidenceItem, Level1Authority
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from src.knowledge.authority import ActiveEntityContext
     from src.models.local.embedding import EmbeddingClient
     from src.storage.repositories import GraphRepository
 
@@ -97,19 +98,35 @@ class AliasLookup:
 class ActiveEntityLookup:
     """Level2: 近期活跃实体候选"""
 
-    def __init__(self, graph_repo: GraphRepository | None = None, run_id: str | None = None):
+    def __init__(
+        self,
+        graph_repo: GraphRepository | None = None,
+        run_id: str | None = None,
+        authority_provider: Level1AuthorityProvider | None = None,
+    ):
         self._graph_repo = graph_repo
         self._run_id = run_id
+        self._authority_provider = authority_provider
+
+    def get_active_contexts(
+        self,
+        current_chunk: int,
+        lookback: int = 10,
+    ) -> list[ActiveEntityContext]:
+        if self._authority_provider is None or self._run_id is None:
+            return []
+        return self._authority_provider.build_active_entity_contexts(
+            self._run_id,
+            current_chunk=current_chunk,
+            lookback=lookback,
+        )
 
     def get_active_candidates(
         self,
         current_chunk: int,
         lookback: int = 10,
     ) -> list[str]:
-        if self._graph_repo is None or self._run_id is None:
-            return []
-        rows = self._graph_repo.fetch_active_entities(current_chunk, lookback, self._run_id)
-        return [str(row["name"]) for row in rows]
+        return [item.name for item in self.get_active_contexts(current_chunk, lookback) if item.name]
 
 
 class Level3VectorEvidence:
@@ -322,11 +339,18 @@ class DisambigContextProvider:
         similarity_threshold: float = 0.7,
         level3_top_k: int = 5,
     ):
+        self._authority_provider = (
+            Level1AuthorityProvider(graph_repo) if graph_repo is not None and run_id is not None else None
+        )
         self._alias_lookup = AliasLookup(
             graph_repo=graph_repo,
             run_id=run_id,
         )
-        self._active_lookup = ActiveEntityLookup(graph_repo=graph_repo, run_id=run_id)
+        self._active_lookup = ActiveEntityLookup(
+            graph_repo=graph_repo,
+            run_id=run_id,
+            authority_provider=self._authority_provider,
+        )
 
         self._level3 = Level3VectorEvidence(
             session=session,
@@ -343,9 +367,6 @@ class DisambigContextProvider:
         self._lookback_chunks = lookback_chunks
         self._relations_cache: list[dict] | None = None
         self._authority_snapshot_cache: Level1AuthoritySnapshot | None = None
-        self._authority_provider = (
-            Level1AuthorityProvider(graph_repo) if graph_repo is not None and run_id is not None else None
-        )
         self._level1_enabled = level1_enabled
         self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
@@ -377,7 +398,9 @@ class DisambigContextProvider:
         requested_names = [name for name in (names_in_chunk or []) if name]
         relevant_names = set(requested_names)
         if relevant_names:
-            related_canonicals = {mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names}
+            related_canonicals = {
+                mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names
+            }
             relevant_names |= related_canonicals
 
         structured_evidence: list[EvidenceItem] = []
@@ -469,20 +492,26 @@ class DisambigContextProvider:
         bundle = self._build_structured_evidence(names_in_chunk=names_in_chunk)
 
         if self._level2_enabled and current_chunk is not None:
-            candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
-            if self._graph_repo is not None and self._run_id is not None:
-                rows = self._graph_repo.fetch_active_entities(current_chunk, self._lookback_chunks, self._run_id)
-            else:
-                rows = [{"name": name} for name in candidates]
+            active_contexts = self._active_lookup.get_active_contexts(current_chunk, self._lookback_chunks)
 
             bundle.local_evidence.extend(
                 EvidenceItem(
                     evidence_type="active_entity",
-                    source="graph_active_entities",
-                    content=str(row.get("name", "")),
-                    metadata=dict(row),
+                    source=item.source,
+                    content=item.name,
+                    metadata={
+                        "entity_id": item.entity_id,
+                        "name": item.name,
+                        "role": item.role or "other",
+                        "entity_type": item.entity_type,
+                        "status": item.status,
+                        "last_seen_chunk": item.last_seen_chunk,
+                        "recent_action": item.recent_action,
+                        "recent_emotion": item.recent_emotion,
+                    },
+                    chunk_id=item.last_seen_chunk,
                 )
-                for row in rows
+                for item in active_contexts
             )
 
         return bundle
