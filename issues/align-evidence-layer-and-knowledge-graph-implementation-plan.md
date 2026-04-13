@@ -5,7 +5,8 @@
 | 项目 | 内容 |
 |------|------|
 | 创建时间 | 2026-04-12 |
-| 状态 | 待实施 |
+| 更新时间 | 2026-04-13 |
+| 状态 | 阶段 1-3 已完成；阶段 4 已完成 authority 第一轮落地，进入阶段 4/5 |
 | 文档定位 | 两份上游文档的联合实施路线图 |
 | 上游文档 | `issues/generalize-rag-to-narrative-evidence.md` |
 | 上游文档 | `issues/rebuild-knowledge-graph-architecture.md` |
@@ -382,6 +383,14 @@ class Level1AuthorityProvider:
 - 现有调用链已预留 `rag_retriever`
 - 对图谱契约依赖较轻
 
+当前状态：
+
+- 已完成
+- `Phase 2` 已真实消费共享 evidence layer
+- `evidence_bundle` 已贯通 `workflow/context -> multi_phase -> phase2 -> message builder`
+- `serial / parallel` 两条路径已对齐
+- 已补充回归测试，覆盖 `Level 1 / 2 / 3` 提示拼装与 `anchor_text` 不得污染当前 chunk 的约束
+
 #### 方案 B
 
 先做 Phase 3 对话归属
@@ -441,6 +450,36 @@ projection / aggregate 重建
 稳定 repository / service 边界
 
 避免 evidence layer 和产品层继续直接依赖图谱内部实现。
+
+### 当前已落地的阶段 4 内容
+
+截至 2026-04-13，`refactor/knowledge-graph-authority` 已完成以下第一轮 authority 落地：
+
+- 已引入 `KnowledgeGraphAuthorityService`
+- 已落地 `Level1AuthoritySnapshot`
+- 已落地 `TimelineAuthorityView`
+- 已落地 `GraphAuthorityView`
+- 已落地 `ActiveEntityContext`，用于承接 `Level 2` 近期活跃实体上下文
+- 时间轴已改为消费 authority view，而不是直接依赖图谱 repository 的原始 ORM / dict 形状
+- `/graph` 快照已改为消费 authority view
+- 图谱节点 contract 已去除 `emotion_score` 这类不应进入稳定 authority contract 的瞬时字段
+- 已修正 graph current/history 混合问题：
+  - `confirmed_relations` 只表示当前仍有效的确认关系
+  - `relation_events` 单独表示历史关系变化
+  - graph summary / quality 重新回到“当前权威事实”语义
+
+### 当前阶段 4 的边界说明
+
+虽然 authority 第一轮落地已经完成，但这不等于阶段 4 全部结束。
+
+当前更准确的状态是：
+
+- authority service / view / contract 已成形
+- current relation 与 relation history 的语义边界已收紧
+- `Level 2` 活跃实体上下文已在 evidence 主线完成 authority 化消费适配
+- results export 与 cloud diagnosis payload 已改为复用 authority graph view，而不是继续各自维护旧 graph summary 组装逻辑
+- annotation 在 `rag` provider 不可用时的活跃实体 fallback 也已统一回 authority-owned `Level 2` 契约
+- 但图谱产品层、timeline 完整契约和更上层 analysis 聚合仍未全部完成
 
 ### 本阶段不应直接耦合到 evidence layer 内部
 
@@ -562,6 +601,16 @@ projection / aggregate 重建
 - 已将最小 `Level 1` 契约同步到 `refactor/level123-evidence-layer`
 - 已创建 `refactor/evidence-layer-phase3-disambiguation`
 - 已将 `refactor/evidence-layer-phase3-disambiguation` 合入 `refactor/level123-evidence-layer`
+- 已完成 `Phase 2` 伏笔分析接入共享 evidence layer
+- 已将 `codex/phase4-foreshadowing-evidence-consumer` 合入 `refactor/level123-evidence-layer`
+- 已补齐 `Phase 2` 的相邻 chunk 文本透传与 evidence 回归测试
+- 已从 `codex/knowledge-graph-authority-stage4` 拆出 authority 相关提交并合入 `refactor/knowledge-graph-authority`
+- 已在 `refactor/knowledge-graph-authority` 上完成 authority service / graph snapshot / timeline view 的第一轮落地
+- 已将 `codex/knowledge-graph-authority-stage4` 中用于收口 authority contract 的后续修复继续合入 `refactor/knowledge-graph-authority`
+- 已完成 graph summary / relation events / quality 的 contract 分离，避免 summary 再混入 history/diagnostic 语义
+- 已完成 results export 与 cloud diagnosis payload 的 authority graph view 对齐
+- 已完成 annotation fallback 的 `Level 2` 活跃实体 authority 化收口
+- 已明确将混合提交中的 evidence consumer 改动留在 evidence 主线处理，不强行并入 graph 主线
 
 ### 短生命周期子分支
 
@@ -615,6 +664,11 @@ projection / aggregate 重建
 说明：
 
 - 接入 Phase2/3/4 中至少一个新消费者
+
+当前状态补充：
+
+- 该阶段目标已由 `codex/phase4-foreshadowing-evidence-consumer` 先行完成 `Phase 2` 伏笔分析接入
+- 如后续继续扩展，可沿用该子分支命名承接 `Phase 3 / Phase 4` 其他消费者
 
 #### 子分支 5
 
@@ -698,6 +752,8 @@ projection / aggregate 重建
 - current relation projection
 - entity type projection
 - authority contract regression
+- export / diagnosis payload graph contract regression
+- annotation fallback 的 `Level 2` authority contract regression
 
 ### C. timeline 测试
 
@@ -784,7 +840,8 @@ projection / aggregate 重建
 
 ### 联合验收 D
 
-- [ ] 图谱权威层完整重构完成
+- [~] 图谱权威层完整重构推进中
+- [x] authority service / view / current-history 边界第一轮落地完成
 - [ ] 时间轴共享契约完成适配
 
 ### 联合验收 E
@@ -797,11 +854,11 @@ projection / aggregate 重建
 
 ## 当前立即建议执行的下一步
 
-上述阶段 1、阶段 2 和阶段 3 的当前目标已经完成，接下来更合理的推进顺序是：
+上述阶段 1、阶段 2 和阶段 3 的当前目标已经完成，且 `Phase 4` 的首个非消歧消费者（`Phase 2` 伏笔分析）也已落地。接下来更合理的推进顺序是：
 
-1. 从 `refactor/level123-evidence-layer` 继续推进 `Phase 4`，选择至少一个非消歧新消费者完成真实接入
-2. 从 `refactor/knowledge-graph-authority` 继续推进图谱权威层完整重构
-3. 启动时间轴共享契约与图谱产品层迁移规划
+1. 从 `refactor/knowledge-graph-authority` 继续推进图谱权威层完整重构
+2. 启动时间轴共享契约与图谱产品层迁移规划
+3. 视收益再决定是否继续在 evidence 主线中扩展 `Phase 3` 对话归属或 `Phase 4` 关系抽取消费者
 
 ---
 
