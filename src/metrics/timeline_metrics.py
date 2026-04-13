@@ -597,9 +597,7 @@ def build_timeline_candidates(
     Raises:
         ValueError: 无 chunk 数据时
     """
-    from src.storage.repositories import GraphRepository
-
-    graph_repo = GraphRepository(chunk_repo.session)
+    from src.knowledge.authority import KnowledgeGraphAuthorityService
 
     # 获取 chunk 文本列表
     chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
@@ -647,13 +645,13 @@ def build_timeline_candidates(
 
     annotation_map = {ann.chunk_id: ann for ann in [Annotation(r) for r in raw_annotations]} if raw_annotations else {}
 
-    # 获取知识图谱数据
-    entities = graph_repo.fetch_entities(run_id, entity_type="character")
+    authority_service = KnowledgeGraphAuthorityService.from_session(chunk_repo.session)
+    timeline_view = authority_service.build_timeline_view(run_id)
+    entities = timeline_view.character_entities
 
-    # 预构建实体ID到名称的映射
-    entity_name_map: dict[int, str] = {e.entity_id: e.canonical_name for e in entities if e.entity_id is not None}
-
-    relation_events = graph_repo.fetch_relation_event_models(run_id)
+    # 时间轴只消费角色子图，避免直接依赖 GraphRepository 的原始 ORM/dict 形状。
+    entity_name_map: dict[int, str] = {e.entity_id: e.name for e in entities if e.entity_id is not None}
+    relation_events = timeline_view.relation_events
 
     # 计算四阶段划分
     phases = compute_four_phases(tension_scores, chunk_ids)
@@ -666,7 +664,7 @@ def build_timeline_candidates(
         if char.first_seen_chunk is not None:
             idx = chunk_id_to_idx.get(char.first_seen_chunk)
             if idx is not None:
-                major_character_entries.append((char.canonical_name, idx))
+                major_character_entries.append((char.name, idx))
 
     # 获取关系断裂事件
     relation_break_events: list[tuple[int, RelationChangeEventDTO]] = []
@@ -715,9 +713,9 @@ def build_timeline_candidates(
         character_exits: list[str] = []
         for char in entities:
             if char.first_seen_chunk == chunk_id:
-                character_entries.append(char.canonical_name)
+                character_entries.append(char.name)
             if char.last_seen_chunk == chunk_id:
-                character_exits.append(char.canonical_name)
+                character_exits.append(char.name)
 
         # 检查是否为关系变化节点
         relation_changes: list[RelationChangeEventDTO] = []
@@ -735,9 +733,7 @@ def build_timeline_candidates(
             )
 
         # 检查是否为主要角色相关
-        is_major_character = bool(
-            set(character_entries) | set(character_exits) & {c.canonical_name for c in major_characters}
-        )
+        is_major_character = bool((set(character_entries) | set(character_exits)) & {c.name for c in major_characters})
 
         # 计算重要性分数
         importance_score, level = compute_importance_score(
