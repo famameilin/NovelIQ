@@ -6,6 +6,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.config import settings
+from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
 """
@@ -161,7 +162,9 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     )
 
     known_characters, alias_merges = repo.fetch_character_disambig_data(effective_run_id)
-    graph_summary = repo.fetch_graph_summary(effective_run_id)
+    graph_view = KnowledgeGraphAuthorityService.from_session(conn).build_graph_view(effective_run_id)
+    graph_summary = graph_view.summary
+    graph_quality_report = graph_view.quality
 
     payload = {
         "novel_id": novel_id,
@@ -176,6 +179,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "known_characters": known_characters,
         "alias_merges": alias_merges,
         "graph_summary": graph_summary,
+        "graph_quality_report": graph_quality_report,
     }
 
     logger.info(
