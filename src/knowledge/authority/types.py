@@ -14,7 +14,12 @@ class AliasMapping:
 
 @dataclass(slots=True)
 class CanonicalEntity:
-    """Stable entity identity inside one run, not a transient mention."""
+    """
+    Stable entity identity inside one run.
+
+    Intentionally excludes transient prompt-local state like last_action or
+    last_emotion_score so Level 1 stays a minimal reusable authority contract.
+    """
 
     name: str
     entity_type: str = "character"
@@ -22,8 +27,6 @@ class CanonicalEntity:
     first_seen_chunk: int | None = None
     last_seen_chunk: int | None = None
     primary_role_function: str | None = None
-    last_emotion_score: str | None = None
-    last_action: str | None = None
     status: str = "active"
     source_confidence: float | None = None
     source: str = "graph_entities"

@@ -128,6 +128,32 @@ def test_build_graph_view_exposes_stable_states_without_transient_local_context(
     assert "quality" in view.summary
 
 
+def test_build_level1_snapshot_entities_exclude_transient_prompt_local_state(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Level1 Stable Entity Contract",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    graph_repo.upsert_entity(
+        run_id=run_id,
+        canonical_name="陆九",
+        first_seen_chunk=1,
+        last_seen_chunk=4,
+        last_emotion_score="angry",
+        last_action="拔刀",
+    )
+    db_session.commit()
+
+    snapshot = KnowledgeGraphAuthorityService.from_session(db_session).build_level1_snapshot(run_id)
+
+    assert len(snapshot.canonical_entities) == 1
+    assert not hasattr(snapshot.canonical_entities[0], "last_action")
+    assert not hasattr(snapshot.canonical_entities[0], "last_emotion_score")
+
+
 def test_build_level1_snapshot_keeps_inactive_relations_outside_confirmed_relations(db_session) -> None:
     novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
     run_id = RunRepository(db_session).create_run(
@@ -185,3 +211,65 @@ def test_build_level1_snapshot_keeps_inactive_relations_outside_confirmed_relati
         ("韩立", "南宫婉", "断裂"),
         ("韩立", "南宫婉", "新建"),
     }
+
+
+def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph View Summary Contract",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=8)
+    rival = graph_repo.upsert_entity(run_id=run_id, canonical_name="谢危", first_seen_chunk=2, last_seen_chunk=8)
+
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="并肩迎敌",
+        confidence=0.92,
+        source_relation_row_id=15001,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="敌对",
+        change_type="新建",
+        chunk_id=4,
+        evidence="结下仇怨",
+        confidence=0.58,
+        source_relation_row_id=15002,
+        directionality="directed",
+    )
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="敌对",
+        change_type="断裂",
+        chunk_id=8,
+        evidence="恩怨了结",
+        confidence=0.55,
+        source_relation_row_id=15003,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    db_session.commit()
+
+    view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+
+    assert len(view.confirmed_relations) == 2
+    assert view.summary["edge_count"] == 2
+    assert view.summary["density"] == 0.3333
+    assert view.quality["low_confidence_count"] == 2
