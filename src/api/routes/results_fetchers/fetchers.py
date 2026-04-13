@@ -756,7 +756,6 @@ def _fetch_graph_snapshot(
             "first_seen_chunk": row.first_seen_chunk,
             "last_seen_chunk": row.last_seen_chunk,
             "role": row.primary_role_function,
-            "emotion_score": None,
             "status": row.status,
         }
         for row in graph_view.stable_states
