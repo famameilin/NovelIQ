@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from src.metrics.timeline_metrics import build_timeline_candidates
+from types import SimpleNamespace
+
+import pytest
+
+from src.metrics.timeline_metrics import _resolve_timeline_authority_contract, build_timeline_candidates
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
@@ -61,3 +65,46 @@ def test_build_timeline_candidates_consumes_authority_character_subgraph_only(db
     assert relation_break_events[0][0] == 4
     assert relation_break_events[0][1].from_char == scenario.hero_name
     assert relation_break_events[0][1].to_char == scenario.rival_name
+
+
+def test_resolve_timeline_authority_contract_rejects_missing_lifecycle_for_character() -> None:
+    timeline_view = SimpleNamespace(
+        character_entities=[
+            SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
+            SimpleNamespace(entity_id=2, name="苏映雪", entity_type="character"),
+        ],
+        entity_lifecycles=[
+            SimpleNamespace(
+                entity_id=1,
+                name="顾承渊",
+                entity_type="character",
+                first_seen_chunk=0,
+                last_seen_chunk=4,
+            )
+        ],
+        relation_events=[],
+    )
+
+    with pytest.raises(ValueError, match="exactly align with character_entities"):
+        _resolve_timeline_authority_contract(timeline_view)
+
+
+def test_resolve_timeline_authority_contract_rejects_lifecycle_name_drift() -> None:
+    timeline_view = SimpleNamespace(
+        character_entities=[
+            SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
+        ],
+        entity_lifecycles=[
+            SimpleNamespace(
+                entity_id=1,
+                name="顾承渊旧名",
+                entity_type="character",
+                first_seen_chunk=0,
+                last_seen_chunk=4,
+            )
+        ],
+        relation_events=[],
+    )
+
+    with pytest.raises(ValueError, match="names must match character_entities"):
+        _resolve_timeline_authority_contract(timeline_view)
