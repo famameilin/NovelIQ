@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.knowledge.authority import (
+    ActiveEntityContext,
     AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
@@ -12,6 +13,7 @@ from src.knowledge.authority import (
 )
 
 __all__ = [
+    "ActiveEntityContext",
     "AliasMapping",
     "CanonicalEntity",
     "ConfirmedRelation",

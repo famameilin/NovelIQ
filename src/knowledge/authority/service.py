@@ -6,6 +6,7 @@ from typing import Any
 from src.storage.repositories import GraphRepository
 
 from .types import (
+    ActiveEntityContext,
     AliasMapping,
     CanonicalEntity,
     ConfirmedRelation,
@@ -62,12 +63,23 @@ class KnowledgeGraphAuthorityService:
             relation_events=relation_events,
         )
 
+    def build_active_entity_view(
+        self,
+        run_id: str,
+        current_chunk: int,
+        lookback: int = 10,
+    ) -> list[ActiveEntityContext]:
+        """Evidence consumers use a stable Level 2 view instead of raw repo rows."""
+
+        rows = self._graph_repo.fetch_active_entities(current_chunk, lookback, run_id)
+        return self._build_active_entity_contexts(rows)
+
     def build_graph_view(self, run_id: str, event_limit: int | None = 200) -> GraphAuthorityView:
-        """Graph page and diagnosis consume richer authority projections."""
+        """Graph page consumes current authority facts plus separate relation history."""
 
         entities = self._graph_repo.fetch_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
-            self._graph_repo.fetch_current_relations(run_id, active_only=False)
+            self._graph_repo.fetch_current_relations(run_id, active_only=True)
         )
         all_relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
         relation_events = all_relation_events[:event_limit] if event_limit is not None else all_relation_events
@@ -179,6 +191,24 @@ class KnowledgeGraphAuthorityService:
             )
         return lifecycles
 
+    def _build_active_entity_contexts(self, rows: Iterable[dict[str, Any]]) -> list[ActiveEntityContext]:
+        active_entities: list[ActiveEntityContext] = []
+        for row in rows:
+            # Normalize repository row keys into an authority-owned Level 2 contract.
+            active_entities.append(
+                ActiveEntityContext(
+                    name=str(row.get("name", "")),
+                    entity_id=int(row["entity_id"]) if row.get("entity_id") is not None else None,
+                    role=str(row.get("role")) if row.get("role") is not None else None,
+                    entity_type=str(row.get("entity_type") or "character"),
+                    status=str(row.get("status") or "active"),
+                    last_seen_chunk=int(row["chunk_id"]) if row.get("chunk_id") is not None else None,
+                    recent_action=str(row.get("last_action")) if row.get("last_action") else None,
+                    recent_emotion=str(row.get("last_emotion")) if row.get("last_emotion") else None,
+                )
+            )
+        return active_entities
+
     def _build_stable_states(self, entities: Iterable[Any]) -> list[StableState]:
         stable_states: list[StableState] = []
         for entity in sorted(entities, key=lambda row: row.canonical_name):
@@ -225,7 +255,12 @@ class KnowledgeGraphAuthorityService:
             }
             for relation in sorted(
                 confirmed_relations,
-                key=lambda item: (-(item.support_count or 0), -(item.last_seen_chunk or 0), item.from_name, item.to_name),
+                key=lambda item: (
+                    -(item.support_count or 0),
+                    -(item.last_seen_chunk or 0),
+                    item.from_name,
+                    item.to_name,
+                ),
             )[:5]
         ]
         recent_events = [
@@ -299,7 +334,9 @@ class KnowledgeGraphAuthorityService:
                     "entity_names": sorted({pair_key[0][1], pair_key[1][1]}),
                     "relation_types": sorted(relation_types),
                     "relation_count": len(relations),
-                    "latest_event_ids": [relation.latest_event_id for relation in relations if relation.latest_event_id],
+                    "latest_event_ids": [
+                        relation.latest_event_id for relation in relations if relation.latest_event_id
+                    ],
                 }
             )
         return conflicts
