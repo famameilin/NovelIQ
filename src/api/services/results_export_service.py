@@ -14,7 +14,6 @@ from typing import Any
 
 from loguru import logger
 
-from src.api.routes.results_converters import _convert_aggregate_result
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
@@ -163,6 +162,11 @@ def load_aggregate_bundle(
     )
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
 
+    # Delay importing the route-layer converter so this service module can be
+    # imported independently by tests and background consumers without
+    # initializing the whole routes package.
+    from src.api.routes.results_converters import _convert_aggregate_result
+
     result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
     narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
 
@@ -198,6 +202,11 @@ def _fetch_timeline_data(
 
     Returns:
         时间轴数据字典，包含 phases, nodes, tension_curve
+
+    Contract note:
+        Export intentionally reuses the same authority-backed timeline helper
+        as the /timeline route so both surfaces stay aligned on character
+        lifecycles and character-character relation history.
     """
     try:
         (

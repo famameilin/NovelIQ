@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from src.metrics.timeline_metrics import build_timeline_candidates
+from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
+from tests.support.timeline_contract_helpers import (
+    create_timeline_contract_scenario,
+    index_by_chunk_id,
+    relation_change_names,
+    relation_change_tuples,
+)
+
+
+def test_build_timeline_candidates_consumes_authority_character_subgraph_only(db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+
+    chunk_repo = ChunkRepository(db_session)
+    annotation_repo = AnnotationRepository(db_session)
+    stats_repo = StatsRepository(db_session)
+
+    (
+        candidates,
+        tension_scores,
+        chunk_ids,
+        total_chunks,
+        timeline_phases,
+        major_character_entries,
+        relation_break_events,
+    ) = build_timeline_candidates(
+        scenario.run_id,
+        chunk_repo,
+        annotation_repo,
+        stats_repo,
+    )
+
+    candidates_by_chunk = index_by_chunk_id(candidates)
+
+    assert chunk_ids == [0, 1, 2, 3, 4]
+    assert tension_scores == [0.15, 0.3, 0.95, 0.45, 0.1]
+    assert total_chunks == 5
+    assert len(timeline_phases) == 4
+
+    # Only character lifecycles should contribute to timeline entry/exit hints.
+    assert {name for name, _ in major_character_entries} == {scenario.hero_name, scenario.rival_name}
+    assert scenario.organization_name not in {name for name, _ in major_character_entries}
+
+    assert candidates_by_chunk[0].character_entries == [scenario.hero_name]
+    assert candidates_by_chunk[1].character_entries == [scenario.rival_name]
+    assert candidates_by_chunk[3].character_exits == [scenario.rival_name]
+    assert candidates_by_chunk[4].character_exits == [scenario.hero_name]
+
+    # Relation changes should come only from character-character authority events.
+    assert relation_change_tuples(candidates_by_chunk[2].relation_changes) == {
+        (scenario.hero_name, scenario.rival_name, "新建")
+    }
+    assert scenario.organization_name not in relation_change_names(candidates_by_chunk[2].relation_changes)
+
+    assert relation_change_tuples(candidates_by_chunk[4].relation_changes) == {
+        (scenario.hero_name, scenario.rival_name, "断裂")
+    }
+    assert len(relation_break_events) == 1
+    assert relation_break_events[0][0] == 4
+    assert relation_break_events[0][1].from_char == scenario.hero_name
+    assert relation_break_events[0][1].to_char == scenario.rival_name
