@@ -276,6 +276,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 "entity_id": row.entity_id,
                 "name": row.canonical_name,
                 "role": row.primary_role_function,
+                "entity_type": row.entity_type,
+                "status": row.status,
                 "last_action": row.last_action or "",
                 "last_emotion": row.last_emotion_score or "",
                 "emotion_score": row.last_emotion_score,
