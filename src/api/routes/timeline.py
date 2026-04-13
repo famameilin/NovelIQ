@@ -35,6 +35,7 @@ from src.metrics.timeline_metrics import (
     RelationChangeEventDTO,
     TimelineNodeDTO,
     TimelinePhaseDTO,
+    TimelineDataUnavailableError,
     build_timeline_candidates,
     convert_to_timeline_nodes,
     select_timeline_nodes,
@@ -231,7 +232,7 @@ async def get_timeline(
             major_character_entries,
             relation_break_events,
         ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
-    except ValueError:
+    except TimelineDataUnavailableError:
         logger.warning(f"No chunks found for run {run_id}")
         return TimelineResponse(
             meta=TimelineMeta(

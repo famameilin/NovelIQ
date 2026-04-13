@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
+from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
     index_by_chunk_id,
@@ -121,3 +123,25 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
         "change_type": "新建",
         "evidence": "二人正式结盟",
     }
+
+
+def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_payload(
+    api_client: TestClient,
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+
+    def _raise_contract_error(*_args, **_kwargs):
+        raise TimelineAuthorityContractError("broken authority contract")
+
+    monkeypatch.setattr("src.api.routes.timeline.build_timeline_candidates", _raise_contract_error)
+
+    with TestClient(api_client.app, raise_server_exceptions=False) as relaxed_client:
+        response = relaxed_client.get(
+            f"/api/novels/{scenario.novel_id}/timeline",
+            params={"task_id": scenario.task_id, "include_curve": "true"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["error_type"] == "InternalServerError"

@@ -43,6 +43,14 @@ TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
 }
 
 
+class TimelineDataUnavailableError(ValueError):
+    """Raised when timeline source data is genuinely unavailable."""
+
+
+class TimelineAuthorityContractError(RuntimeError):
+    """Raised when the authority-backed timeline contract is violated."""
+
+
 # ==================== DTO 定义 ====================
 
 
@@ -594,7 +602,13 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
     relation_events = list(timeline_view.relation_events)
 
     if any(entity.entity_type != "character" for entity in character_entities):
-        raise ValueError("TimelineAuthorityView.character_entities must contain only character entities")
+        raise TimelineAuthorityContractError("TimelineAuthorityView.character_entities must contain only character entities")
+
+    entity_ids = [getattr(entity, "entity_id", None) for entity in character_entities]
+    if any(entity_id is None for entity_id in entity_ids):
+        raise TimelineAuthorityContractError("TimelineAuthorityView.character_entities must provide non-null entity_id")
+    if len(set(entity_ids)) != len(entity_ids):
+        raise TimelineAuthorityContractError("TimelineAuthorityView.character_entities must not duplicate entity_id")
 
     # Entry/exit spans and relation rendering must talk about the exact same
     # character set, otherwise timeline can silently emit different names for
@@ -604,26 +618,33 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
         for entity in character_entities
         if getattr(entity, "entity_id", None) is not None
     }
+    lifecycle_ids = [getattr(lifecycle, "entity_id", None) for lifecycle in entity_lifecycles]
+    if any(lifecycle_id is None for lifecycle_id in lifecycle_ids):
+        raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must provide non-null entity_id")
+    if len(set(lifecycle_ids)) != len(lifecycle_ids):
+        raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must not duplicate entity_id")
     lifecycle_map = {int(lifecycle.entity_id): lifecycle for lifecycle in entity_lifecycles}
     character_ids = set(character_map)
 
     for lifecycle in entity_lifecycles:
         if lifecycle.entity_type != "character":
-            raise ValueError("TimelineAuthorityView.entity_lifecycles must contain only character lifecycles")
+            raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must contain only character lifecycles")
         if lifecycle.entity_id not in character_ids:
-            raise ValueError("TimelineAuthorityView.entity_lifecycles must align with character_entities")
+            raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must align with character_entities")
 
     if set(lifecycle_map) != character_ids:
-        raise ValueError("TimelineAuthorityView.entity_lifecycles must exactly align with character_entities")
+        raise TimelineAuthorityContractError(
+            "TimelineAuthorityView.entity_lifecycles must exactly align with character_entities"
+        )
 
     for entity_id, entity in character_map.items():
         lifecycle = lifecycle_map[entity_id]
         if lifecycle.name != entity.name:
-            raise ValueError("TimelineAuthorityView.entity_lifecycles names must match character_entities")
+            raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles names must match character_entities")
 
     for event in relation_events:
         if event.from_entity_id not in character_ids or event.to_entity_id not in character_ids:
-            raise ValueError("TimelineAuthorityView.relation_events must stay inside the character subgraph")
+            raise TimelineAuthorityContractError("TimelineAuthorityView.relation_events must stay inside the character subgraph")
 
     return entity_lifecycles, relation_events, {entity_id: entity.name for entity_id, entity in character_map.items()}
 
@@ -677,7 +698,7 @@ def build_timeline_candidates(
     # 获取 chunk 文本列表
     chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
     if not chunk_texts:
-        raise ValueError(f"No chunks found for run {run_id}")
+        raise TimelineDataUnavailableError(f"No chunks found for run {run_id}")
 
     chunk_ids = [cid for cid, _ in chunk_texts]
     total_chunks = len(chunk_ids)
