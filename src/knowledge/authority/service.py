@@ -95,7 +95,7 @@ class KnowledgeGraphAuthorityService:
         relation_events = all_relation_events[:event_limit] if event_limit is not None else all_relation_events
         stable_states = self._build_stable_states(entities)
         quality = self._build_graph_quality(confirmed_relations, all_relation_events)
-        summary = self._build_graph_summary(stable_states, confirmed_relations, all_relation_events, quality)
+        summary = self._build_graph_summary(stable_states, confirmed_relations)
 
         return GraphAuthorityView(
             canonical_entities=self._build_canonical_entities(entities),
@@ -210,8 +210,9 @@ class KnowledgeGraphAuthorityService:
                     name=str(row.get("name", "")),
                     entity_id=int(row["entity_id"]) if row.get("entity_id") is not None else None,
                     role=str(row.get("role")) if row.get("role") is not None else None,
-                    entity_type=str(row.get("entity_type") or "character"),
-                    status=str(row.get("status") or "active"),
+                    # Preserve repository-backed authority fields when present.
+                    entity_type=str(row["entity_type"]) if row.get("entity_type") is not None else "character",
+                    status=str(row["status"]) if row.get("status") is not None else "active",
                     last_seen_chunk=int(row["chunk_id"]) if row.get("chunk_id") is not None else None,
                     recent_action=str(row.get("last_action")) if row.get("last_action") else None,
                     recent_emotion=str(row.get("last_emotion")) if row.get("last_emotion") else None,
@@ -240,8 +241,6 @@ class KnowledgeGraphAuthorityService:
         self,
         stable_states: list[StableState],
         confirmed_relations: list[ConfirmedRelation],
-        relation_events: list[RelationEvent],
-        quality: dict[str, Any],
     ) -> dict[str, Any]:
         node_count = len(stable_states)
         edge_count = len(confirmed_relations)
@@ -273,15 +272,6 @@ class KnowledgeGraphAuthorityService:
                 ),
             )[:5]
         ]
-        recent_events = [
-            {
-                "chunk_id": event.chunk_id,
-                "type": event.relation_type,
-                "change": event.change_type,
-                "evidence": event.evidence,
-            }
-            for event in relation_events[:5]
-        ]
 
         return {
             "node_count": node_count,
@@ -289,8 +279,6 @@ class KnowledgeGraphAuthorityService:
             "density": round(density, 4),
             "core_characters": core_characters,
             "key_relations": key_relations,
-            "recent_events": recent_events,
-            "quality": quality,
         }
 
     def _build_graph_quality(

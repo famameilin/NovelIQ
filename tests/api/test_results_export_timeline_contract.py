@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.api.services.results_export_service import _fetch_timeline_data
+from unittest.mock import MagicMock
+
+from src.api.services.results_export_service import _fetch_timeline_data, build_export_payload
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
@@ -62,3 +64,32 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         "change_type",
         "evidence",
     }
+
+
+def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() -> None:
+    token_usage_stats = MagicMock()
+    token_usage_stats.model_dump.return_value = {}
+
+    payload = build_export_payload(
+        task_id="task-1",
+        novel_id="novel-1",
+        novel_name="Test Novel",
+        chunk_curves=[],
+        characters=[],
+        topics=[],
+        diagnosis=None,
+        chunk_styles=[],
+        chunk_annotations=[],
+        character_relations=[],
+        hierarchical_relations=[],
+        global_stats=None,
+        aggregate_metrics={},
+        token_usage_stats=token_usage_stats,
+        graph_summary={"node_count": 3, "edge_count": 1},
+        graph_quality_report={"conflict_count": 2},
+        timeline_data=None,
+    )
+
+    assert payload["graph_summary"] == {"node_count": 3, "edge_count": 1}
+    assert payload["graph_quality_report"] == {"conflict_count": 2}
+    assert "quality" not in payload["graph_summary"]

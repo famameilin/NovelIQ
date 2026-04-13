@@ -43,7 +43,8 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
     assert len(snapshot["nodes"]) == 2
     assert len(snapshot["edges"]) == 1
     assert len(snapshot["events"]) == 1
-    assert "quality" in snapshot["summary"]
+    assert "quality" not in snapshot["summary"]
+    assert "recent_events" not in snapshot["summary"]
     assert set(snapshot["quality"].keys()) == {
         "conflict_count",
         "low_confidence_count",
