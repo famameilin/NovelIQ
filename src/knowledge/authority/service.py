@@ -44,13 +44,23 @@ class KnowledgeGraphAuthorityService:
         )
 
     def build_timeline_view(self, run_id: str) -> TimelineAuthorityView:
-        """Timeline consumes the character subgraph plus immutable relation history."""
+        """
+        Build the shared contract consumed by timeline-style downstreams.
+
+        The timeline contract intentionally exposes only the character subgraph:
+        non-character entities never appear in ``character_entities`` or
+        ``entity_lifecycles``, and relation history is filtered so both
+        endpoints must belong to that same character set.
+        """
 
         character_entities = self._build_canonical_entities(
             self._graph_repo.fetch_entities(run_id, entity_type="character")
         )
         character_ids = {entity.entity_id for entity in character_entities if entity.entity_id is not None}
 
+        # Freeze the shared timeline contract at the "character subgraph" boundary.
+        # Downstream consumers should never need to inspect repository rows to
+        # figure out whether an organization/group edge belongs on the timeline.
         relation_events = [
             event
             for event in self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))

@@ -79,7 +79,13 @@ class EntityTypeFact:
 
 @dataclass(slots=True)
 class EntityLifecycle:
-    """Stable span/state metadata that can be safely reused across consumers."""
+    """
+    Stable span/state metadata that can be safely reused across consumers.
+
+    For timeline consumers this is the protected source of truth for
+    character entry/exit spans. Downstream code should not re-derive
+    lifecycle windows from repository rows.
+    """
 
     entity_id: int
     name: str
@@ -139,6 +145,19 @@ class Level1AuthoritySnapshot:
 
 @dataclass(slots=True)
 class TimelineAuthorityView:
+    """
+    Protected timeline-facing authority contract.
+
+    The view is intentionally narrower than the full graph authority surface:
+    - ``character_entities`` contains only the character subgraph.
+    - ``entity_lifecycles`` stays aligned with that same character set.
+    - ``relation_events`` contains immutable history events whose two endpoints
+      both belong to the character subgraph.
+
+    Timeline consumers should treat this as the shared contract and avoid
+    depending on repository row shapes or current-relation projections.
+    """
+
     character_entities: list[CanonicalEntity] = field(default_factory=list)
     entity_lifecycles: list[EntityLifecycle] = field(default_factory=list)
     relation_events: list[RelationEvent] = field(default_factory=list)
