@@ -106,15 +106,13 @@ class KnowledgeGraphAuthorityService:
         all_relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
         relation_events = all_relation_events[:event_limit] if event_limit is not None else all_relation_events
         stable_states = self._build_stable_states(entities)
-        report = self._assemble_graph_report(stable_states, confirmed_relations, all_relation_events)
-
         return GraphAuthorityView(
             canonical_entities=self._build_canonical_entities(entities),
             confirmed_relations=confirmed_relations,
             relation_events=relation_events,
             stable_states=stable_states,
-            summary=report.summary,
-            quality=report.quality,
+            summary=self._build_graph_summary(stable_states, confirmed_relations),
+            quality=self._build_graph_quality(confirmed_relations, all_relation_events),
         )
 
     def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
@@ -256,7 +254,7 @@ class KnowledgeGraphAuthorityService:
     ) -> GraphAuthorityReport:
         return GraphAuthorityReport(
             summary=self._build_graph_summary(stable_states, confirmed_relations),
-            quality=self._build_graph_quality(confirmed_relations, relation_events),
+            quality=self._build_graph_quality_summary(confirmed_relations, relation_events),
         )
 
     def _build_graph_summary(
@@ -327,6 +325,19 @@ class KnowledgeGraphAuthorityService:
             "low_confidence_count": len(low_confidence_events),
             "conflicts": relation_conflicts[:5],
             "low_confidence_samples": low_confidence_events[:5],
+        }
+
+    def _build_graph_quality_summary(
+        self,
+        confirmed_relations: list[ConfirmedRelation],
+        relation_events: list[RelationEvent],
+    ) -> dict[str, Any]:
+        detailed_quality = self._build_graph_quality(confirmed_relations, relation_events)
+        # Non-graph consumers should stay on aggregate report signals instead of
+        # binding to relation/event samples that belong to graph product surfaces.
+        return {
+            "conflict_count": int(detailed_quality["conflict_count"]),
+            "low_confidence_count": int(detailed_quality["low_confidence_count"]),
         }
 
     def _detect_relation_conflicts(self, confirmed_relations: list[ConfirmedRelation]) -> list[dict[str, Any]]:

@@ -174,6 +174,9 @@ def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(d
     assert report.summary["node_count"] == 2
     assert report.summary["edge_count"] == 1
     assert report.quality["low_confidence_count"] == 1
+    assert report.quality["conflict_count"] == 0
+    assert "conflicts" not in report.quality
+    assert "low_confidence_samples" not in report.quality
     assert not hasattr(report, "stable_states")
     assert not hasattr(report, "confirmed_relations")
     assert not hasattr(report, "relation_events")

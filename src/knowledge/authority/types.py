@@ -201,6 +201,8 @@ class GraphAuthorityReport:
 
     Export and diagnosis currently only depend on the summary/quality layer and
     should not receive full graph facts like stable_states or relation_events.
+    The quality payload is intentionally aggregate-only so these consumers do
+    not recouple to graph fact samples through report-level diagnostics.
     """
 
     summary: dict[str, Any] = field(default_factory=dict)
