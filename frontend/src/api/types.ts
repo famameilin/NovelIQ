@@ -194,7 +194,9 @@ export interface GraphKeyRelation {
   support_count: number;
 }
 
-export interface GraphSummary {
+// Graph page owns these display summaries; diagnosis/export reuse a narrower
+// aggregate-only graph report on the backend and should not share this shape.
+export interface GraphPageSummary {
   node_count: number;
   edge_count: number;
   density: number;
@@ -220,7 +222,7 @@ export interface GraphLowConfidenceSample {
   confidence?: number | null;
 }
 
-export interface GraphQualityReport {
+export interface GraphPageQualityReport {
   conflict_count: number;
   low_confidence_count: number;
   conflicts: GraphConflictSample[];
@@ -236,8 +238,8 @@ export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   events?: GraphEvent[];
-  summary?: GraphSummary;
-  quality?: GraphQualityReport;
+  summary?: GraphPageSummary;
+  quality?: GraphPageQualityReport;
 }
 
 // ============================================================
@@ -277,8 +279,8 @@ export interface ForceGraphData {
   nodes: GraphNodeObject[];
   links: GraphLinkObject[];
   events?: GraphEvent[];
-  summary?: GraphSummary;
-  quality?: GraphQualityReport;
+  summary?: GraphPageSummary;
+  quality?: GraphPageQualityReport;
 }
 
 // 创建时间: 2026-04-05

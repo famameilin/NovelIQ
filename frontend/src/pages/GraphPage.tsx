@@ -210,6 +210,8 @@ export function GraphPage() {
     return related.sort((left, right) => right.weight - left.weight);
   }, [selectedNode, graphData]);
 
+  // /graph 返回的是 product-layer summary/quality，而不是 authority 原始事实；
+  // 页面可以自由调整展示摘要，但不应反向定义 authority 语义。
   const graphSummary = graphData?.summary ?? null;
   const graphQuality = graphData?.quality ?? null;
 

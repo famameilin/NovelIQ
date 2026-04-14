@@ -138,9 +138,8 @@ def test_build_graph_view_exposes_stable_states_without_transient_local_context(
     }
     assert all(not hasattr(state, "last_action") for state in view.stable_states)
     assert all(not hasattr(state, "last_emotion_score") for state in view.stable_states)
-    assert view.summary["node_count"] == 2
-    assert "quality" not in view.summary
-    assert "recent_events" not in view.summary
+    assert not hasattr(view, "summary")
+    assert not hasattr(view, "quality")
 
 
 def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(db_session) -> None:
@@ -360,16 +359,18 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
     graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
     db_session.commit()
 
-    view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    view = service.build_graph_view(run_id)
+    report = service.build_graph_report(run_id)
 
     # Current graph view should expose only active relations; broken history stays in relation_events.
     assert len(view.confirmed_relations) == 1
     assert {(item.from_name, item.to_name, item.relation_type) for item in view.confirmed_relations} == {
         ("林渡", "顾霜", "盟友")
     }
-    assert view.summary["edge_count"] == 1
-    assert view.summary["density"] == 0.1667
-    assert view.quality["low_confidence_count"] == 2
+    assert report.summary["edge_count"] == 1
+    assert report.summary["density"] == 0.1667
+    assert report.quality["low_confidence_count"] == 2
 
 
 def test_build_graph_view_keeps_history_in_events_while_current_relations_stay_active_only(db_session) -> None:
