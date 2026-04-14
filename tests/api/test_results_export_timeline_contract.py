@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.api.services.results_export_service import _fetch_timeline_data, build_export_payload
+from src.api.services.results_export_service import _fetch_timeline_data, build_export_payload, load_aggregate_bundle
+from src.knowledge.authority import GraphAuthorityReport
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
@@ -115,3 +117,55 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
             annotation_repo=annotation_repo,
             stats_repo=stats_repo,
         )
+
+
+def test_load_aggregate_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
+            assert run_id == "run-graph-report"
+            return GraphAuthorityReport(
+                summary={"node_count": 4, "edge_count": 2},
+                quality={"conflict_count": 1, "low_confidence_count": 0},
+            )
+
+        def build_graph_view(self, *_args, **_kwargs):
+            raise AssertionError("export should not depend on full GraphAuthorityView")
+
+    monkeypatch.setattr("src.api.services.results_export_service._fetch_character_relations", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.api.services.results_export_service._fetch_hierarchical_relations", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_token_usage_stats",
+        lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {}),
+    )
+    monkeypatch.setattr("src.api.services.results_export_service.aggregate_all_metrics", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    import src.api.routes.results_converters as results_converters
+
+    monkeypatch.setattr(results_converters, "_convert_aggregate_result", lambda *_args, **_kwargs: (None, None, None, None, None))
+
+    (
+        _character_relations,
+        _hierarchical_relations,
+        _global_stats,
+        _token_usage_stats,
+        _aggregate_metrics,
+        graph_summary,
+        graph_quality_report,
+    ) = load_aggregate_bundle(
+        run_id="run-graph-report",
+        novel_id="novel-1",
+        stats_repo=SimpleNamespace(session=object()),
+        annotation_repo=MagicMock(),
+        chunk_repo=MagicMock(),
+        graph_repo=MagicMock(),
+        alias_map={},
+        valid_character_names=set(),
+    )
+
+    assert graph_summary == {"node_count": 4, "edge_count": 2}
+    assert graph_quality_report == {"conflict_count": 1, "low_confidence_count": 0}

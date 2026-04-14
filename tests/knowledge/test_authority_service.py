@@ -143,6 +143,42 @@ def test_build_graph_view_exposes_stable_states_without_transient_local_context(
     assert "recent_events" not in view.summary
 
 
+def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Authority Report",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13021,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    report = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_report(run_id)
+
+    assert report.summary["node_count"] == 2
+    assert report.summary["edge_count"] == 1
+    assert report.quality["low_confidence_count"] == 1
+    assert not hasattr(report, "stable_states")
+    assert not hasattr(report, "confirmed_relations")
+    assert not hasattr(report, "relation_events")
+
+
 def test_build_active_entity_view_normalizes_repository_rows_into_authority_contract(db_session) -> None:
     novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
     run_id = RunRepository(db_session).create_run(
