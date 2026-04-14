@@ -32,15 +32,7 @@ import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeD
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type {
-  ForceGraphHandle,
-  GraphData,
-  GraphEdge,
-  GraphNode,
-  GraphNodeObject,
-  GraphQualityReport,
-  GraphSummary,
-} from "@/api/types";
+import type { ForceGraphHandle, GraphEdge, GraphNode, GraphNodeObject } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
@@ -87,69 +79,6 @@ function getEdgeDisplayNames(edge: GraphEdge, nodeNameMap: Map<string, string>):
   return {
     from: edge.from_name ?? nodeNameMap.get(edge.source) ?? edge.source,
     to: edge.to_name ?? nodeNameMap.get(edge.target) ?? edge.target,
-  };
-}
-
-function buildFallbackSummary(graphData: GraphData): GraphSummary {
-  const nodeNameMap = new Map(graphData.nodes.map((node) => [node.entity_id, node.name]));
-  const nodeCount = graphData.nodes.length;
-  const edgeCount = graphData.edges.length;
-  const density = nodeCount > 1 ? edgeCount / (nodeCount * (nodeCount - 1)) : 0;
-
-  const coreCharacters = [...graphData.nodes]
-    .sort((left, right) => {
-      const chunkDiff = (right.last_seen_chunk ?? 0) - (left.last_seen_chunk ?? 0);
-      if (chunkDiff !== 0) return chunkDiff;
-      return left.name.localeCompare(right.name, "zh-CN");
-    })
-    .slice(0, 5)
-    .map((node) => node.name);
-
-  const keyRelations = [...graphData.edges]
-    .sort((left, right) => {
-      const weightDiff = (right.weight ?? 1) - (left.weight ?? 1);
-      if (weightDiff !== 0) return weightDiff;
-      return (right.change_count ?? 0) - (left.change_count ?? 0);
-    })
-    .slice(0, 5)
-    .map((edge) => {
-      const names = getEdgeDisplayNames(edge, nodeNameMap);
-      return {
-        from: names.from,
-        to: names.to,
-        type: edge.relation_type,
-        support_count: Math.max(1, Math.round(edge.weight ?? 1)),
-      };
-    });
-
-  return {
-    node_count: nodeCount,
-    edge_count: edgeCount,
-    density,
-    core_characters: coreCharacters,
-    key_relations: keyRelations,
-  };
-}
-
-function buildFallbackQuality(graphData: GraphData): GraphQualityReport {
-  const lowConfidenceSamples = (graphData.events ?? [])
-    .filter((event) => event.confidence == null || event.confidence < LOW_CONFIDENCE_THRESHOLD)
-    .slice(0, 5)
-    .map((event) => ({
-      relation_event_id: event.relation_event_id,
-      chunk_id: event.chunk_id,
-      from_name: event.from_name,
-      to_name: event.to_name,
-      relation_type: event.relation_type,
-      change_type: event.change_type,
-      confidence: event.confidence,
-    }));
-
-  return {
-    conflict_count: 0,
-    low_confidence_count: lowConfidenceSamples.length,
-    conflicts: [],
-    low_confidence_samples: lowConfidenceSamples,
   };
 }
 
@@ -208,6 +137,7 @@ export function GraphPage() {
 
   const novelTitle = novelQuery.data?.title ?? "小说详情";
   const graphData = graphQuery.data;
+  const graphContractIssue = enabled && !!graphData && (!graphData.summary || !graphData.quality);
 
   const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
     if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
@@ -280,15 +210,8 @@ export function GraphPage() {
     return related.sort((left, right) => right.weight - left.weight);
   }, [selectedNode, graphData]);
 
-  const graphSummary = useMemo(() => {
-    if (!graphData) return null;
-    return graphData.summary ?? buildFallbackSummary(graphData);
-  }, [graphData]);
-
-  const graphQuality = useMemo(() => {
-    if (!graphData) return null;
-    return graphData.quality ?? buildFallbackQuality(graphData);
-  }, [graphData]);
+  const graphSummary = graphData?.summary ?? null;
+  const graphQuality = graphData?.quality ?? null;
 
   const sortedEvents = useMemo(() => {
     if (!graphData?.events) return [];
@@ -305,6 +228,26 @@ export function GraphPage() {
     return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? sortedEvents[0];
   }, [sortedEvents, selectedEventId]);
   const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
+
+  useEffect(() => {
+    setSelectedNode(null);
+    setIsPanelOpen(false);
+    setSelectedEventId(null);
+  }, [currentTaskId, graphQuery.dataUpdatedAt]);
+
+  useEffect(() => {
+    if (!graphContractIssue || !graphData) return;
+
+    const missingFields = [
+      graphData.summary ? null : "summary",
+      graphData.quality ? null : "quality",
+    ].filter(Boolean);
+
+    console.error("[GraphPage] /graph authority contract is missing required fields:", {
+      taskId: currentTaskId,
+      missingFields,
+    });
+  }, [currentTaskId, graphContractIssue, graphData]);
 
   const weakRelations = useMemo(() => {
     if (!graphData) return [];
@@ -396,14 +339,51 @@ export function GraphPage() {
 
   const handleGoTimeline = useCallback(() => {
     if (timelineUrl) {
-      navigate(timelineUrl);
+      const chunkParam = selectedEvent?.chunk_id != null ? `&selected_chunk=${selectedEvent.chunk_id}` : "";
+      const eventParam =
+        selectedEvent?.relation_event_id != null ? `&relation_event_id=${selectedEvent.relation_event_id}` : "";
+      navigate(`${timelineUrl}${chunkParam}${eventParam}`);
     }
-  }, [navigate, timelineUrl]);
+  }, [navigate, selectedEvent, timelineUrl]);
 
   const handleScrollToGraph = useCallback(() => {
     const graphSection = document.getElementById("graph-workspace");
     graphSection?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
+
+  const renderContractIssue = () => (
+    <motion.section
+      variants={pageSectionVariants}
+      initial="hidden"
+      animate="visible"
+      transition={{ duration: 0.28, delay: 0.05 }}
+    >
+      <Card variant="elevated" className="rounded-2xl border-chart-negative/30">
+        <CardContent className="flex flex-col gap-4 p-8">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-6 w-6 text-chart-negative" />
+            <div className="space-y-2">
+              <p className="text-base font-semibold text-text">/graph authority contract 不完整</p>
+              <p className="text-sm leading-6 text-text-muted">
+                当前任务返回了图数据，但缺少 `summary` 或 `quality`。图谱分析入口不会在前端补造 authority
+                语义，请先修复后端 contract 再继续使用该页面。
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" size="sm" onClick={handleRetry}>
+              <RefreshCw className="h-4 w-4" />
+              重新请求
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleGoTimeline} disabled={!timelineUrl}>
+              打开时间轴
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.section>
+  );
 
   const renderLoadedContent = () => (
     <>
@@ -983,6 +963,8 @@ export function GraphPage() {
               </CardContent>
             </Card>
           </motion.section>
+        ) : graphContractIssue ? (
+          renderContractIssue()
         ) : (
           renderLoadedContent()
         )}
