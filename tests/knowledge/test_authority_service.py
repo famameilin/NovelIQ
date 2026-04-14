@@ -373,6 +373,97 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
     assert report.quality["low_confidence_count"] == 2
 
 
+def test_build_graph_view_relation_events_are_full_history_not_page_window(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph View Full History",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=205)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=205)
+
+    for chunk_id in range(1, 206):
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="盟友",
+            change_type="波动" if chunk_id > 1 else "新建",
+            chunk_id=chunk_id,
+            evidence=f"事件 {chunk_id}",
+            confidence=0.7,
+            source_relation_row_id=17000 + chunk_id,
+            directionality="directed",
+        )
+
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+
+    assert len(view.relation_events) == 205
+    assert view.relation_events[0].chunk_id == 205
+    assert view.relation_events[-1].chunk_id == 1
+
+
+def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Report Shared Stats",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=8)
+    rival = graph_repo.upsert_entity(run_id=run_id, canonical_name="谢危", first_seen_chunk=2, last_seen_chunk=8)
+
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="并肩迎敌",
+        confidence=0.92,
+        source_relation_row_id=18001,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=rival.entity_id,
+        relation_type="敌对",
+        change_type="新建",
+        chunk_id=4,
+        evidence="结下仇怨",
+        confidence=0.58,
+        source_relation_row_id=18002,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    view = service.build_graph_view(run_id)
+    report = service.build_graph_report(run_id)
+
+    assert report.summary["node_count"] == 3
+    assert report.summary["edge_count"] == 2
+    assert report.summary["density"] == 0.3333
+    assert set(report.summary["core_characters"]) == {"林渡", "顾霜", "谢危"}
+    assert report.quality["conflict_count"] == 0
+    assert report.quality["low_confidence_count"] == 1
+    assert len(view.relation_events) == 2
+
+
 def test_build_graph_view_keeps_history_in_events_while_current_relations_stay_active_only(db_session) -> None:
     novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
     run_id = RunRepository(db_session).create_run(
