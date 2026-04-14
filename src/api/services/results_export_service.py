@@ -193,9 +193,9 @@ def load_aggregate_bundle(
     }
 
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
-    graph_view = KnowledgeGraphAuthorityService.from_session(stats_repo.session).build_graph_view(run_id)
-    graph_summary = graph_view.summary
-    graph_quality_report = graph_view.quality
+    graph_report = KnowledgeGraphAuthorityService.from_session(stats_repo.session).build_graph_report(run_id)
+    graph_summary = graph_report.summary
+    graph_quality_report = graph_report.quality
 
     return (
         character_relations,

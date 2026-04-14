@@ -162,9 +162,9 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     )
 
     known_characters, alias_merges = repo.fetch_character_disambig_data(effective_run_id)
-    graph_view = KnowledgeGraphAuthorityService.from_session(conn).build_graph_view(effective_run_id)
-    graph_summary = graph_view.summary
-    graph_quality_report = graph_view.quality
+    graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(effective_run_id)
+    graph_summary = graph_report.summary
+    graph_quality_report = graph_report.quality
 
     payload = {
         "novel_id": novel_id,
