@@ -47,6 +47,7 @@ export function TimelinePage() {
   const urlTaskId = searchParams.get("task_id");
   const urlMaxLevel = searchParams.get("max_level");
   const urlShowTension = searchParams.get("show_tension");
+  const urlSelectedChunk = searchParams.get("selected_chunk");
 
   const [maxLevel, setMaxLevel] = useState<1 | 2 | 3>(() => {
     const level = urlMaxLevel ? parseInt(urlMaxLevel, 10) : 3;
@@ -102,6 +103,11 @@ export function TimelinePage() {
   const tensionCurve = timelineData?.tension_curve;
   const totalChunks = timelineData?.meta?.total_chunks ?? 0;
 
+  useEffect(() => {
+    setSelectedNode(null);
+    setActivePhase(undefined);
+  }, [currentTaskId, timelineQuery.dataUpdatedAt]);
+
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
       setMaxLevel(level);
@@ -137,6 +143,16 @@ export function TimelinePage() {
   const handleRetry = useCallback(() => {
     timelineQuery.refetch();
   }, [timelineQuery]);
+
+  useEffect(() => {
+    if (!urlSelectedChunk || nodes.length === 0) return;
+
+    const selectedChunk = Number(urlSelectedChunk);
+    if (!Number.isFinite(selectedChunk)) return;
+
+    const matchedNode = nodes.find((node) => node.chunk_id === selectedChunk) ?? null;
+    setSelectedNode(matchedNode);
+  }, [nodes, urlSelectedChunk]);
 
   const isLoading = timelineQuery.isLoading || novelQuery.isLoading;
   const isError = timelineQuery.isError || novelQuery.isError;
