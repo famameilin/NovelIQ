@@ -137,6 +137,13 @@ class StableState:
 
 @dataclass(slots=True)
 class Level1AuthoritySnapshot:
+    """
+    Minimal Level 1 authority contract for evidence consumers.
+
+    This snapshot exists to feed EvidenceBundle/Level1 assembly and should stay
+    free of timeline history, graph product summaries, and prompt-local state.
+    """
+
     alias_mappings: list[AliasMapping] = field(default_factory=list)
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     confirmed_relations: list[ConfirmedRelation] = field(default_factory=list)
@@ -165,6 +172,20 @@ class TimelineAuthorityView:
 
 @dataclass(slots=True)
 class GraphAuthorityView:
+    """
+    Protected graph-facing authority contract.
+
+    This is the broadest reusable graph surface, but consumers still have
+    narrower allowances:
+    - /graph and graph page may consume stable_states / confirmed_relations /
+      relation_events / summary / quality.
+    - export and diagnosis payloads should normally stay on summary / quality.
+
+    If another downstream needs a different slice, add a dedicated authority
+    view instead of borrowing repository rows or overloading Level1/Timeline
+    contracts.
+    """
+
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     confirmed_relations: list[ConfirmedRelation] = field(default_factory=list)
     relation_events: list[RelationEvent] = field(default_factory=list)
