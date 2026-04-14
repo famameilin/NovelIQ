@@ -4,6 +4,7 @@ import uuid
 from unittest.mock import MagicMock
 
 from src.api.routes.results_fetchers import _fetch_graph_snapshot
+from src.knowledge.authority import ConfirmedRelation, GraphAuthorityView, RelationEvent, StableState
 from src.storage.repositories import GraphRepository, RunRepository
 
 
@@ -117,3 +118,199 @@ def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_sessio
         ("贺伯安", "柳婉儿", "断裂"),
         ("贺伯安", "柳婉儿", "新建"),
     }
+
+
+def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-graph-page"
+            return GraphAuthorityView(
+                stable_states=[
+                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
+                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
+                ],
+                confirmed_relations=[
+                    ConfirmedRelation(
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        support_count=3,
+                        last_seen_chunk=6,
+                    )
+                ],
+                relation_events=[
+                    RelationEvent(
+                        relation_event_id=11,
+                        chunk_id=6,
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        change_type="新建",
+                        confidence=0.55,
+                    )
+                ],
+            )
+
+        def build_graph_report(self, *_args, **_kwargs):
+            raise AssertionError("/graph page should not consume diagnosis/export graph report")
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-page", annotation_repo)
+
+    assert snapshot["summary"] == {
+        "node_count": 2,
+        "edge_count": 1,
+        "density": 0.5,
+        "core_characters": ["沈砚", "陆明"],
+        "key_relations": [{"from": "沈砚", "to": "陆明", "type": "盟友", "support_count": 3}],
+    }
+    assert snapshot["quality"]["conflict_count"] == 0
+    assert snapshot["quality"]["low_confidence_count"] == 1
+    assert snapshot["quality"]["low_confidence_samples"][0]["relation_event_id"] == 11
+
+
+def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-graph-quality"
+            relation_events = [
+                RelationEvent(
+                    relation_event_id=index + 1,
+                    chunk_id=500 - index,
+                    from_entity_id=1,
+                    to_entity_id=2,
+                    from_name="沈砚",
+                    to_name="陆明",
+                    relation_type="盟友",
+                    change_type="波动",
+                    confidence=0.55,
+                )
+                for index in range(205)
+            ]
+            return GraphAuthorityView(
+                stable_states=[
+                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=500),
+                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=499),
+                ],
+                confirmed_relations=[
+                    ConfirmedRelation(
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        support_count=205,
+                        last_seen_chunk=500,
+                    )
+                ],
+                relation_events=relation_events,
+            )
+
+        def build_graph_report(self, *_args, **_kwargs):
+            raise AssertionError("/graph page should not consume diagnosis/export graph report")
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-quality", annotation_repo)
+
+    assert len(snapshot["events"]) == 200
+    assert snapshot["events"][0]["relation_event_id"] == 1
+    assert snapshot["events"][-1]["relation_event_id"] == 200
+    assert snapshot["quality"]["low_confidence_count"] == 205
+    assert len(snapshot["quality"]["low_confidence_samples"]) == 5
+    assert snapshot["quality"]["low_confidence_samples"][0]["relation_event_id"] == 1
+
+
+def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-graph-shared-counts"
+            return GraphAuthorityView(
+                stable_states=[
+                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=9),
+                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=8),
+                    StableState(entity_id=3, name="秦昭", entity_type="character", last_seen_chunk=7),
+                ],
+                confirmed_relations=[
+                    ConfirmedRelation(
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        support_count=3,
+                        last_seen_chunk=8,
+                        latest_event_id=31,
+                    ),
+                    ConfirmedRelation(
+                        from_name="陆明",
+                        to_name="秦昭",
+                        relation_type="敌对",
+                        from_entity_id=2,
+                        to_entity_id=3,
+                        support_count=2,
+                        last_seen_chunk=7,
+                        latest_event_id=32,
+                    ),
+                ],
+                relation_events=[
+                    RelationEvent(
+                        relation_event_id=31,
+                        chunk_id=8,
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        change_type="新建",
+                        confidence=0.82,
+                    ),
+                    RelationEvent(
+                        relation_event_id=32,
+                        chunk_id=7,
+                        from_entity_id=2,
+                        to_entity_id=3,
+                        from_name="陆明",
+                        to_name="秦昭",
+                        relation_type="敌对",
+                        change_type="新建",
+                        confidence=0.51,
+                    ),
+                ],
+            )
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-shared-counts", annotation_repo)
+
+    assert snapshot["summary"]["node_count"] == 3
+    assert snapshot["summary"]["edge_count"] == 2
+    assert snapshot["summary"]["density"] == 0.3333
+    assert snapshot["quality"]["conflict_count"] == 0
+    assert snapshot["quality"]["low_confidence_count"] == 1

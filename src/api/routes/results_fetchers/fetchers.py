@@ -43,6 +43,7 @@ from src.api.routes.results_fetchers.scoring import _calculate_protagonist_score
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
 from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.knowledge.authority.graph_outputs import build_graph_quality_payload, build_graph_summary_payload
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -50,6 +51,9 @@ from src.storage.repositories import (
     GraphRepository,
     StatsRepository,
 )
+
+
+GRAPH_PAGE_EVENT_LIMIT = 200
 
 
 def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
@@ -744,10 +748,8 @@ def _fetch_graph_snapshot(
     if pending_relations:
         raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
 
-    graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_graph_view(
-        run_id,
-        event_limit=200,
-    )
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    graph_view = authority_service.build_graph_view(run_id)
     nodes = [
         {
             "entity_id": str(row.entity_id),
@@ -776,6 +778,9 @@ def _fetch_graph_snapshot(
         for edge in graph_view.confirmed_relations
     ]
 
+    # Keep page-facing history samples lightweight, but compute quality against
+    # the full authority event history so long-running books do not hide older
+    # low-confidence signals once they exceed the UI sample cap.
     events = [
         {
             "relation_event_id": event.relation_event_id,
@@ -791,14 +796,18 @@ def _fetch_graph_snapshot(
             "source_relation_row_id": event.source_relation_row_id,
             "directionality": event.directionality,
         }
-        for event in graph_view.relation_events
+        for event in graph_view.relation_events[:GRAPH_PAGE_EVENT_LIMIT]
     ]
-    summary = graph_view.summary
+    # Graph page owns display-level summary/quality assembly. The authority
+    # service intentionally stops at stable facts so product tweaks do not
+    # contaminate downstream diagnosis/export contracts.
+    summary = build_graph_summary_payload(graph_view.stable_states, graph_view.confirmed_relations)
+    quality = build_graph_quality_payload(graph_view.confirmed_relations, graph_view.relation_events)
 
     return {
         "nodes": nodes,
         "edges": edges,
         "events": events,
         "summary": summary,
-        "quality": graph_view.quality,
+        "quality": quality,
     }
