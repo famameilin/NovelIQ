@@ -236,6 +236,8 @@ export function createGraph(): GraphData {
     { source: "char-0", target: "char-9", relation_type: "朋友", weight: 0.5 },
   ];
 
+  const changeTypes = ["新建", "强化", "弱化", "断裂"];
+
   const events = Array.from({ length: 8 }, (_, i) => ({
     relation_event_id: i + 1,
     chunk_id: Math.floor(Math.random() * 100 + 10),
@@ -244,7 +246,7 @@ export function createGraph(): GraphData {
     from_name: names[i % 5],
     to_name: names[(i + 1) % 5],
     relation_type: relationTypes[i % relationTypes.length],
-    change_type: i % 2 === 0 ? "strengthened" : "introduced",
+    change_type: changeTypes[i % changeTypes.length],
     evidence: `${names[i % 5]}与${names[(i + 1) % 5]}在关键桥段中产生新的互动。`,
     confidence: +(Math.random() * 0.5 + 0.4).toFixed(2),
     source_relation_row_id: i + 100,
@@ -265,17 +267,10 @@ export function createGraph(): GraphData {
   };
 
   const quality = {
-    conflict_count: 1,
+    // Mock contract follows authority semantics: conflict_count reflects current confirmed relations only.
+    conflict_count: 0,
     low_confidence_count: events.filter((event) => (event.confidence ?? 0) < 0.6).length,
-    conflicts: [
-      {
-        entity_pair: [0, 2],
-        entity_names: ["萧炎", "纳兰嫣然"],
-        relation_types: ["恋人", "竞争"],
-        relation_count: 2,
-        latest_event_ids: [2, 6],
-      },
-    ],
+    conflicts: [],
     low_confidence_samples: events
       .filter((event) => (event.confidence ?? 0) < 0.6)
       .slice(0, 5)
