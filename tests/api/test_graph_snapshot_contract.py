@@ -4,6 +4,7 @@ import uuid
 from unittest.mock import MagicMock
 
 from src.api.routes.results_fetchers import _fetch_graph_snapshot
+from src.knowledge.authority import ConfirmedRelation, GraphAuthorityView, RelationEvent, StableState
 from src.storage.repositories import GraphRepository, RunRepository
 
 
@@ -117,3 +118,65 @@ def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_sessio
         ("贺伯安", "柳婉儿", "断裂"),
         ("贺伯安", "柳婉儿", "新建"),
     }
+
+
+def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str, event_limit: int | None = 200) -> GraphAuthorityView:
+            assert run_id == "run-graph-page"
+            assert event_limit == 200
+            return GraphAuthorityView(
+                stable_states=[
+                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
+                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
+                ],
+                confirmed_relations=[
+                    ConfirmedRelation(
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        support_count=3,
+                        last_seen_chunk=6,
+                    )
+                ],
+                relation_events=[
+                    RelationEvent(
+                        relation_event_id=11,
+                        chunk_id=6,
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        change_type="新建",
+                        confidence=0.55,
+                    )
+                ],
+            )
+
+        def build_graph_report(self, *_args, **_kwargs):
+            raise AssertionError("/graph page should not consume diagnosis/export graph report")
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-page", annotation_repo)
+
+    assert snapshot["summary"] == {
+        "node_count": 2,
+        "edge_count": 1,
+        "density": 0.5,
+        "core_characters": ["沈砚", "陆明"],
+        "key_relations": [{"from": "沈砚", "to": "陆明", "type": "盟友", "support_count": 3}],
+    }
+    assert snapshot["quality"]["conflict_count"] == 0
+    assert snapshot["quality"]["low_confidence_count"] == 1
+    assert snapshot["quality"]["low_confidence_samples"][0]["relation_event_id"] == 11

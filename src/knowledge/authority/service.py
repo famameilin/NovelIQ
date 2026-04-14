@@ -86,7 +86,13 @@ class KnowledgeGraphAuthorityService:
         return self._build_active_entity_contexts(rows)
 
     def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
-        """Export/diagnosis only receive graph summary and quality layers."""
+        """
+        Build aggregate graph signals for non-product consumers.
+
+        Export/diagnosis can reuse these counters as graph-owned inputs, but
+        they should still assemble their own higher-level conclusions instead
+        of treating this report as the final diagnosis layer.
+        """
 
         entities = self._graph_repo.fetch_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
@@ -97,7 +103,7 @@ class KnowledgeGraphAuthorityService:
         return self._assemble_graph_report(stable_states, confirmed_relations, relation_events)
 
     def build_graph_view(self, run_id: str, event_limit: int | None = 200) -> GraphAuthorityView:
-        """Graph page consumes current authority facts plus separate relation history."""
+        """Return graph authority facts without graph-page summary/quality dressing."""
 
         entities = self._graph_repo.fetch_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
@@ -111,8 +117,6 @@ class KnowledgeGraphAuthorityService:
             confirmed_relations=confirmed_relations,
             relation_events=relation_events,
             stable_states=stable_states,
-            summary=self._build_graph_summary(stable_states, confirmed_relations),
-            quality=self._build_graph_quality(confirmed_relations, all_relation_events),
         )
 
     def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
