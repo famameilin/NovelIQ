@@ -173,36 +173,36 @@ class TimelineAuthorityView:
 @dataclass(slots=True)
 class GraphAuthorityView:
     """
-    Protected graph-facing authority contract.
+    Protected graph-facing authority facts.
 
-    This is the broadest reusable graph surface, but consumers still have
-    narrower allowances:
-    - /graph and graph page may consume stable_states / confirmed_relations /
-      relation_events / summary / quality.
-    - export and diagnosis payloads should normally stay on summary / quality.
+    This contract deliberately stops at stable facts:
+    - canonical entity identity
+    - current confirmed relations
+    - immutable relation history events
+    - stable entity states
 
-    If another downstream needs a different slice, add a dedicated authority
-    view instead of borrowing repository rows or overloading Level1/Timeline
-    contracts.
+    Product-layer summaries/quality cards belong to graph page assemblers,
+    while diagnosis/aggregate conclusions belong to higher-level analysis.
+    If another downstream needs a different slice, add a dedicated contract
+    instead of borrowing repository rows or overloading Level1/Timeline
+    boundaries.
     """
 
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     confirmed_relations: list[ConfirmedRelation] = field(default_factory=list)
     relation_events: list[RelationEvent] = field(default_factory=list)
     stable_states: list[StableState] = field(default_factory=list)
-    summary: dict[str, Any] = field(default_factory=dict)
-    quality: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class GraphAuthorityReport:
     """
-    Narrow graph authority output for non-graph product consumers.
+    Narrow authority-owned graph signals for non-graph product consumers.
 
-    Export and diagnosis currently only depend on the summary/quality layer and
-    should not receive full graph facts like stable_states or relation_events.
+    Export and diagnosis may reuse these aggregate graph signals as inputs, but
+    the final diagnosis/aggregate conclusions are assembled outside authority.
     The quality payload is intentionally aggregate-only so these consumers do
-    not recouple to graph fact samples through report-level diagnostics.
+    not recouple to graph page detail samples through report-level shortcuts.
     """
 
     summary: dict[str, Any] = field(default_factory=dict)
