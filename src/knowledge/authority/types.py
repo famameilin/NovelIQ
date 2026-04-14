@@ -178,7 +178,7 @@ class GraphAuthorityView:
     This contract deliberately stops at stable facts:
     - canonical entity identity
     - current confirmed relations
-    - immutable relation history events
+    - full immutable relation history events
     - stable entity states
 
     Product-layer summaries/quality cards belong to graph page assemblers,

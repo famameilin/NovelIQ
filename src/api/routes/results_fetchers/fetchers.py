@@ -42,7 +42,8 @@ from src.api.routes.results_fetchers.parsers import _parse_int_field, _parse_jso
 from src.api.routes.results_fetchers.scoring import _calculate_protagonist_scores, _normalize_arc_scores
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
-from src.knowledge.authority import ConfirmedRelation, KnowledgeGraphAuthorityService, RelationEvent, StableState
+from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.knowledge.authority.graph_outputs import build_graph_quality_payload, build_graph_summary_payload
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -50,6 +51,9 @@ from src.storage.repositories import (
     GraphRepository,
     StatsRepository,
 )
+
+
+GRAPH_PAGE_EVENT_LIMIT = 200
 
 
 def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
@@ -730,119 +734,6 @@ def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository)
     return alias_merges
 
 
-def _build_graph_page_summary(
-    stable_states: list[StableState],
-    confirmed_relations: list[ConfirmedRelation],
-) -> dict[str, Any]:
-    """
-    Build graph-page summary cards from authority facts.
-
-    This summary belongs to the graph product surface rather than the authority
-    contract itself, so frontend display tweaks do not force changes to the
-    underlying stable graph facts.
-    """
-
-    node_count = len(stable_states)
-    edge_count = len(confirmed_relations)
-    density = 0.0
-    if node_count > 1:
-        density = float(edge_count) / float(node_count * (node_count - 1))
-
-    core_characters = [
-        state.name
-        for state in sorted(
-            stable_states,
-            key=lambda item: (item.last_seen_chunk is None, -(item.last_seen_chunk or 0), item.name),
-        )[:5]
-    ]
-    key_relations = [
-        {
-            "from": relation.from_name,
-            "to": relation.to_name,
-            "type": relation.relation_type,
-            "support_count": int(relation.support_count or 0),
-        }
-        for relation in sorted(
-            confirmed_relations,
-            key=lambda item: (
-                -(item.support_count or 0),
-                -(item.last_seen_chunk or 0),
-                item.from_name,
-                item.to_name,
-            ),
-        )[:5]
-    ]
-
-    return {
-        "node_count": node_count,
-        "edge_count": edge_count,
-        "density": round(density, 4),
-        "core_characters": core_characters,
-        "key_relations": key_relations,
-    }
-
-
-def _build_graph_page_quality(
-    confirmed_relations: list[ConfirmedRelation],
-    relation_events: list[RelationEvent],
-) -> dict[str, Any]:
-    """
-    Build graph-page quality samples from authority facts.
-
-    Detailed samples are a graph-page concern. Diagnosis/export must stay on
-    aggregate-only report counters instead of reusing these product details.
-    """
-
-    low_confidence_events = [
-        {
-            "relation_event_id": event.relation_event_id,
-            "chunk_id": event.chunk_id,
-            "from_name": event.from_name,
-            "to_name": event.to_name,
-            "relation_type": event.relation_type,
-            "change_type": event.change_type,
-            "confidence": event.confidence,
-        }
-        for event in relation_events
-        if event.confidence is None or event.confidence < 0.6
-    ]
-
-    pair_map: dict[tuple[Any, Any, Any, Any], list[ConfirmedRelation]] = {}
-    for relation in confirmed_relations:
-        pair_key = tuple(
-            sorted(
-                [
-                    (relation.from_entity_id, relation.from_name),
-                    (relation.to_entity_id, relation.to_name),
-                ],
-                key=lambda item: (item[0] is None, item[0] if item[0] is not None else item[1]),
-            )
-        )
-        pair_map[pair_key] = pair_map.get(pair_key, []) + [relation]
-
-    relation_conflicts: list[dict[str, Any]] = []
-    for pair_key, relations in pair_map.items():
-        relation_types = {relation.relation_type for relation in relations if relation.relation_type}
-        if len(relation_types) < 2:
-            continue
-        relation_conflicts.append(
-            {
-                "entity_pair": [pair_key[0][0], pair_key[1][0]],
-                "entity_names": sorted({pair_key[0][1], pair_key[1][1]}),
-                "relation_types": sorted(relation_types),
-                "relation_count": len(relations),
-                "latest_event_ids": [relation.latest_event_id for relation in relations if relation.latest_event_id],
-            }
-        )
-
-    return {
-        "conflict_count": len(relation_conflicts),
-        "low_confidence_count": len(low_confidence_events),
-        "conflicts": relation_conflicts[:5],
-        "low_confidence_samples": low_confidence_events[:5],
-    }
-
-
 def _fetch_graph_snapshot(
     run_id: str,
     annotation_repo: AnnotationRepository,
@@ -857,10 +748,8 @@ def _fetch_graph_snapshot(
     if pending_relations:
         raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
 
-    graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_graph_view(
-        run_id,
-        event_limit=200,
-    )
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    graph_view = authority_service.build_graph_view(run_id)
     nodes = [
         {
             "entity_id": str(row.entity_id),
@@ -889,6 +778,9 @@ def _fetch_graph_snapshot(
         for edge in graph_view.confirmed_relations
     ]
 
+    # Keep page-facing history samples lightweight, but compute quality against
+    # the full authority event history so long-running books do not hide older
+    # low-confidence signals once they exceed the UI sample cap.
     events = [
         {
             "relation_event_id": event.relation_event_id,
@@ -904,13 +796,13 @@ def _fetch_graph_snapshot(
             "source_relation_row_id": event.source_relation_row_id,
             "directionality": event.directionality,
         }
-        for event in graph_view.relation_events
+        for event in graph_view.relation_events[:GRAPH_PAGE_EVENT_LIMIT]
     ]
     # Graph page owns display-level summary/quality assembly. The authority
     # service intentionally stops at stable facts so product tweaks do not
     # contaminate downstream diagnosis/export contracts.
-    summary = _build_graph_page_summary(graph_view.stable_states, graph_view.confirmed_relations)
-    quality = _build_graph_page_quality(graph_view.confirmed_relations, graph_view.relation_events)
+    summary = build_graph_summary_payload(graph_view.stable_states, graph_view.confirmed_relations)
+    quality = build_graph_quality_payload(graph_view.confirmed_relations, graph_view.relation_events)
 
     return {
         "nodes": nodes,
