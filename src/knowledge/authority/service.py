@@ -12,6 +12,7 @@ from .types import (
     ConfirmedRelation,
     EntityLifecycle,
     EntityTypeFact,
+    GraphAuthorityReport,
     GraphAuthorityView,
     Level1AuthoritySnapshot,
     RelationEvent,
@@ -84,6 +85,17 @@ class KnowledgeGraphAuthorityService:
         rows = self._graph_repo.fetch_active_entities(current_chunk, lookback, run_id)
         return self._build_active_entity_contexts(rows)
 
+    def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
+        """Export/diagnosis only receive graph summary and quality layers."""
+
+        entities = self._graph_repo.fetch_entities(run_id)
+        confirmed_relations = self._build_confirmed_relations(
+            self._graph_repo.fetch_current_relations(run_id, active_only=True)
+        )
+        relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
+        stable_states = self._build_stable_states(entities)
+        return self._assemble_graph_report(stable_states, confirmed_relations, relation_events)
+
     def build_graph_view(self, run_id: str, event_limit: int | None = 200) -> GraphAuthorityView:
         """Graph page consumes current authority facts plus separate relation history."""
 
@@ -94,16 +106,15 @@ class KnowledgeGraphAuthorityService:
         all_relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
         relation_events = all_relation_events[:event_limit] if event_limit is not None else all_relation_events
         stable_states = self._build_stable_states(entities)
-        quality = self._build_graph_quality(confirmed_relations, all_relation_events)
-        summary = self._build_graph_summary(stable_states, confirmed_relations)
+        report = self._assemble_graph_report(stable_states, confirmed_relations, all_relation_events)
 
         return GraphAuthorityView(
             canonical_entities=self._build_canonical_entities(entities),
             confirmed_relations=confirmed_relations,
             relation_events=relation_events,
             stable_states=stable_states,
-            summary=summary,
-            quality=quality,
+            summary=report.summary,
+            quality=report.quality,
         )
 
     def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
@@ -236,6 +247,17 @@ class KnowledgeGraphAuthorityService:
                 )
             )
         return stable_states
+
+    def _assemble_graph_report(
+        self,
+        stable_states: list[StableState],
+        confirmed_relations: list[ConfirmedRelation],
+        relation_events: list[RelationEvent],
+    ) -> GraphAuthorityReport:
+        return GraphAuthorityReport(
+            summary=self._build_graph_summary(stable_states, confirmed_relations),
+            quality=self._build_graph_quality(confirmed_relations, relation_events),
+        )
 
     def _build_graph_summary(
         self,

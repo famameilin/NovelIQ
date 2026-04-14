@@ -1,8 +1,11 @@
 import json
+from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import text
 
 from src.models.cloud import build_diagnosis_payload
+from src.knowledge.authority import GraphAuthorityReport
 
 
 def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
@@ -46,3 +49,58 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
     assert "graph_summary" in payload
     assert "graph_quality_report" in payload
     assert "quality" not in payload["graph_summary"]
+
+
+def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeDiagnosisRepository:
+        def __init__(self, session) -> None:
+            self.session = session
+
+        def fetch_pivot_blocks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_pivot_moments(self, *_args, **_kwargs):
+            return []
+
+        def fetch_high_tension_chunks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_relation_changes(self, *_args, **_kwargs):
+            return []
+
+        def fetch_foreshadowing_chunks(self, *_args, **_kwargs):
+            return []
+
+        def fetch_stage_summaries(self, *_args, **_kwargs):
+            return []
+
+        def fetch_topic_words(self, *_args, **_kwargs):
+            return []
+
+        def fetch_character_disambig_data(self, *_args, **_kwargs):
+            return (["白芷"], {"蒙面人": "白芷"})
+
+    class FakeAuthorityService:
+        def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
+            assert run_id == "run-summary-only"
+            return GraphAuthorityReport(
+                summary={"node_count": 2, "edge_count": 1},
+                quality={"conflict_count": 0, "low_confidence_count": 1},
+            )
+
+        def build_graph_view(self, *_args, **_kwargs):
+            raise AssertionError("diagnosis should not depend on full GraphAuthorityView")
+
+    monkeypatch.setattr("src.models.cloud.payload.DiagnosisRepository", FakeDiagnosisRepository)
+    monkeypatch.setattr("src.models.cloud.payload._get_total_topic_count", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        "src.models.cloud.payload.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    payload = build_diagnosis_payload(SimpleNamespace(), novel_id="novel-1", run_id="run-summary-only")
+
+    assert payload["known_characters"] == ["白芷"]
+    assert payload["alias_merges"] == {"蒙面人": "白芷"}
+    assert payload["graph_summary"] == {"node_count": 2, "edge_count": 1}
+    assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 1}

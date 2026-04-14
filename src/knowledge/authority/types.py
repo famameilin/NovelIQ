@@ -192,3 +192,16 @@ class GraphAuthorityView:
     stable_states: list[StableState] = field(default_factory=list)
     summary: dict[str, Any] = field(default_factory=dict)
     quality: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphAuthorityReport:
+    """
+    Narrow graph authority output for non-graph product consumers.
+
+    Export and diagnosis currently only depend on the summary/quality layer and
+    should not receive full graph facts like stable_states or relation_events.
+    """
+
+    summary: dict[str, Any] = field(default_factory=dict)
+    quality: dict[str, Any] = field(default_factory=dict)
