@@ -160,6 +160,11 @@ export interface GraphEdge {
   target: string;
   relation_type?: string;
   weight?: number;
+  from_name?: string;
+  to_name?: string;
+  change_count?: number;
+  tension_index?: number;
+  is_active?: boolean;
 }
 
 // 创建时间: 2026-04-05
@@ -168,13 +173,58 @@ export interface GraphEdge {
 // 说明: 添加图谱事件类型定义
 
 export interface GraphEvent {
-  event_id: string;
-  event_type: string;
-  source_entity: string;
-  target_entity: string;
+  relation_event_id: number;
+  chunk_id: number;
+  from_entity_id?: number | null;
+  to_entity_id?: number | null;
+  from_name: string;
+  to_name: string;
   relation_type?: string;
-  chunk_index?: number;
-  timestamp?: string;
+  change_type?: string;
+  evidence?: string;
+  confidence?: number | null;
+  source_relation_row_id?: number | null;
+  directionality?: string | null;
+}
+
+export interface GraphKeyRelation {
+  from: string;
+  to: string;
+  type?: string | null;
+  support_count: number;
+}
+
+export interface GraphSummary {
+  node_count: number;
+  edge_count: number;
+  density: number;
+  core_characters: string[];
+  key_relations: GraphKeyRelation[];
+}
+
+export interface GraphConflictSample {
+  entity_pair: Array<number | null>;
+  entity_names: string[];
+  relation_types: string[];
+  relation_count: number;
+  latest_event_ids: number[];
+}
+
+export interface GraphLowConfidenceSample {
+  relation_event_id: number;
+  chunk_id: number;
+  from_name: string;
+  to_name: string;
+  relation_type?: string | null;
+  change_type?: string | null;
+  confidence?: number | null;
+}
+
+export interface GraphQualityReport {
+  conflict_count: number;
+  low_confidence_count: number;
+  conflicts: GraphConflictSample[];
+  low_confidence_samples: GraphLowConfidenceSample[];
 }
 
 // 创建时间: 2026-04-05
@@ -186,8 +236,8 @@ export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   events?: GraphEvent[];
-  summary?: Record<string, unknown>;
-  quality?: Record<string, unknown>;
+  summary?: GraphSummary;
+  quality?: GraphQualityReport;
 }
 
 // ============================================================
@@ -227,8 +277,8 @@ export interface ForceGraphData {
   nodes: GraphNodeObject[];
   links: GraphLinkObject[];
   events?: GraphEvent[];
-  summary?: Record<string, unknown>;
-  quality?: Record<string, unknown>;
+  summary?: GraphSummary;
+  quality?: GraphQualityReport;
 }
 
 // 创建时间: 2026-04-05
