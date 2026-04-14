@@ -236,17 +236,56 @@ export function createGraph(): GraphData {
     { source: "char-0", target: "char-9", relation_type: "朋友", weight: 0.5 },
   ];
 
+  const changeTypes = ["新建", "强化", "弱化", "断裂"];
+
   const events = Array.from({ length: 8 }, (_, i) => ({
-    event_id: `evt-${i}`,
-    event_type: i % 2 === 0 ? "relation_change" : "character_entry",
-    source_entity: `char-${i % 5}`,
-    target_entity: `char-${(i + 1) % 5}`,
+    relation_event_id: i + 1,
+    chunk_id: Math.floor(Math.random() * 100 + 10),
+    from_entity_id: i % 5,
+    to_entity_id: (i + 1) % 5,
+    from_name: names[i % 5],
+    to_name: names[(i + 1) % 5],
     relation_type: relationTypes[i % relationTypes.length],
-    chunk_index: Math.floor(Math.random() * 100 + 10),
-    timestamp: dateAgo(Math.floor(Math.random() * 30)),
+    change_type: changeTypes[i % changeTypes.length],
+    evidence: `${names[i % 5]}与${names[(i + 1) % 5]}在关键桥段中产生新的互动。`,
+    confidence: +(Math.random() * 0.5 + 0.4).toFixed(2),
+    source_relation_row_id: i + 100,
+    directionality: "bidirectional",
   }));
 
-  return { nodes, edges, events };
+  const summary = {
+    node_count: nodes.length,
+    edge_count: edges.length,
+    density: +(edges.length / (nodes.length * (nodes.length - 1))).toFixed(4),
+    core_characters: names.slice(0, 5),
+    key_relations: edges.slice(0, 5).map((edge) => ({
+      from: names[Number(edge.source.replace("char-", ""))] ?? "未知角色",
+      to: names[Number(edge.target.replace("char-", ""))] ?? "未知角色",
+      type: edge.relation_type,
+      support_count: Math.max(1, Math.round((edge.weight ?? 0.4) * 10)),
+    })),
+  };
+
+  const quality = {
+    // Mock contract follows authority semantics: conflict_count reflects current confirmed relations only.
+    conflict_count: 0,
+    low_confidence_count: events.filter((event) => (event.confidence ?? 0) < 0.6).length,
+    conflicts: [],
+    low_confidence_samples: events
+      .filter((event) => (event.confidence ?? 0) < 0.6)
+      .slice(0, 5)
+      .map((event) => ({
+        relation_event_id: event.relation_event_id,
+        chunk_id: event.chunk_id,
+        from_name: event.from_name,
+        to_name: event.to_name,
+        relation_type: event.relation_type,
+        change_type: event.change_type,
+        confidence: event.confidence,
+      })),
+  };
+
+  return { nodes, edges, events, summary, quality };
 }
 
 /* ------------------------------------------------------------------ */
