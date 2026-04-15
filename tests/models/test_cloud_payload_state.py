@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
+from src.knowledge.authority import GraphAuthorityReport, GraphQualitySignals, GraphSharedSummary
 from src.models.cloud import build_diagnosis_payload
-from src.knowledge.authority import GraphAuthorityReport
 
 
 def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
@@ -48,7 +48,7 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
     }
     assert "graph_summary" in payload
     assert "graph_quality_report" in payload
-    assert "quality" not in payload["graph_summary"]
+    assert set(payload["graph_summary"].keys()) == {"node_count", "edge_count", "density"}
 
 
 def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,8 +84,8 @@ def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: p
         def build_graph_report(self, run_id: str) -> GraphAuthorityReport:
             assert run_id == "run-summary-only"
             return GraphAuthorityReport(
-                summary={"node_count": 2, "edge_count": 1},
-                quality={"conflict_count": 0, "low_confidence_count": 1},
+                summary=GraphSharedSummary(node_count=2, edge_count=1, density=0.5),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=1),
             )
 
         def build_graph_view(self, *_args, **_kwargs):
@@ -102,5 +102,5 @@ def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: p
 
     assert payload["known_characters"] == ["白芷"]
     assert payload["alias_merges"] == {"蒙面人": "白芷"}
-    assert payload["graph_summary"] == {"node_count": 2, "edge_count": 1}
+    assert payload["graph_summary"] == {"node_count": 2, "edge_count": 1, "density": 0.5}
     assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 1}

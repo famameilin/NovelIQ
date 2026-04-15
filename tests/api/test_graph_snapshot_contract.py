@@ -8,7 +8,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.api.routes.results_fetchers import _fetch_graph_events_page, _fetch_graph_snapshot
-from src.knowledge.authority import ConfirmedRelation, GraphAuthorityView, RelationEvent, StableState
+from src.api.routes.results_fetchers.fetchers import _serialize_graph_page_quality, _serialize_graph_page_summary
+from src.knowledge.authority import (
+    ConfirmedRelation,
+    GraphAuthorityView,
+    GraphConflictSample,
+    GraphKeyRelationHighlight,
+    GraphLowConfidenceSample,
+    GraphPageQualityDetails,
+    GraphPageSummary,
+    RelationEvent,
+    StableState,
+)
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
 
@@ -197,6 +208,90 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
         "total": 1,
         "has_more": False,
         "next_cursor": None,
+    }
+
+
+def test_graph_page_public_dto_is_owned_by_route_layer() -> None:
+    import src.knowledge.authority.graph_outputs as graph_outputs
+
+    # 中文注释：authority 只保留 page facts builder，不再定义 `/graph` 的公开 DTO，
+    # 防止其他 consumer 继续直接 import authority serializer 借用页面字段。
+    assert not hasattr(graph_outputs, "serialize_graph_page_summary")
+    assert not hasattr(graph_outputs, "serialize_graph_page_quality")
+
+    summary = _serialize_graph_page_summary(
+        GraphPageSummary(
+            node_count=2,
+            edge_count=1,
+            density=0.5,
+            core_characters=["沈砚", "陆明"],
+            key_relations=[
+                GraphKeyRelationHighlight(
+                    from_name="沈砚",
+                    to_name="陆明",
+                    relation_type="盟友",
+                    support_count=3,
+                )
+            ],
+        )
+    )
+    quality = _serialize_graph_page_quality(
+        GraphPageQualityDetails(
+            conflict_count=1,
+            low_confidence_count=2,
+            conflicts=[
+                GraphConflictSample(
+                    entity_pair=[1, 2],
+                    entity_names=["沈砚", "陆明"],
+                    relation_types=["盟友", "敌对"],
+                    relation_count=2,
+                    latest_event_ids=[11, 12],
+                )
+            ],
+            low_confidence_samples=[
+                GraphLowConfidenceSample(
+                    relation_event_id=11,
+                    chunk_id=6,
+                    from_name="沈砚",
+                    to_name="陆明",
+                    relation_type="盟友",
+                    change_type="波动",
+                    confidence=0.55,
+                )
+            ],
+        )
+    )
+
+    assert summary == {
+        "node_count": 2,
+        "edge_count": 1,
+        "density": 0.5,
+        "core_characters": ["沈砚", "陆明"],
+        "key_relations": [{"from": "沈砚", "to": "陆明", "type": "盟友", "support_count": 3}],
+    }
+    assert quality == {
+        "conflict_count": 1,
+        "low_confidence_count": 2,
+        "conflicts": [
+            {
+                "entity_pair": [1, 2],
+                "entity_names": ["沈砚", "陆明"],
+                "relation_types": ["盟友", "敌对"],
+                "relation_count": 2,
+                "latest_event_ids": [11, 12],
+            }
+        ],
+        "low_confidence_samples": [
+            {
+                "relation_event_id": 11,
+                "chunk_id": 6,
+                "from_name": "沈砚",
+                "to_name": "陆明",
+                "relation_type": "盟友",
+                "change_type": "波动",
+                "confidence": 0.55,
+            }
+        ],
     }
 
 
