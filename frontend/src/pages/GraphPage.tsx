@@ -175,7 +175,27 @@ export function GraphPage() {
 
   const novelTitle = novelQuery.data?.title ?? "小说详情";
   const graphData = graphQuery.data;
-  const graphContractIssue = enabled && !!graphData && (!graphData.summary || !graphData.quality || !graphData.events_page);
+  const graphContractIssue =
+    enabled &&
+    !!graphData &&
+    (graphData.summary == null || graphData.quality == null || graphData.events_page == null);
+
+  const resetTaskScopedGraphState = useCallback(
+    (options?: { events?: GraphEvent[]; pageInfo?: GraphEventsPageInfo | null }) => {
+      // 中文注释：图谱页的选中态、分页窗口、加载错误都绑定当前 task。
+      // 只要 task 变了，或者拿到了新的 graph snapshot，就必须整包重置，
+      // 防止旧任务的事件窗口、错误提示和节点选择残留到新页面。
+      setSelectedNode(null);
+      setIsPanelOpen(false);
+      setSelectedEventId(null);
+      setHasUserSelectedEvent(false);
+      setLoadedEvents(options?.events ?? []);
+      setEventsPageInfo(options?.pageInfo ?? null);
+      setEventsLoadError(null);
+      setIsEventsLoading(false);
+    },
+    []
+  );
 
   const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
     if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
@@ -338,15 +358,11 @@ export function GraphPage() {
     // responses from the previous task/view are ignored instead of polluting
     // the current page-level history window.
     eventsRequestVersionRef.current += 1;
-    setSelectedNode(null);
-    setIsPanelOpen(false);
-    setSelectedEventId(null);
-    setHasUserSelectedEvent(false);
-    setLoadedEvents(graphData?.events ?? []);
-    setEventsPageInfo(graphData?.events_page ?? null);
-    setEventsLoadError(null);
-    setIsEventsLoading(false);
-  }, [graphData]);
+    resetTaskScopedGraphState({
+      events: graphData?.events ?? [],
+      pageInfo: graphData?.events_page ?? null,
+    });
+  }, [graphData, resetTaskScopedGraphState]);
 
   useEffect(() => {
     setHasUserSelectedEvent(false);
@@ -378,11 +394,11 @@ export function GraphPage() {
   }, [hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, loadedEvents]);
 
   useEffect(() => {
-    setSelectedNode(null);
-    setIsPanelOpen(false);
-    setSelectedEventId(null);
-    setHasUserSelectedEvent(false);
-  }, [currentTaskId]);
+    // 中文注释：task 切换发生在新快照返回之前时，也要立即清掉旧页面状态；
+    // 否则 load-more 报错、旧 deep-link 提示、旧选中节点会短暂闪回到新 task 页面。
+    eventsRequestVersionRef.current += 1;
+    resetTaskScopedGraphState();
+  }, [currentTaskId, resetTaskScopedGraphState]);
 
   useEffect(() => {
     if (!graphContractIssue || !graphData) return;

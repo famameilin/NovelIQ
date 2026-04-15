@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS
 from src.metrics.timeline_metrics import (
     TimelineAuthorityContractError,
     _resolve_timeline_authority_contract,
@@ -161,4 +162,90 @@ def test_resolve_timeline_authority_contract_rejects_duplicate_character_entity_
     )
 
     with pytest.raises(TimelineAuthorityContractError, match="must not duplicate entity_id"):
+        _resolve_timeline_authority_contract(timeline_view)
+
+
+def test_resolve_timeline_authority_contract_accepts_allowlist_only_shape() -> None:
+    timeline_view = SimpleNamespace(
+        character_entities=[
+            SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
+            SimpleNamespace(entity_id=2, name="苏映雪", entity_type="character"),
+        ],
+        entity_lifecycles=[
+            SimpleNamespace(
+                entity_id=1,
+                name="顾承渊",
+                entity_type="character",
+                first_seen_chunk=0,
+                last_seen_chunk=4,
+            ),
+            SimpleNamespace(
+                entity_id=2,
+                name="苏映雪",
+                entity_type="character",
+                first_seen_chunk=1,
+                last_seen_chunk=4,
+            ),
+        ],
+        relation_events=[
+            SimpleNamespace(
+                chunk_id=2,
+                from_entity_id=1,
+                to_entity_id=2,
+                relation_type="盟友",
+                change_type="新建",
+                evidence="并肩迎敌",
+            )
+        ],
+    )
+
+    entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
+
+    assert TIMELINE_AUTHORITY_DEPENDENCY_FIELDS["relation_events"] == (
+        "chunk_id",
+        "from_entity_id",
+        "to_entity_id",
+        "relation_type",
+        "change_type",
+        "evidence",
+    )
+    assert len(entity_lifecycles) == 2
+    assert len(relation_events) == 1
+    assert entity_name_map == {1: "顾承渊", 2: "苏映雪"}
+
+
+def test_resolve_timeline_authority_contract_rejects_missing_required_relation_event_field() -> None:
+    timeline_view = SimpleNamespace(
+        character_entities=[
+            SimpleNamespace(entity_id=1, name="顾承渊", entity_type="character"),
+            SimpleNamespace(entity_id=2, name="苏映雪", entity_type="character"),
+        ],
+        entity_lifecycles=[
+            SimpleNamespace(
+                entity_id=1,
+                name="顾承渊",
+                entity_type="character",
+                first_seen_chunk=0,
+                last_seen_chunk=4,
+            ),
+            SimpleNamespace(
+                entity_id=2,
+                name="苏映雪",
+                entity_type="character",
+                first_seen_chunk=1,
+                last_seen_chunk=4,
+            ),
+        ],
+        relation_events=[
+            SimpleNamespace(
+                chunk_id=2,
+                from_entity_id=1,
+                to_entity_id=2,
+                change_type="新建",
+                evidence="并肩迎敌",
+            )
+        ],
+    )
+
+    with pytest.raises(TimelineAuthorityContractError, match="missing required fields: relation_type"):
         _resolve_timeline_authority_contract(timeline_view)
