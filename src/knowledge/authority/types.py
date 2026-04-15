@@ -195,6 +195,36 @@ class GraphAuthorityView:
 
 
 @dataclass(slots=True)
+class ExportRelationSnapshot:
+    """Current relation snapshot dedicated to legacy export payload assembly."""
+
+    relation_id: int | None = None
+    from_name: str = ""
+    to_name: str = ""
+    relation_type: str = ""
+    first_seen_chunk: int | None = None
+    last_seen_chunk: int | None = None
+    latest_event_id: int | None = None
+    is_active: bool = True
+    source: str = "graph_relations_current"
+
+
+@dataclass(slots=True)
+class ExportGraphAuthorityView:
+    """
+    Dedicated authority surface for legacy graph-derived export payloads.
+
+    Results export still emits DTOs such as chunk-level relations and
+    hierarchical relation summaries. This view keeps those payload builders off
+    repository/projection row shapes without overloading GraphAuthorityView or
+    GraphAuthorityReport with export-only concerns.
+    """
+
+    current_relations: list[ExportRelationSnapshot] = field(default_factory=list)
+    relation_events: list[RelationEvent] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class GraphAuthorityReport:
     """
     Narrow authority-owned graph signals for non-graph product consumers.
