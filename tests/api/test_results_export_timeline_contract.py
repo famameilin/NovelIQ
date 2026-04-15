@@ -8,8 +8,8 @@ import pytest
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
-    load_character_bundle,
     load_aggregate_bundle,
+    load_character_bundle,
 )
 from src.knowledge.authority import (
     CanonicalEntity,
