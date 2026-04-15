@@ -270,8 +270,7 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
-function renderPage() {
-  const queryClient = createQueryClient();
+function renderPage(queryClient = createQueryClient()) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <GraphPage />
@@ -342,6 +341,27 @@ describe("GraphPage pagination", () => {
     await screen.findByText(/\/graph authority contract 不完整/);
     expect(consoleErrorSpy).toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
+  });
+
+  it("keeps cached graph events visible on first mount instead of clearing the preloaded window", async () => {
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-a",
+      novelsCache: [],
+    });
+    const cachedGraph = createGraphData("task-a", {
+      eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 }],
+      total: 2,
+      nextCursor: "cursor-a-1",
+    });
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(["graph", "novel-1", "task-a"], cachedGraph);
+
+    renderPage(queryClient);
+
+    expect((await screen.findAllByText(/第 50 段 · task-a Hero → task-a Ally/)).length).toBeGreaterThan(0);
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(getGraphMock).not.toHaveBeenCalled();
   });
 
   it("merges load-more history into the current task window", async () => {

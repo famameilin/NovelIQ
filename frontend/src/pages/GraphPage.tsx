@@ -130,6 +130,7 @@ export function GraphPage() {
   const [eventsLoadError, setEventsLoadError] = useState<string | null>(null);
   const eventsRequestVersionRef = useRef(0);
   const currentTaskIdRef = useRef<string | null>(currentTaskId);
+  const previousTaskIdRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (novelId) {
@@ -413,6 +414,14 @@ export function GraphPage() {
   }, [hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, loadedEvents]);
 
   useEffect(() => {
+    const previousTaskId = previousTaskIdRef.current;
+    previousTaskIdRef.current = currentTaskId;
+    // 中文注释：这里只处理“真实 task 变化”后的页面清理。
+    // 首次挂载若已命中 React Query 缓存，不应把刚同步进来的 events/pageInfo
+    // 又立即清空，否则会出现 graph 已有数据但 events 侧栏为空的回归。
+    if (previousTaskId === undefined || previousTaskId === currentTaskId) {
+      return;
+    }
     // 中文注释：task 切换发生在新快照返回之前时，也要立即清掉旧页面状态；
     // 否则 load-more 报错、旧 deep-link 提示、旧选中节点会短暂闪回到新 task 页面。
     eventsRequestVersionRef.current += 1;
