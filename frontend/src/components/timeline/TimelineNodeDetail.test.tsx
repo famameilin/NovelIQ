@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TimelineNodeDetail } from "@/components/timeline/TimelineNodeDetail";
 import type { TimelineNode } from "@/api/types";
@@ -89,7 +89,42 @@ function createLifecycleNode(): TimelineNode {
   };
 }
 
+function createMultiRelationNode(): TimelineNode {
+  return {
+    chunk_id: 18,
+    progress: 0.9,
+    importance_score: 9,
+    level: 1,
+    event: "多条关系同时变化",
+    characters: ["顾承渊", "苏映雪", "陆沉"],
+    is_pivot: false,
+    is_cliffhanger: true,
+    tension_percentile: 95,
+    node_type: "relation_change",
+    relation_changes: [
+      {
+        relation_event_id: 9101,
+        from_char: "顾承渊",
+        to_char: "苏映雪",
+        relation_type: "盟友",
+        change_type: "弱化",
+      },
+      {
+        relation_event_id: 9102,
+        from_char: "顾承渊",
+        to_char: "陆沉",
+        relation_type: "对手",
+        change_type: "强化",
+      },
+    ],
+  };
+}
+
 describe("TimelineNodeDetail", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("shows lifecycle guidance for character entry nodes", () => {
     render(
       <TimelineNodeDetail
@@ -124,6 +159,24 @@ describe("TimelineNodeDetail", () => {
 
     expect(navigateMock).toHaveBeenCalledWith(
       "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002"
+    );
+  });
+
+  it("does not fabricate a relation_event_id when the node contains multiple relation changes", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TimelineNodeDetail
+        node={createMultiRelationNode()}
+        novelId="novel-1"
+        taskId="task-a"
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/graph?task_id=task-a&selected_chunk=18"
     );
   });
 

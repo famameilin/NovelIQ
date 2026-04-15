@@ -16,6 +16,7 @@ const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
 let currentGraphSearchParams = "task_id=task-a";
+let currentGraphNovelId = "novel-1";
 
 function passthroughComponent(displayName: string) {
   const Component = ({ children }: { children?: ReactNode }) => <div data-testid={displayName}>{children}</div>;
@@ -49,7 +50,7 @@ function motionElement(tagName: string) {
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => navigateMock,
-  useParams: () => ({ novelId: "novel-1" }),
+  useParams: () => ({ novelId: currentGraphNovelId }),
   useSearchParams: () => [new URLSearchParams(currentGraphSearchParams)],
 }));
 
@@ -283,6 +284,7 @@ describe("GraphPage pagination", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     currentGraphSearchParams = "task_id=task-a";
+    currentGraphNovelId = "novel-1";
     useNovelStore.setState({
       currentNovelId: null,
       currentTaskId: null,
@@ -304,6 +306,37 @@ describe("GraphPage pagination", () => {
 
     expect(await screen.findByText("请先选择分析任务")).toBeInTheDocument();
     expect(getGraphMock).not.toHaveBeenCalled();
+  });
+
+  it("normalizes stale graph deep-link params when the active task already switched", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-b",
+      novelsCache: [],
+    });
+    getGraphMock.mockResolvedValue(
+      createGraphData("task-b", {
+        eventNames: [{ from: "task-b Hero", to: "task-b Ally", eventId: 301, chunkId: 40 }],
+        total: 1,
+        nextCursor: null,
+      })
+    );
+
+    renderPage();
+
+    await screen.findByText("task-b Hero");
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-b", { replace: true });
+  });
+
+  it("shows the missing-novel state when the route param is absent", async () => {
+    currentGraphNovelId = undefined as unknown as string;
+
+    renderPage();
+
+    expect(await screen.findByText("小说不存在")).toBeInTheDocument();
+    expect(getGraphMock).not.toHaveBeenCalled();
+    expect(getNovelMock).not.toHaveBeenCalled();
   });
 
   it("shows the graph error state and supports retry", async () => {
@@ -517,6 +550,30 @@ describe("GraphPage pagination", () => {
 
     expect(await screen.findByText("事件 ID")).toBeInTheDocument();
     expect(screen.getByText("102")).toBeInTheDocument();
+  });
+
+  it("uses the resolved fallback event when jumping back to timeline after a graph deep-link miss", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [
+        { from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 },
+        { from: "task-a Older", to: "task-a Ally", eventId: 102, chunkId: 48 },
+      ],
+      total: 2,
+      nextCursor: null,
+    });
+
+    getGraphMock.mockResolvedValue(taskAGraph);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText("102");
+    await user.click(screen.getByRole("button", { name: "去时间轴联动查看" }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=48&relation_event_id=102"
+    );
   });
 
   it("clears the deep-link fallback hint after the user manually selects an event", async () => {

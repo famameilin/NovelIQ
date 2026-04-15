@@ -2,6 +2,7 @@ import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Novel, TimelineResponse } from "@/api/types";
@@ -13,6 +14,7 @@ const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
 let currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9002";
+let currentTimelineNovelId = "novel-1";
 
 function passthroughComponent(displayName: string) {
   const Component = ({ children }: { children?: ReactNode }) => <div data-testid={displayName}>{children}</div>;
@@ -46,7 +48,7 @@ function motionElement(tagName: string) {
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => navigateMock,
-  useParams: () => ({ novelId: "novel-1" }),
+  useParams: () => ({ novelId: currentTimelineNovelId }),
   useSearchParams: () => [new URLSearchParams(currentTimelineSearchParams)],
 }));
 
@@ -68,7 +70,22 @@ vi.mock("@/components/common/NovelHeader", () => ({
 }));
 
 vi.mock("@/components/timeline", () => ({
-  TimelineControls: passthroughComponent("timeline-controls"),
+  TimelineControls: ({
+    onMaxLevelChange,
+    onShowTensionChange,
+  }: {
+    onMaxLevelChange: (level: 1 | 2 | 3) => void;
+    onShowTensionChange: (show: boolean) => void;
+  }) => (
+    <div data-testid="timeline-controls">
+      <button type="button" onClick={() => onMaxLevelChange(1)}>
+        切到重要
+      </button>
+      <button type="button" onClick={() => onShowTensionChange(false)}>
+        隐藏张力
+      </button>
+    </div>
+  ),
   PhaseBar: passthroughComponent("phase-bar"),
   TensionOverlay: passthroughComponent("tension-overlay"),
   TimelineTrack: ({ nodes, onNodeClick }: { nodes: TimelineResponse["nodes"]; onNodeClick: (node: TimelineResponse["nodes"][number]) => void }) => (
@@ -83,13 +100,18 @@ vi.mock("@/components/timeline", () => ({
   TimelineNodeDetail: ({
     node,
     selectedRelationEventId,
+    onClose,
   }: {
     node: TimelineResponse["nodes"][number] | null;
     selectedRelationEventId?: number | null;
+    onClose?: () => void;
   }) => (
     <div data-testid="timeline-node-detail">
       <span>{node ? `selected-${node.chunk_id}` : "selected-none"}</span>
       <span>{selectedRelationEventId != null ? `event-${selectedRelationEventId}` : "event-none"}</span>
+      <button type="button" onClick={onClose}>
+        关闭详情
+      </button>
     </div>
   ),
 }));
@@ -210,6 +232,7 @@ describe("TimelinePage deep links", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9002";
+    currentTimelineNovelId = "novel-1";
     useNovelStore.setState({
       currentNovelId: null,
       currentTaskId: "task-a",
@@ -231,6 +254,16 @@ describe("TimelinePage deep links", () => {
 
     expect(await screen.findByText("请先选择分析任务")).toBeInTheDocument();
     expect(getTimelineMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the missing-novel state when the route param is absent", async () => {
+    currentTimelineNovelId = undefined as unknown as string;
+
+    renderPage();
+
+    expect(await screen.findByText("小说不存在")).toBeInTheDocument();
+    expect(getTimelineMock).not.toHaveBeenCalled();
+    expect(getNovelMock).not.toHaveBeenCalled();
   });
 
   it("prefers relation_event_id over selected_chunk when deep-linking from graph", async () => {
@@ -283,6 +316,68 @@ describe("TimelinePage deep links", () => {
       expect(getTimelineMock).toHaveBeenCalledTimes(2);
     });
     expect(await screen.findByText("selected-12")).toBeInTheDocument();
+  });
+
+  it("keeps the graph deep-link selection when timeline controls change", async () => {
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await screen.findByText("selected-12");
+    await user.click(screen.getByRole("button", { name: "切到重要" }));
+    expect(navigateMock).toHaveBeenLastCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&show_tension=true&selected_chunk=12&relation_event_id=9002",
+      { replace: true }
+    );
+
+    await user.click(screen.getByRole("button", { name: "隐藏张力" }));
+    expect(navigateMock).toHaveBeenLastCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&show_tension=false&selected_chunk=12&relation_event_id=9002",
+      { replace: true }
+    );
+  });
+
+  it("drops a stale relation_event_id when controls change after falling back to selected_chunk", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9999";
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await screen.findByText("selected-12");
+    await user.click(screen.getByRole("button", { name: "切到重要" }));
+
+    expect(navigateMock).toHaveBeenLastCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&show_tension=true&selected_chunk=12",
+      { replace: true }
+    );
+  });
+
+  it("clears stale relation_event_id after the user manually selects another timeline node", async () => {
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await screen.findByText("selected-12");
+    await user.click(screen.getByRole("button", { name: "节点 8" }));
+
+    expect(navigateMock).toHaveBeenLastCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=8",
+      { replace: true }
+    );
+  });
+
+  it("clears the current deep-link selection when the detail panel is closed", async () => {
+    const user = userEvent.setup();
+
+    renderPage();
+
+    await screen.findByText("selected-12");
+    await user.click(screen.getByRole("button", { name: "关闭详情" }));
+
+    expect(navigateMock).toHaveBeenLastCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true",
+      { replace: true }
+    );
   });
 
   it("clears deep-link selection when switching to another task", async () => {

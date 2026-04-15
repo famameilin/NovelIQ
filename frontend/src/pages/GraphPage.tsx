@@ -1153,6 +1153,23 @@ export function GraphPage() {
     </>
   );
 
+  // 中文注释：GraphPage 也需要和 TimelinePage 一样先兜住路由缺参空态，
+  // 避免 novelId 缺失时继续渲染图谱分析入口，造成“页面存在但上下文不存在”的假象。
+  if (!novelId) {
+    return (
+      <PageContainer>
+        <div className="flex h-96 flex-col items-center justify-center gap-4">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-text">小说不存在</h3>
+            <p className="mt-1 text-sm text-text-muted">
+              当前图谱入口缺少小说上下文，请从小说列表重新进入。
+            </p>
+          </div>
+        </div>
+      </PageContainer>
+    );
+  }
+
   if (!currentTaskId) {
     return (
       <PageContainer>
