@@ -45,6 +45,18 @@ from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 """
 
 
+def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    构建 diagnosis 允许复用的共享 graph signals。
+
+    中文注释：diagnosis payload 只搬运 GraphAuthorityReport 的白名单字段，
+    不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入。
+    """
+
+    graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
+    return graph_report.summary.to_contract_dict(), graph_report.quality.to_contract_dict()
+
+
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
     """
     构建诊断payload
@@ -162,11 +174,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     )
 
     known_characters, alias_merges = repo.fetch_character_disambig_data(effective_run_id)
-    graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(effective_run_id)
-    # 中文注释：诊断 payload 只拿共享 graph signals，避免 graph page 的页面高亮
-    # 或质量样本再次渗入 diagnosis/aggregate 边界。
-    graph_summary = graph_report.summary.to_contract_dict()
-    graph_quality_report = graph_report.quality.to_contract_dict()
+    graph_summary, graph_quality_report = _build_graph_signal_payload(conn, effective_run_id)
 
     payload = {
         "novel_id": novel_id,
