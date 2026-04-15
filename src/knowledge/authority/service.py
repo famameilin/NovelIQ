@@ -136,6 +136,26 @@ class KnowledgeGraphAuthorityService:
             stable_states=stable_states,
         )
 
+    def build_graph_relation_event_page(
+        self,
+        run_id: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> tuple[list[RelationEvent], int]:
+        """
+        Return one relation-history page plus the full event count.
+
+        中文注释：graph page 的 load-more 只需要“稳定排序后的事件分页 + 总数”，
+        不应该每次都重建完整 GraphAuthorityView 再在内存里切片。
+        """
+
+        total = self._graph_repo.count_relation_events(run_id)
+        relation_events = self._build_relation_events(
+            self._graph_repo.fetch_relation_events(run_id, limit=limit, offset=offset)
+        )
+        return relation_events, total
+
     def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
         return [
             AliasMapping(alias=alias, canonical=canonical)
