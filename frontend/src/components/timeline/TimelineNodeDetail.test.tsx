@@ -126,4 +126,22 @@ describe("TimelineNodeDetail", () => {
       "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002"
     );
   });
+
+  it("falls back to the node's only relation event when the url-level selection is absent", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TimelineNodeDetail
+        node={createRelationNode()}
+        novelId="novel-1"
+        taskId="task-a"
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002"
+    );
+  });
 });

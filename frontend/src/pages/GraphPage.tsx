@@ -123,6 +123,7 @@ export function GraphPage() {
   const [selectedRelationTypes, setSelectedRelationTypes] = useState<Set<string>>(new Set());
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [hasUserSelectedEvent, setHasUserSelectedEvent] = useState(false);
   const [loadedEvents, setLoadedEvents] = useState<GraphEvent[]>([]);
   const [eventsPageInfo, setEventsPageInfo] = useState<GraphEventsPageInfo | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(false);
@@ -282,7 +283,31 @@ export function GraphPage() {
     return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? null;
   }, [initialRelationEventId, initialSelectedChunk, sortedEvents, selectedEventId]);
   const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
+  const deepLinkResolvedEventId = useMemo(() => {
+    if (initialRelationEventId != null) {
+      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
+      if (matchedEvent) {
+        return matchedEvent.relation_event_id;
+      }
+      if (initialSelectedChunk != null) {
+        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+        return fallbackEvent?.relation_event_id ?? null;
+      }
+      return null;
+    }
+    if (initialSelectedChunk != null) {
+      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+      return chunkMatchedEvent?.relation_event_id ?? null;
+    }
+    return null;
+  }, [initialRelationEventId, initialSelectedChunk, sortedEvents]);
   const graphSelectionHint = useMemo(() => {
+    if (hasUserSelectedEvent) {
+      return null;
+    }
+    if (activeSelectedEventId != null && (deepLinkResolvedEventId == null || activeSelectedEventId !== deepLinkResolvedEventId)) {
+      return null;
+    }
     if (initialRelationEventId == null && initialSelectedChunk == null) {
       return null;
     }
@@ -306,13 +331,17 @@ export function GraphPage() {
       }
     }
     return null;
-  }, [initialRelationEventId, initialSelectedChunk, sortedEvents]);
+  }, [activeSelectedEventId, deepLinkResolvedEventId, hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, sortedEvents]);
 
   useEffect(() => {
     // Bump the request version whenever the snapshot changes so late load-more
     // responses from the previous task/view are ignored instead of polluting
     // the current page-level history window.
     eventsRequestVersionRef.current += 1;
+    setSelectedNode(null);
+    setIsPanelOpen(false);
+    setSelectedEventId(null);
+    setHasUserSelectedEvent(false);
     setLoadedEvents(graphData?.events ?? []);
     setEventsPageInfo(graphData?.events_page ?? null);
     setEventsLoadError(null);
@@ -320,6 +349,11 @@ export function GraphPage() {
   }, [graphData]);
 
   useEffect(() => {
+    setHasUserSelectedEvent(false);
+  }, [currentTaskId, initialRelationEventId, initialSelectedChunk]);
+
+  useEffect(() => {
+    if (hasUserSelectedEvent) return;
     if (initialRelationEventId == null && initialSelectedChunk == null) return;
 
     const matchedEvent =
@@ -341,13 +375,14 @@ export function GraphPage() {
     }
 
     setSelectedEventId(null);
-  }, [initialRelationEventId, initialSelectedChunk, loadedEvents]);
+  }, [hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, loadedEvents]);
 
   useEffect(() => {
     setSelectedNode(null);
     setIsPanelOpen(false);
     setSelectedEventId(null);
-  }, [currentTaskId, graphQuery.dataUpdatedAt]);
+    setHasUserSelectedEvent(false);
+  }, [currentTaskId]);
 
   useEffect(() => {
     if (!graphContractIssue || !graphData) return;
@@ -497,6 +532,13 @@ export function GraphPage() {
       );
     }
   }, [navigate, selectedEvent, timelineUrl]);
+
+  const handleSelectEvent = useCallback((relationEventId: number) => {
+    // 中文注释：深链只负责首轮自动定位；用户手动改选后，应以当前交互为准，
+    // 不能继续保留旧提示或在后续事件窗口刷新时强行拉回初始命中结果。
+    setHasUserSelectedEvent(true);
+    setSelectedEventId(relationEventId);
+  }, []);
 
   const handleOpenTimelineChunk = useCallback(
     (chunkId?: number, relationEventId?: number | null) => {
@@ -918,7 +960,7 @@ export function GraphPage() {
                         <button
                           key={event.relation_event_id}
                           type="button"
-                          onClick={() => setSelectedEventId(event.relation_event_id)}
+                          onClick={() => handleSelectEvent(event.relation_event_id)}
                           className={cn(
                             "w-full rounded-xl border p-4 text-left transition-colors",
                             isSelected

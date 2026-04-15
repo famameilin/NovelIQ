@@ -7,7 +7,7 @@
  * 说明: 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
  */
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -86,15 +86,34 @@ export function TimelineNodeDetail({
     navigate(`/novels/${novelId}/characters?highlight=${encodeURIComponent(characterName)}`);
   }, [navigate, novelId]);
 
+  const graphRelationEventId = useMemo(() => {
+    if (selectedRelationEventId != null) {
+      return selectedRelationEventId;
+    }
+
+    const uniqueRelationEventIds = Array.from(
+      new Set(
+        (node?.relation_changes ?? [])
+          .map((relationChange) => relationChange.relation_event_id)
+          .filter((relationEventId): relationEventId is number => relationEventId != null)
+      )
+    );
+
+    // 中文注释：时间轴页内手动点开 relation node 时，URL 里不一定已有
+    // relation_event_id。若当前节点只承载一个稳定事件，就直接把它带回图谱，
+    // 避免回退成 chunk 级命中而误高亮同 chunk 的其他关系变化。
+    return uniqueRelationEventIds.length === 1 ? uniqueRelationEventIds[0] : null;
+  }, [node?.relation_changes, selectedRelationEventId]);
+
   const handleBackToGraph = useCallback(() => {
     if (!node) return;
     const params = new URLSearchParams({ task_id: taskId });
     params.set("selected_chunk", String(node.chunk_id));
-    if (selectedRelationEventId != null) {
-      params.set("relation_event_id", String(selectedRelationEventId));
+    if (graphRelationEventId != null) {
+      params.set("relation_event_id", String(graphRelationEventId));
     }
     navigate(`/novels/${novelId}/graph?${params.toString()}`);
-  }, [navigate, node, novelId, selectedRelationEventId, taskId]);
+  }, [graphRelationEventId, navigate, node, novelId, taskId]);
 
   return (
     <AnimatePresence mode="wait">
