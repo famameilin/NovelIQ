@@ -27,7 +27,7 @@ from src.api.routes.results_fetchers import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.knowledge.authority import ExportGraphAuthorityView, GraphAuthorityReport, KnowledgeGraphAuthorityService
 from src.metrics.aggregate import aggregate_all_metrics
 from src.metrics.timeline_metrics import (
     TimelineAuthorityContractError,
@@ -111,6 +111,7 @@ def load_chunk_bundle(
     chunk_repo: ChunkRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
+    export_graph_view: ExportGraphAuthorityView,
 ) -> tuple[list, list, list, list[str]]:
     """
     加载分块相关数据
@@ -131,6 +132,7 @@ def load_chunk_bundle(
         annotation_repo,
         alias_map,
         valid_character_names=valid_character_names,
+        export_graph_view=export_graph_view,
     )
     if not chunk_annotations:
         missing_fields.append("chunk_annotations")
@@ -144,9 +146,10 @@ def load_aggregate_bundle(
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    graph_repo: GraphRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
+    export_graph_view: ExportGraphAuthorityView,
+    graph_report: GraphAuthorityReport,
 ) -> tuple[list, list, Any, Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
     """
     加载聚合统计数据
@@ -167,10 +170,11 @@ def load_aggregate_bundle(
         annotation_repo,
         alias_map,
         valid_character_names=valid_character_names,
+        export_graph_view=export_graph_view,
     )
     hierarchical_relations = _fetch_hierarchical_relations(
         run_id,
-        graph_repo,
+        export_graph_view,
         alias_map,
         valid_character_names=valid_character_names,
     )
@@ -193,7 +197,6 @@ def load_aggregate_bundle(
     }
 
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
-    graph_report = KnowledgeGraphAuthorityService.from_session(stats_repo.session).build_graph_report(run_id)
     graph_summary = graph_report.summary
     graph_quality_report = graph_report.quality
 
@@ -325,6 +328,9 @@ def fetch_all_results_data(
     获取所有分析结果数据
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
+    graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
+    export_graph_view = graph_authority_service.build_export_view(run_id)
+    graph_report = graph_authority_service.build_graph_report(run_id)
 
     chunk_curves, missing_fields = load_core_results(run_id, stats_repo)
 
@@ -338,7 +344,12 @@ def fetch_all_results_data(
         missing_fields.append("diagnosis")
 
     topics, chunk_styles, chunk_annotations, chunk_missing = load_chunk_bundle(
-        run_id, annotation_repo, chunk_repo, alias_map, valid_character_names
+        run_id,
+        annotation_repo,
+        chunk_repo,
+        alias_map,
+        valid_character_names,
+        export_graph_view,
     )
     missing_fields.extend(chunk_missing)
 
@@ -351,7 +362,15 @@ def fetch_all_results_data(
         graph_summary,
         graph_quality_report,
     ) = load_aggregate_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, chunk_repo, graph_repo, alias_map, valid_character_names
+        run_id,
+        novel_id,
+        stats_repo,
+        annotation_repo,
+        chunk_repo,
+        alias_map,
+        valid_character_names,
+        export_graph_view,
+        graph_report,
     )
 
     novel_name = _fetch_novel_name(run_id, novel_id, stats_repo)

@@ -181,6 +181,45 @@ def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(d
     assert not hasattr(report, "relation_events")
 
 
+def test_build_export_view_keeps_export_graph_payloads_off_repository_shapes(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Export Graph Authority View",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="spouse_of",
+        change_type="新建",
+        chunk_id=5,
+        evidence="并肩回府",
+        confidence=0.78,
+        source_relation_row_id=13031,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    export_view = KnowledgeGraphAuthorityService.from_session(db_session).build_export_view(run_id)
+
+    assert len(export_view.current_relations) == 1
+    assert export_view.current_relations[0].relation_id is not None
+    assert export_view.current_relations[0].from_name == "苏镜"
+    assert export_view.current_relations[0].relation_type == "spouse_of"
+    assert export_view.current_relations[0].last_seen_chunk == 5
+    assert len(export_view.relation_events) == 1
+    assert export_view.relation_events[0].chunk_id == 5
+    assert not hasattr(export_view, "summary")
+    assert not hasattr(export_view, "quality")
+
+
 def test_build_active_entity_view_normalizes_repository_rows_into_authority_contract(db_session) -> None:
     novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
     run_id = RunRepository(db_session).create_run(

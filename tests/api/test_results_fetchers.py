@@ -1,16 +1,18 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
+    _fetch_chunk_annotations,
     _fetch_diagnosis,
     _fetch_hierarchical_relations,
     _normalize_arc_scores,
     _normalize_name_list,
     _normalize_text_by_alias_map,
 )
+from src.knowledge.authority import ExportGraphAuthorityView, ExportRelationSnapshot, RelationEvent
 
 
 class _DummyRow:
@@ -84,7 +86,10 @@ def test_normalize_name_list_applies_alias_map_and_deduplicates():
 
 
 def test_normalize_text_by_alias_map_rewrites_aliases_to_common_names():
-    text = "\u7334\u5b50\u5e2e\u4e86\u4e8c\u5988\u5988\uff0c\u7b97\u76d8\u8fd8\u5728\u65c1\u8fb9\u770b\u7740\u4e8c\u5988\u5988\u3002"
+    text = (
+        "\u7334\u5b50\u5e2e\u4e86\u4e8c\u5988\u5988\uff0c"
+        "\u7b97\u76d8\u8fd8\u5728\u65c1\u8fb9\u770b\u7740\u4e8c\u5988\u5988\u3002"
+    )
     alias_map = {
         "\u7334\u5b50": "\u4faf\u98de\u767d",
         "\u7b97\u76d8": "\u6797\u7acb\u679c",
@@ -110,7 +115,10 @@ def test_normalize_text_by_alias_map_skips_embedded_suffixes_in_longer_names():
 
 
 def test_normalize_text_by_alias_map_skips_embedded_title_aliases():
-    text = "\u6797\u5bb6\u5927\u5c11\u7237\u56de\u5e9c\uff0c\u8001\u795e\u4ed9\u63d0\u70b9\u4ed6\u795e\u4ed9\u6765\u4e86\u3002"
+    text = (
+        "\u6797\u5bb6\u5927\u5c11\u7237\u56de\u5e9c\uff0c"
+        "\u8001\u795e\u4ed9\u63d0\u70b9\u4ed6\u795e\u4ed9\u6765\u4e86\u3002"
+    )
     alias_map = {
         "\u5927\u5c11\u7237": "\u8d3a\u4f2f\u5b89",
         "\u795e\u4ed9": "\u5f20\u9053\u9675",
@@ -166,11 +174,16 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     assert result is not None
     assert result.arc_scores == {"\u4faf\u98de\u767d": 6.5, "\u6797\u7acb\u679c": 6.0}
     assert result.topic_labels == ["\u67f3\u5a49\u513f", "\u767d\u82b7"]
-    assert result.diagnosis == "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
+    assert result.diagnosis == (
+        "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c"
+        "\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
+    )
     assert result.value_logic_reason == "\u67f3\u5a49\u513f\u5f71\u54cd\u4e86\u4faf\u98de\u767d\u7684\u5224\u65ad\u3002"
     assert result.power_stance_reason == "\u6797\u7acb\u679c\u538b\u5236\u4e86\u67f3\u5a49\u513f\u3002"
     assert result.dignity_reason == "\u67f3\u5a49\u513f\u4fdd\u6301\u4f53\u9762\u3002"
-    assert result.cultural_depth_reason == "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
+    assert result.cultural_depth_reason == (
+        "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
+    )
     assert result.protagonist == "\u4faf\u98de\u767d"
     assert result.main_characters == ["\u4faf\u98de\u767d", "\u67f3\u5a49\u513f"]
     assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c", "\u67f3\u5a49\u513f"]
@@ -230,20 +243,19 @@ def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
 
 
 def test_fetch_character_relations_deduplicates_across_chunks():
-    rows = [
-        {"from_name": "贺伯安", "to_name": "二妈妈", "type": "家族", "last_seen_chunk": 3},
-        {"from_name": "贺伯安", "to_name": "林立果", "type": "盟友", "last_seen_chunk": 5},
-    ]
-
     annotation_repo = _DummyAnnotationRepo2()
-    mock_graph_repo = MagicMock()
-    mock_graph_repo.fetch_current_relations.return_value = rows
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(from_name="贺伯安", to_name="二妈妈", relation_type="家族", last_seen_chunk=3),
+            ExportRelationSnapshot(from_name="贺伯安", to_name="林立果", relation_type="盟友", last_seen_chunk=5),
+        ]
+    )
 
-    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
-        result = _fetch_character_relations(
-            run_id="run-1",
-            annotation_repo=annotation_repo,
-        )
+    result = _fetch_character_relations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        export_graph_view=export_graph_view,
+    )
 
     assert len(result) == 2
 
@@ -259,19 +271,18 @@ def test_fetch_character_relations_deduplicates_across_chunks():
 
 
 def test_fetch_character_relations_uses_last_seen_chunk_id():
-    rows = [
-        {"from_name": "张三", "to_name": "李四", "type": "朋友", "last_seen_chunk": 15},
-    ]
-
     annotation_repo = _DummyAnnotationRepo2()
-    mock_graph_repo = MagicMock()
-    mock_graph_repo.fetch_current_relations.return_value = rows
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(from_name="张三", to_name="李四", relation_type="朋友", last_seen_chunk=15),
+        ]
+    )
 
-    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
-        result = _fetch_character_relations(
-            run_id="run-1",
-            annotation_repo=annotation_repo,
-        )
+    result = _fetch_character_relations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        export_graph_view=export_graph_view,
+    )
 
     assert len(result) == 1
     assert result[0].chunk_id == 15
@@ -281,56 +292,51 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
 def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo2()
     annotation_repo._pending = [object()]
-    mock_graph_repo = MagicMock()
-    mock_graph_repo.fetch_current_relations.return_value = []
-
-    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
-        with pytest.raises(RuntimeError, match="pending relations"):
-            _fetch_character_relations(
-                run_id="run-1",
-                annotation_repo=annotation_repo,
-            )
+    with pytest.raises(RuntimeError, match="pending relations"):
+        _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=ExportGraphAuthorityView(),
+        )
 
 
 def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
     annotation_repo._pending = []
-    mock_graph_repo = MagicMock()
-    mock_graph_repo.fetch_current_relations.return_value = []
-
-    with patch("src.api.routes.results_fetchers.fetchers.GraphRepository", return_value=mock_graph_repo):
-        result = _fetch_character_relations(
-            run_id="run-1",
-            annotation_repo=annotation_repo,
-        )
+    result = _fetch_character_relations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        export_graph_view=ExportGraphAuthorityView(),
+    )
 
     assert result == []
 
 
 def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
-    mock_graph_repo = MagicMock()
-    mock_graph_repo.fetch_current_relations.return_value = [
-        {
-            "relation_id": 1,
-            "type": "father_of",
-            "from_name": "老贺",
-            "to_name": "伯安",
-            "first_seen_chunk": 2,
-            "last_seen_chunk": 9,
-        },
-        {
-            "relation_id": 2,
-            "type": "ally_of",
-            "from_name": "老贺",
-            "to_name": "伯安",
-            "first_seen_chunk": 2,
-            "last_seen_chunk": 9,
-        },
-    ]
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(
+                relation_id=1,
+                from_name="老贺",
+                to_name="伯安",
+                relation_type="father_of",
+                first_seen_chunk=2,
+                last_seen_chunk=9,
+            ),
+            ExportRelationSnapshot(
+                relation_id=2,
+                from_name="老贺",
+                to_name="伯安",
+                relation_type="ally_of",
+                first_seen_chunk=2,
+                last_seen_chunk=9,
+            ),
+        ]
+    )
 
     result = _fetch_hierarchical_relations(
         run_id="run-1",
-        graph_repo=mock_graph_repo,
+        export_graph_view=export_graph_view,
         alias_map={"老贺": "贺铮"},
         valid_character_names={"贺铮", "伯安"},
     )
@@ -342,23 +348,78 @@ def test_fetch_hierarchical_relations_normalizes_aliases_before_filtering():
 
 
 def test_fetch_hierarchical_relations_filters_unknown_after_normalization():
-    mock_graph_repo = MagicMock()
-    mock_graph_repo.fetch_current_relations.return_value = [
-        {
-            "relation_id": 10,
-            "type": "spouse_of",
-            "from_name": "二妈妈",
-            "to_name": "陌生人",
-            "first_seen_chunk": 1,
-            "last_seen_chunk": 4,
-        }
-    ]
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(
+                relation_id=10,
+                from_name="二妈妈",
+                to_name="陌生人",
+                relation_type="spouse_of",
+                first_seen_chunk=1,
+                last_seen_chunk=4,
+            )
+        ]
+    )
 
     result = _fetch_hierarchical_relations(
         run_id="run-1",
-        graph_repo=mock_graph_repo,
+        export_graph_view=export_graph_view,
         alias_map={"二妈妈": "柳婉儿"},
         valid_character_names={"柳婉儿", "贺伯安"},
     )
 
     assert result == []
+
+
+def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
+    class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
+        def fetch_chunk_annotations_full(self, _run_id):
+            return [
+                _DummyRow(
+                    chunk_id=3,
+                    emotional_valence="正向",
+                    event_type="冲突",
+                    pivot_moment=True,
+                    cliffhanger=False,
+                    has_foreshadowing=False,
+                    foreshadowing_type=None,
+                    foreshadowing_desc=None,
+                )
+            ]
+
+        def fetch_chunk_characters_full(self, _run_id):
+            return []
+
+        def fetch_chunk_dialogues_full(self, _run_id):
+            return []
+
+    annotation_repo = _AnnotationRepoWithChunkRows()
+    export_graph_view = ExportGraphAuthorityView(
+        relation_events=[
+            RelationEvent(
+                relation_event_id=101,
+                chunk_id=3,
+                from_entity_id=1,
+                to_entity_id=2,
+                from_name="老贺",
+                to_name="伯安",
+                relation_type="父子",
+                change_type="新建",
+            )
+        ]
+    )
+
+    result = _fetch_chunk_annotations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        alias_map={"老贺": "贺铮"},
+        valid_character_names={"贺铮", "伯安"},
+        export_graph_view=export_graph_view,
+    )
+
+    assert len(result) == 1
+    assert len(result[0].relations) == 1
+    assert result[0].relations[0].from_char == "贺铮"
+    assert result[0].relations[0].to_char == "伯安"
+    assert result[0].relations[0].type == "父子"
+    assert result[0].relations[0].change == "新建"

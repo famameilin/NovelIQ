@@ -13,6 +13,8 @@ from .types import (
     ConfirmedRelation,
     EntityLifecycle,
     EntityTypeFact,
+    ExportGraphAuthorityView,
+    ExportRelationSnapshot,
     GraphAuthorityReport,
     GraphAuthorityView,
     Level1AuthoritySnapshot,
@@ -103,6 +105,18 @@ class KnowledgeGraphAuthorityService:
         stable_states = self._build_stable_states(entities)
         return self._assemble_graph_report(stable_states, confirmed_relations, relation_events)
 
+    def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
+        """Return the authority surface used by graph-derived export payloads."""
+
+        # 中文注释：export 仍保留部分历史 DTO，这里统一把“当前关系快照 + 关系事件历史”
+        # 收口成 authority view，避免导出层再直接依赖 repository/raw projection。
+        return ExportGraphAuthorityView(
+            current_relations=self._build_export_relation_snapshots(
+                self._graph_repo.fetch_current_relations(run_id, active_only=False)
+            ),
+            relation_events=self._build_relation_events(self._graph_repo.fetch_relation_events(run_id)),
+        )
+
     def build_graph_view(self, run_id: str) -> GraphAuthorityView:
         """Return graph authority facts with full relation history for downstream product assembly."""
 
@@ -165,6 +179,26 @@ class KnowledgeGraphAuthorityService:
                 )
             )
         return confirmed_relations
+
+    def _build_export_relation_snapshots(self, relations: Iterable[dict[str, Any]]) -> list[ExportRelationSnapshot]:
+        export_relations: list[ExportRelationSnapshot] = []
+        for relation in sorted(
+            relations,
+            key=lambda row: (str(row["from_name"]), str(row["to_name"]), str(row["type"])),
+        ):
+            export_relations.append(
+                ExportRelationSnapshot(
+                    relation_id=relation.get("relation_id"),
+                    from_name=str(relation["from_name"]),
+                    to_name=str(relation["to_name"]),
+                    relation_type=str(relation["type"]),
+                    first_seen_chunk=relation.get("first_seen_chunk"),
+                    last_seen_chunk=relation.get("last_seen_chunk"),
+                    latest_event_id=relation.get("latest_event_id"),
+                    is_active=bool(relation["is_active"]),
+                )
+            )
+        return export_relations
 
     def _build_relation_events(self, events: Iterable[dict[str, Any]]) -> list[RelationEvent]:
         relation_events: list[RelationEvent] = []
