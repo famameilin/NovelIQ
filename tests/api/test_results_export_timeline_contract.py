@@ -8,9 +8,11 @@ import pytest
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
+    load_character_bundle,
     load_aggregate_bundle,
 )
 from src.knowledge.authority import (
+    CanonicalEntity,
     ExportGraphAuthorityView,
     ExportRelationSnapshot,
     GraphAuthorityReport,
@@ -126,6 +128,48 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
             annotation_repo=annotation_repo,
             stats_repo=stats_repo,
         )
+
+
+def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    characters = [SimpleNamespace(name="沈砚")]
+
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        lambda *_args, **_kwargs: diagnosis,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_characters",
+        lambda *_args, **_kwargs: characters,
+    )
+
+    export_graph_view = ExportGraphAuthorityView(
+        canonical_entities=[
+            CanonicalEntity(name="沈砚"),
+            CanonicalEntity(name="陆明"),
+        ]
+    )
+
+    (
+        fetched_characters,
+        arc_scores,
+        main_characters,
+        valid_character_names,
+        missing_fields,
+    ) = load_character_bundle(
+        run_id="run-export-bundle",
+        novel_id="novel-1",
+        stats_repo=MagicMock(),
+        annotation_repo=MagicMock(),
+        alias_map={},
+        export_graph_view=export_graph_view,
+    )
+
+    assert fetched_characters == characters
+    assert arc_scores == {"沈砚": 8.0}
+    assert main_characters == ["沈砚"]
+    assert valid_character_names == {"沈砚", "陆明"}
+    assert missing_fields == []
 
 
 def test_load_aggregate_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
