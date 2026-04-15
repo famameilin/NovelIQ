@@ -108,9 +108,12 @@ class KnowledgeGraphAuthorityService:
     def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
         """Return the authority surface used by graph-derived export payloads."""
 
+        entities = self._graph_repo.fetch_entities(run_id)
         # 中文注释：export 仍保留部分历史 DTO，这里统一把“当前关系快照 + 关系事件历史”
-        # 收口成 authority view，避免导出层再直接依赖 repository/raw projection。
+        # 以及“允许导出的规范实体集合”一起收口成 authority view，避免导出层再直接
+        # 依赖 repository/raw projection 做二次过滤。
         return ExportGraphAuthorityView(
+            canonical_entities=self._build_canonical_entities(entities),
             current_relations=self._build_export_relation_snapshots(
                 self._graph_repo.fetch_current_relations(run_id, active_only=False)
             ),

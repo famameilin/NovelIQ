@@ -209,6 +209,7 @@ def test_build_export_view_keeps_export_graph_payloads_off_repository_shapes(db_
 
     export_view = KnowledgeGraphAuthorityService.from_session(db_session).build_export_view(run_id)
 
+    assert {entity.name for entity in export_view.canonical_entities} == {"苏镜", "程霜"}
     assert len(export_view.current_relations) == 1
     assert export_view.current_relations[0].relation_id is not None
     assert export_view.current_relations[0].from_name == "苏镜"
@@ -446,6 +447,43 @@ def test_build_graph_view_relation_events_are_full_history_not_page_window(db_se
     assert len(view.relation_events) == 205
     assert view.relation_events[0].chunk_id == 205
     assert view.relation_events[-1].chunk_id == 1
+
+
+def test_build_graph_report_caps_low_confidence_count_to_legacy_summary_limit(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Report Low Confidence Cap",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=25)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=25)
+
+    for chunk_id in range(1, 26):
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="盟友",
+            change_type="波动" if chunk_id > 1 else "新建",
+            chunk_id=chunk_id,
+            evidence=f"低置信事件 {chunk_id}",
+            confidence=0.55,
+            source_relation_row_id=17500 + chunk_id,
+            directionality="directed",
+        )
+
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    report = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_report(run_id)
+
+    # 中文注释：report 是 export/diagnosis 共用的聚合口径，仍需保持旧 summary
+    # 的上限行为；graph page 的全历史计数由独立 contract 负责覆盖。
+    assert report.quality["low_confidence_count"] == 20
+    assert report.quality["conflict_count"] == 0
 
 
 def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
