@@ -77,7 +77,10 @@ def _decode_graph_events_cursor(cursor: str | None) -> int:
         raise ValueError("invalid graph events cursor") from exc
 
     offset = payload.get("offset")
-    if not isinstance(offset, int) or offset < 0:
+    # bool is a subclass of int in Python, but graph cursors only allow plain
+    # non-negative integer offsets. Reject boolean payloads so invalid cursors
+    # never silently coerce to 0/1.
+    if type(offset) is not int or offset < 0:
         raise ValueError("invalid graph events cursor")
     return offset
 
