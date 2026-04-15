@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Novel, TimelineResponse } from "@/api/types";
@@ -222,5 +222,23 @@ describe("TimelinePage deep links", () => {
     expect(await screen.findByText("selected-12")).toBeInTheDocument();
     expect(screen.getByText("event-9999")).toBeInTheDocument();
     expect(screen.getByText("未定位到指定关系事件，已回退到对应时间节点。")).toBeInTheDocument();
+  });
+
+  it("clears deep-link selection when switching to another task", async () => {
+    renderPage();
+
+    await screen.findByText("selected-12");
+    useNovelStore.setState({
+      currentNovelId: null,
+      currentTaskId: "task-b",
+      novelsCache: [],
+    });
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith(
+        "/novels/novel-1/timeline?task_id=task-b&max_level=3&show_tension=true",
+        { replace: true }
+      );
+    });
   });
 });

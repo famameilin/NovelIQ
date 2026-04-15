@@ -114,6 +114,7 @@ export function GraphPage() {
   const { currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
+  const urlSelectedChunk = searchParams.get("selected_chunk");
   const urlRelationEventId = searchParams.get("relation_event_id");
   const forceGraphRef = useRef<ForceGraphHandle>(null);
 
@@ -263,17 +264,49 @@ export function GraphPage() {
   const hasMoreEvents = eventsPageInfo?.has_more ?? false;
   const loadedEventCount = sortedEvents.length;
 
-  const selectedEvent = useMemo(() => {
-    if (sortedEvents.length === 0) return null;
-    if (selectedEventId == null) return sortedEvents[0];
-    return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? sortedEvents[0];
-  }, [sortedEvents, selectedEventId]);
-  const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
   const initialRelationEventId = useMemo(() => {
     if (!urlRelationEventId) return null;
     const parsed = Number(urlRelationEventId);
     return Number.isInteger(parsed) ? parsed : null;
   }, [urlRelationEventId]);
+  const initialSelectedChunk = useMemo(() => {
+    if (!urlSelectedChunk) return null;
+    const parsed = Number(urlSelectedChunk);
+    return Number.isInteger(parsed) ? parsed : null;
+  }, [urlSelectedChunk]);
+  const selectedEvent = useMemo(() => {
+    if (sortedEvents.length === 0) return null;
+    if (selectedEventId == null) {
+      return initialRelationEventId != null || initialSelectedChunk != null ? null : sortedEvents[0];
+    }
+    return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? null;
+  }, [initialRelationEventId, initialSelectedChunk, sortedEvents, selectedEventId]);
+  const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
+  const graphSelectionHint = useMemo(() => {
+    if (initialRelationEventId == null && initialSelectedChunk == null) {
+      return null;
+    }
+    if (initialRelationEventId != null) {
+      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
+      if (matchedEvent) {
+        return null;
+      }
+      if (initialSelectedChunk != null) {
+        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+        if (fallbackEvent) {
+          return "未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。";
+        }
+      }
+      return "未在当前图谱事件窗口定位到指定关系事件。";
+    }
+    if (initialSelectedChunk != null) {
+      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+      if (!chunkMatchedEvent) {
+        return "未在当前事件窗口定位到指定时间节点的关系变化。";
+      }
+    }
+    return null;
+  }, [initialRelationEventId, initialSelectedChunk, sortedEvents]);
 
   useEffect(() => {
     // Bump the request version whenever the snapshot changes so late load-more
@@ -287,12 +320,28 @@ export function GraphPage() {
   }, [graphData]);
 
   useEffect(() => {
-    if (initialRelationEventId == null) return;
-    const matchedEvent = loadedEvents.find((event) => event.relation_event_id === initialRelationEventId);
+    if (initialRelationEventId == null && initialSelectedChunk == null) return;
+
+    const matchedEvent =
+      initialRelationEventId != null
+        ? loadedEvents.find((event) => event.relation_event_id === initialRelationEventId) ?? null
+        : null;
     if (matchedEvent) {
       setSelectedEventId(matchedEvent.relation_event_id);
+      return;
     }
-  }, [initialRelationEventId, loadedEvents]);
+
+    const fallbackEvent =
+      initialSelectedChunk != null
+        ? loadedEvents.find((event) => event.chunk_id === initialSelectedChunk) ?? null
+        : null;
+    if (fallbackEvent) {
+      setSelectedEventId(fallbackEvent.relation_event_id);
+      return;
+    }
+
+    setSelectedEventId(null);
+  }, [initialRelationEventId, initialSelectedChunk, loadedEvents]);
 
   useEffect(() => {
     setSelectedNode(null);
@@ -855,6 +904,11 @@ export function GraphPage() {
             </CardHeader>
 
             <CardContent className="space-y-3">
+              {graphSelectionHint ? (
+                <div className="rounded-xl border border-chart-negative/20 bg-chart-negative/5 p-3 text-xs leading-5 text-text-muted">
+                  {graphSelectionHint}
+                </div>
+              ) : null}
               {sortedEvents.length ? (
                 <>
                   <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">

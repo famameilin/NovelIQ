@@ -107,8 +107,10 @@ export function TimelinePage() {
       navigate(buildTimelinePageUrl(novelId, currentTaskId, {
         maxLevel,
         showTension,
-        selectedChunk: selectedChunkFromUrl,
-        relationEventId: relationEventIdFromUrl,
+        // 中文注释：时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
+        // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮。
+        selectedChunk: null,
+        relationEventId: null,
       }), { replace: true });
     }
   }, [currentTaskId, novelId, navigate, urlTaskId, maxLevel, showTension, selectedChunkFromUrl, relationEventIdFromUrl]);
