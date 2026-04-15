@@ -142,7 +142,9 @@ export function GraphPage() {
   }, [novelId, urlTaskId, setNovel, setTask]);
 
   useEffect(() => {
-    if (currentTaskId && searchParams.get("task_id") !== currentTaskId) {
+    // 中文注释：GraphPage 的 task 归一化只能建立在有效 novelId 之上；
+    // 否则缺参空态虽然能显示出来，但 URL 仍可能被错误改写成 /novels/undefined/graph。
+    if (currentTaskId && novelId && searchParams.get("task_id") !== currentTaskId) {
       navigate(`/novels/${novelId}/graph?task_id=${currentTaskId}`, { replace: true });
     }
   }, [currentTaskId, novelId, navigate, searchParams]);
