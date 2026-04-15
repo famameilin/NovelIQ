@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from .types import (
     ConfirmedRelation,
     GraphConflictSample,
@@ -139,57 +137,6 @@ def build_graph_page_quality(
         conflicts=relation_conflicts[:GRAPH_PAGE_CONFLICT_SAMPLE_LIMIT],
         low_confidence_samples=low_confidence_events[:GRAPH_PAGE_LOW_CONFIDENCE_SAMPLE_LIMIT],
     )
-
-
-def serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
-    """Serialize graph-page summary to the public DTO without leaking internal field names."""
-
-    return {
-        "node_count": summary.node_count,
-        "edge_count": summary.edge_count,
-        "density": summary.density,
-        "core_characters": list(summary.core_characters),
-        "key_relations": [
-            {
-                "from": relation.from_name,
-                "to": relation.to_name,
-                "type": relation.relation_type,
-                "support_count": relation.support_count,
-            }
-            for relation in summary.key_relations
-        ],
-    }
-
-
-def serialize_graph_page_quality(quality: GraphPageQualityDetails) -> dict[str, Any]:
-    """Serialize graph-page quality details to the public DTO."""
-
-    return {
-        "conflict_count": quality.conflict_count,
-        "low_confidence_count": quality.low_confidence_count,
-        "conflicts": [
-            {
-                "entity_pair": list(conflict.entity_pair),
-                "entity_names": list(conflict.entity_names),
-                "relation_types": list(conflict.relation_types),
-                "relation_count": conflict.relation_count,
-                "latest_event_ids": list(conflict.latest_event_ids),
-            }
-            for conflict in quality.conflicts
-        ],
-        "low_confidence_samples": [
-            {
-                "relation_event_id": event.relation_event_id,
-                "chunk_id": event.chunk_id,
-                "from_name": event.from_name,
-                "to_name": event.to_name,
-                "relation_type": event.relation_type,
-                "change_type": event.change_type,
-                "confidence": event.confidence,
-            }
-            for event in quality.low_confidence_samples
-        ],
-    }
 
 
 def _detect_relation_conflicts(confirmed_relations: list[ConfirmedRelation]) -> list[GraphConflictSample]:
