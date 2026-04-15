@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass(slots=True)
@@ -195,6 +194,100 @@ class GraphAuthorityView:
 
 
 @dataclass(slots=True)
+class GraphSharedSummary:
+    """
+    Aggregate-only graph summary shared outside the graph product surface.
+
+    Diagnosis/export may reuse these counters as graph-owned input signals,
+    but richer highlights such as core characters and key relations must stay
+    in graph-page-only contracts.
+    """
+
+    node_count: int = 0
+    edge_count: int = 0
+    density: float = 0.0
+
+
+@dataclass(slots=True)
+class GraphQualitySignals:
+    """
+    Aggregate-only graph quality counters shared outside the graph page.
+
+    The detailed conflict / low-confidence samples belong to graph product
+    presentation and should not flow into diagnosis/export/aggregate layers.
+    """
+
+    conflict_count: int = 0
+    low_confidence_count: int = 0
+
+
+@dataclass(slots=True)
+class GraphKeyRelationHighlight:
+    """Page-facing highlight for one representative confirmed relation."""
+
+    from_name: str
+    to_name: str
+    relation_type: str | None = None
+    support_count: int = 0
+
+
+@dataclass(slots=True)
+class GraphPageSummary:
+    """
+    Graph-page-only summary contract.
+
+    中文说明：这里可以承载页面首屏高亮（如核心角色、关键关系），但这些字段
+    不应进入 diagnosis/export/shared signals，否则 graph page 又会反向定义
+    上层分析语义。
+    """
+
+    node_count: int = 0
+    edge_count: int = 0
+    density: float = 0.0
+    core_characters: list[str] = field(default_factory=list)
+    key_relations: list[GraphKeyRelationHighlight] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class GraphConflictSample:
+    """Graph-page-only sample for relation type conflicts."""
+
+    entity_pair: list[int | None] = field(default_factory=list)
+    entity_names: list[str] = field(default_factory=list)
+    relation_types: list[str] = field(default_factory=list)
+    relation_count: int = 0
+    latest_event_ids: list[int] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class GraphLowConfidenceSample:
+    """Graph-page-only sample for one low-confidence relation event."""
+
+    relation_event_id: int
+    chunk_id: int
+    from_name: str
+    to_name: str
+    relation_type: str | None = None
+    change_type: str | None = None
+    confidence: float | None = None
+
+
+@dataclass(slots=True)
+class GraphPageQualityDetails:
+    """
+    Graph-page-only quality details.
+
+    中文说明：共享层只拿 counters；样本明细只服务 graph page 的排障与解释，
+    不允许 diagnosis/export 继续顺手复用这些字段。
+    """
+
+    conflict_count: int = 0
+    low_confidence_count: int = 0
+    conflicts: list[GraphConflictSample] = field(default_factory=list)
+    low_confidence_samples: list[GraphLowConfidenceSample] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ExportRelationSnapshot:
     """Current relation snapshot dedicated to legacy export payload assembly."""
 
@@ -236,5 +329,5 @@ class GraphAuthorityReport:
     not recouple to graph page detail samples through report-level shortcuts.
     """
 
-    summary: dict[str, Any] = field(default_factory=dict)
-    quality: dict[str, Any] = field(default_factory=dict)
+    summary: GraphSharedSummary = field(default_factory=GraphSharedSummary)
+    quality: GraphQualitySignals = field(default_factory=GraphQualitySignals)
