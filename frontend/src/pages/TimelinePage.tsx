@@ -178,10 +178,12 @@ export function TimelinePage() {
         maxLevel: level,
         showTension,
         selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
-        relationEventId: relationEventIdFromUrl,
+        // 中文注释：控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link。
+        // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择。
+        relationEventId: resolvedRelationEventId,
       }), { replace: true });
     },
-    [novelId, currentTaskId, showTension, navigate, selectedNode, selectedChunkFromUrl, relationEventIdFromUrl]
+    [novelId, currentTaskId, showTension, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
   );
 
   const handleShowTensionChange = useCallback(
@@ -192,10 +194,10 @@ export function TimelinePage() {
         maxLevel,
         showTension: show,
         selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
-        relationEventId: relationEventIdFromUrl,
+        relationEventId: resolvedRelationEventId,
       }), { replace: true });
     },
-    [novelId, currentTaskId, maxLevel, navigate, selectedNode, selectedChunkFromUrl, relationEventIdFromUrl]
+    [novelId, currentTaskId, maxLevel, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
   );
 
   const handleNodeClick = useCallback((node: TimelineNode) => {
