@@ -269,19 +269,19 @@ def render_annotation_evidence_blocks(bundle: EvidenceBundle) -> list[str]:
 
 
 def render_annotation_prompt_blocks(bundle: EvidenceBundle) -> AnnotationPromptBlocks:
+    level1_facts = _render_annotation_level1(bundle)
     active_entities = _render_active_entity_lines(
         [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
     )
     disambig_context = _render_disambig_candidates(bundle)
     vector_evidence = render_vector_evidence(bundle)
-
-    if disambig_context and vector_evidence:
-        combined_disambig = disambig_context + "\n\n" + vector_evidence
-    else:
-        combined_disambig = disambig_context or vector_evidence
+    prompt_sections = [section for section in (level1_facts, disambig_context, vector_evidence) if section]
+    # 中文注释：annotation 主 prompt 当前只接收 active_entities + disambig_context 两个入口，
+    # 因此这里显式把 Level 1 结构化事实并入 disambig_context，保证稳定事实真正进入主链路。
+    combined_disambig = "\n\n".join(prompt_sections) if prompt_sections else None
 
     return AnnotationPromptBlocks(
-        level1_facts=_render_annotation_level1(bundle),
+        level1_facts=level1_facts,
         active_entities=active_entities,
         disambig_context=combined_disambig,
         vector_evidence=vector_evidence,

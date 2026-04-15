@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from src.rag import Level1AuthorityProvider
+from src.rag import DisambigContextProvider, Level1AuthorityProvider
 from src.storage.repositories import GraphRepository, RunRepository
 
 
@@ -118,3 +118,45 @@ class TestLevel1AuthoritySnapshot:
         snapshot = Level1AuthorityProvider(graph_repo).build_snapshot(run_id)
 
         assert snapshot.confirmed_relations == []
+
+    def test_collect_evidence_level2_uses_authority_contract_instead_of_raw_graph_rows(self, db_session) -> None:
+        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Test Novel",
+        )
+
+        graph_repo = GraphRepository(db_session)
+        graph_repo.upsert_entity(
+            run_id=run_id,
+            canonical_name="白芷",
+            entity_type="organization",
+            last_seen_chunk=12,
+            primary_role_function="helper",
+            last_action="观察",
+            last_emotion_score="平静",
+            status="active",
+        )
+        db_session.commit()
+
+        provider = DisambigContextProvider(
+            graph_repo=graph_repo,
+            novel_id=novel_id,
+            run_id=run_id,
+            lookback_chunks=5,
+            level1_enabled=False,
+            level2_enabled=True,
+            level3_enabled=False,
+        )
+
+        bundle = provider.collect_evidence(current_chunk=12)
+
+        assert len(bundle.local_evidence) == 1
+        metadata = bundle.local_evidence[0].metadata
+        assert metadata["name"] == "白芷"
+        assert metadata["entity_type"] == "organization"
+        assert metadata["recent_action"] == "观察"
+        assert metadata["recent_emotion"] == "平静"
+        assert "last_action" not in metadata
+        assert "last_emotion" not in metadata

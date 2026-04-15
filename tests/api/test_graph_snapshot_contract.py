@@ -459,9 +459,8 @@ def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(m
 
 def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch) -> None:
     class FakeAuthorityService:
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-graph-events-page"
-            relation_events = [
+        def __init__(self) -> None:
+            self._relation_events = [
                 RelationEvent(
                     relation_event_id=index + 1,
                     chunk_id=500 - index,
@@ -475,14 +474,28 @@ def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch
                 )
                 for index in range(205)
             ]
+
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-graph-events-page"
             return GraphAuthorityView(
                 stable_states=[],
                 confirmed_relations=[],
-                relation_events=relation_events,
+                relation_events=self._relation_events,
             )
 
         def build_graph_report(self, *_args, **_kwargs):
             raise AssertionError("graph events pagination should not depend on graph report")
+
+        def build_graph_relation_event_page(
+            self,
+            run_id: str,
+            *,
+            offset: int = 0,
+            limit: int | None = None,
+        ) -> tuple[list[RelationEvent], int]:
+            assert run_id == "run-graph-events-page"
+            end = offset + (limit or len(self._relation_events))
+            return self._relation_events[offset:end], len(self._relation_events)
 
     monkeypatch.setattr(
         "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
@@ -514,6 +527,17 @@ def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch
 
 def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> None:
     class FakeAuthorityService:
+        def build_graph_relation_event_page(
+            self,
+            run_id: str,
+            *,
+            offset: int = 0,
+            limit: int | None = None,
+        ) -> tuple[list[RelationEvent], int]:
+            assert run_id == "run-empty-graph-events-page"
+            assert offset == 0
+            return [], 0
+
         def build_graph_view(self, run_id: str) -> GraphAuthorityView:
             assert run_id == "run-empty-graph-events-page"
             return GraphAuthorityView(
@@ -560,6 +584,28 @@ def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> Non
 )
 def test_fetch_graph_events_page_rejects_invalid_cursor_payloads(monkeypatch, cursor: str) -> None:
     class FakeAuthorityService:
+        def build_graph_relation_event_page(
+            self,
+            run_id: str,
+            *,
+            offset: int = 0,
+            limit: int | None = None,
+        ) -> tuple[list[RelationEvent], int]:
+            assert run_id == "run-invalid-graph-cursor"
+            return [
+                RelationEvent(
+                    relation_event_id=1,
+                    chunk_id=3,
+                    from_entity_id=1,
+                    to_entity_id=2,
+                    from_name="沈砚",
+                    to_name="陆明",
+                    relation_type="盟友",
+                    change_type="新建",
+                    confidence=0.8,
+                )
+            ], 1
+
         def build_graph_view(self, run_id: str) -> GraphAuthorityView:
             assert run_id == "run-invalid-graph-cursor"
             return GraphAuthorityView(
@@ -595,6 +641,75 @@ def test_fetch_graph_events_page_rejects_invalid_cursor_payloads(monkeypatch, cu
             annotation_repo,
             events_cursor=cursor,
         )
+
+
+def test_fetch_graph_events_page_uses_incremental_authority_page_builder(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, *_args, **_kwargs):
+            raise AssertionError("graph events pagination should not rebuild the full graph view")
+
+        def build_graph_relation_event_page(
+            self,
+            run_id: str,
+            *,
+            offset: int = 0,
+            limit: int | None = None,
+        ) -> tuple[list[RelationEvent], int]:
+            assert run_id == "run-incremental-graph-events"
+            assert offset == 1
+            assert limit == 2
+            return [
+                RelationEvent(
+                    relation_event_id=12,
+                    chunk_id=8,
+                    from_entity_id=1,
+                    to_entity_id=2,
+                    from_name="沈砚",
+                    to_name="陆明",
+                    relation_type="盟友",
+                    change_type="强化",
+                    confidence=0.77,
+                ),
+                RelationEvent(
+                    relation_event_id=13,
+                    chunk_id=7,
+                    from_entity_id=1,
+                    to_entity_id=2,
+                    from_name="沈砚",
+                    to_name="陆明",
+                    relation_type="盟友",
+                    change_type="弱化",
+                    confidence=0.73,
+                ),
+            ], 5
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    cursor = base64.urlsafe_b64encode(json.dumps({"offset": 1}).encode("utf-8")).decode("ascii").rstrip("=")
+    page = _fetch_graph_events_page(
+        "run-incremental-graph-events",
+        annotation_repo,
+        events_cursor=cursor,
+        events_limit=2,
+    )
+
+    assert [event["relation_event_id"] for event in page["events"]] == [12, 13]
+    assert page["page_info"] == {
+        "limit": 2,
+        "returned_count": 2,
+        "total": 5,
+        "has_more": True,
+        "next_cursor": base64.urlsafe_b64encode(
+            json.dumps({"offset": 3}, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii").rstrip("="),
+    }
 
 
 def test_get_graph_events_invalid_cursor_returns_400(api_client, db_session) -> None:

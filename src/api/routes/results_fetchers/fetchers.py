@@ -244,6 +244,26 @@ def _paginate_graph_relation_events(
     return relation_events[start:end], page_info
 
 
+def _build_graph_events_page_info(
+    *,
+    start: int,
+    page_limit: int,
+    returned_count: int,
+    total: int,
+) -> dict[str, Any]:
+    """Build a stable graph-events pagination descriptor from slice metadata."""
+
+    end = start + returned_count
+    next_cursor = _encode_graph_events_cursor(end) if end < total else None
+    return {
+        "limit": page_limit,
+        "returned_count": returned_count,
+        "total": total,
+        "has_more": next_cursor is not None,
+        "next_cursor": next_cursor,
+    }
+
+
 def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
     """
     获取分块曲线数据（情绪 + 节奏）
@@ -1024,12 +1044,20 @@ def _fetch_graph_events_page(
         raise RuntimeError("graph projection is still pending; finish projection before reading graph events.")
 
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    graph_view = authority_service.build_graph_view(run_id)
-    _stable_states, _confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
-    paged_relation_events, page_info = _paginate_graph_relation_events(
-        relation_events,
-        cursor=events_cursor,
-        limit=events_limit,
+    start = _decode_graph_events_cursor(events_cursor)
+    page_limit = max(1, min(events_limit, GRAPH_PAGE_EVENT_LIMIT))
+    paged_relation_events, total = authority_service.build_graph_relation_event_page(
+        run_id,
+        offset=start,
+        limit=page_limit,
+    )
+    if start > total:
+        raise ValueError("graph events cursor is out of range")
+    page_info = _build_graph_events_page_info(
+        start=start,
+        page_limit=page_limit,
+        returned_count=len(paged_relation_events),
+        total=total,
     )
 
     return {

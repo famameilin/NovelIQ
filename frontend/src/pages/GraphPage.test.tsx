@@ -669,4 +669,44 @@ describe("GraphPage pagination", () => {
     expect(screen.queryByText("102")).not.toBeInTheDocument();
     expect(screen.getByText("301")).toBeInTheDocument();
   });
+
+  it("keeps node selection and event detail when the same task snapshot refreshes", async () => {
+    const initialGraph = createGraphData("task-a", {
+      eventNames: [
+        { from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 },
+        { from: "task-a Older", to: "task-a Ally", eventId: 102, chunkId: 48 },
+      ],
+      total: 3,
+      nextCursor: "cursor-a-1",
+    });
+    const refreshedGraph = createGraphData("task-a", {
+      eventNames: [
+        { from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 },
+        { from: "task-a Older", to: "task-a Ally", eventId: 102, chunkId: 48 },
+      ],
+      total: 4,
+      nextCursor: "cursor-a-2",
+    });
+
+    getGraphMock.mockResolvedValue(initialGraph);
+
+    const user = userEvent.setup();
+    const view = renderPage();
+
+    await screen.findByText("task-a Hero");
+    await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
+    const targetEventButton = screen.getByText(/第 48 段 · task-a Older → task-a Ally/).closest("button");
+    expect(targetEventButton).not.toBeNull();
+    fireEvent.click(targetEventButton!);
+    expect(screen.getByText("selected-node:task-a Hero")).toBeInTheDocument();
+    expect(screen.getByText("102")).toBeInTheDocument();
+
+    view.queryClient.setQueryData(["graph", "novel-1", "task-a"], refreshedGraph);
+
+    await waitFor(() => {
+      expect(screen.getByText("selected-node:task-a Hero")).toBeInTheDocument();
+      expect(screen.getByText("102")).toBeInTheDocument();
+      expect(screen.getByText("2 / 4")).toBeInTheDocument();
+    });
+  });
 });

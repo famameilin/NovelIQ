@@ -354,15 +354,34 @@ export function GraphPage() {
   }, [activeSelectedEventId, deepLinkResolvedEventId, hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, sortedEvents]);
 
   useEffect(() => {
+    if (!graphData) {
+      return;
+    }
+
     // Bump the request version whenever the snapshot changes so late load-more
     // responses from the previous task/view are ignored instead of polluting
     // the current page-level history window.
     eventsRequestVersionRef.current += 1;
-    resetTaskScopedGraphState({
-      events: graphData?.events ?? [],
-      pageInfo: graphData?.events_page ?? null,
+    // 中文注释：同一 task 的 snapshot 刷新只同步最新首屏数据与分页元信息，
+    // 不应把用户当前选中的节点、事件详情和已展开的历史窗口整包清空。
+    setLoadedEvents((currentEvents) =>
+      currentEvents.length > 0 ? mergeGraphEvents(currentEvents, graphData.events ?? []) : (graphData.events ?? [])
+    );
+    setEventsPageInfo(graphData.events_page ?? null);
+    setEventsLoadError(null);
+    setIsEventsLoading(false);
+    setSelectedNode((currentSelectedNode) => {
+      if (!currentSelectedNode) {
+        return null;
+      }
+      const nextSelectedNode =
+        graphData.nodes.find((node) => node.entity_id === currentSelectedNode.entity_id) ?? null;
+      if (nextSelectedNode == null) {
+        setIsPanelOpen(false);
+      }
+      return nextSelectedNode;
     });
-  }, [graphData, resetTaskScopedGraphState]);
+  }, [graphData]);
 
   useEffect(() => {
     setHasUserSelectedEvent(false);

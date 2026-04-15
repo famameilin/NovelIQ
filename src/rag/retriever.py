@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
+from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.rag.authority import Level1AuthorityProvider
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem, Level1AuthoritySnapshot
 
@@ -346,6 +347,9 @@ class DisambigContextProvider:
         self._authority_provider = (
             Level1AuthorityProvider(graph_repo) if graph_repo is not None and run_id is not None else None
         )
+        self._graph_authority_service = (
+            KnowledgeGraphAuthorityService(graph_repo) if graph_repo is not None else None
+        )
         self._level1_enabled = level1_enabled
         self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
@@ -470,20 +474,45 @@ class DisambigContextProvider:
 
         if self._level2_enabled and current_chunk is not None:
             candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
-            if self._graph_repo is not None and self._run_id is not None:
-                rows = self._graph_repo.fetch_active_entities(current_chunk, self._lookback_chunks, self._run_id)
+            if self._graph_authority_service is not None and self._run_id is not None:
+                active_entities = self._graph_authority_service.build_active_entity_view(
+                    self._run_id,
+                    current_chunk=current_chunk,
+                    lookback=self._lookback_chunks,
+                )
             else:
-                rows = [{"name": name} for name in candidates]
+                active_entities = []
 
             bundle.local_evidence.extend(
                 EvidenceItem(
                     evidence_type="active_entity",
-                    source="graph_active_entities",
-                    content=str(row.get("name", "")),
-                    metadata=dict(row),
+                    source=item.source,
+                    content=item.name,
+                    metadata={
+                        "entity_id": item.entity_id,
+                        "name": item.name,
+                        "role": item.role,
+                        "entity_type": item.entity_type,
+                        "status": item.status,
+                        "last_seen_chunk": item.last_seen_chunk,
+                        "recent_action": item.recent_action,
+                        "recent_emotion": item.recent_emotion,
+                    },
+                    chunk_id=item.last_seen_chunk,
                 )
-                for row in rows
+                for item in active_entities
             )
+
+            if not bundle.local_evidence:
+                bundle.local_evidence.extend(
+                    EvidenceItem(
+                        evidence_type="active_entity",
+                        source="graph_active_entities",
+                        content=name,
+                        metadata={"name": name},
+                    )
+                    for name in candidates
+                )
 
         return bundle
 
