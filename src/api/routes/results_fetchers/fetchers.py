@@ -45,7 +45,7 @@ from src.api.routes.results_fetchers.parsers import _parse_int_field, _parse_jso
 from src.api.routes.results_fetchers.scoring import _calculate_protagonist_scores, _normalize_arc_scores
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
 from src.knowledge.authority.graph_outputs import build_graph_quality_payload, build_graph_summary_payload
 from src.storage.repositories import (
     AnnotationRepository,
@@ -54,7 +54,6 @@ from src.storage.repositories import (
     GraphRepository,
     StatsRepository,
 )
-
 
 GRAPH_PAGE_EVENT_LIMIT = 200
 
@@ -443,6 +442,7 @@ def _fetch_chunk_annotations(
     annotation_repo: AnnotationRepository,
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
+    export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """
     获取分块标注数据
@@ -471,10 +471,12 @@ def _fetch_chunk_annotations(
     characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
 
-    relation_events_raw: list[dict[str, Any]] = []
-    graph_repo = GraphRepository(annotation_repo.session)
-    relation_events_raw = graph_repo.fetch_relation_events(run_id)
-    if not relation_events_raw:
+    if export_graph_view is None:
+        export_graph_view = (
+            KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(run_id)
+        )
+
+    if not export_graph_view.relation_events:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
             raise RuntimeError(
@@ -500,14 +502,12 @@ def _fetch_chunk_annotations(
         )
 
     relations_by_chunk: dict[int, list[ChunkRelation]] = defaultdict(list)
-    for row in relation_events_raw:
-        cid = int(row["chunk_id"])
-        from_name_raw = str(row["from_name"])
-        to_name_raw = str(row["to_name"])
-        from_normalized = _normalize_name(from_name_raw, alias_map)
-        to_normalized = _normalize_name(to_name_raw, alias_map)
-        from_char = from_normalized if from_normalized else from_name_raw
-        to_char = to_normalized if to_normalized else to_name_raw
+    for relation_event in export_graph_view.relation_events:
+        cid = relation_event.chunk_id
+        # 中文注释：authority relation event 已经是规范名，这里只保留 alias_map 兼容，
+        # 避免旧数据里混入未完全收敛的别名时导出结果退化。
+        from_char = _normalize_name(relation_event.from_name, alias_map) or relation_event.from_name
+        to_char = _normalize_name(relation_event.to_name, alias_map) or relation_event.to_name
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
@@ -522,8 +522,8 @@ def _fetch_chunk_annotations(
             ChunkRelation(
                 from_char=from_char,
                 to_char=to_char,
-                type=str(row["relation_type"]) if row.get("relation_type") else "",
-                change=str(row["change_type"]) if row.get("change_type") else "",
+                type=relation_event.relation_type,
+                change=relation_event.change_type,
             )
         )
 
@@ -585,11 +585,15 @@ def _fetch_character_relations(
     annotation_repo: AnnotationRepository,
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
+    export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """获取角色关系数据（graph_relations_current 权威来源）。"""
-    graph_repo = GraphRepository(annotation_repo.session)
-    graph_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
-    if not graph_relations:
+    if export_graph_view is None:
+        export_graph_view = (
+            KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(run_id)
+        )
+
+    if not export_graph_view.current_relations:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
             raise RuntimeError(
@@ -598,19 +602,19 @@ def _fetch_character_relations(
             )
 
     result: list[CharacterRelation] = []
-    for row in graph_relations:
-        from_char = _normalize_name(row["from_name"], alias_map) or row["from_name"]
-        to_char = _normalize_name(row["to_name"], alias_map) or row["to_name"]
+    for relation in export_graph_view.current_relations:
+        from_char = _normalize_name(relation.from_name, alias_map) or relation.from_name
+        to_char = _normalize_name(relation.to_name, alias_map) or relation.to_name
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
             continue
         result.append(
             CharacterRelation(
-                chunk_id=row["last_seen_chunk"],
+                chunk_id=relation.last_seen_chunk,
                 from_char=from_char,
                 to_char=to_char,
-                type=row["type"],
+                type=relation.relation_type,
                 change="汇总",
             )
         )
@@ -620,7 +624,7 @@ def _fetch_character_relations(
 
 def _fetch_hierarchical_relations(
     run_id: str,
-    graph_repo: GraphRepository,
+    export_graph_view: ExportGraphAuthorityView,
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
 ) -> list:
@@ -637,34 +641,33 @@ def _fetch_hierarchical_relations(
     任务: fix-character-dangling-reference
     修改内容: 添加 valid_character_names 参数，过滤悬空引用的关系
 
-    修改时间: 2026-03-30
-    修改者: CodeBuddy
-    任务: db-schema-cleanup
-    修改内容: 改用 GraphRepository 查询 graph_relation_current
+    修改时间: 2026-04-15
+    修改者: Codex
+    任务: export-graph-derived-authority
+    修改内容: 改为消费 ExportGraphAuthorityView，避免导出层继续直连 repository/raw projection
     """
     hierarchical_types = {"child_of", "parent_of", "father_of", "son_of", "sibling_of", "spouse_of"}
-    all_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
     result = []
-    for rel in all_relations:
-        rel_type = rel.get("type", "")
+    for relation in export_graph_view.current_relations:
+        rel_type = relation.relation_type
         if rel_type not in hierarchical_types:
             continue
-        from_name_raw = rel.get("from_name", "")
-        to_name_raw = rel.get("to_name", "")
+        from_name_raw = relation.from_name
+        to_name_raw = relation.to_name
         from_entity = _normalize_name(from_name_raw, alias_map) or from_name_raw
         to_entity = _normalize_name(to_name_raw, alias_map) or to_name_raw
         if valid_character_names is not None:
             if from_entity not in valid_character_names or to_entity not in valid_character_names:
                 continue
-        rel_id = rel.get("relation_id")
+        rel_id = relation.relation_id
         if rel_id is None:
             continue
         result.append(
             HierarchicalRelation(
                 rel_id=rel_id,
                 rel_type=rel_type,
-                first_chunk=rel.get("first_seen_chunk"),
-                last_chunk=rel.get("last_seen_chunk"),
+                first_chunk=relation.first_seen_chunk,
+                last_chunk=relation.last_seen_chunk,
                 from_entity=from_entity,
                 to_entity=to_entity,
             )
