@@ -170,12 +170,14 @@ def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(d
 
     report = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_report(run_id)
 
-    assert report.summary["node_count"] == 2
-    assert report.summary["edge_count"] == 1
-    assert report.quality["low_confidence_count"] == 1
-    assert report.quality["conflict_count"] == 0
-    assert "conflicts" not in report.quality
-    assert "low_confidence_samples" not in report.quality
+    assert report.summary.node_count == 2
+    assert report.summary.edge_count == 1
+    assert report.quality.low_confidence_count == 1
+    assert report.quality.conflict_count == 0
+    assert not hasattr(report.summary, "core_characters")
+    assert not hasattr(report.summary, "key_relations")
+    assert not hasattr(report.quality, "conflicts")
+    assert not hasattr(report.quality, "low_confidence_samples")
     assert not hasattr(report, "stable_states")
     assert not hasattr(report, "confirmed_relations")
     assert not hasattr(report, "relation_events")
@@ -408,9 +410,9 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
     assert {(item.from_name, item.to_name, item.relation_type) for item in view.confirmed_relations} == {
         ("林渡", "顾霜", "盟友")
     }
-    assert report.summary["edge_count"] == 1
-    assert report.summary["density"] == 0.1667
-    assert report.quality["low_confidence_count"] == 2
+    assert report.summary.edge_count == 1
+    assert report.summary.density == 0.1667
+    assert report.quality.low_confidence_count == 2
 
 
 def test_build_graph_view_relation_events_are_full_history_not_page_window(db_session) -> None:
@@ -482,8 +484,8 @@ def test_build_graph_report_caps_low_confidence_count_to_legacy_summary_limit(db
 
     # 中文注释：report 是 export/diagnosis 共用的聚合口径，仍需保持旧 summary
     # 的上限行为；graph page 的全历史计数由独立 contract 负责覆盖。
-    assert report.quality["low_confidence_count"] == 20
-    assert report.quality["conflict_count"] == 0
+    assert report.quality.low_confidence_count == 20
+    assert report.quality.conflict_count == 0
 
 
 def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
@@ -532,12 +534,12 @@ def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
     view = service.build_graph_view(run_id)
     report = service.build_graph_report(run_id)
 
-    assert report.summary["node_count"] == 3
-    assert report.summary["edge_count"] == 2
-    assert report.summary["density"] == 0.3333
-    assert set(report.summary["core_characters"]) == {"林渡", "顾霜", "谢危"}
-    assert report.quality["conflict_count"] == 0
-    assert report.quality["low_confidence_count"] == 1
+    assert report.summary.node_count == 3
+    assert report.summary.edge_count == 2
+    assert report.summary.density == 0.3333
+    assert not hasattr(report.summary, "core_characters")
+    assert report.quality.conflict_count == 0
+    assert report.quality.low_confidence_count == 1
     assert len(view.relation_events) == 2
 
 

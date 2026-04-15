@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from loguru import logger
@@ -163,8 +164,10 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
     known_characters, alias_merges = repo.fetch_character_disambig_data(effective_run_id)
     graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(effective_run_id)
-    graph_summary = graph_report.summary
-    graph_quality_report = graph_report.quality
+    # 中文注释：诊断 payload 只拿共享 graph signals，避免 graph page 的页面高亮
+    # 或质量样本再次渗入 diagnosis/aggregate 边界。
+    graph_summary = asdict(graph_report.summary)
+    graph_quality_report = asdict(graph_report.quality)
 
     payload = {
         "novel_id": novel_id,

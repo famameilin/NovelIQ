@@ -117,7 +117,10 @@ class TestCloudDiagnose:
         for i in range(chunk_count):
             self.db_session.execute(
                 text(
-                    "INSERT INTO chunk_curves (chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :proxy, :composite, :run_id)"
+                    "INSERT INTO chunk_curves ("
+                    "chunk_id, pos_density, neg_density, net_density, smoothed_density, "
+                    "tension_proxy, tension_composite, run_id"
+                    ") VALUES (:chunk_id, :pos, :neg, :net, :smoothed, :proxy, :composite, :run_id)"
                 ),
                 {
                     "chunk_id": i,
@@ -214,8 +217,7 @@ class TestCloudDiagnose:
         assert len(payload["foreshadowing_list"]) > 0
         assert payload["known_characters"] == ["伯安"]
         assert payload["alias_merges"] == {"角色0": "伯安"}
-        assert "quality" not in payload["graph_summary"]
-        assert "recent_events" not in payload["graph_summary"]
+        assert set(payload["graph_summary"].keys()) == {"node_count", "edge_count", "density"}
         assert "conflict_count" in payload["graph_quality_report"]
         assert "low_confidence_count" in payload["graph_quality_report"]
 
@@ -297,7 +299,8 @@ class TestCloudDiagnose:
         )
         rows = self.db_session.execute(
             text(
-                "SELECT novel_id, narrative_type, foreshadow_rate, narrative_arc_type, protagonist, main_characters, core_cast "
+                "SELECT novel_id, narrative_type, foreshadow_rate, narrative_arc_type, "
+                "protagonist, main_characters, core_cast "
                 "FROM cloud_analysis WHERE run_id = :run_id"
             ),
             {"run_id": self.run_id},

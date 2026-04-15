@@ -46,7 +46,12 @@ from src.api.routes.results_fetchers.scoring import _calculate_protagonist_score
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
 from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
-from src.knowledge.authority.graph_outputs import build_graph_quality_payload, build_graph_summary_payload
+from src.knowledge.authority.graph_outputs import (
+    build_graph_page_quality,
+    build_graph_page_summary,
+    serialize_graph_page_quality,
+    serialize_graph_page_summary,
+)
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -874,8 +879,15 @@ def _fetch_graph_snapshot(
     # Graph page owns display-level summary/quality assembly. The authority
     # service intentionally stops at stable facts so product tweaks do not
     # contaminate downstream diagnosis/export contracts.
-    summary = build_graph_summary_payload(graph_view.stable_states, graph_view.confirmed_relations)
-    quality = build_graph_quality_payload(graph_view.confirmed_relations, graph_view.relation_events)
+    # 中文注释：graph page 的 summary / quality 属于 product-layer contract，
+    # 这里显式从 authority facts 组装页面 DTO，避免 diagnosis/export 共享层再被
+    # 页面高亮或样本字段反向污染。
+    summary = serialize_graph_page_summary(
+        build_graph_page_summary(graph_view.stable_states, graph_view.confirmed_relations)
+    )
+    quality = serialize_graph_page_quality(
+        build_graph_page_quality(graph_view.confirmed_relations, graph_view.relation_events)
+    )
 
     return {
         "nodes": nodes,
