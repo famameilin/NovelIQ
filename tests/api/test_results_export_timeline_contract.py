@@ -178,6 +178,46 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
+def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    characters = [SimpleNamespace(name="沈砚")]
+
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        lambda *_args, **_kwargs: diagnosis,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_characters",
+        lambda *_args, **_kwargs: characters,
+    )
+
+    export_graph_view = ExportGraphAuthorityView(
+        canonical_entities=[
+            CanonicalEntity(name="沈砚", entity_type="character"),
+            CanonicalEntity(name="青云门", entity_type="organization"),
+        ]
+    )
+
+    (
+        _fetched_characters,
+        _arc_scores,
+        _main_characters,
+        valid_character_names,
+        _missing_fields,
+    ) = load_character_bundle(
+        run_id="run-export-bundle",
+        novel_id="novel-1",
+        stats_repo=MagicMock(),
+        annotation_repo=MagicMock(),
+        alias_map={},
+        export_graph_view=export_graph_view,
+    )
+
+    assert valid_character_names == {"沈砚"}
+
+
 def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(

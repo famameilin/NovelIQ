@@ -7,7 +7,8 @@
 
 from unittest.mock import Mock
 
-from src.knowledge.authority import ActiveEntityContext
+from src.knowledge.authority import ActiveEntityContext, AliasMapping, CanonicalEntity, EntityTypeFact, Level1AuthoritySnapshot
+from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers.context import ChunkContext, _build_active_entities_prompt_from_authority
 
@@ -156,3 +157,30 @@ def test_build_active_entities_prompt_from_authority_uses_authority_contract(mon
     assert "【近期活跃角色】" in rendered
     assert "白芷" in rendered
     assert "[chunk=12]" in rendered
+
+
+def test_render_annotation_prompt_blocks_includes_level1_facts_in_main_disambig_context():
+    bundle = EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="graph_active_entities",
+                content="白芷",
+                metadata={"name": "白芷"},
+            )
+        ],
+        requested_names=["蒙面人"],
+        level1_snapshot=Level1AuthoritySnapshot(
+            alias_mappings=[AliasMapping(alias="白老板", canonical="白芷")],
+            canonical_entities=[CanonicalEntity(name="白芷", entity_type="character")],
+            entity_types=[EntityTypeFact(name="白芷", entity_type="character")],
+        ),
+    )
+
+    blocks = render_annotation_prompt_blocks(bundle)
+
+    assert blocks.level1_facts is not None
+    assert blocks.disambig_context is not None
+    assert "已确认别名：白老板 -> 白芷" in blocks.disambig_context
+    assert "已确认实体：白芷 (character)" in blocks.disambig_context
+    assert "「蒙面人」可能是：白芷" in blocks.disambig_context
