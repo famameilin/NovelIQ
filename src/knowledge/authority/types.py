@@ -207,6 +207,15 @@ class GraphSharedSummary:
     edge_count: int = 0
     density: float = 0.0
 
+    def to_contract_dict(self) -> dict[str, float | int]:
+        """Serialize the shared graph summary with an explicit field whitelist."""
+
+        return {
+            "node_count": self.node_count,
+            "edge_count": self.edge_count,
+            "density": self.density,
+        }
+
 
 @dataclass(slots=True)
 class GraphQualitySignals:
@@ -219,6 +228,14 @@ class GraphQualitySignals:
 
     conflict_count: int = 0
     low_confidence_count: int = 0
+
+    def to_contract_dict(self) -> dict[str, int]:
+        """Serialize the shared graph quality counters with an explicit field whitelist."""
+
+        return {
+            "conflict_count": self.conflict_count,
+            "low_confidence_count": self.low_confidence_count,
+        }
 
 
 @dataclass(slots=True)
@@ -331,3 +348,17 @@ class GraphAuthorityReport:
 
     summary: GraphSharedSummary = field(default_factory=GraphSharedSummary)
     quality: GraphQualitySignals = field(default_factory=GraphQualitySignals)
+
+    def __post_init__(self) -> None:
+        # 中文注释：GraphAuthorityReport 是 diagnosis/export 共享边界，必须在
+        # 运行时也拒绝 graph page contract，避免调用方误把页面高亮/样本塞回共享层。
+        if type(self.summary) is not GraphSharedSummary:
+            raise TypeError(
+                "GraphAuthorityReport.summary must be GraphSharedSummary; "
+                f"got {type(self.summary).__name__}"
+            )
+        if type(self.quality) is not GraphQualitySignals:
+            raise TypeError(
+                "GraphAuthorityReport.quality must be GraphQualitySignals; "
+                f"got {type(self.quality).__name__}"
+            )
