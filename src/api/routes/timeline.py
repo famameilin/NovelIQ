@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from loguru import logger
@@ -31,11 +31,13 @@ from src.api.models.timeline import (
     TimelineResponse,
 )
 from src.api.services.novel_service import NovelService
+from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.metrics.timeline_metrics import (
     RelationChangeEventDTO,
+    TimelineDataUnavailableError,
     TimelineNodeDTO,
     TimelinePhaseDTO,
-    TimelineDataUnavailableError,
+    _resolve_timeline_authority_contract,
     build_timeline_candidates,
     convert_to_timeline_nodes,
     select_timeline_nodes,
@@ -50,14 +52,108 @@ from src.storage.repositories import (
 router = APIRouter(prefix="/novels", tags=["timeline"])
 
 
+def _relation_change_signature(
+    *,
+    from_char: str,
+    to_char: str,
+    relation_type: str,
+    change_type: str,
+    evidence: str | None,
+) -> tuple[str, str, str, str, str | None]:
+    """构造 timeline shared relation change 的稳定匹配键。"""
+
+    return (from_char, to_char, relation_type, change_type, evidence)
+
+
+def _build_route_owned_relation_fields(session: Session, run_id: str) -> dict[int, list[dict[str, Any]]]:
+    """
+    仅在 /timeline route 层装配 relation locator 字段。
+
+    中文注释：shared timeline helper/export 只消费冻结的五元组语义；这里才补
+    `relation_event_id/confidence/directionality`，避免 route-owned 字段继续
+    泄漏回共享 contract。
+    """
+
+    authority_service = KnowledgeGraphAuthorityService.from_session(session)
+    timeline_view = authority_service.build_timeline_view(run_id)
+    _entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
+
+    route_fields_by_chunk: dict[int, list[dict[str, Any]]] = {}
+    for event in relation_events:
+        from_char = entity_name_map.get(event.from_entity_id, str(event.from_entity_id))
+        to_char = entity_name_map.get(event.to_entity_id, str(event.to_entity_id))
+        route_fields_by_chunk.setdefault(event.chunk_id, []).append(
+            {
+                "signature": _relation_change_signature(
+                    from_char=from_char,
+                    to_char=to_char,
+                    relation_type=event.relation_type,
+                    change_type=event.change_type,
+                    evidence=event.evidence,
+                ),
+                "relation_event_id": event.relation_event_id,
+                "confidence": event.confidence,
+                "directionality": event.directionality,
+            }
+        )
+    return route_fields_by_chunk
+
+
+def _enrich_route_owned_relation_fields(
+    nodes: list[TimelineNode],
+    route_fields_by_chunk: dict[int, list[dict[str, Any]]],
+) -> None:
+    """
+    按 shared 字段逐条回填 route-only relation locator。
+
+    中文注释：这里使用 chunk 内顺序 + shared signature 做一一匹配，确保
+    `/timeline` 可以拿到精确定位字段，但 export/shared DTO 仍保持干净。
+    """
+
+    for node in nodes:
+        if not node.relation_changes:
+            continue
+
+        chunk_route_fields = route_fields_by_chunk.get(node.chunk_id, [])
+        used_indexes: set[int] = set()
+        for relation_change in node.relation_changes:
+            signature = _relation_change_signature(
+                from_char=relation_change.from_char,
+                to_char=relation_change.to_char,
+                relation_type=relation_change.relation_type,
+                change_type=relation_change.change_type,
+                evidence=relation_change.evidence,
+            )
+
+            match_index = next(
+                (
+                    index
+                    for index, route_field in enumerate(chunk_route_fields)
+                    if index not in used_indexes and route_field["signature"] == signature
+                ),
+                None,
+            )
+            if match_index is None:
+                continue
+
+            used_indexes.add(match_index)
+            route_field = chunk_route_fields[match_index]
+            relation_change.relation_event_id = route_field["relation_event_id"]
+            relation_change.confidence = route_field["confidence"]
+            relation_change.directionality = route_field["directionality"]
+
+
 def _dto_to_relation_change_event(dto: RelationChangeEventDTO) -> RelationChangeEvent:
     """将 RelationChangeEventDTO 转换为 Pydantic 模型"""
     return RelationChangeEvent(
+        relation_event_id=None,
         from_char=dto.from_char,
         to_char=dto.to_char,
         relation_type=dto.relation_type,
         change_type=dto.change_type,
         evidence=dto.evidence,
+        confidence=None,
+        directionality=None,
     )
 
 
@@ -263,6 +359,7 @@ async def get_timeline(
     timeline_nodes = convert_to_timeline_nodes(selected_candidates)
     # DTO -> Pydantic 模型转换
     api_nodes = [_dto_to_timeline_node(node) for node in timeline_nodes]
+    _enrich_route_owned_relation_fields(api_nodes, _build_route_owned_relation_fields(session, run_id))
     api_phases = [_dto_to_timeline_phase(phase) for phase in timeline_phases]
 
     logger.info(
