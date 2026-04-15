@@ -16,6 +16,8 @@ from src.knowledge.authority import (
     ExportGraphAuthorityView,
     ExportRelationSnapshot,
     GraphAuthorityReport,
+    GraphQualitySignals,
+    GraphSharedSummary,
     RelationEvent,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
@@ -101,14 +103,14 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
         global_stats=None,
         aggregate_metrics={},
         token_usage_stats=token_usage_stats,
-        graph_summary={"node_count": 3, "edge_count": 1},
+        graph_summary={"node_count": 3, "edge_count": 1, "density": 0.5},
         graph_quality_report={"conflict_count": 2},
         timeline_data=None,
     )
 
-    assert payload["graph_summary"] == {"node_count": 3, "edge_count": 1}
+    assert payload["graph_summary"] == {"node_count": 3, "edge_count": 1, "density": 0.5}
     assert payload["graph_quality_report"] == {"conflict_count": 2}
-    assert "quality" not in payload["graph_summary"]
+    assert "core_characters" not in payload["graph_summary"]
 
 
 def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,8 +218,8 @@ def test_load_aggregate_bundle_uses_graph_report_view_for_export(monkeypatch: py
         ],
     )
     graph_report = GraphAuthorityReport(
-        summary={"node_count": 4, "edge_count": 2},
-        quality={"conflict_count": 1, "low_confidence_count": 0},
+        summary=GraphSharedSummary(node_count=4, edge_count=2, density=0.3333),
+        quality=GraphQualitySignals(conflict_count=1, low_confidence_count=0),
     )
 
     (
@@ -244,5 +246,5 @@ def test_load_aggregate_bundle_uses_graph_report_view_for_export(monkeypatch: py
     assert character_relations[0].from_char == "苏镜"
     assert len(hierarchical_relations) == 1
     assert hierarchical_relations[0].rel_id == 22
-    assert graph_summary == {"node_count": 4, "edge_count": 2}
+    assert graph_summary == {"node_count": 4, "edge_count": 2, "density": 0.3333}
     assert graph_quality_report == {"conflict_count": 1, "low_confidence_count": 0}
