@@ -8,8 +8,10 @@ import pytest
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
-    load_aggregate_bundle,
+    load_aggregate_metrics_bundle,
     load_character_bundle,
+    load_export_relation_bundle,
+    load_graph_signal_bundle,
 )
 from src.knowledge.authority import (
     CanonicalEntity,
@@ -75,6 +77,8 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         "character_entries",
         "character_exits",
     }
+    # 中文说明：export 只保留 shared timeline 语义，不导出 /timeline route-only
+    # 的定位与展示字段。
     assert set(nodes_by_chunk[2]["relation_changes"][0].keys()) == {
         "from_char",
         "to_char",
@@ -174,7 +178,7 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
-def test_load_aggregate_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_token_usage_stats",
@@ -230,7 +234,7 @@ def test_load_aggregate_bundle_uses_graph_report_view_for_export(monkeypatch: py
         _aggregate_metrics,
         graph_summary,
         graph_quality_report,
-    ) = load_aggregate_bundle(
+    ) = load_export_relation_bundle(
         run_id="run-graph-report",
         novel_id="novel-1",
         stats_repo=SimpleNamespace(session=object()),
@@ -248,3 +252,53 @@ def test_load_aggregate_bundle_uses_graph_report_view_for_export(monkeypatch: py
     assert hierarchical_relations[0].rel_id == 22
     assert graph_summary == {"node_count": 4, "edge_count": 2, "density": 0.3333}
     assert graph_quality_report == {"conflict_count": 1, "low_confidence_count": 0}
+
+
+def test_load_graph_signal_bundle_serializes_shared_report_only() -> None:
+    graph_report = GraphAuthorityReport(
+        summary=GraphSharedSummary(node_count=6, edge_count=4, density=0.2667),
+        quality=GraphQualitySignals(conflict_count=2, low_confidence_count=3),
+    )
+
+    graph_summary, graph_quality_report = load_graph_signal_bundle(graph_report)
+
+    assert graph_summary == {"node_count": 6, "edge_count": 4, "density": 0.2667}
+    assert graph_quality_report == {"conflict_count": 2, "low_confidence_count": 3}
+
+
+def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_token_usage_stats",
+        lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {}),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.aggregate_all_metrics",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    import src.api.routes.results_converters as results_converters
+
+    monkeypatch.setattr(
+        results_converters,
+        "_convert_aggregate_result",
+        lambda *_args, **_kwargs: (None, None, None, None, None),
+    )
+
+    _global_stats, _token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
+        run_id="run-aggregate-only",
+        novel_id="novel-1",
+        stats_repo=SimpleNamespace(session=object()),
+        annotation_repo=MagicMock(),
+        chunk_repo=MagicMock(),
+    )
+
+    assert set(aggregate_metrics) == {
+        "narrative_structure",
+        "emotion_stats",
+        "character_stats",
+        "style_stats",
+        "culture_stats",
+    }
+    assert "graph_summary" not in aggregate_metrics
+    assert "graph_quality_report" not in aggregate_metrics
