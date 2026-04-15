@@ -15,33 +15,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Final, Literal, cast
+from typing import Any, Literal, cast
 
 from loguru import logger
 
+from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS
 from src.metrics.narrative_metrics import find_global_peak, find_local_peaks
 
 # Literal 类型定义
 TimelineNodeType = Literal["plot", "character_entry", "character_exit", "relation_change"]
 TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
 ImportanceLevel = Literal[1, 2, 3]
-
-# Timeline 对 authority 的共享依赖字段清单。
-# 这份清单用于把“timeline 实际依赖什么”固定在消费者侧，避免后续改动时
-# 又退回去读取 repository 原始 row / ORM 形状。
-TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
-    "character_entities": ("entity_id", "name", "entity_type"),
-    "entity_lifecycles": ("entity_id", "name", "entity_type", "first_seen_chunk", "last_seen_chunk"),
-    "relation_events": (
-        "chunk_id",
-        "from_entity_id",
-        "to_entity_id",
-        "relation_type",
-        "change_type",
-        "evidence",
-    ),
-}
-
 
 class TimelineDataUnavailableError(ValueError):
     """Raised when timeline source data is genuinely unavailable."""
@@ -600,6 +584,22 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
     character_entities = list(timeline_view.character_entities)
     entity_lifecycles = list(timeline_view.entity_lifecycles)
     relation_events = list(timeline_view.relation_events)
+
+    for slice_name, items in {
+        "character_entities": character_entities,
+        "entity_lifecycles": entity_lifecycles,
+        "relation_events": relation_events,
+    }.items():
+        for item in items:
+            missing_fields = [
+                field_name
+                for field_name in TIMELINE_AUTHORITY_DEPENDENCY_FIELDS[slice_name]
+                if not hasattr(item, field_name)
+            ]
+            if missing_fields:
+                raise TimelineAuthorityContractError(
+                    f"TimelineAuthorityView.{slice_name} is missing required fields: {', '.join(missing_fields)}"
+                )
 
     if any(entity.entity_type != "character" for entity in character_entities):
         raise TimelineAuthorityContractError(

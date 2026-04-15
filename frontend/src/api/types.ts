@@ -245,10 +245,10 @@ export interface GraphEventsPageInfo {
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  events?: GraphEvent[];
-  events_page?: GraphEventsPageInfo;
-  summary?: GraphPageSummary;
-  quality?: GraphPageQualityReport;
+  events: GraphEvent[];
+  events_page: GraphEventsPageInfo;
+  summary: GraphPageSummary;
+  quality: GraphPageQualityReport;
 }
 
 export interface GraphEventsPageResponse {
@@ -292,10 +292,10 @@ export interface GraphLinkObject {
 export interface ForceGraphData {
   nodes: GraphNodeObject[];
   links: GraphLinkObject[];
-  events?: GraphEvent[];
-  events_page?: GraphEventsPageInfo;
-  summary?: GraphPageSummary;
-  quality?: GraphPageQualityReport;
+  events: GraphEvent[];
+  events_page: GraphEventsPageInfo;
+  summary: GraphPageSummary;
+  quality: GraphPageQualityReport;
 }
 
 // 创建时间: 2026-04-05

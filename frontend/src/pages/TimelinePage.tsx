@@ -142,33 +142,33 @@ export function TimelinePage() {
   const nodes = useMemo(() => timelineData?.nodes ?? [], [timelineData?.nodes]);
   const tensionCurve = timelineData?.tension_curve;
   const totalChunks = timelineData?.meta?.total_chunks ?? 0;
+  const matchedRelationEventNode = useMemo(() => {
+    if (relationEventIdFromUrl == null) return null;
+    return (
+      nodes.find((node) =>
+        node.relation_changes?.some((relationChange) => relationChange.relation_event_id === relationEventIdFromUrl)
+      ) ?? null
+    );
+  }, [nodes, relationEventIdFromUrl]);
   const selectedNode = useMemo(() => {
     if (nodes.length === 0) return null;
-    if (relationEventIdFromUrl != null) {
-      const matchedRelationNode =
-        nodes.find((node) =>
-          node.relation_changes?.some((relationChange) => relationChange.relation_event_id === relationEventIdFromUrl)
-        ) ?? null;
-      if (matchedRelationNode) {
-        return matchedRelationNode;
-      }
+    if (matchedRelationEventNode) {
+      return matchedRelationEventNode;
     }
     if (selectedChunkFromUrl != null) {
       return nodes.find((node) => node.chunk_id === selectedChunkFromUrl) ?? null;
     }
     return null;
-  }, [nodes, relationEventIdFromUrl, selectedChunkFromUrl]);
+  }, [matchedRelationEventNode, nodes, selectedChunkFromUrl]);
+  const resolvedRelationEventId = matchedRelationEventNode ? relationEventIdFromUrl : null;
   const selectionHint = useMemo(() => {
     if (relationEventIdFromUrl == null) return null;
-    const matchedRelationNode = nodes.find((node) =>
-      node.relation_changes?.some((relationChange) => relationChange.relation_event_id === relationEventIdFromUrl)
-    );
-    if (matchedRelationNode) return null;
+    if (matchedRelationEventNode) return null;
     if (selectedChunkFromUrl != null && selectedNode) {
       return "未定位到指定关系事件，已回退到对应时间节点。";
     }
     return "未定位到对应事件。";
-  }, [nodes, relationEventIdFromUrl, selectedChunkFromUrl, selectedNode]);
+  }, [matchedRelationEventNode, relationEventIdFromUrl, selectedChunkFromUrl, selectedNode]);
 
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
@@ -401,7 +401,7 @@ export function TimelinePage() {
             node={selectedNode}
             novelId={novelId}
             taskId={currentTaskId}
-            selectedRelationEventId={relationEventIdFromUrl}
+            selectedRelationEventId={resolvedRelationEventId}
             onClose={() => {
               navigate(
                 buildTimelinePageUrl(novelId, currentTaskId, {

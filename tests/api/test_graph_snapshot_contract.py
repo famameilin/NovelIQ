@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import uuid
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -88,6 +89,50 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
         "status",
     }
     assert "emotion_score" not in node
+
+
+def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Snapshot Empty Contract",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=3)
+    graph_repo.upsert_entity(run_id=run_id, canonical_name="柳婉儿", first_seen_chunk=1, last_seen_chunk=3)
+    db_session.commit()
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = db_session
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
+
+    assert snapshot["nodes"]
+    assert snapshot["edges"] == []
+    assert snapshot["events"] == []
+    assert snapshot["events_page"] == {
+        "limit": 200,
+        "returned_count": 0,
+        "total": 0,
+        "has_more": False,
+        "next_cursor": None,
+    }
+    assert snapshot["summary"] == {
+        "node_count": 2,
+        "edge_count": 0,
+        "density": 0.0,
+        "core_characters": ["柳婉儿", "贺伯安"],
+        "key_relations": [],
+    }
+    assert snapshot["quality"] == {
+        "conflict_count": 0,
+        "low_confidence_count": 0,
+        "conflicts": [],
+        "low_confidence_samples": [],
+    }
 
 
 def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_session) -> None:
@@ -209,6 +254,60 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
         "has_more": False,
         "next_cursor": None,
     }
+
+
+def test_fetch_graph_snapshot_accepts_graph_page_allowlist_without_full_graph_view(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> SimpleNamespace:
+            assert run_id == "run-graph-page-allowlist"
+            # 中文注释：route assembler 只应该依赖 graph page allowlist；
+            # 这里故意不给 canonical_entities，防止测试重新把它当必需依赖。
+            return SimpleNamespace(
+                stable_states=[
+                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
+                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
+                ],
+                confirmed_relations=[
+                    ConfirmedRelation(
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        support_count=3,
+                        last_seen_chunk=6,
+                    )
+                ],
+                relation_events=[
+                    RelationEvent(
+                        relation_event_id=11,
+                        chunk_id=6,
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        change_type="新建",
+                        confidence=0.55,
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-page-allowlist", annotation_repo)
+
+    assert snapshot["summary"]["node_count"] == 2
+    assert snapshot["summary"]["edge_count"] == 1
+    assert snapshot["quality"]["low_confidence_count"] == 1
+    assert snapshot["events_page"]["total"] == 1
 
 
 def test_graph_page_public_dto_is_owned_by_route_layer() -> None:
@@ -410,6 +509,43 @@ def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch
         "total": 205,
         "has_more": False,
         "next_cursor": None,
+    }
+
+
+def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-empty-graph-events-page"
+            return GraphAuthorityView(
+                canonical_entities=[],
+                stable_states=[],
+                confirmed_relations=[],
+                relation_events=[],
+            )
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    page = _fetch_graph_events_page(
+        "run-empty-graph-events-page",
+        annotation_repo,
+    )
+
+    assert page == {
+        "events": [],
+        "page_info": {
+            "limit": 200,
+            "returned_count": 0,
+            "total": 0,
+            "has_more": False,
+            "next_cursor": None,
+        },
     }
 
 
