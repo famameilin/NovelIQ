@@ -196,8 +196,10 @@ def load_aggregate_bundle(
     }
 
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
-    graph_summary = graph_report.summary
-    graph_quality_report = graph_report.quality
+    # 中文注释：export 只序列化共享 graph signals，不接触 graph page 专属高亮
+    # 或质量样本，避免导出层继续与产品层互借字段。
+    graph_summary = graph_report.summary.to_contract_dict()
+    graph_quality_report = graph_report.quality.to_contract_dict()
 
     return (
         character_relations,
