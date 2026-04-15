@@ -5,7 +5,7 @@ from typing import Any
 
 from src.storage.repositories import GraphRepository
 
-from .graph_outputs import build_graph_quality_report, build_graph_summary_payload
+from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
 from .types import (
     ActiveEntityContext,
     AliasMapping,
@@ -294,6 +294,6 @@ class KnowledgeGraphAuthorityService:
         relation_events: list[RelationEvent],
     ) -> GraphAuthorityReport:
         return GraphAuthorityReport(
-            summary=build_graph_summary_payload(stable_states, confirmed_relations),
+            summary=build_graph_shared_summary(stable_states, confirmed_relations),
             quality=build_graph_quality_report(confirmed_relations, relation_events),
         )

@@ -45,8 +45,16 @@ from src.api.routes.results_fetchers.parsers import _parse_int_field, _parse_jso
 from src.api.routes.results_fetchers.scoring import _calculate_protagonist_scores, _normalize_arc_scores
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
-from src.knowledge.authority import ExportGraphAuthorityView, KnowledgeGraphAuthorityService
-from src.knowledge.authority.graph_outputs import build_graph_quality_payload, build_graph_summary_payload
+from src.knowledge.authority import (
+    ExportGraphAuthorityView,
+    GraphPageQualityDetails,
+    GraphPageSummary,
+    KnowledgeGraphAuthorityService,
+)
+from src.knowledge.authority.graph_outputs import (
+    build_graph_page_quality,
+    build_graph_page_summary,
+)
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -99,6 +107,62 @@ def _serialize_graph_event(event: Any) -> dict[str, Any]:
         "confidence": event.confidence,
         "source_relation_row_id": event.source_relation_row_id,
         "directionality": event.directionality,
+    }
+
+
+def _serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
+    """
+    Convert graph-page summary facts into the route-owned public DTO.
+
+    中文注释：authority 只负责产出页面所需 facts；真正对外暴露什么字段名，
+    由 route/product 层自己决定，避免 authority 再次背负 `/graph` 的产品契约。
+    """
+
+    return {
+        "node_count": summary.node_count,
+        "edge_count": summary.edge_count,
+        "density": summary.density,
+        "core_characters": list(summary.core_characters),
+        "key_relations": [
+            {
+                "from": relation.from_name,
+                "to": relation.to_name,
+                "type": relation.relation_type,
+                "support_count": relation.support_count,
+            }
+            for relation in summary.key_relations
+        ],
+    }
+
+
+def _serialize_graph_page_quality(quality: GraphPageQualityDetails) -> dict[str, Any]:
+    """Convert graph-page quality facts into the route-owned public DTO."""
+
+    return {
+        "conflict_count": quality.conflict_count,
+        "low_confidence_count": quality.low_confidence_count,
+        "conflicts": [
+            {
+                "entity_pair": list(conflict.entity_pair),
+                "entity_names": list(conflict.entity_names),
+                "relation_types": list(conflict.relation_types),
+                "relation_count": conflict.relation_count,
+                "latest_event_ids": list(conflict.latest_event_ids),
+            }
+            for conflict in quality.conflicts
+        ],
+        "low_confidence_samples": [
+            {
+                "relation_event_id": event.relation_event_id,
+                "chunk_id": event.chunk_id,
+                "from_name": event.from_name,
+                "to_name": event.to_name,
+                "relation_type": event.relation_type,
+                "change_type": event.change_type,
+                "confidence": event.confidence,
+            }
+            for event in quality.low_confidence_samples
+        ],
     }
 
 
@@ -874,8 +938,15 @@ def _fetch_graph_snapshot(
     # Graph page owns display-level summary/quality assembly. The authority
     # service intentionally stops at stable facts so product tweaks do not
     # contaminate downstream diagnosis/export contracts.
-    summary = build_graph_summary_payload(graph_view.stable_states, graph_view.confirmed_relations)
-    quality = build_graph_quality_payload(graph_view.confirmed_relations, graph_view.relation_events)
+    # 中文注释：graph page 的 summary / quality 属于 product-layer contract，
+    # 这里显式从 authority facts 组装页面 DTO，避免 diagnosis/export 共享层再被
+    # 页面高亮或样本字段反向污染。
+    summary = _serialize_graph_page_summary(
+        build_graph_page_summary(graph_view.stable_states, graph_view.confirmed_relations)
+    )
+    quality = _serialize_graph_page_quality(
+        build_graph_page_quality(graph_view.confirmed_relations, graph_view.relation_events)
+    )
 
     return {
         "nodes": nodes,
