@@ -77,15 +77,14 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         "character_entries",
         "character_exits",
     }
+    # 中文说明：export 只保留 shared timeline 语义，不导出 /timeline route-only
+    # 的定位与展示字段。
     assert set(nodes_by_chunk[2]["relation_changes"][0].keys()) == {
-        "relation_event_id",
         "from_char",
         "to_char",
         "relation_type",
         "change_type",
         "evidence",
-        "confidence",
-        "directionality",
     }
 
 

@@ -341,6 +341,44 @@ describe("GraphPage pagination", () => {
     );
   });
 
+  it("falls back to selected_chunk when the deep-linked relation event is not in the current page window", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [
+        { from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 },
+        { from: "task-a Older", to: "task-a Ally", eventId: 102, chunkId: 48 },
+      ],
+      total: 2,
+      nextCursor: null,
+    });
+
+    getGraphMock.mockResolvedValue(taskAGraph);
+
+    renderPage();
+
+    expect(await screen.findByText("事件 ID")).toBeInTheDocument();
+    expect(screen.getByText("102")).toBeInTheDocument();
+  });
+
+  it("clears the graph event selection instead of highlighting the wrong event when no deep-link match exists", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chunk=999&relation_event_id=9999";
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 }],
+      total: 1,
+      nextCursor: null,
+    });
+
+    getGraphMock.mockResolvedValue(taskAGraph);
+
+    renderPage();
+
+    await screen.findByText("task-a Hero");
+    await waitFor(() => {
+      expect(screen.queryByText("事件 ID")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/这里会显示详细上下文/)).toBeInTheDocument();
+  });
+
   it("ignores stale load-more responses after switching tasks", async () => {
     const taskAGraph = createGraphData("task-a", {
       eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 201, chunkId: 60 }],
