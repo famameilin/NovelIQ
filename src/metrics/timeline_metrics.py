@@ -62,10 +62,7 @@ class RelationChangeEventDTO:
     to_char: str
     relation_type: str
     change_type: str
-    relation_event_id: int | None = None
     evidence: str | None = None
-    confidence: float | None = None
-    directionality: str | None = None
 
 
 @dataclass
@@ -785,14 +782,11 @@ def build_timeline_candidates(
                 (
                     idx,
                     RelationChangeEventDTO(
-                        relation_event_id=rel_event.relation_event_id,
                         from_char=from_char,
                         to_char=to_char,
                         relation_type=rel_event.relation_type,
                         change_type=rel_event.change_type,
                         evidence=rel_event.evidence,
-                        confidence=rel_event.confidence,
-                        directionality=rel_event.directionality,
                     ),
                 )
             )
@@ -833,14 +827,11 @@ def build_timeline_candidates(
             to_char = entity_name_map.get(event_data.to_entity_id, str(event_data.to_entity_id))
             relation_changes.append(
                 RelationChangeEventDTO(
-                    relation_event_id=event_data.relation_event_id,
                     from_char=from_char,
                     to_char=to_char,
                     relation_type=event_data.relation_type,
                     change_type=event_data.change_type,
                     evidence=event_data.evidence,
-                    confidence=event_data.confidence,
-                    directionality=event_data.directionality,
                 )
             )
 
