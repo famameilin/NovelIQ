@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import binascii
+import json
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -54,6 +57,78 @@ from src.storage.repositories import (
 
 
 GRAPH_PAGE_EVENT_LIMIT = 200
+
+
+def _encode_graph_events_cursor(offset: int) -> str:
+    """Encode an opaque cursor for the next graph event slice."""
+    payload = json.dumps({"offset": offset}, separators=(",", ":")).encode("utf-8")
+    return urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_graph_events_cursor(cursor: str | None) -> int:
+    """Decode the graph event cursor back into a slice offset."""
+    if not cursor:
+        return 0
+
+    padded_cursor = cursor + ("=" * (-len(cursor) % 4))
+    try:
+        payload = json.loads(urlsafe_b64decode(padded_cursor.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+        raise ValueError("invalid graph events cursor") from exc
+
+    offset = payload.get("offset")
+    if not isinstance(offset, int) or offset < 0:
+        raise ValueError("invalid graph events cursor")
+    return offset
+
+
+def _serialize_graph_event(event: Any) -> dict[str, Any]:
+    """Flatten authority relation events into the public graph DTO shape."""
+    return {
+        "relation_event_id": event.relation_event_id,
+        "chunk_id": event.chunk_id,
+        "from_entity_id": event.from_entity_id,
+        "to_entity_id": event.to_entity_id,
+        "from_name": event.from_name,
+        "to_name": event.to_name,
+        "relation_type": event.relation_type,
+        "change_type": event.change_type,
+        "evidence": event.evidence,
+        "confidence": event.confidence,
+        "source_relation_row_id": event.source_relation_row_id,
+        "directionality": event.directionality,
+    }
+
+
+def _paginate_graph_relation_events(
+    relation_events: list[Any],
+    *,
+    cursor: str | None = None,
+    limit: int = GRAPH_PAGE_EVENT_LIMIT,
+) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Slice graph-page relation history without changing authority semantics.
+
+    The input list is expected to already be in the stable authority order
+    (newest-first). The cursor is opaque to callers and only carries the next
+    offset inside that fixed ordering.
+    """
+    page_limit = max(1, min(limit, GRAPH_PAGE_EVENT_LIMIT))
+    start = _decode_graph_events_cursor(cursor)
+    total = len(relation_events)
+    if start > total:
+        raise ValueError("graph events cursor is out of range")
+
+    end = min(start + page_limit, total)
+    next_cursor = _encode_graph_events_cursor(end) if end < total else None
+    page_info = {
+        "limit": page_limit,
+        "returned_count": end - start,
+        "total": total,
+        "has_more": next_cursor is not None,
+        "next_cursor": next_cursor,
+    }
+    return relation_events[start:end], page_info
 
 
 def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
@@ -737,6 +812,9 @@ def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository)
 def _fetch_graph_snapshot(
     run_id: str,
     annotation_repo: AnnotationRepository,
+    *,
+    events_cursor: str | None = None,
+    events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
     """获取知识图谱快照（nodes/edges/events/summary）。
 
@@ -781,23 +859,12 @@ def _fetch_graph_snapshot(
     # Keep page-facing history samples lightweight, but compute quality against
     # the full authority event history so long-running books do not hide older
     # low-confidence signals once they exceed the UI sample cap.
-    events = [
-        {
-            "relation_event_id": event.relation_event_id,
-            "chunk_id": event.chunk_id,
-            "from_entity_id": event.from_entity_id,
-            "to_entity_id": event.to_entity_id,
-            "from_name": event.from_name,
-            "to_name": event.to_name,
-            "relation_type": event.relation_type,
-            "change_type": event.change_type,
-            "evidence": event.evidence,
-            "confidence": event.confidence,
-            "source_relation_row_id": event.source_relation_row_id,
-            "directionality": event.directionality,
-        }
-        for event in graph_view.relation_events[:GRAPH_PAGE_EVENT_LIMIT]
-    ]
+    paged_relation_events, events_page = _paginate_graph_relation_events(
+        graph_view.relation_events,
+        cursor=events_cursor,
+        limit=events_limit,
+    )
+    events = [_serialize_graph_event(event) for event in paged_relation_events]
     # Graph page owns display-level summary/quality assembly. The authority
     # service intentionally stops at stable facts so product tweaks do not
     # contaminate downstream diagnosis/export contracts.
@@ -808,6 +875,38 @@ def _fetch_graph_snapshot(
         "nodes": nodes,
         "edges": edges,
         "events": events,
+        "events_page": events_page,
         "summary": summary,
         "quality": quality,
+    }
+
+
+def _fetch_graph_events_page(
+    run_id: str,
+    annotation_repo: AnnotationRepository,
+    *,
+    events_cursor: str | None = None,
+    events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
+) -> dict[str, Any]:
+    """
+    获取 graph page relation events 的增量分页结果。
+
+    该 contract 仅属于 graph product surface。authority 仍然保留全量
+    relation history，分页窗口只在页面层切片。
+    """
+    pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+    if pending_relations:
+        raise RuntimeError("graph projection is still pending; finish projection before reading graph events.")
+
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    graph_view = authority_service.build_graph_view(run_id)
+    paged_relation_events, page_info = _paginate_graph_relation_events(
+        graph_view.relation_events,
+        cursor=events_cursor,
+        limit=events_limit,
+    )
+
+    return {
+        "events": [_serialize_graph_event(event) for event in paged_relation_events],
+        "page_info": page_info,
     }

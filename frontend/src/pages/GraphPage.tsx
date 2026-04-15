@@ -18,7 +18,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { getGraph, getCharacters } from "@/api/results";
+import { getCharacters, getGraph, getGraphEvents } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { cn } from "@/lib/cn";
@@ -32,7 +32,7 @@ import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeD
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ForceGraphHandle, GraphEdge, GraphNode, GraphNodeObject } from "@/api/types";
+import type { ForceGraphHandle, GraphEdge, GraphEvent, GraphEventsPageInfo, GraphNode, GraphNodeObject } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
@@ -82,6 +82,17 @@ function getEdgeDisplayNames(edge: GraphEdge, nodeNameMap: Map<string, string>):
   };
 }
 
+function mergeGraphEvents(existingEvents: GraphEvent[], incomingEvents: GraphEvent[]): GraphEvent[] {
+  const merged = new Map<number, GraphEvent>();
+  existingEvents.forEach((event) => {
+    merged.set(event.relation_event_id, event);
+  });
+  incomingEvents.forEach((event) => {
+    merged.set(event.relation_event_id, event);
+  });
+  return Array.from(merged.values());
+}
+
 export function GraphPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -96,6 +107,10 @@ export function GraphPage() {
   const [selectedRelationTypes, setSelectedRelationTypes] = useState<Set<string>>(new Set());
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [loadedEvents, setLoadedEvents] = useState<GraphEvent[]>([]);
+  const [eventsPageInfo, setEventsPageInfo] = useState<GraphEventsPageInfo | null>(null);
+  const [isEventsLoading, setIsEventsLoading] = useState(false);
+  const [eventsLoadError, setEventsLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (novelId) {
@@ -137,7 +152,7 @@ export function GraphPage() {
 
   const novelTitle = novelQuery.data?.title ?? "小说详情";
   const graphData = graphQuery.data;
-  const graphContractIssue = enabled && !!graphData && (!graphData.summary || !graphData.quality);
+  const graphContractIssue = enabled && !!graphData && (!graphData.summary || !graphData.quality || !graphData.events_page);
 
   const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
     if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
@@ -216,13 +231,16 @@ export function GraphPage() {
   const graphQuality = graphData?.quality ?? null;
 
   const sortedEvents = useMemo(() => {
-    if (!graphData?.events) return [];
-    return [...graphData.events].sort((left, right) => {
+    return [...loadedEvents].sort((left, right) => {
       const chunkDiff = right.chunk_id - left.chunk_id;
       if (chunkDiff !== 0) return chunkDiff;
       return right.relation_event_id - left.relation_event_id;
     });
-  }, [graphData]);
+  }, [loadedEvents]);
+
+  const totalEventCount = eventsPageInfo?.total ?? sortedEvents.length;
+  const hasMoreEvents = eventsPageInfo?.has_more ?? false;
+  const loadedEventCount = sortedEvents.length;
 
   const selectedEvent = useMemo(() => {
     if (sortedEvents.length === 0) return null;
@@ -230,6 +248,13 @@ export function GraphPage() {
     return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? sortedEvents[0];
   }, [sortedEvents, selectedEventId]);
   const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
+
+  useEffect(() => {
+    setLoadedEvents(graphData?.events ?? []);
+    setEventsPageInfo(graphData?.events_page ?? null);
+    setEventsLoadError(null);
+    setIsEventsLoading(false);
+  }, [graphData]);
 
   useEffect(() => {
     setSelectedNode(null);
@@ -243,6 +268,7 @@ export function GraphPage() {
     const missingFields = [
       graphData.summary ? null : "summary",
       graphData.quality ? null : "quality",
+      graphData.events_page ? null : "events_page",
     ].filter(Boolean);
 
     console.error("[GraphPage] /graph authority contract is missing required fields:", {
@@ -339,6 +365,28 @@ export function GraphPage() {
     graphQuery.refetch();
   }, [graphQuery]);
 
+  const handleLoadMoreEvents = useCallback(async () => {
+    if (!novelId || !currentTaskId || !eventsPageInfo?.next_cursor || isEventsLoading) {
+      return;
+    }
+
+    setIsEventsLoading(true);
+    setEventsLoadError(null);
+    try {
+      const page = await getGraphEvents(novelId, currentTaskId, {
+        eventsCursor: eventsPageInfo.next_cursor,
+        eventsLimit: eventsPageInfo.limit,
+      });
+      setLoadedEvents((currentEvents) => mergeGraphEvents(currentEvents, page.events));
+      setEventsPageInfo(page.page_info);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "加载更多 relation events 失败";
+      setEventsLoadError(message);
+    } finally {
+      setIsEventsLoading(false);
+    }
+  }, [currentTaskId, eventsPageInfo, isEventsLoading, novelId]);
+
   const handleGoTimeline = useCallback(() => {
     if (timelineUrl) {
       const chunkParam = selectedEvent?.chunk_id != null ? `&selected_chunk=${selectedEvent.chunk_id}` : "";
@@ -367,8 +415,8 @@ export function GraphPage() {
             <div className="space-y-2">
               <p className="text-base font-semibold text-text">/graph authority contract 不完整</p>
               <p className="text-sm leading-6 text-text-muted">
-                当前任务返回了图数据，但缺少 `summary` 或 `quality`。图谱分析入口不会在前端补造 authority
-                语义，请先修复后端 contract 再继续使用该页面。
+                当前任务返回了图数据，但缺少 `summary`、`quality` 或 `events_page`。图谱分析入口不会在前端补造
+                authority 语义，请先修复后端 contract 再继续使用该页面。
               </p>
             </div>
           </div>
@@ -425,11 +473,15 @@ export function GraphPage() {
         />
         <MetricCard
           label="历史事件"
-          value={sortedEvents.length}
+          value={totalEventCount}
           format="raw"
           decimals={0}
           icon={<History className="h-5 w-5" />}
-          description="relation events 历史条目"
+          description={
+            totalEventCount > loadedEventCount
+              ? `已加载 ${loadedEventCount} / ${totalEventCount} 条 history`
+              : "relation events 历史条目"
+          }
           accent="chart-5"
         />
       </motion.section>
@@ -723,9 +775,12 @@ export function GraphPage() {
                   </CardTitle>
                   <CardDescription className="mt-1">
                     events 侧栏直接承接 relation history，不再只靠时间轴页兜底。
+                    {hasMoreEvents ? " 当前只首屏加载样本，可继续增量展开更长历史。" : ""}
                   </CardDescription>
                 </div>
-                <Badge variant="outline">{sortedEvents.length}</Badge>
+                <Badge variant="outline">
+                  {loadedEventCount < totalEventCount ? `${loadedEventCount} / ${totalEventCount}` : totalEventCount}
+                </Badge>
               </div>
               <Button variant="outline" size="sm" onClick={handleGoTimeline} disabled={!timelineUrl}>
                 去时间轴联动查看
@@ -735,34 +790,63 @@ export function GraphPage() {
 
             <CardContent className="space-y-3">
               {sortedEvents.length ? (
-                sortedEvents.slice(0, 8).map((event) => {
-                  const isSelected = activeSelectedEventId === event.relation_event_id;
-                  return (
-                    <button
-                      key={event.relation_event_id}
-                      type="button"
-                      onClick={() => setSelectedEventId(event.relation_event_id)}
-                      className={cn(
-                        "w-full rounded-xl border p-4 text-left transition-colors",
-                        isSelected ? "border-primary/40 bg-primary/5" : "border-border bg-surface hover:bg-surface-hover"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-text">
-                            第 {event.chunk_id} 段 · {event.from_name} → {event.to_name}
-                          </p>
-                          <p className="mt-1 text-xs leading-5 text-text-muted">
-                            {event.relation_type ?? "未标注关系"} · {getChangeTypeLabel(event.change_type)}
-                          </p>
-                        </div>
-                        <Badge variant={getEventConfidenceVariant(event.confidence)}>
-                          {formatConfidence(event.confidence)}
-                        </Badge>
+                <>
+                  <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                    {sortedEvents.map((event) => {
+                      const isSelected = activeSelectedEventId === event.relation_event_id;
+                      return (
+                        <button
+                          key={event.relation_event_id}
+                          type="button"
+                          onClick={() => setSelectedEventId(event.relation_event_id)}
+                          className={cn(
+                            "w-full rounded-xl border p-4 text-left transition-colors",
+                            isSelected
+                              ? "border-primary/40 bg-primary/5"
+                              : "border-border bg-surface hover:bg-surface-hover"
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-text">
+                                第 {event.chunk_id} 段 · {event.from_name} → {event.to_name}
+                              </p>
+                              <p className="mt-1 text-xs leading-5 text-text-muted">
+                                {event.relation_type ?? "未标注关系"} · {getChangeTypeLabel(event.change_type)}
+                              </p>
+                            </div>
+                            <Badge variant={getEventConfidenceVariant(event.confidence)}>
+                              {formatConfidence(event.confidence)}
+                            </Badge>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {(hasMoreEvents || isEventsLoading || eventsLoadError) && (
+                    <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-xs leading-5 text-text-muted">
+                          {hasMoreEvents
+                            ? `已加载 ${loadedEventCount} 条，仍有 ${Math.max(totalEventCount - loadedEventCount, 0)} 条历史可继续查看。`
+                            : "历史样本已全部加载。"}
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleLoadMoreEvents}
+                          disabled={!hasMoreEvents || isEventsLoading}
+                        >
+                          {isEventsLoading ? "加载中..." : "加载更多"}
+                        </Button>
                       </div>
-                    </button>
-                  );
-                })
+                      {eventsLoadError ? (
+                        <p className="mt-2 text-xs text-chart-negative">{eventsLoadError}</p>
+                      ) : null}
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="rounded-xl border border-dashed border-border p-4 text-sm text-text-muted">
                   暂无 relation events 历史。

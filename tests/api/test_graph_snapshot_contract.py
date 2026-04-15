@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import MagicMock
 
-from src.api.routes.results_fetchers import _fetch_graph_snapshot
+from src.api.routes.results_fetchers import _fetch_graph_events_page, _fetch_graph_snapshot
 from src.knowledge.authority import ConfirmedRelation, GraphAuthorityView, RelationEvent, StableState
 from src.storage.repositories import GraphRepository, RunRepository
 
@@ -40,10 +40,17 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
 
     snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
 
-    assert set(snapshot.keys()) == {"nodes", "edges", "events", "summary", "quality"}
+    assert set(snapshot.keys()) == {"nodes", "edges", "events", "events_page", "summary", "quality"}
     assert len(snapshot["nodes"]) == 2
     assert len(snapshot["edges"]) == 1
     assert len(snapshot["events"]) == 1
+    assert snapshot["events_page"] == {
+        "limit": 200,
+        "returned_count": 1,
+        "total": 1,
+        "has_more": False,
+        "next_cursor": None,
+    }
     assert "quality" not in snapshot["summary"]
     assert "recent_events" not in snapshot["summary"]
     assert set(snapshot["quality"].keys()) == {
@@ -179,6 +186,13 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
     assert snapshot["quality"]["conflict_count"] == 0
     assert snapshot["quality"]["low_confidence_count"] == 1
     assert snapshot["quality"]["low_confidence_samples"][0]["relation_event_id"] == 11
+    assert snapshot["events_page"] == {
+        "limit": 200,
+        "returned_count": 1,
+        "total": 1,
+        "has_more": False,
+        "next_cursor": None,
+    }
 
 
 def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(monkeypatch) -> None:
@@ -235,9 +249,68 @@ def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(m
     assert len(snapshot["events"]) == 200
     assert snapshot["events"][0]["relation_event_id"] == 1
     assert snapshot["events"][-1]["relation_event_id"] == 200
+    assert snapshot["events_page"]["returned_count"] == 200
+    assert snapshot["events_page"]["total"] == 205
+    assert snapshot["events_page"]["has_more"] is True
+    assert snapshot["events_page"]["next_cursor"] is not None
     assert snapshot["quality"]["low_confidence_count"] == 205
     assert len(snapshot["quality"]["low_confidence_samples"]) == 5
     assert snapshot["quality"]["low_confidence_samples"][0]["relation_event_id"] == 1
+
+
+def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-graph-events-page"
+            relation_events = [
+                RelationEvent(
+                    relation_event_id=index + 1,
+                    chunk_id=500 - index,
+                    from_entity_id=1,
+                    to_entity_id=2,
+                    from_name="沈砚",
+                    to_name="陆明",
+                    relation_type="盟友",
+                    change_type="波动",
+                    confidence=0.55,
+                )
+                for index in range(205)
+            ]
+            return GraphAuthorityView(
+                stable_states=[],
+                confirmed_relations=[],
+                relation_events=relation_events,
+            )
+
+        def build_graph_report(self, *_args, **_kwargs):
+            raise AssertionError("graph events pagination should not depend on graph report")
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-events-page", annotation_repo)
+    next_cursor = snapshot["events_page"]["next_cursor"]
+
+    page = _fetch_graph_events_page(
+        "run-graph-events-page",
+        annotation_repo,
+        events_cursor=next_cursor,
+    )
+
+    assert [event["relation_event_id"] for event in page["events"]] == [201, 202, 203, 204, 205]
+    assert page["page_info"] == {
+        "limit": 200,
+        "returned_count": 5,
+        "total": 205,
+        "has_more": False,
+        "next_cursor": None,
+    }
 
 
 def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monkeypatch) -> None:
