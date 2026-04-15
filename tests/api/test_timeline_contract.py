@@ -115,14 +115,51 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
         "character_entries",
         "character_exits",
     }
-    assert set(relation_change) == {"from_char", "to_char", "relation_type", "change_type", "evidence"}
-    assert relation_change == {
-        "from_char": scenario.hero_name,
-        "to_char": scenario.rival_name,
-        "relation_type": "盟友",
-        "change_type": "新建",
-        "evidence": "二人正式结盟",
+    assert set(relation_change) == {
+        "relation_event_id",
+        "from_char",
+        "to_char",
+        "relation_type",
+        "change_type",
+        "evidence",
+        "confidence",
+        "directionality",
     }
+    assert relation_change["from_char"] == scenario.hero_name
+    assert relation_change["to_char"] == scenario.rival_name
+    assert relation_change["relation_type"] == "盟友"
+    assert relation_change["change_type"] == "新建"
+    assert relation_change["evidence"] == "二人正式结盟"
+
+
+def test_get_timeline_exposes_route_owned_relation_locator_fields(api_client: TestClient, db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{scenario.novel_id}/timeline",
+        params={"task_id": scenario.task_id, "include_curve": "false"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    nodes_by_chunk = index_by_chunk_id(payload["nodes"])
+    relation_change = nodes_by_chunk[2]["relation_changes"][0]
+
+    # 中文说明：这些字段只是 /timeline 的 route-owned 定位信息，不代表 authority
+    # contract 扩边界。
+    assert set(relation_change) == {
+        "relation_event_id",
+        "from_char",
+        "to_char",
+        "relation_type",
+        "change_type",
+        "evidence",
+        "confidence",
+        "directionality",
+    }
+    assert relation_change["relation_event_id"] is not None
+    assert relation_change["confidence"] == 0.91
+    assert relation_change["directionality"] == "directed"
 
 
 def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_payload(

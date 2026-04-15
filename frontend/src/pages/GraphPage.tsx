@@ -54,6 +54,20 @@ function buildTimelineUrl(novelId: string, taskId: string): string {
   return `/novels/${novelId}/timeline?task_id=${taskId}&max_level=3&show_tension=true`;
 }
 
+function buildTimelineSelectionUrl(baseUrl: string, options?: { chunkId?: number | null; relationEventId?: number | null }): string {
+  const params: string[] = [];
+  if (options?.chunkId != null) {
+    params.push(`selected_chunk=${options.chunkId}`);
+  }
+  if (options?.relationEventId != null) {
+    params.push(`relation_event_id=${options.relationEventId}`);
+  }
+  if (params.length === 0) {
+    return baseUrl;
+  }
+  return `${baseUrl}&${params.join("&")}`;
+}
+
 function formatDensity(value: number | undefined): string {
   if (value == null || Number.isNaN(value)) return "--";
   return value.toFixed(4);
@@ -100,6 +114,8 @@ export function GraphPage() {
   const { currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
+  const urlSelectedChunk = searchParams.get("selected_chunk");
+  const urlRelationEventId = searchParams.get("relation_event_id");
   const forceGraphRef = useRef<ForceGraphHandle>(null);
 
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
@@ -107,6 +123,7 @@ export function GraphPage() {
   const [selectedRelationTypes, setSelectedRelationTypes] = useState<Set<string>>(new Set());
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [hasUserSelectedEvent, setHasUserSelectedEvent] = useState(false);
   const [loadedEvents, setLoadedEvents] = useState<GraphEvent[]>([]);
   const [eventsPageInfo, setEventsPageInfo] = useState<GraphEventsPageInfo | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(false);
@@ -248,18 +265,83 @@ export function GraphPage() {
   const hasMoreEvents = eventsPageInfo?.has_more ?? false;
   const loadedEventCount = sortedEvents.length;
 
+  const initialRelationEventId = useMemo(() => {
+    if (!urlRelationEventId) return null;
+    const parsed = Number(urlRelationEventId);
+    return Number.isInteger(parsed) ? parsed : null;
+  }, [urlRelationEventId]);
+  const initialSelectedChunk = useMemo(() => {
+    if (!urlSelectedChunk) return null;
+    const parsed = Number(urlSelectedChunk);
+    return Number.isInteger(parsed) ? parsed : null;
+  }, [urlSelectedChunk]);
   const selectedEvent = useMemo(() => {
     if (sortedEvents.length === 0) return null;
-    if (selectedEventId == null) return sortedEvents[0];
-    return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? sortedEvents[0];
-  }, [sortedEvents, selectedEventId]);
+    if (selectedEventId == null) {
+      return initialRelationEventId != null || initialSelectedChunk != null ? null : sortedEvents[0];
+    }
+    return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? null;
+  }, [initialRelationEventId, initialSelectedChunk, sortedEvents, selectedEventId]);
   const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
+  const deepLinkResolvedEventId = useMemo(() => {
+    if (initialRelationEventId != null) {
+      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
+      if (matchedEvent) {
+        return matchedEvent.relation_event_id;
+      }
+      if (initialSelectedChunk != null) {
+        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+        return fallbackEvent?.relation_event_id ?? null;
+      }
+      return null;
+    }
+    if (initialSelectedChunk != null) {
+      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+      return chunkMatchedEvent?.relation_event_id ?? null;
+    }
+    return null;
+  }, [initialRelationEventId, initialSelectedChunk, sortedEvents]);
+  const graphSelectionHint = useMemo(() => {
+    if (hasUserSelectedEvent) {
+      return null;
+    }
+    if (activeSelectedEventId != null && (deepLinkResolvedEventId == null || activeSelectedEventId !== deepLinkResolvedEventId)) {
+      return null;
+    }
+    if (initialRelationEventId == null && initialSelectedChunk == null) {
+      return null;
+    }
+    if (initialRelationEventId != null) {
+      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
+      if (matchedEvent) {
+        return null;
+      }
+      if (initialSelectedChunk != null) {
+        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+        if (fallbackEvent) {
+          return "未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。";
+        }
+      }
+      return "未在当前图谱事件窗口定位到指定关系事件。";
+    }
+    if (initialSelectedChunk != null) {
+      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+      if (!chunkMatchedEvent) {
+        return "未在当前事件窗口定位到指定时间节点的关系变化。";
+      }
+    }
+    return null;
+  }, [activeSelectedEventId, deepLinkResolvedEventId, hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, sortedEvents]);
 
   useEffect(() => {
     // Bump the request version whenever the snapshot changes so late load-more
     // responses from the previous task/view are ignored instead of polluting
     // the current page-level history window.
     eventsRequestVersionRef.current += 1;
+    setSelectedNode(null);
+    setIsPanelOpen(false);
+    setSelectedEventId(null);
+    setHasUserSelectedEvent(false);
     setLoadedEvents(graphData?.events ?? []);
     setEventsPageInfo(graphData?.events_page ?? null);
     setEventsLoadError(null);
@@ -267,10 +349,40 @@ export function GraphPage() {
   }, [graphData]);
 
   useEffect(() => {
+    setHasUserSelectedEvent(false);
+  }, [currentTaskId, initialRelationEventId, initialSelectedChunk]);
+
+  useEffect(() => {
+    if (hasUserSelectedEvent) return;
+    if (initialRelationEventId == null && initialSelectedChunk == null) return;
+
+    const matchedEvent =
+      initialRelationEventId != null
+        ? loadedEvents.find((event) => event.relation_event_id === initialRelationEventId) ?? null
+        : null;
+    if (matchedEvent) {
+      setSelectedEventId(matchedEvent.relation_event_id);
+      return;
+    }
+
+    const fallbackEvent =
+      initialSelectedChunk != null
+        ? loadedEvents.find((event) => event.chunk_id === initialSelectedChunk) ?? null
+        : null;
+    if (fallbackEvent) {
+      setSelectedEventId(fallbackEvent.relation_event_id);
+      return;
+    }
+
+    setSelectedEventId(null);
+  }, [hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, loadedEvents]);
+
+  useEffect(() => {
     setSelectedNode(null);
     setIsPanelOpen(false);
     setSelectedEventId(null);
-  }, [currentTaskId, graphQuery.dataUpdatedAt]);
+    setHasUserSelectedEvent(false);
+  }, [currentTaskId]);
 
   useEffect(() => {
     if (!graphContractIssue || !graphData) return;
@@ -412,12 +524,34 @@ export function GraphPage() {
 
   const handleGoTimeline = useCallback(() => {
     if (timelineUrl) {
-      const chunkParam = selectedEvent?.chunk_id != null ? `&selected_chunk=${selectedEvent.chunk_id}` : "";
-      const eventParam =
-        selectedEvent?.relation_event_id != null ? `&relation_event_id=${selectedEvent.relation_event_id}` : "";
-      navigate(`${timelineUrl}${chunkParam}${eventParam}`);
+      navigate(
+        buildTimelineSelectionUrl(timelineUrl, {
+          chunkId: selectedEvent?.chunk_id,
+          relationEventId: selectedEvent?.relation_event_id,
+        })
+      );
     }
   }, [navigate, selectedEvent, timelineUrl]);
+
+  const handleSelectEvent = useCallback((relationEventId: number) => {
+    // 中文注释：深链只负责首轮自动定位；用户手动改选后，应以当前交互为准，
+    // 不能继续保留旧提示或在后续事件窗口刷新时强行拉回初始命中结果。
+    setHasUserSelectedEvent(true);
+    setSelectedEventId(relationEventId);
+  }, []);
+
+  const handleOpenTimelineChunk = useCallback(
+    (chunkId?: number, relationEventId?: number | null) => {
+      if (!timelineUrl || chunkId == null) return;
+      navigate(
+        buildTimelineSelectionUrl(timelineUrl, {
+          chunkId,
+          relationEventId,
+        })
+      );
+    },
+    [navigate, timelineUrl]
+  );
 
   const handleScrollToGraph = useCallback(() => {
     const graphSection = document.getElementById("graph-workspace");
@@ -812,6 +946,11 @@ export function GraphPage() {
             </CardHeader>
 
             <CardContent className="space-y-3">
+              {graphSelectionHint ? (
+                <div className="rounded-xl border border-chart-negative/20 bg-chart-negative/5 p-3 text-xs leading-5 text-text-muted">
+                  {graphSelectionHint}
+                </div>
+              ) : null}
               {sortedEvents.length ? (
                 <>
                   <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
@@ -821,7 +960,7 @@ export function GraphPage() {
                         <button
                           key={event.relation_event_id}
                           type="button"
-                          onClick={() => setSelectedEventId(event.relation_event_id)}
+                          onClick={() => handleSelectEvent(event.relation_event_id)}
                           className={cn(
                             "w-full rounded-xl border p-4 text-left transition-colors",
                             isSelected
@@ -877,6 +1016,44 @@ export function GraphPage() {
               )}
             </CardContent>
           </Card>
+
+          {selectedNode?.entity_type === "character" &&
+          (selectedNode.first_seen_chunk != null || selectedNode.last_seen_chunk != null) ? (
+            <Card variant="elevated" className="rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-base">角色生命周期联动</CardTitle>
+                <CardDescription>从稳定 lifecycle chunk 直接跳到时间轴查看首次登场与最后活跃。</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
+                  当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
+                  {selectedNode.first_seen_chunk != null && selectedNode.last_seen_chunk != null
+                    ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chunk} 段到第 ${selectedNode.last_seen_chunk} 段。`
+                    : "，可继续跳到时间轴查看稳定生命周期节点。"}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenTimelineChunk(selectedNode.first_seen_chunk)}
+                    disabled={selectedNode.first_seen_chunk == null || !timelineUrl}
+                  >
+                    查看首次登场
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenTimelineChunk(selectedNode.last_seen_chunk)}
+                    disabled={selectedNode.last_seen_chunk == null || !timelineUrl}
+                  >
+                    查看最后活跃
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card variant="elevated" className="rounded-2xl">
             <CardHeader>

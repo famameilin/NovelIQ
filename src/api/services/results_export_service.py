@@ -43,6 +43,17 @@ from src.storage.repositories import (
 )
 
 
+def _serialize_graph_report_signals(graph_report: GraphAuthorityReport) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    序列化共享 graph signals。
+
+    中文注释：这里明确只白名单导出 GraphAuthorityReport 的共享计数，不允许
+    export 装配层顺手接触 graph page 专属 summary/quality 细节。
+    """
+
+    return graph_report.summary.to_contract_dict(), graph_report.quality.to_contract_dict()
+
+
 def load_core_results(
     run_id: str,
     stats_repo: StatsRepository,
@@ -139,7 +150,56 @@ def load_chunk_bundle(
     return topics, chunk_styles, chunk_annotations, missing_fields
 
 
-def load_aggregate_bundle(
+def load_graph_signal_bundle(
+    graph_report: GraphAuthorityReport,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    加载 graph authority 输入信号。
+
+    中文注释：graph_summary / graph_quality_report 在 export 里只是 graph-owned
+    input signals，不承担最终诊断或聚合结论语义。
+    """
+
+    return _serialize_graph_report_signals(graph_report)
+
+
+def load_aggregate_metrics_bundle(
+    run_id: str,
+    novel_id: str,
+    stats_repo: StatsRepository,
+    annotation_repo: AnnotationRepository,
+    chunk_repo: ChunkRepository,
+) -> tuple[Any, Any, dict[str, Any]]:
+    """
+    加载非 graph 的聚合结论。
+
+    中文注释：aggregate_metrics 继续只由 aggregate_all_metrics() 负责产出，
+    不与 graph authority 信号在同一个 helper 中混算。
+    """
+
+    global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
+    token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
+
+    # Delay importing the route-layer converter so this service module can be
+    # imported independently by tests and background consumers without
+    # initializing the whole routes package.
+    from src.api.routes.results_converters import _convert_aggregate_result
+
+    result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
+    narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
+
+    aggregate_metrics = {
+        "narrative_structure": narrative_structure.model_dump() if narrative_structure else None,
+        "emotion_stats": emotion_stats.model_dump() if emotion_stats else None,
+        "character_stats": character_stats.model_dump() if character_stats else None,
+        "style_stats": style_stats.model_dump() if style_stats else None,
+        "culture_stats": culture_stats.model_dump() if culture_stats else None,
+    }
+
+    return global_stats, token_usage_stats, aggregate_metrics
+
+
+def load_export_relation_bundle(
     run_id: str,
     novel_id: str,
     stats_repo: StatsRepository,
@@ -177,29 +237,14 @@ def load_aggregate_bundle(
         alias_map,
         valid_character_names=valid_character_names,
     )
-    global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
-
-    # Delay importing the route-layer converter so this service module can be
-    # imported independently by tests and background consumers without
-    # initializing the whole routes package.
-    from src.api.routes.results_converters import _convert_aggregate_result
-
-    result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
-    narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
-
-    aggregate_metrics = {
-        "narrative_structure": narrative_structure.model_dump() if narrative_structure else None,
-        "emotion_stats": emotion_stats.model_dump() if emotion_stats else None,
-        "character_stats": character_stats.model_dump() if character_stats else None,
-        "style_stats": style_stats.model_dump() if style_stats else None,
-        "culture_stats": culture_stats.model_dump() if culture_stats else None,
-    }
-
-    token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
-    # 中文注释：export 只序列化共享 graph signals，不接触 graph page 专属高亮
-    # 或质量样本，避免导出层继续与产品层互借字段。
-    graph_summary = graph_report.summary.to_contract_dict()
-    graph_quality_report = graph_report.quality.to_contract_dict()
+    global_stats, token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
+        run_id=run_id,
+        novel_id=novel_id,
+        stats_repo=stats_repo,
+        annotation_repo=annotation_repo,
+        chunk_repo=chunk_repo,
+    )
+    graph_summary, graph_quality_report = load_graph_signal_bundle(graph_report)
 
     return (
         character_relations,
@@ -361,7 +406,7 @@ def fetch_all_results_data(
         aggregate_metrics,
         graph_summary,
         graph_quality_report,
-    ) = load_aggregate_bundle(
+    ) = load_export_relation_bundle(
         run_id,
         novel_id,
         stats_repo,

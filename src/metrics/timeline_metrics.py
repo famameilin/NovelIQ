@@ -602,7 +602,9 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
     relation_events = list(timeline_view.relation_events)
 
     if any(entity.entity_type != "character" for entity in character_entities):
-        raise TimelineAuthorityContractError("TimelineAuthorityView.character_entities must contain only character entities")
+        raise TimelineAuthorityContractError(
+            "TimelineAuthorityView.character_entities must contain only character entities"
+        )
 
     entity_ids = [getattr(entity, "entity_id", None) for entity in character_entities]
     if any(entity_id is None for entity_id in entity_ids):
@@ -628,9 +630,13 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
 
     for lifecycle in entity_lifecycles:
         if lifecycle.entity_type != "character":
-            raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must contain only character lifecycles")
+            raise TimelineAuthorityContractError(
+                "TimelineAuthorityView.entity_lifecycles must contain only character lifecycles"
+            )
         if lifecycle.entity_id not in character_ids:
-            raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must align with character_entities")
+            raise TimelineAuthorityContractError(
+                "TimelineAuthorityView.entity_lifecycles must align with character_entities"
+            )
 
     if set(lifecycle_map) != character_ids:
         raise TimelineAuthorityContractError(
@@ -640,11 +646,15 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
     for entity_id, entity in character_map.items():
         lifecycle = lifecycle_map[entity_id]
         if lifecycle.name != entity.name:
-            raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles names must match character_entities")
+            raise TimelineAuthorityContractError(
+                "TimelineAuthorityView.entity_lifecycles names must match character_entities"
+            )
 
     for event in relation_events:
         if event.from_entity_id not in character_ids or event.to_entity_id not in character_ids:
-            raise TimelineAuthorityContractError("TimelineAuthorityView.relation_events must stay inside the character subgraph")
+            raise TimelineAuthorityContractError(
+                "TimelineAuthorityView.relation_events must stay inside the character subgraph"
+            )
 
     return entity_lifecycles, relation_events, {entity_id: entity.name for entity_id, entity in character_map.items()}
 
