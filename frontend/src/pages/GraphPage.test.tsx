@@ -15,7 +15,7 @@ const getGraphEventsMock = vi.fn();
 const getNovelMock = vi.fn();
 const navigateMock = vi.fn();
 
-let currentTaskIdFromUrl = "task-a";
+let currentGraphSearchParams = "task_id=task-a";
 
 function passthroughComponent(displayName: string) {
   const Component = ({ children }: { children?: ReactNode }) => <div data-testid={displayName}>{children}</div>;
@@ -50,7 +50,7 @@ function motionElement(tagName: string) {
 vi.mock("react-router-dom", () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ novelId: "novel-1" }),
-  useSearchParams: () => [new URLSearchParams(`task_id=${currentTaskIdFromUrl}`)],
+  useSearchParams: () => [new URLSearchParams(currentGraphSearchParams)],
 }));
 
 vi.mock("framer-motion", () => ({
@@ -80,7 +80,13 @@ vi.mock("@/components/common/MetricCard", () => ({
 }));
 
 vi.mock("@/components/charts/ForceGraph", () => ({
-  ForceGraph: passthroughComponent("force-graph"),
+  ForceGraph: ({ data, onNodeClick }: { data?: GraphData; onNodeClick?: (node: GraphData["nodes"][number]) => void }) => (
+    <div data-testid="force-graph">
+      <button type="button" onClick={() => data?.nodes?.[0] && onNodeClick?.(data.nodes[0])}>
+        选择第一个节点
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/charts/GraphToolbar", () => ({
@@ -236,7 +242,7 @@ function renderPage() {
 describe("GraphPage pagination", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentTaskIdFromUrl = "task-a";
+    currentGraphSearchParams = "task_id=task-a";
     useNovelStore.setState({
       currentNovelId: null,
       currentTaskId: null,
@@ -294,6 +300,47 @@ describe("GraphPage pagination", () => {
     expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
   });
 
+  it("navigates to timeline with the selected relation event", async () => {
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 }],
+      total: 1,
+      nextCursor: null,
+    });
+
+    getGraphMock.mockResolvedValue(taskAGraph);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText("task-a Hero");
+    await user.click(await screen.findByRole("button", { name: "去时间轴联动查看" }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=50&relation_event_id=101"
+    );
+  });
+
+  it("opens timeline lifecycle entry points for the selected character node", async () => {
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 }],
+      total: 1,
+      nextCursor: null,
+    });
+
+    getGraphMock.mockResolvedValue(taskAGraph);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText("task-a Hero");
+    await user.click(await screen.findByRole("button", { name: "选择第一个节点" }));
+    await user.click(await screen.findByRole("button", { name: "查看首次登场" }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=1"
+    );
+  });
+
   it("ignores stale load-more responses after switching tasks", async () => {
     const taskAGraph = createGraphData("task-a", {
       eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 201, chunkId: 60 }],
@@ -329,7 +376,7 @@ describe("GraphPage pagination", () => {
     await screen.findByText("task-a Hero");
     await user.click(await screen.findByRole("button", { name: "加载更多" }));
 
-    currentTaskIdFromUrl = "task-b";
+    currentGraphSearchParams = "task_id=task-b";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <GraphPage />

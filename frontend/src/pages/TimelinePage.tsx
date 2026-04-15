@@ -7,11 +7,11 @@
  * 说明: 完整叙事时间轴页面，展示四阶段划分、关键事件节点、张力曲线叠加
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
@@ -34,6 +34,30 @@ import type { TimelineNode, TimelinePhase } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 
+function buildTimelinePageUrl(
+  novelId: string,
+  taskId: string,
+  options: {
+    maxLevel: 1 | 2 | 3;
+    showTension: boolean;
+    selectedChunk?: number | null;
+    relationEventId?: number | null;
+  }
+): string {
+  const params = new URLSearchParams({
+    task_id: taskId,
+    max_level: String(options.maxLevel),
+    show_tension: String(options.showTension),
+  });
+  if (options.selectedChunk != null) {
+    params.set("selected_chunk", String(options.selectedChunk));
+  }
+  if (options.relationEventId != null) {
+    params.set("relation_event_id", String(options.relationEventId));
+  }
+  return `/novels/${novelId}/timeline?${params.toString()}`;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
@@ -48,14 +72,26 @@ export function TimelinePage() {
   const urlMaxLevel = searchParams.get("max_level");
   const urlShowTension = searchParams.get("show_tension");
   const urlSelectedChunk = searchParams.get("selected_chunk");
+  const urlRelationEventId = searchParams.get("relation_event_id");
 
   const [maxLevel, setMaxLevel] = useState<1 | 2 | 3>(() => {
     const level = urlMaxLevel ? parseInt(urlMaxLevel, 10) : 3;
     return [1, 2, 3].includes(level) ? (level as 1 | 2 | 3) : 3;
   });
   const [showTension, setShowTension] = useState(urlShowTension !== "false");
-  const [selectedNode, setSelectedNode] = useState<TimelineNode | null>(null);
   const [activePhase, setActivePhase] = useState<string | undefined>();
+
+  const selectedChunkFromUrl = useMemo(() => {
+    if (!urlSelectedChunk) return null;
+    const parsed = Number(urlSelectedChunk);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [urlSelectedChunk]);
+
+  const relationEventIdFromUrl = useMemo(() => {
+    if (!urlRelationEventId) return null;
+    const parsed = Number(urlRelationEventId);
+    return Number.isInteger(parsed) ? parsed : null;
+  }, [urlRelationEventId]);
 
   useEffect(() => {
     if (novelId) {
@@ -67,13 +103,15 @@ export function TimelinePage() {
   }, [novelId, urlTaskId, setNovel, setTask]);
 
   useEffect(() => {
-    if (currentTaskId && urlTaskId !== currentTaskId) {
-      navigate(
-        `/novels/${novelId}/timeline?task_id=${currentTaskId}&max_level=${maxLevel}&show_tension=${showTension}`,
-        { replace: true }
-      );
+    if (currentTaskId && novelId && urlTaskId !== currentTaskId) {
+      navigate(buildTimelinePageUrl(novelId, currentTaskId, {
+        maxLevel,
+        showTension,
+        selectedChunk: selectedChunkFromUrl,
+        relationEventId: relationEventIdFromUrl,
+      }), { replace: true });
     }
-  }, [currentTaskId, novelId, navigate, urlTaskId, maxLevel, showTension]);
+  }, [currentTaskId, novelId, navigate, urlTaskId, maxLevel, showTension, selectedChunkFromUrl, relationEventIdFromUrl]);
 
   const enabled = !!novelId && !!currentTaskId;
 
@@ -99,42 +137,78 @@ export function TimelinePage() {
 
   const timelineData = timelineQuery.data;
   const phases = timelineData?.phases ?? [];
-  const nodes = timelineData?.nodes ?? [];
+  const nodes = useMemo(() => timelineData?.nodes ?? [], [timelineData?.nodes]);
   const tensionCurve = timelineData?.tension_curve;
   const totalChunks = timelineData?.meta?.total_chunks ?? 0;
-
-  useEffect(() => {
-    setSelectedNode(null);
-    setActivePhase(undefined);
-  }, [currentTaskId, timelineQuery.dataUpdatedAt]);
+  const selectedNode = useMemo(() => {
+    if (nodes.length === 0) return null;
+    if (relationEventIdFromUrl != null) {
+      const matchedRelationNode =
+        nodes.find((node) =>
+          node.relation_changes?.some((relationChange) => relationChange.relation_event_id === relationEventIdFromUrl)
+        ) ?? null;
+      if (matchedRelationNode) {
+        return matchedRelationNode;
+      }
+    }
+    if (selectedChunkFromUrl != null) {
+      return nodes.find((node) => node.chunk_id === selectedChunkFromUrl) ?? null;
+    }
+    return null;
+  }, [nodes, relationEventIdFromUrl, selectedChunkFromUrl]);
+  const selectionHint = useMemo(() => {
+    if (relationEventIdFromUrl == null) return null;
+    const matchedRelationNode = nodes.find((node) =>
+      node.relation_changes?.some((relationChange) => relationChange.relation_event_id === relationEventIdFromUrl)
+    );
+    if (matchedRelationNode) return null;
+    if (selectedChunkFromUrl != null && selectedNode) {
+      return "未定位到指定关系事件，已回退到对应时间节点。";
+    }
+    return "未定位到对应事件。";
+  }, [nodes, relationEventIdFromUrl, selectedChunkFromUrl, selectedNode]);
 
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
       setMaxLevel(level);
-      navigate(
-        `/novels/${novelId}/timeline?task_id=${currentTaskId}&max_level=${level}&show_tension=${showTension}`,
-        { replace: true }
-      );
+      if (!novelId || !currentTaskId) return;
+      navigate(buildTimelinePageUrl(novelId, currentTaskId, {
+        maxLevel: level,
+        showTension,
+        selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
+        relationEventId: relationEventIdFromUrl,
+      }), { replace: true });
     },
-    [novelId, currentTaskId, showTension, navigate]
+    [novelId, currentTaskId, showTension, navigate, selectedNode, selectedChunkFromUrl, relationEventIdFromUrl]
   );
 
   const handleShowTensionChange = useCallback(
     (show: boolean) => {
       setShowTension(show);
-      navigate(
-        `/novels/${novelId}/timeline?task_id=${currentTaskId}&max_level=${maxLevel}&show_tension=${show}`,
-        { replace: true }
-      );
+      if (!novelId || !currentTaskId) return;
+      navigate(buildTimelinePageUrl(novelId, currentTaskId, {
+        maxLevel,
+        showTension: show,
+        selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
+        relationEventId: relationEventIdFromUrl,
+      }), { replace: true });
     },
-    [novelId, currentTaskId, maxLevel, navigate]
+    [novelId, currentTaskId, maxLevel, navigate, selectedNode, selectedChunkFromUrl, relationEventIdFromUrl]
   );
 
   const handleNodeClick = useCallback((node: TimelineNode) => {
-    setSelectedNode((prev) =>
-      prev?.chunk_id === node.chunk_id ? null : node
+    if (!novelId || !currentTaskId) return;
+    const nextSelectedChunk = selectedNode?.chunk_id === node.chunk_id ? null : node.chunk_id;
+    navigate(
+      buildTimelinePageUrl(novelId, currentTaskId, {
+        maxLevel,
+        showTension,
+        selectedChunk: nextSelectedChunk,
+        relationEventId: null,
+      }),
+      { replace: true }
     );
-  }, []);
+  }, [currentTaskId, maxLevel, navigate, novelId, selectedNode, showTension]);
 
   const handlePhaseClick = useCallback((phase: TimelinePhase) => {
     setActivePhase((prev) => (prev === phase.name ? undefined : phase.name));
@@ -143,16 +217,6 @@ export function TimelinePage() {
   const handleRetry = useCallback(() => {
     timelineQuery.refetch();
   }, [timelineQuery]);
-
-  useEffect(() => {
-    if (!urlSelectedChunk || nodes.length === 0) return;
-
-    const selectedChunk = Number(urlSelectedChunk);
-    if (!Number.isFinite(selectedChunk)) return;
-
-    const matchedNode = nodes.find((node) => node.chunk_id === selectedChunk) ?? null;
-    setSelectedNode(matchedNode);
-  }, [nodes, urlSelectedChunk]);
 
   const isLoading = timelineQuery.isLoading || novelQuery.isLoading;
   const isError = timelineQuery.isError || novelQuery.isError;
@@ -205,6 +269,21 @@ export function TimelinePage() {
             onShowTensionChange={handleShowTensionChange}
           />
         </motion.div>
+
+        {selectionHint && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.05 }}
+          >
+            <Card variant="elevated" className="rounded-xl border-chart-negative/20">
+              <CardContent className="flex items-start gap-3 p-4">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
+                <p className="text-sm text-text-muted">{selectionHint}</p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -319,7 +398,19 @@ export function TimelinePage() {
           <TimelineNodeDetail
             node={selectedNode}
             novelId={novelId}
-            onClose={() => setSelectedNode(null)}
+            taskId={currentTaskId}
+            selectedRelationEventId={relationEventIdFromUrl}
+            onClose={() => {
+              navigate(
+                buildTimelinePageUrl(novelId, currentTaskId, {
+                  maxLevel,
+                  showTension,
+                  selectedChunk: null,
+                  relationEventId: null,
+                }),
+                { replace: true }
+              );
+            }}
           />
         )}
       </div>
