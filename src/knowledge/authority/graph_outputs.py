@@ -4,6 +4,8 @@ from typing import Any
 
 from .types import ConfirmedRelation, RelationEvent, StableState
 
+LOW_CONFIDENCE_REPORT_LIMIT = 20
+
 
 def build_graph_summary_payload(
     stable_states: list[StableState],
@@ -86,9 +88,12 @@ def build_graph_quality_report(
     """Collapse graph quality details into aggregate-only report counters."""
 
     detailed_quality = build_graph_quality_payload(confirmed_relations, relation_events)
+    # 中文注释：graph page 继续暴露全历史低置信事件计数；但 export/diagnosis
+    # 复用的 report 必须保持旧 summary contract，避免长篇作品把 low_confidence_count
+    # 悄悄放大成“全历史事件总数”。
     return {
         "conflict_count": int(detailed_quality["conflict_count"]),
-        "low_confidence_count": int(detailed_quality["low_confidence_count"]),
+        "low_confidence_count": min(int(detailed_quality["low_confidence_count"]), LOW_CONFIDENCE_REPORT_LIMIT),
     }
 
 
