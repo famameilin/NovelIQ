@@ -347,11 +347,14 @@ export interface TimelinePhase {
 }
 
 export interface RelationChangeEvent {
+  relation_event_id?: number | null;
   from_char: string;
   to_char: string;
   relation_type: string;
   change_type: string;
   evidence?: string;
+  confidence?: number | null;
+  directionality?: string | null;
 }
 
 export interface TimelineNode {

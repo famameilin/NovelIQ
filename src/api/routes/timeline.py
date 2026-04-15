@@ -33,9 +33,9 @@ from src.api.models.timeline import (
 from src.api.services.novel_service import NovelService
 from src.metrics.timeline_metrics import (
     RelationChangeEventDTO,
+    TimelineDataUnavailableError,
     TimelineNodeDTO,
     TimelinePhaseDTO,
-    TimelineDataUnavailableError,
     build_timeline_candidates,
     convert_to_timeline_nodes,
     select_timeline_nodes,
@@ -53,11 +53,14 @@ router = APIRouter(prefix="/novels", tags=["timeline"])
 def _dto_to_relation_change_event(dto: RelationChangeEventDTO) -> RelationChangeEvent:
     """将 RelationChangeEventDTO 转换为 Pydantic 模型"""
     return RelationChangeEvent(
+        relation_event_id=dto.relation_event_id,
         from_char=dto.from_char,
         to_char=dto.to_char,
         relation_type=dto.relation_type,
         change_type=dto.change_type,
         evidence=dto.evidence,
+        confidence=dto.confidence,
+        directionality=dto.directionality,
     )
 
 
