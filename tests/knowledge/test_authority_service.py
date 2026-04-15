@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import uuid
 
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+import pytest
+
+from src.knowledge.authority import (
+    GraphAuthorityReport,
+    GraphPageQualityDetails,
+    GraphPageSummary,
+    KnowledgeGraphAuthorityService,
+)
 from src.storage.repositories import GraphRepository, RunRepository
 
 
@@ -181,6 +188,23 @@ def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(d
     assert not hasattr(report, "stable_states")
     assert not hasattr(report, "confirmed_relations")
     assert not hasattr(report, "relation_events")
+
+
+def test_graph_authority_report_rejects_graph_page_contracts() -> None:
+    # 中文注释：report 是 diagnosis/export 的共享边界，必须拒绝 graph page
+    # contract，避免页面字段被错误地重新序列化进共享 payload。
+    with pytest.raises(TypeError, match="GraphAuthorityReport.summary must be GraphSharedSummary"):
+        GraphAuthorityReport(
+            summary=GraphPageSummary(node_count=2, edge_count=1, density=0.5, core_characters=["苏镜"]),
+        )
+
+    with pytest.raises(TypeError, match="GraphAuthorityReport.quality must be GraphQualitySignals"):
+        GraphAuthorityReport(
+            quality=GraphPageQualityDetails(
+                conflict_count=1,
+                low_confidence_count=2,
+            )
+        )
 
 
 def test_build_export_view_keeps_export_graph_payloads_off_repository_shapes(db_session) -> None:
