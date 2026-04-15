@@ -331,12 +331,18 @@ describe("GraphPage pagination", () => {
 
   it("shows the missing-novel state when the route param is absent", async () => {
     currentGraphNovelId = undefined as unknown as string;
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-a",
+      novelsCache: [],
+    });
 
     renderPage();
 
     expect(await screen.findByText("小说不存在")).toBeInTheDocument();
     expect(getGraphMock).not.toHaveBeenCalled();
     expect(getNovelMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it("shows the graph error state and supports retry", async () => {
