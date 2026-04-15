@@ -44,6 +44,7 @@ env/
 
 # Claude Code 配置
 CLAUDE.md
+.codex-tmp/
 
 # Issues 文件夹
 issues/
@@ -177,6 +178,7 @@ deprecated/
 
 .codebuddy/
 .workbuddy/
+skills/chart-diagram.skill
 
 # Understand Everything Dashboard - 独立的前端可视化工具
 /understand-everything/
