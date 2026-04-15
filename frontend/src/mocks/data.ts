@@ -12,6 +12,9 @@ import type {
   Topic,
   DiagnosisResult,
   GraphData,
+  GraphEvent,
+  GraphEventsPageInfo,
+  GraphEventsPageResponse,
   TimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
@@ -32,6 +35,28 @@ function dateAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString();
+}
+
+function encodeGraphEventsCursor(offset: number): string {
+  return btoa(JSON.stringify({ offset })).replace(/=+$/u, "");
+}
+
+function decodeGraphEventsCursor(cursor?: string | null): number {
+  if (!cursor) return 0;
+  const normalized = cursor.padEnd(Math.ceil(cursor.length / 4) * 4, "=");
+  const payload = JSON.parse(atob(normalized)) as { offset?: unknown };
+  return typeof payload.offset === "number" && payload.offset >= 0 ? payload.offset : 0;
+}
+
+function buildGraphEventsPageInfo(total: number, start: number, limit: number): GraphEventsPageInfo {
+  const end = Math.min(start + limit, total);
+  return {
+    limit,
+    returned_count: end - start,
+    total,
+    has_more: end < total,
+    next_cursor: end < total ? encodeGraphEventsCursor(end) : null,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -238,9 +263,9 @@ export function createGraph(): GraphData {
 
   const changeTypes = ["新建", "强化", "弱化", "断裂"];
 
-  const events = Array.from({ length: 8 }, (_, i) => ({
+  const allEvents: GraphEvent[] = Array.from({ length: 18 }, (_, i) => ({
     relation_event_id: i + 1,
-    chunk_id: Math.floor(Math.random() * 100 + 10),
+    chunk_id: 160 - i * 6,
     from_entity_id: i % 5,
     to_entity_id: (i + 1) % 5,
     from_name: names[i % 5],
@@ -248,10 +273,12 @@ export function createGraph(): GraphData {
     relation_type: relationTypes[i % relationTypes.length],
     change_type: changeTypes[i % changeTypes.length],
     evidence: `${names[i % 5]}与${names[(i + 1) % 5]}在关键桥段中产生新的互动。`,
-    confidence: +(Math.random() * 0.5 + 0.4).toFixed(2),
+    confidence: +(0.42 + (i % 7) * 0.08).toFixed(2),
     source_relation_row_id: i + 100,
     directionality: "bidirectional",
   }));
+  const initialEventLimit = 8;
+  const events = allEvents.slice(0, initialEventLimit);
 
   const summary = {
     node_count: nodes.length,
@@ -269,9 +296,9 @@ export function createGraph(): GraphData {
   const quality = {
     // Mock contract follows authority semantics: conflict_count reflects current confirmed relations only.
     conflict_count: 0,
-    low_confidence_count: events.filter((event) => (event.confidence ?? 0) < 0.6).length,
+    low_confidence_count: allEvents.filter((event) => (event.confidence ?? 0) < 0.6).length,
     conflicts: [],
-    low_confidence_samples: events
+    low_confidence_samples: allEvents
       .filter((event) => (event.confidence ?? 0) < 0.6)
       .slice(0, 5)
       .map((event) => ({
@@ -284,8 +311,33 @@ export function createGraph(): GraphData {
         confidence: event.confidence,
       })),
   };
+  const events_page = buildGraphEventsPageInfo(allEvents.length, 0, initialEventLimit);
 
-  return { nodes, edges, events, summary, quality };
+  return { nodes, edges, events, events_page, summary, quality };
+}
+
+export function createGraphEventsPage(cursor?: string | null, limit = 8): GraphEventsPageResponse {
+  const graph = createGraph();
+  const allEvents: GraphEvent[] = Array.from({ length: 18 }, (_, i) => ({
+    relation_event_id: i + 1,
+    chunk_id: 160 - i * 6,
+    from_entity_id: i % 5,
+    to_entity_id: (i + 1) % 5,
+    from_name: graph.nodes[i % 5]?.name ?? "未知角色",
+    to_name: graph.nodes[(i + 1) % 5]?.name ?? "未知角色",
+    relation_type: ["师徒", "恋人", "仇敌", "盟友", "朋友", "竞争", "合作"][i % 7],
+    change_type: ["新建", "强化", "弱化", "断裂"][i % 4],
+    evidence: `${graph.nodes[i % 5]?.name ?? "角色"}与${graph.nodes[(i + 1) % 5]?.name ?? "角色"}在关键桥段中产生新的互动。`,
+    confidence: +(0.42 + (i % 7) * 0.08).toFixed(2),
+    source_relation_row_id: i + 100,
+    directionality: "bidirectional",
+  }));
+  const start = decodeGraphEventsCursor(cursor);
+  const pageInfo = buildGraphEventsPageInfo(allEvents.length, start, limit);
+  return {
+    events: allEvents.slice(start, start + limit),
+    page_info: pageInfo,
+  };
 }
 
 /* ------------------------------------------------------------------ */

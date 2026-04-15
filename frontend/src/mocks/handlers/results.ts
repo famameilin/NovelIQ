@@ -8,6 +8,7 @@ import {
   createTopics,
   createDiagnosis,
   createGraph,
+  createGraphEventsPage,
   createTimeline,
   createNarrativeStructure,
   createEmotionStats,
@@ -105,6 +106,27 @@ export const graphHandler = http.get(
 
     await delay(400);
     return HttpResponse.json(createGraph());
+  }
+);
+
+// GET /api/novels/:novelId/graph/events
+export const graphEventsHandler = http.get(
+  `${BASE}/api/novels/:novelId/graph/events`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const url = new URL(request.url);
+    const taskId = url.searchParams.get("task_id") ?? "";
+
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(200);
+    return HttpResponse.json(
+      createGraphEventsPage(
+        url.searchParams.get("events_cursor"),
+        Number(url.searchParams.get("events_limit") ?? "8")
+      )
+    );
   }
 );
 

@@ -229,6 +229,14 @@ export interface GraphPageQualityReport {
   low_confidence_samples: GraphLowConfidenceSample[];
 }
 
+export interface GraphEventsPageInfo {
+  limit: number;
+  returned_count: number;
+  total: number;
+  has_more: boolean;
+  next_cursor?: string | null;
+}
+
 // 创建时间: 2026-04-05
 // 创建者: GLM-5
 // 任务: Phase 2-A 人物关系图谱 API 类型定义
@@ -238,8 +246,14 @@ export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   events?: GraphEvent[];
+  events_page?: GraphEventsPageInfo;
   summary?: GraphPageSummary;
   quality?: GraphPageQualityReport;
+}
+
+export interface GraphEventsPageResponse {
+  events: GraphEvent[];
+  page_info: GraphEventsPageInfo;
 }
 
 // ============================================================
@@ -279,6 +293,7 @@ export interface ForceGraphData {
   nodes: GraphNodeObject[];
   links: GraphLinkObject[];
   events?: GraphEvent[];
+  events_page?: GraphEventsPageInfo;
   summary?: GraphPageSummary;
   quality?: GraphPageQualityReport;
 }
