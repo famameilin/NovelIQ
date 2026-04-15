@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -358,6 +358,35 @@ describe("GraphPage pagination", () => {
 
     expect(await screen.findByText("事件 ID")).toBeInTheDocument();
     expect(screen.getByText("102")).toBeInTheDocument();
+  });
+
+  it("clears the deep-link fallback hint after the user manually selects an event", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [
+        { from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 },
+        { from: "task-a Older", to: "task-a Ally", eventId: 102, chunkId: 48 },
+      ],
+      total: 2,
+      nextCursor: null,
+    });
+
+    getGraphMock.mockResolvedValue(taskAGraph);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。")).toBeInTheDocument();
+    const targetEventButton = screen.getByText(/第 50 段 · task-a Hero → task-a Ally/).closest("button");
+    expect(targetEventButton).not.toBeNull();
+    fireEvent.click(targetEventButton!);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText("未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。")
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("101")).toBeInTheDocument();
   });
 
   it("clears the graph event selection instead of highlighting the wrong event when no deep-link match exists", async () => {
