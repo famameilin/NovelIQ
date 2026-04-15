@@ -111,6 +111,8 @@ export function GraphPage() {
   const [eventsPageInfo, setEventsPageInfo] = useState<GraphEventsPageInfo | null>(null);
   const [isEventsLoading, setIsEventsLoading] = useState(false);
   const [eventsLoadError, setEventsLoadError] = useState<string | null>(null);
+  const eventsRequestVersionRef = useRef(0);
+  const currentTaskIdRef = useRef<string | null>(currentTaskId);
 
   useEffect(() => {
     if (novelId) {
@@ -126,6 +128,10 @@ export function GraphPage() {
       navigate(`/novels/${novelId}/graph?task_id=${currentTaskId}`, { replace: true });
     }
   }, [currentTaskId, novelId, navigate, searchParams]);
+
+  useEffect(() => {
+    currentTaskIdRef.current = currentTaskId;
+  }, [currentTaskId]);
 
   const enabled = !!novelId && !!currentTaskId;
 
@@ -250,6 +256,10 @@ export function GraphPage() {
   const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
 
   useEffect(() => {
+    // Bump the request version whenever the snapshot changes so late load-more
+    // responses from the previous task/view are ignored instead of polluting
+    // the current page-level history window.
+    eventsRequestVersionRef.current += 1;
     setLoadedEvents(graphData?.events ?? []);
     setEventsPageInfo(graphData?.events_page ?? null);
     setEventsLoadError(null);
@@ -370,20 +380,33 @@ export function GraphPage() {
       return;
     }
 
+    const requestTaskId = currentTaskId;
+    const requestCursor = eventsPageInfo.next_cursor;
+    const requestVersion = eventsRequestVersionRef.current + 1;
+    eventsRequestVersionRef.current = requestVersion;
+
     setIsEventsLoading(true);
     setEventsLoadError(null);
     try {
       const page = await getGraphEvents(novelId, currentTaskId, {
-        eventsCursor: eventsPageInfo.next_cursor,
+        eventsCursor: requestCursor,
         eventsLimit: eventsPageInfo.limit,
       });
+      if (eventsRequestVersionRef.current !== requestVersion || currentTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       setLoadedEvents((currentEvents) => mergeGraphEvents(currentEvents, page.events));
       setEventsPageInfo(page.page_info);
     } catch (error) {
+      if (eventsRequestVersionRef.current !== requestVersion || currentTaskIdRef.current !== requestTaskId) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "加载更多 relation events 失败";
       setEventsLoadError(message);
     } finally {
-      setIsEventsLoading(false);
+      if (eventsRequestVersionRef.current === requestVersion && currentTaskIdRef.current === requestTaskId) {
+        setIsEventsLoading(false);
+      }
     }
   }, [currentTaskId, eventsPageInfo, isEventsLoading, novelId]);
 

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import base64
+import json
 import uuid
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.api.routes.results_fetchers import _fetch_graph_events_page, _fetch_graph_snapshot
 from src.knowledge.authority import ConfirmedRelation, GraphAuthorityView, RelationEvent, StableState
 from src.storage.repositories import GraphRepository, RunRepository
+from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
 
 
 def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
@@ -311,6 +316,115 @@ def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch
         "has_more": False,
         "next_cursor": None,
     }
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "not-base64",
+        base64.urlsafe_b64encode(json.dumps({"offset": True}).encode("utf-8")).decode("ascii").rstrip("="),
+        base64.urlsafe_b64encode(json.dumps({"offset": False}).encode("utf-8")).decode("ascii").rstrip("="),
+        base64.urlsafe_b64encode(json.dumps({"offset": "1"}).encode("utf-8")).decode("ascii").rstrip("="),
+    ],
+)
+def test_fetch_graph_events_page_rejects_invalid_cursor_payloads(monkeypatch, cursor: str) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-invalid-graph-cursor"
+            return GraphAuthorityView(
+                stable_states=[],
+                confirmed_relations=[],
+                relation_events=[
+                    RelationEvent(
+                        relation_event_id=1,
+                        chunk_id=3,
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        change_type="新建",
+                        confidence=0.8,
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    with pytest.raises(ValueError, match="invalid graph events cursor"):
+        _fetch_graph_events_page(
+            "run-invalid-graph-cursor",
+            annotation_repo,
+            events_cursor=cursor,
+        )
+
+
+def test_get_graph_events_invalid_cursor_returns_400(api_client, db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{scenario.novel_id}/graph/events",
+        params={"task_id": scenario.task_id, "events_cursor": "not-base64"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid graph events cursor"
+
+
+def test_get_graph_events_out_of_range_cursor_returns_400(api_client, db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+    out_of_range_cursor = base64.urlsafe_b64encode(json.dumps({"offset": 99}).encode("utf-8")).decode("ascii").rstrip(
+        "="
+    )
+
+    response = api_client.get(
+        f"/api/novels/{scenario.novel_id}/graph/events",
+        params={"task_id": scenario.task_id, "events_cursor": out_of_range_cursor},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "graph events cursor is out of range"
+
+
+def test_get_graph_events_pagination_contract_is_continuous(api_client, db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+
+    first_page = api_client.get(
+        f"/api/novels/{scenario.novel_id}/graph/events",
+        params={"task_id": scenario.task_id, "events_limit": 1},
+    )
+
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert [event["chunk_id"] for event in first_payload["events"]] == [4]
+    assert first_payload["page_info"]["returned_count"] == 1
+    assert first_payload["page_info"]["total"] == 3
+    assert first_payload["page_info"]["has_more"] is True
+
+    second_page = api_client.get(
+        f"/api/novels/{scenario.novel_id}/graph/events",
+        params={
+            "task_id": scenario.task_id,
+            "events_limit": 1,
+            "events_cursor": first_payload["page_info"]["next_cursor"],
+        },
+    )
+
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert [event["chunk_id"] for event in second_payload["events"]] == [2]
+    assert second_payload["page_info"]["returned_count"] == 1
+    assert second_payload["page_info"]["total"] == 3
+    assert second_payload["page_info"]["has_more"] is True
+    assert second_payload["page_info"]["next_cursor"] != first_payload["page_info"]["next_cursor"]
+    assert second_payload["events"][0]["relation_event_id"] != first_payload["events"][0]["relation_event_id"]
 
 
 def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monkeypatch) -> None:
