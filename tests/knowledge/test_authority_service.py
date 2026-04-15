@@ -5,6 +5,11 @@ import uuid
 import pytest
 
 from src.knowledge.authority import (
+    EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS,
+    GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
+    GRAPH_REPORT_AUTHORITY_DEPENDENCY_FIELDS,
+    LEVEL1_AUTHORITY_DEPENDENCY_FIELDS,
+    TIMELINE_AUTHORITY_DEPENDENCY_FIELDS,
     GraphAuthorityReport,
     GraphPageQualityDetails,
     GraphPageSummary,
@@ -310,6 +315,10 @@ def test_build_level1_snapshot_entities_exclude_transient_prompt_local_state(db_
     assert len(snapshot.canonical_entities) == 1
     assert not hasattr(snapshot.canonical_entities[0], "last_action")
     assert not hasattr(snapshot.canonical_entities[0], "last_emotion_score")
+    assert not hasattr(snapshot, "relation_events")
+    assert not hasattr(snapshot, "stable_states")
+    assert not hasattr(snapshot, "summary")
+    assert not hasattr(snapshot, "quality")
 
 
 def test_build_level1_snapshot_keeps_inactive_relations_outside_confirmed_relations(db_session) -> None:
@@ -613,3 +622,72 @@ def test_build_graph_view_keeps_history_in_events_while_current_relations_stay_a
         ("林渡", "谢危", "断裂"),
         ("林渡", "谢危", "新建"),
     }
+
+
+def test_authority_dependency_matrix_constants_match_consumer_boundaries() -> None:
+    assert set(LEVEL1_AUTHORITY_DEPENDENCY_FIELDS.keys()) == {
+        "alias_mappings",
+        "canonical_entities",
+        "confirmed_relations",
+        "entity_types",
+    }
+    assert set(TIMELINE_AUTHORITY_DEPENDENCY_FIELDS.keys()) == {
+        "character_entities",
+        "entity_lifecycles",
+        "relation_events",
+    }
+    assert set(GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS.keys()) == {
+        "stable_states",
+        "confirmed_relations",
+        "relation_events",
+    }
+    assert set(GRAPH_REPORT_AUTHORITY_DEPENDENCY_FIELDS.keys()) == {"summary", "quality"}
+    assert set(EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS.keys()) == {
+        "canonical_entities",
+        "current_relations",
+        "relation_events",
+    }
+
+
+def test_authority_views_do_not_expose_other_consumers_shortcuts(db_session) -> None:
+    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Authority Consumer Boundaries",
+    )
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="并肩迎敌",
+        confidence=0.82,
+        source_relation_row_id=18101,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    level1 = service.build_level1_snapshot(run_id)
+    timeline = service.build_timeline_view(run_id)
+    graph_view = service.build_graph_view(run_id)
+    report = service.build_graph_report(run_id)
+
+    assert not hasattr(level1, "relation_events")
+    assert not hasattr(level1, "stable_states")
+    assert not hasattr(timeline, "confirmed_relations")
+    assert not hasattr(timeline, "stable_states")
+    assert not hasattr(graph_view, "entity_lifecycles")
+    assert not hasattr(graph_view, "summary")
+    assert not hasattr(graph_view, "quality")
+    assert not hasattr(report, "canonical_entities")
+    assert not hasattr(report, "confirmed_relations")
+    assert not hasattr(report, "relation_events")

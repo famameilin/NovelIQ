@@ -184,6 +184,19 @@ function createTimelineResponse(): TimelineResponse {
   };
 }
 
+function createEmptyTimelineResponse(): TimelineResponse {
+  return {
+    meta: {
+      novel_id: "novel-1",
+      novel_name: "Timeline Review Novel",
+      total_chunks: 0,
+    },
+    phases: [],
+    nodes: [],
+    tension_curve: [],
+  };
+}
+
 function renderPage() {
   const queryClient = createQueryClient();
   return render(
@@ -206,6 +219,20 @@ describe("TimelinePage deep links", () => {
     getTimelineMock.mockResolvedValue(createTimelineResponse());
   });
 
+  it("shows the no-task state when no task is selected", async () => {
+    currentTimelineSearchParams = "";
+    useNovelStore.setState({
+      currentNovelId: null,
+      currentTaskId: null,
+      novelsCache: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("请先选择分析任务")).toBeInTheDocument();
+    expect(getTimelineMock).not.toHaveBeenCalled();
+  });
+
   it("prefers relation_event_id over selected_chunk when deep-linking from graph", async () => {
     renderPage();
 
@@ -220,8 +247,42 @@ describe("TimelinePage deep links", () => {
     renderPage();
 
     expect(await screen.findByText("selected-12")).toBeInTheDocument();
-    expect(screen.getByText("event-9999")).toBeInTheDocument();
+    expect(screen.getByText("event-none")).toBeInTheDocument();
     expect(screen.getByText("未定位到指定关系事件，已回退到对应时间节点。")).toBeInTheDocument();
+  });
+
+  it("shows a no-match hint without keeping stale selection when neither relation event nor chunk exists", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=99&relation_event_id=9999";
+
+    renderPage();
+
+    expect(await screen.findByText("selected-none")).toBeInTheDocument();
+    expect(screen.getByText("event-none")).toBeInTheDocument();
+    expect(screen.getByText("未定位到对应事件。")).toBeInTheDocument();
+  });
+
+  it("shows explicit empty states for missing phases and nodes", async () => {
+    getTimelineMock.mockResolvedValue(createEmptyTimelineResponse());
+
+    renderPage();
+
+    expect(await screen.findByText("暂无阶段数据")).toBeInTheDocument();
+    expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
+  });
+
+  it("shows the error state and supports retry", async () => {
+    getTimelineMock.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(createTimelineResponse());
+
+    renderPage();
+
+    expect(await screen.findAllByText("加载失败")).toHaveLength(2);
+    const retryButtons = await screen.findAllByRole("button", { name: /重试/ });
+    retryButtons[0]?.click();
+
+    await waitFor(() => {
+      expect(getTimelineMock).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText("selected-12")).toBeInTheDocument();
   });
 
   it("clears deep-link selection when switching to another task", async () => {

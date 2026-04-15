@@ -46,6 +46,7 @@ from src.api.routes.results_fetchers.scoring import _calculate_protagonist_score
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
 from src.knowledge.authority import (
+    GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
     ExportGraphAuthorityView,
     GraphPageQualityDetails,
     GraphPageSummary,
@@ -164,6 +165,52 @@ def _serialize_graph_page_quality(quality: GraphPageQualityDetails) -> dict[str,
             for event in quality.low_confidence_samples
         ],
     }
+
+
+def _validate_authority_dependency_items(
+    items: list[Any],
+    required_fields: tuple[str, ...],
+    *,
+    contract_name: str,
+) -> None:
+    """Validate that a consumer-facing authority slice exposes its required fields."""
+
+    for item in items:
+        missing_fields = [field_name for field_name in required_fields if not hasattr(item, field_name)]
+        if missing_fields:
+            raise RuntimeError(
+                f"{contract_name} is missing required authority fields: {', '.join(missing_fields)}"
+            )
+
+
+def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], list[Any], list[Any]]:
+    """
+    Resolve the narrow graph-page authority slice used by the route assembler.
+
+    中文注释：`/graph` 页面只允许消费 stable_states、confirmed_relations、
+    relation_events 三块 authority facts。assembler 不得下探 canonical_entities，
+    更不能回退去读 summary/quality/timeline lifecycle 或 repository 原始形状。
+    """
+
+    stable_states = list(getattr(graph_view, "stable_states", []))
+    confirmed_relations = list(getattr(graph_view, "confirmed_relations", []))
+    relation_events = list(getattr(graph_view, "relation_events", []))
+
+    required_slices = {
+        "stable_states": stable_states,
+        "confirmed_relations": confirmed_relations,
+        "relation_events": relation_events,
+    }
+    for slice_name, slice_items in required_slices.items():
+        if not hasattr(graph_view, slice_name):
+            raise RuntimeError(f"graph page authority contract is missing required slice: {slice_name}")
+        _validate_authority_dependency_items(
+            slice_items,
+            GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS[slice_name],
+            contract_name=f"graph page authority contract.{slice_name}",
+        )
+
+    return stable_states, confirmed_relations, relation_events
 
 
 def _paginate_graph_relation_events(
@@ -898,6 +945,7 @@ def _fetch_graph_snapshot(
 
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     graph_view = authority_service.build_graph_view(run_id)
+    stable_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
     nodes = [
         {
             "entity_id": str(row.entity_id),
@@ -908,7 +956,7 @@ def _fetch_graph_snapshot(
             "role": row.primary_role_function,
             "status": row.status,
         }
-        for row in graph_view.stable_states
+        for row in stable_states
     ]
 
     edges = [
@@ -923,14 +971,14 @@ def _fetch_graph_snapshot(
             "tension_index": edge.tension_index,
             "is_active": edge.is_active,
         }
-        for edge in graph_view.confirmed_relations
+        for edge in confirmed_relations
     ]
 
     # Keep page-facing history samples lightweight, but compute quality against
     # the full authority event history so long-running books do not hide older
     # low-confidence signals once they exceed the UI sample cap.
     paged_relation_events, events_page = _paginate_graph_relation_events(
-        graph_view.relation_events,
+        relation_events,
         cursor=events_cursor,
         limit=events_limit,
     )
@@ -942,10 +990,10 @@ def _fetch_graph_snapshot(
     # 这里显式从 authority facts 组装页面 DTO，避免 diagnosis/export 共享层再被
     # 页面高亮或样本字段反向污染。
     summary = _serialize_graph_page_summary(
-        build_graph_page_summary(graph_view.stable_states, graph_view.confirmed_relations)
+        build_graph_page_summary(stable_states, confirmed_relations)
     )
     quality = _serialize_graph_page_quality(
-        build_graph_page_quality(graph_view.confirmed_relations, graph_view.relation_events)
+        build_graph_page_quality(confirmed_relations, relation_events)
     )
 
     return {
@@ -977,8 +1025,9 @@ def _fetch_graph_events_page(
 
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     graph_view = authority_service.build_graph_view(run_id)
+    _stable_states, _confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
     paged_relation_events, page_info = _paginate_graph_relation_events(
-        graph_view.relation_events,
+        relation_events,
         cursor=events_cursor,
         limit=events_limit,
     )

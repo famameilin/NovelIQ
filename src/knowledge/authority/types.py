@@ -1,6 +1,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Final
+
+# 中文注释：以下 allowlist 常量把 authority 输出矩阵直接固定在代码里。
+# consumer 只能依赖自己那一层明确允许的字段，避免继续跨层借字段。
+LEVEL1_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "alias_mappings": ("alias", "canonical", "confidence", "source"),
+    "canonical_entities": (
+        "name",
+        "entity_type",
+        "entity_id",
+        "first_seen_chunk",
+        "last_seen_chunk",
+        "primary_role_function",
+        "status",
+        "source_confidence",
+    ),
+    "confirmed_relations": (
+        "from_name",
+        "to_name",
+        "relation_type",
+        "from_entity_id",
+        "to_entity_id",
+        "is_active",
+        "first_seen_chunk",
+        "last_seen_chunk",
+        "change_count",
+        "support_count",
+        "latest_event_id",
+        "tension_index",
+    ),
+    "entity_types": ("name", "entity_type"),
+}
 
 
 @dataclass(slots=True)
@@ -149,6 +181,22 @@ class Level1AuthoritySnapshot:
     entity_types: list[EntityTypeFact] = field(default_factory=list)
 
 
+# 中文注释：timeline 只允许消费角色子图、生命周期与关系事件三块共享字段，
+# 不允许从 GraphAuthorityView 或 repository 原始形状反推历史语义。
+TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "character_entities": ("entity_id", "name", "entity_type"),
+    "entity_lifecycles": ("entity_id", "name", "entity_type", "first_seen_chunk", "last_seen_chunk"),
+    "relation_events": (
+        "chunk_id",
+        "from_entity_id",
+        "to_entity_id",
+        "relation_type",
+        "change_type",
+        "evidence",
+    ),
+}
+
+
 @dataclass(slots=True)
 class TimelineAuthorityView:
     """
@@ -167,6 +215,46 @@ class TimelineAuthorityView:
     character_entities: list[CanonicalEntity] = field(default_factory=list)
     entity_lifecycles: list[EntityLifecycle] = field(default_factory=list)
     relation_events: list[RelationEvent] = field(default_factory=list)
+
+
+# 中文注释：graph page route assembler 只允许读取这三块 authority facts。
+# 页面 summary / quality / events_page 仍由 route/product 层自己组装。
+GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "stable_states": (
+        "entity_id",
+        "name",
+        "entity_type",
+        "status",
+        "primary_role_function",
+        "first_seen_chunk",
+        "last_seen_chunk",
+    ),
+    "confirmed_relations": (
+        "from_entity_id",
+        "to_entity_id",
+        "from_name",
+        "to_name",
+        "relation_type",
+        "support_count",
+        "change_count",
+        "tension_index",
+        "is_active",
+    ),
+    "relation_events": (
+        "relation_event_id",
+        "chunk_id",
+        "from_entity_id",
+        "to_entity_id",
+        "from_name",
+        "to_name",
+        "relation_type",
+        "change_type",
+        "evidence",
+        "confidence",
+        "directionality",
+        "source_relation_row_id",
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -236,6 +324,13 @@ class GraphQualitySignals:
             "conflict_count": self.conflict_count,
             "low_confidence_count": self.low_confidence_count,
         }
+
+
+# 中文注释：report 只给 diagnosis/export 共用聚合信号，字段必须保持最小集。
+GRAPH_REPORT_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "summary": ("node_count", "edge_count", "density"),
+    "quality": ("conflict_count", "low_confidence_count"),
+}
 
 
 @dataclass(slots=True)
@@ -333,6 +428,44 @@ class ExportGraphAuthorityView:
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     current_relations: list[ExportRelationSnapshot] = field(default_factory=list)
     relation_events: list[RelationEvent] = field(default_factory=list)
+
+
+EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "canonical_entities": (
+        "name",
+        "entity_type",
+        "entity_id",
+        "first_seen_chunk",
+        "last_seen_chunk",
+        "primary_role_function",
+        "status",
+        "source_confidence",
+    ),
+    "current_relations": (
+        "relation_id",
+        "from_name",
+        "to_name",
+        "relation_type",
+        "first_seen_chunk",
+        "last_seen_chunk",
+        "latest_event_id",
+        "is_active",
+    ),
+    "relation_events": (
+        "relation_event_id",
+        "chunk_id",
+        "from_entity_id",
+        "to_entity_id",
+        "from_name",
+        "to_name",
+        "relation_type",
+        "change_type",
+        "evidence",
+        "confidence",
+        "directionality",
+        "source_relation_row_id",
+    ),
+}
 
 
 @dataclass(slots=True)

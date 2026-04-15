@@ -98,7 +98,9 @@ vi.mock("@/components/charts/GraphLegend", () => ({
 }));
 
 vi.mock("@/components/charts/NodeDetailPanel", () => ({
-  NodeDetailPanel: passthroughComponent("node-detail-panel"),
+  NodeDetailPanel: ({ node }: { node?: GraphData["nodes"][number] | null }) => (
+    <div data-testid="node-detail-panel">{node ? `selected-node:${node.name}` : "selected-node:none"}</div>
+  ),
 }));
 
 vi.mock("@/api/results", () => ({
@@ -210,6 +212,45 @@ function createGraphData(
   };
 }
 
+function createEmptyGraphData(): GraphData {
+  return {
+    nodes: [],
+    edges: [],
+    events: [],
+    events_page: {
+      limit: 200,
+      returned_count: 0,
+      total: 0,
+      has_more: false,
+      next_cursor: null,
+    },
+    summary: {
+      node_count: 0,
+      edge_count: 0,
+      density: 0,
+      core_characters: [],
+      key_relations: [],
+    },
+    quality: {
+      conflict_count: 0,
+      low_confidence_count: 0,
+      conflicts: [],
+      low_confidence_samples: [],
+    },
+  };
+}
+
+function createContractBrokenGraphData(): GraphData {
+  return {
+    ...createGraphData("task-broken", {
+      eventNames: [{ from: "task-broken Hero", to: "task-broken Ally", eventId: 101, chunkId: 50 }],
+      total: 1,
+      nextCursor: null,
+    }),
+    summary: undefined as unknown as GraphData["summary"],
+  };
+}
+
 function createNovel(): Novel {
   return {
     novel_id: "novel-1",
@@ -250,6 +291,57 @@ describe("GraphPage pagination", () => {
     });
     getNovelMock.mockResolvedValue(createNovel());
     getCharactersMock.mockResolvedValue([]);
+  });
+
+  it("shows the no-task empty state when no task is selected", async () => {
+    currentGraphSearchParams = "";
+    useNovelStore.setState({
+      currentNovelId: null,
+      currentTaskId: null,
+      novelsCache: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("请先选择分析任务")).toBeInTheDocument();
+    expect(getGraphMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the graph error state and supports retry", async () => {
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 }],
+      total: 1,
+      nextCursor: null,
+    });
+    getGraphMock.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(taskAGraph);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("图谱数据加载失败")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /重试/ }));
+
+    expect(await screen.findByText("task-a Hero")).toBeInTheDocument();
+    expect(getGraphMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the empty graph state when the task has no graph nodes", async () => {
+    getGraphMock.mockResolvedValue(createEmptyGraphData());
+
+    renderPage();
+
+    await screen.findByText(/该任务尚未产生图谱 authority 输出/);
+  });
+
+  it("shows the graph contract issue state when required page fields are missing", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    getGraphMock.mockResolvedValue(createContractBrokenGraphData());
+
+    renderPage();
+
+    await screen.findByText(/\/graph authority contract 不完整/);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
   });
 
   it("merges load-more history into the current task window", async () => {
@@ -298,6 +390,53 @@ describe("GraphPage pagination", () => {
 
     await screen.findByText(/task-a Extra → task-a Ally/);
     expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+  });
+
+  it("shows load-more errors and clears them after a successful retry", async () => {
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 }],
+      total: 2,
+      nextCursor: "cursor-a-1",
+    });
+    const taskASecondPage: GraphEventsPageResponse = {
+      events: [
+        {
+          relation_event_id: 102,
+          chunk_id: 48,
+          from_entity_id: 1,
+          to_entity_id: 2,
+          from_name: "task-a Extra",
+          to_name: "task-a Ally",
+          relation_type: "盟友",
+          change_type: "强化",
+          evidence: "task-a Extra -> task-a Ally",
+          confidence: 0.88,
+          source_relation_row_id: 102,
+          directionality: "bidirectional",
+        },
+      ],
+      page_info: {
+        limit: 1,
+        returned_count: 1,
+        total: 2,
+        has_more: false,
+        next_cursor: null,
+      },
+    };
+
+    getGraphMock.mockResolvedValue(taskAGraph);
+    getGraphEventsMock.mockRejectedValueOnce(new Error("分页失败")).mockResolvedValueOnce(taskASecondPage);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText("task-a Hero");
+    await user.click(await screen.findByRole("button", { name: "加载更多" }));
+    expect(await screen.findByText("分页失败")).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "加载更多" }));
+    await screen.findByText(/task-a Extra → task-a Ally/);
+    expect(screen.queryByText("分页失败")).not.toBeInTheDocument();
   });
 
   it("navigates to timeline with the selected relation event", async () => {
@@ -373,10 +512,9 @@ describe("GraphPage pagination", () => {
 
     getGraphMock.mockResolvedValue(taskAGraph);
 
-    const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByText("未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。")).toBeInTheDocument();
+    await screen.findByText(/未在当前事件窗口定位到指定关系事件/);
     const targetEventButton = screen.getByText(/第 50 段 · task-a Hero → task-a Ally/).closest("button");
     expect(targetEventButton).not.toBeNull();
     fireEvent.click(targetEventButton!);
@@ -482,5 +620,53 @@ describe("GraphPage pagination", () => {
     });
     expect(screen.getByRole("button", { name: "加载更多" })).toBeEnabled();
     expect(screen.getByText("1 / 2")).toBeInTheDocument();
+  });
+
+  it("clears stale node selection, event detail, load-more errors, and deep-link hints after switching tasks", async () => {
+    currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [
+        { from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 },
+        { from: "task-a Older", to: "task-a Ally", eventId: 102, chunkId: 48 },
+      ],
+      total: 3,
+      nextCursor: "cursor-a-1",
+    });
+    const taskBGraph = createGraphData("task-b", {
+      eventNames: [{ from: "task-b Hero", to: "task-b Ally", eventId: 301, chunkId: 40 }],
+      total: 1,
+      nextCursor: null,
+    });
+
+    getGraphMock.mockImplementation(async (_novelId: string, taskId: string) => {
+      if (taskId === "task-a") return taskAGraph;
+      if (taskId === "task-b") return taskBGraph;
+      throw new Error(`unexpected task id: ${taskId}`);
+    });
+    getGraphEventsMock.mockRejectedValue(new Error("旧任务分页失败"));
+
+    const user = userEvent.setup();
+    const view = renderPage();
+
+    await screen.findByText(/未在当前事件窗口定位到指定关系事件/);
+    await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
+    expect(screen.getByText("102")).toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "加载更多" }));
+    expect(await screen.findByText("旧任务分页失败")).toBeInTheDocument();
+
+    currentGraphSearchParams = "task_id=task-b";
+    view.rerender(
+      <QueryClientProvider client={view.queryClient}>
+        <GraphPage />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("task-b Hero");
+    expect(screen.queryByText("旧任务分页失败")).not.toBeInTheDocument();
+    expect(screen.queryByText(/未在当前事件窗口定位到指定关系事件/)).not.toBeInTheDocument();
+    expect(screen.getByText("selected-node:none")).toBeInTheDocument();
+    expect(screen.queryByText("102")).not.toBeInTheDocument();
+    expect(screen.getByText("301")).toBeInTheDocument();
   });
 });
