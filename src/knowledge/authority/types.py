@@ -220,6 +220,7 @@ class ExportGraphAuthorityView:
     GraphAuthorityReport with export-only concerns.
     """
 
+    canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     current_relations: list[ExportRelationSnapshot] = field(default_factory=list)
     relation_events: list[RelationEvent] = field(default_factory=list)
 

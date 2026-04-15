@@ -39,7 +39,6 @@ from src.metrics.timeline_metrics import (
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
-    GraphRepository,
     StatsRepository,
 )
 
@@ -73,8 +72,8 @@ def load_character_bundle(
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    graph_repo: GraphRepository,
     alias_map: dict[str, str],
+    export_graph_view: ExportGraphAuthorityView,
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
     """
     加载角色相关数据
@@ -98,9 +97,9 @@ def load_character_bundle(
     if not characters:
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
-
-    graph_entities = graph_repo.fetch_entities(run_id)
-    valid_character_names = valid_character_names | {e.canonical_name for e in graph_entities}
+    # 中文注释：export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
+    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉。
+    valid_character_names = valid_character_names | {entity.name for entity in export_graph_view.canonical_entities}
 
     return characters, arc_scores, main_characters, valid_character_names, missing_fields
 
@@ -322,7 +321,6 @@ def fetch_all_results_data(
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    graph_repo: GraphRepository,
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
@@ -335,7 +333,7 @@ def fetch_all_results_data(
     chunk_curves, missing_fields = load_core_results(run_id, stats_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, graph_repo, alias_map
+        run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view
     )
     missing_fields.extend(char_missing)
 
