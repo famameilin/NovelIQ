@@ -137,6 +137,7 @@ async def _run_phase2(
     main_characters: str | None,
     position_pct: float | None,
     chapter_id: int | None,
+    evidence_bundle,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
     rag_retriever: Any | None,
@@ -162,6 +163,9 @@ async def _run_phase2(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
+        # 中文注释：优先透传上游已准备好的 evidence bundle，
+        # 保证 AnnotationClient -> multi_phase -> Phase2 的真实入口也能复用同一份证据上下文。
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
         rag_retriever=rag_retriever,
@@ -440,6 +444,7 @@ async def annotate_chunk_parallel(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
+            evidence_bundle=evidence_bundle,
             cloud_client=cloud_client,
             run_id=run_id,
             rag_retriever=rag_retriever,
@@ -581,6 +586,7 @@ async def annotate_chunk_serial(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
         rag_retriever=rag_retriever,
