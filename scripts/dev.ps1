@@ -2,7 +2,8 @@ param(
     [Parameter(Position = 0)]
     [string]$Command = "help",
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$Args
+    [AllowNull()]
+    [object[]]$CommandArgs
 )
 
 Set-StrictMode -Version Latest
@@ -10,6 +11,13 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
+$CommandArgs = @(
+    $CommandArgs |
+    Where-Object { $null -ne $_ -and $_ -ne "" } |
+    ForEach-Object { [string]$_ }
+)
+# 中文注释：不要和 PowerShell 自动变量 `$Args` 重名；同时把剩余参数归一化成数组，
+# 避免 test/lint/typecheck 的无参入口在严格模式下因为空值直接崩掉。
 
 function Test-CommandExists {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -77,41 +85,41 @@ switch ($Command.ToLowerInvariant()) {
     }
     "api" {
         Ensure-Setup
-        $commandArgs = @("python", "-m", "src.api.main") + $Args
+        $commandArgs = @("python", "-m", "src.api.main") + $CommandArgs
         Run-Uv -CommandArgs $commandArgs
     }
     "cli" {
         Ensure-Setup
-        if ($Args.Count -eq 0) {
+        if ($CommandArgs.Count -eq 0) {
             throw "Missing CLI arguments. Example: scripts/dev.ps1 cli preprocess --source <file> --db <db_path>"
         }
-        $commandArgs = @("python", "-m", "src.cli.main") + $Args
+        $commandArgs = @("python", "-m", "src.cli.main") + $CommandArgs
         Run-Uv -CommandArgs $commandArgs
     }
     "test" {
         Ensure-Setup
-        if ($Args.Count -eq 0) {
+        if ($CommandArgs.Count -eq 0) {
             Run-Uv -CommandArgs @("--group", "dev", "python", "-m", "pytest", "tests/", "-v")
         } else {
-            $commandArgs = @("--group", "dev", "python", "-m", "pytest") + $Args
+            $commandArgs = @("--group", "dev", "python", "-m", "pytest") + $CommandArgs
             Run-Uv -CommandArgs $commandArgs
         }
     }
     "lint" {
         Ensure-Setup
-        if ($Args.Count -eq 0) {
+        if ($CommandArgs.Count -eq 0) {
             Run-Uv -CommandArgs @("--group", "dev", "ruff", "check", "src", "tests", "scripts")
         } else {
-            $commandArgs = @("--group", "dev", "ruff", "check") + $Args
+            $commandArgs = @("--group", "dev", "ruff", "check") + $CommandArgs
             Run-Uv -CommandArgs $commandArgs
         }
     }
     "typecheck" {
         Ensure-Setup
-        if ($Args.Count -eq 0) {
+        if ($CommandArgs.Count -eq 0) {
             Run-Uv -CommandArgs @("--group", "dev", "mypy", "src")
         } else {
-            $commandArgs = @("--group", "dev", "mypy") + $Args
+            $commandArgs = @("--group", "dev", "mypy") + $CommandArgs
             Run-Uv -CommandArgs $commandArgs
         }
     }
