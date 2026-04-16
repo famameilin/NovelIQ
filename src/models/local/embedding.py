@@ -85,7 +85,9 @@ class EmbeddingClient:
                 )
             self._timeout_s = timeout_s
             self._max_retries = max_retries if max_retries is not None else 2
-            self._embedding_dim = embedding_dim if embedding_dim is not None else settings.models.semantic_chunking.embedding_dim
+            self._embedding_dim = (
+                embedding_dim if embedding_dim is not None else settings.models.semantic_chunking.embedding_dim
+            )
 
         if self._embedding_dim <= 0:
             raise ValueError(f"embedding dimension must be positive, got {self._embedding_dim}")
@@ -268,8 +270,7 @@ class EmbeddingClient:
         actual_dim = len(embedding)
         if actual_dim != self._embedding_dim:
             raise ValueError(
-                f"embedding dimension mismatch: expected {self._embedding_dim}, got {actual_dim} "
-                f"(model={self._model})"
+                f"embedding dimension mismatch: expected {self._embedding_dim}, got {actual_dim} (model={self._model})"
             )
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:

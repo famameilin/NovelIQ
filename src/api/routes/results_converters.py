@@ -235,10 +235,7 @@ def validate_aggregate_metrics_contract(aggregate_metrics: dict[str, Any]) -> No
     keys = set(aggregate_metrics.keys())
     forbidden = sorted(keys & AGGREGATE_GRAPH_FORBIDDEN_FIELDS)
     if forbidden:
-        raise ValueError(
-            "aggregate_metrics must not include graph-owned fields: "
-            + ", ".join(forbidden)
-        )
+        raise ValueError("aggregate_metrics must not include graph-owned fields: " + ", ".join(forbidden))
 
     expected = set(AGGREGATE_METRIC_CONTRACT_FIELDS)
     missing = sorted(expected - keys)

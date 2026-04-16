@@ -109,7 +109,9 @@ class TestBuildExtendedResultFromResponse(unittest.TestCase):
             ],
         )
 
-        result = build_extended_result_from_response(response, _candidates("bo_an", "zhang_san", "red_guard", "he_family"))
+        result = build_extended_result_from_response(
+            response, _candidates("bo_an", "zhang_san", "red_guard", "he_family")
+        )
 
         self.assertEqual(len(result.entity_relations), 3)
         self.assertEqual(

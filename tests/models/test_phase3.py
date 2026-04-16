@@ -299,7 +299,6 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         self.assertEqual(attribution, {1: "张三"})
         self.assertEqual(dialogues, [(1, "你好")])
 
-
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
     async def test_return_tones_when_requested(self, mock_attribute: MagicMock) -> None:
         """鏄惧紡璇锋眰鏃惰繑鍥炲\u0192瀵硅櫥鍚屻€?"""
@@ -332,6 +331,7 @@ class TestPostProcessValidationFix(unittest.TestCase):
         alias_map: dict[str, str] | None = None,
     ) -> list[DialogueRecord]:
         from src.models.local.annotation.phase3 import _post_process_validation
+
         candidates = [QuoteCandidate(index=r.index, content=r.content or "") for r in records]
         return _post_process_validation(records, candidates, known_characters, alias_map, chunk_id=1)
 
@@ -375,8 +375,11 @@ class TestPostProcessValidationFix(unittest.TestCase):
         """identity_clue 作为元数据保留，不参与 speaker 修正"""
         records = [
             DialogueRecord(
-                index=1, content="我叫白芷。", is_dialogue=True,
-                speaker=["白芷"], identity_clue="白芷自称名为白芷",
+                index=1,
+                content="我叫白芷。",
+                is_dialogue=True,
+                speaker=["白芷"],
+                identity_clue="白芷自称名为白芷",
             ),
         ]
         result = self._call_validation(records, known_characters=["白芷"])
@@ -396,6 +399,7 @@ class TestPostProcessValidationFix(unittest.TestCase):
     def test_invalid_index_skipped(self) -> None:
         """无效 index 的记录被跳过"""
         from src.models.local.annotation.phase3 import _post_process_validation
+
         records = [
             DialogueRecord(index=99, content="你好", is_dialogue=True, speaker=["白芷"]),
         ]

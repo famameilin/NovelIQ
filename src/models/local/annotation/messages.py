@@ -37,8 +37,7 @@ def _render_alias_map_text(
         alias_rows.extend(alias_map.items())
     elif evidence_bundle is not None and evidence_bundle.level1_snapshot is not None:
         alias_rows.extend(
-            (mapping.alias, mapping.canonical)
-            for mapping in evidence_bundle.level1_snapshot.alias_mappings
+            (mapping.alias, mapping.canonical) for mapping in evidence_bundle.level1_snapshot.alias_mappings
         )
 
     canonical_to_aliases: dict[str, list[str]] = {}

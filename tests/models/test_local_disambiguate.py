@@ -54,7 +54,9 @@ class TestLocalDisambiguate(unittest.TestCase):
             client=MagicMock(),
         )
 
-        result = asyncio.run(client.disambiguate_characters(_candidates("zhang_san", "third_brother", "young_master_zhang")))
+        result = asyncio.run(
+            client.disambiguate_characters(_candidates("zhang_san", "third_brother", "young_master_zhang"))
+        )
 
         self.assertIsInstance(result, ExtendedDisambigResult)
         self.assertEqual(result.canonical_decisions["third_brother"], "zhang_san")
@@ -62,9 +64,7 @@ class TestLocalDisambiguate(unittest.TestCase):
 
     @patch("src.models.disambiguation.call_disambiguate_api")
     def test_disambiguate_characters_with_context_sentences(self, mock_api_call: MagicMock) -> None:
-        mock_api_call.return_value = DisambiguateResponseModel(
-            canonical_decisions={"monkey": "hou_fei_bai"}
-        )
+        mock_api_call.return_value = DisambiguateResponseModel(canonical_decisions={"monkey": "hou_fei_bai"})
         config = TaskModelConfig(
             base_url="http://127.0.0.1:8000/v1",
             model="test-model",
@@ -76,10 +76,12 @@ class TestLocalDisambiguate(unittest.TestCase):
             client=MagicMock(),
         )
 
-        result = asyncio.run(client.disambiguate_characters(
-            _candidates("hou_fei_bai", "monkey"),
-            context_sentences={"monkey": "monkey smiled and said he was hou_fei_bai"},
-        ))
+        result = asyncio.run(
+            client.disambiguate_characters(
+                _candidates("hou_fei_bai", "monkey"),
+                context_sentences={"monkey": "monkey smiled and said he was hou_fei_bai"},
+            )
+        )
 
         self.assertIsInstance(result, ExtendedDisambigResult)
         self.assertEqual(result.canonical_decisions["monkey"], "hou_fei_bai")
@@ -114,7 +116,9 @@ class TestLocalDisambiguate(unittest.TestCase):
             config=config,
             client=MagicMock(),
         )
-        result = asyncio.run(client.disambiguate_characters(_candidates("zhang_san"), existing_names=["li_si", "wang_wu"]))
+        result = asyncio.run(
+            client.disambiguate_characters(_candidates("zhang_san"), existing_names=["li_si", "wang_wu"])
+        )
         self.assertIsInstance(result, ExtendedDisambigResult)
 
 

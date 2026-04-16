@@ -12,6 +12,7 @@
 任务: phase4-code-review-fix
 修改内容: 移除已废弃的 relations 和 character_appearances 字段，使用 location_appearances
 """
+
 import sys
 from pathlib import Path
 

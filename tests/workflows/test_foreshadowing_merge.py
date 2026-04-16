@@ -9,6 +9,7 @@
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations、character_appearances、chunk_summary 字段
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -67,7 +68,8 @@ class TestForeshadowingMerge(unittest.TestCase):
             foreshadowing_type=foreshadowing.foreshadowing_type,
             foreshadowing_desc=(
                 f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}"
-                if foreshadowing.has_foreshadowing else ""
+                if foreshadowing.has_foreshadowing
+                else ""
             ),
             characters=annotation.characters,
             dialogues=annotation.dialogues,
@@ -100,7 +102,8 @@ class TestForeshadowingMerge(unittest.TestCase):
             foreshadowing_type=foreshadowing.foreshadowing_type,
             foreshadowing_desc=(
                 f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}"
-                if foreshadowing.has_foreshadowing else ""
+                if foreshadowing.has_foreshadowing
+                else ""
             ),
             characters=annotation.characters,
             dialogues=annotation.dialogues,
@@ -130,7 +133,8 @@ class TestForeshadowingMerge(unittest.TestCase):
             foreshadowing_type=foreshadowing.foreshadowing_type,
             foreshadowing_desc=(
                 f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}"
-                if foreshadowing.has_foreshadowing else ""
+                if foreshadowing.has_foreshadowing
+                else ""
             ),
             characters=annotation.characters,
             dialogues=annotation.dialogues,

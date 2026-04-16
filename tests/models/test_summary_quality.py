@@ -28,16 +28,28 @@ class TestCharacterDeduplication(unittest.TestCase):
 
     def test_no_duplicates_returns_same_list(self) -> None:
         characters = [
-            CharacterSnapshot(name="伯安", role_function="主体", action="行动", action_type="其他", emotion_score="neutral"),
-            CharacterSnapshot(name="林立果", role_function="客体", action="被裹挟", action_type="其他", emotion_score="neutral"),
+            CharacterSnapshot(
+                name="伯安", role_function="主体", action="行动", action_type="其他", emotion_score="neutral"
+            ),
+            CharacterSnapshot(
+                name="林立果", role_function="客体", action="被裹挟", action_type="其他", emotion_score="neutral"
+            ),
         ]
         result = _deduplicate_characters(characters)
         self.assertEqual(len(result), 2)
 
     def test_duplicate_keeps_higher_priority_role(self) -> None:
         characters = [
-            CharacterSnapshot(name="伯安", role_function="客体", action="被白芷称为哥哥", action_type="其他", emotion_score="neutral"),
-            CharacterSnapshot(name="伯安", role_function="主体", action="决定拜师白芷", action_type="其他", emotion_score="mild_positive"),
+            CharacterSnapshot(
+                name="伯安", role_function="客体", action="被白芷称为哥哥", action_type="其他", emotion_score="neutral"
+            ),
+            CharacterSnapshot(
+                name="伯安",
+                role_function="主体",
+                action="决定拜师白芷",
+                action_type="其他",
+                emotion_score="mild_positive",
+            ),
         ]
         result = _deduplicate_characters(characters)
         self.assertEqual(len(result), 1)
@@ -46,8 +58,16 @@ class TestCharacterDeduplication(unittest.TestCase):
 
     def test_duplicate_same_priority_keeps_first(self) -> None:
         characters = [
-            CharacterSnapshot(name="伯安", role_function="客体", action="被白芷称为哥哥", action_type="其他", emotion_score="neutral"),
-            CharacterSnapshot(name="伯安", role_function="客体", action="决定拜师白芷", action_type="其他", emotion_score="mild_positive"),
+            CharacterSnapshot(
+                name="伯安", role_function="客体", action="被白芷称为哥哥", action_type="其他", emotion_score="neutral"
+            ),
+            CharacterSnapshot(
+                name="伯安",
+                role_function="客体",
+                action="决定拜师白芷",
+                action_type="其他",
+                emotion_score="mild_positive",
+            ),
         ]
         result = _deduplicate_characters(characters)
         self.assertEqual(len(result), 1)
@@ -55,10 +75,18 @@ class TestCharacterDeduplication(unittest.TestCase):
 
     def test_multiple_duplicates_all_resolved(self) -> None:
         characters = [
-            CharacterSnapshot(name="伯安", role_function="客体", action="行为1", action_type="其他", emotion_score="neutral"),
-            CharacterSnapshot(name="林立果", role_function="主体", action="行为2", action_type="其他", emotion_score="neutral"),
-            CharacterSnapshot(name="伯安", role_function="主体", action="行为3", action_type="其他", emotion_score="neutral"),
-            CharacterSnapshot(name="林立果", role_function="客体", action="行为4", action_type="其他", emotion_score="neutral"),
+            CharacterSnapshot(
+                name="伯安", role_function="客体", action="行为1", action_type="其他", emotion_score="neutral"
+            ),
+            CharacterSnapshot(
+                name="林立果", role_function="主体", action="行为2", action_type="其他", emotion_score="neutral"
+            ),
+            CharacterSnapshot(
+                name="伯安", role_function="主体", action="行为3", action_type="其他", emotion_score="neutral"
+            ),
+            CharacterSnapshot(
+                name="林立果", role_function="客体", action="行为4", action_type="其他", emotion_score="neutral"
+            ),
         ]
         result = _deduplicate_characters(characters)
         self.assertEqual(len(result), 2)

@@ -67,8 +67,7 @@ class TestLevel1AuthoritySnapshot:
         assert entity_types == {"方源": "character", "白凝冰": "character"}
 
         relations = {
-            (item.from_name, item.to_name, item.relation_type, item.is_active)
-            for item in snapshot.confirmed_relations
+            (item.from_name, item.to_name, item.relation_type, item.is_active) for item in snapshot.confirmed_relations
         }
         assert ("方源", "白凝冰", "盟友", True) in relations
 

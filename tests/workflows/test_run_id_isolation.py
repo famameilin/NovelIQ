@@ -58,12 +58,20 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
     ann_repo.insert_chunk_characters(
         run_1,
         2,
-        [CharacterSnapshot(name="zhangsan", role_function="主体", action="说话", action_type="对话", emotion_score="neutral")],
+        [
+            CharacterSnapshot(
+                name="zhangsan", role_function="主体", action="说话", action_type="对话", emotion_score="neutral"
+            )
+        ],
     )
     ann_repo.insert_chunk_characters(
         run_2,
         100,
-        [CharacterSnapshot(name="zhangsan", role_function="主体", action="说话", action_type="对话", emotion_score="neutral")],
+        [
+            CharacterSnapshot(
+                name="zhangsan", role_function="主体", action="说话", action_type="对话", emotion_score="neutral"
+            )
+        ],
     )
 
     stats_repo = StatsRepository(db_session)
@@ -83,7 +91,9 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
         [10],
     )
 
-    result = build_context_sentences(db_session, _candidates("zhangsan"), alias_keywords=["就是"], prev_chunks=1, run_id=run_1)
+    result = build_context_sentences(
+        db_session, _candidates("zhangsan"), alias_keywords=["就是"], prev_chunks=1, run_id=run_1
+    )
 
     assert "zhangsan" in result
     context = result["zhangsan"]

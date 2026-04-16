@@ -10,6 +10,7 @@ Phase1/Phase2 独立重试机制测试
 任务: code-quality-refactor - Task 9 拆分annotation_client
 修改内容: 更新测试以调用子模块函数
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -58,7 +59,7 @@ def create_mock_foreshadowing() -> ForeshadowingResult:
 class MockAnnotationClient:
     """
     Mock AnnotationClient for testing
-    
+
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
@@ -400,7 +401,7 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
     修改内容: 更新测试以调用子模块函数
     """
 
-    @patch('src.models.local.annotation.multi_phase.settings')
+    @patch("src.models.local.annotation.multi_phase.settings")
     async def test_two_phase_serial_passes_cloud_client(self, mock_settings):
         """串行模式传递 cloud_client 参数"""
         mock_settings.analysis.multi_phase_annotation.parallel = False
@@ -417,7 +418,7 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result.annotation, ChunkAnnotation)
 
-    @patch('src.models.local.annotation.multi_phase.settings')
+    @patch("src.models.local.annotation.multi_phase.settings")
     async def test_two_phase_serial_passes_evidence_bundle_to_phase2(self, mock_settings):
         """串行模式会把上游 evidence_bundle 继续透传给 Phase2。"""
         mock_settings.analysis.multi_phase_annotation.parallel = False
@@ -445,7 +446,7 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result.annotation, ChunkAnnotation)
         self.assertIs(mock_phase2.await_args.kwargs["evidence_bundle"], evidence_bundle)
 
-    @patch('src.models.local.annotation.multi_phase.settings')
+    @patch("src.models.local.annotation.multi_phase.settings")
     async def test_two_phase_parallel_passes_cloud_client(self, mock_settings):
         """并行模式传递 cloud_client 参数"""
         mock_settings.analysis.multi_phase_annotation.parallel = True
@@ -462,7 +463,7 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result.annotation, ChunkAnnotation)
 
-    @patch('src.models.local.annotation.multi_phase.settings')
+    @patch("src.models.local.annotation.multi_phase.settings")
     async def test_two_phase_parallel_passes_evidence_bundle_to_phase2(self, mock_settings):
         """并行模式也会把上游 evidence_bundle 继续透传给 Phase2。"""
         mock_settings.analysis.multi_phase_annotation.parallel = True

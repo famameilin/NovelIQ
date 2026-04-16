@@ -175,10 +175,7 @@ class TestConvertResponseRunIDsToTaskIDs:
 
     def test_converts_run_id_in_nested_dict(self):
         """测试转换嵌套字典中的run_id"""
-        data = {
-            "name": "parent",
-            "child": {"run_id": "0211f894-1a72-4444-a772-2ddc64334cd2", "value": 123}
-        }
+        data = {"name": "parent", "child": {"run_id": "0211f894-1a72-4444-a772-2ddc64334cd2", "value": 123}}
         result = convert_response_run_ids_to_task_ids(data)
         assert result["child"]["task_id"] == "0211f894"
         assert "run_id" not in result["child"]
@@ -187,7 +184,7 @@ class TestConvertResponseRunIDsToTaskIDs:
         """测试转换列表中的run_id"""
         data = [
             {"run_id": "0211f894-1a72-4444-a772-2ddc64334cd2", "name": "item1"},
-            {"run_id": "3a25baca-1a72-4444-a772-2ddc64334cd2", "name": "item2"}
+            {"run_id": "3a25baca-1a72-4444-a772-2ddc64334cd2", "name": "item2"},
         ]
         result = convert_response_run_ids_to_task_ids(data)
         assert result[0]["task_id"] == "0211f894"
@@ -199,7 +196,7 @@ class TestConvertResponseRunIDsToTaskIDs:
             "run_id": "0211f894-1a72-4444-a772-2ddc64334cd2",
             "name": "test",
             "count": 42,
-            "nested": {"key": "value"}
+            "nested": {"key": "value"},
         }
         result = convert_response_run_ids_to_task_ids(data)
         assert result["name"] == "test"
