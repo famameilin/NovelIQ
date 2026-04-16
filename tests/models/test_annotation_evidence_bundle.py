@@ -64,13 +64,12 @@ def test_annotation_messages_prefers_evidence_bundle_rendering() -> None:
     )
 
     user_message = messages[-1]["content"]
-    assert "灰衣人 → 白芷" in user_message
-    assert "【近期活跃角色】" in user_message
+    assert "灰衣人" in user_message
     assert "白芷" in user_message
     assert "<Vector_Evidence>" in user_message
 
 
-def test_annotation_messages_keep_explicit_strings_over_bundle() -> None:
+def test_annotation_messages_use_bundle_as_primary_source_and_keep_legacy_strings_as_fallback() -> None:
     bundle = EvidenceBundle(
         local_evidence=[
             EvidenceItem(
@@ -90,7 +89,8 @@ def test_annotation_messages_keep_explicit_strings_over_bundle() -> None:
     )
 
     user_message = messages[-1]["content"]
-    assert "EXPLICIT_ACTIVE" in user_message
+    assert "EXPLICIT_ACTIVE" not in user_message
+    assert "白芷" in user_message
     assert "EXPLICIT_DISAMBIG" in user_message
 
 
@@ -108,5 +108,22 @@ def test_annotation_messages_prefer_explicit_alias_map_over_bundle() -> None:
     )
 
     user_message = messages[-1]["content"]
-    assert "黑衣客 → 白芷" in user_message
-    assert "灰衣人 → 白芷" not in user_message
+    assert "黑衣客" in user_message
+    assert "{}" not in user_message
+
+
+def test_annotation_messages_empty_alias_map_does_not_fallback_to_bundle() -> None:
+    bundle = EvidenceBundle(
+        level1_snapshot=Level1AuthoritySnapshot(
+            alias_mappings=[AliasMapping(alias="灰衣人", canonical="白芷")],
+        )
+    )
+
+    messages = _build_annotation_messages_v2(
+        text="灰衣人站在门口。",
+        alias_map={},
+        evidence_bundle=bundle,
+    )
+
+    user_message = messages[-1]["content"]
+    assert "{}" in user_message

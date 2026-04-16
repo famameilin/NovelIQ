@@ -33,7 +33,7 @@ def _render_alias_map_text(
 ) -> str:
     alias_rows: list[tuple[str, str]] = []
 
-    if alias_map:
+    if alias_map is not None:
         alias_rows.extend(alias_map.items())
     elif evidence_bundle is not None and evidence_bundle.level1_snapshot is not None:
         alias_rows.extend(
@@ -98,9 +98,11 @@ def _build_annotation_messages_v2(
 
     if evidence_bundle is not None:
         blocks = render_annotation_prompt_blocks(evidence_bundle)
-        if active_entities is None:
+        # 中文注释：EvidenceBundle 是新的主语义入口。
+        # 兼容层字符串只在 bundle 没有产出对应 prompt block 时兜底，避免旧字段反向覆盖新设计。
+        if blocks.active_entities is not None:
             active_entities = blocks.active_entities
-        if disambig_context is None:
+        if blocks.disambig_context is not None:
             disambig_context = blocks.disambig_context
 
     active_entities_str = active_entities or "[]"

@@ -157,6 +157,49 @@ def test_chunk_context_prompt_accessors_prefer_renderer_blocks_and_fallbacks():
     assert "[Chunk 4]" in context.prompt_vector_evidence
 
 
+def test_chunk_context_legacy_setters_sync_back_to_effective_prompt_values():
+    context = ChunkContext(
+        active_entities_fallback="authority-fallback",
+        annotation_prompt_blocks=render_annotation_prompt_blocks(
+            EvidenceBundle(
+                local_evidence=[
+                    EvidenceItem(
+                        evidence_type="active_entity",
+                        source="level2",
+                        content="程霜",
+                        metadata={"name": "程霜", "role": "helper", "recent_action": "追查", "last_seen_chunk": 21},
+                    ),
+                    EvidenceItem(
+                        evidence_type="disambig_candidate",
+                        source="level2",
+                        content="「灰衣人」可能是：程霜",
+                    ),
+                ],
+                semantic_evidence=[
+                    EvidenceItem(
+                        evidence_type="vector_evidence",
+                        source="level3",
+                        content="程霜在旧案卷中发现了线索。",
+                        chunk_id=4,
+                        score=0.91,
+                    )
+                ],
+            )
+        ),
+    )
+
+    context.active_entities_str = "LEGACY_ACTIVE"
+    context.disambig_context_str = "LEGACY_DISAMBIG"
+    context.vector_evidence_str = "LEGACY_VECTOR"
+
+    assert context.prompt_active_entities == "LEGACY_ACTIVE"
+    assert context.active_entities_str == "LEGACY_ACTIVE"
+    assert context.prompt_disambig_context == "LEGACY_DISAMBIG"
+    assert context.disambig_context_str == "LEGACY_DISAMBIG"
+    assert context.prompt_vector_evidence == "LEGACY_VECTOR"
+    assert context.vector_evidence_str == "LEGACY_VECTOR"
+
+
 def test_chunk_context_evidence_bundle_with_structured_evidence():
     bundle = EvidenceBundle(
         structured_evidence=[
