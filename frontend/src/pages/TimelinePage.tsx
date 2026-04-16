@@ -7,11 +7,11 @@
  * 说明: 完整叙事时间轴页面，展示四阶段划分、关键事件节点、张力曲线叠加
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
@@ -34,6 +34,30 @@ import type { TimelineNode, TimelinePhase } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 
+function buildTimelinePageUrl(
+  novelId: string,
+  taskId: string,
+  options: {
+    maxLevel: 1 | 2 | 3;
+    showTension: boolean;
+    selectedChunk?: number | null;
+    relationEventId?: number | null;
+  }
+): string {
+  const params = new URLSearchParams({
+    task_id: taskId,
+    max_level: String(options.maxLevel),
+    show_tension: String(options.showTension),
+  });
+  if (options.selectedChunk != null) {
+    params.set("selected_chunk", String(options.selectedChunk));
+  }
+  if (options.relationEventId != null) {
+    params.set("relation_event_id", String(options.relationEventId));
+  }
+  return `/novels/${novelId}/timeline?${params.toString()}`;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
@@ -42,44 +66,78 @@ export function TimelinePage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
+  const { currentNovelId, currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
   const urlMaxLevel = searchParams.get("max_level");
   const urlShowTension = searchParams.get("show_tension");
+  const urlSelectedChunk = searchParams.get("selected_chunk");
+  const urlRelationEventId = searchParams.get("relation_event_id");
+  const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
 
-  const [maxLevel, setMaxLevel] = useState<1 | 2 | 3>(() => {
+  const maxLevel = useMemo<1 | 2 | 3>(() => {
     const level = urlMaxLevel ? parseInt(urlMaxLevel, 10) : 3;
     return [1, 2, 3].includes(level) ? (level as 1 | 2 | 3) : 3;
-  });
-  const [showTension, setShowTension] = useState(urlShowTension !== "false");
-  const [selectedNode, setSelectedNode] = useState<TimelineNode | null>(null);
+  }, [urlMaxLevel]);
+  const showTension = useMemo(() => urlShowTension !== "false", [urlShowTension]);
   const [activePhase, setActivePhase] = useState<string | undefined>();
+  const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
+  const taskScopeId = urlTaskId ?? storeTaskId;
+
+  const selectedChunkFromUrl = useMemo(() => {
+    if (!urlSelectedChunk) return null;
+    const parsed = Number(urlSelectedChunk);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [urlSelectedChunk]);
+
+  const relationEventIdFromUrl = useMemo(() => {
+    if (!urlRelationEventId) return null;
+    const parsed = Number(urlRelationEventId);
+    return Number.isInteger(parsed) ? parsed : null;
+  }, [urlRelationEventId]);
 
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
       if (urlTaskId) {
+        if (storeTaskId !== urlTaskId) {
+          urlTaskSyncRef.current = urlTaskId;
+        }
         setTask(urlTaskId);
       }
     }
-  }, [novelId, urlTaskId, setNovel, setTask]);
+  }, [novelId, setNovel, setTask, urlTaskId]);
 
   useEffect(() => {
-    if (currentTaskId && urlTaskId !== currentTaskId) {
-      navigate(
-        `/novels/${novelId}/timeline?task_id=${currentTaskId}&max_level=${maxLevel}&show_tension=${showTension}`,
-        { replace: true }
-      );
+    if (!novelId || !storeTaskId) {
+      return;
     }
-  }, [currentTaskId, novelId, navigate, urlTaskId, maxLevel, showTension]);
+    if (urlTaskId === storeTaskId) {
+      if (urlTaskSyncRef.current === storeTaskId) {
+        urlTaskSyncRef.current = null;
+      }
+      return;
+    }
+    if (urlTaskId && urlTaskSyncRef.current === urlTaskId) {
+      return;
+    }
 
-  const enabled = !!novelId && !!currentTaskId;
+    navigate(buildTimelinePageUrl(novelId, storeTaskId, {
+        maxLevel,
+        showTension,
+        // 中文注释：时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
+        // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮。
+        selectedChunk: null,
+        relationEventId: null,
+      }), { replace: true });
+  }, [maxLevel, navigate, novelId, showTension, storeTaskId, urlTaskId]);
+
+  const enabled = !!novelId && !!taskScopeId;
 
   const timelineQuery = useQuery({
-    queryKey: ["timeline", novelId, currentTaskId, maxLevel],
+    queryKey: ["timeline", novelId, taskScopeId, maxLevel],
     queryFn: () =>
-      getTimeline(novelId!, currentTaskId!, {
+      getTimeline(novelId!, taskScopeId!, {
         includeCurve: true,
         maxLevel: maxLevel,
       }),
@@ -98,37 +156,78 @@ export function TimelinePage() {
 
   const timelineData = timelineQuery.data;
   const phases = timelineData?.phases ?? [];
-  const nodes = timelineData?.nodes ?? [];
+  const nodes = useMemo(() => timelineData?.nodes ?? [], [timelineData?.nodes]);
   const tensionCurve = timelineData?.tension_curve;
   const totalChunks = timelineData?.meta?.total_chunks ?? 0;
+  const matchedRelationEventNode = useMemo(() => {
+    if (relationEventIdFromUrl == null) return null;
+    return (
+      nodes.find((node) =>
+        node.relation_changes?.some((relationChange) => relationChange.relation_event_id === relationEventIdFromUrl)
+      ) ?? null
+    );
+  }, [nodes, relationEventIdFromUrl]);
+  const selectedNode = useMemo(() => {
+    if (nodes.length === 0) return null;
+    if (matchedRelationEventNode) {
+      return matchedRelationEventNode;
+    }
+    if (selectedChunkFromUrl != null) {
+      return nodes.find((node) => node.chunk_id === selectedChunkFromUrl) ?? null;
+    }
+    return null;
+  }, [matchedRelationEventNode, nodes, selectedChunkFromUrl]);
+  const resolvedRelationEventId = matchedRelationEventNode ? relationEventIdFromUrl : null;
+  const selectionHint = useMemo(() => {
+    if (relationEventIdFromUrl == null) return null;
+    if (matchedRelationEventNode) return null;
+    if (selectedChunkFromUrl != null && selectedNode) {
+      return "未定位到指定关系事件，已回退到对应时间节点。";
+    }
+    return "未定位到对应事件。";
+  }, [matchedRelationEventNode, relationEventIdFromUrl, selectedChunkFromUrl, selectedNode]);
 
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
-      setMaxLevel(level);
-      navigate(
-        `/novels/${novelId}/timeline?task_id=${currentTaskId}&max_level=${level}&show_tension=${showTension}`,
-        { replace: true }
-      );
+      if (!novelId || !taskScopeId) return;
+      navigate(buildTimelinePageUrl(novelId, taskScopeId, {
+        maxLevel: level,
+        showTension,
+        selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
+        // 中文注释：控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link。
+        // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择。
+        relationEventId: resolvedRelationEventId,
+      }), { replace: true });
     },
-    [novelId, currentTaskId, showTension, navigate]
+    [novelId, taskScopeId, showTension, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
   );
 
   const handleShowTensionChange = useCallback(
     (show: boolean) => {
-      setShowTension(show);
-      navigate(
-        `/novels/${novelId}/timeline?task_id=${currentTaskId}&max_level=${maxLevel}&show_tension=${show}`,
-        { replace: true }
-      );
+      if (!novelId || !taskScopeId) return;
+      navigate(buildTimelinePageUrl(novelId, taskScopeId, {
+        maxLevel,
+        showTension: show,
+        selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
+        relationEventId: resolvedRelationEventId,
+      }), { replace: true });
     },
-    [novelId, currentTaskId, maxLevel, navigate]
+    [novelId, taskScopeId, maxLevel, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
   );
 
   const handleNodeClick = useCallback((node: TimelineNode) => {
-    setSelectedNode((prev) =>
-      prev?.chunk_id === node.chunk_id ? null : node
+    if (!novelId || !taskScopeId) return;
+    const nextSelectedChunk = selectedNode?.chunk_id === node.chunk_id ? null : node.chunk_id;
+    navigate(
+      buildTimelinePageUrl(novelId, taskScopeId, {
+        maxLevel,
+        showTension,
+        selectedChunk: nextSelectedChunk,
+        relationEventId: null,
+      }),
+      { replace: true }
     );
-  }, []);
+  }, [taskScopeId, maxLevel, navigate, novelId, selectedNode, showTension]);
 
   const handlePhaseClick = useCallback((phase: TimelinePhase) => {
     setActivePhase((prev) => (prev === phase.name ? undefined : phase.name));
@@ -156,7 +255,7 @@ export function TimelinePage() {
     );
   }
 
-  if (!currentTaskId) {
+  if (!taskScopeId) {
     return (
       <PageContainer>
         <NovelHeader title={novelTitle} />
@@ -189,6 +288,21 @@ export function TimelinePage() {
             onShowTensionChange={handleShowTensionChange}
           />
         </motion.div>
+
+        {selectionHint && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.05 }}
+          >
+            <Card variant="elevated" className="rounded-xl border-chart-negative/20">
+              <CardContent className="flex items-start gap-3 p-4">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
+                <p className="text-sm text-text-muted">{selectionHint}</p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -303,7 +417,19 @@ export function TimelinePage() {
           <TimelineNodeDetail
             node={selectedNode}
             novelId={novelId}
-            onClose={() => setSelectedNode(null)}
+            taskId={taskScopeId}
+            selectedRelationEventId={resolvedRelationEventId}
+            onClose={() => {
+              navigate(
+                buildTimelinePageUrl(novelId, taskScopeId, {
+                  maxLevel,
+                  showTension,
+                  selectedChunk: null,
+                  relationEventId: null,
+                }),
+                { replace: true }
+              );
+            }}
           />
         )}
       </div>

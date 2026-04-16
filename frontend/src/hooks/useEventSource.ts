@@ -15,7 +15,7 @@
  * - onerror 中不主动 close，让浏览器原生自动重连
  */
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -50,12 +50,12 @@ export function useSSEListener(
   const eventSourceRef = useRef<EventSource | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // 用 ref 存储 callback，避免依赖变化导致 EventSource 重建
-  const onEventRef = useRef(options.onEvent);
-  onEventRef.current = options.onEvent;
-
-  const onErrorRef = useRef(options.onError);
-  onErrorRef.current = options.onError;
+  const emitEvent = useEffectEvent((eventType: SSEEventType, data: unknown) => {
+    options.onEvent?.(eventType, data);
+  });
+  const emitError = useEffectEvent((error: Event) => {
+    options.onError?.(error);
+  });
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {
@@ -78,7 +78,7 @@ export function useSSEListener(
     // 不在 onerror 中主动 close，让浏览器原生自动重连
     eventSource.onerror = (error: Event) => {
       setIsConnected(false);
-      onErrorRef.current?.(error);
+      emitError(error);
     };
 
     const defaultEventTypes: SSEEventType[] = [
@@ -103,7 +103,7 @@ export function useSSEListener(
         } catch {
           data = event.data;
         }
-        onEventRef.current?.(eventType as SSEEventType, data);
+        emitEvent(eventType as SSEEventType, data);
       });
     }
 
