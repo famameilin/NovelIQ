@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from .evidence_renderer import (
         render_disambig_candidates,
         render_disambig_prompt_context,
-        render_graph_feedback_hint,
     )
     from .logging import (
         log_disambiguate_response,
@@ -55,7 +54,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "format_evidence_profile": (".evidence", "format_evidence_profile"),
     "render_disambig_candidates": (".evidence_renderer", "render_disambig_candidates"),
     "render_disambig_prompt_context": (".evidence_renderer", "render_disambig_prompt_context"),
-    "render_graph_feedback_hint": (".evidence_renderer", "render_graph_feedback_hint"),
     "log_disambiguate_response": (".logging", "log_disambiguate_response"),
     "log_disambiguate_result": (".logging", "log_disambiguate_result"),
     "log_disambiguate_start": (".logging", "log_disambiguate_start"),

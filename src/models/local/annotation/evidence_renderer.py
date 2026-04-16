@@ -16,16 +16,6 @@ class AnnotationPromptBlocks:
     vector_evidence: str | None = None
 
 
-@dataclass(slots=True)
-class ForeshadowingPromptBlocks:
-    level1_facts: str | None = None
-    level2_context: str | None = None
-    level3_echoes: str | None = None
-
-    def sections(self) -> list[str]:
-        return [section for section in (self.level1_facts, self.level2_context, self.level3_echoes) if section]
-
-
 def _render_active_entity_lines(items: list[EvidenceItem]) -> str | None:
     if not items:
         return None
@@ -151,22 +141,6 @@ def _collect_level1_lines_from_snapshot(
     return alias_lines + entity_lines + relation_lines
 
 
-def _render_foreshadowing_level1(bundle: EvidenceBundle) -> str | None:
-    lines = _collect_level1_lines_from_structured(bundle) if bundle.structured_evidence else []
-    if not lines and bundle.level1_snapshot is not None:
-        lines = _collect_level1_lines_from_snapshot(bundle.level1_snapshot)
-
-    if not lines:
-        return None
-
-    return (
-        "<Narrative_Evidence_Level1>\n"
-        "以下是与当前片段相关的稳定实体事实，可用于判断是否存在提前埋线：\n"
-        + "\n".join(lines)
-        + "\n</Narrative_Evidence_Level1>"
-    )
-
-
 def _render_annotation_level1(
     bundle: EvidenceBundle,
     *,
@@ -191,51 +165,6 @@ def _render_annotation_level1(
         "以下是当前片段相关的稳定实体事实；优先使用这些结构化事实，再结合局部上下文判断人物、实体类型与关系。\n"
         + "\n".join(lines)
         + "\n</Narrative_Evidence_Level1>"
-    )
-
-
-def _render_foreshadowing_level2(bundle: EvidenceBundle) -> str | None:
-    active_lines = _render_active_entity_lines(
-        [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
-    )
-    if not active_lines:
-        return None
-
-    payload = active_lines.replace("【近期活跃角色】\n", "", 1)
-    return (
-        "<Narrative_Evidence_Level2>\n"
-        "以下是当前片段附近的近期活跃实体与状态，可辅助判断这段信息是否在为后文铺垫：\n"
-        + payload
-        + "\n</Narrative_Evidence_Level2>"
-    )
-
-
-def _render_foreshadowing_level3(bundle: EvidenceBundle, max_chunks: int = 3, max_text_len: int = 180) -> str | None:
-    if not bundle.semantic_evidence:
-        return None
-
-    lines: list[str] = []
-    for item in bundle.semantic_evidence[:max_chunks]:
-        chunk_id = item.metadata.get("chunk_id", item.chunk_id if item.chunk_id is not None else "?")
-        similarity = float(item.metadata.get("similarity", item.metadata.get("score", item.score or 0.0)))
-        text = str(item.metadata.get("text", item.content))
-        preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
-        lines.append(f"- [Chunk {chunk_id} | 相似度 {similarity:.2f}] {preview}")
-
-    return (
-        "<Narrative_Evidence_Level3>\n"
-        "以下是语义相近的历史片段，只能作为弱证据，用于观察重复意象、线索回响或叙事呼应：\n"
-        + "\n".join(lines)
-        + "\n注意：这些历史片段不能直接作为 anchor_text；anchor_text 必须来自<当前文本>。\n"
-        "</Narrative_Evidence_Level3>"
-    )
-
-
-def render_foreshadowing_prompt_blocks(bundle: EvidenceBundle) -> ForeshadowingPromptBlocks:
-    return ForeshadowingPromptBlocks(
-        level1_facts=_render_foreshadowing_level1(bundle),
-        level2_context=_render_foreshadowing_level2(bundle),
-        level3_echoes=_render_foreshadowing_level3(bundle),
     )
 
 

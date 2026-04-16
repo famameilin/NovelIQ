@@ -4,37 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from src.models.local.disambiguation import render_graph_feedback_hint
 from src.rag import (
-    AliasMapping,
-    ConfirmedRelation,
     EvidenceBundle,
     EvidenceItem,
-    Level1AuthoritySnapshot,
 )
-
-
-def test_render_graph_feedback_hint_excludes_inactive_relations() -> None:
-    bundle = EvidenceBundle(
-        level1_snapshot=Level1AuthoritySnapshot(
-            alias_mappings=[AliasMapping(alias="灰衣人", canonical="白芷")],
-            confirmed_relations=[
-                ConfirmedRelation(
-                    from_name="白芷",
-                    to_name="侯飞白",
-                    relation_type="盟友",
-                    is_active=False,
-                )
-            ],
-        )
-    )
-
-    hint = render_graph_feedback_hint(bundle, existing_names=["白芷"], base_hint="BASE")
-
-    assert hint is not None
-    assert "BASE" in hint
-    assert "灰衣人 → 白芷" in hint
-    assert "盟友" not in hint
 
 
 def test_importing_annotation_messages_in_fresh_interpreter_does_not_trigger_cycle() -> None:

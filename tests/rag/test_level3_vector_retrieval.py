@@ -312,6 +312,28 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         self.assertIn("<Disambig_Candidates>", context)
         self.assertIn("「灰衣人」可能是：白芷", context)
 
+    def test_build_graph_feedback_hint_keeps_repository_contract_when_level1_disabled(self) -> None:
+        graph_repo = MagicMock()
+        graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
+        graph_repo.fetch_current_relations.return_value = [
+            {"from_name": "白芷", "to_name": "侯飞白", "type": "盟友"},
+            {"from_name": "路人甲", "to_name": "路人乙", "type": "同伴"},
+        ]
+
+        provider = DisambigContextProvider(
+            graph_repo=graph_repo,
+            run_id="test-run-id",
+            level1_enabled=False,
+        )
+
+        hint = provider.build_graph_feedback_hint(["白芷"], base_hint="BASE")
+
+        self.assertIsNotNone(hint)
+        self.assertIn("BASE", hint)
+        self.assertIn("灰衣人 → 白芷", hint)
+        self.assertIn("白芷 ←盟友→ 侯飞白", hint)
+        self.assertNotIn("路人甲", hint)
+
 
 if __name__ == "__main__":
     unittest.main()
