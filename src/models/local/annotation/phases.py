@@ -77,6 +77,7 @@ def build_phase2_messages(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建Phase2消息
@@ -95,6 +96,7 @@ def build_phase2_messages(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
+        evidence_bundle=evidence_bundle,
     )
 
 

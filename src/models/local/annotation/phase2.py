@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +36,48 @@ from .messages import _build_foreshadowing_messages
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+
+
+def _extract_names_from_text(text: str) -> list[str]:
+    """从当前 chunk 中提取用于 evidence 过滤的人名候选。"""
+
+    return re.findall(r"[\u4e00-\u9fff]{2,4}", text)
+
+
+async def _collect_phase2_evidence_bundle(
+    *,
+    text: str,
+    chunk_id: int | None,
+    rag_retriever: Any | None,
+):
+    if rag_retriever is None:
+        return None
+
+    names_in_chunk = _extract_names_from_text(text)
+    exclude_chunk_ids = [chunk_id] if chunk_id is not None else None
+
+    if rag_retriever.requires_level3():
+        if not rag_retriever.is_level3_available():
+            raise RuntimeError("Level 3 vector retrieval is required but not available")
+        return await rag_retriever.collect_evidence_with_level3(
+            names_in_chunk=names_in_chunk,
+            current_chunk=chunk_id,
+            context_text=text,
+            exclude_chunk_ids=exclude_chunk_ids,
+        )
+
+    if rag_retriever.is_level3_available():
+        return await rag_retriever.collect_evidence_with_level3(
+            names_in_chunk=names_in_chunk,
+            current_chunk=chunk_id,
+            context_text=text,
+            exclude_chunk_ids=exclude_chunk_ids,
+        )
+
+    return rag_retriever.collect_evidence(
+        names_in_chunk=names_in_chunk,
+        current_chunk=chunk_id,
+    )
 
 
 async def _do_phase2(
@@ -115,6 +158,7 @@ async def annotate_chunk_phase2(
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
+    evidence_bundle=None,
 ) -> ForeshadowingResult | None:
     """
     第二次调用：伏笔分析（带独立重试机制）
@@ -128,6 +172,13 @@ async def annotate_chunk_phase2(
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
     """
+    if evidence_bundle is None:
+        evidence_bundle = await _collect_phase2_evidence_bundle(
+            text=text,
+            chunk_id=chunk_id,
+            rag_retriever=rag_retriever,
+        )
+
     messages = _build_foreshadowing_messages(
         text=text,
         prev_chunk_summary=prev_chunk_summary,
@@ -138,6 +189,7 @@ async def annotate_chunk_phase2(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
+        evidence_bundle=evidence_bundle,
     )
 
     from src.models.local.schema import ForeshadowingResult

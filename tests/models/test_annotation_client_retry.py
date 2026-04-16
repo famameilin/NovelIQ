@@ -13,7 +13,7 @@ Phase1/Phase2 独立重试机制测试
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -365,6 +365,31 @@ class TestPhase2Retry(unittest.TestCase):
                 chunk_id=1,
                 cloud_client=cloud_client,
             )
+
+    async def test_phase2_collects_evidence_bundle_from_rag_retriever(self):
+        """Phase2 会把 rag_retriever 产出的 evidence_bundle 传给 message builder。"""
+        client = MockAnnotationClient()
+        rag_retriever = MagicMock()
+        evidence_bundle = MagicMock(name="phase2_evidence_bundle")
+
+        rag_retriever.requires_level3.return_value = True
+        rag_retriever.is_level3_available.return_value = True
+        rag_retriever.collect_evidence_with_level3 = AsyncMock(return_value=evidence_bundle)
+
+        with patch(
+            "src.models.local.annotation.phase2._build_foreshadowing_messages",
+            return_value=[{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
+        ) as mock_build_messages:
+            result = await annotate_chunk_phase2(
+                client=client,
+                text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
+                chunk_id=12,
+                rag_retriever=rag_retriever,
+            )
+
+        self.assertIsInstance(result, ForeshadowingResult)
+        rag_retriever.collect_evidence_with_level3.assert_awaited_once()
+        self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
 
 
 class TestTwoPhaseIntegration(unittest.TestCase):
