@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from src.rag.evidence_types import EvidenceBundle, EvidenceItem, Level1AuthoritySnapshot
+if TYPE_CHECKING:
+    from src.knowledge.authority import Level1AuthoritySnapshot
+    from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 
 @dataclass(slots=True)

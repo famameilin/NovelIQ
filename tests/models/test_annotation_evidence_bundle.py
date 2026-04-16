@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.models.local.annotation.messages import _build_annotation_messages_v2
+from src.models.local.validator import validate_names_in_sources
 from src.rag import (
     AliasMapping,
     CanonicalEntity,
@@ -94,6 +95,42 @@ def test_annotation_messages_use_bundle_as_primary_source_and_keep_legacy_string
     assert "EXPLICIT_DISAMBIG" in user_message
 
 
+def test_annotation_messages_ignore_legacy_disambig_context_when_bundle_has_main_prompt_blocks() -> None:
+    bundle = EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="alias_mapping",
+                source="level1",
+                content="灰衣人 -> 白芷",
+                metadata={"alias": "灰衣人", "canonical": "白芷"},
+            )
+        ],
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="chunk_embeddings",
+                content="灰衣人抬手露出袖中银针。",
+                metadata={
+                    "chunk_id": 5,
+                    "similarity": 0.92,
+                    "text": "灰衣人抬手露出袖中银针。",
+                },
+            )
+        ],
+    )
+
+    messages = _build_annotation_messages_v2(
+        text="灰衣人站在门口。",
+        disambig_context="EXPLICIT_DISAMBIG",
+        evidence_bundle=bundle,
+    )
+
+    user_message = messages[-1]["content"]
+    assert "<Narrative_Evidence_Level1>" in user_message
+    assert "<Vector_Evidence>" in user_message
+    assert "EXPLICIT_DISAMBIG" not in user_message
+
+
 def test_annotation_messages_prefer_explicit_alias_map_over_bundle() -> None:
     bundle = EvidenceBundle(
         level1_snapshot=Level1AuthoritySnapshot(
@@ -131,3 +168,24 @@ def test_annotation_messages_empty_alias_map_does_not_fallback_to_bundle() -> No
     assert "{}" in user_message
     assert "灰衣人 -> 白芷" not in user_message
     assert "已确认别名：" not in user_message
+
+
+def test_validate_names_in_sources_accepts_bundle_level1_canonical_names() -> None:
+    bundle = EvidenceBundle(
+        level1_snapshot=Level1AuthoritySnapshot(
+            alias_mappings=[AliasMapping(alias="灰衣人", canonical="白芷")],
+            canonical_entities=[CanonicalEntity(name="白芷", entity_type="character")],
+        )
+    )
+
+    invalid_names = validate_names_in_sources(
+        ["白芷"],
+        {
+            "text": "灰衣人站在门口。",
+            "active_entities": [],
+            "alias_map": {},
+            "evidence_bundle": bundle,
+        },
+    )
+
+    assert invalid_names == []

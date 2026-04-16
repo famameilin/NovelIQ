@@ -104,6 +104,7 @@ def build_validation_sources(
     text: str,
     active_entities: str | None = None,
     alias_map: dict[str, str] | None = None,
+    evidence_bundle=None,
 ) -> dict:
     """
     构建验证来源字典
@@ -130,4 +131,5 @@ def build_validation_sources(
         "text": text,
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
+        "evidence_bundle": evidence_bundle,
     }
