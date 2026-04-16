@@ -12,7 +12,10 @@
 
 from __future__ import annotations
 
-from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
+from src.models.local.annotation.evidence_renderer import (
+    render_annotation_prompt_blocks,
+    render_foreshadowing_prompt_blocks,
+)
 from src.models.local.prompts import (
     FEW_SHOT_EXAMPLES_V2,
     FORESHADOWING_EXAMPLES,
@@ -134,6 +137,7 @@ def _build_foreshadowing_messages(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建第二次调用（伏笔分析）的messages
@@ -156,6 +160,14 @@ def _build_foreshadowing_messages(
         chunk_text=text,
         next_chunk_text=next_chunk_text or "（无后文）",
     )
+
+    if evidence_bundle is not None:
+        blocks = render_foreshadowing_prompt_blocks(evidence_bundle)
+        # 中文注释：Phase 2 现在通过 foreshadowing renderer 显式接入 Level 1/2/3，
+        # 避免 evidence layer 只在 annotation/disambiguation 主链路生效。
+        evidence_sections = blocks.sections()
+        if evidence_sections:
+            user_content += "\n\n" + "\n\n".join(evidence_sections)
 
     messages.append({"role": "user", "content": user_content})
     return messages
