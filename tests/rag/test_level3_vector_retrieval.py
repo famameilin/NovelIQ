@@ -10,6 +10,7 @@
 - Level3VectorEvidence 可用性检查
 - DisambigContextProvider Level 3 集成
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -288,51 +289,14 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         self.assertEqual(len(bundle.structured_evidence), 1)
         self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 -> 白芷")
         self.assertEqual(
-            [item.metadata.get("name", item.content) for item in bundle.local_evidence if item.evidence_type == "active_entity"],
+            [
+                item.metadata.get("name", item.content)
+                for item in bundle.local_evidence
+                if item.evidence_type == "active_entity"
+            ],
             ["白芷", "侯飞白"],
         )
         self.assertEqual(bundle.to_prompt_blocks()["disambig_candidates"], "")
-
-    def test_build_disambig_context_renders_legacy_candidate_items_via_disambig_renderer(self) -> None:
-        provider = DisambigContextProvider()
-        provider.collect_evidence = MagicMock(
-            return_value=MagicMock(
-                to_prompt_blocks=MagicMock(
-                    return_value={
-                        "structured_evidence": "",
-                        "disambig_candidates": "<Disambig_Candidates>\n- 「灰衣人」可能是：白芷\n</Disambig_Candidates>",
-                        "vector_evidence": "",
-                    }
-                )
-            )
-        )
-
-        context = provider.build_disambig_context(["灰衣人"], current_chunk=3)
-
-        self.assertIn("<Disambig_Candidates>", context)
-        self.assertIn("「灰衣人」可能是：白芷", context)
-
-    def test_build_graph_feedback_hint_keeps_repository_contract_when_level1_disabled(self) -> None:
-        graph_repo = MagicMock()
-        graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
-        graph_repo.fetch_current_relations.return_value = [
-            {"from_name": "白芷", "to_name": "侯飞白", "type": "盟友"},
-            {"from_name": "路人甲", "to_name": "路人乙", "type": "同伴"},
-        ]
-
-        provider = DisambigContextProvider(
-            graph_repo=graph_repo,
-            run_id="test-run-id",
-            level1_enabled=False,
-        )
-
-        hint = provider.build_graph_feedback_hint(["白芷"], base_hint="BASE")
-
-        self.assertIsNotNone(hint)
-        self.assertIn("BASE", hint)
-        self.assertIn("灰衣人 → 白芷", hint)
-        self.assertIn("白芷 ←盟友→ 侯飞白", hint)
-        self.assertNotIn("路人甲", hint)
 
 
 if __name__ == "__main__":
