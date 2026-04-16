@@ -13,8 +13,8 @@
 from __future__ import annotations
 
 from src.models.local.annotation.evidence_renderer import (
+    render_annotation_evidence_blocks,
     render_annotation_prompt_blocks,
-    render_foreshadowing_prompt_blocks,
 )
 from src.models.local.prompts import (
     FEW_SHOT_EXAMPLES_V2,
@@ -169,10 +169,9 @@ def _build_foreshadowing_messages(
     )
 
     if evidence_bundle is not None:
-        blocks = render_foreshadowing_prompt_blocks(evidence_bundle)
-        # 中文注释：Phase 2 现在通过 foreshadowing renderer 显式接入 Level 1/2/3，
-        # 避免 evidence layer 只在 annotation/disambiguation 主链路生效。
-        evidence_sections = blocks.sections()
+        # 中文注释：Phase 2 只被动复用共享 evidence block，
+        # 不再引入 narrative 专用的二次渲染协议，避免这轮收口任务继续外扩。
+        evidence_sections = render_annotation_evidence_blocks(evidence_bundle)
         if evidence_sections:
             user_content += "\n\n" + "\n\n".join(evidence_sections)
 

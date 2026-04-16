@@ -652,8 +652,37 @@ class DisambigContextProvider:
         existing_names: list[str],
         base_hint: str | None = None,
     ) -> str | None:
-        """兼容接口：图谱反馈的渲染逻辑已迁移到 disambiguation renderer。"""
-        from src.models.local.disambiguation.evidence_renderer import render_graph_feedback_hint
+        """构建图谱反馈提示，包含已裁决别名映射和已确认关系。"""
+        if self._graph_repo is None or self._run_id is None:
+            return base_hint
 
-        bundle = self.collect_evidence(names_in_chunk=existing_names, current_chunk=None)
-        return render_graph_feedback_hint(bundle, existing_names, base_hint=base_hint)
+        existing_set = set(existing_names)
+        parts: list[str] = []
+
+        if base_hint:
+            parts.append(base_hint)
+
+        alias_map = self._alias_lookup.get_alias_map()
+        graph_aliases = {a: c for a, c in alias_map.items() if a != c and c in existing_set}
+        if graph_aliases:
+            alias_lines = ["【图谱已裁决的别名映射】"]
+            for alias, canonical in sorted(graph_aliases.items()):
+                alias_lines.append(f"- {alias} → {canonical}")
+            parts.append("\n".join(alias_lines))
+            logger.debug(f"Graph feedback: injected {len(graph_aliases)} alias mappings")
+
+        if self._relations_cache is None:
+            self._relations_cache = self._graph_repo.fetch_current_relations(self._run_id, active_only=True)
+        relations = self._relations_cache
+        relevant_rels = [r for r in relations if r["from_name"] in existing_set or r["to_name"] in existing_set]
+        if relevant_rels:
+            rel_lines = ["【图谱已确认的关系】"]
+            for relation in relevant_rels[:10]:
+                rel_lines.append(f"- {relation['from_name']} ←{relation['type']}→ {relation['to_name']}")
+            parts.append("\n".join(rel_lines))
+            logger.debug(f"Graph feedback: injected {len(relevant_rels)} relations")
+
+        if not parts:
+            return base_hint
+
+        return "\n".join(parts)

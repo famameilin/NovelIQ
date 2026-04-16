@@ -1,7 +1,6 @@
 from src.models.local.annotation.evidence_renderer import (
     render_annotation_evidence_blocks,
     render_annotation_prompt_blocks,
-    render_foreshadowing_prompt_blocks,
 )
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
@@ -204,26 +203,7 @@ def _build_foreshadowing_bundle() -> EvidenceBundle:
     )
 
 
-def test_render_foreshadowing_prompt_blocks_uses_level123_sections() -> None:
-    bundle = _build_foreshadowing_bundle()
-
-    blocks = render_foreshadowing_prompt_blocks(bundle)
-
-    assert blocks.level1_facts is not None
-    assert "<Narrative_Evidence_Level1>" in blocks.level1_facts
-    assert "稳定实体事实" in blocks.level1_facts
-
-    assert blocks.level2_context is not None
-    assert "<Narrative_Evidence_Level2>" in blocks.level2_context
-    assert "白芷" in blocks.level2_context
-    assert "「灰衣人」可能是：白芷" not in blocks.level2_context
-
-    assert blocks.level3_echoes is not None
-    assert "<Narrative_Evidence_Level3>" in blocks.level3_echoes
-    assert "anchor_text 必须来自<当前文本>" in blocks.level3_echoes
-
-
-def test_build_foreshadowing_messages_appends_shared_evidence_sections() -> None:
+def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
     bundle = _build_foreshadowing_bundle()
 
     messages = _build_foreshadowing_messages(
@@ -236,12 +216,12 @@ def test_build_foreshadowing_messages_appends_shared_evidence_sections() -> None
     )
 
     user_content = messages[-1]["content"]
-    assert "<Narrative_Evidence_Level1>" in user_content
-    assert "<Narrative_Evidence_Level2>" in user_content
-    assert "<Narrative_Evidence_Level3>" in user_content
-    assert "稳定实体事实" in user_content
-    assert "anchor_text 必须来自<当前文本>" in user_content
-    assert "<Disambig_Candidates>" not in user_content
+    assert "<Structured_Evidence>" in user_content
+    assert "<Disambig_Candidates>" in user_content
+    assert "<Vector_Evidence>" in user_content
+    assert "<Narrative_Evidence_Level1>" not in user_content
+    assert "<Narrative_Evidence_Level2>" not in user_content
+    assert "<Narrative_Evidence_Level3>" not in user_content
 
 
 def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> None:
@@ -252,6 +232,6 @@ def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> Non
     )
 
     user_content = messages[-1]["content"]
-    assert "<Narrative_Evidence_Level1>" not in user_content
-    assert "<Narrative_Evidence_Level2>" not in user_content
-    assert "<Narrative_Evidence_Level3>" not in user_content
+    assert "<Structured_Evidence>" not in user_content
+    assert "<Disambig_Candidates>" not in user_content
+    assert "<Vector_Evidence>" not in user_content

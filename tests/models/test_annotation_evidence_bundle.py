@@ -189,3 +189,36 @@ def test_validate_names_in_sources_accepts_bundle_level1_canonical_names() -> No
     )
 
     assert invalid_names == []
+
+
+def test_validate_names_in_sources_rejects_relation_only_names_from_bundle() -> None:
+    bundle = EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content="白芷<盟友>侯飞白",
+                metadata={
+                    "from_name": "白芷",
+                    "to_name": "侯飞白",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            )
+        ],
+        level1_snapshot=Level1AuthoritySnapshot(
+            confirmed_relations=[ConfirmedRelation(from_name="白芷", to_name="侯飞白", relation_type="盟友")],
+        ),
+    )
+
+    invalid_names = validate_names_in_sources(
+        ["侯飞白"],
+        {
+            "text": "灰衣人站在门口。",
+            "active_entities": [],
+            "alias_map": {},
+            "evidence_bundle": bundle,
+        },
+    )
+
+    assert invalid_names == ["侯飞白"]
