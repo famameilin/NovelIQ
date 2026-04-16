@@ -91,14 +91,7 @@ class EvidenceBundle:
             if mapping.alias and mapping.canonical and mapping.alias != mapping.canonical
         }
 
-    def to_prompt_blocks(self) -> dict[str, str]:
-        structured_lines = [item.content for item in self.structured_evidence if item.content]
-        structured_evidence = (
-            "<Structured_Evidence>\n" + "\n".join(structured_lines) + "\n</Structured_Evidence>"
-            if structured_lines
-            else ""
-        )
-
+    def render_disambig_candidates(self) -> str | None:
         candidate_lines = [item.content for item in self.local_evidence if item.evidence_type == "disambig_candidate"]
         if not candidate_lines and self.requested_names:
             exact_aliases = set(self.structured_alias_map().keys())
@@ -114,28 +107,37 @@ class EvidenceBundle:
                 if candidates:
                     candidate_lines.append(f"「{name}」可能是：{'、'.join(candidates)}")
 
-        disambig_candidates = (
-            "<Disambig_Candidates>\n" + "\n".join(candidate_lines) + "\n</Disambig_Candidates>"
-            if candidate_lines
-            else ""
-        )
+        if not candidate_lines:
+            return None
+        return "<Disambig_Candidates>\n" + "\n".join(candidate_lines) + "\n</Disambig_Candidates>"
 
+    def render_vector_evidence(self, max_chunks: int = 3, max_text_len: int = 200) -> str | None:
         vector_parts: list[str] = []
-        for item in self.semantic_evidence[:3]:
+        for item in self.semantic_evidence[:max_chunks]:
             chunk_id = item.chunk_id if item.chunk_id is not None else item.metadata.get("chunk_id", "?")
             score = item.score if item.score is not None else item.metadata.get("similarity", 0.0)
             text = str(item.metadata.get("text", item.content))
-            preview = text[:200] + "..." if len(text) > 200 else text
+            preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
             vector_parts.append(f"[Chunk {chunk_id}] (相似度: {float(score):.2f})\n{preview}")
 
-        vector_evidence = (
+        if not vector_parts:
+            return None
+        return (
             "<Vector_Evidence>\n"
             "以下是与当前上下文语义相似的历史片段，可能存在身份关联：\n"
             + "\n\n".join(vector_parts)
             + "\n</Vector_Evidence>"
-            if vector_parts
+        )
+
+    def to_prompt_blocks(self) -> dict[str, str]:
+        structured_lines = [item.content for item in self.structured_evidence if item.content]
+        structured_evidence = (
+            "<Structured_Evidence>\n" + "\n".join(structured_lines) + "\n</Structured_Evidence>"
+            if structured_lines
             else ""
         )
+        disambig_candidates = self.render_disambig_candidates() or ""
+        vector_evidence = self.render_vector_evidence() or ""
 
         return {
             "structured_evidence": structured_evidence,

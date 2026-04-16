@@ -53,6 +53,8 @@ def test_build_annotation_messages_prefers_structured_evidence_bundle_blocks() -
     user_content = messages[-1]["content"]
     assert "<Narrative_Evidence_Level1>" in user_content
     assert "已确认别名：阿七 -> 贺重明" in user_content
+    assert "<Disambig_Candidates>" in user_content
+    assert "「阿七」可能是：贺重明" in user_content
     assert "<Vector_Evidence>" in user_content
 
 
