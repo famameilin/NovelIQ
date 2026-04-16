@@ -7,7 +7,7 @@
  * 说明: 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
  */
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -59,6 +59,8 @@ const NODE_TYPE_CONFIG: Record<
 export interface TimelineNodeDetailProps {
   node: TimelineNodeType | null;
   novelId: string;
+  taskId: string;
+  selectedRelationEventId?: number | null;
   onClose?: () => void;
   className?: string;
 }
@@ -70,6 +72,8 @@ export interface TimelineNodeDetailProps {
 export function TimelineNodeDetail({
   node,
   novelId,
+  taskId,
+  selectedRelationEventId = null,
   onClose,
   className,
 }: TimelineNodeDetailProps) {
@@ -81,6 +85,35 @@ export function TimelineNodeDetail({
   const handleCharacterClick = useCallback((characterName: string) => {
     navigate(`/novels/${novelId}/characters?highlight=${encodeURIComponent(characterName)}`);
   }, [navigate, novelId]);
+
+  const graphRelationEventId = useMemo(() => {
+    if (selectedRelationEventId != null) {
+      return selectedRelationEventId;
+    }
+
+    const uniqueRelationEventIds = Array.from(
+      new Set(
+        (node?.relation_changes ?? [])
+          .map((relationChange) => relationChange.relation_event_id)
+          .filter((relationEventId): relationEventId is number => relationEventId != null)
+      )
+    );
+
+    // 中文注释：时间轴页内手动点开 relation node 时，URL 里不一定已有
+    // relation_event_id。若当前节点只承载一个稳定事件，就直接把它带回图谱，
+    // 避免回退成 chunk 级命中而误高亮同 chunk 的其他关系变化。
+    return uniqueRelationEventIds.length === 1 ? uniqueRelationEventIds[0] : null;
+  }, [node?.relation_changes, selectedRelationEventId]);
+
+  const handleBackToGraph = useCallback(() => {
+    if (!node) return;
+    const params = new URLSearchParams({ task_id: taskId });
+    params.set("selected_chunk", String(node.chunk_id));
+    if (graphRelationEventId != null) {
+      params.set("relation_event_id", String(graphRelationEventId));
+    }
+    navigate(`/novels/${novelId}/graph?${params.toString()}`);
+  }, [graphRelationEventId, navigate, node, novelId, taskId]);
 
   return (
     <AnimatePresence mode="wait">
@@ -122,6 +155,12 @@ export function TimelineNodeDetail({
                   <span>第 {node.chunk_id} 块</span>
                   <span>进度: {Math.round(node.progress * 100)}%</span>
                   <span>重要性: {node.importance_score.toFixed(1)}</span>
+                </div>
+                <div className="mt-3">
+                  <Button variant="outline" size="sm" onClick={handleBackToGraph}>
+                    回到图谱入口
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
 
@@ -169,6 +208,9 @@ export function TimelineNodeDetail({
                     <User className="h-3.5 w-3.5" />
                     <span>角色登场</span>
                   </div>
+                  <p className="mb-2 text-xs leading-5 text-text-muted">
+                    这是 timeline 基于稳定 lifecycle 标出的首次登场节点，不是页面侧临时推断结果。
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
                     {node.character_entries.map((char) => (
                       <Badge
@@ -190,6 +232,9 @@ export function TimelineNodeDetail({
                     <UserMinus className="h-3.5 w-3.5" />
                     <span>角色退场</span>
                   </div>
+                  <p className="mb-2 text-xs leading-5 text-text-muted">
+                    这里表达的是稳定 lifecycle 的最后活跃节点，便于和 graph page 的角色状态联动查看。
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
                     {node.character_exits.map((char) => (
                       <Badge
@@ -214,18 +259,43 @@ export function TimelineNodeDetail({
                   <div className="space-y-2">
                     {node.relation_changes.map((rc, i) => (
                       <div
-                        key={i}
-                        className="flex items-center gap-2 rounded-md bg-surface-hover p-2 text-xs"
+                        key={rc.relation_event_id ?? i}
+                        className={cn(
+                          "rounded-md p-3 text-xs",
+                          rc.relation_event_id != null && rc.relation_event_id === selectedRelationEventId
+                            ? "border border-primary/30 bg-primary/5"
+                            : "bg-surface-hover"
+                        )}
                       >
-                        <span className="font-medium">{rc.from_char}</span>
-                        <ArrowRight className="h-3 w-3 text-text-muted" />
-                        <span className="font-medium">{rc.to_char}</span>
-                        <Badge variant="outline" className="text-[10px]">
-                          {rc.relation_type}
-                        </Badge>
-                        <Badge variant="secondary" className="text-[10px]">
-                          {rc.change_type}
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{rc.from_char}</span>
+                          <ArrowRight className="h-3 w-3 text-text-muted" />
+                          <span className="font-medium">{rc.to_char}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {rc.relation_type}
+                          </Badge>
+                          <Badge variant="secondary" className="text-[10px]">
+                            {rc.change_type}
+                          </Badge>
+                          {rc.relation_event_id != null ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              事件 #{rc.relation_event_id}
+                            </Badge>
+                          ) : null}
+                          {rc.directionality ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              {rc.directionality}
+                            </Badge>
+                          ) : null}
+                          {rc.confidence != null ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              置信 {Math.round(rc.confidence * 100)}%
+                            </Badge>
+                          ) : null}
+                        </div>
+                        {rc.evidence ? (
+                          <p className="mt-2 leading-5 text-text-muted">{rc.evidence}</p>
+                        ) : null}
                       </div>
                     ))}
                   </div>

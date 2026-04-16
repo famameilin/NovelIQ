@@ -183,6 +183,7 @@ class AnalysisEventBus:
         resolved_total = event.total if event.total is not None else self._total
 
         # 自动计算 percent：当事件没有提供 percent 时，根据 current/total 和当前阶段计算
+        resolved_percent: float | None
         if event.percent is not None:
             resolved_percent = event.percent
         elif resolved_current is not None and resolved_total is not None and resolved_total > 0:
@@ -190,6 +191,7 @@ class AnalysisEventBus:
         else:
             resolved_percent = self._percent
 
+        resolved_sub_percent: float | None
         resolved_sub_percent = event.sub_percent if event.sub_percent is not None else self._sub_percent
 
         resolved_event = StreamEvent(
