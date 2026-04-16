@@ -50,6 +50,21 @@ const changeTypeLabels: Record<string, string> = {
   断裂: "断裂",
 };
 
+function buildGraphUrl(
+  novelId: string,
+  taskId: string,
+  options?: { chunkId?: number | null; relationEventId?: number | null }
+): string {
+  const params = new URLSearchParams({ task_id: taskId });
+  if (options?.chunkId != null) {
+    params.set("selected_chunk", String(options.chunkId));
+  }
+  if (options?.relationEventId != null) {
+    params.set("relation_event_id", String(options.relationEventId));
+  }
+  return `/novels/${novelId}/graph?${params.toString()}`;
+}
+
 function buildTimelineUrl(novelId: string, taskId: string): string {
   return `/novels/${novelId}/timeline?task_id=${taskId}&max_level=3&show_tension=true`;
 }
@@ -164,7 +179,7 @@ export function GraphPage() {
       return;
     }
 
-    navigate(`/novels/${novelId}/graph?task_id=${storeTaskId}`, { replace: true });
+    navigate(buildGraphUrl(novelId, storeTaskId), { replace: true });
   }, [navigate, novelId, storeTaskId, urlTaskId]);
 
   useEffect(() => {
@@ -447,8 +462,17 @@ export function GraphPage() {
     // 中文注释：task 切换发生在新快照返回之前时，也要立即清掉旧页面状态；
     // 否则 load-more 报错、旧 deep-link 提示、旧选中节点会短暂闪回到新 task 页面。
     eventsRequestVersionRef.current += 1;
-    resetTaskScopedGraphState();
-  }, [resetTaskScopedGraphState, taskScopeId]);
+    // 中文注释：如果新 task 已经命中 React Query 缓存，就用当前 snapshot 直接回填
+    // events/pageInfo；这样既能清掉旧 task 的脏状态，也不会把新 task 的已缓存窗口误清空。
+    resetTaskScopedGraphState(
+      graphData
+        ? {
+            events: graphData.events ?? [],
+            pageInfo: graphData.events_page ?? null,
+          }
+        : undefined
+    );
+  }, [graphData, resetTaskScopedGraphState, taskScopeId]);
 
   useEffect(() => {
     if (!graphContractIssue || !graphData) return;
@@ -592,19 +616,30 @@ export function GraphPage() {
     if (timelineUrl) {
       navigate(
         buildTimelineSelectionUrl(timelineUrl, {
-          chunkId: selectedEvent?.chunk_id,
+          chunkId: selectedEvent?.chunk_id ?? initialSelectedChunk,
           relationEventId: selectedEvent?.relation_event_id,
         })
       );
     }
-  }, [navigate, selectedEvent, timelineUrl]);
+  }, [initialSelectedChunk, navigate, selectedEvent, timelineUrl]);
 
-  const handleSelectEvent = useCallback((relationEventId: number) => {
+  const handleSelectEvent = useCallback((event: GraphEvent) => {
     // 中文注释：深链只负责首轮自动定位；用户手动改选后，应以当前交互为准，
-    // 不能继续保留旧提示或在后续事件窗口刷新时强行拉回初始命中结果。
+    // 不能继续保留旧提示或在后续事件窗口刷新时强行拉回初始命中结果；
+    // 同时要把当前选择同步回 URL，避免页面状态和 deep-link 语义继续分叉。
     setHasUserSelectedEvent(true);
-    setSelectedEventId(relationEventId);
-  }, []);
+    setSelectedEventId(event.relation_event_id);
+    if (!novelId || !taskScopeId) {
+      return;
+    }
+    navigate(
+      buildGraphUrl(novelId, taskScopeId, {
+        chunkId: event.chunk_id,
+        relationEventId: event.relation_event_id,
+      }),
+      { replace: true }
+    );
+  }, [navigate, novelId, taskScopeId]);
 
   const handleOpenTimelineChunk = useCallback(
     (chunkId?: number, relationEventId?: number | null) => {
@@ -1026,7 +1061,7 @@ export function GraphPage() {
                         <button
                           key={event.relation_event_id}
                           type="button"
-                          onClick={() => handleSelectEvent(event.relation_event_id)}
+                          onClick={() => handleSelectEvent(event)}
                           className={cn(
                             "w-full rounded-xl border p-4 text-left transition-colors",
                             isSelected
