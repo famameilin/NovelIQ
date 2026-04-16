@@ -45,50 +45,11 @@ def _render_active_entity_lines(items: list[EvidenceItem]) -> str | None:
 
 
 def _render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
-    if not bundle.requested_names or not bundle.local_evidence:
-        return None
-
-    exact_aliases = {item.alias for item in bundle.level1_snapshot.alias_mappings} if bundle.level1_snapshot else set()
-    active_names = [
-        str(item.metadata.get("name", item.content))
-        for item in bundle.local_evidence
-        if item.evidence_type == "active_entity"
-    ]
-    candidate_names = [name for name in active_names if name]
-    if not candidate_names:
-        return None
-
-    lines: list[str] = []
-    for name in bundle.requested_names:
-        if name in exact_aliases:
-            continue
-        candidates = [candidate for candidate in candidate_names if candidate != name][:5]
-        if candidates:
-            lines.append(f"- 「{name}」可能是：{'、'.join(candidates)}")
-
-    if not lines:
-        return None
-    return "<Disambig_Candidates>\n" + "\n".join(lines) + "\n</Disambig_Candidates>"
+    return bundle.render_disambig_candidates()
 
 
 def render_vector_evidence(bundle: EvidenceBundle, max_chunks: int = 3, max_text_len: int = 200) -> str | None:
-    if not bundle.semantic_evidence:
-        return None
-
-    evidence_parts: list[str] = []
-    for item in bundle.semantic_evidence[:max_chunks]:
-        chunk_id = item.metadata.get("chunk_id", item.chunk_id if item.chunk_id is not None else "?")
-        similarity = float(item.metadata.get("similarity", item.score if item.score is not None else 0.0))
-        text = str(item.metadata.get("text", item.content))
-        preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
-        evidence_parts.append(f"[Chunk {chunk_id}] (相似度: {similarity:.2f})\n{preview}")
-
-    return (
-        "<Vector_Evidence>\n"
-        "以下是与当前上下文语义相似的历史片段，可能存在身份关联：\n"
-        + "\n\n".join(evidence_parts)
-        + "\n</Vector_Evidence>"
-    )
+    return bundle.render_vector_evidence(max_chunks=max_chunks, max_text_len=max_text_len)
 
 
 def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> None:

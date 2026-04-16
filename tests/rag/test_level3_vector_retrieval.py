@@ -286,7 +286,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         bundle = provider.collect_evidence(["灰衣人"], current_chunk=3)
 
         self.assertEqual(len(bundle.structured_evidence), 1)
-        self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 → 白芷")
+        self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 -> 白芷")
         self.assertEqual(
             [item.metadata.get("name", item.content) for item in bundle.local_evidence if item.evidence_type == "active_entity"],
             ["白芷", "侯飞白"],
