@@ -22,7 +22,7 @@ class TestGlobalContext(unittest.TestCase):
         chunks = [
             '张三说："今天天气真好。"',
             '李四回答："是啊，适合出行。"',
-            '王五也加入了对话。',
+            "王五也加入了对话。",
         ]
         result = asyncio.run(extract_global_context(chunks))
 
@@ -37,7 +37,9 @@ class TestGlobalContext(unittest.TestCase):
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"core_characters": ["张三", "李四"], "world_setting": "古代武侠世界"}'
+        mock_response.choices[
+            0
+        ].message.content = '{"core_characters": ["张三", "李四"], "world_setting": "古代武侠世界"}'
         mock_inner_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         chunks = ["第一章 张三出场", "李四也出现了"]

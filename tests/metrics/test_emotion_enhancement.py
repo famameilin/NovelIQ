@@ -12,6 +12,7 @@
 - 傅里叶滤波：基本功能、降噪效果、无滞后
 - jieba用户词典：分词效果验证
 """
+
 from __future__ import annotations
 
 import sys
@@ -313,7 +314,6 @@ class TestWeightedDensity:
         assert result["好"] == 1
         assert result["快乐"] == 2
         assert result["心花怒放"] == 3
-
 
 
 class TestFourierSmooth:

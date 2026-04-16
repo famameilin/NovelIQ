@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from src.rag.evidence_types import EvidenceBundle, EvidenceItem, Level1AuthoritySnapshot
+if TYPE_CHECKING:
+    from src.knowledge.authority import Level1AuthoritySnapshot
+    from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 
 @dataclass(slots=True)
@@ -11,16 +14,6 @@ class AnnotationPromptBlocks:
     active_entities: str | None = None
     disambig_context: str | None = None
     vector_evidence: str | None = None
-
-
-@dataclass(slots=True)
-class ForeshadowingPromptBlocks:
-    level1_facts: str | None = None
-    level2_context: str | None = None
-    level3_echoes: str | None = None
-
-    def sections(self) -> list[str]:
-        return [section for section in (self.level1_facts, self.level2_context, self.level3_echoes) if section]
 
 
 def _render_active_entity_lines(items: list[EvidenceItem]) -> str | None:
@@ -45,50 +38,11 @@ def _render_active_entity_lines(items: list[EvidenceItem]) -> str | None:
 
 
 def _render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
-    if not bundle.requested_names or not bundle.local_evidence:
-        return None
-
-    exact_aliases = {item.alias for item in bundle.level1_snapshot.alias_mappings} if bundle.level1_snapshot else set()
-    active_names = [
-        str(item.metadata.get("name", item.content))
-        for item in bundle.local_evidence
-        if item.evidence_type == "active_entity"
-    ]
-    candidate_names = [name for name in active_names if name]
-    if not candidate_names:
-        return None
-
-    lines: list[str] = []
-    for name in bundle.requested_names:
-        if name in exact_aliases:
-            continue
-        candidates = [candidate for candidate in candidate_names if candidate != name][:5]
-        if candidates:
-            lines.append(f"- 「{name}」可能是：{'、'.join(candidates)}")
-
-    if not lines:
-        return None
-    return "<Disambig_Candidates>\n" + "\n".join(lines) + "\n</Disambig_Candidates>"
+    return bundle.render_disambig_candidates()
 
 
 def render_vector_evidence(bundle: EvidenceBundle, max_chunks: int = 3, max_text_len: int = 200) -> str | None:
-    if not bundle.semantic_evidence:
-        return None
-
-    evidence_parts: list[str] = []
-    for item in bundle.semantic_evidence[:max_chunks]:
-        chunk_id = item.metadata.get("chunk_id", item.chunk_id if item.chunk_id is not None else "?")
-        similarity = float(item.metadata.get("similarity", item.score if item.score is not None else 0.0))
-        text = str(item.metadata.get("text", item.content))
-        preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
-        evidence_parts.append(f"[Chunk {chunk_id}] (相似度: {similarity:.2f})\n{preview}")
-
-    return (
-        "<Vector_Evidence>\n"
-        "以下是与当前上下文语义相似的历史片段，可能存在身份关联：\n"
-        + "\n\n".join(evidence_parts)
-        + "\n</Vector_Evidence>"
-    )
+    return bundle.render_vector_evidence(max_chunks=max_chunks, max_text_len=max_text_len)
 
 
 def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> None:
@@ -97,7 +51,11 @@ def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> N
         seen_lines.add(line)
 
 
-def _collect_level1_lines_from_structured(bundle: EvidenceBundle) -> list[str]:
+def _collect_level1_lines_from_structured(
+    bundle: EvidenceBundle,
+    *,
+    include_alias_mappings: bool = True,
+) -> list[str]:
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
@@ -113,6 +71,8 @@ def _collect_level1_lines_from_structured(bundle: EvidenceBundle) -> list[str]:
 
     for item in bundle.structured_evidence:
         if item.evidence_type == "alias_mapping":
+            if not include_alias_mappings:
+                continue
             alias = str(item.metadata.get("alias", "")).strip()
             canonical = str(item.metadata.get("canonical", "")).strip()
             if alias and canonical:
@@ -139,22 +99,25 @@ def _collect_level1_lines_from_structured(bundle: EvidenceBundle) -> list[str]:
     return alias_lines + entity_lines + relation_lines
 
 
-def _collect_level1_lines_from_snapshot(snapshot: Level1AuthoritySnapshot) -> list[str]:
+def _collect_level1_lines_from_snapshot(
+    snapshot: Level1AuthoritySnapshot,
+    *,
+    include_alias_mappings: bool = True,
+) -> list[str]:
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
     seen_lines: set[str] = set()
     entity_types = {
-        item.name.strip(): item.entity_type.strip()
-        for item in snapshot.entity_types
-        if item.name and item.entity_type
+        item.name.strip(): item.entity_type.strip() for item in snapshot.entity_types if item.name and item.entity_type
     }
 
-    for mapping in snapshot.alias_mappings:
-        alias = mapping.alias.strip()
-        canonical = mapping.canonical.strip()
-        if alias and canonical:
-            _append_unique_line(alias_lines, seen_lines, f"- 已确认别名：{alias} -> {canonical}")
+    if include_alias_mappings:
+        for mapping in snapshot.alias_mappings:
+            alias = mapping.alias.strip()
+            canonical = mapping.canonical.strip()
+            if alias and canonical:
+                _append_unique_line(alias_lines, seen_lines, f"- 已确认别名：{alias} -> {canonical}")
 
     for entity in snapshot.canonical_entities:
         name = entity.name.strip()
@@ -176,26 +139,21 @@ def _collect_level1_lines_from_snapshot(snapshot: Level1AuthoritySnapshot) -> li
     return alias_lines + entity_lines + relation_lines
 
 
-def _render_foreshadowing_level1(bundle: EvidenceBundle) -> str | None:
-    lines = _collect_level1_lines_from_structured(bundle) if bundle.structured_evidence else []
-    if not lines and bundle.level1_snapshot is not None:
-        lines = _collect_level1_lines_from_snapshot(bundle.level1_snapshot)
-
-    if not lines:
-        return None
-
-    return (
-        "<Narrative_Evidence_Level1>\n"
-        "以下是与当前片段相关的稳定实体事实，可用于判断是否存在提前埋线：\n"
-        + "\n".join(lines)
-        + "\n</Narrative_Evidence_Level1>"
+def _render_annotation_level1(
+    bundle: EvidenceBundle,
+    *,
+    include_alias_mappings: bool = True,
+) -> str | None:
+    lines = (
+        _collect_level1_lines_from_structured(bundle, include_alias_mappings=include_alias_mappings)
+        if bundle.structured_evidence
+        else []
     )
-
-
-def _render_annotation_level1(bundle: EvidenceBundle) -> str | None:
-    lines = _collect_level1_lines_from_structured(bundle) if bundle.structured_evidence else []
     if not lines and bundle.level1_snapshot is not None:
-        lines = _collect_level1_lines_from_snapshot(bundle.level1_snapshot)
+        lines = _collect_level1_lines_from_snapshot(
+            bundle.level1_snapshot,
+            include_alias_mappings=include_alias_mappings,
+        )
 
     if not lines:
         return None
@@ -208,68 +166,35 @@ def _render_annotation_level1(bundle: EvidenceBundle) -> str | None:
     )
 
 
-def _render_foreshadowing_level2(bundle: EvidenceBundle) -> str | None:
-    active_lines = _render_active_entity_lines(
-        [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
-    )
-    if not active_lines:
-        return None
-
-    payload = active_lines.replace("【近期活跃角色】\n", "", 1)
-    return (
-        "<Narrative_Evidence_Level2>\n"
-        "以下是当前片段附近的近期活跃实体与状态，可辅助判断这段信息是否在为后文铺垫：\n"
-        + payload
-        + "\n</Narrative_Evidence_Level2>"
-    )
-
-
-def _render_foreshadowing_level3(bundle: EvidenceBundle, max_chunks: int = 3, max_text_len: int = 180) -> str | None:
-    if not bundle.semantic_evidence:
-        return None
-
-    lines: list[str] = []
-    for item in bundle.semantic_evidence[:max_chunks]:
-        chunk_id = item.metadata.get("chunk_id", item.chunk_id if item.chunk_id is not None else "?")
-        similarity = float(item.metadata.get("similarity", item.metadata.get("score", item.score or 0.0)))
-        text = str(item.metadata.get("text", item.content))
-        preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
-        lines.append(f"- [Chunk {chunk_id} | 相似度 {similarity:.2f}] {preview}")
-
-    return (
-        "<Narrative_Evidence_Level3>\n"
-        "以下是语义相近的历史片段，只能作为弱证据，用于观察重复意象、线索回响或叙事呼应：\n"
-        + "\n".join(lines)
-        + "\n注意：这些历史片段不能直接作为 anchor_text；anchor_text 必须来自<当前文本>。\n"
-        "</Narrative_Evidence_Level3>"
-    )
-
-
-def render_foreshadowing_prompt_blocks(bundle: EvidenceBundle) -> ForeshadowingPromptBlocks:
-    return ForeshadowingPromptBlocks(
-        level1_facts=_render_foreshadowing_level1(bundle),
-        level2_context=_render_foreshadowing_level2(bundle),
-        level3_echoes=_render_foreshadowing_level3(bundle),
-    )
-
-
 def render_annotation_evidence_blocks(bundle: EvidenceBundle) -> list[str]:
-    """兼容旧测试和调用方，保持证据块输出顺序稳定。"""
+    """将 EvidenceBundle 渲染为 Phase 2 可消费的结构化证据块列表。"""
 
-    blocks = bundle.to_prompt_blocks()
-    return [
-        block
-        for block in (
-            blocks["structured_evidence"],
-            blocks["disambig_candidates"],
-            blocks["vector_evidence"],
-        )
-        if block
-    ]
+    blocks: list[str] = []
+
+    structured_lines = [item.content for item in bundle.structured_evidence if item.content]
+    if structured_lines:
+        blocks.append("<Structured_Evidence>\n" + "\n".join(structured_lines) + "\n</Structured_Evidence>")
+
+    disambig_candidates = bundle.render_disambig_candidates()
+    if disambig_candidates:
+        blocks.append(disambig_candidates)
+
+    vector_evidence = bundle.render_vector_evidence()
+    if vector_evidence:
+        blocks.append(vector_evidence)
+
+    return blocks
 
 
-def render_annotation_prompt_blocks(bundle: EvidenceBundle) -> AnnotationPromptBlocks:
-    level1_facts = _render_annotation_level1(bundle)
+def render_annotation_prompt_blocks(
+    bundle: EvidenceBundle,
+    *,
+    include_level1_alias_mappings: bool = True,
+) -> AnnotationPromptBlocks:
+    level1_facts = _render_annotation_level1(
+        bundle,
+        include_alias_mappings=include_level1_alias_mappings,
+    )
     active_entities = _render_active_entity_lines(
         [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
     )

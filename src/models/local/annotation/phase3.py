@@ -366,9 +366,7 @@ def _post_process_validation(
             valid_records.append(record)
 
     if unknown_count > 0:
-        logger.info(
-            f"phase3_validation summary: unknown_speakers={unknown_count}, chunk_id={chunk_id}"
-        )
+        logger.info(f"phase3_validation summary: unknown_speakers={unknown_count}, chunk_id={chunk_id}")
 
     return valid_records
 

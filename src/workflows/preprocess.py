@@ -209,9 +209,7 @@ async def _generate_chunk_embeddings(
     expected_dim = settings.models.semantic_chunking.embedding_dim
     actual_dim = await embedding_client.detect_embedding_dimension()
     if actual_dim != expected_dim:
-        raise ValueError(
-            f"Level 3 embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}"
-        )
+        raise ValueError(f"Level 3 embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}")
 
     ensure_chunk_embeddings_schema(session, expected_dim)
 

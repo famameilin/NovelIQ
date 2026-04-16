@@ -107,6 +107,7 @@ async def execute_phase1_call(
         "text": text,
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
+        "evidence_bundle": evidence_bundle,
     }
 
     result = client._validate_annotation(result, sources, chunk_id, content_clean)

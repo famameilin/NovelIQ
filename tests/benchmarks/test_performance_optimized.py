@@ -66,7 +66,7 @@ def test_aho_corasick_optimization():
     for _ in range(100):
         get_emotion_spans(test_text, tokens, pos_terms.keys())
     elapsed_old = time.time() - start
-    print(f"   耗时: {elapsed_old/100*1000:.2f}毫秒/次")
+    print(f"   耗时: {elapsed_old / 100 * 1000:.2f}毫秒/次")
 
     print("\n2. Aho-Corasick优化:")
     automaton = build_automaton(pos_terms.keys())
@@ -74,11 +74,11 @@ def test_aho_corasick_optimization():
     for _ in range(100):
         get_emotion_spans_fast(test_text, automaton, tokens)
     elapsed_new = time.time() - start
-    print(f"   耗时: {elapsed_new/100*1000:.2f}毫秒/次")
+    print(f"   耗时: {elapsed_new / 100 * 1000:.2f}毫秒/次")
 
     speedup = elapsed_old / elapsed_new
     print(f"\n✅ 性能提升: {speedup:.2f}倍")
-    print(f"   时间节省: {(elapsed_old - elapsed_new)/100*1000:.2f}毫秒/次")
+    print(f"   时间节省: {(elapsed_old - elapsed_new) / 100 * 1000:.2f}毫秒/次")
 
 
 def test_multi_type_merge_optimization():
@@ -97,7 +97,7 @@ def test_multi_type_merge_optimization():
     ]
 
     for i, lex in enumerate(weighted_lexicons):
-        print(f"类型{i+1}: pos={len(lex.pos_terms)}, neg={len(lex.neg_terms)}")
+        print(f"类型{i + 1}: pos={len(lex.pos_terms)}, neg={len(lex.neg_terms)}")
 
     chunk_texts = [(i, generate_test_text(500)) for i in range(10)]
 
@@ -109,10 +109,10 @@ def test_multi_type_merge_optimization():
     for _ in range(10):
         compute_emotion_curve_weighted(chunk_texts, weighted_lexicons)
     elapsed_new = time.time() - start
-    print(f"   耗时: {elapsed_new/10*1000:.2f}毫秒/次")
+    print(f"   耗时: {elapsed_new / 10 * 1000:.2f}毫秒/次")
 
     print(f"\n✅ 预期性能提升: 3倍")
-    print(f"   预期耗时: ~{elapsed_new*3:.2f}毫秒（优化前）")
+    print(f"   预期耗时: ~{elapsed_new * 3:.2f}毫秒（优化前）")
 
 
 def test_end_to_end_optimization():
@@ -143,7 +143,7 @@ def test_end_to_end_optimization():
     elapsed = time.time() - start
 
     print(f"\n总耗时: {elapsed:.3f}秒")
-    print(f"平均每个Chunk: {elapsed/chunk_count*1000:.2f}毫秒")
+    print(f"平均每个Chunk: {elapsed / chunk_count * 1000:.2f}毫秒")
     print(f"处理速度: {chunk_count * chunk_length / elapsed:.0f}字/秒")
 
     print(f"\n✅ 对比优化前:")
@@ -179,14 +179,14 @@ def test_different_text_lengths():
         for _ in range(10):
             get_emotion_spans(test_text, tokens, pos_terms.keys())
         elapsed_old = time.time() - start
-        print(f"{elapsed_old/10*1000:.2f}毫秒")
+        print(f"{elapsed_old / 10 * 1000:.2f}毫秒")
 
         print("  Aho-Corasick:", end=" ")
         start = time.time()
         for _ in range(10):
             get_emotion_spans_fast(test_text, automaton, tokens)
         elapsed_new = time.time() - start
-        print(f"{elapsed_new/10*1000:.2f}毫秒")
+        print(f"{elapsed_new / 10 * 1000:.2f}毫秒")
 
         speedup = elapsed_old / elapsed_new
         print(f"  性能提升: {speedup:.2f}倍")
@@ -210,7 +210,7 @@ def test_automaton_reuse():
     start = time.time()
     automaton = build_automaton(pos_terms.keys())
     elapsed_build = time.time() - start
-    print(f"   耗时: {elapsed_build*1000:.2f}毫秒")
+    print(f"   耗时: {elapsed_build * 1000:.2f}毫秒")
 
     print("\n2. 复用自动机（100次匹配）:")
     test_text = generate_test_text(1000)
@@ -218,11 +218,11 @@ def test_automaton_reuse():
     for _ in range(100):
         get_emotion_spans_fast(test_text, automaton)
     elapsed_reuse = time.time() - start
-    print(f"   耗时: {elapsed_reuse/100*1000:.2f}毫秒/次")
+    print(f"   耗时: {elapsed_reuse / 100 * 1000:.2f}毫秒/次")
 
     print(f"\n✅ 结论: 自动机构建一次，可重复使用")
-    print(f"   构建开销: {elapsed_build*1000:.2f}毫秒")
-    print(f"   单次匹配: {elapsed_reuse/100*1000:.2f}毫秒")
+    print(f"   构建开销: {elapsed_build * 1000:.2f}毫秒")
+    print(f"   单次匹配: {elapsed_reuse / 100 * 1000:.2f}毫秒")
 
 
 if __name__ == "__main__":

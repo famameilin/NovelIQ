@@ -73,12 +73,16 @@ class TestCloudStub(unittest.TestCase):
         expected_canonical_decisions = {"alias_a": "zhangsan"}
         fake_result = MagicMock(canonical_decisions=expected_canonical_decisions)
 
-        with patch.object(client._disambiguation_client, "disambiguate_characters", return_value=fake_result) as mock_disambiguate:
-            result = asyncio.run(client.disambiguate_characters(
-                candidates=_candidates("zhangsan", "alias_a"),
-                context_sentences={"alias_a": "alias_a smiled"},
-                existing_names=["zhangsan"],
-            ))
+        with patch.object(
+            client._disambiguation_client, "disambiguate_characters", return_value=fake_result
+        ) as mock_disambiguate:
+            result = asyncio.run(
+                client.disambiguate_characters(
+                    candidates=_candidates("zhangsan", "alias_a"),
+                    context_sentences={"alias_a": "alias_a smiled"},
+                    existing_names=["zhangsan"],
+                )
+            )
 
         self.assertEqual(result, expected_canonical_decisions)
         mock_disambiguate.assert_called_once_with(

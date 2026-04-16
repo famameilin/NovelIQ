@@ -10,6 +10,7 @@
 - Level3VectorEvidence 可用性检查
 - DisambigContextProvider Level 3 集成
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -286,31 +287,16 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         bundle = provider.collect_evidence(["灰衣人"], current_chunk=3)
 
         self.assertEqual(len(bundle.structured_evidence), 1)
-        self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 → 白芷")
+        self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 -> 白芷")
         self.assertEqual(
-            [item.metadata.get("name", item.content) for item in bundle.local_evidence if item.evidence_type == "active_entity"],
+            [
+                item.metadata.get("name", item.content)
+                for item in bundle.local_evidence
+                if item.evidence_type == "active_entity"
+            ],
             ["白芷", "侯飞白"],
         )
         self.assertEqual(bundle.to_prompt_blocks()["disambig_candidates"], "")
-
-    def test_build_disambig_context_renders_legacy_candidate_items_via_disambig_renderer(self) -> None:
-        provider = DisambigContextProvider()
-        provider.collect_evidence = MagicMock(
-            return_value=MagicMock(
-                to_prompt_blocks=MagicMock(
-                    return_value={
-                        "structured_evidence": "",
-                        "disambig_candidates": "<Disambig_Candidates>\n- 「灰衣人」可能是：白芷\n</Disambig_Candidates>",
-                        "vector_evidence": "",
-                    }
-                )
-            )
-        )
-
-        context = provider.build_disambig_context(["灰衣人"], current_chunk=3)
-
-        self.assertIn("<Disambig_Candidates>", context)
-        self.assertIn("「灰衣人」可能是：白芷", context)
 
 
 if __name__ == "__main__":

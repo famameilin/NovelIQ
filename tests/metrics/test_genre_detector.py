@@ -45,26 +45,20 @@ class TestDetectGenreWeighted:
 
     def test_multiple_chunks_sampling(self):
         """多个 chunk 均匀采样"""
-        chunk_texts = [
-            (i, f"第{i}章内容，剑气修仙境界提升。") for i in range(100)
-        ]
+        chunk_texts = [(i, f"第{i}章内容，剑气修仙境界提升。") for i in range(100)]
         result = detect_genre_weighted(chunk_texts, sample_ratio=0.1)
         assert result.sample_count >= 3
         assert result.sample_count <= 10
 
     def test_min_samples_constraint(self):
         """最少采样数约束"""
-        chunk_texts = [
-            (i, f"第{i}章内容。") for i in range(5)
-        ]
+        chunk_texts = [(i, f"第{i}章内容。") for i in range(5)]
         result = detect_genre_weighted(chunk_texts, sample_ratio=0.1, min_samples=10)
         assert result.sample_count >= 10 or result.sample_count == len(chunk_texts)
 
     def test_large_novel_sampling(self):
         """长篇小说采样测试"""
-        chunk_texts = [
-            (i, f"第{i}章内容，剑气修仙境界提升。") for i in range(500)
-        ]
+        chunk_texts = [(i, f"第{i}章内容，剑气修仙境界提升。") for i in range(500)]
         result = detect_genre_weighted(chunk_texts, sample_ratio=0.1)
         assert result.sample_count == 50
 
@@ -81,9 +75,7 @@ class TestDetectGenreWeighted:
 
     def test_weights_accumulate_to_one(self):
         """权重累加到 1.0 后停止"""
-        chunk_texts = [
-            (i, f"第{i}章内容，剑气修仙境界提升。") for i in range(50)
-        ]
+        chunk_texts = [(i, f"第{i}章内容，剑气修仙境界提升。") for i in range(50)]
         result = detect_genre_weighted(chunk_texts)
         accumulated = 0.0
         for _, w in result.genre_weights:
