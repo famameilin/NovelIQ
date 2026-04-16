@@ -157,7 +157,7 @@ def test_chunk_context_prompt_accessors_prefer_renderer_blocks_and_fallbacks():
     assert "[Chunk 4]" in context.prompt_vector_evidence
 
 
-def test_chunk_context_legacy_setters_sync_back_to_effective_prompt_values():
+def test_chunk_context_legacy_setters_do_not_override_renderer_prompt_blocks():
     context = ChunkContext(
         active_entities_fallback="authority-fallback",
         annotation_prompt_blocks=render_annotation_prompt_blocks(
@@ -192,11 +192,29 @@ def test_chunk_context_legacy_setters_sync_back_to_effective_prompt_values():
     context.disambig_context_str = "LEGACY_DISAMBIG"
     context.vector_evidence_str = "LEGACY_VECTOR"
 
-    assert context.prompt_active_entities == "LEGACY_ACTIVE"
+    assert context.prompt_active_entities is not None
+    assert "程霜" in context.prompt_active_entities
+    assert context.active_entities_str is not None
+    assert "程霜" in context.active_entities_str
+    assert context.prompt_disambig_context is not None
+    assert "「灰衣人」可能是：程霜" in context.prompt_disambig_context
+    assert context.disambig_context_str is not None
+    assert "「灰衣人」可能是：程霜" in context.disambig_context_str
+    assert context.prompt_vector_evidence is not None
+    assert "[Chunk 4]" in context.prompt_vector_evidence
+    assert context.vector_evidence_str is not None
+    assert "[Chunk 4]" in context.vector_evidence_str
+
+
+def test_chunk_context_legacy_setters_still_work_without_renderer_blocks():
+    context = ChunkContext()
+
+    context.active_entities_str = "LEGACY_ACTIVE"
+    context.disambig_context_str = "LEGACY_DISAMBIG"
+    context.vector_evidence_str = "LEGACY_VECTOR"
+
     assert context.active_entities_str == "LEGACY_ACTIVE"
-    assert context.prompt_disambig_context == "LEGACY_DISAMBIG"
     assert context.disambig_context_str == "LEGACY_DISAMBIG"
-    assert context.prompt_vector_evidence == "LEGACY_VECTOR"
     assert context.vector_evidence_str == "LEGACY_VECTOR"
 
 
