@@ -35,6 +35,9 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
+from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.rag.authority import Level1AuthorityProvider
+from src.rag.evidence_types import EvidenceBundle, EvidenceItem, Level1AuthoritySnapshot
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -340,6 +343,13 @@ class DisambigContextProvider:
         self._run_id = run_id
         self._lookback_chunks = lookback_chunks
         self._relations_cache: list[dict] | None = None
+        self._authority_snapshot_cache: Level1AuthoritySnapshot | None = None
+        self._authority_provider = (
+            Level1AuthorityProvider(graph_repo) if graph_repo is not None and run_id is not None else None
+        )
+        self._graph_authority_service = (
+            KnowledgeGraphAuthorityService(graph_repo) if graph_repo is not None else None
+        )
         self._level1_enabled = level1_enabled
         self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
@@ -357,6 +367,180 @@ class DisambigContextProvider:
         """别名映射和关系缓存失效（每个 chunk 处理后调用，因为 projection 可能更新了别名表）"""
         self._alias_lookup.invalidate_cache()
         self._relations_cache = None
+        self._authority_snapshot_cache = None
+
+    def _get_authority_snapshot(self) -> Level1AuthoritySnapshot:
+        if not self._level1_enabled or self._authority_provider is None or self._run_id is None:
+            return Level1AuthoritySnapshot()
+        if self._authority_snapshot_cache is None:
+            self._authority_snapshot_cache = self._authority_provider.build_snapshot(self._run_id)
+        return self._authority_snapshot_cache
+
+    def _build_structured_evidence(self, names_in_chunk: list[str] | None = None) -> EvidenceBundle:
+        snapshot = self._get_authority_snapshot()
+        requested_names = [name for name in (names_in_chunk or []) if name]
+        relevant_names = set(requested_names)
+        if relevant_names:
+            related_canonicals = {mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names}
+            relevant_names |= related_canonicals
+
+        structured_evidence: list[EvidenceItem] = []
+
+        alias_mappings = snapshot.alias_mappings
+        if relevant_names:
+            alias_mappings = [
+                mapping
+                for mapping in snapshot.alias_mappings
+                if mapping.alias in relevant_names or mapping.canonical in relevant_names
+            ]
+        for mapping in alias_mappings:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="alias_mapping",
+                    source=mapping.source,
+                    content=f"{mapping.alias} -> {mapping.canonical}",
+                    metadata={
+                        "alias": mapping.alias,
+                        "canonical": mapping.canonical,
+                        "confidence": mapping.confidence,
+                    },
+                )
+            )
+
+        canonical_entities = snapshot.canonical_entities
+        if relevant_names:
+            canonical_entities = [entity for entity in snapshot.canonical_entities if entity.name in relevant_names]
+        for entity in canonical_entities:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="canonical_entity",
+                    source=entity.source,
+                    content=entity.name,
+                    metadata={"name": entity.name, "entity_type": entity.entity_type},
+                )
+            )
+
+        relations = snapshot.confirmed_relations
+        if relevant_names:
+            relations = [
+                relation
+                for relation in snapshot.confirmed_relations
+                if relation.from_name in relevant_names or relation.to_name in relevant_names
+            ]
+        for relation in relations:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="confirmed_relation",
+                    source=relation.source,
+                    content=f"{relation.from_name}<{relation.relation_type}>{relation.to_name}",
+                    metadata={
+                        "from_name": relation.from_name,
+                        "to_name": relation.to_name,
+                        "relation_type": relation.relation_type,
+                        "is_active": relation.is_active,
+                        "first_seen_chunk": relation.first_seen_chunk,
+                        "last_seen_chunk": relation.last_seen_chunk,
+                        "support_count": relation.support_count,
+                        "latest_event_id": relation.latest_event_id,
+                    },
+                )
+            )
+
+        entity_types = snapshot.entity_types
+        if relevant_names:
+            entity_types = [item for item in snapshot.entity_types if item.name in relevant_names]
+        for item in entity_types:
+            structured_evidence.append(
+                EvidenceItem(
+                    evidence_type="entity_type",
+                    source=item.source,
+                    content=f"{item.name}:{item.entity_type}",
+                    metadata={"name": item.name, "entity_type": item.entity_type},
+                )
+            )
+
+        return EvidenceBundle(
+            structured_evidence=structured_evidence,
+            requested_names=requested_names,
+            level1_snapshot=snapshot,
+        )
+
+    def collect_evidence(
+        self,
+        names_in_chunk: list[str] | None = None,
+        current_chunk: int | None = None,
+    ) -> EvidenceBundle:
+        bundle = self._build_structured_evidence(names_in_chunk=names_in_chunk)
+
+        if self._level2_enabled and current_chunk is not None:
+            candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
+            if self._graph_authority_service is not None and self._run_id is not None:
+                active_entities = self._graph_authority_service.build_active_entity_view(
+                    self._run_id,
+                    current_chunk=current_chunk,
+                    lookback=self._lookback_chunks,
+                )
+            else:
+                active_entities = []
+
+            bundle.local_evidence.extend(
+                EvidenceItem(
+                    evidence_type="active_entity",
+                    source=item.source,
+                    content=item.name,
+                    metadata={
+                        "entity_id": item.entity_id,
+                        "name": item.name,
+                        "role": item.role,
+                        "entity_type": item.entity_type,
+                        "status": item.status,
+                        "last_seen_chunk": item.last_seen_chunk,
+                        "recent_action": item.recent_action,
+                        "recent_emotion": item.recent_emotion,
+                    },
+                    chunk_id=item.last_seen_chunk,
+                )
+                for item in active_entities
+            )
+
+            if not bundle.local_evidence:
+                bundle.local_evidence.extend(
+                    EvidenceItem(
+                        evidence_type="active_entity",
+                        source="graph_active_entities",
+                        content=name,
+                        metadata={"name": name},
+                    )
+                    for name in candidates
+                )
+
+        return bundle
+
+    async def collect_evidence_with_level3(
+        self,
+        names_in_chunk: list[str] | None = None,
+        current_chunk: int | None = None,
+        context_text: str | None = None,
+        exclude_chunk_ids: list[int] | None = None,
+    ) -> EvidenceBundle:
+        bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
+
+        if self._level3_enabled and context_text and self.is_level3_available():
+            level3_results = await self._level3.search_similar_chunks(
+                context_text,
+                exclude_chunk_ids=exclude_chunk_ids,
+            )
+            bundle.semantic_evidence.extend(
+                EvidenceItem(
+                    evidence_type="semantic_recall",
+                    source="chunk_embeddings",
+                    content=str(result.get("text", "")),
+                    metadata=dict(result),
+                )
+                for result in level3_results
+            )
+
+        return bundle
 
     def retrieve(
         self,
@@ -439,7 +623,6 @@ class DisambigContextProvider:
         """
         if not names_in_chunk:
             return ""
-
         disambig_parts: list[str] = []
 
         for name in names_in_chunk:

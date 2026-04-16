@@ -44,6 +44,7 @@ env/
 
 # Claude Code 配置
 CLAUDE.md
+.codex-tmp/
 
 # Issues 文件夹
 issues/
@@ -171,12 +172,14 @@ deprecated/
 # Tests 根目录测试文件不上传（显式保留 conftest.py）
 /tests/*.py
 !/tests/conftest.py
+!/tests/__init__.py
 
 # LDA Topic Models - 训练好的模型文件
 /models/
 
 .codebuddy/
 .workbuddy/
+skills/chart-diagram.skill
 
 # Understand Everything Dashboard - 独立的前端可视化工具
 /understand-everything/

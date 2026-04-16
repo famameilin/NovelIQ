@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from src.storage.models import (
@@ -276,6 +276,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 "entity_id": row.entity_id,
                 "name": row.canonical_name,
                 "role": row.primary_role_function,
+                "entity_type": row.entity_type,
+                "status": row.status,
                 "last_action": row.last_action or "",
                 "last_emotion": row.last_emotion_score or "",
                 "emotion_score": row.last_emotion_score,
@@ -330,7 +332,21 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             )
         return result
 
-    def fetch_relation_events(self, run_id: str, limit: int | None = None) -> list[dict[str, Any]]:
+    def count_relation_events(self, run_id: str) -> int:
+        """返回指定运行的关系事件总数。"""
+        return int(
+            self.session.execute(
+                select(func.count()).select_from(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id)
+            ).scalar()
+            or 0
+        )
+
+    def fetch_relation_events(
+        self,
+        run_id: str,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
         entity_names = {
             row.entity_id: row.canonical_name
             for row in self.session.execute(
@@ -345,6 +361,8 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 GraphRelationEvent.relation_event_id.desc(),
             )
         )
+        if offset > 0:
+            stmt = stmt.offset(offset)
         if limit is not None:
             stmt = stmt.limit(limit)
         rows = self.session.execute(stmt).scalars().all()

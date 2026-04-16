@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import binascii
+import json
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -42,6 +45,17 @@ from src.api.routes.results_fetchers.parsers import _parse_int_field, _parse_jso
 from src.api.routes.results_fetchers.scoring import _calculate_protagonist_scores, _normalize_arc_scores
 from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
+from src.knowledge.authority import (
+    GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
+    ExportGraphAuthorityView,
+    GraphPageQualityDetails,
+    GraphPageSummary,
+    KnowledgeGraphAuthorityService,
+)
+from src.knowledge.authority.graph_outputs import (
+    build_graph_page_quality,
+    build_graph_page_summary,
+)
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -49,6 +63,205 @@ from src.storage.repositories import (
     GraphRepository,
     StatsRepository,
 )
+
+GRAPH_PAGE_EVENT_LIMIT = 200
+
+
+def _encode_graph_events_cursor(offset: int) -> str:
+    """Encode an opaque cursor for the next graph event slice."""
+    payload = json.dumps({"offset": offset}, separators=(",", ":")).encode("utf-8")
+    return urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_graph_events_cursor(cursor: str | None) -> int:
+    """Decode the graph event cursor back into a slice offset."""
+    if not cursor:
+        return 0
+
+    padded_cursor = cursor + ("=" * (-len(cursor) % 4))
+    try:
+        payload = json.loads(urlsafe_b64decode(padded_cursor.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+        raise ValueError("invalid graph events cursor") from exc
+
+    offset = payload.get("offset")
+    # bool is a subclass of int in Python, but graph cursors only allow plain
+    # non-negative integer offsets. Reject boolean payloads so invalid cursors
+    # never silently coerce to 0/1.
+    if type(offset) is not int or offset < 0:
+        raise ValueError("invalid graph events cursor")
+    return offset
+
+
+def _serialize_graph_event(event: Any) -> dict[str, Any]:
+    """Flatten authority relation events into the public graph DTO shape."""
+    return {
+        "relation_event_id": event.relation_event_id,
+        "chunk_id": event.chunk_id,
+        "from_entity_id": event.from_entity_id,
+        "to_entity_id": event.to_entity_id,
+        "from_name": event.from_name,
+        "to_name": event.to_name,
+        "relation_type": event.relation_type,
+        "change_type": event.change_type,
+        "evidence": event.evidence,
+        "confidence": event.confidence,
+        "source_relation_row_id": event.source_relation_row_id,
+        "directionality": event.directionality,
+    }
+
+
+def _serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
+    """
+    Convert graph-page summary facts into the route-owned public DTO.
+
+    中文注释：authority 只负责产出页面所需 facts；真正对外暴露什么字段名，
+    由 route/product 层自己决定，避免 authority 再次背负 `/graph` 的产品契约。
+    """
+
+    return {
+        "node_count": summary.node_count,
+        "edge_count": summary.edge_count,
+        "density": summary.density,
+        "core_characters": list(summary.core_characters),
+        "key_relations": [
+            {
+                "from": relation.from_name,
+                "to": relation.to_name,
+                "type": relation.relation_type,
+                "support_count": relation.support_count,
+            }
+            for relation in summary.key_relations
+        ],
+    }
+
+
+def _serialize_graph_page_quality(quality: GraphPageQualityDetails) -> dict[str, Any]:
+    """Convert graph-page quality facts into the route-owned public DTO."""
+
+    return {
+        "conflict_count": quality.conflict_count,
+        "low_confidence_count": quality.low_confidence_count,
+        "conflicts": [
+            {
+                "entity_pair": list(conflict.entity_pair),
+                "entity_names": list(conflict.entity_names),
+                "relation_types": list(conflict.relation_types),
+                "relation_count": conflict.relation_count,
+                "latest_event_ids": list(conflict.latest_event_ids),
+            }
+            for conflict in quality.conflicts
+        ],
+        "low_confidence_samples": [
+            {
+                "relation_event_id": event.relation_event_id,
+                "chunk_id": event.chunk_id,
+                "from_name": event.from_name,
+                "to_name": event.to_name,
+                "relation_type": event.relation_type,
+                "change_type": event.change_type,
+                "confidence": event.confidence,
+            }
+            for event in quality.low_confidence_samples
+        ],
+    }
+
+
+def _validate_authority_dependency_items(
+    items: list[Any],
+    required_fields: tuple[str, ...],
+    *,
+    contract_name: str,
+) -> None:
+    """Validate that a consumer-facing authority slice exposes its required fields."""
+
+    for item in items:
+        missing_fields = [field_name for field_name in required_fields if not hasattr(item, field_name)]
+        if missing_fields:
+            raise RuntimeError(
+                f"{contract_name} is missing required authority fields: {', '.join(missing_fields)}"
+            )
+
+
+def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], list[Any], list[Any]]:
+    """
+    Resolve the narrow graph-page authority slice used by the route assembler.
+
+    中文注释：`/graph` 页面只允许消费 stable_states、confirmed_relations、
+    relation_events 三块 authority facts。assembler 不得下探 canonical_entities，
+    更不能回退去读 summary/quality/timeline lifecycle 或 repository 原始形状。
+    """
+
+    stable_states = list(getattr(graph_view, "stable_states", []))
+    confirmed_relations = list(getattr(graph_view, "confirmed_relations", []))
+    relation_events = list(getattr(graph_view, "relation_events", []))
+
+    required_slices = {
+        "stable_states": stable_states,
+        "confirmed_relations": confirmed_relations,
+        "relation_events": relation_events,
+    }
+    for slice_name, slice_items in required_slices.items():
+        if not hasattr(graph_view, slice_name):
+            raise RuntimeError(f"graph page authority contract is missing required slice: {slice_name}")
+        _validate_authority_dependency_items(
+            slice_items,
+            GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS[slice_name],
+            contract_name=f"graph page authority contract.{slice_name}",
+        )
+
+    return stable_states, confirmed_relations, relation_events
+
+
+def _paginate_graph_relation_events(
+    relation_events: list[Any],
+    *,
+    cursor: str | None = None,
+    limit: int = GRAPH_PAGE_EVENT_LIMIT,
+) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Slice graph-page relation history without changing authority semantics.
+
+    The input list is expected to already be in the stable authority order
+    (newest-first). The cursor is opaque to callers and only carries the next
+    offset inside that fixed ordering.
+    """
+    page_limit = max(1, min(limit, GRAPH_PAGE_EVENT_LIMIT))
+    start = _decode_graph_events_cursor(cursor)
+    total = len(relation_events)
+    if start > total:
+        raise ValueError("graph events cursor is out of range")
+
+    end = min(start + page_limit, total)
+    next_cursor = _encode_graph_events_cursor(end) if end < total else None
+    page_info = {
+        "limit": page_limit,
+        "returned_count": end - start,
+        "total": total,
+        "has_more": next_cursor is not None,
+        "next_cursor": next_cursor,
+    }
+    return relation_events[start:end], page_info
+
+
+def _build_graph_events_page_info(
+    *,
+    start: int,
+    page_limit: int,
+    returned_count: int,
+    total: int,
+) -> dict[str, Any]:
+    """Build a stable graph-events pagination descriptor from slice metadata."""
+
+    end = start + returned_count
+    next_cursor = _encode_graph_events_cursor(end) if end < total else None
+    return {
+        "limit": page_limit,
+        "returned_count": returned_count,
+        "total": total,
+        "has_more": next_cursor is not None,
+        "next_cursor": next_cursor,
+    }
 
 
 def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
@@ -360,6 +573,7 @@ def _fetch_chunk_annotations(
     annotation_repo: AnnotationRepository,
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
+    export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """
     获取分块标注数据
@@ -388,10 +602,12 @@ def _fetch_chunk_annotations(
     characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
 
-    relation_events_raw: list[dict[str, Any]] = []
-    graph_repo = GraphRepository(annotation_repo.session)
-    relation_events_raw = graph_repo.fetch_relation_events(run_id)
-    if not relation_events_raw:
+    if export_graph_view is None:
+        export_graph_view = (
+            KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(run_id)
+        )
+
+    if not export_graph_view.relation_events:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
             raise RuntimeError(
@@ -417,14 +633,12 @@ def _fetch_chunk_annotations(
         )
 
     relations_by_chunk: dict[int, list[ChunkRelation]] = defaultdict(list)
-    for row in relation_events_raw:
-        cid = int(row["chunk_id"])
-        from_name_raw = str(row["from_name"])
-        to_name_raw = str(row["to_name"])
-        from_normalized = _normalize_name(from_name_raw, alias_map)
-        to_normalized = _normalize_name(to_name_raw, alias_map)
-        from_char = from_normalized if from_normalized else from_name_raw
-        to_char = to_normalized if to_normalized else to_name_raw
+    for relation_event in export_graph_view.relation_events:
+        cid = relation_event.chunk_id
+        # 中文注释：authority relation event 已经是规范名，这里只保留 alias_map 兼容，
+        # 避免旧数据里混入未完全收敛的别名时导出结果退化。
+        from_char = _normalize_name(relation_event.from_name, alias_map) or relation_event.from_name
+        to_char = _normalize_name(relation_event.to_name, alias_map) or relation_event.to_name
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
@@ -439,8 +653,8 @@ def _fetch_chunk_annotations(
             ChunkRelation(
                 from_char=from_char,
                 to_char=to_char,
-                type=str(row["relation_type"]) if row.get("relation_type") else "",
-                change=str(row["change_type"]) if row.get("change_type") else "",
+                type=relation_event.relation_type,
+                change=relation_event.change_type,
             )
         )
 
@@ -502,11 +716,15 @@ def _fetch_character_relations(
     annotation_repo: AnnotationRepository,
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
+    export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """获取角色关系数据（graph_relations_current 权威来源）。"""
-    graph_repo = GraphRepository(annotation_repo.session)
-    graph_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
-    if not graph_relations:
+    if export_graph_view is None:
+        export_graph_view = (
+            KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(run_id)
+        )
+
+    if not export_graph_view.current_relations:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
             raise RuntimeError(
@@ -515,19 +733,30 @@ def _fetch_character_relations(
             )
 
     result: list[CharacterRelation] = []
-    for row in graph_relations:
-        from_char = _normalize_name(row["from_name"], alias_map) or row["from_name"]
-        to_char = _normalize_name(row["to_name"], alias_map) or row["to_name"]
+    for relation in export_graph_view.current_relations:
+        from_char = _normalize_name(relation.from_name, alias_map) or relation.from_name
+        to_char = _normalize_name(relation.to_name, alias_map) or relation.to_name
         if valid_character_names is not None and (
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
             continue
+        # 中文注释：角色关系导出需要稳定的 chunk_id；优先使用最近一次出现，
+        # 若旧快照缺少 last_seen_chunk，则回退到 first_seen_chunk，再不满足就跳过。
+        chunk_id = relation.last_seen_chunk or relation.first_seen_chunk
+        if chunk_id is None:
+            logger.warning(
+                "跳过缺少 chunk_id 的当前关系快照: from_char={}, to_char={}, type={}",
+                from_char,
+                to_char,
+                relation.relation_type,
+            )
+            continue
         result.append(
             CharacterRelation(
-                chunk_id=row["last_seen_chunk"],
+                chunk_id=chunk_id,
                 from_char=from_char,
                 to_char=to_char,
-                type=row["type"],
+                type=relation.relation_type,
                 change="汇总",
             )
         )
@@ -537,7 +766,7 @@ def _fetch_character_relations(
 
 def _fetch_hierarchical_relations(
     run_id: str,
-    graph_repo: GraphRepository,
+    export_graph_view: ExportGraphAuthorityView,
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
 ) -> list:
@@ -554,34 +783,33 @@ def _fetch_hierarchical_relations(
     任务: fix-character-dangling-reference
     修改内容: 添加 valid_character_names 参数，过滤悬空引用的关系
 
-    修改时间: 2026-03-30
-    修改者: CodeBuddy
-    任务: db-schema-cleanup
-    修改内容: 改用 GraphRepository 查询 graph_relation_current
+    修改时间: 2026-04-15
+    修改者: Codex
+    任务: export-graph-derived-authority
+    修改内容: 改为消费 ExportGraphAuthorityView，避免导出层继续直连 repository/raw projection
     """
     hierarchical_types = {"child_of", "parent_of", "father_of", "son_of", "sibling_of", "spouse_of"}
-    all_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
     result = []
-    for rel in all_relations:
-        rel_type = rel.get("type", "")
+    for relation in export_graph_view.current_relations:
+        rel_type = relation.relation_type
         if rel_type not in hierarchical_types:
             continue
-        from_name_raw = rel.get("from_name", "")
-        to_name_raw = rel.get("to_name", "")
+        from_name_raw = relation.from_name
+        to_name_raw = relation.to_name
         from_entity = _normalize_name(from_name_raw, alias_map) or from_name_raw
         to_entity = _normalize_name(to_name_raw, alias_map) or to_name_raw
         if valid_character_names is not None:
             if from_entity not in valid_character_names or to_entity not in valid_character_names:
                 continue
-        rel_id = rel.get("relation_id")
+        rel_id = relation.relation_id
         if rel_id is None:
             continue
         result.append(
             HierarchicalRelation(
                 rel_id=rel_id,
                 rel_type=rel_type,
-                first_chunk=rel.get("first_seen_chunk"),
-                last_chunk=rel.get("last_seen_chunk"),
+                first_chunk=relation.first_seen_chunk,
+                last_chunk=relation.last_seen_chunk,
                 from_entity=from_entity,
                 to_entity=to_entity,
             )
@@ -732,6 +960,9 @@ def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository)
 def _fetch_graph_snapshot(
     run_id: str,
     annotation_repo: AnnotationRepository,
+    *,
+    events_cursor: str | None = None,
+    events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
     """获取知识图谱快照（nodes/edges/events/summary）。
 
@@ -739,49 +970,108 @@ def _fetch_graph_snapshot(
     修改者: GLM-5
     修改内容: 将边数据转换为前端期望的格式（source/target/relation_type/weight）
     """
-    graph_repo = GraphRepository(annotation_repo.session)
     pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
     if pending_relations:
         raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
 
-    node_rows = graph_repo.fetch_entities(run_id)
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    graph_view = authority_service.build_graph_view(run_id)
+    stable_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
     nodes = [
         {
             "entity_id": str(row.entity_id),
-            "name": row.canonical_name,
+            "name": row.name,
             "entity_type": row.entity_type,
             "first_seen_chunk": row.first_seen_chunk,
             "last_seen_chunk": row.last_seen_chunk,
             "role": row.primary_role_function,
-            "emotion_score": row.last_emotion_score,
             "status": row.status,
         }
-        for row in node_rows
+        for row in stable_states
     ]
 
-    raw_edges = graph_repo.fetch_current_relations(run_id, active_only=False)
     edges = [
         {
-            "source": str(edge["from_entity_id"]),
-            "target": str(edge["to_entity_id"]),
-            "relation_type": edge.get("type"),
-            "weight": edge.get("support_count", 1),
-            "from_name": edge.get("from_name"),
-            "to_name": edge.get("to_name"),
-            "change_count": edge.get("change_count"),
-            "tension_index": edge.get("tension_index"),
-            "is_active": edge.get("is_active"),
+            "source": str(edge.from_entity_id) if edge.from_entity_id is not None else edge.from_name,
+            "target": str(edge.to_entity_id) if edge.to_entity_id is not None else edge.to_name,
+            "relation_type": edge.relation_type,
+            "weight": edge.support_count or 1,
+            "from_name": edge.from_name,
+            "to_name": edge.to_name,
+            "change_count": edge.change_count,
+            "tension_index": edge.tension_index,
+            "is_active": edge.is_active,
         }
-        for edge in raw_edges
+        for edge in confirmed_relations
     ]
 
-    events = graph_repo.fetch_relation_events(run_id, limit=200)
-    summary = DiagnosisRepository(annotation_repo.session).fetch_graph_summary(run_id)
+    # Keep page-facing history samples lightweight, but compute quality against
+    # the full authority event history so long-running books do not hide older
+    # low-confidence signals once they exceed the UI sample cap.
+    paged_relation_events, events_page = _paginate_graph_relation_events(
+        relation_events,
+        cursor=events_cursor,
+        limit=events_limit,
+    )
+    events = [_serialize_graph_event(event) for event in paged_relation_events]
+    # Graph page owns display-level summary/quality assembly. The authority
+    # service intentionally stops at stable facts so product tweaks do not
+    # contaminate downstream diagnosis/export contracts.
+    # 中文注释：graph page 的 summary / quality 属于 product-layer contract，
+    # 这里显式从 authority facts 组装页面 DTO，避免 diagnosis/export 共享层再被
+    # 页面高亮或样本字段反向污染。
+    summary = _serialize_graph_page_summary(
+        build_graph_page_summary(stable_states, confirmed_relations)
+    )
+    quality = _serialize_graph_page_quality(
+        build_graph_page_quality(confirmed_relations, relation_events)
+    )
 
     return {
         "nodes": nodes,
         "edges": edges,
         "events": events,
+        "events_page": events_page,
         "summary": summary,
-        "quality": summary.get("quality", {}),
+        "quality": quality,
+    }
+
+
+def _fetch_graph_events_page(
+    run_id: str,
+    annotation_repo: AnnotationRepository,
+    *,
+    events_cursor: str | None = None,
+    events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
+) -> dict[str, Any]:
+    """
+    获取 graph page relation events 的增量分页结果。
+
+    该 contract 仅属于 graph product surface。authority 仍然保留全量
+    relation history，分页窗口只在页面层切片。
+    """
+    pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+    if pending_relations:
+        raise RuntimeError("graph projection is still pending; finish projection before reading graph events.")
+
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    start = _decode_graph_events_cursor(events_cursor)
+    page_limit = max(1, min(events_limit, GRAPH_PAGE_EVENT_LIMIT))
+    paged_relation_events, total = authority_service.build_graph_relation_event_page(
+        run_id,
+        offset=start,
+        limit=page_limit,
+    )
+    if start > total:
+        raise ValueError("graph events cursor is out of range")
+    page_info = _build_graph_events_page_info(
+        start=start,
+        page_limit=page_limit,
+        returned_count=len(paged_relation_events),
+        total=total,
+    )
+
+    return {
+        "events": [_serialize_graph_event(event) for event in paged_relation_events],
+        "page_info": page_info,
     }
