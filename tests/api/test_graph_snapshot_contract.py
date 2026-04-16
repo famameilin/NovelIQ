@@ -256,6 +256,73 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
     }
 
 
+def test_fetch_graph_snapshot_core_characters_excludes_non_character_nodes(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-graph-page-character-only"
+            return GraphAuthorityView(
+                stable_states=[
+                    StableState(entity_id=10, name="天工阁", entity_type="organization", last_seen_chunk=10),
+                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
+                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
+                ],
+                confirmed_relations=[
+                    ConfirmedRelation(
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        support_count=3,
+                        last_seen_chunk=6,
+                    )
+                ],
+                relation_events=[],
+            )
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-page-character-only", annotation_repo)
+
+    assert snapshot["summary"]["core_characters"] == ["沈砚", "陆明"]
+    assert "天工阁" not in snapshot["summary"]["core_characters"]
+
+
+def test_fetch_graph_snapshot_core_characters_is_empty_without_character_nodes(monkeypatch) -> None:
+    class FakeAuthorityService:
+        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
+            assert run_id == "run-graph-page-no-character"
+            return GraphAuthorityView(
+                stable_states=[
+                    StableState(entity_id=10, name="天工阁", entity_type="organization", last_seen_chunk=10),
+                    StableState(entity_id=11, name="黑水城", entity_type="location", last_seen_chunk=8),
+                ],
+                confirmed_relations=[],
+                relation_events=[],
+            )
+
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: FakeAuthorityService(),
+    )
+
+    annotation_repo = MagicMock()
+    annotation_repo.session = object()
+    annotation_repo.fetch_pending_chunk_relations.return_value = []
+
+    snapshot = _fetch_graph_snapshot("run-graph-page-no-character", annotation_repo)
+
+    assert snapshot["summary"]["node_count"] == 2
+    assert snapshot["summary"]["core_characters"] == []
+
+
 def test_fetch_graph_snapshot_accepts_graph_page_allowlist_without_full_graph_view(monkeypatch) -> None:
     class FakeAuthorityService:
         def build_graph_view(self, run_id: str) -> SimpleNamespace:

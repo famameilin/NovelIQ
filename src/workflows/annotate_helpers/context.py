@@ -214,7 +214,9 @@ def _prepare_chunk_context(
             current_chunk=chunk_id,
         )
         blocks = render_annotation_prompt_blocks(context.evidence_bundle)
-        if use_context_enhancement and run_id:
+        if use_context_enhancement and run_id and blocks.active_entities is not None:
+            # 中文注释：只有 Level 2 真正产出新的活跃实体片段时才覆盖 authority fallback，
+            # 避免 level2 关闭时把前面已经准备好的上下文清空。
             context.active_entities_str = blocks.active_entities
         context.disambig_context_str = blocks.disambig_context
         context.vector_evidence_str = blocks.vector_evidence
@@ -288,7 +290,9 @@ async def _prepare_chunk_context_with_level3(
             )
 
         blocks = render_annotation_prompt_blocks(context.evidence_bundle)
-        if use_context_enhancement and run_id:
+        if use_context_enhancement and run_id and blocks.active_entities is not None:
+            # 中文注释：异步路径和同步路径需要保持同样的 fallback 语义，
+            # 不能用空的 Level 2 渲染结果覆盖 authority 侧的活跃实体提示。
             context.active_entities_str = blocks.active_entities
         context.disambig_context_str = blocks.disambig_context
         context.vector_evidence_str = blocks.vector_evidence

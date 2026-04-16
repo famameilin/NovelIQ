@@ -46,10 +46,12 @@ def build_graph_page_summary(
     """Compute graph-page-only summary highlights from stable authority facts."""
 
     shared_summary = build_graph_shared_summary(stable_states, confirmed_relations)
+    # 中文注释：graph page 的 `core_characters` 是页面契约字段，只能从 character 节点中挑选，
+    # 不能因为组织/地点最近出现过就挤掉真正的角色。
     core_characters = [
         state.name
         for state in sorted(
-            stable_states,
+            [state for state in stable_states if state.entity_type == "character"],
             key=lambda item: (item.last_seen_chunk is None, -(item.last_seen_chunk or 0), item.name),
         )[:GRAPH_PAGE_CORE_CHARACTER_LIMIT]
     ]
