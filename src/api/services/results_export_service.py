@@ -27,7 +27,13 @@ from src.api.routes.results_fetchers import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
-from src.knowledge.authority import ExportGraphAuthorityView, GraphAuthorityReport, KnowledgeGraphAuthorityService
+from src.api.routes.results_converters import build_aggregate_metrics_contract, validate_aggregate_metrics_contract
+from src.knowledge.authority import (
+    ExportGraphAuthorityView,
+    GraphAuthorityReport,
+    KnowledgeGraphAuthorityService,
+    serialize_graph_report_signals,
+)
 from src.metrics.aggregate import aggregate_all_metrics
 from src.metrics.timeline_metrics import (
     TimelineAuthorityContractError,
@@ -41,19 +47,6 @@ from src.storage.repositories import (
     ChunkRepository,
     StatsRepository,
 )
-
-
-def _serialize_graph_report_signals(graph_report: GraphAuthorityReport) -> tuple[dict[str, Any], dict[str, Any]]:
-    """
-    序列化共享 graph signals。
-
-    中文注释：这里明确只白名单导出 GraphAuthorityReport 的共享计数，不允许
-    export 装配层顺手接触 graph page 专属 summary/quality 细节。
-    """
-
-    return graph_report.summary.to_contract_dict(), graph_report.quality.to_contract_dict()
-
-
 def load_core_results(
     run_id: str,
     stats_repo: StatsRepository,
@@ -163,8 +156,7 @@ def load_graph_signal_bundle(
     中文注释：graph_summary / graph_quality_report 在 export 里只是 graph-owned
     input signals，不承担最终诊断或聚合结论语义。
     """
-
-    return _serialize_graph_report_signals(graph_report)
+    return serialize_graph_report_signals(graph_report)
 
 
 def load_aggregate_metrics_bundle(
@@ -184,21 +176,8 @@ def load_aggregate_metrics_bundle(
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
 
-    # Delay importing the route-layer converter so this service module can be
-    # imported independently by tests and background consumers without
-    # initializing the whole routes package.
-    from src.api.routes.results_converters import _convert_aggregate_result
-
     result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
-    narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
-
-    aggregate_metrics = {
-        "narrative_structure": narrative_structure.model_dump() if narrative_structure else None,
-        "emotion_stats": emotion_stats.model_dump() if emotion_stats else None,
-        "character_stats": character_stats.model_dump() if character_stats else None,
-        "style_stats": style_stats.model_dump() if style_stats else None,
-        "culture_stats": culture_stats.model_dump() if culture_stats else None,
-    }
+    aggregate_metrics = build_aggregate_metrics_contract(result)
 
     return global_stats, token_usage_stats, aggregate_metrics
 
@@ -342,6 +321,9 @@ def build_export_payload(
     """
     构建导出 payload
     """
+    # 中文注释：export payload 中的 aggregate_metrics 只允许保留 aggregate 结论，
+    # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去。
+    validate_aggregate_metrics_contract(aggregate_metrics)
     return {
         "task_id": task_id,
         "novel_id": novel_id,

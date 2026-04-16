@@ -18,9 +18,13 @@ from src.knowledge.authority import (
     ExportGraphAuthorityView,
     ExportRelationSnapshot,
     GraphAuthorityReport,
+    GraphAuthorityView,
+    GraphPageQualityDetails,
+    GraphPageSummary,
     GraphQualitySignals,
     GraphSharedSummary,
     RelationEvent,
+    serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
@@ -105,7 +109,13 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
         character_relations=[],
         hierarchical_relations=[],
         global_stats=None,
-        aggregate_metrics={},
+        aggregate_metrics={
+            "narrative_structure": None,
+            "emotion_stats": None,
+            "character_stats": None,
+            "style_stats": None,
+            "culture_stats": None,
+        },
         token_usage_stats=token_usage_stats,
         graph_summary={"node_count": 3, "edge_count": 1, "density": 0.5},
         graph_quality_report={"conflict_count": 2},
@@ -306,6 +316,24 @@ def test_load_graph_signal_bundle_serializes_shared_report_only() -> None:
     assert graph_quality_report == {"conflict_count": 2, "low_confidence_count": 3}
 
 
+def test_shared_graph_signal_serializer_rejects_non_report_consumers() -> None:
+    with pytest.raises(TypeError, match="shared graph signal consumers require GraphAuthorityReport"):
+        serialize_graph_report_signals(
+            GraphAuthorityView(
+                canonical_entities=[],
+                confirmed_relations=[],
+                relation_events=[],
+                stable_states=[],
+            )
+        )
+
+    with pytest.raises(TypeError, match="shared graph signal consumers require GraphAuthorityReport"):
+        serialize_graph_report_signals(GraphPageSummary(node_count=2, edge_count=1, density=0.5))
+
+    with pytest.raises(TypeError, match="shared graph signal consumers require GraphAuthorityReport"):
+        serialize_graph_report_signals(GraphPageQualityDetails(conflict_count=1, low_confidence_count=2))
+
+
 def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("src.api.services.results_export_service._fetch_global_stats", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -342,3 +370,36 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
     }
     assert "graph_summary" not in aggregate_metrics
     assert "graph_quality_report" not in aggregate_metrics
+
+
+def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() -> None:
+    token_usage_stats = MagicMock()
+    token_usage_stats.model_dump.return_value = {}
+
+    with pytest.raises(ValueError, match="aggregate_metrics must not include graph-owned fields: graph_summary"):
+        build_export_payload(
+            task_id="task-1",
+            novel_id="novel-1",
+            novel_name="Test Novel",
+            chunk_curves=[],
+            characters=[],
+            topics=[],
+            diagnosis=None,
+            chunk_styles=[],
+            chunk_annotations=[],
+            character_relations=[],
+            hierarchical_relations=[],
+            global_stats=None,
+            aggregate_metrics={
+                "narrative_structure": None,
+                "emotion_stats": None,
+                "character_stats": None,
+                "style_stats": None,
+                "culture_stats": None,
+                "graph_summary": {},
+            },
+            token_usage_stats=token_usage_stats,
+            graph_summary={"node_count": 3, "edge_count": 1, "density": 0.5},
+            graph_quality_report={"conflict_count": 2},
+            timeline_data=None,
+        )

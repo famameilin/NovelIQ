@@ -1,3 +1,4 @@
+from .shared_signals import serialize_graph_report_signals
 from .service import KnowledgeGraphAuthorityService
 from .types import (
     EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS,
@@ -53,6 +54,7 @@ __all__ = [
     "LEVEL1_AUTHORITY_DEPENDENCY_FIELDS",
     "Level1AuthoritySnapshot",
     "RelationEvent",
+    "serialize_graph_report_signals",
     "StableState",
     "TIMELINE_AUTHORITY_DEPENDENCY_FIELDS",
     "TimelineAuthorityView",

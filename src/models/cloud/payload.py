@@ -6,7 +6,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
 """
@@ -54,7 +54,7 @@ def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, A
     """
 
     graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
-    return graph_report.summary.to_contract_dict(), graph_report.quality.to_contract_dict()
+    return serialize_graph_report_signals(graph_report)
 
 
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
