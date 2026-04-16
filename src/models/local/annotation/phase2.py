@@ -172,26 +172,6 @@ async def annotate_chunk_phase2(
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
     """
-    if evidence_bundle is None:
-        evidence_bundle = await _collect_phase2_evidence_bundle(
-            text=text,
-            chunk_id=chunk_id,
-            rag_retriever=rag_retriever,
-        )
-
-    messages = _build_foreshadowing_messages(
-        text=text,
-        prev_chunk_summary=prev_chunk_summary,
-        chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
-        novel_title=novel_title,
-        main_characters=main_characters,
-        position_pct=position_pct,
-        chapter_id=chapter_id,
-        evidence_bundle=evidence_bundle,
-    )
-
     from src.models.local.schema import ForeshadowingResult
 
     config = RetryConfig(
@@ -206,11 +186,38 @@ async def annotate_chunk_phase2(
         exception_type=Phase2MaxRetriesExceededError,
     )
 
+    resolved_evidence_bundle = evidence_bundle
+
+    async def _resolve_phase2_messages() -> list[dict]:
+        nonlocal resolved_evidence_bundle
+
+        # 中文注释：把 evidence 检索放进重试闭包里，这样向量检索的瞬时失败也能走本地重试和云端兜底；
+        # 一旦某次检索成功，就缓存 bundle，避免后续重试重复命中检索层。
+        if resolved_evidence_bundle is None:
+            resolved_evidence_bundle = await _collect_phase2_evidence_bundle(
+                text=text,
+                chunk_id=chunk_id,
+                rag_retriever=rag_retriever,
+            )
+
+        return _build_foreshadowing_messages(
+            text=text,
+            prev_chunk_summary=prev_chunk_summary,
+            chunk_id=chunk_id,
+            prev_chunk_text=prev_chunk_text,
+            next_chunk_text=next_chunk_text,
+            novel_title=novel_title,
+            main_characters=main_characters,
+            position_pct=position_pct,
+            chapter_id=chapter_id,
+            evidence_bundle=resolved_evidence_bundle,
+        )
+
     async def operation(
         local_client: AnnotationClient, retry_messages: list[dict] | None = None
     ) -> ForeshadowingResult:
         """执行单次Phase2调用"""
-        msgs = retry_messages if retry_messages else messages
+        msgs = retry_messages if retry_messages else await _resolve_phase2_messages()
         return await _do_phase2(local_client, msgs, text, prev_chunk_summary, chunk_id, run_id, handler.state.attempt)
 
     return await handler.execute(operation)
