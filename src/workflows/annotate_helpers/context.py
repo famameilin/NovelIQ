@@ -22,6 +22,7 @@ from loguru import logger
 
 from src.config import settings
 from src.config.schemas import ANNOTATION_CONFIG
+from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
 
 if TYPE_CHECKING:
@@ -123,6 +124,48 @@ def _extract_names_from_text(text: str) -> list[str]:
     return re.findall(r"[\u4e00-\u9fff]{2,4}", text)
 
 
+def _build_active_entities_prompt_from_authority(
+    conn,
+    run_id: str,
+    chunk_id: int,
+    lookback: int,
+) -> str | None:
+    """Reuse the authority-owned Level 2 contract even when the RAG provider is unavailable."""
+
+    from src.rag import EvidenceBundle, EvidenceItem
+
+    active_entities = KnowledgeGraphAuthorityService.from_session(conn).build_active_entity_view(
+        run_id,
+        current_chunk=chunk_id,
+        lookback=lookback,
+    )
+    if not active_entities:
+        return None
+
+    bundle = EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source=item.source,
+                content=item.name,
+                metadata={
+                    "entity_id": item.entity_id,
+                    "name": item.name,
+                    "role": item.role or "other",
+                    "entity_type": item.entity_type,
+                    "status": item.status,
+                    "last_seen_chunk": item.last_seen_chunk,
+                    "recent_action": item.recent_action,
+                    "recent_emotion": item.recent_emotion,
+                },
+                chunk_id=item.last_seen_chunk,
+            )
+            for item in active_entities
+        ]
+    )
+    return render_annotation_prompt_blocks(bundle).active_entities
+
+
 def _prepare_chunk_context(
     conn,
     chunk_id: int,
@@ -139,8 +182,7 @@ def _prepare_chunk_context(
     任务: refactor-phase1-identity-extraction
     修改内容: 移除 character_appearances 数据获取（已迁移至 Phase 3）
     """
-    from src.context import format_entities_for_prompt, get_active_entities
-    from src.storage.repositories import ChunkRepository, GraphRepository
+    from src.storage.repositories import ChunkRepository
 
     context = ChunkContext()
 
@@ -158,10 +200,12 @@ def _prepare_chunk_context(
         chunk_repo = ChunkRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
-        graph_repo = GraphRepository(conn)
-        active_entities = get_active_entities(graph_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
-        if active_entities:
-            context.active_entities_str = format_entities_for_prompt(active_entities)
+        context.active_entities_str = _build_active_entities_prompt_from_authority(
+            conn,
+            run_id,
+            chunk_id,
+            lookback=ANNOTATION_CONFIG.lookback,
+        )
 
     if disambig_provider:
         names_in_chunk = _extract_names_from_text(chunk_text)
@@ -170,7 +214,9 @@ def _prepare_chunk_context(
             current_chunk=chunk_id,
         )
         blocks = render_annotation_prompt_blocks(context.evidence_bundle)
-        if use_context_enhancement and run_id:
+        if use_context_enhancement and run_id and blocks.active_entities is not None:
+            # 中文注释：只有 Level 2 真正产出新的活跃实体片段时才覆盖 authority fallback，
+            # 避免 level2 关闭时把前面已经准备好的上下文清空。
             context.active_entities_str = blocks.active_entities
         context.disambig_context_str = blocks.disambig_context
         context.vector_evidence_str = blocks.vector_evidence
@@ -194,8 +240,7 @@ async def _prepare_chunk_context_with_level3(
     任务: implement-level3-vector-retrieval
     说明: 异步版本，支持 Level 3 向量检索
     """
-    from src.context import format_entities_for_prompt, get_active_entities
-    from src.storage.repositories import ChunkRepository, GraphRepository
+    from src.storage.repositories import ChunkRepository
 
     context = ChunkContext()
 
@@ -213,10 +258,12 @@ async def _prepare_chunk_context_with_level3(
         chunk_repo = ChunkRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
-        graph_repo = GraphRepository(conn)
-        active_entities = get_active_entities(graph_repo, run_id, chunk_id, lookback=ANNOTATION_CONFIG.lookback)
-        if active_entities:
-            context.active_entities_str = format_entities_for_prompt(active_entities)
+        context.active_entities_str = _build_active_entities_prompt_from_authority(
+            conn,
+            run_id,
+            chunk_id,
+            lookback=ANNOTATION_CONFIG.lookback,
+        )
 
     if disambig_provider:
         names_in_chunk = _extract_names_from_text(chunk_text)
@@ -243,7 +290,9 @@ async def _prepare_chunk_context_with_level3(
             )
 
         blocks = render_annotation_prompt_blocks(context.evidence_bundle)
-        if use_context_enhancement and run_id:
+        if use_context_enhancement and run_id and blocks.active_entities is not None:
+            # 中文注释：异步路径和同步路径需要保持同样的 fallback 语义，
+            # 不能用空的 Level 2 渲染结果覆盖 authority 侧的活跃实体提示。
             context.active_entities_str = blocks.active_entities
         context.disambig_context_str = blocks.disambig_context
         context.vector_evidence_str = blocks.vector_evidence

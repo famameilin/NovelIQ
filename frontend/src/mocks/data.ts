@@ -12,6 +12,9 @@ import type {
   Topic,
   DiagnosisResult,
   GraphData,
+  GraphEvent,
+  GraphEventsPageInfo,
+  GraphEventsPageResponse,
   TimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
@@ -32,6 +35,28 @@ function dateAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString();
+}
+
+function encodeGraphEventsCursor(offset: number): string {
+  return btoa(JSON.stringify({ offset })).replace(/=+$/u, "");
+}
+
+function decodeGraphEventsCursor(cursor?: string | null): number {
+  if (!cursor) return 0;
+  const normalized = cursor.padEnd(Math.ceil(cursor.length / 4) * 4, "=");
+  const payload = JSON.parse(atob(normalized)) as { offset?: unknown };
+  return typeof payload.offset === "number" && payload.offset >= 0 ? payload.offset : 0;
+}
+
+function buildGraphEventsPageInfo(total: number, start: number, limit: number): GraphEventsPageInfo {
+  const end = Math.min(start + limit, total);
+  return {
+    limit,
+    returned_count: end - start,
+    total,
+    has_more: end < total,
+    next_cursor: end < total ? encodeGraphEventsCursor(end) : null,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -217,7 +242,6 @@ export function createGraph(): GraphData {
     first_seen_chunk: Math.floor(Math.random() * 10 + 1),
     last_seen_chunk: Math.floor(Math.random() * 100 + 50),
     role: i === 0 ? "protagonist" : i < 3 ? "main" : "supporting",
-    emotion_score: +(Math.random() * 2 - 0.5).toFixed(2),
     status: i === 0 ? "active" : "active",
   }));
 
@@ -237,17 +261,83 @@ export function createGraph(): GraphData {
     { source: "char-0", target: "char-9", relation_type: "朋友", weight: 0.5 },
   ];
 
-  const events = Array.from({ length: 8 }, (_, i) => ({
-    event_id: `evt-${i}`,
-    event_type: i % 2 === 0 ? "relation_change" : "character_entry",
-    source_entity: `char-${i % 5}`,
-    target_entity: `char-${(i + 1) % 5}`,
-    relation_type: relationTypes[i % relationTypes.length],
-    chunk_index: Math.floor(Math.random() * 100 + 10),
-    timestamp: dateAgo(Math.floor(Math.random() * 30)),
-  }));
+  const changeTypes = ["新建", "强化", "弱化", "断裂"];
 
-  return { nodes, edges, events };
+  const allEvents: GraphEvent[] = Array.from({ length: 18 }, (_, i) => ({
+    relation_event_id: i + 1,
+    chunk_id: 160 - i * 6,
+    from_entity_id: i % 5,
+    to_entity_id: (i + 1) % 5,
+    from_name: names[i % 5],
+    to_name: names[(i + 1) % 5],
+    relation_type: relationTypes[i % relationTypes.length],
+    change_type: changeTypes[i % changeTypes.length],
+    evidence: `${names[i % 5]}与${names[(i + 1) % 5]}在关键桥段中产生新的互动。`,
+    confidence: +(0.42 + (i % 7) * 0.08).toFixed(2),
+    source_relation_row_id: i + 100,
+    directionality: "bidirectional",
+  }));
+  const initialEventLimit = 8;
+  const events = allEvents.slice(0, initialEventLimit);
+
+  const summary = {
+    node_count: nodes.length,
+    edge_count: edges.length,
+    density: +(edges.length / (nodes.length * (nodes.length - 1))).toFixed(4),
+    core_characters: names.slice(0, 5),
+    key_relations: edges.slice(0, 5).map((edge) => ({
+      from: names[Number(edge.source.replace("char-", ""))] ?? "未知角色",
+      to: names[Number(edge.target.replace("char-", ""))] ?? "未知角色",
+      type: edge.relation_type,
+      support_count: Math.max(1, Math.round((edge.weight ?? 0.4) * 10)),
+    })),
+  };
+
+  const quality = {
+    // Mock contract follows authority semantics: conflict_count reflects current confirmed relations only.
+    conflict_count: 0,
+    low_confidence_count: allEvents.filter((event) => (event.confidence ?? 0) < 0.6).length,
+    conflicts: [],
+    low_confidence_samples: allEvents
+      .filter((event) => (event.confidence ?? 0) < 0.6)
+      .slice(0, 5)
+      .map((event) => ({
+        relation_event_id: event.relation_event_id,
+        chunk_id: event.chunk_id,
+        from_name: event.from_name,
+        to_name: event.to_name,
+        relation_type: event.relation_type,
+        change_type: event.change_type,
+        confidence: event.confidence,
+      })),
+  };
+  const events_page = buildGraphEventsPageInfo(allEvents.length, 0, initialEventLimit);
+
+  return { nodes, edges, events, events_page, summary, quality };
+}
+
+export function createGraphEventsPage(cursor?: string | null, limit = 8): GraphEventsPageResponse {
+  const graph = createGraph();
+  const allEvents: GraphEvent[] = Array.from({ length: 18 }, (_, i) => ({
+    relation_event_id: i + 1,
+    chunk_id: 160 - i * 6,
+    from_entity_id: i % 5,
+    to_entity_id: (i + 1) % 5,
+    from_name: graph.nodes[i % 5]?.name ?? "未知角色",
+    to_name: graph.nodes[(i + 1) % 5]?.name ?? "未知角色",
+    relation_type: ["师徒", "恋人", "仇敌", "盟友", "朋友", "竞争", "合作"][i % 7],
+    change_type: ["新建", "强化", "弱化", "断裂"][i % 4],
+    evidence: `${graph.nodes[i % 5]?.name ?? "角色"}与${graph.nodes[(i + 1) % 5]?.name ?? "角色"}在关键桥段中产生新的互动。`,
+    confidence: +(0.42 + (i % 7) * 0.08).toFixed(2),
+    source_relation_row_id: i + 100,
+    directionality: "bidirectional",
+  }));
+  const start = decodeGraphEventsCursor(cursor);
+  const pageInfo = buildGraphEventsPageInfo(allEvents.length, start, limit);
+  return {
+    events: allEvents.slice(start, start + limit),
+    page_info: pageInfo,
+  };
 }
 
 /* ------------------------------------------------------------------ */

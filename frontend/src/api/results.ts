@@ -5,6 +5,7 @@ import type {
   Topic,
   DiagnosisResult,
   GraphData,
+  GraphEventsPageResponse,
   TimelineResponse,
   NarrativeStructureMetrics,
   EmotionStatsMetrics,
@@ -93,6 +94,24 @@ export async function getGraph(
   const { data } = await apiClient.get<GraphData>(
     `/api/novels/${novelId}/graph`,
     { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+export async function getGraphEvents(
+  novelId: string,
+  taskId: string,
+  options?: { eventsCursor?: string | null; eventsLimit?: number }
+): Promise<GraphEventsPageResponse> {
+  const { data } = await apiClient.get<GraphEventsPageResponse>(
+    `/api/novels/${novelId}/graph/events`,
+    {
+      params: {
+        task_id: taskId,
+        ...(options?.eventsCursor ? { events_cursor: options.eventsCursor } : {}),
+        ...(options?.eventsLimit != null ? { events_limit: options.eventsLimit } : {}),
+      },
+    }
   );
   return data;
 }
