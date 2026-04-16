@@ -35,6 +35,7 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from src.models.local.schema import ChunkAnnotation
+    from src.rag.evidence_types import EvidenceBundle
 
 from src.models.local.schema import CharacterSnapshot, DialogueSnapshot
 
@@ -68,6 +69,75 @@ def generate_anonymous_name(chunk_id: int, index: int) -> str:
         格式为「匿名_C{chunk_id}_{序号}」的占位名
     """
     return f"匿名_C{chunk_id}_{index}"
+
+
+def _collect_names_from_disambig_candidate(content: str) -> set[str]:
+    if not content:
+        return set()
+
+    names: set[str] = set()
+    body = content.strip()
+
+    if "「" in body and "」" in body:
+        _, _, tail = body.partition("「")
+        source_name, _, _ = tail.partition("」")
+        source_name = source_name.strip()
+        if source_name:
+            names.add(source_name)
+
+    _, separator, candidates_text = body.partition("：")
+    if not separator:
+        return names
+
+    for candidate in candidates_text.split("、"):
+        normalized = candidate.strip().strip("。；;")
+        if normalized:
+            names.add(normalized)
+    return names
+
+
+def _collect_names_from_evidence_bundle(bundle: EvidenceBundle | None) -> set[str]:
+    if bundle is None:
+        return set()
+
+    names: set[str] = set()
+
+    structured_alias_map = getattr(bundle, "structured_alias_map", None)
+    if callable(structured_alias_map):
+        alias_map = structured_alias_map()
+        if isinstance(alias_map, dict):
+            names.update(name for name in alias_map.keys() if isinstance(name, str) and name)
+            names.update(name for name in alias_map.values() if isinstance(name, str) and name)
+
+    for item in getattr(bundle, "structured_evidence", []):
+        if item.evidence_type == "alias_mapping":
+            alias = str(item.metadata.get("alias", "")).strip()
+            canonical = str(item.metadata.get("canonical", "")).strip()
+            if alias:
+                names.add(alias)
+            if canonical:
+                names.add(canonical)
+        elif item.evidence_type in {"canonical_entity", "entity_type"}:
+            name = str(item.metadata.get("name", item.content)).strip()
+            if name:
+                names.add(name)
+
+    for item in getattr(bundle, "local_evidence", []):
+        if item.evidence_type == "active_entity":
+            name = str(item.metadata.get("name", item.content)).strip()
+            if name:
+                names.add(name)
+        elif item.evidence_type == "disambig_candidate":
+            names.update(_collect_names_from_disambig_candidate(item.content))
+
+    snapshot = getattr(bundle, "level1_snapshot", None)
+    if snapshot is not None:
+        names.update(mapping.alias for mapping in snapshot.alias_mappings if mapping.alias)
+        names.update(mapping.canonical for mapping in snapshot.alias_mappings if mapping.canonical)
+        names.update(entity.name for entity in snapshot.canonical_entities if entity.name)
+        names.update(item.name for item in snapshot.entity_types if item.name)
+
+    return names
 
 
 def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
@@ -104,19 +174,21 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
     alias_map = sources.get("alias_map") or {}
     next_chunk_text = sources.get("next_chunk_text") or ""
     character_appearances = sources.get("character_appearances") or []
+    evidence_bundle_names = _collect_names_from_evidence_bundle(sources.get("evidence_bundle"))
 
     appearance_names = [ca.get("raw_name") for ca in character_appearances if ca.get("raw_name")]
 
     logger.debug(
         "validate_names_in_sources: "
         "names={} text_len={} prev_chunk_len={} "
-        "active_entities={} alias_map_keys={} "
+        "active_entities={} alias_map_keys={} evidence_bundle_names={} "
         "next_chunk_len={} appearance_names={}",
         names,
         len(text),
         len(prev_chunk_text),
         active_entities,
         list(alias_map.keys()) if alias_map else [],
+        sorted(evidence_bundle_names),
         len(next_chunk_text),
         appearance_names,
     )
@@ -150,6 +222,10 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
                         is_valid = True
                         logger.debug("validate_names_in_sources: name='{}' found as substring in alias_map", name)
                         break
+
+        if not is_valid and evidence_bundle_names and name in evidence_bundle_names:
+            is_valid = True
+            logger.debug("validate_names_in_sources: name='{}' found in evidence_bundle", name)
 
         if not is_valid and next_chunk_text and name in next_chunk_text:
             is_valid = True

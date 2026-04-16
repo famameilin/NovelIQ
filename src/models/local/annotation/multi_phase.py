@@ -140,7 +140,6 @@ async def _run_phase2(
     evidence_bundle,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
-    rag_retriever: Any | None,
 ) -> ForeshadowingResult | None:
     """执行 Phase2 伏笔分析
 
@@ -168,7 +167,6 @@ async def _run_phase2(
         evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
-        rag_retriever=rag_retriever,
     )
 
 
@@ -331,6 +329,8 @@ async def annotate_chunk_multi_phase(
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def，使用 asyncio.gather 并行执行
     """
+    # 中文注释：保留 rag_retriever 形参仅为兼容旧调用方；
+    # Phase2 的证据入口已经收敛为上游 evidence_bundle，这里不再继续向下透传新的取证职责。
     parallel = settings.analysis.multi_phase_annotation.parallel
 
     if parallel:
@@ -347,7 +347,6 @@ async def annotate_chunk_multi_phase(
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
-            rag_retriever=rag_retriever,
             active_entities=active_entities,
             evidence_bundle=evidence_bundle,
             emitter=emitter,
@@ -367,7 +366,6 @@ async def annotate_chunk_multi_phase(
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
-            rag_retriever=rag_retriever,
             active_entities=active_entities,
             evidence_bundle=evidence_bundle,
             emitter=emitter,
@@ -447,7 +445,6 @@ async def annotate_chunk_parallel(
             evidence_bundle=evidence_bundle,
             cloud_client=cloud_client,
             run_id=run_id,
-            rag_retriever=rag_retriever,
         ),
     )
 
@@ -589,7 +586,6 @@ async def annotate_chunk_serial(
         evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
-        rag_retriever=rag_retriever,
     )
     if emitter:
         await emitter(

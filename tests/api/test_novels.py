@@ -6,6 +6,7 @@ API 小说端点测试
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 """
+
 import tempfile
 
 from fastapi.testclient import TestClient
@@ -21,10 +22,7 @@ class TestNovelUpload:
             f.flush()
 
             with open(f.name, "rb") as file:
-                response = api_client.post(
-                    "/api/novels/upload",
-                    files={"file": ("test.txt", file, "text/plain")}
-                )
+                response = api_client.post("/api/novels/upload", files={"file": ("test.txt", file, "text/plain")})
 
         assert response.status_code == 200
         data = response.json()
@@ -34,10 +32,7 @@ class TestNovelUpload:
 
     def test_upload_invalid_file(self, api_client: TestClient):
         """测试上传无效文件"""
-        response = api_client.post(
-            "/api/novels/upload",
-            files={"file": ("test.pdf", b"content", "application/pdf")}
-        )
+        response = api_client.post("/api/novels/upload", files={"file": ("test.pdf", b"content", "application/pdf")})
         assert response.status_code == 400
 
     def test_list_novels(self, api_client: TestClient):

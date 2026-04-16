@@ -11,6 +11,7 @@ CLI workflow 测试
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """
+
 import uuid
 from unittest.mock import MagicMock
 
@@ -63,6 +64,7 @@ class TestStageCompletion:
 
         chunk_repo = ChunkRepository(db_session)
         from src.chunking.chunker import Chunk
+
         chunks = [Chunk(index=0, text="测试文本" * 100, start=0, end=100)]
         chunk_repo.insert_chunks(run_id, chunks)
 
@@ -77,6 +79,7 @@ class TestStageCompletion:
         chunk_repo = ChunkRepository(db_session)
         ann_repo = AnnotationRepository(db_session)
         from src.chunking.chunker import Chunk
+
         chunks = [Chunk(index=0, text="测试文本" * 100, start=0, end=100)]
         chunk_repo.insert_chunks(run_id, chunks)
         ann_repo.insert_chunk_annotation(
@@ -104,13 +107,9 @@ class TestStageCompletion:
         chunk_repo = ChunkRepository(db_session)
         stats_repo = StatsRepository(db_session)
         from src.chunking.chunker import Chunk
+
         chunks = [Chunk(index=0, text="测试文本" * 100, start=0, end=100)]
         chunk_repo.insert_chunks(run_id, chunks)
         stats_repo.insert_chunk_curve(run_id, [(0, 0.1, 0.2, 0.0, 0.1, 0.5, 0.3)])
 
         assert stats_repo.has_aggregated_data(run_id)
-
-
-
-
-

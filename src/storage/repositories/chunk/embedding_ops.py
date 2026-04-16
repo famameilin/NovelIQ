@@ -43,15 +43,18 @@ def insert_chunk_embeddings(
     created_at = datetime.now().isoformat()
     rows = []
     for chunk_id, embedding_vector in embeddings:
-        rows.append({
-            "chunk_id": chunk_id,
-            "run_id": run_id,
-            "embedding_vector": embedding_vector,
-            "created_at": created_at,
-        })
+        rows.append(
+            {
+                "chunk_id": chunk_id,
+                "run_id": run_id,
+                "embedding_vector": embedding_vector,
+                "created_at": created_at,
+            }
+        )
 
     if rows:
         from sqlalchemy import insert
+
         session.execute(insert(ChunkEmbedding), rows)
 
     return len(rows)
@@ -74,11 +77,7 @@ def get_missing_embedding_chunk_ids(
     stmt = (
         select(Chunk.chunk_id)
         .where(Chunk.run_id == run_id)
-        .where(
-            Chunk.chunk_id.not_in(
-                select(ChunkEmbedding.chunk_id).where(ChunkEmbedding.run_id == run_id)
-            )
-        )
+        .where(Chunk.chunk_id.not_in(select(ChunkEmbedding.chunk_id).where(ChunkEmbedding.run_id == run_id)))
     )
     result = session.execute(stmt)
     return [row[0] for row in result.fetchall()]
@@ -151,7 +150,9 @@ def search_similar_chunks(
         run_scoped_chunks = run_scoped_chunks.where(ChunkEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
 
     run_scoped_chunks_subquery = run_scoped_chunks.subquery()
-    similarity = (1 - run_scoped_chunks_subquery.c.embedding_vector.cosine_distance(query_embedding)).label("similarity")
+    similarity = (1 - run_scoped_chunks_subquery.c.embedding_vector.cosine_distance(query_embedding)).label(
+        "similarity"
+    )
     stmt = (
         select(
             run_scoped_chunks_subquery.c.chunk_id,

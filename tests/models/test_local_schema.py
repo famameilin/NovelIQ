@@ -10,6 +10,7 @@
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 字段相关测试
 """
+
 import sys
 import unittest
 from pathlib import Path

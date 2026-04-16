@@ -13,8 +13,8 @@
 from __future__ import annotations
 
 from src.models.local.annotation.evidence_renderer import (
+    render_annotation_evidence_blocks,
     render_annotation_prompt_blocks,
-    render_foreshadowing_prompt_blocks,
 )
 from src.models.local.prompts import (
     FEW_SHOT_EXAMPLES_V2,
@@ -33,12 +33,11 @@ def _render_alias_map_text(
 ) -> str:
     alias_rows: list[tuple[str, str]] = []
 
-    if alias_map:
+    if alias_map is not None:
         alias_rows.extend(alias_map.items())
     elif evidence_bundle is not None and evidence_bundle.level1_snapshot is not None:
         alias_rows.extend(
-            (mapping.alias, mapping.canonical)
-            for mapping in evidence_bundle.level1_snapshot.alias_mappings
+            (mapping.alias, mapping.canonical) for mapping in evidence_bundle.level1_snapshot.alias_mappings
         )
 
     canonical_to_aliases: dict[str, list[str]] = {}
@@ -97,10 +96,17 @@ def _build_annotation_messages_v2(
     alias_map_str = _render_alias_map_text(alias_map=alias_map, evidence_bundle=evidence_bundle)
 
     if evidence_bundle is not None:
-        blocks = render_annotation_prompt_blocks(evidence_bundle)
-        if active_entities is None:
+        blocks = render_annotation_prompt_blocks(
+            evidence_bundle,
+            include_level1_alias_mappings=alias_map is None,
+        )
+        # 中文注释：EvidenceBundle 是新的主语义入口。
+        # 兼容层字符串只在 bundle 没有产出对应 prompt block 时兜底，避免旧字段反向覆盖新设计。
+        # 如果调用方显式给了 alias_map（包括空 dict），就不再把 bundle 里的 Level 1 别名裁决
+        # 通过 disambig_context 反向注入，避免新旧入口共存时出现优先级错位。
+        if blocks.active_entities is not None:
             active_entities = blocks.active_entities
-        if disambig_context is None:
+        if blocks.disambig_context is not None:
             disambig_context = blocks.disambig_context
 
     active_entities_str = active_entities or "[]"
@@ -162,10 +168,9 @@ def _build_foreshadowing_messages(
     )
 
     if evidence_bundle is not None:
-        blocks = render_foreshadowing_prompt_blocks(evidence_bundle)
-        # 中文注释：Phase 2 现在通过 foreshadowing renderer 显式接入 Level 1/2/3，
-        # 避免 evidence layer 只在 annotation/disambiguation 主链路生效。
-        evidence_sections = blocks.sections()
+        # 中文注释：Phase 2 只被动复用共享 evidence block，
+        # 不再引入 narrative 专用的二次渲染协议，避免这轮收口任务继续外扩。
+        evidence_sections = render_annotation_evidence_blocks(evidence_bundle)
         if evidence_sections:
             user_content += "\n\n" + "\n\n".join(evidence_sections)
 

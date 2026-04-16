@@ -59,8 +59,8 @@ def test_negation_detection_performance():
     print(f"否定词数量: {len(negation_words)}")
     print(f"测试次数: {iterations}")
     print(f"总耗时: {elapsed:.3f}秒")
-    print(f"平均耗时: {elapsed/iterations*1000:.3f}毫秒/次")
-    print(f"性能: {iterations/elapsed:.0f}次/秒")
+    print(f"平均耗时: {elapsed / iterations * 1000:.3f}毫秒/次")
+    print(f"性能: {iterations / elapsed:.0f}次/秒")
 
     if elapsed / iterations > 0.001:
         print("⚠️  警告: 单次否定词检测耗时超过1毫秒，可能存在性能问题")
@@ -91,8 +91,8 @@ def test_lexicon_matching_performance():
         elapsed = time.time() - start
 
         print(f"\n文本长度: {text_length}字")
-        print(f"  单次匹配耗时: {elapsed/100*1000:.2f}毫秒")
-        print(f"  性能: {100/elapsed:.1f}次/秒")
+        print(f"  单次匹配耗时: {elapsed / 100 * 1000:.2f}毫秒")
+        print(f"  性能: {100 / elapsed:.1f}次/秒")
 
         if elapsed / 100 > 0.1:
             print(f"  ⚠️  警告: 单次匹配耗时超过100毫秒")
@@ -121,7 +121,7 @@ def test_emotion_spans_performance():
     print(f"词条数量: {len(pos_terms)}")
     print(f"测试次数: {iterations}")
     print(f"总耗时: {elapsed:.3f}秒")
-    print(f"平均耗时: {elapsed/iterations*1000:.2f}毫秒/次")
+    print(f"平均耗时: {elapsed / iterations * 1000:.2f}毫秒/次")
 
 
 def test_full_emotion_density_performance():
@@ -142,14 +142,12 @@ def test_full_emotion_density_performance():
 
         start = time.time()
         for _ in range(10):
-            result = lexical_sentiment_density(
-                test_text, pos_terms, neg_terms, enable_negation=True
-            )
+            result = lexical_sentiment_density(test_text, pos_terms, neg_terms, enable_negation=True)
         elapsed = time.time() - start
 
         print(f"\n文本长度: {text_length}字")
-        print(f"  单次计算耗时: {elapsed/10*1000:.2f}毫秒")
-        print(f"  性能: {10/elapsed:.1f}次/秒")
+        print(f"  单次计算耗时: {elapsed / 10 * 1000:.2f}毫秒")
+        print(f"  性能: {10 / elapsed:.1f}次/秒")
         print(f"  结果: pos={result['pos_density']:.4f}, neg={result['neg_density']:.4f}")
 
         if elapsed / 10 > 1.0:
@@ -172,7 +170,7 @@ def test_weighted_multi_type_performance():
     ]
 
     for i, lex in enumerate(weighted_lexicons):
-        print(f"类型{i+1}: pos={len(lex.pos_terms)}, neg={len(lex.neg_terms)}")
+        print(f"类型{i + 1}: pos={len(lex.pos_terms)}, neg={len(lex.neg_terms)}")
 
     test_text = generate_test_text(1000)
 
@@ -181,17 +179,15 @@ def test_weighted_multi_type_performance():
         weighted_pos = 0.0
         weighted_neg = 0.0
         for lex_set in weighted_lexicons:
-            result = lexical_sentiment_density(
-                test_text, lex_set.pos_terms, lex_set.neg_terms
-            )
+            result = lexical_sentiment_density(test_text, lex_set.pos_terms, lex_set.neg_terms)
             weighted_pos += result["pos_density"]
             weighted_neg += result["neg_density"]
     elapsed = time.time() - start
 
     print(f"\n文本长度: {len(test_text)}字")
     print(f"类型数量: {len(weighted_lexicons)}")
-    print(f"单次计算耗时: {elapsed/10*1000:.2f}毫秒")
-    print(f"性能: {10/elapsed:.1f}次/秒")
+    print(f"单次计算耗时: {elapsed / 10 * 1000:.2f}毫秒")
+    print(f"性能: {10 / elapsed:.1f}次/秒")
 
     if elapsed / 10 > 3.0:
         print("⚠️  警告: 多类型混合计算耗时超过3秒")
@@ -225,7 +221,7 @@ def test_end_to_end_performance():
     elapsed = time.time() - start
 
     print(f"\n总耗时: {elapsed:.3f}秒")
-    print(f"平均每个Chunk: {elapsed/chunk_count*1000:.2f}毫秒")
+    print(f"平均每个Chunk: {elapsed / chunk_count * 1000:.2f}毫秒")
     print(f"处理速度: {chunk_count * chunk_length / elapsed:.0f}字/秒")
 
     if elapsed > 10:
@@ -253,7 +249,7 @@ def profile_hotspot():
     for _ in range(100):
         tokens = tokenize_words(test_text)
     elapsed = time.time() - start
-    print(f"   耗时: {elapsed/100*1000:.2f}毫秒/次")
+    print(f"   耗时: {elapsed / 100 * 1000:.2f}毫秒/次")
 
     print("\n2. 词典匹配性能:")
     tokens = tokenize_words(test_text)
@@ -262,7 +258,7 @@ def profile_hotspot():
         pos_spans = get_emotion_spans(test_text, tokens, pos_terms.keys())
         neg_spans = get_emotion_spans(test_text, tokens, neg_terms.keys())
     elapsed = time.time() - start
-    print(f"   耗时: {elapsed/100*1000:.2f}毫秒/次")
+    print(f"   耗时: {elapsed / 100 * 1000:.2f}毫秒/次")
     print(f"   正面词命中: {len(pos_spans)}个")
     print(f"   负面词命中: {len(neg_spans)}个")
 
@@ -279,7 +275,7 @@ def profile_hotspot():
             count_negations_before(test_text, start_pos, negation_words)
             total_negation_checks += 1
     elapsed = time.time() - start
-    print(f"   耗时: {elapsed/10*1000:.2f}毫秒/次")
+    print(f"   耗时: {elapsed / 10 * 1000:.2f}毫秒/次")
     print(f"   否定词检测次数: {total_negation_checks}次")
 
 

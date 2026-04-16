@@ -73,9 +73,9 @@ def test_get_timeline_max_level_filter_only_changes_node_subset(api_client: Test
     assert [node["progress"] for node in filtered_payload["nodes"]] == sorted(
         node["progress"] for node in filtered_payload["nodes"]
     )
-    assert {
-        node["chunk_id"] for node in filtered_payload["nodes"]
-    }.issubset({node["chunk_id"] for node in full_payload["nodes"]})
+    assert {node["chunk_id"] for node in filtered_payload["nodes"]}.issubset(
+        {node["chunk_id"] for node in full_payload["nodes"]}
+    )
 
 
 def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_shapes(

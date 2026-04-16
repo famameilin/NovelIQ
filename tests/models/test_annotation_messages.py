@@ -1,6 +1,6 @@
 from src.models.local.annotation.evidence_renderer import (
     render_annotation_evidence_blocks,
-    render_foreshadowing_prompt_blocks,
+    render_annotation_prompt_blocks,
 )
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
@@ -23,7 +23,7 @@ def test_build_annotation_messages_prefers_structured_evidence_bundle_blocks() -
             EvidenceItem(
                 evidence_type="alias_mapping",
                 source="level1",
-                content="阿七 → 贺重明",
+                content="阿七 -> 贺重明",
                 metadata={"alias": "阿七", "canonical": "贺重明"},
             ),
         ],
@@ -53,7 +53,43 @@ def test_build_annotation_messages_prefers_structured_evidence_bundle_blocks() -
     user_content = messages[-1]["content"]
     assert "<Narrative_Evidence_Level1>" in user_content
     assert "已确认别名：阿七 -> 贺重明" in user_content
+    assert "<Disambig_Candidates>" in user_content
+    assert "「阿七」可能是：贺重明" in user_content
     assert "<Vector_Evidence>" in user_content
+
+
+def test_render_annotation_prompt_blocks_can_drop_bundle_alias_lines_when_alias_map_is_explicit() -> None:
+    bundle = EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="alias_mapping",
+                source="level1",
+                content="灰衣人 -> 白芷",
+                metadata={"alias": "灰衣人", "canonical": "白芷"},
+            ),
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content="白芷<盟友>侯飞白",
+                metadata={
+                    "from_name": "白芷",
+                    "to_name": "侯飞白",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            ),
+        ],
+    )
+
+    blocks = render_annotation_prompt_blocks(
+        bundle,
+        include_level1_alias_mappings=False,
+    )
+
+    assert blocks.disambig_context is not None
+    assert "灰衣人 -> 白芷" not in blocks.disambig_context
+    assert "已确认别名：" not in blocks.disambig_context
+    assert "已确认关系：" in blocks.disambig_context
 
 
 def test_render_annotation_evidence_blocks_keeps_phase1_prompt_shape() -> None:
@@ -62,7 +98,7 @@ def test_render_annotation_evidence_blocks_keeps_phase1_prompt_shape() -> None:
             EvidenceItem(
                 evidence_type="alias_mapping",
                 source="level1",
-                content="阿七 → 贺重明",
+                content="阿七 -> 贺重明",
                 metadata={"alias": "阿七", "canonical": "贺重明"},
             ),
         ],
@@ -167,26 +203,7 @@ def _build_foreshadowing_bundle() -> EvidenceBundle:
     )
 
 
-def test_render_foreshadowing_prompt_blocks_uses_level123_sections() -> None:
-    bundle = _build_foreshadowing_bundle()
-
-    blocks = render_foreshadowing_prompt_blocks(bundle)
-
-    assert blocks.level1_facts is not None
-    assert "<Narrative_Evidence_Level1>" in blocks.level1_facts
-    assert "稳定实体事实" in blocks.level1_facts
-
-    assert blocks.level2_context is not None
-    assert "<Narrative_Evidence_Level2>" in blocks.level2_context
-    assert "白芷" in blocks.level2_context
-    assert "「灰衣人」可能是：白芷" not in blocks.level2_context
-
-    assert blocks.level3_echoes is not None
-    assert "<Narrative_Evidence_Level3>" in blocks.level3_echoes
-    assert "anchor_text 必须来自<当前文本>" in blocks.level3_echoes
-
-
-def test_build_foreshadowing_messages_appends_shared_evidence_sections() -> None:
+def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
     bundle = _build_foreshadowing_bundle()
 
     messages = _build_foreshadowing_messages(
@@ -199,12 +216,12 @@ def test_build_foreshadowing_messages_appends_shared_evidence_sections() -> None
     )
 
     user_content = messages[-1]["content"]
-    assert "<Narrative_Evidence_Level1>" in user_content
-    assert "<Narrative_Evidence_Level2>" in user_content
-    assert "<Narrative_Evidence_Level3>" in user_content
-    assert "稳定实体事实" in user_content
-    assert "anchor_text 必须来自<当前文本>" in user_content
-    assert "<Disambig_Candidates>" not in user_content
+    assert "<Structured_Evidence>" in user_content
+    assert "<Disambig_Candidates>" in user_content
+    assert "<Vector_Evidence>" in user_content
+    assert "<Narrative_Evidence_Level1>" not in user_content
+    assert "<Narrative_Evidence_Level2>" not in user_content
+    assert "<Narrative_Evidence_Level3>" not in user_content
 
 
 def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> None:
@@ -215,6 +232,6 @@ def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> Non
     )
 
     user_content = messages[-1]["content"]
-    assert "<Narrative_Evidence_Level1>" not in user_content
-    assert "<Narrative_Evidence_Level2>" not in user_content
-    assert "<Narrative_Evidence_Level3>" not in user_content
+    assert "<Structured_Evidence>" not in user_content
+    assert "<Disambig_Candidates>" not in user_content
+    assert "<Vector_Evidence>" not in user_content

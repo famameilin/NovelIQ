@@ -26,6 +26,7 @@
 任务: async-reconstruction
 修改内容: chunk_text 改为 async，添加 asyncio.run() 包装
 """
+
 import asyncio
 import sys
 import uuid
@@ -55,6 +56,7 @@ class MockEmbeddingClient:
 
     def get_embedding(self, text: str):
         import random
+
         return [random.random() for _ in range(768)]
 
     @staticmethod
