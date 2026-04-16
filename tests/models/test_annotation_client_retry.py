@@ -491,6 +491,28 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result.annotation, ChunkAnnotation)
 
     @patch('src.models.local.annotation.multi_phase.settings')
+    async def test_two_phase_serial_passes_evidence_bundle_to_phase2(self, mock_settings):
+        """串行模式会把上游 evidence_bundle 继续透传给 Phase2。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = False
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+
+        with patch(
+            "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+            new=AsyncMock(return_value=create_mock_foreshadowing()),
+        ) as mock_phase2:
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="测试文本",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase2.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch('src.models.local.annotation.multi_phase.settings')
     async def test_two_phase_parallel_passes_cloud_client(self, mock_settings):
         """并行模式传递 cloud_client 参数"""
         mock_settings.analysis.multi_phase_annotation.parallel = True
@@ -506,6 +528,28 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsInstance(result.annotation, ChunkAnnotation)
+
+    @patch('src.models.local.annotation.multi_phase.settings')
+    async def test_two_phase_parallel_passes_evidence_bundle_to_phase2(self, mock_settings):
+        """并行模式也会把上游 evidence_bundle 继续透传给 Phase2。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = True
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+
+        with patch(
+            "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+            new=AsyncMock(return_value=create_mock_foreshadowing()),
+        ) as mock_phase2:
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="测试文本",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase2.await_args.kwargs["evidence_bundle"], evidence_bundle)
 
 
 if __name__ == "__main__":
