@@ -3,16 +3,35 @@ from __future__ import annotations
 from src.rag.evidence_types import EvidenceBundle
 
 
+def _read_legacy_or_shared_block(
+    bundle: EvidenceBundle,
+    render_attr: str,
+    block_key: str,
+) -> str | None:
+    shared_renderer = getattr(bundle, render_attr, None)
+    if callable(shared_renderer):
+        rendered = shared_renderer()
+        if rendered is None or isinstance(rendered, str):
+            return rendered
+
+    legacy_builder = getattr(bundle, "to_prompt_blocks", None)
+    if not callable(legacy_builder):
+        return None
+
+    blocks = legacy_builder()
+    if isinstance(blocks, dict):
+        value = blocks.get(block_key)
+        return value if isinstance(value, str) and value else None
+    return None
+
+
 def render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
-    blocks = bundle.to_prompt_blocks()
-    disambig_candidates = blocks["disambig_candidates"]
-    return disambig_candidates or None
+    return _read_legacy_or_shared_block(bundle, "render_disambig_candidates", "disambig_candidates")
 
 
 def render_disambig_prompt_context(bundle: EvidenceBundle) -> str | None:
-    blocks = bundle.to_prompt_blocks()
-    disambig_candidates = blocks["disambig_candidates"]
-    vector_evidence = blocks["vector_evidence"]
+    disambig_candidates = _read_legacy_or_shared_block(bundle, "render_disambig_candidates", "disambig_candidates")
+    vector_evidence = _read_legacy_or_shared_block(bundle, "render_vector_evidence", "vector_evidence")
 
     if disambig_candidates and vector_evidence:
         return disambig_candidates + "\n\n" + vector_evidence
