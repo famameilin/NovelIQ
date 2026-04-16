@@ -344,9 +344,9 @@ async def _process_single_chunk(
         alias_map=alias_map if alias_map else None,
         chunk_id=chunk_id,
         global_context=phase_result.global_context_str,
-        active_entities=getattr(ctx, "prompt_active_entities", ctx.active_entities_str),
+        active_entities=ctx.prompt_active_entities,
         evidence_bundle=ctx.evidence_bundle,
-        disambig_context=getattr(ctx, "prompt_disambig_context", ctx.disambig_context_str),
+        disambig_context=ctx.prompt_disambig_context,
         cloud_client=phase_result.cloud_annotation_client,
         run_id=run_id,
         emitter=phase_result.emitter,
@@ -537,7 +537,12 @@ async def _run_disambiguation_phase(
     from .disambiguation import _run_final_disambiguation_with_state
 
     state = await _run_final_disambiguation_with_state(
-        conn, state, phase_result.full_disambig_client, phase_result.alias_keywords, novel_id, run_id=run_id,
+        conn,
+        state,
+        phase_result.full_disambig_client,
+        phase_result.alias_keywords,
+        novel_id,
+        run_id=run_id,
         disambig_provider=phase_result.rag_retriever,
     )
 

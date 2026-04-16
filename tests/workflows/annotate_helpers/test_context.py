@@ -3,16 +3,27 @@
 创建者: TraeAI
 任务: 用户请求创建 ChunkContext 测试
 说明: 测试 ChunkContext.evidence_bundle 字段和遗留兼容字段
+
+修改时间: 2026-04-17
+修改者: Codex
+任务: trim-legacy-string-evidence
+修改内容: 删除依赖遗留字符串字段的测试，改为仅测试主链路 prompt_* 入口和 annotation_prompt_blocks
 """
 
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from src.knowledge.authority import (
+    ActiveEntityContext,
+    AliasMapping,
+    CanonicalEntity,
+    EntityTypeFact,
+    Level1AuthoritySnapshot,
+)
+from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers import context as context_module
-from src.knowledge.authority import ActiveEntityContext, AliasMapping, CanonicalEntity, EntityTypeFact, Level1AuthoritySnapshot
-from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
 from src.workflows.annotate_helpers.context import (
     ChunkContext,
     _build_active_entities_prompt_from_authority,
@@ -32,95 +43,20 @@ def test_chunk_context_has_evidence_bundle():
     assert isinstance(context.evidence_bundle, EvidenceBundle)
 
 
-def test_chunk_context_all_fields():
-    bundle = EvidenceBundle(
-        structured_evidence=[],
-        local_evidence=[
-            EvidenceItem(evidence_type="disambig_candidate", source="level2", content="「张三」可能是：张三丰"),
-        ],
-        semantic_evidence=[],
-    )
-
-    context = ChunkContext(
-        prev_chunk_text="上一段文本",
-        active_entities_str="活跃实体：张三、李四",
-        disambig_context_str="<Disambig_Candidates>\n- 「张三」可能是：张三丰\n</Disambig_Candidates>",
-        next_chunk_text="下一段文本",
-        evidence_bundle=bundle,
-    )
-
-    assert context.prev_chunk_text == "上一段文本"
-    assert context.active_entities_str == "活跃实体：张三、李四"
-    assert context.disambig_context_str is not None
-    assert context.evidence_bundle is not None
-
-
-def test_chunk_context_evidence_bundle_default_none():
-    context = ChunkContext()
-    assert context.evidence_bundle is None
-
-
 def test_chunk_context_all_fields_default_none():
     context = ChunkContext()
     assert context.prev_chunk_text is None
-    assert context.active_entities_str is None
-    assert context.disambig_context_str is None
     assert context.next_chunk_text is None
-    assert context.vector_evidence_str is None
     assert context.evidence_bundle is None
+    assert context.annotation_prompt_blocks is None
+    assert context.active_entities_fallback is None
+    assert context.prompt_active_entities is None
+    assert context.prompt_disambig_context is None
+    assert context.prompt_vector_evidence is None
 
 
-def test_chunk_context_keeps_legacy_fields_optional():
-    bundle = EvidenceBundle(
-        structured_evidence=[],
-        local_evidence=[
-            EvidenceItem(evidence_type="disambig_candidate", source="level2", content="「张三」可能是：张三丰"),
-            EvidenceItem(evidence_type="disambig_candidate", source="level2", content="「李四」可能是：李四郎"),
-        ],
-        semantic_evidence=[
-            EvidenceItem(
-                evidence_type="vector_evidence",
-                source="level3",
-                content="灰衣人缓缓转过身来...",
-                chunk_id=42,
-                score=0.85,
-            ),
-        ],
-    )
-
-    context = ChunkContext(evidence_bundle=bundle)
-    assert context.evidence_bundle is bundle
-    assert context.disambig_context_str is None
-
-
-def test_chunk_context_allows_explicit_legacy_disambig_context():
-    bundle = EvidenceBundle(
-        structured_evidence=[],
-        local_evidence=[],
-        semantic_evidence=[],
-    )
-
+def test_chunk_context_prompt_active_entities_prefers_renderer_blocks():
     context = ChunkContext(
-        evidence_bundle=bundle,
-        disambig_context_str="<Legacy_Disambig />",
-    )
-    assert context.disambig_context_str == "<Legacy_Disambig />"
-
-
-def test_chunk_context_vector_evidence_str_deprecated():
-    context = ChunkContext(
-        vector_evidence_str="旧的向量证据字符串",
-    )
-    assert context.vector_evidence_str == "旧的向量证据字符串"
-    assert context.evidence_bundle is None
-
-
-def test_chunk_context_prompt_accessors_prefer_renderer_blocks_and_fallbacks():
-    context = ChunkContext(
-        active_entities_str="旧活跃实体",
-        disambig_context_str="<Legacy_Disambig />",
-        vector_evidence_str="<Legacy_Vector />",
-        active_entities_fallback="authority-fallback",
         annotation_prompt_blocks=render_annotation_prompt_blocks(
             EvidenceBundle(
                 local_evidence=[
@@ -130,92 +66,86 @@ def test_chunk_context_prompt_accessors_prefer_renderer_blocks_and_fallbacks():
                         content="程霜",
                         metadata={"name": "程霜", "role": "helper", "recent_action": "追查", "last_seen_chunk": 21},
                     ),
-                    EvidenceItem(
-                        evidence_type="disambig_candidate",
-                        source="level2",
-                        content="「灰衣人」可能是：程霜",
-                    ),
-                ],
-                semantic_evidence=[
-                    EvidenceItem(
-                        evidence_type="vector_evidence",
-                        source="level3",
-                        content="程霜在旧案卷中发现了线索。",
-                        chunk_id=4,
-                        score=0.91,
-                    )
                 ],
             )
         ),
     )
-
     assert context.prompt_active_entities is not None
     assert "程霜" in context.prompt_active_entities
-    assert context.prompt_disambig_context is not None
-    assert "「灰衣人」可能是：程霜" in context.prompt_disambig_context
-    assert context.prompt_vector_evidence is not None
-    assert "[Chunk 4]" in context.prompt_vector_evidence
 
 
-def test_chunk_context_legacy_setters_do_not_override_renderer_prompt_blocks():
+def test_chunk_context_prompt_active_entities_uses_fallback_when_no_renderer():
+    context = ChunkContext(active_entities_fallback="authority-fallback")
+    assert context.prompt_active_entities == "authority-fallback"
+
+
+def test_chunk_context_prompt_disambig_context_from_renderer():
     context = ChunkContext(
-        active_entities_fallback="authority-fallback",
         annotation_prompt_blocks=render_annotation_prompt_blocks(
             EvidenceBundle(
                 local_evidence=[
                     EvidenceItem(
-                        evidence_type="active_entity",
-                        source="level2",
-                        content="程霜",
-                        metadata={"name": "程霜", "role": "helper", "recent_action": "追查", "last_seen_chunk": 21},
-                    ),
-                    EvidenceItem(
                         evidence_type="disambig_candidate",
                         source="level2",
                         content="「灰衣人」可能是：程霜",
                     ),
                 ],
-                semantic_evidence=[
-                    EvidenceItem(
-                        evidence_type="vector_evidence",
-                        source="level3",
-                        content="程霜在旧案卷中发现了线索。",
-                        chunk_id=4,
-                        score=0.91,
-                    )
-                ],
+                requested_names=["灰衣人"],
             )
         ),
     )
-
-    context.active_entities_str = "LEGACY_ACTIVE"
-    context.disambig_context_str = "LEGACY_DISAMBIG"
-    context.vector_evidence_str = "LEGACY_VECTOR"
-
-    assert context.prompt_active_entities is not None
-    assert "程霜" in context.prompt_active_entities
-    assert context.active_entities_str is not None
-    assert "程霜" in context.active_entities_str
     assert context.prompt_disambig_context is not None
     assert "「灰衣人」可能是：程霜" in context.prompt_disambig_context
-    assert context.disambig_context_str is not None
-    assert "「灰衣人」可能是：程霜" in context.disambig_context_str
-    assert context.prompt_vector_evidence is not None
-    assert "[Chunk 4]" in context.prompt_vector_evidence
-    assert context.vector_evidence_str is not None
-    assert "[Chunk 4]" in context.vector_evidence_str
 
 
-def test_chunk_context_legacy_setters_still_work_without_renderer_blocks():
+def test_chunk_context_prompt_disambig_context_none_when_empty():
     context = ChunkContext()
+    assert context.prompt_disambig_context is None
 
-    context.active_entities_str = "LEGACY_ACTIVE"
-    context.disambig_context_str = "LEGACY_DISAMBIG"
-    context.vector_evidence_str = "LEGACY_VECTOR"
 
-    assert context.active_entities_str == "LEGACY_ACTIVE"
-    assert context.disambig_context_str == "LEGACY_DISAMBIG"
-    assert context.vector_evidence_str == "LEGACY_VECTOR"
+def test_chunk_context_prompt_vector_evidence_from_renderer():
+    context = ChunkContext(
+        annotation_prompt_blocks=render_annotation_prompt_blocks(
+            EvidenceBundle(
+                semantic_evidence=[
+                    EvidenceItem(
+                        evidence_type="vector_evidence",
+                        source="level3",
+                        content="程霜在旧案卷中发现了线索。",
+                        chunk_id=4,
+                        score=0.91,
+                    )
+                ],
+            )
+        ),
+    )
+    assert context.prompt_vector_evidence is not None
+    assert "[Chunk 4]" in context.prompt_vector_evidence
+
+
+def test_chunk_context_prompt_vector_evidence_none_when_empty():
+    context = ChunkContext()
+    assert context.prompt_vector_evidence is None
+
+
+def test_chunk_context_renderer_blocks_take_priority_over_fallback():
+    context = ChunkContext(
+        active_entities_fallback="old-fallback",
+        annotation_prompt_blocks=render_annotation_prompt_blocks(
+            EvidenceBundle(
+                local_evidence=[
+                    EvidenceItem(
+                        evidence_type="active_entity",
+                        source="level2",
+                        content="程霜",
+                        metadata={"name": "程霜", "role": "helper", "recent_action": "追查", "last_seen_chunk": 21},
+                    ),
+                ],
+            )
+        ),
+    )
+    assert "程霜" in context.prompt_active_entities
+    assert "old-fallback" not in context.prompt_active_entities
 
 
 def test_chunk_context_evidence_bundle_with_structured_evidence():
@@ -361,10 +291,10 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
 
     assert context.prev_chunk_text == "prev:run-1:12"
     assert context.next_chunk_text == "next:run-1:12"
-    assert context.active_entities_str == "【近期活跃角色】\n- 白芷（helper）：观察 [chunk=12]"
+    assert context.prompt_active_entities == "【近期活跃角色】\n- 白芷（helper）：观察 [chunk=12]"
     assert context.evidence_bundle is bundle
-    assert context.disambig_context_str is not None
-    assert "「蒙面人」可能是：白芷" in context.disambig_context_str
+    assert context.prompt_disambig_context is not None
+    assert "「蒙面人」可能是：白芷" in context.prompt_disambig_context
 
 
 def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_bundle_has_value(monkeypatch):
@@ -406,7 +336,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
     )
 
     assert expected_active_entities is not None
-    assert context.active_entities_str == expected_active_entities
+    assert context.prompt_active_entities == expected_active_entities
     assert context.prev_chunk_text == "prev:run-override:20"
     assert context.next_chunk_text == "next:run-override:20"
 
@@ -428,7 +358,7 @@ def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
     build_authority_prompt.assert_not_called()
     assert context.prev_chunk_text is None
     assert context.next_chunk_text is None
-    assert context.active_entities_str is None
+    assert context.prompt_active_entities is None
     assert context.evidence_bundle is None
 
 
@@ -449,7 +379,7 @@ def test_prepare_chunk_context_skips_context_loading_when_run_id_missing(monkeyp
     build_authority_prompt.assert_not_called()
     assert context.prev_chunk_text is None
     assert context.next_chunk_text is None
-    assert context.active_entities_str is None
+    assert context.prompt_active_entities is None
     assert context.evidence_bundle is None
 
 
@@ -473,10 +403,10 @@ def test_prepare_chunk_context_without_disambig_provider_keeps_authority_context
 
     assert context.prev_chunk_text == "prev:run-authority-only:9"
     assert context.next_chunk_text == "next:run-authority-only:9"
-    assert context.active_entities_str == "【近期活跃角色】\n- 苏镜（protagonist）：思考 [chunk=9]"
+    assert context.prompt_active_entities == "【近期活跃角色】\n- 苏镜（protagonist）：思考 [chunk=9]"
     assert context.evidence_bundle is None
-    assert context.disambig_context_str is None
-    assert context.vector_evidence_str is None
+    assert context.prompt_disambig_context is None
+    assert context.prompt_vector_evidence is None
 
 
 @pytest.mark.asyncio
@@ -518,10 +448,10 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
 
     assert context.prev_chunk_text == "prev:run-async:18"
     assert context.next_chunk_text == "next:run-async:18"
-    assert context.active_entities_str == "【近期活跃角色】\n- 陆明（helper）：巡查 [chunk=18]"
+    assert context.prompt_active_entities == "【近期活跃角色】\n- 陆明（helper）：巡查 [chunk=18]"
     assert context.evidence_bundle is bundle
-    assert context.disambig_context_str is not None
-    assert "「黑衣人」可能是：陆明" in context.disambig_context_str
+    assert context.prompt_disambig_context is not None
+    assert "「黑衣人」可能是：陆明" in context.prompt_disambig_context
 
 
 @pytest.mark.asyncio
@@ -582,9 +512,9 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         exclude_chunk_ids=[21],
     )
     assert expected_active_entities is not None
-    assert context.active_entities_str == expected_active_entities
-    assert context.vector_evidence_str is not None
-    assert "[Chunk 4]" in context.vector_evidence_str
+    assert context.prompt_active_entities == expected_active_entities
+    assert context.prompt_vector_evidence is not None
+    assert "[Chunk 4]" in context.prompt_vector_evidence
 
 
 @pytest.mark.asyncio

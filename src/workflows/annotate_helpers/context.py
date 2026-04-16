@@ -50,15 +50,17 @@ class ChunkContext:
     修改者: Codex
     任务: trim-legacy-string-evidence
     修改内容: 新增 annotation_prompt_blocks 语义入口，旧字符串字段降为兼容层
+
+    修改时间: 2026-04-17
+    修改者: Codex
+    任务: trim-legacy-string-evidence
+    修改内容: 删除遗留字符串字段和兼容属性，主链路统一使用 annotation_prompt_blocks
     """
 
     def __init__(
         self,
         prev_chunk_text: str | None = None,
-        active_entities_str: str | None = None,
-        disambig_context_str: str | None = None,
         next_chunk_text: str | None = None,
-        vector_evidence_str: str | None = None,
         evidence_bundle: EvidenceBundle | None = None,
         annotation_prompt_blocks: AnnotationPromptBlocks | None = None,
         active_entities_fallback: str | None = None,
@@ -68,58 +70,26 @@ class ChunkContext:
         self.evidence_bundle = evidence_bundle
         self.annotation_prompt_blocks = annotation_prompt_blocks
         self.active_entities_fallback = active_entities_fallback
-        self._legacy_active_entities_str = active_entities_str
-        self._legacy_disambig_context_str = disambig_context_str
-        self._legacy_vector_evidence_str = vector_evidence_str
 
     @property
     def prompt_active_entities(self) -> str | None:
-        # 中文注释：主链路优先消费 renderer 产出的语义块，
-        # authority fallback 只在 bundle 尚未给出 Level 2 活跃实体时兜底。
         if self.annotation_prompt_blocks and self.annotation_prompt_blocks.active_entities is not None:
             return self.annotation_prompt_blocks.active_entities
         if self.active_entities_fallback is not None:
             return self.active_entities_fallback
-        return self._legacy_active_entities_str
+        return None
 
     @property
     def prompt_disambig_context(self) -> str | None:
         if self.annotation_prompt_blocks and self.annotation_prompt_blocks.disambig_context is not None:
             return self.annotation_prompt_blocks.disambig_context
-        return self._legacy_disambig_context_str
+        return None
 
     @property
     def prompt_vector_evidence(self) -> str | None:
         if self.annotation_prompt_blocks and self.annotation_prompt_blocks.vector_evidence is not None:
             return self.annotation_prompt_blocks.vector_evidence
-        return self._legacy_vector_evidence_str
-
-    @property
-    def active_entities_str(self) -> str | None:
-        return self.prompt_active_entities
-
-    @active_entities_str.setter
-    def active_entities_str(self, value: str | None) -> None:
-        # 中文注释：legacy 字段只保留为兼容输入，不再反向改写 renderer 产出的主语义块。
-        self._legacy_active_entities_str = value
-
-    @property
-    def disambig_context_str(self) -> str | None:
-        return self.prompt_disambig_context
-
-    @disambig_context_str.setter
-    def disambig_context_str(self, value: str | None) -> None:
-        # 中文注释：避免旧字段在 bundle 已就绪后继续污染主 prompt。
-        self._legacy_disambig_context_str = value
-
-    @property
-    def vector_evidence_str(self) -> str | None:
-        return self.prompt_vector_evidence
-
-    @vector_evidence_str.setter
-    def vector_evidence_str(self, value: str | None) -> None:
-        # 中文注释：只保留兼容层写入，不把 legacy 值同步回 annotation_prompt_blocks。
-        self._legacy_vector_evidence_str = value
+        return None
 
 
 def _init_disambig_provider(
