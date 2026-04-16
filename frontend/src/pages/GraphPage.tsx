@@ -111,12 +111,13 @@ export function GraphPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
+  const { currentNovelId, currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
   const urlSelectedChunk = searchParams.get("selected_chunk");
   const urlRelationEventId = searchParams.get("relation_event_id");
   const forceGraphRef = useRef<ForceGraphHandle>(null);
+  const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
 
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -129,42 +130,59 @@ export function GraphPage() {
   const [isEventsLoading, setIsEventsLoading] = useState(false);
   const [eventsLoadError, setEventsLoadError] = useState<string | null>(null);
   const eventsRequestVersionRef = useRef(0);
-  const currentTaskIdRef = useRef<string | null>(currentTaskId);
+  const currentTaskScopeIdRef = useRef<string | null>(null);
   const previousTaskIdRef = useRef<string | null | undefined>(undefined);
+  const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
+  const taskScopeId = urlTaskId ?? storeTaskId;
 
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
       if (urlTaskId) {
+        if (storeTaskId !== urlTaskId) {
+          urlTaskSyncRef.current = urlTaskId;
+        }
         setTask(urlTaskId);
       }
     }
-  }, [novelId, urlTaskId, setNovel, setTask]);
+  }, [novelId, setNovel, setTask, urlTaskId]);
 
   useEffect(() => {
-    // 中文注释：GraphPage 的 task 归一化只能建立在有效 novelId 之上；
-    // 否则缺参空态虽然能显示出来，但 URL 仍可能被错误改写成 /novels/undefined/graph。
-    if (currentTaskId && novelId && searchParams.get("task_id") !== currentTaskId) {
-      navigate(`/novels/${novelId}/graph?task_id=${currentTaskId}`, { replace: true });
+    if (!novelId || !storeTaskId) {
+      return;
     }
-  }, [currentTaskId, novelId, navigate, searchParams]);
+
+    // 中文注释：URL 上带 task_id 的首屏 deep-link 必须先等 store 同步到同一 task，
+    // 不能让旧 store 状态抢先回写 URL；否则会把合法 deep-link 误改成旧任务。
+    if (urlTaskId === storeTaskId) {
+      if (urlTaskSyncRef.current === storeTaskId) {
+        urlTaskSyncRef.current = null;
+      }
+      return;
+    }
+    if (urlTaskId && urlTaskSyncRef.current === urlTaskId) {
+      return;
+    }
+
+    navigate(`/novels/${novelId}/graph?task_id=${storeTaskId}`, { replace: true });
+  }, [navigate, novelId, storeTaskId, urlTaskId]);
 
   useEffect(() => {
-    currentTaskIdRef.current = currentTaskId;
-  }, [currentTaskId]);
+    currentTaskScopeIdRef.current = taskScopeId;
+  }, [taskScopeId]);
 
-  const enabled = !!novelId && !!currentTaskId;
+  const enabled = !!novelId && !!taskScopeId;
 
   const graphQuery = useQuery({
-    queryKey: ["graph", novelId, currentTaskId],
-    queryFn: () => getGraph(novelId!, currentTaskId!),
+    queryKey: ["graph", novelId, taskScopeId],
+    queryFn: () => getGraph(novelId!, taskScopeId!),
     enabled,
     staleTime: STALE_TIME,
   });
 
   const charactersQuery = useQuery({
-    queryKey: ["characters", novelId, currentTaskId],
-    queryFn: () => getCharacters(novelId!, currentTaskId!),
+    queryKey: ["characters", novelId, taskScopeId],
+    queryFn: () => getCharacters(novelId!, taskScopeId!),
     enabled,
     staleTime: STALE_TIME,
   });
@@ -190,6 +208,8 @@ export function GraphPage() {
       // 防止旧任务的事件窗口、错误提示和节点选择残留到新页面。
       setSelectedNode(null);
       setIsPanelOpen(false);
+      setSearchQuery("");
+      setSelectedRelationTypes(new Set());
       setSelectedEventId(null);
       setHasUserSelectedEvent(false);
       setLoadedEvents(options?.events ?? []);
@@ -388,7 +408,7 @@ export function GraphPage() {
 
   useEffect(() => {
     setHasUserSelectedEvent(false);
-  }, [currentTaskId, initialRelationEventId, initialSelectedChunk]);
+  }, [initialRelationEventId, initialSelectedChunk, taskScopeId]);
 
   useEffect(() => {
     if (hasUserSelectedEvent) return;
@@ -417,18 +437,18 @@ export function GraphPage() {
 
   useEffect(() => {
     const previousTaskId = previousTaskIdRef.current;
-    previousTaskIdRef.current = currentTaskId;
+    previousTaskIdRef.current = taskScopeId;
     // 中文注释：这里只处理“真实 task 变化”后的页面清理。
     // 首次挂载若已命中 React Query 缓存，不应把刚同步进来的 events/pageInfo
     // 又立即清空，否则会出现 graph 已有数据但 events 侧栏为空的回归。
-    if (previousTaskId === undefined || previousTaskId === currentTaskId) {
+    if (previousTaskId === undefined || previousTaskId === taskScopeId) {
       return;
     }
     // 中文注释：task 切换发生在新快照返回之前时，也要立即清掉旧页面状态；
     // 否则 load-more 报错、旧 deep-link 提示、旧选中节点会短暂闪回到新 task 页面。
     eventsRequestVersionRef.current += 1;
     resetTaskScopedGraphState();
-  }, [currentTaskId, resetTaskScopedGraphState]);
+  }, [resetTaskScopedGraphState, taskScopeId]);
 
   useEffect(() => {
     if (!graphContractIssue || !graphData) return;
@@ -440,10 +460,10 @@ export function GraphPage() {
     ].filter(Boolean);
 
     console.error("[GraphPage] /graph authority contract is missing required fields:", {
-      taskId: currentTaskId,
+      taskId: taskScopeId,
       missingFields,
     });
-  }, [currentTaskId, graphContractIssue, graphData]);
+  }, [graphContractIssue, graphData, taskScopeId]);
 
   const weakRelations = useMemo(() => {
     if (!graphData) return [];
@@ -495,7 +515,7 @@ export function GraphPage() {
     };
   }, [graphQuality]);
 
-  const timelineUrl = novelId && currentTaskId ? buildTimelineUrl(novelId, currentTaskId) : null;
+  const timelineUrl = novelId && taskScopeId ? buildTimelineUrl(novelId, taskScopeId) : null;
   const isLoading = graphQuery.isLoading;
   const isError = graphQuery.isError;
   const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
@@ -534,11 +554,11 @@ export function GraphPage() {
   }, [graphQuery]);
 
   const handleLoadMoreEvents = useCallback(async () => {
-    if (!novelId || !currentTaskId || !eventsPageInfo?.next_cursor || isEventsLoading) {
+    if (!novelId || !taskScopeId || !eventsPageInfo?.next_cursor || isEventsLoading) {
       return;
     }
 
-    const requestTaskId = currentTaskId;
+    const requestTaskId = taskScopeId;
     const requestCursor = eventsPageInfo.next_cursor;
     const requestVersion = eventsRequestVersionRef.current + 1;
     eventsRequestVersionRef.current = requestVersion;
@@ -546,27 +566,27 @@ export function GraphPage() {
     setIsEventsLoading(true);
     setEventsLoadError(null);
     try {
-      const page = await getGraphEvents(novelId, currentTaskId, {
+      const page = await getGraphEvents(novelId, taskScopeId, {
         eventsCursor: requestCursor,
         eventsLimit: eventsPageInfo.limit,
       });
-      if (eventsRequestVersionRef.current !== requestVersion || currentTaskIdRef.current !== requestTaskId) {
+      if (eventsRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
         return;
       }
       setLoadedEvents((currentEvents) => mergeGraphEvents(currentEvents, page.events));
       setEventsPageInfo(page.page_info);
     } catch (error) {
-      if (eventsRequestVersionRef.current !== requestVersion || currentTaskIdRef.current !== requestTaskId) {
+      if (eventsRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
         return;
       }
       const message = error instanceof Error ? error.message : "加载更多 relation events 失败";
       setEventsLoadError(message);
     } finally {
-      if (eventsRequestVersionRef.current === requestVersion && currentTaskIdRef.current === requestTaskId) {
+      if (eventsRequestVersionRef.current === requestVersion && currentTaskScopeIdRef.current === requestTaskId) {
         setIsEventsLoading(false);
       }
     }
-  }, [currentTaskId, eventsPageInfo, isEventsLoading, novelId]);
+  }, [eventsPageInfo, isEventsLoading, novelId, taskScopeId]);
 
   const handleGoTimeline = useCallback(() => {
     if (timelineUrl) {
@@ -1172,7 +1192,7 @@ export function GraphPage() {
     );
   }
 
-  if (!currentTaskId) {
+  if (!taskScopeId) {
     return (
       <PageContainer>
         <NovelHeader title={novelTitle} />
