@@ -6,6 +6,7 @@ API 分析端点测试
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 """
+
 import tempfile
 from unittest.mock import MagicMock, patch
 
@@ -52,10 +53,7 @@ class TestReanalysis:
 
     def test_reanalyze_not_found(self, api_client: TestClient):
         """测试重新分析不存在的小说"""
-        response = api_client.post(
-            "/api/novels/nonexistent/reanalyze",
-            json={"label": "test"}
-        )
+        response = api_client.post("/api/novels/nonexistent/reanalyze", json={"label": "test"})
         assert response.status_code == 404
 
     def test_reanalyze_creates_new_version(self, api_client: TestClient):
@@ -66,17 +64,13 @@ class TestReanalysis:
 
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
-                    "/api/novels/upload",
-                    files={"file": ("reanalyze_test.txt", file, "text/plain")}
+                    "/api/novels/upload", files={"file": ("reanalyze_test.txt", file, "text/plain")}
                 )
 
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
 
-        reanalyze_response = api_client.post(
-            f"/api/novels/{novel_id}/reanalyze",
-            json={"label": "v2"}
-        )
+        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "v2"})
         assert reanalyze_response.status_code == 200
         data = reanalyze_response.json()
         assert data["novel_id"] == novel_id
@@ -91,8 +85,7 @@ class TestReanalysis:
 
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
-                    "/api/novels/upload",
-                    files={"file": ("auto_label_test.txt", file, "text/plain")}
+                    "/api/novels/upload", files={"file": ("auto_label_test.txt", file, "text/plain")}
                 )
 
         novel_id = upload_response.json()["novel_id"]
@@ -123,8 +116,7 @@ class TestAnalysesList:
 
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
-                    "/api/novels/upload",
-                    files={"file": ("list_test.txt", file, "text/plain")}
+                    "/api/novels/upload", files={"file": ("list_test.txt", file, "text/plain")}
                 )
 
         novel_id = upload_response.json()["novel_id"]
@@ -155,16 +147,12 @@ class TestDeleteAnalysis:
 
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
-                    "/api/novels/upload",
-                    files={"file": ("delete_test.txt", file, "text/plain")}
+                    "/api/novels/upload", files={"file": ("delete_test.txt", file, "text/plain")}
                 )
 
         novel_id = upload_response.json()["novel_id"]
 
-        reanalyze_response = api_client.post(
-            f"/api/novels/{novel_id}/reanalyze",
-            json={"label": "to_delete"}
-        )
+        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "to_delete"})
         task_id = reanalyze_response.json()["task_id"]
 
         delete_response = api_client.delete(f"/api/novels/{novel_id}/tasks/{task_id}")

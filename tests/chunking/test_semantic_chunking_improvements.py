@@ -65,6 +65,7 @@ class TestSemanticChunkerBasic(unittest.IsolatedAsyncioTestCase):
 
     async def test_chunk_text_semantic_with_mock(self):
         """测试使用 mock embedding client 进行语义分块"""
+
         async def mock_embed_texts(texts):
             return [
                 [0.1] * 10,
@@ -85,6 +86,7 @@ class TestSemanticChunkerBasic(unittest.IsolatedAsyncioTestCase):
 
     async def test_chunk_text_semantic_empty_text(self):
         """测试空文本返回空列表"""
+
         async def mock_embed_texts(texts):
             return []
 
@@ -96,6 +98,7 @@ class TestSemanticChunkerBasic(unittest.IsolatedAsyncioTestCase):
 
     async def test_chunk_text_semantic_single_paragraph(self):
         """测试单段落文本"""
+
         async def mock_embed_texts(texts):
             return [[0.1] * 10]
 

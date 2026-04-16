@@ -30,6 +30,7 @@ from src.workflows.aggregate import TENSION_COMPOSITE_WEIGHTS, _compute_tension_
 # Fixtures
 # ====================================================================
 
+
 @pytest.fixture()
 def registry() -> LexiconRegistry:
     """使用项目真实 data/lexicons 目录创建 Registry"""
@@ -41,6 +42,7 @@ def registry() -> LexiconRegistry:
 # ====================================================================
 # 1. Registry 加载与 key 解析
 # ====================================================================
+
 
 class TestLexiconRegistryLoad:
     def test_loads_successfully(self, registry):
@@ -97,6 +99,7 @@ class TestLexiconRegistryLoad:
 # 2. Conflict Matrix 跨表重叠检测
 # ====================================================================
 
+
 class TestConflictMatrix:
     def test_conflicts_loaded(self, registry):
         conflicts = registry.get_conflicts_for("tension.action_terms")
@@ -121,6 +124,7 @@ class TestConflictMatrix:
 # 3. exclude_borrowed 排除借用词
 # ====================================================================
 
+
 class TestExcludeBorrowed:
     def test_exclude_reduces_combat_count(self, registry):
         """排除借用词后，action_terms 应该减少"""
@@ -141,6 +145,7 @@ class TestExcludeBorrowed:
 # ====================================================================
 # 4. 领域扩展词表
 # ====================================================================
+
 
 class TestDomainExtension:
     def test_xianxia_domain_exists(self, registry):
@@ -164,16 +169,12 @@ class TestDomainExtension:
 
     def test_domain_deduplicates(self, registry):
         """domain 扩展应去重"""
-        extended = registry.get_with_domains(
-            "emotion.negative", ["xianxia_negative"]
-        )
+        extended = registry.get_with_domains("emotion.negative", ["xianxia_negative"])
         assert len(extended) == len(set(extended))
 
     def test_nonexistent_domain_graceful(self, registry):
         """不存在的 domain 不应报错，只跳过"""
-        result = registry.get_with_domains(
-            "emotion.positive", ["nonexistent_domain_xyz"]
-        )
+        result = registry.get_with_domains("emotion.positive", ["nonexistent_domain_xyz"])
         # 应该返回基础词表
         base = registry.get("emotion.positive")
         assert len(result) == len(base)
@@ -192,6 +193,7 @@ class TestDomainExtension:
 # 5. 版本 hash
 # ====================================================================
 
+
 class TestVersionHash:
     def test_hash_is_string(self, registry):
         h = registry.version_hash()
@@ -207,6 +209,7 @@ class TestVersionHash:
 # ====================================================================
 # 6. 多模式匹配
 # ====================================================================
+
 
 class TestEnhancedMatching:
     @pytest.fixture()
@@ -268,23 +271,43 @@ class TestEditDistance:
 # 7. tension_composite v2 加权模型
 # ====================================================================
 
+
 class TestTensionCompositeV2:
     def _make_signals(self) -> list[dict]:
         """构造测试用的张力信号数据"""
         return [
-            {"emotion_intensity": 0.001, "dialogue_ratio": 0.2, "sent_len_std": 8,
-             "event_score": 0.2, "cliffhanger_score": 0},   # 低张力 chunk
-            {"emotion_intensity": 0.005, "dialogue_ratio": 0.35, "sent_len_std": 15,
-             "event_score": 0.6, "cliffhanger_score": 0},   # 中等事件
-            {"emotion_intensity": 0.01, "dialogue_ratio": 0.45, "sent_len_std": 25,
-             "event_score": 0.8, "cliffhanger_score": 1},    # 高潮 chunk
-            {"emotion_intensity": 0.002, "dialogue_ratio": 0.18, "sent_len_std": 33,
-             "event_score": 0.2, "cliffhanger_score": 0},    # 高 sent_len_std 但低语义
+            {
+                "emotion_intensity": 0.001,
+                "dialogue_ratio": 0.2,
+                "sent_len_std": 8,
+                "event_score": 0.2,
+                "cliffhanger_score": 0,
+            },  # 低张力 chunk
+            {
+                "emotion_intensity": 0.005,
+                "dialogue_ratio": 0.35,
+                "sent_len_std": 15,
+                "event_score": 0.6,
+                "cliffhanger_score": 0,
+            },  # 中等事件
+            {
+                "emotion_intensity": 0.01,
+                "dialogue_ratio": 0.45,
+                "sent_len_std": 25,
+                "event_score": 0.8,
+                "cliffhanger_score": 1,
+            },  # 高潮 chunk
+            {
+                "emotion_intensity": 0.002,
+                "dialogue_ratio": 0.18,
+                "sent_len_std": 33,
+                "event_score": 0.2,
+                "cliffhanger_score": 0,
+            },  # 高 sent_len_std 但低语义
         ]
 
     def test_weights_are_defined(self):
-        expected_keys = {"emotion_intensity", "dialogue_ratio", "sent_len_std",
-                         "event_score", "cliffhanger_score"}
+        expected_keys = {"emotion_intensity", "dialogue_ratio", "sent_len_std", "event_score", "cliffhanger_score"}
         assert set(TENSION_COMPOSITE_WEIGHTS.keys()) == expected_keys
 
     def test_event_score_has_highest_weight(self):
@@ -318,8 +341,15 @@ class TestTensionCompositeV2:
         assert _compute_tension_composite([]) == []
 
     def test_single_signal(self):
-        signals = [{"emotion_intensity": 0.5, "dialogue_ratio": 0.5, "sent_len_std": 10,
-                    "event_score": 0.5, "cliffhanger_score": 0.5}]
+        signals = [
+            {
+                "emotion_intensity": 0.5,
+                "dialogue_ratio": 0.5,
+                "sent_len_std": 10,
+                "event_score": 0.5,
+                "cliffhanger_score": 0.5,
+            }
+        ]
         result = _compute_tension_composite(signals)
         assert len(result) == 1
         # 单信号归一化后所有维度都是 0 或 1（min=max 时归一化为 0）
@@ -330,6 +360,7 @@ class TestTensionCompositeV2:
 # ====================================================================
 # 8. 全局单例管理
 # ====================================================================
+
 
 class TestGlobalSingleton:
     def test_reset_clears_singleton(self):

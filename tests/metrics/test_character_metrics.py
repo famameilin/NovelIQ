@@ -154,9 +154,9 @@ class TestCharacterFunctionCoverage(unittest.TestCase):
 
     def test_role_distribution(self) -> None:
         result = compute_character_function_coverage(["主体", "反对者", "帮助者"])
-        self.assertAlmostEqual(result["主体"], 1/3, places=6)
-        self.assertAlmostEqual(result["反对者"], 1/3, places=6)
-        self.assertAlmostEqual(result["帮助者"], 1/3, places=6)
+        self.assertAlmostEqual(result["主体"], 1 / 3, places=6)
+        self.assertAlmostEqual(result["反对者"], 1 / 3, places=6)
+        self.assertAlmostEqual(result["帮助者"], 1 / 3, places=6)
 
 
 class TestGreimasCoverage(unittest.TestCase):

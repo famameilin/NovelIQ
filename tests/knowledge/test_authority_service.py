@@ -83,14 +83,10 @@ def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db
         ("叶青", "沈昭", "断裂")
     }
     assert {
-        (event.chunk_id, event.relation_type, event.change_type, event.evidence)
-        for event in view.relation_events
-    } == {
-        (9, "盟友", "断裂", "二人决裂")
-    }
+        (event.chunk_id, event.relation_type, event.change_type, event.evidence) for event in view.relation_events
+    } == {(9, "盟友", "断裂", "二人决裂")}
     assert all(
-        event.from_entity_id in character_ids and event.to_entity_id in character_ids
-        for event in view.relation_events
+        event.from_entity_id in character_ids and event.to_entity_id in character_ids for event in view.relation_events
     )
     assert {(item.name, item.first_seen_chunk, item.last_seen_chunk) for item in view.entity_lifecycles} == {
         ("叶青", 1, 8),
