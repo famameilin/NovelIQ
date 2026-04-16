@@ -126,7 +126,7 @@ class MockAnnotationClient:
     def _get_instructor_client(self):
         return None
 
-    def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None):
+    async def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None):
         self._call_count += 1
         if self.should_fail:
             raise ConnectionError("Connection failed")
@@ -156,7 +156,7 @@ class MockAnnotationClient:
         pass
 
 
-class TestPhase1Retry(unittest.TestCase):
+class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
     """
     Phase1 重试机制测试
 
@@ -175,7 +175,7 @@ class TestPhase1Retry(unittest.TestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id):
             call_count[0] += 1
             return MagicMock()
 
@@ -195,7 +195,7 @@ class TestPhase1Retry(unittest.TestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id):
             call_count[0] += 1
             if call_count[0] < 3:
                 raise ConnectionError("Connection failed")
@@ -220,11 +220,11 @@ class TestPhase1Retry(unittest.TestCase):
         local_call_count = [0]
         cloud_call_count = [0]
 
-        def local_call_api(messages, enable_thinking, chunk_id):
+        async def local_call_api(messages, enable_thinking, chunk_id):
             local_call_count[0] += 1
             raise ConnectionError("Local connection failed")
 
-        def cloud_call_api(messages, enable_thinking, chunk_id):
+        async def cloud_call_api(messages, enable_thinking, chunk_id):
             cloud_call_count[0] += 1
             return MagicMock()
 
@@ -247,7 +247,7 @@ class TestPhase1Retry(unittest.TestCase):
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        def always_fail(messages, enable_thinking, chunk_id):
+        async def always_fail(messages, enable_thinking, chunk_id):
             raise ConnectionError("Connection failed")
 
         local_client._call_annotation_api = always_fail
@@ -262,7 +262,7 @@ class TestPhase1Retry(unittest.TestCase):
             )
 
 
-class TestPhase2Retry(unittest.TestCase):
+class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
     """
     Phase2 重试机制测试
 
@@ -293,7 +293,7 @@ class TestPhase2Retry(unittest.TestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        def mock_call_annotation_api(*args, **kwargs):
+        async def mock_call_annotation_api(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] < 3:
                 raise ConnectionError("Instructor connection failed")
@@ -322,11 +322,11 @@ class TestPhase2Retry(unittest.TestCase):
         local_call_count = [0]
         cloud_call_count = [0]
 
-        def local_call_annotation_api(*args, **kwargs):
+        async def local_call_annotation_api(*args, **kwargs):
             local_call_count[0] += 1
             raise ConnectionError("Local connection failed")
 
-        def cloud_call_annotation_api(*args, **kwargs):
+        async def cloud_call_annotation_api(*args, **kwargs):
             cloud_call_count[0] += 1
             result = create_mock_foreshadowing()
             response = MagicMock()
@@ -352,7 +352,7 @@ class TestPhase2Retry(unittest.TestCase):
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        def always_fail(*args, **kwargs):
+        async def always_fail(*args, **kwargs):
             raise ConnectionError("Connection failed")
 
         local_client._call_annotation_api = always_fail
@@ -391,8 +391,75 @@ class TestPhase2Retry(unittest.TestCase):
         rag_retriever.collect_evidence_with_level3.assert_awaited_once()
         self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
 
+    async def test_phase2_retries_when_rag_retriever_temporarily_fails(self):
+        """Phase2 的 evidence 检索失败后应纳入重试链路。"""
+        client = MockAnnotationClient()
+        rag_retriever = MagicMock()
+        evidence_bundle = MagicMock(name="phase2_evidence_bundle")
 
-class TestTwoPhaseIntegration(unittest.TestCase):
+        rag_retriever.requires_level3.return_value = True
+        rag_retriever.is_level3_available.return_value = True
+        rag_retriever.collect_evidence_with_level3 = AsyncMock(
+            side_effect=[ConnectionError("vector search failed"), evidence_bundle]
+        )
+
+        with patch(
+            "src.models.local.annotation.phase2._build_foreshadowing_messages",
+            return_value=[{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
+        ) as mock_build_messages:
+            result = await annotate_chunk_phase2(
+                client=client,
+                text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
+                chunk_id=12,
+                rag_retriever=rag_retriever,
+            )
+
+        self.assertIsInstance(result, ForeshadowingResult)
+        self.assertEqual(rag_retriever.collect_evidence_with_level3.await_count, 2)
+        self.assertEqual(mock_build_messages.call_count, 1)
+        self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    async def test_phase2_rag_retrieval_can_fall_back_to_cloud(self):
+        """本地重试耗尽后，RAG 检索也应继续参与云端兜底调用。"""
+        local_client = MockAnnotationClient()
+        cloud_client = MockAnnotationClient()
+        rag_retriever = MagicMock()
+        evidence_bundle = MagicMock(name="phase2_evidence_bundle")
+
+        cloud_call_count = [0]
+
+        async def cloud_call_annotation_api(*args, **kwargs):
+            cloud_call_count[0] += 1
+            result = create_mock_foreshadowing()
+            response = MagicMock()
+            response.choices = [MagicMock(message=MagicMock(content="{}", reasoning_content="thinking"))]
+            return result, response
+
+        cloud_client._call_annotation_api = cloud_call_annotation_api
+        rag_retriever.requires_level3.return_value = True
+        rag_retriever.is_level3_available.return_value = True
+        rag_retriever.collect_evidence_with_level3 = AsyncMock(
+            side_effect=[ConnectionError("vector search failed")] * PHASE_MAX_RETRIES + [evidence_bundle]
+        )
+
+        with patch(
+            "src.models.local.annotation.phase2._build_foreshadowing_messages",
+            return_value=[{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
+        ):
+            result = await annotate_chunk_phase2(
+                client=local_client,
+                text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
+                chunk_id=12,
+                rag_retriever=rag_retriever,
+                cloud_client=cloud_client,
+            )
+
+        self.assertIsInstance(result, ForeshadowingResult)
+        self.assertEqual(rag_retriever.collect_evidence_with_level3.await_count, PHASE_MAX_RETRIES + 1)
+        self.assertEqual(cloud_call_count[0], 1)
+
+
+class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
     """
     双次调用集成测试
 
