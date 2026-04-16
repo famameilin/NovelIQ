@@ -22,9 +22,8 @@
 
 from __future__ import annotations
 
-import re
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from src.config.constants import PHASE_MAX_RETRIES
 from src.models.interactions import record_model_interaction
@@ -36,48 +35,6 @@ from .messages import _build_foreshadowing_messages
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
-
-
-def _extract_names_from_text(text: str) -> list[str]:
-    """从当前 chunk 中提取用于 evidence 过滤的人名候选。"""
-
-    return re.findall(r"[\u4e00-\u9fff]{2,4}", text)
-
-
-async def _collect_phase2_evidence_bundle(
-    *,
-    text: str,
-    chunk_id: int | None,
-    rag_retriever: Any | None,
-):
-    if rag_retriever is None:
-        return None
-
-    names_in_chunk = _extract_names_from_text(text)
-    exclude_chunk_ids = [chunk_id] if chunk_id is not None else None
-
-    if rag_retriever.requires_level3():
-        if not rag_retriever.is_level3_available():
-            raise RuntimeError("Level 3 vector retrieval is required but not available")
-        return await rag_retriever.collect_evidence_with_level3(
-            names_in_chunk=names_in_chunk,
-            current_chunk=chunk_id,
-            context_text=text,
-            exclude_chunk_ids=exclude_chunk_ids,
-        )
-
-    if rag_retriever.is_level3_available():
-        return await rag_retriever.collect_evidence_with_level3(
-            names_in_chunk=names_in_chunk,
-            current_chunk=chunk_id,
-            context_text=text,
-            exclude_chunk_ids=exclude_chunk_ids,
-        )
-
-    return rag_retriever.collect_evidence(
-        names_in_chunk=names_in_chunk,
-        current_chunk=chunk_id,
-    )
 
 
 async def _do_phase2(
@@ -157,7 +114,6 @@ async def annotate_chunk_phase2(
     chapter_id: int | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
     evidence_bundle=None,
 ) -> ForeshadowingResult | None:
     """
@@ -186,38 +142,26 @@ async def annotate_chunk_phase2(
         exception_type=Phase2MaxRetriesExceededError,
     )
 
-    resolved_evidence_bundle = evidence_bundle
-
-    async def _resolve_phase2_messages() -> list[dict]:
-        nonlocal resolved_evidence_bundle
-
-        # 中文注释：把 evidence 检索放进重试闭包里，这样向量检索的瞬时失败也能走本地重试和云端兜底；
-        # 一旦某次检索成功，就缓存 bundle，避免后续重试重复命中检索层。
-        if resolved_evidence_bundle is None:
-            resolved_evidence_bundle = await _collect_phase2_evidence_bundle(
-                text=text,
-                chunk_id=chunk_id,
-                rag_retriever=rag_retriever,
-            )
-
-        return _build_foreshadowing_messages(
-            text=text,
-            prev_chunk_summary=prev_chunk_summary,
-            chunk_id=chunk_id,
-            prev_chunk_text=prev_chunk_text,
-            next_chunk_text=next_chunk_text,
-            novel_title=novel_title,
-            main_characters=main_characters,
-            position_pct=position_pct,
-            chapter_id=chapter_id,
-            evidence_bundle=resolved_evidence_bundle,
-        )
+    # 中文注释：Phase2 只消费调用方已经准备好的 evidence_bundle，
+    # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界。
+    messages = _build_foreshadowing_messages(
+        text=text,
+        prev_chunk_summary=prev_chunk_summary,
+        chunk_id=chunk_id,
+        prev_chunk_text=prev_chunk_text,
+        next_chunk_text=next_chunk_text,
+        novel_title=novel_title,
+        main_characters=main_characters,
+        position_pct=position_pct,
+        chapter_id=chapter_id,
+        evidence_bundle=evidence_bundle,
+    )
 
     async def operation(
         local_client: AnnotationClient, retry_messages: list[dict] | None = None
     ) -> ForeshadowingResult:
         """执行单次Phase2调用"""
-        msgs = retry_messages if retry_messages else await _resolve_phase2_messages()
+        msgs = retry_messages if retry_messages else messages
         return await _do_phase2(local_client, msgs, text, prev_chunk_summary, chunk_id, run_id, handler.state.attempt)
 
     return await handler.execute(operation)
