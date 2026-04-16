@@ -46,8 +46,7 @@ async def test_retry_disambig_passes_existing_names_to_client() -> None:
 
 def test_validate_confidence_with_evidence_promotes_unique_marker_merge() -> None:
     context = (
-        "【前文总结】贺伯安为救同伴被火焰吞噬昏迷\n"
-        "赵兰英想起贺伯安脊椎处的白金火焰符号，怀里的婴孩脊椎处也有同样印记"
+        "【前文总结】贺伯安为救同伴被火焰吞噬昏迷\n赵兰英想起贺伯安脊椎处的白金火焰符号，怀里的婴孩脊椎处也有同样印记"
     )
     result = ExtendedDisambigResult(
         canonical_decisions={"婴儿": "婴儿"},

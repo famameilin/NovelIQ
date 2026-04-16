@@ -23,7 +23,7 @@ from loguru import logger
 from src.config import settings
 from src.config.schemas import ANNOTATION_CONFIG
 from src.knowledge.authority import KnowledgeGraphAuthorityService
-from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
+from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
 
 if TYPE_CHECKING:
     from src.rag import DisambigContextProvider, EvidenceBundle
@@ -45,23 +45,51 @@ class ChunkContext:
     修改者: TraeAI
     任务: implement-level3-vector-retrieval
     修改内容: 添加 vector_evidence_str 字段
+
+    修改时间: 2026-04-16
+    修改者: Codex
+    任务: trim-legacy-string-evidence
+    修改内容: 新增 annotation_prompt_blocks 语义入口，旧字符串字段降为兼容层
+
+    修改时间: 2026-04-17
+    修改者: Codex
+    任务: trim-legacy-string-evidence
+    修改内容: 删除遗留字符串字段和兼容属性，主链路统一使用 annotation_prompt_blocks
     """
 
     def __init__(
         self,
         prev_chunk_text: str | None = None,
-        active_entities_str: str | None = None,
-        disambig_context_str: str | None = None,
         next_chunk_text: str | None = None,
-        vector_evidence_str: str | None = None,
         evidence_bundle: EvidenceBundle | None = None,
+        annotation_prompt_blocks: AnnotationPromptBlocks | None = None,
+        active_entities_fallback: str | None = None,
     ) -> None:
         self.prev_chunk_text = prev_chunk_text
-        self.active_entities_str = active_entities_str
-        self.disambig_context_str = disambig_context_str
         self.next_chunk_text = next_chunk_text
-        self.vector_evidence_str = vector_evidence_str
         self.evidence_bundle = evidence_bundle
+        self.annotation_prompt_blocks = annotation_prompt_blocks
+        self.active_entities_fallback = active_entities_fallback
+
+    @property
+    def prompt_active_entities(self) -> str | None:
+        if self.annotation_prompt_blocks and self.annotation_prompt_blocks.active_entities is not None:
+            return self.annotation_prompt_blocks.active_entities
+        if self.active_entities_fallback is not None:
+            return self.active_entities_fallback
+        return None
+
+    @property
+    def prompt_disambig_context(self) -> str | None:
+        if self.annotation_prompt_blocks and self.annotation_prompt_blocks.disambig_context is not None:
+            return self.annotation_prompt_blocks.disambig_context
+        return None
+
+    @property
+    def prompt_vector_evidence(self) -> str | None:
+        if self.annotation_prompt_blocks and self.annotation_prompt_blocks.vector_evidence is not None:
+            return self.annotation_prompt_blocks.vector_evidence
+        return None
 
 
 def _init_disambig_provider(
@@ -200,7 +228,7 @@ def _prepare_chunk_context(
         chunk_repo = ChunkRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
-        context.active_entities_str = _build_active_entities_prompt_from_authority(
+        context.active_entities_fallback = _build_active_entities_prompt_from_authority(
             conn,
             run_id,
             chunk_id,
@@ -213,13 +241,7 @@ def _prepare_chunk_context(
             names_in_chunk=names_in_chunk,
             current_chunk=chunk_id,
         )
-        blocks = render_annotation_prompt_blocks(context.evidence_bundle)
-        if use_context_enhancement and run_id and blocks.active_entities is not None:
-            # 中文注释：只有 Level 2 真正产出新的活跃实体片段时才覆盖 authority fallback，
-            # 避免 level2 关闭时把前面已经准备好的上下文清空。
-            context.active_entities_str = blocks.active_entities
-        context.disambig_context_str = blocks.disambig_context
-        context.vector_evidence_str = blocks.vector_evidence
+        context.annotation_prompt_blocks = render_annotation_prompt_blocks(context.evidence_bundle)
 
     return context
 
@@ -258,7 +280,7 @@ async def _prepare_chunk_context_with_level3(
         chunk_repo = ChunkRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
-        context.active_entities_str = _build_active_entities_prompt_from_authority(
+        context.active_entities_fallback = _build_active_entities_prompt_from_authority(
             conn,
             run_id,
             chunk_id,
@@ -289,12 +311,6 @@ async def _prepare_chunk_context_with_level3(
                 current_chunk=chunk_id,
             )
 
-        blocks = render_annotation_prompt_blocks(context.evidence_bundle)
-        if use_context_enhancement and run_id and blocks.active_entities is not None:
-            # 中文注释：异步路径和同步路径需要保持同样的 fallback 语义，
-            # 不能用空的 Level 2 渲染结果覆盖 authority 侧的活跃实体提示。
-            context.active_entities_str = blocks.active_entities
-        context.disambig_context_str = blocks.disambig_context
-        context.vector_evidence_str = blocks.vector_evidence
+        context.annotation_prompt_blocks = render_annotation_prompt_blocks(context.evidence_bundle)
 
     return context

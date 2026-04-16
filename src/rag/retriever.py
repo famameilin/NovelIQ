@@ -162,8 +162,7 @@ class Level3VectorEvidence:
         actual_dim = await self._embedding_client.detect_embedding_dimension()
         if actual_dim != self._expected_embedding_dim:
             raise Level3NotReadyError(
-                "Level 3 embedding dimension mismatch: "
-                f"configured={self._expected_embedding_dim}, actual={actual_dim}"
+                f"Level 3 embedding dimension mismatch: configured={self._expected_embedding_dim}, actual={actual_dim}"
             )
 
         from src.storage.repositories.chunk import has_embeddings
@@ -249,9 +248,7 @@ class Level3VectorEvidence:
                 exclude_chunk_ids=exclude_chunk_ids,
             )
 
-            logger.debug(
-                f"Level3VectorEvidence: found {len(results)} similar chunks for query (len={len(query_text)})"
-            )
+            logger.debug(f"Level3VectorEvidence: found {len(results)} similar chunks for query (len={len(query_text)})")
 
             return results
 
@@ -285,9 +282,7 @@ class Level3VectorEvidence:
             similarity = r.get("similarity", 0.0)
             chunk_id = r.get("chunk_id", 0)
             text_preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
-            evidence_parts.append(
-                f"[Chunk {chunk_id}] (相似度: {similarity:.2f})\n{text_preview}"
-            )
+            evidence_parts.append(f"[Chunk {chunk_id}] (相似度: {similarity:.2f})\n{text_preview}")
 
         return (
             "<Vector_Evidence>\n"
@@ -347,9 +342,7 @@ class DisambigContextProvider:
         self._authority_provider = (
             Level1AuthorityProvider(graph_repo) if graph_repo is not None and run_id is not None else None
         )
-        self._graph_authority_service = (
-            KnowledgeGraphAuthorityService(graph_repo) if graph_repo is not None else None
-        )
+        self._graph_authority_service = KnowledgeGraphAuthorityService(graph_repo) if graph_repo is not None else None
         self._level1_enabled = level1_enabled
         self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
@@ -381,7 +374,9 @@ class DisambigContextProvider:
         requested_names = [name for name in (names_in_chunk or []) if name]
         relevant_names = set(requested_names)
         if relevant_names:
-            related_canonicals = {mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names}
+            related_canonicals = {
+                mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names
+            }
             relevant_names |= related_canonicals
 
         structured_evidence: list[EvidenceItem] = []
@@ -610,50 +605,42 @@ class DisambigContextProvider:
         if self._level3_enabled:
             await self._level3.ensure_level3_ready()
 
-    def build_disambig_context(
-        self,
-        names_in_chunk: list[str],
-        current_chunk: int | None = None,
-    ) -> str:
-        """对 chunk 中出现的名字逐个执行层级检索，生成消歧线索文本。
-
-        - Level1 精确命中：直接追加到 alias_map，不生成额外线索
-        - Level2 候选集：生成 <Disambig_Candidates> 供 LLM 参考
-        - 未命中：不生成任何线索
-        """
-        from src.models.local.disambiguation import render_disambig_prompt_context
-
-        if not names_in_chunk:
-            return ""
-
-        bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
-        return render_disambig_prompt_context(bundle) or ""
-
-    async def build_disambig_context_with_level3(
-        self,
-        names_in_chunk: list[str],
-        current_chunk: int | None = None,
-        context_text: str | None = None,
-        exclude_chunk_ids: list[int] | None = None,
-    ) -> str:
-        """异步版本的 build_disambig_context，支持 Level 3"""
-        from src.models.local.disambiguation import render_disambig_prompt_context
-
-        bundle = await self.collect_evidence_with_level3(
-            names_in_chunk=names_in_chunk,
-            current_chunk=current_chunk,
-            context_text=context_text,
-            exclude_chunk_ids=exclude_chunk_ids,
-        )
-        return render_disambig_prompt_context(bundle) or ""
-
     def build_graph_feedback_hint(
         self,
         existing_names: list[str],
         base_hint: str | None = None,
     ) -> str | None:
-        """兼容接口：图谱反馈的渲染逻辑已迁移到 disambiguation renderer。"""
-        from src.models.local.disambiguation.evidence_renderer import render_graph_feedback_hint
+        """构建图谱反馈提示，包含已裁决别名映射和已确认关系。"""
+        if self._graph_repo is None or self._run_id is None:
+            return base_hint
 
-        bundle = self.collect_evidence(names_in_chunk=existing_names, current_chunk=None)
-        return render_graph_feedback_hint(bundle, existing_names, base_hint=base_hint)
+        existing_set = set(existing_names)
+        parts: list[str] = []
+
+        if base_hint:
+            parts.append(base_hint)
+
+        alias_map = self._alias_lookup.get_alias_map()
+        graph_aliases = {a: c for a, c in alias_map.items() if a != c and c in existing_set}
+        if graph_aliases:
+            alias_lines = ["【图谱已裁决的别名映射】"]
+            for alias, canonical in sorted(graph_aliases.items()):
+                alias_lines.append(f"- {alias} → {canonical}")
+            parts.append("\n".join(alias_lines))
+            logger.debug(f"Graph feedback: injected {len(graph_aliases)} alias mappings")
+
+        if self._relations_cache is None:
+            self._relations_cache = self._graph_repo.fetch_current_relations(self._run_id, active_only=True)
+        relations = self._relations_cache
+        relevant_rels = [r for r in relations if r["from_name"] in existing_set or r["to_name"] in existing_set]
+        if relevant_rels:
+            rel_lines = ["【图谱已确认的关系】"]
+            for relation in relevant_rels[:10]:
+                rel_lines.append(f"- {relation['from_name']} ←{relation['type']}→ {relation['to_name']}")
+            parts.append("\n".join(rel_lines))
+            logger.debug(f"Graph feedback: injected {len(relevant_rels)} relations")
+
+        if not parts:
+            return base_hint
+
+        return "\n".join(parts)

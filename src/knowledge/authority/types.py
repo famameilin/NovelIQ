@@ -487,11 +487,9 @@ class GraphAuthorityReport:
         # 运行时也拒绝 graph page contract，避免调用方误把页面高亮/样本塞回共享层。
         if type(self.summary) is not GraphSharedSummary:
             raise TypeError(
-                "GraphAuthorityReport.summary must be GraphSharedSummary; "
-                f"got {type(self.summary).__name__}"
+                f"GraphAuthorityReport.summary must be GraphSharedSummary; got {type(self.summary).__name__}"
             )
         if type(self.quality) is not GraphQualitySignals:
             raise TypeError(
-                "GraphAuthorityReport.quality must be GraphQualitySignals; "
-                f"got {type(self.quality).__name__}"
+                f"GraphAuthorityReport.quality must be GraphQualitySignals; got {type(self.quality).__name__}"
             )

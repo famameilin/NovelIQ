@@ -25,6 +25,7 @@ CLI annotate 模块测试
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 字段相关测试
 """
+
 import sys
 import uuid
 from pathlib import Path
@@ -119,9 +120,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            canonical_decisions={},
-            entity_types={},
-            entity_relations=[]
+            canonical_decisions={}, entity_types={}, entity_relations=[]
         )
         mock_annotation_class.return_value = mock_annotation_client
         mock_disambiguation_class.return_value = mock_disambiguation_client
@@ -156,15 +155,15 @@ class TestAnnotate:
     @pytest.mark.asyncio()
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
-    async def test_annotate_resume(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
+    async def test_annotate_resume(
+        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock
+    ) -> None:
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            canonical_decisions={},
-            entity_types={},
-            entity_relations=[]
+            canonical_decisions={}, entity_types={}, entity_relations=[]
         )
         mock_annotation_class.return_value = mock_annotation_client
         mock_disambiguation_class.return_value = mock_disambiguation_client
@@ -217,9 +216,7 @@ class TestAnnotate:
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
         mock_disambiguation_client = MagicMock(spec=DisambiguationClient)
         mock_disambiguation_client.disambiguate_characters.return_value = ExtendedDisambigResult(
-            canonical_decisions={"张三三": "张三"},
-            entity_types={},
-            entity_relations=[]
+            canonical_decisions={"张三三": "张三"}, entity_types={}, entity_relations=[]
         )
         mock_annotation_class.return_value = mock_annotation_client
         mock_disambiguation_class.return_value = mock_disambiguation_client
@@ -234,7 +231,9 @@ class TestAnnotate:
         assert success == 2
 
         self.db_session.execute(
-            text("INSERT INTO chunk_characters (chunk_id, name, role_function, action, action_type, emotion_score, run_id) VALUES (1, '张三三', '其他', 'test', '其他', 'neutral', :run_id)"),
+            text(
+                "INSERT INTO chunk_characters (chunk_id, name, role_function, action, action_type, emotion_score, run_id) VALUES (1, '张三三', '其他', 'test', '其他', 'neutral', :run_id)"
+            ),
             {"run_id": self.run_id},
         )
         self.db_session.commit()

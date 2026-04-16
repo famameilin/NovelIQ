@@ -11,6 +11,7 @@
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 """
+
 from fastapi.testclient import TestClient
 
 
@@ -57,5 +58,3 @@ class TestResults:
         """测试获取不存在任务的诊断结果 - 返回404"""
         response = api_client.get("/api/novels/nonexistent/diagnosis?task_id=nonexistent")
         assert response.status_code == 404
-
-

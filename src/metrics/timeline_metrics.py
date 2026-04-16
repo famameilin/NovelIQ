@@ -27,6 +27,7 @@ TimelineNodeType = Literal["plot", "character_entry", "character_exit", "relatio
 TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
 ImportanceLevel = Literal[1, 2, 3]
 
+
 class TimelineDataUnavailableError(ValueError):
     """Raised when timeline source data is genuinely unavailable."""
 
@@ -616,9 +617,7 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
     # character set, otherwise timeline can silently emit different names for
     # the same entity across node types.
     character_map = {
-        int(entity.entity_id): entity
-        for entity in character_entities
-        if getattr(entity, "entity_id", None) is not None
+        int(entity.entity_id): entity for entity in character_entities if getattr(entity, "entity_id", None) is not None
     }
     lifecycle_ids = [getattr(lifecycle, "entity_id", None) for lifecycle in entity_lifecycles]
     if any(lifecycle_id is None for lifecycle_id in lifecycle_ids):

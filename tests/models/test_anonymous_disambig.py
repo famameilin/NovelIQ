@@ -11,21 +11,22 @@
 任务: 移除已废弃的内部方法测试
 修改内容: _build_anonymous_disambig_messages 方法已移除，简化测试
 """
+
 import re
 import unittest
 
 
 class TestBuildAnonymousContexts(unittest.TestCase):
     def test_anonymous_name_regex(self) -> None:
-        pattern = r'^匿名_C\d+_\d+$'
-        self.assertTrue(re.match(pattern, '匿名_C1_0'))
-        self.assertTrue(re.match(pattern, '匿名_C123_45'))
-        self.assertFalse(re.match(pattern, '匿名_1_0'))
-        self.assertFalse(re.match(pattern, '匿名C1_0'))
-        self.assertFalse(re.match(pattern, '张三'))
+        pattern = r"^匿名_C\d+_\d+$"
+        self.assertTrue(re.match(pattern, "匿名_C1_0"))
+        self.assertTrue(re.match(pattern, "匿名_C123_45"))
+        self.assertFalse(re.match(pattern, "匿名_1_0"))
+        self.assertFalse(re.match(pattern, "匿名C1_0"))
+        self.assertFalse(re.match(pattern, "张三"))
 
     def test_extract_chunk_id(self) -> None:
-        match = re.match(r'^匿名_C(\d+)_\d+$', '匿名_C5_2')
+        match = re.match(r"^匿名_C(\d+)_\d+$", "匿名_C5_2")
         self.assertIsNotNone(match)
         if match:
             chunk_id = int(match.group(1))
@@ -39,15 +40,15 @@ class TestAnonymousDisambigClient(unittest.TestCase):
         from src.models.disambiguation import DisambiguationClient
 
         config = TaskModelConfig(
-            model='test-model',
-            base_url='http://localhost:8000',
-            api_key='test',
+            model="test-model",
+            base_url="http://localhost:8000",
+            api_key="test",
         )
-        client = DisambiguationClient(config=config, task_type='incremental_disambig')
+        client = DisambiguationClient(config=config, task_type="incremental_disambig")
 
         # 验证客户端已初始化
         self.assertIsNotNone(client._client)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
