@@ -142,15 +142,16 @@ def build_graph_page_quality(
 def _detect_relation_conflicts(confirmed_relations: list[ConfirmedRelation]) -> list[GraphConflictSample]:
     pair_map: dict[tuple[tuple[int | None, str], tuple[int | None, str]], list[ConfirmedRelation]] = {}
     for relation in confirmed_relations:
-        pair_key = tuple(
-            sorted(
-                [
-                    (relation.from_entity_id, relation.from_name),
-                    (relation.to_entity_id, relation.to_name),
-                ],
-                key=lambda item: (item[0] is None, item[0] if item[0] is not None else item[1]),
-            )
+        sorted_pair = sorted(
+            [
+                (relation.from_entity_id, relation.from_name),
+                (relation.to_entity_id, relation.to_name),
+            ],
+            key=lambda item: (item[0] is None, item[0] if item[0] is not None else item[1]),
         )
+        # 中文注释：这里的 pair_key 语义上永远是“两端实体组成的二元组”，显式拼成
+        # 固定长度 tuple，避免 mypy 把 sorted(...) 的结果推断成可变长度序列。
+        pair_key = (sorted_pair[0], sorted_pair[1])
         pair_map[pair_key] = pair_map.get(pair_key, []) + [relation]
 
     conflicts: list[GraphConflictSample] = []

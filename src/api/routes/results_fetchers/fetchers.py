@@ -740,9 +740,20 @@ def _fetch_character_relations(
             from_char not in valid_character_names or to_char not in valid_character_names
         ):
             continue
+        # 中文注释：角色关系导出需要稳定的 chunk_id；优先使用最近一次出现，
+        # 若旧快照缺少 last_seen_chunk，则回退到 first_seen_chunk，再不满足就跳过。
+        chunk_id = relation.last_seen_chunk or relation.first_seen_chunk
+        if chunk_id is None:
+            logger.warning(
+                "跳过缺少 chunk_id 的当前关系快照: from_char={}, to_char={}, type={}",
+                from_char,
+                to_char,
+                relation.relation_type,
+            )
+            continue
         result.append(
             CharacterRelation(
-                chunk_id=relation.last_seen_chunk,
+                chunk_id=chunk_id,
                 from_char=from_char,
                 to_char=to_char,
                 type=relation.relation_type,
