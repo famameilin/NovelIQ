@@ -221,11 +221,12 @@ function createEmptyTimelineResponse(): TimelineResponse {
 
 function renderPage() {
   const queryClient = createQueryClient();
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <TimelinePage />
     </QueryClientProvider>
   );
+  return { queryClient, ...view };
 }
 
 describe("TimelinePage deep links", () => {
@@ -264,6 +265,27 @@ describe("TimelinePage deep links", () => {
     expect(await screen.findByText("小说不存在")).toBeInTheDocument();
     expect(getTimelineMock).not.toHaveBeenCalled();
     expect(getNovelMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the URL deep-link task authoritative when the store still holds an older task", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9002";
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-b",
+      novelsCache: [],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(getTimelineMock).toHaveBeenCalledWith("novel-1", "task-a", {
+      includeCurve: true,
+      maxLevel: 3,
+    });
+    expect(navigateMock).not.toHaveBeenCalledWith(
+      "/novels/novel-1/timeline?task_id=task-b&max_level=3&show_tension=true",
+      { replace: true }
+    );
   });
 
   it("prefers relation_event_id over selected_chunk when deep-linking from graph", async () => {
@@ -320,8 +342,7 @@ describe("TimelinePage deep links", () => {
 
   it("keeps the graph deep-link selection when timeline controls change", async () => {
     const user = userEvent.setup();
-
-    renderPage();
+    const view = renderPage();
 
     await screen.findByText("selected-12");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
@@ -330,11 +351,13 @@ describe("TimelinePage deep links", () => {
       { replace: true }
     );
 
-    await user.click(screen.getByRole("button", { name: "隐藏张力" }));
-    expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&show_tension=false&selected_chunk=12&relation_event_id=9002",
-      { replace: true }
+    currentTimelineSearchParams = "task_id=task-a&max_level=1&show_tension=true&selected_chunk=12&relation_event_id=9002";
+    view.rerender(
+      <QueryClientProvider client={view.queryClient}>
+        <TimelinePage />
+      </QueryClientProvider>
     );
+    expect(await screen.findByText("selected-12")).toBeInTheDocument();
   });
 
   it("drops a stale relation_event_id when controls change after falling back to selected_chunk", async () => {
@@ -385,7 +408,7 @@ describe("TimelinePage deep links", () => {
 
     await screen.findByText("selected-12");
     useNovelStore.setState({
-      currentNovelId: null,
+      currentNovelId: "novel-1",
       currentTaskId: "task-b",
       novelsCache: [],
     });
@@ -396,5 +419,28 @@ describe("TimelinePage deep links", () => {
         { replace: true }
       );
     });
+  });
+
+  it("re-syncs controls and query params when the timeline url changes while mounted", async () => {
+    const view = renderPage();
+
+    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(screen.getByTestId("tension-overlay")).toBeInTheDocument();
+
+    currentTimelineSearchParams = "task_id=task-a&max_level=1&show_tension=false&selected_chunk=8";
+    view.rerender(
+      <QueryClientProvider client={view.queryClient}>
+        <TimelinePage />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => {
+      expect(getTimelineMock).toHaveBeenLastCalledWith("novel-1", "task-a", {
+        includeCurve: true,
+        maxLevel: 1,
+      });
+    });
+    expect(await screen.findByText("selected-8")).toBeInTheDocument();
+    expect(screen.queryByTestId("tension-overlay")).not.toBeInTheDocument();
   });
 });
