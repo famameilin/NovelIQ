@@ -71,6 +71,31 @@ def generate_anonymous_name(chunk_id: int, index: int) -> str:
     return f"匿名_C{chunk_id}_{index}"
 
 
+def _collect_names_from_disambig_candidate(content: str) -> set[str]:
+    if not content:
+        return set()
+
+    names: set[str] = set()
+    body = content.strip()
+
+    if "「" in body and "」" in body:
+        _, _, tail = body.partition("「")
+        source_name, _, _ = tail.partition("」")
+        source_name = source_name.strip()
+        if source_name:
+            names.add(source_name)
+
+    _, separator, candidates_text = body.partition("：")
+    if not separator:
+        return names
+
+    for candidate in candidates_text.split("、"):
+        normalized = candidate.strip().strip("。；;")
+        if normalized:
+            names.add(normalized)
+    return names
+
+
 def _collect_names_from_evidence_bundle(bundle: EvidenceBundle | None) -> set[str]:
     if bundle is None:
         return set()
@@ -96,20 +121,14 @@ def _collect_names_from_evidence_bundle(bundle: EvidenceBundle | None) -> set[st
             name = str(item.metadata.get("name", item.content)).strip()
             if name:
                 names.add(name)
-        elif item.evidence_type == "confirmed_relation":
-            from_name = str(item.metadata.get("from_name", "")).strip()
-            to_name = str(item.metadata.get("to_name", "")).strip()
-            if from_name:
-                names.add(from_name)
-            if to_name:
-                names.add(to_name)
 
     for item in getattr(bundle, "local_evidence", []):
-        if item.evidence_type != "active_entity":
-            continue
-        name = str(item.metadata.get("name", item.content)).strip()
-        if name:
-            names.add(name)
+        if item.evidence_type == "active_entity":
+            name = str(item.metadata.get("name", item.content)).strip()
+            if name:
+                names.add(name)
+        elif item.evidence_type == "disambig_candidate":
+            names.update(_collect_names_from_disambig_candidate(item.content))
 
     snapshot = getattr(bundle, "level1_snapshot", None)
     if snapshot is not None:
@@ -117,8 +136,6 @@ def _collect_names_from_evidence_bundle(bundle: EvidenceBundle | None) -> set[st
         names.update(mapping.canonical for mapping in snapshot.alias_mappings if mapping.canonical)
         names.update(entity.name for entity in snapshot.canonical_entities if entity.name)
         names.update(item.name for item in snapshot.entity_types if item.name)
-        names.update(relation.from_name for relation in snapshot.confirmed_relations if relation.from_name)
-        names.update(relation.to_name for relation in snapshot.confirmed_relations if relation.to_name)
 
     return names
 
