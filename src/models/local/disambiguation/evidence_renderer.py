@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from src.rag.evidence_types import EvidenceBundle
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.rag.evidence_types import EvidenceBundle
 
 
 def _read_legacy_or_shared_block(
@@ -11,7 +14,7 @@ def _read_legacy_or_shared_block(
     shared_renderer = getattr(bundle, render_attr, None)
     if callable(shared_renderer):
         rendered = shared_renderer()
-        if rendered is None or isinstance(rendered, str):
+        if isinstance(rendered, str) and rendered:
             return rendered
 
     legacy_builder = getattr(bundle, "to_prompt_blocks", None)

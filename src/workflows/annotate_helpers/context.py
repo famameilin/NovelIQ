@@ -72,18 +72,6 @@ class ChunkContext:
         self._legacy_disambig_context_str = disambig_context_str
         self._legacy_vector_evidence_str = vector_evidence_str
 
-    def _ensure_annotation_prompt_blocks(self) -> AnnotationPromptBlocks:
-        if self.annotation_prompt_blocks is None:
-            self.annotation_prompt_blocks = AnnotationPromptBlocks()
-        return self.annotation_prompt_blocks
-
-    def _sync_legacy_override_to_prompt_blocks(self, field_name: str, value: str | None) -> None:
-        if value is None:
-            return
-        # 中文注释：兼容 setter 仍允许旧调用方显式覆盖上下文，
-        # 这里把写入同步到当前真正生效的 prompt block，避免“可写但不生效”的兼容陷阱。
-        setattr(self._ensure_annotation_prompt_blocks(), field_name, value)
-
     @property
     def prompt_active_entities(self) -> str | None:
         # 中文注释：主链路优先消费 renderer 产出的语义块，
@@ -112,8 +100,8 @@ class ChunkContext:
 
     @active_entities_str.setter
     def active_entities_str(self, value: str | None) -> None:
+        # 中文注释：legacy 字段只保留为兼容输入，不再反向改写 renderer 产出的主语义块。
         self._legacy_active_entities_str = value
-        self._sync_legacy_override_to_prompt_blocks("active_entities", value)
 
     @property
     def disambig_context_str(self) -> str | None:
@@ -121,8 +109,8 @@ class ChunkContext:
 
     @disambig_context_str.setter
     def disambig_context_str(self, value: str | None) -> None:
+        # 中文注释：避免旧字段在 bundle 已就绪后继续污染主 prompt。
         self._legacy_disambig_context_str = value
-        self._sync_legacy_override_to_prompt_blocks("disambig_context", value)
 
     @property
     def vector_evidence_str(self) -> str | None:
@@ -130,8 +118,8 @@ class ChunkContext:
 
     @vector_evidence_str.setter
     def vector_evidence_str(self, value: str | None) -> None:
+        # 中文注释：只保留兼容层写入，不把 legacy 值同步回 annotation_prompt_blocks。
         self._legacy_vector_evidence_str = value
-        self._sync_legacy_override_to_prompt_blocks("vector_evidence", value)
 
 
 def _init_disambig_provider(
