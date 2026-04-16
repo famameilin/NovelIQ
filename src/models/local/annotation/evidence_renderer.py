@@ -109,9 +109,7 @@ def _collect_level1_lines_from_snapshot(
     relation_lines: list[str] = []
     seen_lines: set[str] = set()
     entity_types = {
-        item.name.strip(): item.entity_type.strip()
-        for item in snapshot.entity_types
-        if item.name and item.entity_type
+        item.name.strip(): item.entity_type.strip() for item in snapshot.entity_types if item.name and item.entity_type
     }
 
     if include_alias_mappings:
@@ -169,18 +167,23 @@ def _render_annotation_level1(
 
 
 def render_annotation_evidence_blocks(bundle: EvidenceBundle) -> list[str]:
-    """兼容旧测试和调用方，保持证据块输出顺序稳定。"""
+    """将 EvidenceBundle 渲染为 Phase 2 可消费的结构化证据块列表。"""
 
-    blocks = bundle.to_prompt_blocks()
-    return [
-        block
-        for block in (
-            blocks["structured_evidence"],
-            blocks["disambig_candidates"],
-            blocks["vector_evidence"],
-        )
-        if block
-    ]
+    blocks: list[str] = []
+
+    structured_lines = [item.content for item in bundle.structured_evidence if item.content]
+    if structured_lines:
+        blocks.append("<Structured_Evidence>\n" + "\n".join(structured_lines) + "\n</Structured_Evidence>")
+
+    disambig_candidates = bundle.render_disambig_candidates()
+    if disambig_candidates:
+        blocks.append(disambig_candidates)
+
+    vector_evidence = bundle.render_vector_evidence()
+    if vector_evidence:
+        blocks.append(vector_evidence)
+
+    return blocks
 
 
 def render_annotation_prompt_blocks(

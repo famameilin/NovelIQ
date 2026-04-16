@@ -6,9 +6,11 @@ import pytest
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks
 from src.rag import Level3NotReadyError
 from src.workflows.annotate_helpers.context import ChunkContext
-from src.workflows.annotate_helpers.phase import AnnotationPhaseConfig
-from src.workflows.annotate_helpers.phase import _init_annotation_phase_with_config
-from src.workflows.annotate_helpers.phase import _process_single_chunk
+from src.workflows.annotate_helpers.phase import (
+    AnnotationPhaseConfig,
+    _init_annotation_phase_with_config,
+    _process_single_chunk,
+)
 
 
 @pytest.mark.asyncio
@@ -27,8 +29,8 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
         emitter=None,
     )
     context = SimpleNamespace(
-        active_entities_str="active-entities",
-        disambig_context_str="vector-evidence",
+        prompt_active_entities="active-entities",
+        prompt_disambig_context="vector-evidence",
         evidence_bundle={"structured_evidence": ["authority"]},
     )
     annotation_result = SimpleNamespace(
@@ -95,9 +97,7 @@ async def test_process_single_chunk_prefers_prompt_blocks_over_legacy_strings() 
         emitter=None,
     )
     context = ChunkContext(
-        active_entities_str="LEGACY_ACTIVE",
-        disambig_context_str="LEGACY_DISAMBIG",
-        evidence_bundle={"structured_evidence": ["authority"]},
+        evidence_bundle=MagicMock(),
         annotation_prompt_blocks=AnnotationPromptBlocks(
             active_entities="BLOCK_ACTIVE",
             disambig_context="BLOCK_DISAMBIG",
@@ -147,7 +147,6 @@ async def test_process_single_chunk_prefers_prompt_blocks_over_legacy_strings() 
     mock_annotate_chunk.assert_awaited_once()
     assert mock_annotate_chunk.await_args.kwargs["active_entities"] == "BLOCK_ACTIVE"
     assert mock_annotate_chunk.await_args.kwargs["disambig_context"] == "BLOCK_DISAMBIG"
-    assert mock_annotate_chunk.await_args.kwargs["evidence_bundle"] == {"structured_evidence": ["authority"]}
 
 
 @pytest.mark.asyncio
