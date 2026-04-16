@@ -18,6 +18,7 @@
 任务: 移除已废弃的内部方法测试
 修改内容: _build_messages 和 _build_disambiguate_messages 方法已移除，简化测试
 """
+
 import sys
 import unittest
 from pathlib import Path

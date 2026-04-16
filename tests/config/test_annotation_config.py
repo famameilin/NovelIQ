@@ -27,34 +27,22 @@ class TestAnnotationConfig(unittest.TestCase):
     def test_valid_relation_types(self) -> None:
         """测试关系类型常量"""
         expected = ["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
-        self.assertEqual(
-            ANNOTATION_CONFIG.valid_relation_types,
-            expected
-        )
+        self.assertEqual(ANNOTATION_CONFIG.valid_relation_types, expected)
 
     def test_valid_entity_types(self) -> None:
         """测试实体类型常量"""
         expected = ["character", "group", "organization", "creature", "artifact"]
-        self.assertEqual(
-            ANNOTATION_CONFIG.valid_entity_types,
-            expected
-        )
+        self.assertEqual(ANNOTATION_CONFIG.valid_entity_types, expected)
 
     def test_valid_role_functions(self) -> None:
         """测试角色功能常量"""
         expected = ["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
-        self.assertEqual(
-            ANNOTATION_CONFIG.valid_role_functions,
-            expected
-        )
+        self.assertEqual(ANNOTATION_CONFIG.valid_role_functions, expected)
 
     def test_valid_action_types(self) -> None:
         """测试行为类型常量"""
         expected = ["战斗", "逃跑", "对话", "决策", "移动", "情感", "其他"]
-        self.assertEqual(
-            ANNOTATION_CONFIG.valid_action_types,
-            expected
-        )
+        self.assertEqual(ANNOTATION_CONFIG.valid_action_types, expected)
 
     def test_valid_clue_types(self) -> None:
         """测试线索类型常量"""
@@ -68,10 +56,7 @@ class TestAnnotationConfig(unittest.TestCase):
             "kinship_identity",
             "naming_scene",
         ]
-        self.assertEqual(
-            ANNOTATION_CONFIG.valid_clue_types,
-            expected
-        )
+        self.assertEqual(ANNOTATION_CONFIG.valid_clue_types, expected)
 
     def test_retry_config(self) -> None:
         """测试重试配置"""

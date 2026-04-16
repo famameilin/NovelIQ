@@ -10,6 +10,7 @@
 任务: refactor-phase1-identity-extraction
 修改内容: 移除 relations 和 character_appearances 字段相关测试
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -182,8 +183,12 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
             foreshadowing_type=None,
             foreshadowing_desc="",
             characters=[
-                CharacterSnapshot(name="张三", role_function="主体", action="行走", action_type="移动", emotion_score="neutral"),
-                CharacterSnapshot(name="李四", role_function="其他", action="站立", action_type="其他", emotion_score="neutral"),
+                CharacterSnapshot(
+                    name="张三", role_function="主体", action="行走", action_type="移动", emotion_score="neutral"
+                ),
+                CharacterSnapshot(
+                    name="李四", role_function="其他", action="站立", action_type="其他", emotion_score="neutral"
+                ),
             ],
             dialogues=[],
         )
@@ -218,7 +223,9 @@ class TestReplaceInvalidNamesWithAnonymous(unittest.TestCase):
             foreshadowing_type=None,
             foreshadowing_desc="",
             characters=[
-                CharacterSnapshot(name="张三", role_function="主体", action="行走", action_type="移动", emotion_score="neutral"),
+                CharacterSnapshot(
+                    name="张三", role_function="主体", action="行走", action_type="移动", emotion_score="neutral"
+                ),
             ],
             dialogues=[
                 DialogueSnapshot(speaker=["张三"]),
@@ -236,7 +243,11 @@ class TestCharacterConsistencyValidation(unittest.TestCase):
                 CharacterAppearance(raw_name="赵哥", identity_clue="赤甲卫赵哥", clue_type="named_by_other"),
                 CharacterAppearance(raw_name="灰衣人", identity_clue="一个灰衣人", clue_type="appearance_desc"),
             ],
-            [CharacterSnapshot(name="贺重明", role_function="主体", action="对话", action_type="对话", emotion_score="neutral")],
+            [
+                CharacterSnapshot(
+                    name="贺重明", role_function="主体", action="对话", action_type="对话", emotion_score="neutral"
+                )
+            ],
         )
 
         self.assertEqual(missing, ["赵哥"])

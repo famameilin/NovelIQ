@@ -47,6 +47,8 @@ from src.storage.repositories import (
     ChunkRepository,
     StatsRepository,
 )
+
+
 def load_core_results(
     run_id: str,
     stats_repo: StatsRepository,
@@ -104,9 +106,7 @@ def load_character_bundle(
     # 中文注释：export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
     # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉。
     valid_character_names = valid_character_names | {
-        entity.name
-        for entity in export_graph_view.canonical_entities
-        if entity.entity_type == "character"
+        entity.name for entity in export_graph_view.canonical_entities if entity.entity_type == "character"
     }
 
     return characters, arc_scores, main_characters, valid_character_names, missing_fields

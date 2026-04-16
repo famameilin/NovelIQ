@@ -15,6 +15,7 @@ CLI preprocess 模块测试
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """
+
 import sys
 import uuid
 from pathlib import Path
@@ -34,10 +35,12 @@ class MockEmbeddingClient:
 
     def get_embedding(self, text: str):
         import random
+
         return [random.random() for _ in range(768)]
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         import random
+
         return [[random.random() for _ in range(768)] for _ in texts]
 
     @staticmethod

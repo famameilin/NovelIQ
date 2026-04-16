@@ -18,6 +18,7 @@
 任务: code-quality-review
 修改内容: 更新测试用例，适配 API key 必填的改动
 """
+
 import sys
 import unittest
 from pathlib import Path
