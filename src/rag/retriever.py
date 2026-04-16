@@ -21,15 +21,21 @@
 任务: implement-level3-vector-retrieval
 修改内容: 重新实现 Level3VectorEvidence，集成到 DisambigContextProvider
 
-说明: 本模块提供消歧上下文检索功能，支持三级检索：
+修改时间: 2026-04-17
+修改者: TraeAI
+任务: refactor/split-provider-bundle-renderer
+修改内容: 删除 retrieve/retrieve_with_level3 废弃接口和 DisambigResult，
+    将 build_graph_feedback_hint 迁移至 disambiguation renderer
+
+说明: 本模块提供证据收集功能（Provider 层），支持三级证据：
 - Level1: 别名表精确匹配
 - Level2: 活跃实体候选
 - Level3: 向量语义相似度检索
+输出统一 EvidenceBundle，由下游 renderer 渲染为 prompt 内容。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -44,17 +50,6 @@ if TYPE_CHECKING:
 
     from src.models.local.embedding import EmbeddingClient
     from src.storage.repositories import GraphRepository
-
-
-@dataclass
-class DisambigResult:
-    """消歧上下文查询结果"""
-
-    level1_hit: bool = False
-    level2_candidates: list[str] = field(default_factory=list)
-    level3_evidence: str = ""
-    canonical_name: str | None = None
-    used_levels: list[int] = field(default_factory=list)
 
 
 class Level3NotReadyError(RuntimeError):
@@ -293,15 +288,14 @@ class Level3VectorEvidence:
 
 
 class DisambigContextProvider:
-    """消歧上下文提供器
+    """证据收集提供器（Provider 层）
 
-    为标注阶段提供别名消歧和活跃实体上下文。
-    支持三级检索：
-    - Level1: 别名表精确匹配
-    - Level2: 活跃实体候选
-    - Level3: 向量语义相似度检索（当前标注流程要求启用）
+    负责收集三级证据并组装为 EvidenceBundle：
+    - Level1: 别名表精确映射
+    - Level2: 近期活跃实体
+    - Level3: 向量语义相似 chunk
 
-    同时提供图谱反馈能力：已裁决别名映射 + 已确认关系。
+    图谱反馈（build_graph_feedback_hint）已迁移至 disambiguation renderer 层。
     """
 
     def __init__(
@@ -537,62 +531,6 @@ class DisambigContextProvider:
 
         return bundle
 
-    def retrieve(
-        self,
-        alias: str,
-        context_sentence: str | None = None,
-        current_chunk: int | None = None,
-    ) -> DisambigResult:
-        """同步检索方法（Level 1 + Level 2）
-
-        注意：Level 3 是异步操作，需要使用 retrieve_with_level3 方法。
-        """
-        logger.debug(f"DisambigContextProvider retrieve: alias='{alias}', chunk={current_chunk}")
-        result = DisambigResult()
-
-        if self._level1_enabled:
-            canonical = self._alias_lookup.query(alias)
-            if canonical:
-                result.level1_hit = True
-                result.canonical_name = canonical
-                result.used_levels.append(1)
-                logger.debug(f"DisambigContextProvider: Level1 hit, canonical='{canonical}'")
-                return result
-
-        if self._level2_enabled and current_chunk is not None:
-            candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
-            if candidates:
-                result.level2_candidates = candidates
-                result.used_levels.append(2)
-                logger.debug(f"DisambigContextProvider: Level2 candidates={candidates[:5]}")
-
-        if not result.used_levels:
-            logger.debug(f"DisambigContextProvider: no levels used for alias='{alias}'")
-
-        return result
-
-    async def retrieve_with_level3(
-        self,
-        alias: str,
-        context_sentence: str | None = None,
-        current_chunk: int | None = None,
-        exclude_chunk_ids: list[int] | None = None,
-    ) -> DisambigResult:
-        """异步检索方法（Level 1 + Level 2 + Level 3）"""
-        result = self.retrieve(alias, context_sentence, current_chunk)
-
-        if self._level3_enabled and not result.level1_hit and context_sentence:
-            level3_results = await self._level3.search_similar_chunks(
-                context_sentence,
-                exclude_chunk_ids=exclude_chunk_ids,
-            )
-            if level3_results:
-                result.level3_evidence = self._level3.format_evidence_for_prompt(level3_results)
-                result.used_levels.append(3)
-                logger.debug(f"DisambigContextProvider: Level3 found {len(level3_results)} similar chunks")
-
-        return result
-
     def is_level3_available(self) -> bool:
         """检查 Level 3 是否可用"""
         return self._level3_enabled and self._level3.is_available()
@@ -605,42 +543,3 @@ class DisambigContextProvider:
         if self._level3_enabled:
             await self._level3.ensure_level3_ready()
 
-    def build_graph_feedback_hint(
-        self,
-        existing_names: list[str],
-        base_hint: str | None = None,
-    ) -> str | None:
-        """构建图谱反馈提示，包含已裁决别名映射和已确认关系。"""
-        if self._graph_repo is None or self._run_id is None:
-            return base_hint
-
-        existing_set = set(existing_names)
-        parts: list[str] = []
-
-        if base_hint:
-            parts.append(base_hint)
-
-        alias_map = self._alias_lookup.get_alias_map()
-        graph_aliases = {a: c for a, c in alias_map.items() if a != c and c in existing_set}
-        if graph_aliases:
-            alias_lines = ["【图谱已裁决的别名映射】"]
-            for alias, canonical in sorted(graph_aliases.items()):
-                alias_lines.append(f"- {alias} → {canonical}")
-            parts.append("\n".join(alias_lines))
-            logger.debug(f"Graph feedback: injected {len(graph_aliases)} alias mappings")
-
-        if self._relations_cache is None:
-            self._relations_cache = self._graph_repo.fetch_current_relations(self._run_id, active_only=True)
-        relations = self._relations_cache
-        relevant_rels = [r for r in relations if r["from_name"] in existing_set or r["to_name"] in existing_set]
-        if relevant_rels:
-            rel_lines = ["【图谱已确认的关系】"]
-            for relation in relevant_rels[:10]:
-                rel_lines.append(f"- {relation['from_name']} ←{relation['type']}→ {relation['to_name']}")
-            parts.append("\n".join(rel_lines))
-            logger.debug(f"Graph feedback: injected {len(relevant_rels)} relations")
-
-        if not parts:
-            return base_hint
-
-        return "\n".join(parts)

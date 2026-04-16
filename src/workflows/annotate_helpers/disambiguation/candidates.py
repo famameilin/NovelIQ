@@ -176,8 +176,54 @@ def _augment_hint_with_graph(
 
     保持 graph authority 的独立消费契约，
     不把这条反馈链路绑定到 annotation/disambiguation 共用的 EvidenceBundle snapshot 上。
+
+    修改时间: 2026-04-17
+    修改者: TraeAI
+    任务: refactor/split-provider-bundle-renderer
+    修改内容: 将 build_graph_feedback_hint 逻辑内联，消除 provider 的渲染职责
     """
-    return disambig_provider.build_graph_feedback_hint(existing_names, base_hint=hint)
+    from loguru import logger
+
+    graph_repo = getattr(disambig_provider, "_graph_repo", None)
+    run_id = getattr(disambig_provider, "_run_id", None)
+
+    if graph_repo is None or run_id is None:
+        return hint
+
+    existing_set = set(existing_names)
+    parts: list[str] = []
+
+    if hint:
+        parts.append(hint)
+
+    alias_lookup = getattr(disambig_provider, "_alias_lookup", None)
+    if alias_lookup is not None:
+        alias_map = alias_lookup.get_alias_map()
+        graph_aliases = {a: c for a, c in alias_map.items() if a != c and c in existing_set}
+        if graph_aliases:
+            alias_lines = ["【图谱已裁决的别名映射】"]
+            for alias, canonical in sorted(graph_aliases.items()):
+                alias_lines.append(f"- {alias} → {canonical}")
+            parts.append("\n".join(alias_lines))
+            logger.debug(f"Graph feedback: injected {len(graph_aliases)} alias mappings")
+
+    relations_cache = getattr(disambig_provider, "_relations_cache", None)
+    if relations_cache is None:
+        relations_cache = graph_repo.fetch_current_relations(run_id, active_only=True)
+        disambig_provider._relations_cache = relations_cache  # noqa: SLF001
+    relations = relations_cache
+    relevant_rels = [r for r in relations if r["from_name"] in existing_set or r["to_name"] in existing_set]
+    if relevant_rels:
+        rel_lines = ["【图谱已确认的关系】"]
+        for relation in relevant_rels[:10]:
+            rel_lines.append(f"- {relation['from_name']} ←{relation['type']}→ {relation['to_name']}")
+        parts.append("\n".join(rel_lines))
+        logger.debug(f"Graph feedback: injected {len(relevant_rels)} relations")
+
+    if not parts:
+        return hint
+
+    return "\n".join(parts)
 
 
 def _build_existing_character_hint_from_db(

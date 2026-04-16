@@ -235,7 +235,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         self.assertTrue(provider.is_level3_available())
 
     def test_level1_can_be_disabled(self) -> None:
-        """禁用 Level 1 后不应命中 alias lookup"""
+        """禁用 Level 1 后 collect_evidence 不应产生 alias_mapping 证据。"""
         graph_repo = MagicMock()
         graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
 
@@ -244,13 +244,13 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             run_id="test-run-id",
             level1_enabled=False,
         )
-        result = provider.retrieve("灰衣人", current_chunk=3)
+        bundle = provider.collect_evidence(names_in_chunk=["灰衣人"], current_chunk=3)
 
-        self.assertFalse(result.level1_hit)
-        self.assertIsNone(result.canonical_name)
+        alias_items = [item for item in bundle.structured_evidence if item.evidence_type == "alias_mapping"]
+        self.assertEqual(len(alias_items), 0)
 
     def test_level2_can_be_disabled(self) -> None:
-        """禁用 Level 2 后不应返回活跃实体候选"""
+        """禁用 Level 2 后 collect_evidence 不应返回活跃实体候选。"""
         graph_repo = MagicMock()
         graph_repo.fetch_alias_map.return_value = {}
         graph_repo.fetch_active_entities.return_value = [
@@ -263,10 +263,16 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             run_id="test-run-id",
             level2_enabled=False,
         )
-        result = provider.retrieve("灰衣人", current_chunk=3)
+        bundle = provider.collect_evidence(names_in_chunk=["灰衣人"], current_chunk=3)
 
-        self.assertEqual(result.level2_candidates, [])
-        self.assertNotIn(2, result.used_levels)
+        self.assertEqual(
+            [
+                item.metadata.get("name", item.content)
+                for item in bundle.local_evidence
+                if item.evidence_type == "active_entity"
+            ],
+            [],
+        )
 
     def test_collect_evidence_keeps_level2_rows_when_level1_hits(self) -> None:
         """结构化证据收集应保留 Level 2 活跃实体，即使 Level 1 已命中。"""
