@@ -128,6 +128,7 @@ export function useAnalysisStatus(
             current: eventData.current,
             total: eventData.total,
             percent: eventData.percent,
+            sub_percent: eventData.sub_percent,
             content: eventData.content,
             message: eventData.message,
           });
@@ -147,6 +148,7 @@ export function useAnalysisStatus(
             current: 0,
             total: 0,
             percent: 0,
+            sub_percent: 0,
             content: "",
             message: "任务已取消",
           });
@@ -163,6 +165,7 @@ export function useAnalysisStatus(
             current: 0,
             total: 0,
             percent: 100,
+            sub_percent: 0,
             content: "",
             message: "分析完成",
           });
@@ -242,6 +245,7 @@ export function useAnalysisStatus(
               current: status.current ?? 0,
               total: status.total ?? 0,
               percent: status.progress,
+              sub_percent: 0,
               content: "",
               message: status.message ?? "",
             });

@@ -6,6 +6,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.config import settings
+from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
 """
@@ -42,6 +43,18 @@ from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 任务: summary-full-chain-refactor
 修改内容: 移除 first_chapter_summary/last_chapter_summary，新增 summaries 字段传递阶段性摘要
 """
+
+
+def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    构建 diagnosis 允许复用的共享 graph signals。
+
+    中文注释：diagnosis payload 只搬运 GraphAuthorityReport 的白名单字段，
+    不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入。
+    """
+
+    graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
+    return serialize_graph_report_signals(graph_report)
 
 
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
@@ -161,7 +174,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     )
 
     known_characters, alias_merges = repo.fetch_character_disambig_data(effective_run_id)
-    graph_summary = repo.fetch_graph_summary(effective_run_id)
+    graph_summary, graph_quality_report = _build_graph_signal_payload(conn, effective_run_id)
 
     payload = {
         "novel_id": novel_id,
@@ -176,6 +189,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "known_characters": known_characters,
         "alias_merges": alias_merges,
         "graph_summary": graph_summary,
+        "graph_quality_report": graph_quality_report,
     }
 
     logger.info(
