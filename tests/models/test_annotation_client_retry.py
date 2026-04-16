@@ -366,15 +366,10 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
                 cloud_client=cloud_client,
             )
 
-    async def test_phase2_collects_evidence_bundle_from_rag_retriever(self):
-        """Phase2 会把 rag_retriever 产出的 evidence_bundle 传给 message builder。"""
+    async def test_phase2_passes_supplied_evidence_bundle_to_message_builder(self):
+        """Phase2 只消费上游 evidence_bundle，不再自行触发新的取证分支。"""
         client = MockAnnotationClient()
-        rag_retriever = MagicMock()
         evidence_bundle = MagicMock(name="phase2_evidence_bundle")
-
-        rag_retriever.requires_level3.return_value = True
-        rag_retriever.is_level3_available.return_value = True
-        rag_retriever.collect_evidence_with_level3 = AsyncMock(return_value=evidence_bundle)
 
         with patch(
             "src.models.local.annotation.phase2._build_foreshadowing_messages",
@@ -384,79 +379,11 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
                 client=client,
                 text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
                 chunk_id=12,
-                rag_retriever=rag_retriever,
+                evidence_bundle=evidence_bundle,
             )
 
         self.assertIsInstance(result, ForeshadowingResult)
-        rag_retriever.collect_evidence_with_level3.assert_awaited_once()
         self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
-
-    async def test_phase2_retries_when_rag_retriever_temporarily_fails(self):
-        """Phase2 的 evidence 检索失败后应纳入重试链路。"""
-        client = MockAnnotationClient()
-        rag_retriever = MagicMock()
-        evidence_bundle = MagicMock(name="phase2_evidence_bundle")
-
-        rag_retriever.requires_level3.return_value = True
-        rag_retriever.is_level3_available.return_value = True
-        rag_retriever.collect_evidence_with_level3 = AsyncMock(
-            side_effect=[ConnectionError("vector search failed"), evidence_bundle]
-        )
-
-        with patch(
-            "src.models.local.annotation.phase2._build_foreshadowing_messages",
-            return_value=[{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
-        ) as mock_build_messages:
-            result = await annotate_chunk_phase2(
-                client=client,
-                text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
-                chunk_id=12,
-                rag_retriever=rag_retriever,
-            )
-
-        self.assertIsInstance(result, ForeshadowingResult)
-        self.assertEqual(rag_retriever.collect_evidence_with_level3.await_count, 2)
-        self.assertEqual(mock_build_messages.call_count, 1)
-        self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
-
-    async def test_phase2_rag_retrieval_can_fall_back_to_cloud(self):
-        """本地重试耗尽后，RAG 检索也应继续参与云端兜底调用。"""
-        local_client = MockAnnotationClient()
-        cloud_client = MockAnnotationClient()
-        rag_retriever = MagicMock()
-        evidence_bundle = MagicMock(name="phase2_evidence_bundle")
-
-        cloud_call_count = [0]
-
-        async def cloud_call_annotation_api(*args, **kwargs):
-            cloud_call_count[0] += 1
-            result = create_mock_foreshadowing()
-            response = MagicMock()
-            response.choices = [MagicMock(message=MagicMock(content="{}", reasoning_content="thinking"))]
-            return result, response
-
-        cloud_client._call_annotation_api = cloud_call_annotation_api
-        rag_retriever.requires_level3.return_value = True
-        rag_retriever.is_level3_available.return_value = True
-        rag_retriever.collect_evidence_with_level3 = AsyncMock(
-            side_effect=[ConnectionError("vector search failed")] * PHASE_MAX_RETRIES + [evidence_bundle]
-        )
-
-        with patch(
-            "src.models.local.annotation.phase2._build_foreshadowing_messages",
-            return_value=[{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
-        ):
-            result = await annotate_chunk_phase2(
-                client=local_client,
-                text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
-                chunk_id=12,
-                rag_retriever=rag_retriever,
-                cloud_client=cloud_client,
-            )
-
-        self.assertIsInstance(result, ForeshadowingResult)
-        self.assertEqual(rag_retriever.collect_evidence_with_level3.await_count, PHASE_MAX_RETRIES + 1)
-        self.assertEqual(cloud_call_count[0], 1)
 
 
 class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
@@ -498,10 +425,16 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
         client = MockAnnotationClient()
         evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
 
-        with patch(
-            "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
-            new=AsyncMock(return_value=create_mock_foreshadowing()),
-        ) as mock_phase2:
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ) as mock_phase2,
+        ):
             result = await annotate_chunk_multi_phase(
                 client=client,
                 text="测试文本",
@@ -537,10 +470,16 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
         client = MockAnnotationClient()
         evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
 
-        with patch(
-            "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
-            new=AsyncMock(return_value=create_mock_foreshadowing()),
-        ) as mock_phase2:
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ) as mock_phase2,
+        ):
             result = await annotate_chunk_multi_phase(
                 client=client,
                 text="测试文本",

@@ -110,6 +110,8 @@ def test_annotation_messages_prefer_explicit_alias_map_over_bundle() -> None:
     user_message = messages[-1]["content"]
     assert "黑衣客" in user_message
     assert "{}" not in user_message
+    assert "灰衣人 -> 白芷" not in user_message
+    assert "已确认别名：" not in user_message
 
 
 def test_annotation_messages_empty_alias_map_does_not_fallback_to_bundle() -> None:
@@ -127,3 +129,5 @@ def test_annotation_messages_empty_alias_map_does_not_fallback_to_bundle() -> No
 
     user_message = messages[-1]["content"]
     assert "{}" in user_message
+    assert "灰衣人 -> 白芷" not in user_message
+    assert "已确认别名：" not in user_message

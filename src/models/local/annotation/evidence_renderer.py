@@ -58,7 +58,11 @@ def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> N
         seen_lines.add(line)
 
 
-def _collect_level1_lines_from_structured(bundle: EvidenceBundle) -> list[str]:
+def _collect_level1_lines_from_structured(
+    bundle: EvidenceBundle,
+    *,
+    include_alias_mappings: bool = True,
+) -> list[str]:
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
@@ -74,6 +78,8 @@ def _collect_level1_lines_from_structured(bundle: EvidenceBundle) -> list[str]:
 
     for item in bundle.structured_evidence:
         if item.evidence_type == "alias_mapping":
+            if not include_alias_mappings:
+                continue
             alias = str(item.metadata.get("alias", "")).strip()
             canonical = str(item.metadata.get("canonical", "")).strip()
             if alias and canonical:
@@ -100,7 +106,11 @@ def _collect_level1_lines_from_structured(bundle: EvidenceBundle) -> list[str]:
     return alias_lines + entity_lines + relation_lines
 
 
-def _collect_level1_lines_from_snapshot(snapshot: Level1AuthoritySnapshot) -> list[str]:
+def _collect_level1_lines_from_snapshot(
+    snapshot: Level1AuthoritySnapshot,
+    *,
+    include_alias_mappings: bool = True,
+) -> list[str]:
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
@@ -111,11 +121,12 @@ def _collect_level1_lines_from_snapshot(snapshot: Level1AuthoritySnapshot) -> li
         if item.name and item.entity_type
     }
 
-    for mapping in snapshot.alias_mappings:
-        alias = mapping.alias.strip()
-        canonical = mapping.canonical.strip()
-        if alias and canonical:
-            _append_unique_line(alias_lines, seen_lines, f"- 已确认别名：{alias} -> {canonical}")
+    if include_alias_mappings:
+        for mapping in snapshot.alias_mappings:
+            alias = mapping.alias.strip()
+            canonical = mapping.canonical.strip()
+            if alias and canonical:
+                _append_unique_line(alias_lines, seen_lines, f"- 已确认别名：{alias} -> {canonical}")
 
     for entity in snapshot.canonical_entities:
         name = entity.name.strip()
@@ -153,10 +164,21 @@ def _render_foreshadowing_level1(bundle: EvidenceBundle) -> str | None:
     )
 
 
-def _render_annotation_level1(bundle: EvidenceBundle) -> str | None:
-    lines = _collect_level1_lines_from_structured(bundle) if bundle.structured_evidence else []
+def _render_annotation_level1(
+    bundle: EvidenceBundle,
+    *,
+    include_alias_mappings: bool = True,
+) -> str | None:
+    lines = (
+        _collect_level1_lines_from_structured(bundle, include_alias_mappings=include_alias_mappings)
+        if bundle.structured_evidence
+        else []
+    )
     if not lines and bundle.level1_snapshot is not None:
-        lines = _collect_level1_lines_from_snapshot(bundle.level1_snapshot)
+        lines = _collect_level1_lines_from_snapshot(
+            bundle.level1_snapshot,
+            include_alias_mappings=include_alias_mappings,
+        )
 
     if not lines:
         return None
@@ -229,8 +251,15 @@ def render_annotation_evidence_blocks(bundle: EvidenceBundle) -> list[str]:
     ]
 
 
-def render_annotation_prompt_blocks(bundle: EvidenceBundle) -> AnnotationPromptBlocks:
-    level1_facts = _render_annotation_level1(bundle)
+def render_annotation_prompt_blocks(
+    bundle: EvidenceBundle,
+    *,
+    include_level1_alias_mappings: bool = True,
+) -> AnnotationPromptBlocks:
+    level1_facts = _render_annotation_level1(
+        bundle,
+        include_alias_mappings=include_level1_alias_mappings,
+    )
     active_entities = _render_active_entity_lines(
         [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
     )

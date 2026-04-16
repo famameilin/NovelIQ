@@ -97,9 +97,14 @@ def _build_annotation_messages_v2(
     alias_map_str = _render_alias_map_text(alias_map=alias_map, evidence_bundle=evidence_bundle)
 
     if evidence_bundle is not None:
-        blocks = render_annotation_prompt_blocks(evidence_bundle)
+        blocks = render_annotation_prompt_blocks(
+            evidence_bundle,
+            include_level1_alias_mappings=alias_map is None,
+        )
         # 中文注释：EvidenceBundle 是新的主语义入口。
         # 兼容层字符串只在 bundle 没有产出对应 prompt block 时兜底，避免旧字段反向覆盖新设计。
+        # 如果调用方显式给了 alias_map（包括空 dict），就不再把 bundle 里的 Level 1 别名裁决
+        # 通过 disambig_context 反向注入，避免新旧入口共存时出现优先级错位。
         if blocks.active_entities is not None:
             active_entities = blocks.active_entities
         if blocks.disambig_context is not None:

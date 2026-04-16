@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks
 from src.rag import Level3NotReadyError
+from src.workflows.annotate_helpers.context import ChunkContext
 from src.workflows.annotate_helpers.phase import AnnotationPhaseConfig
 from src.workflows.annotate_helpers.phase import _init_annotation_phase_with_config
 from src.workflows.annotate_helpers.phase import _process_single_chunk
@@ -75,6 +77,77 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     assert mock_annotate_chunk.await_args.kwargs["evidence_bundle"] == {"structured_evidence": ["authority"]}
     mock_store_results.assert_called_once()
     mock_run_disambig.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_process_single_chunk_prefers_prompt_blocks_over_legacy_strings() -> None:
+    next_state = object()
+    state = MagicMock()
+    state.get_alias_merges_dict.return_value = {"alias": "canonical"}
+
+    phase_result = SimpleNamespace(
+        annotation_client=MagicMock(),
+        cloud_annotation_client=None,
+        incremental_disambig_client=MagicMock(),
+        alias_keywords=["称号"],
+        global_context_str="global-context",
+        rag_retriever=MagicMock(),
+        emitter=None,
+    )
+    context = ChunkContext(
+        active_entities_str="LEGACY_ACTIVE",
+        disambig_context_str="LEGACY_DISAMBIG",
+        evidence_bundle={"structured_evidence": ["authority"]},
+        annotation_prompt_blocks=AnnotationPromptBlocks(
+            active_entities="BLOCK_ACTIVE",
+            disambig_context="BLOCK_DISAMBIG",
+        ),
+    )
+    annotation_result = SimpleNamespace(
+        annotation={"entities": []},
+        foreshadowing=[],
+        dialogue_speakers=[],
+        dialogues=[],
+        dialogue_tones=[],
+        dialogue_identity_clues=[],
+        relations=[],
+    )
+
+    with (
+        patch(
+            "src.workflows.annotate_helpers.context._prepare_chunk_context_with_level3",
+            new=AsyncMock(return_value=context),
+        ) as mock_prepare_context,
+        patch(
+            "src.workflows.annotate_helpers.phase._annotate_chunk",
+            new=AsyncMock(return_value=annotation_result),
+        ) as mock_annotate_chunk,
+        patch("src.workflows.annotate_helpers.storage._store_annotation_results"),
+        patch(
+            "src.workflows.annotate_helpers.disambiguation._run_incremental_disambiguation_with_state",
+            new=AsyncMock(return_value=next_state),
+        ),
+    ):
+        result = await _process_single_chunk(
+            conn=MagicMock(),
+            chunk_id=102,
+            chunk_text="当前 chunk 文本",
+            idx=0,
+            total_chunks=5,
+            phase_result=phase_result,
+            state=state,
+            use_context_enhancement=True,
+            incremental_interval=3,
+            run_id="run-1",
+            novel_id="novel-1",
+        )
+
+    assert result is next_state
+    mock_prepare_context.assert_awaited_once()
+    mock_annotate_chunk.assert_awaited_once()
+    assert mock_annotate_chunk.await_args.kwargs["active_entities"] == "BLOCK_ACTIVE"
+    assert mock_annotate_chunk.await_args.kwargs["disambig_context"] == "BLOCK_DISAMBIG"
+    assert mock_annotate_chunk.await_args.kwargs["evidence_bundle"] == {"structured_evidence": ["authority"]}
 
 
 @pytest.mark.asyncio

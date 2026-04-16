@@ -1,5 +1,6 @@
 from src.models.local.annotation.evidence_renderer import (
     render_annotation_evidence_blocks,
+    render_annotation_prompt_blocks,
     render_foreshadowing_prompt_blocks,
 )
 from src.models.local.annotation.messages import (
@@ -23,7 +24,7 @@ def test_build_annotation_messages_prefers_structured_evidence_bundle_blocks() -
             EvidenceItem(
                 evidence_type="alias_mapping",
                 source="level1",
-                content="阿七 → 贺重明",
+                content="阿七 -> 贺重明",
                 metadata={"alias": "阿七", "canonical": "贺重明"},
             ),
         ],
@@ -58,13 +59,47 @@ def test_build_annotation_messages_prefers_structured_evidence_bundle_blocks() -
     assert "<Vector_Evidence>" in user_content
 
 
+def test_render_annotation_prompt_blocks_can_drop_bundle_alias_lines_when_alias_map_is_explicit() -> None:
+    bundle = EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="alias_mapping",
+                source="level1",
+                content="灰衣人 -> 白芷",
+                metadata={"alias": "灰衣人", "canonical": "白芷"},
+            ),
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content="白芷<盟友>侯飞白",
+                metadata={
+                    "from_name": "白芷",
+                    "to_name": "侯飞白",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            ),
+        ],
+    )
+
+    blocks = render_annotation_prompt_blocks(
+        bundle,
+        include_level1_alias_mappings=False,
+    )
+
+    assert blocks.disambig_context is not None
+    assert "灰衣人 -> 白芷" not in blocks.disambig_context
+    assert "已确认别名：" not in blocks.disambig_context
+    assert "已确认关系：" in blocks.disambig_context
+
+
 def test_render_annotation_evidence_blocks_keeps_phase1_prompt_shape() -> None:
     bundle = EvidenceBundle(
         structured_evidence=[
             EvidenceItem(
                 evidence_type="alias_mapping",
                 source="level1",
-                content="阿七 → 贺重明",
+                content="阿七 -> 贺重明",
                 metadata={"alias": "阿七", "canonical": "贺重明"},
             ),
         ],
