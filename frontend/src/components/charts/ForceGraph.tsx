@@ -408,7 +408,7 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
         });
       });
 
-      graph.data({
+      const graphDataPayload = {
         nodes: g6Data.nodes.map((node) => {
           const positionedNode = positionedNodes.get(node.entity_id);
           return (
@@ -422,7 +422,10 @@ export const ForceGraph = forwardRef<ForceGraphHandle, ForceGraphProps>(
           );
         }),
         edges: g6Data.edges as unknown as Record<string, unknown>[],
-      });
+      };
+
+      // G6 v4 的 graph.data 类型声明比实际可接受的数据更窄，这里显式收口到运行时契约。
+      graph.data(graphDataPayload as unknown as Parameters<typeof graph.data>[0]);
 
       // 节点样式映射（G6 v4: 仅处理数据驱动的静态样式）
       // active/selected 状态由 G6 内部状态管理（nodeStateStyles），不在此处

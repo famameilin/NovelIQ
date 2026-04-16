@@ -31,11 +31,14 @@ class TimelinePhase(BaseModel):
 class RelationChangeEvent(BaseModel):
     """关系变化事件"""
 
+    relation_event_id: int | None = Field(default=None, description="关系事件 ID，用于页面精确定位")
     from_char: str = Field(description="源角色名称")
     to_char: str = Field(description="目标角色名称")
     relation_type: str = Field(description="关系类型：敌对/盟友/师徒/家族等")
     change_type: str = Field(description="变化类型：建立/断裂/转化")
     evidence: str | None = Field(default=None, description="变化依据文本")
+    confidence: float | None = Field(default=None, description="关系事件置信度")
+    directionality: str | None = Field(default=None, description="关系方向性")
 
 
 class TimelineNode(BaseModel):

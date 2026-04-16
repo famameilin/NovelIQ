@@ -14,7 +14,6 @@ from typing import Any
 
 from loguru import logger
 
-from src.api.routes.results_converters import _convert_aggregate_result
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
@@ -28,17 +27,26 @@ from src.api.routes.results_fetchers import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
+from src.api.routes.results_converters import build_aggregate_metrics_contract, validate_aggregate_metrics_contract
+from src.knowledge.authority import (
+    ExportGraphAuthorityView,
+    GraphAuthorityReport,
+    KnowledgeGraphAuthorityService,
+    serialize_graph_report_signals,
+)
 from src.metrics.aggregate import aggregate_all_metrics
-from src.metrics.timeline_metrics import build_timeline_candidates, convert_to_timeline_nodes, select_timeline_nodes
+from src.metrics.timeline_metrics import (
+    TimelineAuthorityContractError,
+    TimelineDataUnavailableError,
+    build_timeline_candidates,
+    convert_to_timeline_nodes,
+    select_timeline_nodes,
+)
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
-    DiagnosisRepository,
-    GraphRepository,
     StatsRepository,
 )
-
-
 def load_core_results(
     run_id: str,
     stats_repo: StatsRepository,
@@ -68,8 +76,8 @@ def load_character_bundle(
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
-    graph_repo: GraphRepository,
     alias_map: dict[str, str],
+    export_graph_view: ExportGraphAuthorityView,
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
     """
     加载角色相关数据
@@ -93,9 +101,13 @@ def load_character_bundle(
     if not characters:
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
-
-    graph_entities = graph_repo.fetch_entities(run_id)
-    valid_character_names = valid_character_names | {e.canonical_name for e in graph_entities}
+    # 中文注释：export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
+    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉。
+    valid_character_names = valid_character_names | {
+        entity.name
+        for entity in export_graph_view.canonical_entities
+        if entity.entity_type == "character"
+    }
 
     return characters, arc_scores, main_characters, valid_character_names, missing_fields
 
@@ -106,6 +118,7 @@ def load_chunk_bundle(
     chunk_repo: ChunkRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
+    export_graph_view: ExportGraphAuthorityView,
 ) -> tuple[list, list, list, list[str]]:
     """
     加载分块相关数据
@@ -126,6 +139,7 @@ def load_chunk_bundle(
         annotation_repo,
         alias_map,
         valid_character_names=valid_character_names,
+        export_graph_view=export_graph_view,
     )
     if not chunk_annotations:
         missing_fields.append("chunk_annotations")
@@ -133,49 +147,87 @@ def load_chunk_bundle(
     return topics, chunk_styles, chunk_annotations, missing_fields
 
 
-def load_aggregate_bundle(
+def load_graph_signal_bundle(
+    graph_report: GraphAuthorityReport,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    加载 graph authority 输入信号。
+
+    中文注释：graph_summary / graph_quality_report 在 export 里只是 graph-owned
+    input signals，不承担最终诊断或聚合结论语义。
+    """
+    return serialize_graph_report_signals(graph_report)
+
+
+def load_aggregate_metrics_bundle(
     run_id: str,
     novel_id: str,
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    graph_repo: GraphRepository,
+) -> tuple[Any, Any, dict[str, Any]]:
+    """
+    加载非 graph 的聚合结论。
+
+    中文注释：aggregate_metrics 继续只由 aggregate_all_metrics() 负责产出，
+    不与 graph authority 信号在同一个 helper 中混算。
+    """
+
+    global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
+    token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
+
+    result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
+    aggregate_metrics = build_aggregate_metrics_contract(result)
+
+    return global_stats, token_usage_stats, aggregate_metrics
+
+
+def load_export_relation_bundle(
+    run_id: str,
+    novel_id: str,
+    stats_repo: StatsRepository,
+    annotation_repo: AnnotationRepository,
+    chunk_repo: ChunkRepository,
     alias_map: dict[str, str],
     valid_character_names: set[str],
-) -> tuple[list, list, Any, Any, dict[str, Any], dict[str, Any]]:
+    export_graph_view: ExportGraphAuthorityView,
+    graph_report: GraphAuthorityReport,
+) -> tuple[list, list, Any, Any, dict[str, Any], dict[str, Any], dict[str, Any]]:
     """
     加载聚合统计数据
 
     Returns:
-        (character_relations, hierarchical_relations, global_stats, token_usage_stats, aggregate_metrics, graph_summary)
+        (
+            character_relations,
+            hierarchical_relations,
+            global_stats,
+            token_usage_stats,
+            aggregate_metrics,
+            graph_summary,
+            graph_quality_report,
+        )
     """
     character_relations = _fetch_character_relations(
         run_id,
         annotation_repo,
         alias_map,
         valid_character_names=valid_character_names,
+        export_graph_view=export_graph_view,
     )
     hierarchical_relations = _fetch_hierarchical_relations(
         run_id,
-        graph_repo,
+        export_graph_view,
         alias_map,
         valid_character_names=valid_character_names,
     )
-    global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
-
-    result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
-    narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
-
-    aggregate_metrics = {
-        "narrative_structure": narrative_structure.model_dump() if narrative_structure else None,
-        "emotion_stats": emotion_stats.model_dump() if emotion_stats else None,
-        "character_stats": character_stats.model_dump() if character_stats else None,
-        "style_stats": style_stats.model_dump() if style_stats else None,
-        "culture_stats": culture_stats.model_dump() if culture_stats else None,
-    }
-
-    token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
-    graph_summary = DiagnosisRepository(stats_repo.session).fetch_graph_summary(run_id)
+    global_stats, token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
+        run_id=run_id,
+        novel_id=novel_id,
+        stats_repo=stats_repo,
+        annotation_repo=annotation_repo,
+        chunk_repo=chunk_repo,
+    )
+    graph_summary, graph_quality_report = load_graph_signal_bundle(graph_report)
 
     return (
         character_relations,
@@ -184,6 +236,7 @@ def load_aggregate_bundle(
         token_usage_stats,
         aggregate_metrics,
         graph_summary,
+        graph_quality_report,
     )
 
 
@@ -198,6 +251,11 @@ def _fetch_timeline_data(
 
     Returns:
         时间轴数据字典，包含 phases, nodes, tension_curve
+
+    Contract note:
+        Export intentionally reuses the same authority-backed timeline helper
+        as the /timeline route so both surfaces stay aligned on character
+        lifecycles and character-character relation history.
     """
     try:
         (
@@ -209,9 +267,12 @@ def _fetch_timeline_data(
             major_character_entries,
             relation_break_events,
         ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
-    except ValueError as e:
+    except TimelineDataUnavailableError as e:
         logger.warning(f"No chunk data for run {run_id}: {e}")
         return None
+    except TimelineAuthorityContractError:
+        logger.error(f"Timeline authority contract violated for run {run_id}")
+        raise
     except Exception as e:
         logger.error(f"Unexpected error building timeline for run {run_id}: {e}")
         return None
@@ -254,11 +315,15 @@ def build_export_payload(
     aggregate_metrics: dict[str, Any],
     token_usage_stats: Any,
     graph_summary: dict[str, Any] | None = None,
+    graph_quality_report: dict[str, Any] | None = None,
     timeline_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     构建导出 payload
     """
+    # 中文注释：export payload 中的 aggregate_metrics 只允许保留 aggregate 结论，
+    # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去。
+    validate_aggregate_metrics_contract(aggregate_metrics)
     return {
         "task_id": task_id,
         "novel_id": novel_id,
@@ -277,7 +342,7 @@ def build_export_payload(
         "aggregate_metrics": aggregate_metrics,
         "token_usage_stats": token_usage_stats.model_dump(exclude_none=True),
         "graph_summary": graph_summary or {},
-        "graph_quality_report": (graph_summary or {}).get("quality", {}),
+        "graph_quality_report": graph_quality_report or {},
         "timeline": timeline_data,
     }
 
@@ -289,17 +354,19 @@ def fetch_all_results_data(
     stats_repo: StatsRepository,
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
-    graph_repo: GraphRepository,
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
+    graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
+    export_graph_view = graph_authority_service.build_export_view(run_id)
+    graph_report = graph_authority_service.build_graph_report(run_id)
 
     chunk_curves, missing_fields = load_core_results(run_id, stats_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, graph_repo, alias_map
+        run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view
     )
     missing_fields.extend(char_missing)
 
@@ -308,7 +375,12 @@ def fetch_all_results_data(
         missing_fields.append("diagnosis")
 
     topics, chunk_styles, chunk_annotations, chunk_missing = load_chunk_bundle(
-        run_id, annotation_repo, chunk_repo, alias_map, valid_character_names
+        run_id,
+        annotation_repo,
+        chunk_repo,
+        alias_map,
+        valid_character_names,
+        export_graph_view,
     )
     missing_fields.extend(chunk_missing)
 
@@ -319,8 +391,17 @@ def fetch_all_results_data(
         token_usage_stats,
         aggregate_metrics,
         graph_summary,
-    ) = load_aggregate_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, chunk_repo, graph_repo, alias_map, valid_character_names
+        graph_quality_report,
+    ) = load_export_relation_bundle(
+        run_id,
+        novel_id,
+        stats_repo,
+        annotation_repo,
+        chunk_repo,
+        alias_map,
+        valid_character_names,
+        export_graph_view,
+        graph_report,
     )
 
     novel_name = _fetch_novel_name(run_id, novel_id, stats_repo)
@@ -351,6 +432,7 @@ def fetch_all_results_data(
         aggregate_metrics=aggregate_metrics,
         token_usage_stats=token_usage_stats,
         graph_summary=graph_summary,
+        graph_quality_report=graph_quality_report,
         timeline_data=timeline_data,
     )
 

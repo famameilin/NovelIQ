@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Final
 from typing import Any
 
 from src.api.models.responses import (
@@ -10,6 +11,15 @@ from src.api.models.responses import (
     StyleStats,
 )
 from src.metrics.aggregate import AggregateResult
+
+AGGREGATE_METRIC_CONTRACT_FIELDS: Final[tuple[str, ...]] = (
+    "narrative_structure",
+    "emotion_stats",
+    "character_stats",
+    "style_stats",
+    "culture_stats",
+)
+AGGREGATE_GRAPH_FORBIDDEN_FIELDS: Final[frozenset[str]] = frozenset({"graph_summary", "graph_quality_report"})
 
 
 def _default_distribution(value: Any) -> dict[str, float]:
@@ -211,3 +221,47 @@ def _convert_aggregate_result(
     culture_stats = _convert_culture_stats(result)
 
     return narrative_structure, emotion_stats, character_stats, style_stats, culture_stats
+
+
+def validate_aggregate_metrics_contract(aggregate_metrics: dict[str, Any]) -> None:
+    """
+    验证 aggregate 导出 contract。
+
+    中文注释：aggregate_metrics 是非 graph 的最终结构化结论出口，必须固定
+    为五组 aggregate 指标，不能混入 graph signals，也不能被 diagnosis/page
+    字段反向污染。
+    """
+
+    keys = set(aggregate_metrics.keys())
+    forbidden = sorted(keys & AGGREGATE_GRAPH_FORBIDDEN_FIELDS)
+    if forbidden:
+        raise ValueError(
+            "aggregate_metrics must not include graph-owned fields: "
+            + ", ".join(forbidden)
+        )
+
+    expected = set(AGGREGATE_METRIC_CONTRACT_FIELDS)
+    missing = sorted(expected - keys)
+    unexpected = sorted(keys - expected)
+    if missing or unexpected:
+        detail_parts: list[str] = []
+        if missing:
+            detail_parts.append("missing=" + ", ".join(missing))
+        if unexpected:
+            detail_parts.append("unexpected=" + ", ".join(unexpected))
+        raise ValueError("aggregate_metrics contract mismatch: " + "; ".join(detail_parts))
+
+
+def build_aggregate_metrics_contract(result: AggregateResult) -> dict[str, Any]:
+    """Build the stable non-graph aggregate metrics bundle used by export surfaces."""
+
+    narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
+    aggregate_metrics = {
+        "narrative_structure": narrative_structure.model_dump() if narrative_structure else None,
+        "emotion_stats": emotion_stats.model_dump() if emotion_stats else None,
+        "character_stats": character_stats.model_dump() if character_stats else None,
+        "style_stats": style_stats.model_dump() if style_stats else None,
+        "culture_stats": culture_stats.model_dump() if culture_stats else None,
+    }
+    validate_aggregate_metrics_contract(aggregate_metrics)
+    return aggregate_metrics

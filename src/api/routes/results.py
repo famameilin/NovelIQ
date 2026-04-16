@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,7 @@ from src.api.routes.results_fetchers import (
     _fetch_characters,
     _fetch_chunk_curves,
     _fetch_diagnosis,
+    _fetch_graph_events_page,
     _fetch_graph_snapshot,
     _fetch_topics,
 )
@@ -52,12 +53,12 @@ from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
-    GraphRepository,
     RunRepository,
     StatsRepository,
 )
 
 router = APIRouter(prefix="/novels", tags=["results"])
+GRAPH_PAGE_EVENT_LIMIT = 200
 
 
 @router.get(
@@ -157,10 +158,9 @@ async def get_results(
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
-    graph_repo = GraphRepository(session)
 
     results_data, missing_fields, novel_name = fetch_all_results_data(
-        novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo, graph_repo
+        novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo
     )
 
     file_path = _write_results_to_file(task_id, results_data)
@@ -277,6 +277,27 @@ async def get_graph(
     """获取知识图谱快照"""
     annotation_repo = AnnotationRepository(session)
     return _fetch_graph_snapshot(run_id, annotation_repo)
+
+
+@router.get("/{novel_id}/graph/events")
+async def get_graph_events(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+    events_cursor: Annotated[str | None, Query(description="graph relation events 分页 cursor")] = None,
+    events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
+) -> dict:
+    """获取 graph page relation events 的增量分页结果。"""
+    annotation_repo = AnnotationRepository(session)
+    try:
+        return _fetch_graph_events_page(
+            run_id,
+            annotation_repo,
+            events_cursor=events_cursor,
+            events_limit=events_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{novel_id}/metrics/narrative-structure")

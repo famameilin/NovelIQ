@@ -1,107 +1,206 @@
 /**
- * GraphPage - 人物关系图谱页面
- *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-A 人物关系图谱页面实现
- * 说明: 展示人物关系力导向图，支持缩放、居中、关系类型过滤、节点搜索和详情面板
- *
- * 修改时间: 2026-04-05
- * 修改者: Code Review Fix
- * 修改内容:
- *   - 重构为使用封装的 ForceGraph 组件，消除重复的 paintNode/paintLink/颜色常量代码
- *   - 移除 ~180 行内联渲染逻辑，统一由 components/charts/ForceGraph.tsx 管理
+ * GraphPage - 图谱分析入口页面
  */
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { getGraph, getCharacters } from "@/api/results";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  History,
+  Link2,
+  Network,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from "lucide-react";
+import { getCharacters, getGraph, getGraphEvents } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
+import { cn } from "@/lib/cn";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
+import { MetricCard } from "@/components/common/MetricCard";
 import { ForceGraph } from "@/components/charts/ForceGraph";
-import { type ForceGraphHandle } from "@/api/types";
 import { GraphToolbar } from "@/components/charts/GraphToolbar";
-import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeDetailPanel";
 import { GraphLegend } from "@/components/charts/GraphLegend";
+import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeDetailPanel";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw } from "lucide-react";
-import type { GraphNode, GraphNodeObject } from "@/api/types";
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import type { ForceGraphHandle, GraphEdge, GraphEvent, GraphEventsPageInfo, GraphNode, GraphNodeObject } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
+const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
-/* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
-/* ------------------------------------------------------------------ */
+const pageSectionVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0 },
+};
+
+const changeTypeLabels: Record<string, string> = {
+  无变化: "延续",
+  新建: "建立",
+  强化: "强化",
+  弱化: "弱化",
+  断裂: "断裂",
+};
+
+function buildGraphUrl(
+  novelId: string,
+  taskId: string,
+  options?: { chunkId?: number | null; relationEventId?: number | null }
+): string {
+  const params = new URLSearchParams({ task_id: taskId });
+  if (options?.chunkId != null) {
+    params.set("selected_chunk", String(options.chunkId));
+  }
+  if (options?.relationEventId != null) {
+    params.set("relation_event_id", String(options.relationEventId));
+  }
+  return `/novels/${novelId}/graph?${params.toString()}`;
+}
+
+function buildTimelineUrl(novelId: string, taskId: string): string {
+  return `/novels/${novelId}/timeline?task_id=${taskId}&max_level=3&show_tension=true`;
+}
+
+function buildTimelineSelectionUrl(baseUrl: string, options?: { chunkId?: number | null; relationEventId?: number | null }): string {
+  const params: string[] = [];
+  if (options?.chunkId != null) {
+    params.push(`selected_chunk=${options.chunkId}`);
+  }
+  if (options?.relationEventId != null) {
+    params.push(`relation_event_id=${options.relationEventId}`);
+  }
+  if (params.length === 0) {
+    return baseUrl;
+  }
+  return `${baseUrl}&${params.join("&")}`;
+}
+
+function formatDensity(value: number | undefined): string {
+  if (value == null || Number.isNaN(value)) return "--";
+  return value.toFixed(4);
+}
+
+function formatConfidence(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "待确认";
+  return `${Math.round(value * 100)}%`;
+}
+
+function getChangeTypeLabel(changeType?: string | null): string {
+  if (!changeType) return "变化";
+  return changeTypeLabels[changeType] ?? changeType;
+}
+
+function getEventConfidenceVariant(confidence: number | null | undefined): "outline" | "success" | "destructive" {
+  if (confidence == null) return "outline";
+  if (confidence < LOW_CONFIDENCE_THRESHOLD) return "destructive";
+  return "success";
+}
+
+function getEdgeDisplayNames(edge: GraphEdge, nodeNameMap: Map<string, string>): { from: string; to: string } {
+  return {
+    from: edge.from_name ?? nodeNameMap.get(edge.source) ?? edge.source,
+    to: edge.to_name ?? nodeNameMap.get(edge.target) ?? edge.target,
+  };
+}
+
+function mergeGraphEvents(existingEvents: GraphEvent[], incomingEvents: GraphEvent[]): GraphEvent[] {
+  const merged = new Map<number, GraphEvent>();
+  existingEvents.forEach((event) => {
+    merged.set(event.relation_event_id, event);
+  });
+  incomingEvents.forEach((event) => {
+    merged.set(event.relation_event_id, event);
+  });
+  return Array.from(merged.values());
+}
 
 export function GraphPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { currentTaskId, setNovel, setTask } = useNovelStore();
+  const { currentNovelId, currentTaskId, setNovel, setTask } = useNovelStore();
 
   const urlTaskId = searchParams.get("task_id");
-
-  // ForceGraph 组件引用（用于外部控制缩放/居中）
+  const urlSelectedChunk = searchParams.get("selected_chunk");
+  const urlRelationEventId = searchParams.get("relation_event_id");
   const forceGraphRef = useRef<ForceGraphHandle>(null);
+  const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
 
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRelationTypes, setSelectedRelationTypes] = useState<Set<string>>(new Set());
   const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [hasUserSelectedEvent, setHasUserSelectedEvent] = useState(false);
+  const [loadedEvents, setLoadedEvents] = useState<GraphEvent[]>([]);
+  const [eventsPageInfo, setEventsPageInfo] = useState<GraphEventsPageInfo | null>(null);
+  const [isEventsLoading, setIsEventsLoading] = useState(false);
+  const [eventsLoadError, setEventsLoadError] = useState<string | null>(null);
+  const eventsRequestVersionRef = useRef(0);
+  const currentTaskScopeIdRef = useRef<string | null>(null);
+  const previousTaskIdRef = useRef<string | null | undefined>(undefined);
+  const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
+  const taskScopeId = urlTaskId ?? storeTaskId;
 
   useEffect(() => {
     if (novelId) {
       setNovel(novelId);
       if (urlTaskId) {
+        if (storeTaskId !== urlTaskId) {
+          urlTaskSyncRef.current = urlTaskId;
+        }
         setTask(urlTaskId);
       }
     }
-  }, [novelId, urlTaskId, setNovel, setTask]);
+  }, [novelId, setNovel, setTask, urlTaskId]);
 
   useEffect(() => {
-    if (currentTaskId && searchParams.get("task_id") !== currentTaskId) {
-      navigate(`/novels/${novelId}/graph?task_id=${currentTaskId}`, { replace: true });
+    if (!novelId || !storeTaskId) {
+      return;
     }
-  }, [currentTaskId, novelId, navigate, searchParams]);
 
-  const enabled = !!novelId && !!currentTaskId;
+    // 中文注释：URL 上带 task_id 的首屏 deep-link 必须先等 store 同步到同一 task，
+    // 不能让旧 store 状态抢先回写 URL；否则会把合法 deep-link 误改成旧任务。
+    if (urlTaskId === storeTaskId) {
+      if (urlTaskSyncRef.current === storeTaskId) {
+        urlTaskSyncRef.current = null;
+      }
+      return;
+    }
+    if (urlTaskId && urlTaskSyncRef.current === urlTaskId) {
+      return;
+    }
+
+    navigate(buildGraphUrl(novelId, storeTaskId), { replace: true });
+  }, [navigate, novelId, storeTaskId, urlTaskId]);
+
+  useEffect(() => {
+    currentTaskScopeIdRef.current = taskScopeId;
+  }, [taskScopeId]);
+
+  const enabled = !!novelId && !!taskScopeId;
 
   const graphQuery = useQuery({
-    queryKey: ["graph", novelId, currentTaskId],
-    queryFn: () => getGraph(novelId!, currentTaskId!),
+    queryKey: ["graph", novelId, taskScopeId],
+    queryFn: () => getGraph(novelId!, taskScopeId!),
     enabled,
     staleTime: STALE_TIME,
   });
 
-  // 调用 /characters API 获取出场次数，用于更准确的节点大小映射
-  // 设计文档 §2.5 要求：节点大小根据"出场次数/度中心性"线性缩放
   const charactersQuery = useQuery({
-    queryKey: ["characters", novelId, currentTaskId],
-    queryFn: () => getCharacters(novelId!, currentTaskId!),
+    queryKey: ["characters", novelId, taskScopeId],
+    queryFn: () => getCharacters(novelId!, taskScopeId!),
     enabled,
     staleTime: STALE_TIME,
   });
-
-  // 构建节点标识 → 出场次数的 Map（供 ForceGraph 使用）
-  // 注意：/characters API 返回的 Character 只有 name 字段（无 entity_id），
-  // 而 /graph API 返回的 GraphNode 有 entity_id 和 name。
-  // 这里使用 name 作为 key，ForceGraph.getNodeSize 会先按 entity_id 查，
-  // 查不到时再按 name 查。
-  const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
-    if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
-    const map = new Map<string, number>();
-    charactersQuery.data.forEach((char) => {
-      map.set(char.name, char.appearance_count);
-    });
-    return map;
-  }, [charactersQuery.data]);
 
   const novelQuery = useQuery({
     queryKey: ["novel", novelId],
@@ -111,10 +210,48 @@ export function GraphPage() {
   });
 
   const novelTitle = novelQuery.data?.title ?? "小说详情";
-
   const graphData = graphQuery.data;
+  const graphContractIssue =
+    enabled &&
+    !!graphData &&
+    (graphData.summary == null || graphData.quality == null || graphData.events_page == null);
 
-  // 从实际数据中提取所有关系类型（动态）
+  const resetTaskScopedGraphState = useCallback(
+    (options?: { events?: GraphEvent[]; pageInfo?: GraphEventsPageInfo | null }) => {
+      // 中文注释：图谱页的选中态、分页窗口、加载错误都绑定当前 task。
+      // 只要 task 变了，或者拿到了新的 graph snapshot，就必须整包重置，
+      // 防止旧任务的事件窗口、错误提示和节点选择残留到新页面。
+      setSelectedNode(null);
+      setIsPanelOpen(false);
+      setSearchQuery("");
+      setSelectedRelationTypes(new Set());
+      setSelectedEventId(null);
+      setHasUserSelectedEvent(false);
+      setLoadedEvents(options?.events ?? []);
+      setEventsPageInfo(options?.pageInfo ?? null);
+      setEventsLoadError(null);
+      setIsEventsLoading(false);
+    },
+    []
+  );
+
+  const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
+    if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
+    const map = new Map<string, number>();
+    charactersQuery.data.forEach((character) => {
+      map.set(character.name, character.appearance_count);
+    });
+    return map;
+  }, [charactersQuery.data]);
+
+  const nodeNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    graphData?.nodes.forEach((node) => {
+      map.set(node.entity_id, node.name);
+    });
+    return map;
+  }, [graphData]);
+
   const relationTypes = useMemo(() => {
     if (!graphData?.edges) return [];
     const types = new Set<string>();
@@ -126,7 +263,6 @@ export function GraphPage() {
     return Array.from(types);
   }, [graphData]);
 
-  // 从实际数据中提取所有实体类型（供图例使用）
   const entityTypes = useMemo(() => {
     if (!graphData?.nodes) return [];
     const types = new Set<string>();
@@ -136,7 +272,6 @@ export function GraphPage() {
     return Array.from(types);
   }, [graphData]);
 
-  // 计算选中节点的关联节点列表
   const relatedNodes = useMemo((): RelatedNodeInfo[] => {
     if (!selectedNode || !graphData) return [];
 
@@ -168,10 +303,246 @@ export function GraphPage() {
       }
     });
 
-    return related;
+    return related.sort((left, right) => right.weight - left.weight);
   }, [selectedNode, graphData]);
 
-  /* ---- Toolbar 回调 ---- */
+  // /graph 返回的是 product-layer summary/quality，而不是 authority 原始事实；
+  // 页面可以自由调整展示摘要，但不应反向定义 authority 语义。
+  const graphSummary = graphData?.summary ?? null;
+  const graphQuality = graphData?.quality ?? null;
+
+  const sortedEvents = useMemo(() => {
+    return [...loadedEvents].sort((left, right) => {
+      const chunkDiff = right.chunk_id - left.chunk_id;
+      if (chunkDiff !== 0) return chunkDiff;
+      return right.relation_event_id - left.relation_event_id;
+    });
+  }, [loadedEvents]);
+
+  const totalEventCount = eventsPageInfo?.total ?? sortedEvents.length;
+  const hasMoreEvents = eventsPageInfo?.has_more ?? false;
+  const loadedEventCount = sortedEvents.length;
+
+  const initialRelationEventId = useMemo(() => {
+    if (!urlRelationEventId) return null;
+    const parsed = Number(urlRelationEventId);
+    return Number.isInteger(parsed) ? parsed : null;
+  }, [urlRelationEventId]);
+  const initialSelectedChunk = useMemo(() => {
+    if (!urlSelectedChunk) return null;
+    const parsed = Number(urlSelectedChunk);
+    return Number.isInteger(parsed) ? parsed : null;
+  }, [urlSelectedChunk]);
+  const selectedEvent = useMemo(() => {
+    if (sortedEvents.length === 0) return null;
+    if (selectedEventId == null) {
+      return initialRelationEventId != null || initialSelectedChunk != null ? null : sortedEvents[0];
+    }
+    return sortedEvents.find((event) => event.relation_event_id === selectedEventId) ?? null;
+  }, [initialRelationEventId, initialSelectedChunk, sortedEvents, selectedEventId]);
+  const activeSelectedEventId = selectedEvent?.relation_event_id ?? null;
+  const deepLinkResolvedEventId = useMemo(() => {
+    if (initialRelationEventId != null) {
+      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
+      if (matchedEvent) {
+        return matchedEvent.relation_event_id;
+      }
+      if (initialSelectedChunk != null) {
+        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+        return fallbackEvent?.relation_event_id ?? null;
+      }
+      return null;
+    }
+    if (initialSelectedChunk != null) {
+      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+      return chunkMatchedEvent?.relation_event_id ?? null;
+    }
+    return null;
+  }, [initialRelationEventId, initialSelectedChunk, sortedEvents]);
+  const graphSelectionHint = useMemo(() => {
+    if (hasUserSelectedEvent) {
+      return null;
+    }
+    if (activeSelectedEventId != null && (deepLinkResolvedEventId == null || activeSelectedEventId !== deepLinkResolvedEventId)) {
+      return null;
+    }
+    if (initialRelationEventId == null && initialSelectedChunk == null) {
+      return null;
+    }
+    if (initialRelationEventId != null) {
+      const matchedEvent = sortedEvents.find((event) => event.relation_event_id === initialRelationEventId);
+      if (matchedEvent) {
+        return null;
+      }
+      if (initialSelectedChunk != null) {
+        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+        if (fallbackEvent) {
+          return "未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。";
+        }
+      }
+      return "未在当前图谱事件窗口定位到指定关系事件。";
+    }
+    if (initialSelectedChunk != null) {
+      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
+      if (!chunkMatchedEvent) {
+        return "未在当前事件窗口定位到指定时间节点的关系变化。";
+      }
+    }
+    return null;
+  }, [activeSelectedEventId, deepLinkResolvedEventId, hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, sortedEvents]);
+
+  useEffect(() => {
+    if (!graphData) {
+      return;
+    }
+
+    // Bump the request version whenever the snapshot changes so late load-more
+    // responses from the previous task/view are ignored instead of polluting
+    // the current page-level history window.
+    eventsRequestVersionRef.current += 1;
+    // 中文注释：同一 task 的 snapshot 刷新只同步最新首屏数据与分页元信息，
+    // 不应把用户当前选中的节点、事件详情和已展开的历史窗口整包清空。
+    setLoadedEvents((currentEvents) =>
+      currentEvents.length > 0 ? mergeGraphEvents(currentEvents, graphData.events ?? []) : (graphData.events ?? [])
+    );
+    setEventsPageInfo(graphData.events_page ?? null);
+    setEventsLoadError(null);
+    setIsEventsLoading(false);
+    setSelectedNode((currentSelectedNode) => {
+      if (!currentSelectedNode) {
+        return null;
+      }
+      const nextSelectedNode =
+        graphData.nodes.find((node) => node.entity_id === currentSelectedNode.entity_id) ?? null;
+      if (nextSelectedNode == null) {
+        setIsPanelOpen(false);
+      }
+      return nextSelectedNode;
+    });
+  }, [graphData]);
+
+  useEffect(() => {
+    setHasUserSelectedEvent(false);
+  }, [initialRelationEventId, initialSelectedChunk, taskScopeId]);
+
+  useEffect(() => {
+    if (hasUserSelectedEvent) return;
+    if (initialRelationEventId == null && initialSelectedChunk == null) return;
+
+    const matchedEvent =
+      initialRelationEventId != null
+        ? loadedEvents.find((event) => event.relation_event_id === initialRelationEventId) ?? null
+        : null;
+    if (matchedEvent) {
+      setSelectedEventId(matchedEvent.relation_event_id);
+      return;
+    }
+
+    const fallbackEvent =
+      initialSelectedChunk != null
+        ? loadedEvents.find((event) => event.chunk_id === initialSelectedChunk) ?? null
+        : null;
+    if (fallbackEvent) {
+      setSelectedEventId(fallbackEvent.relation_event_id);
+      return;
+    }
+
+    setSelectedEventId(null);
+  }, [hasUserSelectedEvent, initialRelationEventId, initialSelectedChunk, loadedEvents]);
+
+  useEffect(() => {
+    const previousTaskId = previousTaskIdRef.current;
+    previousTaskIdRef.current = taskScopeId;
+    // 中文注释：这里只处理“真实 task 变化”后的页面清理。
+    // 首次挂载若已命中 React Query 缓存，不应把刚同步进来的 events/pageInfo
+    // 又立即清空，否则会出现 graph 已有数据但 events 侧栏为空的回归。
+    if (previousTaskId === undefined || previousTaskId === taskScopeId) {
+      return;
+    }
+    // 中文注释：task 切换发生在新快照返回之前时，也要立即清掉旧页面状态；
+    // 否则 load-more 报错、旧 deep-link 提示、旧选中节点会短暂闪回到新 task 页面。
+    eventsRequestVersionRef.current += 1;
+    // 中文注释：如果新 task 已经命中 React Query 缓存，就用当前 snapshot 直接回填
+    // events/pageInfo；这样既能清掉旧 task 的脏状态，也不会把新 task 的已缓存窗口误清空。
+    resetTaskScopedGraphState(
+      graphData
+        ? {
+            events: graphData.events ?? [],
+            pageInfo: graphData.events_page ?? null,
+          }
+        : undefined
+    );
+  }, [graphData, resetTaskScopedGraphState, taskScopeId]);
+
+  useEffect(() => {
+    if (!graphContractIssue || !graphData) return;
+
+    const missingFields = [
+      graphData.summary ? null : "summary",
+      graphData.quality ? null : "quality",
+      graphData.events_page ? null : "events_page",
+    ].filter(Boolean);
+
+    console.error("[GraphPage] /graph authority contract is missing required fields:", {
+      taskId: taskScopeId,
+      missingFields,
+    });
+  }, [graphContractIssue, graphData, taskScopeId]);
+
+  const weakRelations = useMemo(() => {
+    if (!graphData) return [];
+    return [...graphData.edges]
+      .sort((left, right) => {
+        const weightDiff = (left.weight ?? 1) - (right.weight ?? 1);
+        if (weightDiff !== 0) return weightDiff;
+        return (right.change_count ?? 0) - (left.change_count ?? 0);
+      })
+      .slice(0, 5)
+      .map((edge) => ({
+        ...edge,
+        ...getEdgeDisplayNames(edge, nodeNameMap),
+      }));
+  }, [graphData, nodeNameMap]);
+
+  const activeRelationCount = useMemo(
+    () => graphData?.edges.filter((edge) => edge.is_active !== false).length ?? 0,
+    [graphData]
+  );
+
+  const inactiveRelationCount = useMemo(
+    () => graphData?.edges.filter((edge) => edge.is_active === false).length ?? 0,
+    [graphData]
+  );
+
+  const qualityTone = useMemo(() => {
+    if (!graphQuality) {
+      return {
+        icon: ShieldCheck,
+        badgeVariant: "outline" as const,
+        badgeLabel: "待评估",
+        summary: "等待 authority 质量报告。",
+      };
+    }
+    if (graphQuality.conflict_count === 0 && graphQuality.low_confidence_count === 0) {
+      return {
+        icon: ShieldCheck,
+        badgeVariant: "success" as const,
+        badgeLabel: "稳定",
+        summary: "当前 authority 输出没有显著冲突，可直接支撑更高层分析。",
+      };
+    }
+    return {
+      icon: ShieldAlert,
+      badgeVariant: "destructive" as const,
+      badgeLabel: "需关注",
+      summary: "建议先处理冲突关系与低置信事件，再继续做诊断或聚合分析。",
+    };
+  }, [graphQuality]);
+
+  const timelineUrl = novelId && taskScopeId ? buildTimelineUrl(novelId, taskScopeId) : null;
+  const isLoading = graphQuery.isLoading;
+  const isError = graphQuery.isError;
+  const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
 
   const handleZoomIn = useCallback(() => {
     forceGraphRef.current?.zoomIn();
@@ -197,26 +568,666 @@ export function GraphPage() {
     setSearchQuery(query);
   }, []);
 
-  /* ---- 图谱交互回调 ---- */
-
   const handleNodeClick = useCallback((node: GraphNodeObject) => {
     setSelectedNode(node);
     setIsPanelOpen(true);
-  }, []);
-
-  const handlePanelClose = useCallback(() => {
-    setIsPanelOpen(false);
   }, []);
 
   const handleRetry = useCallback(() => {
     graphQuery.refetch();
   }, [graphQuery]);
 
-  const isLoading = graphQuery.isLoading;
-  const isError = graphQuery.isError;
-  const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
+  const handleLoadMoreEvents = useCallback(async () => {
+    if (!novelId || !taskScopeId || !eventsPageInfo?.next_cursor || isEventsLoading) {
+      return;
+    }
 
-  if (!currentTaskId) {
+    const requestTaskId = taskScopeId;
+    const requestCursor = eventsPageInfo.next_cursor;
+    const requestVersion = eventsRequestVersionRef.current + 1;
+    eventsRequestVersionRef.current = requestVersion;
+
+    setIsEventsLoading(true);
+    setEventsLoadError(null);
+    try {
+      const page = await getGraphEvents(novelId, taskScopeId, {
+        eventsCursor: requestCursor,
+        eventsLimit: eventsPageInfo.limit,
+      });
+      if (eventsRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
+        return;
+      }
+      setLoadedEvents((currentEvents) => mergeGraphEvents(currentEvents, page.events));
+      setEventsPageInfo(page.page_info);
+    } catch (error) {
+      if (eventsRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : "加载更多 relation events 失败";
+      setEventsLoadError(message);
+    } finally {
+      if (eventsRequestVersionRef.current === requestVersion && currentTaskScopeIdRef.current === requestTaskId) {
+        setIsEventsLoading(false);
+      }
+    }
+  }, [eventsPageInfo, isEventsLoading, novelId, taskScopeId]);
+
+  const handleGoTimeline = useCallback(() => {
+    if (timelineUrl) {
+      navigate(
+        buildTimelineSelectionUrl(timelineUrl, {
+          chunkId: selectedEvent?.chunk_id ?? initialSelectedChunk,
+          relationEventId: selectedEvent?.relation_event_id,
+        })
+      );
+    }
+  }, [initialSelectedChunk, navigate, selectedEvent, timelineUrl]);
+
+  const handleSelectEvent = useCallback((event: GraphEvent) => {
+    // 中文注释：深链只负责首轮自动定位；用户手动改选后，应以当前交互为准，
+    // 不能继续保留旧提示或在后续事件窗口刷新时强行拉回初始命中结果；
+    // 同时要把当前选择同步回 URL，避免页面状态和 deep-link 语义继续分叉。
+    setHasUserSelectedEvent(true);
+    setSelectedEventId(event.relation_event_id);
+    if (!novelId || !taskScopeId) {
+      return;
+    }
+    navigate(
+      buildGraphUrl(novelId, taskScopeId, {
+        chunkId: event.chunk_id,
+        relationEventId: event.relation_event_id,
+      }),
+      { replace: true }
+    );
+  }, [navigate, novelId, taskScopeId]);
+
+  const handleOpenTimelineChunk = useCallback(
+    (chunkId?: number, relationEventId?: number | null) => {
+      if (!timelineUrl || chunkId == null) return;
+      navigate(
+        buildTimelineSelectionUrl(timelineUrl, {
+          chunkId,
+          relationEventId,
+        })
+      );
+    },
+    [navigate, timelineUrl]
+  );
+
+  const handleScrollToGraph = useCallback(() => {
+    const graphSection = document.getElementById("graph-workspace");
+    graphSection?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const renderContractIssue = () => (
+    <motion.section
+      variants={pageSectionVariants}
+      initial="hidden"
+      animate="visible"
+      transition={{ duration: 0.28, delay: 0.05 }}
+    >
+      <Card variant="elevated" className="rounded-2xl border-chart-negative/30">
+        <CardContent className="flex flex-col gap-4 p-8">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-6 w-6 text-chart-negative" />
+            <div className="space-y-2">
+              <p className="text-base font-semibold text-text">/graph authority contract 不完整</p>
+              <p className="text-sm leading-6 text-text-muted">
+                当前任务返回了图数据，但缺少 `summary`、`quality` 或 `events_page`。图谱分析入口不会在前端补造
+                authority 语义，请先修复后端 contract 再继续使用该页面。
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" size="sm" onClick={handleRetry}>
+              <RefreshCw className="h-4 w-4" />
+              重新请求
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleGoTimeline} disabled={!timelineUrl}>
+              打开时间轴
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.section>
+  );
+
+  const renderLoadedContent = () => (
+    <>
+      <motion.section
+        variants={pageSectionVariants}
+        initial="hidden"
+        animate="visible"
+        transition={{ duration: 0.28, delay: 0.05 }}
+        className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+      >
+        <MetricCard
+          label="图谱实体"
+          value={graphSummary?.node_count ?? 0}
+          format="raw"
+          decimals={0}
+          icon={<Network className="h-5 w-5" />}
+          description="authority 当前稳定实体数"
+          accent="primary"
+        />
+        <MetricCard
+          label="确认关系"
+          value={graphSummary?.edge_count ?? 0}
+          format="raw"
+          decimals={0}
+          icon={<Link2 className="h-5 w-5" />}
+          description="当前确认后的关系边数"
+          accent="chart-2"
+        />
+        <MetricCard
+          label="网络密度"
+          value={graphSummary?.density ?? 0}
+          format="raw"
+          decimals={4}
+          icon={<Activity className="h-5 w-5" />}
+          description="关系连接紧密度"
+          accent="chart-4"
+        />
+        <MetricCard
+          label="历史事件"
+          value={totalEventCount}
+          format="raw"
+          decimals={0}
+          icon={<History className="h-5 w-5" />}
+          description={
+            totalEventCount > loadedEventCount
+              ? `已加载 ${loadedEventCount} / ${totalEventCount} 条 history`
+              : "relation events 历史条目"
+          }
+          accent="chart-5"
+        />
+      </motion.section>
+
+      <motion.section
+        variants={pageSectionVariants}
+        initial="hidden"
+        animate="visible"
+        transition={{ duration: 0.28, delay: 0.1 }}
+        className="grid gap-4 xl:grid-cols-3"
+      >
+        <Card variant="elevated" className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="h-4 w-4 text-primary" />
+              核心网络
+            </CardTitle>
+            <CardDescription>summary 里当前最值得先读的核心角色集合。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {graphSummary?.core_characters.map((name) => (
+                <Badge key={name} variant="secondary" className="px-3 py-1 text-sm">
+                  {name}
+                </Badge>
+              ))}
+            </div>
+            <div className="rounded-xl border border-border/70 bg-surface-hover/40 p-4 text-sm text-text-muted">
+              当前活跃关系 {activeRelationCount} 条
+              {inactiveRelationCount > 0 ? `，另有 ${inactiveRelationCount} 条关系处于非活跃状态。` : "。"}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card variant="elevated" className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="h-4 w-4 text-primary" />
+              关键关系
+            </CardTitle>
+            <CardDescription>按 summary.support_count 排序，优先看最能代表主干结构的关系。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {graphSummary?.key_relations.length ? (
+              graphSummary.key_relations.map((relation) => (
+                <div
+                  key={`${relation.from}-${relation.to}-${relation.type ?? "unknown"}`}
+                  className="rounded-xl border border-border/70 bg-surface-hover/40 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-text">
+                        {relation.from} · {relation.to}
+                      </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        {relation.type ?? "未标注关系类型"}
+                      </p>
+                    </div>
+                    <Badge variant="outline">支撑 {relation.support_count}</Badge>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-xl border border-dashed border-border p-4 text-sm text-text-muted">
+                暂无关键关系摘要。
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card variant="elevated" className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4 text-chart-negative" />
+              弱连接候选
+            </CardTitle>
+            <CardDescription>基于当前边权重和变化次数，优先暴露需要二次确认的边缘连接。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {weakRelations.length ? (
+              weakRelations.map((relation) => (
+                <div
+                  key={`${relation.source}-${relation.target}-${relation.relation_type ?? "unknown"}`}
+                  className="rounded-xl border border-border/70 bg-surface-hover/40 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-text">
+                        {relation.from} · {relation.to}
+                      </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        {relation.relation_type ?? "未标注关系"}
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-text-muted">
+                      <div>权重 {relation.weight ?? 1}</div>
+                      <div>变更 {relation.change_count ?? 0}</div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-xl border border-dashed border-border p-4 text-sm text-text-muted">
+                当前没有足够的边数据来识别弱连接。
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.section>
+
+      <motion.section
+        variants={pageSectionVariants}
+        initial="hidden"
+        animate="visible"
+        transition={{ duration: 0.28, delay: 0.15 }}
+      >
+        <Card variant="elevated" className="rounded-2xl">
+          <CardHeader className="gap-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <qualityTone.icon className="h-4 w-4 text-primary" />
+                  Authority 质量诊断
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  quality 只反映 authority 输出稳定性，不直接等于诊断页的高层结论。
+                </CardDescription>
+              </div>
+              <Badge variant={qualityTone.badgeVariant}>{qualityTone.badgeLabel}</Badge>
+            </div>
+            <p className="text-sm text-text-muted">{qualityTone.summary}</p>
+          </CardHeader>
+
+          <CardContent className="grid gap-4 xl:grid-cols-[280px,minmax(0,1fr),minmax(0,1fr)]">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+              <MetricCard
+                label="冲突关系"
+                value={graphQuality?.conflict_count ?? 0}
+                format="raw"
+                decimals={0}
+                icon={<ShieldAlert className="h-5 w-5" />}
+                description="同一实体对出现多个关系类型"
+                accent="chart-3"
+              />
+              <MetricCard
+                label="低置信事件"
+                value={graphQuality?.low_confidence_count ?? 0}
+                format="raw"
+                decimals={0}
+                icon={<AlertTriangle className="h-5 w-5" />}
+                description={`置信度低于 ${Math.round(LOW_CONFIDENCE_THRESHOLD * 100)}% 的历史变化`}
+                accent="chart-5"
+              />
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-surface-hover/35 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-text">冲突样本</h3>
+                <Badge variant="outline">{graphQuality?.conflicts.length ?? 0} 条样本</Badge>
+              </div>
+              <div className="space-y-3">
+                {graphQuality?.conflicts.length ? (
+                  graphQuality.conflicts.map((conflict) => (
+                    <div
+                      key={`${conflict.entity_names.join("-")}-${conflict.relation_types.join("-")}`}
+                      className="rounded-xl border border-border bg-surface p-4"
+                    >
+                      <p className="text-sm font-medium text-text">{conflict.entity_names.join(" · ")}</p>
+                      <p className="mt-1 text-xs leading-5 text-text-muted">
+                        关系类型: {conflict.relation_types.join(" / ")}
+                      </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        冲突关系数 {conflict.relation_count}，最近事件 ID: {conflict.latest_event_ids.join(", ") || "无"}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-surface p-4 text-center">
+                    <ShieldCheck className="h-8 w-8 text-chart-positive" />
+                    <p className="text-sm font-medium text-text">当前没有冲突关系</p>
+                    <p className="text-xs text-text-muted">实体对之间的关系类型保持一致。</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-surface-hover/35 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-text">低置信事件</h3>
+                <Badge variant="outline">{graphQuality?.low_confidence_samples.length ?? 0} 条样本</Badge>
+              </div>
+              <div className="space-y-3">
+                {graphQuality?.low_confidence_samples.length ? (
+                  graphQuality.low_confidence_samples.map((event) => (
+                    <div
+                      key={event.relation_event_id}
+                      className="rounded-xl border border-border bg-surface p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-text">
+                            第 {event.chunk_id} 段 · {event.from_name} → {event.to_name}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-text-muted">
+                            {event.relation_type ?? "未标注关系"} · {getChangeTypeLabel(event.change_type)}
+                          </p>
+                        </div>
+                        <Badge variant={getEventConfidenceVariant(event.confidence)}>
+                          {formatConfidence(event.confidence)}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-surface p-4 text-center">
+                    <ShieldCheck className="h-8 w-8 text-chart-positive" />
+                    <p className="text-sm font-medium text-text">没有低置信事件</p>
+                    <p className="text-xs text-text-muted">历史关系变化的可信度目前处于健康区间。</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.section>
+
+      <motion.section
+        variants={pageSectionVariants}
+        initial="hidden"
+        animate="visible"
+        transition={{ duration: 0.28, delay: 0.2 }}
+        className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr),380px]"
+      >
+        <Card id="graph-workspace" variant="elevated" className="rounded-2xl">
+          <CardHeader className="gap-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-base">关系工作区</CardTitle>
+                <CardDescription>
+                  关系图仍然保留，但它现在服务于 summary / quality / events 的分析流程。
+                </CardDescription>
+              </div>
+              <div className="overflow-x-auto pb-1">
+                <GraphToolbar
+                  onZoomIn={handleZoomIn}
+                  onZoomOut={handleZoomOut}
+                  onFitToScreen={handleFitToScreen}
+                  onCenter={handleCenter}
+                  relationTypes={relationTypes}
+                  selectedRelationTypes={selectedRelationTypes}
+                  onRelationTypeChange={handleRelationTypeChange}
+                  searchQuery={searchQuery}
+                  onSearchChange={handleSearchChange}
+                  className="w-max"
+                />
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <div className="rounded-xl border border-border/70 bg-surface-hover/35 px-4 py-3 text-sm text-text-muted">
+              先用上方 summary 和 quality 缩小问题范围，再在关系图里放大、筛选和定位具体节点。
+            </div>
+
+            <div className="relative min-h-[620px] overflow-hidden rounded-xl border border-border bg-surface lg:min-h-[720px]">
+              <ForceGraph
+                ref={forceGraphRef}
+                data={graphData!}
+                onNodeClick={handleNodeClick}
+                searchQuery={searchQuery}
+                relationFilter={selectedRelationTypes}
+                appearanceCountMap={appearanceCountMap}
+                className="absolute inset-0"
+              />
+
+              <div className="absolute bottom-4 left-4 z-10 hidden md:block">
+                <GraphLegend entityTypes={entityTypes} relationTypes={relationTypes} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+          <Card variant="elevated" className="rounded-2xl">
+            <CardHeader className="gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <History className="h-4 w-4 text-primary" />
+                    历史变化入口
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    events 侧栏直接承接 relation history，不再只靠时间轴页兜底。
+                    {hasMoreEvents ? " 当前只首屏加载样本，可继续增量展开更长历史。" : ""}
+                  </CardDescription>
+                </div>
+                <Badge variant="outline">
+                  {loadedEventCount < totalEventCount ? `${loadedEventCount} / ${totalEventCount}` : totalEventCount}
+                </Badge>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleGoTimeline} disabled={!timelineUrl}>
+                去时间轴联动查看
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              {graphSelectionHint ? (
+                <div className="rounded-xl border border-chart-negative/20 bg-chart-negative/5 p-3 text-xs leading-5 text-text-muted">
+                  {graphSelectionHint}
+                </div>
+              ) : null}
+              {sortedEvents.length ? (
+                <>
+                  <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                    {sortedEvents.map((event) => {
+                      const isSelected = activeSelectedEventId === event.relation_event_id;
+                      return (
+                        <button
+                          key={event.relation_event_id}
+                          type="button"
+                          onClick={() => handleSelectEvent(event)}
+                          className={cn(
+                            "w-full rounded-xl border p-4 text-left transition-colors",
+                            isSelected
+                              ? "border-primary/40 bg-primary/5"
+                              : "border-border bg-surface hover:bg-surface-hover"
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-text">
+                                第 {event.chunk_id} 段 · {event.from_name} → {event.to_name}
+                              </p>
+                              <p className="mt-1 text-xs leading-5 text-text-muted">
+                                {event.relation_type ?? "未标注关系"} · {getChangeTypeLabel(event.change_type)}
+                              </p>
+                            </div>
+                            <Badge variant={getEventConfidenceVariant(event.confidence)}>
+                              {formatConfidence(event.confidence)}
+                            </Badge>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {(hasMoreEvents || isEventsLoading || eventsLoadError) && (
+                    <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-xs leading-5 text-text-muted">
+                          {hasMoreEvents
+                            ? `已加载 ${loadedEventCount} 条，仍有 ${Math.max(totalEventCount - loadedEventCount, 0)} 条历史可继续查看。`
+                            : "历史样本已全部加载。"}
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleLoadMoreEvents}
+                          disabled={!hasMoreEvents || isEventsLoading}
+                        >
+                          {isEventsLoading ? "加载中..." : "加载更多"}
+                        </Button>
+                      </div>
+                      {eventsLoadError ? (
+                        <p className="mt-2 text-xs text-chart-negative">{eventsLoadError}</p>
+                      ) : null}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border p-4 text-sm text-text-muted">
+                  暂无 relation events 历史。
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {selectedNode?.entity_type === "character" &&
+          (selectedNode.first_seen_chunk != null || selectedNode.last_seen_chunk != null) ? (
+            <Card variant="elevated" className="rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-base">角色生命周期联动</CardTitle>
+                <CardDescription>从稳定 lifecycle chunk 直接跳到时间轴查看首次登场与最后活跃。</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
+                  当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
+                  {selectedNode.first_seen_chunk != null && selectedNode.last_seen_chunk != null
+                    ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chunk} 段到第 ${selectedNode.last_seen_chunk} 段。`
+                    : "，可继续跳到时间轴查看稳定生命周期节点。"}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenTimelineChunk(selectedNode.first_seen_chunk)}
+                    disabled={selectedNode.first_seen_chunk == null || !timelineUrl}
+                  >
+                    查看首次登场
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenTimelineChunk(selectedNode.last_seen_chunk)}
+                    disabled={selectedNode.last_seen_chunk == null || !timelineUrl}
+                  >
+                    查看最后活跃
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card variant="elevated" className="rounded-2xl">
+            <CardHeader>
+              <CardTitle className="text-base">事件详情</CardTitle>
+              <CardDescription>查看选中历史变化的证据、方向和质量信息。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {selectedEvent ? (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-text">
+                          第 {selectedEvent.chunk_id} 段 · {selectedEvent.from_name} → {selectedEvent.to_name}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-text-muted">
+                          {selectedEvent.relation_type ?? "未标注关系"} · {getChangeTypeLabel(selectedEvent.change_type)}
+                        </p>
+                      </div>
+                      <Badge variant={getEventConfidenceVariant(selectedEvent.confidence)}>
+                        {formatConfidence(selectedEvent.confidence)}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border bg-surface p-4">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">方向性</p>
+                      <p className="mt-2 text-sm font-medium text-text">{selectedEvent.directionality ?? "未声明"}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-surface p-4">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">事件 ID</p>
+                      <p className="mt-2 text-sm font-medium text-text">{selectedEvent.relation_event_id}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-surface p-4">
+                    <p className="text-xs uppercase tracking-wide text-text-muted">证据摘录</p>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-text">
+                      {selectedEvent.evidence?.trim() || "当前事件没有附带 evidence 文本。"}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-text-muted">
+                  选择一条历史事件后，这里会显示详细上下文。
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </motion.section>
+    </>
+  );
+
+  // 中文注释：GraphPage 也需要和 TimelinePage 一样先兜住路由缺参空态，
+  // 避免 novelId 缺失时继续渲染图谱分析入口，造成“页面存在但上下文不存在”的假象。
+  if (!novelId) {
+    return (
+      <PageContainer>
+        <div className="flex h-96 flex-col items-center justify-center gap-4">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-text">小说不存在</h3>
+            <p className="mt-1 text-sm text-text-muted">
+              当前图谱入口缺少小说上下文，请从小说列表重新进入。
+            </p>
+          </div>
+        </div>
+      </PageContainer>
+    );
+  }
+
+  if (!taskScopeId) {
     return (
       <PageContainer>
         <NovelHeader title={novelTitle} />
@@ -224,7 +1235,7 @@ export function GraphPage() {
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">请先选择分析任务</h3>
             <p className="mt-1 text-sm text-text-muted">
-              使用顶部任务选择器选择一个已完成的任务以查看人物关系图谱
+              使用顶部任务选择器选择一个已完成的任务以查看图谱分析入口
             </p>
           </div>
         </div>
@@ -236,85 +1247,138 @@ export function GraphPage() {
     <PageContainer className="flex flex-col">
       <NovelHeader title={novelTitle} />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="mt-4 flex flex-1 flex-col"
-      >
-        {/* 工具栏 */}
-        <div className="mb-4">
-          <GraphToolbar
-            onZoomIn={handleZoomIn}
-            onZoomOut={handleZoomOut}
-            onFitToScreen={handleFitToScreen}
-            onCenter={handleCenter}
-            relationTypes={relationTypes}
-            selectedRelationTypes={selectedRelationTypes}
-            onRelationTypeChange={handleRelationTypeChange}
-            searchQuery={searchQuery}
-            onSearchChange={handleSearchChange}
-          />
-        </div>
+      <div className="mt-4 space-y-6">
+        <motion.section
+          variants={pageSectionVariants}
+          initial="hidden"
+          animate="visible"
+          transition={{ duration: 0.28 }}
+        >
+          <Card
+            variant="elevated"
+            className="overflow-hidden rounded-2xl border-border bg-gradient-to-br from-surface via-surface to-primary/10"
+          >
+            <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl space-y-4">
+                <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Graph Product Surface · 第一轮迁移
+                </div>
 
-        {/* 图谱区域 */}
-        <div className="relative min-h-[620px] flex-1 overflow-hidden rounded-lg border border-border bg-surface lg:min-h-[720px]">
-          {isLoading ? (
-            <div className="flex h-full min-h-[500px] w-full items-center justify-center">
-              <div className="flex flex-col items-center gap-4">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <span className="text-sm text-text-muted">正在加载图谱数据...</span>
-              </div>
-            </div>
-          ) : isError ? (
-            <div className="flex h-full min-h-[500px] flex-col items-center justify-center gap-4">
-              <div className="text-center">
-                <p className="text-base text-text">加载图谱数据失败</p>
-                <p className="mt-1 text-sm text-text-muted">请检查网络连接后重试</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2">
-                <RefreshCw className="h-4 w-4" />
-                重试
-              </Button>
-            </div>
-          ) : isEmpty ? (
-            <div className="flex h-full min-h-[500px] flex-col items-center justify-center gap-4">
-              <div className="text-center">
-                <p className="text-base text-text">暂无图谱数据</p>
-                <p className="mt-1 text-sm text-text-muted">该任务尚未生成人物关系图谱</p>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* 使用封装的 ForceGraph 组件 */}
-              <ForceGraph
-                ref={forceGraphRef}
-                data={graphData!}
-                onNodeClick={handleNodeClick}
-                searchQuery={searchQuery}
-                relationFilter={selectedRelationTypes}
-                appearanceCountMap={appearanceCountMap}
-                className="absolute inset-0"
-              />
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-semibold tracking-tight text-text">
+                    先读图谱 summary，再检查 quality，最后沿着 events 进入历史变化
+                  </h2>
+                  <p className="max-w-2xl text-sm leading-6 text-text-muted">
+                    这页现在不只展示关系图，而是把 authority 层已经产出的 summary、quality 和 relation
+                    events 直接变成产品入口，帮助我们更快判断核心网络、风险点与关系演化路径。
+                  </p>
+                </div>
 
-              {/* 动态图例：根据实际数据生成 */}
-              <div className="absolute bottom-4 left-4 z-10">
-                <GraphLegend
-                  entityTypes={entityTypes}
-                  relationTypes={relationTypes}
-                />
+                {!isLoading && !isError && !isEmpty && graphSummary && (
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary">{graphSummary.node_count} 个实体</Badge>
+                    <Badge variant="secondary">{graphSummary.edge_count} 条关系</Badge>
+                    <Badge variant="outline">密度 {formatDensity(graphSummary.density)}</Badge>
+                    <Badge variant={qualityTone.badgeVariant}>{qualityTone.badgeLabel}</Badge>
+                  </div>
+                )}
               </div>
-            </>
-          )}
-        </div>
-      </motion.div>
 
-      {/* 节点详情面板 */}
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={handleGoTimeline} disabled={!timelineUrl}>
+                  查看历史时间轴
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleScrollToGraph}
+                  disabled={isLoading || isError || isEmpty}
+                >
+                  进入关系工作区
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.section>
+
+        {isLoading ? (
+          <motion.section
+            variants={pageSectionVariants}
+            initial="hidden"
+            animate="visible"
+            transition={{ duration: 0.28, delay: 0.05 }}
+          >
+            <Card variant="elevated" className="rounded-2xl">
+              <CardContent className="space-y-4 p-6">
+                <div className="flex items-center gap-3">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <div>
+                    <p className="text-sm font-medium text-text">正在加载图谱 authority 输出</p>
+                    <p className="text-sm text-text-muted">页面会按 summary → quality → events 的顺序展开。</p>
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="h-32 animate-pulse rounded-xl border border-border bg-surface-hover/60"
+                    />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.section>
+        ) : isError ? (
+          <motion.section
+            variants={pageSectionVariants}
+            initial="hidden"
+            animate="visible"
+            transition={{ duration: 0.28, delay: 0.05 }}
+          >
+            <Card variant="elevated" className="rounded-2xl">
+              <CardContent className="flex flex-col items-center gap-4 p-10 text-center">
+                <AlertTriangle className="h-10 w-10 text-chart-negative" />
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-text">图谱数据加载失败</p>
+                  <p className="text-sm text-text-muted">请检查后端服务或任务状态后重试。</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleRetry}>
+                  <RefreshCw className="h-4 w-4" />
+                  重试
+                </Button>
+              </CardContent>
+            </Card>
+          </motion.section>
+        ) : isEmpty ? (
+          <motion.section
+            variants={pageSectionVariants}
+            initial="hidden"
+            animate="visible"
+            transition={{ duration: 0.28, delay: 0.05 }}
+          >
+            <Card variant="elevated" className="rounded-2xl">
+              <CardContent className="flex flex-col items-center gap-4 p-10 text-center">
+                <Network className="h-10 w-10 text-text-muted" />
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-text">该任务尚未产生图谱 authority 输出</p>
+                  <p className="text-sm text-text-muted">完成图谱投影后，这里会自动显示 summary、quality 与事件历史。</p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.section>
+        ) : graphContractIssue ? (
+          renderContractIssue()
+        ) : (
+          renderLoadedContent()
+        )}
+      </div>
+
       <NodeDetailPanel
         node={selectedNode}
         relatedNodes={relatedNodes}
         isOpen={isPanelOpen}
-        onClose={handlePanelClose}
+        onClose={() => setIsPanelOpen(false)}
       />
     </PageContainer>
   );

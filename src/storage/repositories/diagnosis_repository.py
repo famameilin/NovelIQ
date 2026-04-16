@@ -25,13 +25,11 @@ from src.storage.models import (
     ChunkCurve,
     ChunkTopic,
     GraphEntity,
-    GraphRelationCurrent,
     GraphRelationEvent,
     StageSummary,
 )
 from src.storage.models.core import DisambigCheckpoint
 from src.storage.repositories.base import BaseRepository
-from src.storage.repositories.graph.repository import GraphRepository
 
 
 class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
@@ -367,100 +365,6 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
             if isinstance(alias, str) and isinstance(canonical, str) and alias != canonical
         }
         return [str(name) for name in (known_canonical_names or []) if isinstance(name, str)], alias_merges_dict
-
-    def fetch_graph_summary(self, run_id: str) -> dict[str, Any]:
-        graph_repo = GraphRepository(self.session)
-        node_count = (
-            self.session.execute(
-                select(func.count()).select_from(GraphEntity).where(GraphEntity.run_id == run_id)
-            ).scalar()
-            or 0
-        )
-        edge_count = (
-            self.session.execute(
-                select(func.count())
-                .select_from(GraphRelationCurrent)
-                .where(
-                    GraphRelationCurrent.run_id == run_id,
-                    GraphRelationCurrent.is_active.is_(True),
-                )
-            ).scalar()
-            or 0
-        )
-        core_characters_rows = self.session.execute(
-            select(GraphEntity.canonical_name)
-            .where(GraphEntity.run_id == run_id)
-            .order_by(GraphEntity.last_seen_chunk.desc().nullslast())
-            .limit(5)
-        ).fetchall()
-        recent_events = self.session.execute(
-            select(
-                GraphRelationEvent.chunk_id,
-                GraphRelationEvent.relation_type,
-                GraphRelationEvent.change_type,
-                GraphRelationEvent.evidence,
-            )
-            .where(GraphRelationEvent.run_id == run_id)
-            .order_by(GraphRelationEvent.chunk_id.desc(), GraphRelationEvent.relation_event_id.desc())
-            .limit(5)
-        ).fetchall()
-        key_relation_rows = self.session.execute(
-            select(
-                GraphRelationCurrent.current_type,
-                GraphRelationCurrent.support_count,
-                GraphRelationCurrent.from_entity_id,
-                GraphRelationCurrent.to_entity_id,
-            )
-            .where(
-                GraphRelationCurrent.run_id == run_id,
-                GraphRelationCurrent.is_active.is_(True),
-            )
-            .order_by(
-                GraphRelationCurrent.support_count.desc(), GraphRelationCurrent.last_seen_chunk.desc().nullslast()
-            )
-            .limit(5)
-        ).fetchall()
-        entity_name_map = {
-            row.entity_id: row.canonical_name
-            for row in self.session.execute(
-                select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
-            ).fetchall()
-        }
-        low_confidence_events = graph_repo.fetch_low_confidence_relation_events(run_id, threshold=0.6, limit=20)
-        relation_conflicts = graph_repo.detect_relation_conflicts(run_id, active_only=True)
-        density = 0.0
-        if node_count > 1:
-            density = float(edge_count) / float(node_count * (node_count - 1))
-        return {
-            "node_count": int(node_count),
-            "edge_count": int(edge_count),
-            "density": round(density, 4),
-            "core_characters": [row[0] for row in core_characters_rows],
-            "key_relations": [
-                {
-                    "from": entity_name_map.get(row[2], str(row[2])),
-                    "to": entity_name_map.get(row[3], str(row[3])),
-                    "type": row[0],
-                    "support_count": int(row[1] or 0),
-                }
-                for row in key_relation_rows
-            ],
-            "recent_events": [
-                {
-                    "chunk_id": row[0],
-                    "type": row[1],
-                    "change": row[2],
-                    "evidence": row[3],
-                }
-                for row in recent_events
-            ],
-            "quality": {
-                "conflict_count": len(relation_conflicts),
-                "low_confidence_count": len(low_confidence_events),
-                "conflicts": relation_conflicts[:5],
-                "low_confidence_samples": low_confidence_events[:5],
-            },
-        }
 
     def fetch_stage_summaries(self, run_id: str) -> list[dict[str, Any]]:
         """
