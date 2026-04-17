@@ -379,7 +379,6 @@ async def _process_single_chunk(
         chunk_id,
         idx,
         incremental_interval,
-        disambig_provider=phase_result.rag_retriever,
     )
 
     return state
@@ -543,7 +542,6 @@ async def _run_disambiguation_phase(
         phase_result.alias_keywords,
         novel_id,
         run_id=run_id,
-        disambig_provider=phase_result.rag_retriever,
     )
 
     return state
