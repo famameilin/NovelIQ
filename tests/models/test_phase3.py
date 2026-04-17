@@ -18,7 +18,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -28,6 +28,7 @@ from src.models.local.annotation.phase3 import (
     extract_dialogues_from_text,
 )
 from src.models.local.schema import DialogueRecord, QuoteCandidate
+from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 
 class TestExtractDialoguesFromText(unittest.TestCase):
@@ -185,6 +186,102 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].speaker, ["侯飞白"])
+
+
+def _build_phase3_bundle() -> EvidenceBundle:
+    return EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="alias_mapping",
+                source="level1",
+                content="灰衣人 -> 白芷",
+                metadata={"alias": "灰衣人", "canonical": "白芷"},
+            ),
+            EvidenceItem(
+                evidence_type="canonical_entity",
+                source="level1",
+                content="白芷",
+                metadata={"name": "白芷", "entity_type": "character"},
+            ),
+        ],
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="白芷",
+                metadata={
+                    "name": "白芷",
+                    "role": "speaker_candidate",
+                    "recent_action": "按住剑柄",
+                    "recent_emotion": "警惕",
+                    "last_seen_chunk": 12,
+                },
+            ),
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content="「灰衣人」可能是：白芷",
+            ),
+        ],
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="灰衣人忽然压低声音。",
+                metadata={
+                    "chunk_id": 5,
+                    "similarity": 0.91,
+                    "text": "灰衣人忽然压低声音。",
+                },
+            )
+        ],
+        requested_names=["灰衣人"],
+    )
+
+
+class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
+    async def test_attribute_dialogues_with_llm_appends_shared_evidence_blocks(self) -> None:
+        bundle = _build_phase3_bundle()
+
+        with patch("src.models.local.annotation.phase3.settings") as mock_settings:
+            mock_settings.prompts.phase3.system = "system"
+            mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+            mock_settings.thinking.phase3_candidates_per_batch = 8
+
+            mock_annotation_client = MagicMock()
+            mock_annotation_client._config.model = "test-model"
+            mock_annotation_client._config.thinking_enabled = False
+            mock_annotation_client._is_cloud_api.return_value = False
+            mock_response = MagicMock(dialogues=[], model_dump=MagicMock(return_value={}))
+            mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
+
+            await attribute_dialogues_with_llm(
+                mock_annotation_client,
+                "“你终于来了。”",
+                [QuoteCandidate(index=1, content="你终于来了。")],
+                known_characters=["白芷"],
+                evidence_bundle=bundle,
+            )
+
+        user_prompt = mock_annotation_client._call_annotation_api.await_args.kwargs["messages"][-1]["content"]
+        self.assertIn("【近期活跃角色】", user_prompt)
+        self.assertIn("<Narrative_Evidence_Level1>", user_prompt)
+        self.assertIn("<Disambig_Candidates>", user_prompt)
+        self.assertIn("<Vector_Evidence>", user_prompt)
+
+    @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
+    async def test_compute_dialogue_lengths_passes_evidence_bundle_to_phase3(self, mock_attribute: MagicMock) -> None:
+        bundle = _build_phase3_bundle()
+        mock_attribute.return_value = []
+
+        mock_client = MagicMock()
+        await compute_dialogue_lengths_with_llm(
+            mock_client,
+            "“你好”他说道。",
+            evidence_bundle=bundle,
+        )
+
+        self.assertIs(mock_attribute.await_args.kwargs["evidence_bundle"], bundle)
 
 
 class TestComputeDialogueLengthsWithLLM(unittest.TestCase):

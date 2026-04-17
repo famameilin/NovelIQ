@@ -46,11 +46,13 @@ from src.config import settings
 from src.config.constants import PHASE3_MAX_RETRIES
 from src.models.interactions import record_model_interaction
 from src.models.local.annotation.context import DialogueAttributionError
+from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import DialogueAttributionResult, DialogueRecord, DialogueRecordSchema, QuoteCandidate
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+    from src.rag.evidence_types import EvidenceBundle
 
 
 @dataclass
@@ -139,6 +141,7 @@ async def attribute_dialogues_with_llm(
     candidates: list[QuoteCandidate],
     known_characters: list[str] | None = None,
     alias_map: dict[str, str] | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
 ) -> list[DialogueRecord]:
@@ -165,6 +168,7 @@ async def attribute_dialogues_with_llm(
     is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
     batch_size = settings.thinking.phase3_candidates_per_batch
+    evidence_sections = _build_phase3_evidence_sections(evidence_bundle)
 
     async def _execute_single_batch(
         current_client: AnnotationClient,
@@ -183,6 +187,10 @@ async def attribute_dialogues_with_llm(
             dialogue_list=dialogue_list,
             known_characters=known_chars,
         )
+        if evidence_sections:
+            # 中文注释：Phase3 只消费上游已经准备好的共享 evidence blocks，
+            # 不在对话归属阶段重新发起取证，避免 Phase3 再次长成独立上下文体系。
+            user_prompt += "\n\n" + "\n\n".join(evidence_sections)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -371,10 +379,24 @@ def _post_process_validation(
     return valid_records
 
 
+def _build_phase3_evidence_sections(evidence_bundle: EvidenceBundle | None) -> list[str]:
+    if evidence_bundle is None:
+        return []
+
+    blocks = render_annotation_prompt_blocks(evidence_bundle)
+    sections: list[str] = []
+    if blocks.active_entities:
+        sections.append(blocks.active_entities)
+    if blocks.disambig_context:
+        sections.append(blocks.disambig_context)
+    return sections
+
+
 async def compute_dialogue_lengths_with_llm(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
     known_characters: list[str] | None = None,
@@ -417,6 +439,7 @@ async def compute_dialogue_lengths_with_llm(
         candidates,
         known_characters=known_characters,
         alias_map=alias_map,
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
     )
