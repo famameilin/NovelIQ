@@ -39,6 +39,7 @@ from src.config.analysis_logger import AnalysisLogger
 from src.models.diagnosis import DiagnosisClient
 from src.models.disambiguation import DisambiguationClient
 from src.models.disambiguation_types import NameCountCandidate
+from src.models.local.disambiguation import DisambiguationPromptContext
 
 from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
 from .schema import CloudAnalysis
@@ -95,13 +96,13 @@ class ConfiguredCloudModelClient(CloudModelClient):
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context: DisambiguationPromptContext | None = None,
     ) -> dict[str, str]:
         result = await self._disambiguation_client.disambiguate_characters(
             candidates=candidates,
             context_sentences=context_sentences,
             existing_names=existing_names,
-            rag_hint=rag_hint,
+            prompt_context=prompt_context,
         )
         return result.canonical_decisions
 

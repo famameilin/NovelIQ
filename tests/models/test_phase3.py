@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.models.local.annotation.evidence_renderer import render_dialogue_attribution_evidence_sections
 from src.models.local.annotation.phase3 import (
     attribute_dialogues_with_llm,
     compute_dialogue_lengths_with_llm,
@@ -286,12 +287,15 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIs(mock_attribute.await_args.kwargs["evidence_bundle"], bundle)
 
 
-class TestBuildPhase3EvidenceSections(unittest.TestCase):
-    """测试 _build_phase3_evidence_sections 的 alias_map 和 active_entities 逻辑"""
+class TestRenderDialogueAttributionEvidenceSections(unittest.TestCase):
+    """测试 Phase3 renderer 的 alias_map 和 active_entities 逻辑"""
 
     def _call(self, bundle=None, alias_map=None, active_entities=None):
-        from src.models.local.annotation.phase3 import _build_phase3_evidence_sections
-        return _build_phase3_evidence_sections(bundle, alias_map, active_entities)
+        return render_dialogue_attribution_evidence_sections(
+            bundle,
+            alias_map=alias_map,
+            active_entities=active_entities,
+        )
 
     def test_both_none_returns_empty(self) -> None:
         """evidence_bundle=None 且 active_entities=None 时返回 []"""

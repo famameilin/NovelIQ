@@ -89,7 +89,7 @@ class TestCloudStub(unittest.TestCase):
             candidates=_candidates("zhangsan", "alias_a"),
             context_sentences={"alias_a": "alias_a smiled"},
             existing_names=["zhangsan"],
-            rag_hint=None,
+            prompt_context=None,
         )
 
 
