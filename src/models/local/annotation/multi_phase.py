@@ -51,6 +51,7 @@ from .phase4 import annotate_chunk_phase4
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
+    from src.rag.evidence_types import EvidenceBundle
 
 
 @dataclass
@@ -99,7 +100,7 @@ async def _run_phase1(
     position_pct: float | None,
     chapter_id: int | None,
     active_entities: str | None,
-    evidence_bundle,
+    evidence_bundle: EvidenceBundle | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
     disambig_context: str | None = None,
@@ -142,7 +143,7 @@ async def _run_phase2(
     main_characters: str | None,
     position_pct: float | None,
     chapter_id: int | None,
-    evidence_bundle,
+    evidence_bundle: EvidenceBundle | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
 ) -> ForeshadowingResult | None:
@@ -179,7 +180,7 @@ async def _run_phase3_if_needed(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None,
-    evidence_bundle,
+    evidence_bundle: EvidenceBundle | None,
     chunk_id: int | None,
     run_id: str | None,
     known_characters: list[str] | None,
@@ -322,7 +323,7 @@ async def annotate_chunk_multi_phase(
     global_context: str | None = None,
     prev_chunk_text: str | None = None,
     active_entities: str | None = None,
-    evidence_bundle=None,
+    evidence_bundle: EvidenceBundle | None = None,
     disambig_context: str | None = None,
     next_chunk_text: str | None = None,
     novel_title: str | None = None,
@@ -402,7 +403,7 @@ async def annotate_chunk_parallel(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    evidence_bundle=None,
+    evidence_bundle: EvidenceBundle | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
@@ -543,7 +544,7 @@ async def annotate_chunk_serial(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
-    evidence_bundle=None,
+    evidence_bundle: EvidenceBundle | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     rag_retriever: Any | None = None,
