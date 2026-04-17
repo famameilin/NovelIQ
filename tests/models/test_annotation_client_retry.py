@@ -491,6 +491,92 @@ class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result.annotation, ChunkAnnotation)
         self.assertIs(mock_phase2.await_args.kwargs["evidence_bundle"], evidence_bundle)
 
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_serial_passes_evidence_bundle_to_phase3(self, mock_settings):
+        """串行模式也会把上游 evidence_bundle 继续透传给 Phase3。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = False
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+        phase3_result = MagicMock(
+            speaker_lengths={},
+            canonical_attribution={},
+            dialogues=[],
+            dialogue_tones={},
+            dialogue_identity_clues={},
+        )
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.compute_dialogue_lengths_with_llm",
+                new=AsyncMock(return_value=phase3_result),
+            ) as mock_phase3,
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="他说：“你好。”",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase3.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_parallel_passes_evidence_bundle_to_phase3(self, mock_settings):
+        """并行模式也会把上游 evidence_bundle 继续透传给 Phase3。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = True
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+        phase3_result = MagicMock(
+            speaker_lengths={},
+            canonical_attribution={},
+            dialogues=[],
+            dialogue_tones={},
+            dialogue_identity_clues={},
+        )
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.compute_dialogue_lengths_with_llm",
+                new=AsyncMock(return_value=phase3_result),
+            ) as mock_phase3,
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="他说：“你好。”",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase3.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
 
 if __name__ == "__main__":
     unittest.main()
