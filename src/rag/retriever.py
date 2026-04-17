@@ -27,6 +27,11 @@
 修改内容: 删除 retrieve/retrieve_with_level3 废弃接口和 DisambigResult，
     将 build_graph_feedback_hint 迁移至 disambiguation renderer
 
+修改时间: 2026-04-17
+修改者: Codex
+任务: split-provider-renderer-tail
+修改内容: 删除 provider 内残留的 Level3 prompt 格式化逻辑，彻底收回为纯取证层
+
 说明: 本模块提供证据收集功能（Provider 层），支持三级证据：
 - Level1: 别名表精确匹配
 - Level2: 活跃实体候选
@@ -251,41 +256,6 @@ class Level3VectorEvidence:
             logger.error(f"Level3VectorEvidence: search failed: {e}")
             return []
 
-    def format_evidence_for_prompt(
-        self,
-        results: list[dict],
-        max_chunks: int = 3,
-        max_text_len: int = 200,
-    ) -> str:
-        """
-        将检索结果格式化为 prompt 证据
-
-        Args:
-            results: 检索结果列表
-            max_chunks: 最大展示 chunk 数
-            max_text_len: 每个 chunk 文本的最大长度
-
-        Returns:
-            格式化的证据字符串
-        """
-        if not results:
-            return ""
-
-        evidence_parts = []
-        for r in results[:max_chunks]:
-            text = r.get("text", "")
-            similarity = r.get("similarity", 0.0)
-            chunk_id = r.get("chunk_id", 0)
-            text_preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
-            evidence_parts.append(f"[Chunk {chunk_id}] (相似度: {similarity:.2f})\n{text_preview}")
-
-        return (
-            "<Vector_Evidence>\n"
-            "以下是与当前上下文语义相似的历史片段，可能存在身份关联：\n"
-            + "\n\n".join(evidence_parts)
-            + "\n</Vector_Evidence>"
-        )
-
 
 class DisambigContextProvider:
     """证据收集提供器（Provider 层）
@@ -295,7 +265,7 @@ class DisambigContextProvider:
     - Level2: 近期活跃实体
     - Level3: 向量语义相似 chunk
 
-    图谱反馈（build_graph_feedback_hint）已迁移至 disambiguation renderer 层。
+    prompt block 的文本渲染已迁移至 renderer 层。
     """
 
     def __init__(
@@ -328,10 +298,8 @@ class DisambigContextProvider:
         )
 
         self._graph_repo = graph_repo
-        self._novel_id = novel_id
         self._run_id = run_id
         self._lookback_chunks = lookback_chunks
-        self._relations_cache: list[dict] | None = None
         self._authority_snapshot_cache: Level1AuthoritySnapshot | None = None
         self._authority_provider = (
             Level1AuthorityProvider(graph_repo) if graph_repo is not None and run_id is not None else None
@@ -353,7 +321,6 @@ class DisambigContextProvider:
     def invalidate_cache(self) -> None:
         """别名映射和关系缓存失效（每个 chunk 处理后调用，因为 projection 可能更新了别名表）"""
         self._alias_lookup.invalidate_cache()
-        self._relations_cache = None
         self._authority_snapshot_cache = None
 
     def _get_authority_snapshot(self) -> Level1AuthoritySnapshot:
@@ -542,4 +509,3 @@ class DisambigContextProvider:
     async def ensure_level3_ready(self) -> None:
         if self._level3_enabled:
             await self._level3.ensure_level3_ready()
-

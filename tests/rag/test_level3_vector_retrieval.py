@@ -9,8 +9,10 @@
 - 向量存储与检索功能
 - Level3VectorEvidence 可用性检查
 - DisambigContextProvider Level 3 集成
+- 共享 evidence renderer 边界回归
 """
 
+import inspect
 import sys
 import unittest
 from pathlib import Path
@@ -20,6 +22,8 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.models.local.evidence_renderer_shared import render_disambig_candidates, render_vector_evidence
+from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.rag.retriever import DisambigContextProvider, Level3NotReadyError, Level3VectorEvidence
 
 
@@ -72,37 +76,6 @@ class TestLevel3VectorEvidence(unittest.TestCase):
             embedding_client=mock_client,
         )
         self.assertTrue(level3.is_available())
-
-    def test_format_evidence_for_prompt_empty(self) -> None:
-        """空结果返回空字符串"""
-        level3 = Level3VectorEvidence()
-        result = level3.format_evidence_for_prompt([])
-        self.assertEqual(result, "")
-
-    def test_format_evidence_for_prompt_success(self) -> None:
-        """正确格式化检索结果"""
-        level3 = Level3VectorEvidence()
-        results = [
-            {"chunk_id": 1, "text": "测试文本1", "similarity": 0.95},
-            {"chunk_id": 2, "text": "测试文本2", "similarity": 0.85},
-        ]
-        result = level3.format_evidence_for_prompt(results)
-        self.assertIn("<Vector_Evidence>", result)
-        self.assertIn("[Chunk 1]", result)
-        self.assertIn("[Chunk 2]", result)
-        self.assertIn("0.95", result)
-        self.assertIn("0.85", result)
-
-    def test_format_evidence_truncates_long_text(self) -> None:
-        """长文本被截断"""
-        level3 = Level3VectorEvidence()
-        long_text = "测试" * 200
-        results = [
-            {"chunk_id": 1, "text": long_text, "similarity": 0.95},
-        ]
-        result = level3.format_evidence_for_prompt(results, max_text_len=100)
-        self.assertIn("...", result)
-
 
 class TestLevel3VectorEvidenceAsync:
     """Level3VectorEvidence 异步测试"""
@@ -302,7 +275,71 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             ],
             ["白芷", "侯飞白"],
         )
-        self.assertIsNone(bundle.render_disambig_candidates())
+        self.assertIsNone(render_disambig_candidates(bundle))
+
+
+class TestSharedEvidenceRenderer(unittest.TestCase):
+    def test_render_vector_evidence_empty_bundle_returns_none(self) -> None:
+        rendered = render_vector_evidence(EvidenceBundle())
+        self.assertIsNone(rendered)
+
+    def test_render_vector_evidence_formats_bundle_semantic_rows(self) -> None:
+        bundle = EvidenceBundle(
+            semantic_evidence=[
+                EvidenceItem(
+                    evidence_type="semantic_recall",
+                    source="chunk_embeddings",
+                    content="测试文本1",
+                    metadata={"chunk_id": 1, "text": "测试文本1", "similarity": 0.95},
+                ),
+                EvidenceItem(
+                    evidence_type="semantic_recall",
+                    source="chunk_embeddings",
+                    content="测试文本2",
+                    metadata={"chunk_id": 2, "text": "测试文本2", "similarity": 0.85},
+                ),
+            ]
+        )
+
+        rendered = render_vector_evidence(bundle)
+
+        self.assertIsNotNone(rendered)
+        assert rendered is not None
+        self.assertIn("<Vector_Evidence>", rendered)
+        self.assertIn("[Chunk 1]", rendered)
+        self.assertIn("[Chunk 2]", rendered)
+        self.assertIn("0.95", rendered)
+        self.assertIn("0.85", rendered)
+
+    def test_render_vector_evidence_truncates_long_text(self) -> None:
+        long_text = "测试" * 200
+        bundle = EvidenceBundle(
+            semantic_evidence=[
+                EvidenceItem(
+                    evidence_type="semantic_recall",
+                    source="chunk_embeddings",
+                    content=long_text,
+                    metadata={"chunk_id": 1, "text": long_text, "similarity": 0.95},
+                ),
+            ]
+        )
+
+        rendered = render_vector_evidence(bundle, max_text_len=100)
+
+        self.assertIsNotNone(rendered)
+        assert rendered is not None
+        self.assertIn("...", rendered)
+
+    def test_provider_and_bundle_no_longer_expose_renderer_methods(self) -> None:
+        self.assertFalse(hasattr(EvidenceBundle, "render_disambig_candidates"))
+        self.assertFalse(hasattr(EvidenceBundle, "render_vector_evidence"))
+        self.assertFalse(hasattr(Level3VectorEvidence, "format_evidence_for_prompt"))
+
+        provider_source = inspect.getsource(DisambigContextProvider)
+        level3_source = inspect.getsource(Level3VectorEvidence)
+        self.assertNotIn("<Disambig_Candidates>", provider_source)
+        self.assertNotIn("<Vector_Evidence>", provider_source)
+        self.assertNotIn("<Vector_Evidence>", level3_source)
 
 
 if __name__ == "__main__":
