@@ -29,7 +29,7 @@ from src.models.local.disambiguation import DisambiguationState
 
 if TYPE_CHECKING:
     from src.models.local.annotation import MultiPhaseAnnotationResult
-    from src.rag import DisambigContextProvider
+    from src.rag import DisambigContextProvider, EvidenceBundle
 
 
 @dataclass
@@ -379,6 +379,7 @@ async def _process_single_chunk(
         chunk_id,
         idx,
         incremental_interval,
+        rag_retriever=phase_result.rag_retriever,
     )
 
     return state
@@ -452,7 +453,10 @@ async def _process_chunks_phase(
                 current=already_annotated,
                 total=total_chunks,
                 sub_percent=(already_annotated / total_chunks) * 100 if total_chunks > 0 else 0.0,
-                message=f"共 {total_chunks} 个 chunk，{already_annotated} 个已标注，剩余 {total_chunks - already_annotated} 个待标注",
+                message=(
+                    f"共 {total_chunks} 个 chunk，{already_annotated} 个已标注，"
+                    f"剩余 {total_chunks - already_annotated} 个待标注"
+                ),
             )
         )
 
@@ -542,6 +546,7 @@ async def _run_disambiguation_phase(
         phase_result.alias_keywords,
         novel_id,
         run_id=run_id,
+        rag_retriever=phase_result.rag_retriever,
     )
 
     return state
