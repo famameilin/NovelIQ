@@ -42,6 +42,7 @@ from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.base import BaseModelClient
+from src.models.local.disambiguation import DisambiguationPromptContext
 
 from .schema import CloudAnalysis
 
@@ -59,7 +60,7 @@ class CloudModelClient:
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context: DisambiguationPromptContext | None = None,
     ) -> dict[str, str]:
         raise NotImplementedError
 
@@ -75,7 +76,7 @@ class NullCloudModelClient(CloudModelClient):
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context: DisambiguationPromptContext | None = None,
     ) -> dict[str, str]:
         return {candidate["name"]: candidate["name"] for candidate in candidates}
 

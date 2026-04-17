@@ -5,7 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
-from src.models.local.disambiguation import ExtendedDisambigResult, build_evidence_profile
+from src.models.local.disambiguation import (
+    DisambiguationPromptContext,
+    ExtendedDisambigResult,
+    build_evidence_profile,
+)
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 
 
@@ -17,9 +21,17 @@ class _FakeDisambigClient:
     def __init__(self) -> None:
         self._config = SimpleNamespace(model="test-model")
         self.received_existing_names: list[str] | None = None
+        self.received_prompt_context: DisambiguationPromptContext | None = None
 
-    async def disambiguate_characters(self, candidates, context_sentences=None, existing_names=None, rag_hint=None):
+    async def disambiguate_characters(
+        self,
+        candidates,
+        context_sentences=None,
+        existing_names=None,
+        prompt_context=None,
+    ):
         self.received_existing_names = existing_names
+        self.received_prompt_context = prompt_context
         return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 
     def is_cloud_api(self) -> bool:
@@ -38,10 +50,12 @@ async def test_retry_disambig_passes_existing_names_to_client() -> None:
             existing_names=["bai_zhi", "hou_fei_bai"],
             stage_name="incremental disambiguation",
             run_id="run-1",
-            rag_hint="anchor hint",
+            prompt_context=DisambiguationPromptContext(existing_character_hint="anchor hint"),
         )
 
     assert client.received_existing_names == ["bai_zhi", "hou_fei_bai"]
+    assert client.received_prompt_context is not None
+    assert client.received_prompt_context.existing_character_hint == "anchor hint"
 
 
 def test_validate_confidence_with_evidence_promotes_unique_marker_merge() -> None:
@@ -120,7 +134,7 @@ async def test_record_model_interaction_with_disambiguation() -> None:
             existing_names=["bai_zhi"],
             stage_name="final disambiguation",
             run_id="run-1",
-            rag_hint="anchor hint",
+            prompt_context=DisambiguationPromptContext(existing_character_hint="anchor hint"),
         )
 
     mock_record.assert_called_once()
