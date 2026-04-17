@@ -174,6 +174,7 @@ async def _run_phase3_if_needed(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None,
+    evidence_bundle,
     chunk_id: int | None,
     run_id: str | None,
     known_characters: list[str] | None,
@@ -205,6 +206,9 @@ async def _run_phase3_if_needed(
         client=client,
         text=text,
         alias_map=alias_map,
+        # 中文注释：Phase3 和 Phase2 一样只复用上游同一份 evidence_bundle，
+        # 保持多阶段标注共享同一组 Level1/2/3 证据，而不是各阶段各自拼上下文。
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
         known_characters=known_characters,
@@ -471,6 +475,7 @@ async def annotate_chunk_parallel(
             client=client,
             text=text,
             alias_map=alias_map,
+            evidence_bundle=evidence_bundle,
             chunk_id=chunk_id,
             run_id=run_id,
             known_characters=known_characters,
@@ -607,6 +612,7 @@ async def annotate_chunk_serial(
         client=client,
         text=text,
         alias_map=alias_map,
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
         known_characters=known_characters,
