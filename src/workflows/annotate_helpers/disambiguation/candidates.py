@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from loguru import logger
 
@@ -23,9 +23,6 @@ from .state_logic import (
     DISAMBIG_CONFIDENCE_HIGH,
     DISAMBIG_STATE_RESOLVED,
 )
-
-if TYPE_CHECKING:
-    from src.rag import DisambigContextProvider
 
 EXTENSION_REVIEW_MIN_GAP = 3
 EXTENSION_REVIEW_MIN_RATIO = 1.5
@@ -166,17 +163,11 @@ def _collect_final_disambiguation_candidates(
 
 def _augment_hint_with_graph(
     hint: str | None,
-    disambig_provider: DisambigContextProvider,
+    alias_map: dict[str, str],
+    relations: list[dict],
     existing_names: list[str],
 ) -> str | None:
     """将图谱权威数据（别名、关系）追加到 rag_hint。
-
-    这形成了从图谱表回到消歧的反馈循环，
-    让 LLM 能看到已解析的别名映射和已确认的关系。
-
-    通过 DisambigContextProvider.build_disambiguation_hint() 公共接口获取数据，
-    保持 graph authority 的独立消费契约，
-    不把这条反馈链路绑定到 annotation/disambiguation 共用的 EvidenceBundle snapshot 上。
 
     创建时间: 2026-03-27
     创建者: TraeAI
@@ -185,10 +176,12 @@ def _augment_hint_with_graph(
     修改时间: 2026-04-17
     修改者: TraeAI
     任务: refactor/split-provider-bundle-renderer
-    修改内容: 改用 DisambigContextProvider.build_disambiguation_hint() 公共接口，
-              消除 getattr 私有属性访问
+    修改内容: 改用 render_disambiguation_graph_hint() renderer 函数，
+              消除对 DisambigContextProvider 的直接依赖，符合 provider/renderer 职责分离原则。
     """
-    graph_hint = disambig_provider.build_disambiguation_hint(existing_names)
+    from src.models.local.disambiguation.evidence_renderer import render_disambiguation_graph_hint
+
+    graph_hint = render_disambiguation_graph_hint(alias_map, relations, existing_names)
 
     if graph_hint is None:
         return hint
@@ -204,7 +197,8 @@ def _build_existing_character_hint_from_db(
     existing_names: list[str],
     alias_keywords: list[str],
     run_id: str,
-    disambig_provider: DisambigContextProvider | None = None,
+    alias_map: dict[str, str],
+    relations: list[dict],
 ) -> str | None:
     existing_payload = _build_candidate_payload_by_names(all_names, existing_names)
     if not existing_payload:
@@ -213,9 +207,7 @@ def _build_existing_character_hint_from_db(
     existing_context_sentences = build_context_sentences(conn, existing_payload, alias_keywords, run_id=run_id)
     hint = build_existing_character_hint(existing_names, existing_context_sentences)
 
-    # Augment with graph authority data
-    if disambig_provider is not None:
-        hint = _augment_hint_with_graph(hint, disambig_provider, existing_names)
+    hint = _augment_hint_with_graph(hint, alias_map, relations, existing_names)
 
     return hint
 

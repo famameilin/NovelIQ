@@ -128,19 +128,3 @@ class EvidenceBundle:
             + "\n\n".join(vector_parts)
             + "\n</Vector_Evidence>"
         )
-
-    def to_prompt_blocks(self) -> dict[str, str]:
-        structured_lines = [item.content for item in self.structured_evidence if item.content]
-        structured_evidence = (
-            "<Structured_Evidence>\n" + "\n".join(structured_lines) + "\n</Structured_Evidence>"
-            if structured_lines
-            else ""
-        )
-        disambig_candidates = self.render_disambig_candidates() or ""
-        vector_evidence = self.render_vector_evidence() or ""
-
-        return {
-            "structured_evidence": structured_evidence,
-            "disambig_candidates": disambig_candidates,
-            "vector_evidence": vector_evidence,
-        }
