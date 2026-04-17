@@ -30,6 +30,7 @@ from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.base import BaseModelClient, TokenUsageCallback
 
 from .local.disambiguation import (
+    DisambiguationPromptContext,
     ExtendedDisambigResult,
     build_anonymous_disambig_messages,
     build_disambiguate_messages,
@@ -77,7 +78,7 @@ class DisambiguationClient(BaseModelClient):
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context: DisambiguationPromptContext | None = None,
     ) -> ExtendedDisambigResult:
         if not candidates:
             return ExtendedDisambigResult(
@@ -96,7 +97,12 @@ class DisambiguationClient(BaseModelClient):
             self._config.model,
             self._config.thinking_enabled,
         )
-        messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
+        messages = build_disambiguate_messages(
+            candidates,
+            context_sentences,
+            existing_names,
+            prompt_context=prompt_context,
+        )
         try:
             response = await call_disambiguate_api(
                 client=self,

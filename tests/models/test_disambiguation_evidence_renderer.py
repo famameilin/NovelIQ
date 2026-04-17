@@ -133,3 +133,43 @@ def test_render_disambiguation_graph_hint_returns_none_when_no_relevant_facts() 
     assert rendered is None
 
 
+def test_render_disambiguation_prompt_context_sections_keeps_fixed_order() -> None:
+    from src.models.local.disambiguation.evidence_renderer import (
+        DisambiguationPromptContext,
+        render_disambiguation_prompt_context_sections,
+    )
+
+    sections = render_disambiguation_prompt_context_sections(
+        DisambiguationPromptContext(
+            existing_character_hint="【已存在角色锚点】\n- 白芷",
+            graph_hint="【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
+            shared_evidence_context="<Disambig_Candidates>\n「灰衣人」可能是：白芷\n</Disambig_Candidates>",
+        )
+    )
+
+    assert sections == [
+        "【已存在角色锚点】\n- 白芷",
+        "【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
+        "<Disambig_Candidates>\n「灰衣人」可能是：白芷\n</Disambig_Candidates>",
+    ]
+
+
+def test_build_disambiguate_messages_renders_prompt_context_sections() -> None:
+    from src.models.local.disambiguation.evidence_renderer import DisambiguationPromptContext
+    from src.models.local.disambiguation.messages import build_disambiguate_messages
+
+    messages = build_disambiguate_messages(
+        candidates=[{"name": "灰衣人", "count": 3}],
+        context_sentences={"灰衣人": "【身份线索】她自称白芷"},
+        existing_names=["白芷"],
+        prompt_context=DisambiguationPromptContext(
+            existing_character_hint="【已存在角色锚点】\n- 白芷",
+            graph_hint="【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
+            shared_evidence_context="<Vector_Evidence>\n[Chunk 5] 灰衣人忽然压低声音。\n</Vector_Evidence>",
+        ),
+    )
+
+    user_content = messages[-1]["content"]
+    assert "【已存在角色锚点】" in user_content
+    assert "【图谱已确认的关系】" in user_content
+    assert "<Vector_Evidence>" in user_content

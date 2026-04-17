@@ -27,6 +27,7 @@ from src.models.disambiguation_types import NameCountCandidate
 from src.models.interactions import record_model_interaction
 from src.models.interfaces import DisambiguationLike
 from src.models.local.disambiguation import (
+    DisambiguationPromptContext,
     DisambiguationState,
     ExtendedDisambigResult,
     build_disambiguate_messages,
@@ -268,7 +269,7 @@ async def _retry_disambig(
     existing_names: list[str],
     stage_name: str,
     run_id: str | None = None,
-    rag_hint: str | None = None,
+    prompt_context: DisambiguationPromptContext | None = None,
 ) -> Any:
     """
     带重试的消歧调用
@@ -297,11 +298,16 @@ async def _retry_disambig(
                 candidates=candidates,
                 context_sentences=context_sentences,
                 existing_names=existing_names if existing_names else None,
-                rag_hint=rag_hint,
+                prompt_context=prompt_context,
             )
             duration_ms = int((time.time() - start_time) * 1000)
 
-            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
+            messages = build_disambiguate_messages(
+                candidates,
+                context_sentences,
+                existing_names,
+                prompt_context=prompt_context,
+            )
             response_text = _build_disambig_response_text(result)
             thinking_content = getattr(result, "_thinking_content", None)
 
@@ -325,7 +331,12 @@ async def _retry_disambig(
             last_exception = e
             duration_ms = int((time.time() - start_time) * 1000)
 
-            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
+            messages = build_disambiguate_messages(
+                candidates,
+                context_sentences,
+                existing_names,
+                prompt_context=prompt_context,
+            )
 
             record_model_interaction(
                 run_id=run_id,
@@ -400,7 +411,7 @@ async def _run_incremental_disambiguation_with_state(
     existing_names = list(state.known_canonical_names)
     alias_map = state.get_alias_merges_dict()
     relations = _fetch_current_relations(conn, run_id)
-    rag_hint = _build_existing_character_hint_from_db(
+    prompt_context = _build_existing_character_hint_from_db(
         conn,
         new_names,
         existing_names,
@@ -417,7 +428,7 @@ async def _run_incremental_disambiguation_with_state(
         existing_names,
         stage_name="incremental disambiguation",
         run_id=run_id,
-        rag_hint=rag_hint,
+        prompt_context=prompt_context,
     )
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
@@ -540,7 +551,7 @@ async def _run_final_disambiguation_with_state(
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
         _inject_category_into_context(f_classifications, context_sentences)
         relations = _fetch_current_relations(conn, run_id)
-        rag_hint = _build_existing_character_hint_from_db(
+        prompt_context = _build_existing_character_hint_from_db(
             conn,
             all_names,
             existing_names,
@@ -556,7 +567,7 @@ async def _run_final_disambiguation_with_state(
             existing_names,
             stage_name="final disambiguation",
             run_id=run_id,
-            rag_hint=rag_hint,
+            prompt_context=prompt_context,
         )
         result = validate_confidence_with_evidence(result, existing_names, context_sentences)
         final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
