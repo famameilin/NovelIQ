@@ -29,7 +29,7 @@ CLI annotate 模块测试
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import text
@@ -112,9 +112,17 @@ class TestAnnotate:
         chunk_repo.insert_chunks(self.run_id, chunks)
 
     @pytest.mark.asyncio()
+    @patch("src.workflows.annotate_helpers.context._init_disambig_provider")
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
-    async def test_annotate_basic(self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock) -> None:
+    async def test_annotate_basic(
+        self,
+        mock_annotation_class: MagicMock,
+        mock_disambiguation_class: MagicMock,
+        mock_disambig_provider: MagicMock,
+    ) -> None:
+        mock_disambig_provider.return_value = None
+
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
@@ -153,11 +161,14 @@ class TestAnnotate:
         assert dialogue_count == 3
 
     @pytest.mark.asyncio()
+    @patch("src.workflows.annotate_helpers.context._init_disambig_provider")
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
     async def test_annotate_resume(
-        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock
+        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock, mock_disambig_provider: MagicMock
     ) -> None:
+        mock_disambig_provider.return_value = None
+
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
@@ -206,11 +217,14 @@ class TestAnnotate:
         assert annotation_count == 5
 
     @pytest.mark.asyncio()
+    @patch("src.workflows.annotate_helpers.context._init_disambig_provider")
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
     async def test_annotate_disambiguation(
-        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock
+        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock, mock_disambig_provider: MagicMock
     ) -> None:
+        mock_disambig_provider.return_value = None
+
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
         mock_annotation_client._config = MagicMock(model="test-model", thinking_enabled=False)
