@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import TaskModelConfig
 from src.models.cloud.client import ConfiguredCloudModelClient, NullCloudModelClient
+from src.models.local.disambiguation import DisambiguationPromptContext
 
 
 def _candidates(*names: str) -> list[dict[str, int | str]]:
@@ -90,6 +91,37 @@ class TestCloudStub(unittest.TestCase):
             context_sentences={"alias_a": "alias_a smiled"},
             existing_names=["zhangsan"],
             prompt_context=None,
+        )
+
+    def test_configured_client_disambiguate_delegates_non_empty_prompt_context(self) -> None:
+        mock_client = MagicMock()
+        config = TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k")
+        client = ConfiguredCloudModelClient(config, client=mock_client)
+
+        prompt_context = DisambiguationPromptContext(
+            existing_character_hint="【已存在角色锚点】\n- 张三",
+            graph_hint="【图谱已确认的关系】\n- 张三 ←朋友→ 李四",
+            shared_evidence_context="<Vector_Evidence>\n[Chunk 7] 灰衣人忽然开口。\n</Vector_Evidence>",
+        )
+        fake_result = MagicMock(canonical_decisions={"alias_a": "zhangsan"})
+
+        with patch.object(
+            client._disambiguation_client, "disambiguate_characters", return_value=fake_result
+        ) as mock_disambiguate:
+            asyncio.run(
+                client.disambiguate_characters(
+                    candidates=_candidates("zhangsan", "alias_a"),
+                    context_sentences={"alias_a": "alias_a smiled"},
+                    existing_names=["zhangsan"],
+                    prompt_context=prompt_context,
+                )
+            )
+
+        mock_disambiguate.assert_called_once_with(
+            candidates=_candidates("zhangsan", "alias_a"),
+            context_sentences={"alias_a": "alias_a smiled"},
+            existing_names=["zhangsan"],
+            prompt_context=prompt_context,
         )
 
 

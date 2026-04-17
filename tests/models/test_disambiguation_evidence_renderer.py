@@ -173,3 +173,24 @@ def test_build_disambiguate_messages_renders_prompt_context_sections() -> None:
     assert "【已存在角色锚点】" in user_content
     assert "【图谱已确认的关系】" in user_content
     assert "<Vector_Evidence>" in user_content
+    assert user_content.index("【已存在角色锚点】") < user_content.index("【图谱已确认的关系】")
+    assert user_content.index("【图谱已确认的关系】") < user_content.index("<Vector_Evidence>")
+
+
+def test_build_disambiguate_messages_filters_empty_prompt_context_sections() -> None:
+    from src.models.local.disambiguation.evidence_renderer import DisambiguationPromptContext
+    from src.models.local.disambiguation.messages import build_disambiguate_messages
+
+    messages = build_disambiguate_messages(
+        candidates=[{"name": "灰衣人", "count": 1}],
+        context_sentences={"灰衣人": "她望向白芷。"},
+        prompt_context=DisambiguationPromptContext(
+            existing_character_hint="",
+            graph_hint="【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
+            shared_evidence_context=None,
+        ),
+    )
+
+    user_content = messages[-1]["content"]
+    assert "【图谱已确认的关系】" in user_content
+    assert "【已存在角色锚点】" not in user_content
