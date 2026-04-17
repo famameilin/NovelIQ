@@ -354,6 +354,55 @@ class AnalysisService:
             log_prefix="Reanalysis",
         )
 
+    async def _call_execute_analysis_stages(
+        self,
+        bus: AnalysisEventBus,
+        session: Session,
+        run_id: str,
+        source_path: Path,
+        novel_id: str,
+        novel_title: str | None,
+        analysis_logger: AnalysisLogger | None,
+        skip_stages: dict[str, bool],
+        num_topics: int,
+        max_chars: int | None = None,
+        overlap: int | None = None,
+    ) -> None:
+        """
+        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数。
+
+        创建时间: 2026-04-17
+        创建者: TraeAI
+        任务: refactor/split-provider-bundle-renderer
+        说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑。
+        """
+        if max_chars is not None and overlap is not None:
+            await self._execute_analysis_stages(
+                bus=bus,
+                session=session,
+                run_id=run_id,
+                source_path=source_path,
+                novel_id=novel_id,
+                novel_title=novel_title,
+                analysis_logger=analysis_logger,
+                skip_stages=skip_stages,
+                num_topics=num_topics,
+                max_chars=max_chars,
+                overlap=overlap,
+            )
+        else:
+            await self._execute_analysis_stages(
+                bus=bus,
+                session=session,
+                run_id=run_id,
+                source_path=source_path,
+                novel_id=novel_id,
+                novel_title=novel_title,
+                analysis_logger=analysis_logger,
+                skip_stages=skip_stages,
+                num_topics=num_topics,
+            )
+
     async def _run_analysis_core(
         self,
         task_id: str,
@@ -410,32 +459,19 @@ class AnalysisService:
 
             bus = AnalysisEventBus(task_id, self.task_manager)
 
-            if max_chars is not None and overlap is not None:
-                await self._execute_analysis_stages(
-                    bus=bus,
-                    session=session,
-                    run_id=run_id,
-                    source_path=source_path,
-                    novel_id=novel_id,
-                    novel_title=novel_title,
-                    analysis_logger=analysis_logger,
-                    skip_stages=skip_stages,
-                    num_topics=num_topics,
-                    max_chars=max_chars,
-                    overlap=overlap,
-                )
-            else:
-                await self._execute_analysis_stages(
-                    bus=bus,
-                    session=session,
-                    run_id=run_id,
-                    source_path=source_path,
-                    novel_id=novel_id,
-                    novel_title=novel_title,
-                    analysis_logger=analysis_logger,
-                    skip_stages=skip_stages,
-                    num_topics=num_topics,
-                )
+            await self._call_execute_analysis_stages(
+                bus=bus,
+                session=session,
+                run_id=run_id,
+                source_path=source_path,
+                novel_id=novel_id,
+                novel_title=novel_title,
+                analysis_logger=analysis_logger,
+                skip_stages=skip_stages,
+                num_topics=num_topics,
+                max_chars=max_chars,
+                overlap=overlap,
+            )
 
             if self._is_cancelled(task_id):
                 return
