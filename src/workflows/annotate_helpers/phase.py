@@ -65,7 +65,7 @@ async def _annotate_chunk(
     chunk_id: int | None = None,
     global_context: str | None = None,
     active_entities: str | None = None,
-    evidence_bundle: Any | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     cloud_client: AnnotationLike | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
