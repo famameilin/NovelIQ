@@ -17,13 +17,10 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
-
-if TYPE_CHECKING:
-    from src.rag import DisambigContextProvider
 
 from src.config.constants import MAX_DISAMBIG_RETRIES
 from src.models.disambiguation_types import NameCountCandidate
@@ -63,6 +60,14 @@ from .state_logic import (
 )
 
 DisambigStateSnapshot = dict[str, dict[str, str]]
+
+
+def _fetch_current_relations(conn: Session, run_id: str) -> list[dict]:
+    """从 graph_repo 获取当前活跃关系。"""
+    from src.storage.repositories import GraphRepository
+
+    graph_repo = GraphRepository(conn)
+    return graph_repo.fetch_current_relations(run_id, active_only=True)
 
 
 async def _generate_and_save_stage_summary(
@@ -355,7 +360,6 @@ async def _run_incremental_disambiguation_with_state(
     chunk_id: int,
     current_idx: int,
     disambig_interval: int,
-    disambig_provider: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
@@ -394,13 +398,16 @@ async def _run_incremental_disambiguation_with_state(
     # Inject protected category labels into context for prompt
     _inject_category_into_context(classifications, context_sentences)
     existing_names = list(state.known_canonical_names)
+    alias_map = state.get_alias_merges_dict()
+    relations = _fetch_current_relations(conn, run_id)
     rag_hint = _build_existing_character_hint_from_db(
         conn,
         new_names,
         existing_names,
         alias_keywords,
         run_id,
-        disambig_provider=disambig_provider,
+        alias_map,
+        relations,
     )
 
     result = await _retry_disambig(
@@ -467,7 +474,6 @@ async def _run_final_disambiguation_with_state(
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
-    disambig_provider: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行最终消歧（使用新的三层状态）
@@ -530,18 +536,18 @@ async def _run_final_disambiguation_with_state(
     if candidates:
         candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-        # Candidate quality filter: remove blacklist from final disambig candidates
         _, candidate_payload, f_classifications = filter_candidates_by_class(candidate_payload, context_sentences)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-        # Inject protected category labels into context for prompt
         _inject_category_into_context(f_classifications, context_sentences)
+        relations = _fetch_current_relations(conn, run_id)
         rag_hint = _build_existing_character_hint_from_db(
             conn,
             all_names,
             existing_names,
             alias_keywords,
             run_id,
-            disambig_provider=disambig_provider,
+            alias_map_dict,
+            relations,
         )
         result = await _retry_disambig(
             full_disambig_client,

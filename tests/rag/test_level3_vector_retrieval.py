@@ -302,7 +302,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             ],
             ["白芷", "侯飞白"],
         )
-        self.assertEqual(bundle.to_prompt_blocks()["disambig_candidates"], "")
+        self.assertIsNone(bundle.render_disambig_candidates())
 
 
 if __name__ == "__main__":
