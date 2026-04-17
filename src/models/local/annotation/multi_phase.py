@@ -23,6 +23,11 @@
 修改者: TraeAI
 任务: remove-unused-annotation-fields
 修改内容: 移除 character_appearances 参数
+
+修改时间: 2026-04-17
+修改者: TraeAI
+任务: fix-phase3-active-entities-fallback
+修改内容: _run_phase3_if_needed 新增 active_entities 参数，透传上游活跃实体上下文（含 fallback）
 """
 
 from __future__ import annotations
@@ -178,6 +183,7 @@ async def _run_phase3_if_needed(
     chunk_id: int | None,
     run_id: str | None,
     known_characters: list[str] | None,
+    active_entities: str | None = None,
 ) -> _Phase3Result:
     """根据条件执行 Phase3 对话归属判断
 
@@ -189,6 +195,11 @@ async def _run_phase3_if_needed(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-17
+    修改者: TraeAI
+    任务: fix-phase3-active-entities-fallback
+    修改内容: 新增 active_entities 参数，透传上游已解析好的活跃实体上下文（含 fallback）
     """
     result = _Phase3Result()
 
@@ -208,12 +219,14 @@ async def _run_phase3_if_needed(
         alias_map=alias_map,
         # 中文注释：Phase3 和 Phase2 一样只复用上游同一份 evidence_bundle，
         # 保持多阶段标注共享同一组 Level1/2/3 证据，而不是各阶段各自拼上下文。
+        # 透传 active_entities，确保 Phase3 使用与 Phase1 相同的活跃实体上下文（含 fallback）。
         evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
         known_characters=known_characters,
         return_tones=True,
         return_identity_clues=True,
+        active_entities=active_entities,
     )
 
     result.dialogue_lengths = dlg_result.speaker_lengths or None
@@ -479,6 +492,7 @@ async def annotate_chunk_parallel(
             chunk_id=chunk_id,
             run_id=run_id,
             known_characters=known_characters,
+            active_entities=active_entities,
         ),
         annotate_chunk_phase4(
             client=client,
@@ -616,6 +630,7 @@ async def annotate_chunk_serial(
         chunk_id=chunk_id,
         run_id=run_id,
         known_characters=known_characters,
+        active_entities=active_entities,
     )
     if emitter:
         await emitter(
