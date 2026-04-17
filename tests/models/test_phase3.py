@@ -286,6 +286,50 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIs(mock_attribute.await_args.kwargs["evidence_bundle"], bundle)
 
 
+class TestBuildPhase3EvidenceSections(unittest.TestCase):
+    """测试 _build_phase3_evidence_sections 的 alias_map 和 active_entities 逻辑"""
+
+    def _call(self, bundle=None, alias_map=None, active_entities=None):
+        from src.models.local.annotation.phase3 import _build_phase3_evidence_sections
+        return _build_phase3_evidence_sections(bundle, alias_map, active_entities)
+
+    def test_both_none_returns_empty(self) -> None:
+        """evidence_bundle=None 且 active_entities=None 时返回 []"""
+        result = self._call()
+        self.assertEqual(result, [])
+
+    def test_alias_map_none_includes_level1_aliases(self) -> None:
+        """alias_map=None 时 include_level1_alias_mappings=True，prompt 包含 Level1 别名裁决"""
+        bundle = _build_phase3_bundle()
+        result = self._call(bundle=bundle, alias_map=None)
+        # 应包含 Level1 别名映射行
+        self.assertTrue(any("已确认别名：灰衣人" in s for s in result))
+
+    def test_alias_map_provided_excludes_level1_aliases(self) -> None:
+        """alias_map 非 None 时 include_level1_alias_mappings=False，不注入 Level1 别名裁决"""
+        bundle = _build_phase3_bundle()
+        result = self._call(bundle=bundle, alias_map={"猴子": "侯飞白"})
+        # disambig_context 是合并块（Level1 事实 + Level2 候选 + Level3 向量），
+        # include_level1_alias_mappings=False 只是不包含别名映射行，
+        # 但仍会包含 disambig candidates。因此检查“已确认别名：灰衣人”不在结果中。
+        self.assertTrue(all("已确认别名：灰衣人" not in s for s in result))
+        # 但 active_entities 仍应存在
+        self.assertTrue(any("【近期活跃角色】" in s for s in result))
+
+    def test_active_entities_override_bundle(self) -> None:
+        """active_entities 非 None 时优先使用传入值，而非 bundle 中的值"""
+        bundle = _build_phase3_bundle()
+        custom_entities = "【近期活跃角色】自定义实体"
+        result = self._call(bundle=bundle, active_entities=custom_entities)
+        self.assertIn(custom_entities, result)
+
+    def test_active_entities_without_bundle(self) -> None:
+        """evidence_bundle=None 但 active_entities 非 None 时，只返回 active_entities"""
+        custom_entities = "【近期活跃角色】仅 fallback"
+        result = self._call(bundle=None, active_entities=custom_entities)
+        self.assertEqual(result, [custom_entities])
+
+
 class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
     """
     创建时间: 2026-03-21
@@ -330,8 +374,8 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertIsInstance(result.speaker_lengths, dict)
-        self.assertEqual(result.speaker_lengths.get("张三", 0), 4)
-        self.assertEqual(result.speaker_lengths.get("李四", 0), 3)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), len("你好") + len("再见"))
+        self.assertEqual(result.speaker_lengths.get("李四", 0), len("你好啊"))
         self.assertEqual(result.canonical_attribution, {1: ["张三"], 2: ["李四"], 3: ["张三"]})
         self.assertEqual(result.dialogues, [(1, "你好"), (2, "你好啊"), (3, "再见")])
 
@@ -371,8 +415,8 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
             known_characters=["张三"],
         )
 
-        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
-        self.assertEqual(result.speaker_lengths.get("王五", 0), 3)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), len("你好"))
+        self.assertEqual(result.speaker_lengths.get("王五", 0), len("你好啊"))
         self.assertEqual(result.canonical_attribution, {1: ["张三"], 2: ["王五"]})
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
@@ -389,7 +433,7 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
         self.assertEqual(len(result.dialogues), 1)
-        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), len("你好"))
         self.assertEqual(result.canonical_attribution, {2: ["张三"]})
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
@@ -404,7 +448,7 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
 
         result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
-        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), len("你好"))
         self.assertEqual(result.dialogues, [(1, "你好")])
         self.assertEqual(result.canonical_attribution, {1: ["张三"]})
 
@@ -421,7 +465,7 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
 
         result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
-        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), len("你好"))
         self.assertEqual(result.canonical_attribution, {1: ["张三"]})
         self.assertEqual(result.dialogues, [(1, "你好")])
 
