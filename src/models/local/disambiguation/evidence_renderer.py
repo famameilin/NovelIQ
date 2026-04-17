@@ -2,29 +2,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from src.models.local.evidence_renderer_shared import render_disambig_candidates as render_shared_disambig_candidates
+from src.models.local.evidence_renderer_shared import render_vector_evidence
+
 if TYPE_CHECKING:
     from src.rag.evidence_types import EvidenceBundle
 
 
-def _read_legacy_or_shared_block(
-    bundle: EvidenceBundle,
-    render_attr: str,
-) -> str | None:
-    shared_renderer = getattr(bundle, render_attr, None)
-    if callable(shared_renderer):
-        rendered = shared_renderer()
-        if isinstance(rendered, str) and rendered:
-            return rendered
-    return None
-
-
 def render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
-    return _read_legacy_or_shared_block(bundle, "render_disambig_candidates")
+    return render_shared_disambig_candidates(bundle)
 
 
 def render_disambig_prompt_context(bundle: EvidenceBundle) -> str | None:
-    disambig_candidates = _read_legacy_or_shared_block(bundle, "render_disambig_candidates")
-    vector_evidence = _read_legacy_or_shared_block(bundle, "render_vector_evidence")
+    # 中文注释：消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法。
+    disambig_candidates = render_shared_disambig_candidates(bundle)
+    vector_evidence = render_vector_evidence(bundle)
 
     if disambig_candidates and vector_evidence:
         return disambig_candidates + "\n\n" + vector_evidence
