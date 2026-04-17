@@ -335,18 +335,41 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.canonical_attribution, {1: ["张三"], 2: ["李四"], 3: ["张三"]})
         self.assertEqual(result.dialogues, [(1, "你好"), (2, "你好啊"), (3, "再见")])
 
-    @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    async def test_unknown_speaker_kept_and_counted(self, mock_attribute: MagicMock) -> None:
-        """未知说话者会被保留并计入长度，交由下游继续判断。"""
-        mock_attribute.return_value = [
-            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
-            DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker=["王五"]),
-        ]
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_unknown_speaker_kept_and_counted(self, mock_settings: MagicMock) -> None:
+        """未知说话者会被保留并计入长度，交由下游继续判断。
 
-        mock_client = MagicMock()
+        此测试走端到端真实分支：传入 known_characters，mock API 返回不在已知列表中的 speaker，
+        验证 _post_process_validation 不丢弃未知 speaker，且长度统计正确。
+        """
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+
+        mock_annotation_client = MagicMock()
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = False
+        mock_annotation_client._config.temperature = 0.7
+        mock_annotation_client._config.top_p = 0.9
+        mock_annotation_client._config.presence_penalty = 0.0
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_annotation_client._build_json_schema.return_value = {}
+        mock_response = MagicMock(
+            dialogues=[
+                DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
+                DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker=["王五"]),
+            ],
+            model_dump=MagicMock(return_value={}),
+        )
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
+
         text = "\u201c你好\u201d他说道。\u201c你好啊\u201d她回答。"
 
-        result = await compute_dialogue_lengths_with_llm(mock_client, text)
+        result = await compute_dialogue_lengths_with_llm(
+            mock_annotation_client,
+            text,
+            known_characters=["张三"],
+        )
 
         self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
         self.assertEqual(result.speaker_lengths.get("王五", 0), 3)
@@ -422,6 +445,98 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.canonical_attribution, {1: ["张三"]})
         self.assertEqual(result.dialogues[0][0], 1)
         self.assertEqual(result.dialogue_tones, {1: "强硬"})
+
+    @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
+    async def test_return_identity_clues_when_requested(self, mock_attribute: MagicMock) -> None:
+        """显式请求时返回身份线索。"""
+        mock_attribute.return_value = [
+            DialogueRecord(
+                index=1,
+                content="你好",
+                is_dialogue=True,
+                speaker=["张三"],
+                identity_clue="声音低沉的中年男子",
+            ),
+        ]
+
+        mock_client = MagicMock()
+        text = '"你好"他说道。'
+
+        result = await compute_dialogue_lengths_with_llm(
+            mock_client,
+            text,
+            return_identity_clues=True,
+        )
+
+        self.assertEqual(result.speaker_lengths.get("张三", 0), len(result.dialogues[0][1]))
+        self.assertEqual(result.canonical_attribution, {1: ["张三"]})
+        self.assertEqual(result.dialogue_identity_clues, {1: "声音低沉的中年男子"})
+
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_thinking_enabled_false_is_passed_to_api(self, mock_settings: MagicMock) -> None:
+        """验证 thinking_enabled=False 时 enable_thinking=False 被传递给 API 调用。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+
+        mock_annotation_client = MagicMock()
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = False
+        mock_annotation_client._config.temperature = 0.7
+        mock_annotation_client._config.top_p = 0.9
+        mock_annotation_client._config.presence_penalty = 0.0
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_annotation_client._build_json_schema.return_value = {}
+        mock_response = MagicMock(
+            dialogues=[
+                DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
+            ],
+            model_dump=MagicMock(return_value={}),
+        )
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
+
+        await attribute_dialogues_with_llm(
+            mock_annotation_client,
+            "对话文本",
+            [QuoteCandidate(index=1, content="你好")],
+            known_characters=["张三"],
+        )
+
+        call_kwargs = mock_annotation_client._call_annotation_api.await_args.kwargs
+        self.assertFalse(call_kwargs["enable_thinking"])
+
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_thinking_enabled_true_is_passed_to_api(self, mock_settings: MagicMock) -> None:
+        """验证 thinking_enabled=True 时 enable_thinking=True 被传递给 API 调用。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+
+        mock_annotation_client = MagicMock()
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = True
+        mock_annotation_client._config.temperature = 0.7
+        mock_annotation_client._config.top_p = 0.9
+        mock_annotation_client._config.presence_penalty = 0.0
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_annotation_client._build_json_schema.return_value = {}
+        mock_response = MagicMock(
+            dialogues=[
+                DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
+            ],
+            model_dump=MagicMock(return_value={}),
+        )
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
+
+        await attribute_dialogues_with_llm(
+            mock_annotation_client,
+            "对话文本",
+            [QuoteCandidate(index=1, content="你好")],
+            known_characters=["张三"],
+        )
+
+        call_kwargs = mock_annotation_client._call_annotation_api.await_args.kwargs
+        self.assertTrue(call_kwargs["enable_thinking"])
 
 
 class TestPostProcessValidationFix(unittest.TestCase):

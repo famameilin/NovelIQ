@@ -31,6 +31,11 @@
 修改者: TraeAI
 任务: consolidate-codebase-architecture
 修改内容: 从 constants 导入 PHASE3_MAX_RETRIES，移除本地重复定义
+
+修改时间: 2026-04-17
+修改者: TraeAI
+任务: fix-phase3-alias-priority-conflict
+修改内容: _build_phase3_evidence_sections 接收 alias_map 参数，复用 Phase1 别名优先级规则
 """
 
 from __future__ import annotations
@@ -144,6 +149,7 @@ async def attribute_dialogues_with_llm(
     evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
+    active_entities: str | None = None,
 ) -> list[DialogueRecord]:
     """
     使用 LLM 判断对话候选是否是对话，并识别说话者和语气
@@ -157,6 +163,11 @@ async def attribute_dialogues_with_llm(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-17
+    修改者: TraeAI
+    任务: fix-phase3-active-entities-fallback
+    修改内容: 新增 active_entities 参数，优先使用上游已解析好的活跃实体上下文
     """
     if not candidates:
         return []
@@ -168,7 +179,11 @@ async def attribute_dialogues_with_llm(
     is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
     batch_size = settings.thinking.phase3_candidates_per_batch
-    evidence_sections = _build_phase3_evidence_sections(evidence_bundle)
+    # 中文注释：显式传入 alias_map，复用 Phase1 已经冻结的别名优先级规则；
+    # 显式传入 active_entities，优先使用上游已解析好的活跃实体（含 fallback），
+    # 当上游已决议 alias_map 时，不再把 bundle 里的 Level1 别名反向注入 prompt，
+    # 避免 prompt 中的 alias 事实和后处理归一化使用的 alias_map 不是同一套。
+    evidence_sections = _build_phase3_evidence_sections(evidence_bundle, alias_map, active_entities)
 
     async def _execute_single_batch(
         current_client: AnnotationClient,
@@ -379,15 +394,40 @@ def _post_process_validation(
     return valid_records
 
 
-def _build_phase3_evidence_sections(evidence_bundle: EvidenceBundle | None) -> list[str]:
-    if evidence_bundle is None:
+def _build_phase3_evidence_sections(
+    evidence_bundle: EvidenceBundle | None,
+    alias_map: dict[str, str] | None = None,
+    active_entities: str | None = None,
+) -> list[str]:
+    """构建 Phase3 prompt evidence sections
+
+    创建时间: 2026-04-17
+    创建者: TraeAI
+    任务: fix-phase3-alias-priority-conflict
+    说明: 接收 alias_map 参数，复用 Phase1 的别名优先级规则。
+          接收 active_entities 参数，优先使用上游已解析好的活跃实体（含 fallback），
+          避免 Phase3 只从 raw bundle 重建时丢失 active_entities_fallback 上下文。
+
+    修改历史:
+    - 2026-04-17: 新增 alias_map 参数，解决 Phase3 alias 与后处理归一化不一致问题
+    - 2026-04-17: 新增 active_entities 参数，解决 Phase3 丢失 fallback 上下文问题
+    """
+    if evidence_bundle is None and active_entities is None:
         return []
 
-    blocks = render_annotation_prompt_blocks(evidence_bundle)
+    blocks = render_annotation_prompt_blocks(
+        evidence_bundle,
+        include_level1_alias_mappings=alias_map is None,
+    ) if evidence_bundle else None
+
     sections: list[str] = []
-    if blocks.active_entities:
+    # 优先使用上游已决议好的 active_entities（含 fallback），
+    # 否则从 bundle 重建的 blocks 中获取。
+    if active_entities is not None:
+        sections.append(active_entities)
+    elif blocks and blocks.active_entities:
         sections.append(blocks.active_entities)
-    if blocks.disambig_context:
+    if blocks and blocks.disambig_context:
         sections.append(blocks.disambig_context)
     return sections
 
@@ -402,6 +442,7 @@ async def compute_dialogue_lengths_with_llm(
     known_characters: list[str] | None = None,
     return_tones: bool = False,
     return_identity_clues: bool = False,
+    active_entities: str | None = None,
 ) -> DialogueLengthResult:
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
@@ -442,6 +483,7 @@ async def compute_dialogue_lengths_with_llm(
         evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
+        active_entities=active_entities,
     )
     logger.info(f"compute_dialogue_lengths_with_llm: got {len(records)} records")
 
