@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from src.models.local.evidence_renderer_shared import (
+    render_disambig_candidates,
+    render_vector_evidence,
+)
+
 if TYPE_CHECKING:
     from src.knowledge.authority import Level1AuthoritySnapshot
     from src.rag.evidence_types import EvidenceBundle, EvidenceItem
@@ -35,14 +40,6 @@ def _render_active_entity_lines(items: list[EvidenceItem]) -> str | None:
         else:
             lines.append(f"- {name}（{role}）：{detail}")
     return "\n".join(lines)
-
-
-def _render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
-    return bundle.render_disambig_candidates()
-
-
-def render_vector_evidence(bundle: EvidenceBundle, max_chunks: int = 3, max_text_len: int = 200) -> str | None:
-    return bundle.render_vector_evidence(max_chunks=max_chunks, max_text_len=max_text_len)
 
 
 def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> None:
@@ -175,11 +172,11 @@ def render_annotation_evidence_blocks(bundle: EvidenceBundle) -> list[str]:
     if structured_lines:
         blocks.append("<Structured_Evidence>\n" + "\n".join(structured_lines) + "\n</Structured_Evidence>")
 
-    disambig_candidates = bundle.render_disambig_candidates()
+    disambig_candidates = render_disambig_candidates(bundle)
     if disambig_candidates:
         blocks.append(disambig_candidates)
 
-    vector_evidence = bundle.render_vector_evidence()
+    vector_evidence = render_vector_evidence(bundle)
     if vector_evidence:
         blocks.append(vector_evidence)
 
@@ -198,7 +195,7 @@ def render_annotation_prompt_blocks(
     active_entities = _render_active_entity_lines(
         [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
     )
-    disambig_context = _render_disambig_candidates(bundle)
+    disambig_context = render_disambig_candidates(bundle)
     vector_evidence = render_vector_evidence(bundle)
     prompt_sections = [section for section in (level1_facts, disambig_context, vector_evidence) if section]
     # 中文注释：annotation 主 prompt 当前只接收 active_entities + disambig_context 两个入口，
