@@ -90,7 +90,7 @@ class TestExtractDialoguesFromText(unittest.TestCase):
         self.assertEqual(result[0].content, "有空白的内容")
 
 
-class TestAttributeDialoguesWithLLM(unittest.TestCase):
+class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
     """
     创建时间: 2026-03-21
     创建者: TraeAI
@@ -114,6 +114,7 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         """成功归属对话"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
 
         mock_annotation_client = MagicMock()
 
@@ -131,7 +132,7 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
             ],
             model_dump=MagicMock(return_value={}),
         )
-        mock_annotation_client._call_annotation_api.return_value = (mock_response, "{}")
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
         candidates = [QuoteCandidate(index=1, content="你好"), QuoteCandidate(index=2, content="你好啊")]
         result = await attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三", "李四"])
 
@@ -158,6 +159,7 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
         """说话者别名在 known_characters 校验前先归一化"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
 
         mock_annotation_client = MagicMock()
 
@@ -174,7 +176,7 @@ class TestAttributeDialoguesWithLLM(unittest.TestCase):
             ],
             model_dump=MagicMock(return_value={}),
         )
-        mock_annotation_client._call_annotation_api.return_value = (mock_response, "{}")
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
         candidates = [QuoteCandidate(index=1, content="你好")]
         result = await attribute_dialogues_with_llm(
             mock_annotation_client,
@@ -284,7 +286,7 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIs(mock_attribute.await_args.kwargs["evidence_bundle"], bundle)
 
 
-class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
+class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
     """
     创建时间: 2026-03-21
     创建者: TraeAI
@@ -297,21 +299,21 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
     修改内容: 更新测试用例，适配新的返回格式
     """
 
-    async def test_empty_text_returns_empty_dict(self) -> None:
-        """空文本返回空字典"""
+    async def test_empty_text_returns_empty_result(self) -> None:
+        """空文本返回空结果对象"""
         mock_client = MagicMock()
-        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, "")
-        self.assertEqual(speaker_lengths, {})
-        self.assertEqual(attribution, {})
-        self.assertEqual(dialogues, [])
+        result = await compute_dialogue_lengths_with_llm(mock_client, "")
+        self.assertEqual(result.speaker_lengths, {})
+        self.assertEqual(result.canonical_attribution, {})
+        self.assertEqual(result.dialogues, [])
 
-    async def test_no_dialogues_returns_empty_dict(self) -> None:
-        """没有对话返回空字典"""
+    async def test_no_dialogues_returns_empty_result(self) -> None:
+        """没有对话返回空结果对象"""
         mock_client = MagicMock()
-        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, "没有对话的文本")
-        self.assertEqual(speaker_lengths, {})
-        self.assertEqual(attribution, {})
-        self.assertEqual(dialogues, [])
+        result = await compute_dialogue_lengths_with_llm(mock_client, "没有对话的文本")
+        self.assertEqual(result.speaker_lengths, {})
+        self.assertEqual(result.canonical_attribution, {})
+        self.assertEqual(result.dialogues, [])
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
     async def test_compute_lengths_with_attribution(self, mock_attribute: MagicMock) -> None:
@@ -325,16 +327,17 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。\u201c你好啊\u201d她回答。\u201c再见\u201d他说。"
 
-        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
+        result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
-        self.assertIsInstance(speaker_lengths, dict)
-        self.assertEqual(speaker_lengths.get("张三", 0), 4)
-        self.assertEqual(speaker_lengths.get("李四", 0), 3)
-        self.assertIsInstance(attribution, dict)
+        self.assertIsInstance(result.speaker_lengths, dict)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), 4)
+        self.assertEqual(result.speaker_lengths.get("李四", 0), 3)
+        self.assertEqual(result.canonical_attribution, {1: ["张三"], 2: ["李四"], 3: ["张三"]})
+        self.assertEqual(result.dialogues, [(1, "你好"), (2, "你好啊"), (3, "再见")])
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
-    async def test_unknown_speaker_not_counted(self, mock_attribute: MagicMock) -> None:
-        """未知说话者的对话不计入 - 使用中文双引号"""
+    async def test_unknown_speaker_kept_and_counted(self, mock_attribute: MagicMock) -> None:
+        """未知说话者会被保留并计入长度，交由下游继续判断。"""
         mock_attribute.return_value = [
             DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"]),
             DialogueRecord(index=2, content="你好啊", is_dialogue=True, speaker=["王五"]),
@@ -343,10 +346,11 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。\u201c你好啊\u201d她回答。"
 
-        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
+        result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
-        self.assertEqual(speaker_lengths.get("张三", 0), 2)
-        self.assertNotIn("李四", speaker_lengths)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(result.speaker_lengths.get("王五", 0), 3)
+        self.assertEqual(result.canonical_attribution, {1: ["张三"], 2: ["王五"]})
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
     async def test_non_dialogue_filtered(self, mock_attribute: MagicMock) -> None:
@@ -359,10 +363,11 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         text = "\u201c精打细算\u201d的折扇。\u201c你好\u201d他说道。"
 
-        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
+        result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
-        self.assertEqual(len(dialogues), 1)
-        self.assertEqual(speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(len(result.dialogues), 1)
+        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(result.canonical_attribution, {2: ["张三"]})
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
     async def test_source_content_preferred_over_model_content(self, mock_attribute: MagicMock) -> None:
@@ -374,10 +379,11 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。"
 
-        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
+        result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
-        self.assertEqual(speaker_lengths.get("张三", 0), 2)
-        self.assertEqual(dialogues, [(1, "你好")])
+        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(result.dialogues, [(1, "你好")])
+        self.assertEqual(result.canonical_attribution, {1: ["张三"]})
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
     async def test_duplicate_index_counted_once(self, mock_attribute: MagicMock) -> None:
@@ -390,32 +396,32 @@ class TestComputeDialogueLengthsWithLLM(unittest.TestCase):
         mock_client = MagicMock()
         text = "\u201c你好\u201d他说道。"
 
-        speaker_lengths, attribution, dialogues = await compute_dialogue_lengths_with_llm(mock_client, text)
+        result = await compute_dialogue_lengths_with_llm(mock_client, text)
 
-        self.assertEqual(speaker_lengths.get("张三", 0), 2)
-        self.assertEqual(attribution, {1: "张三"})
-        self.assertEqual(dialogues, [(1, "你好")])
+        self.assertEqual(result.speaker_lengths.get("张三", 0), 2)
+        self.assertEqual(result.canonical_attribution, {1: ["张三"]})
+        self.assertEqual(result.dialogues, [(1, "你好")])
 
     @patch("src.models.local.annotation.phase3.attribute_dialogues_with_llm")
     async def test_return_tones_when_requested(self, mock_attribute: MagicMock) -> None:
-        """鏄惧紡璇锋眰鏃惰繑鍥炲\u0192瀵硅櫥鍚屻€?"""
+        """显式请求时返回对话语气。"""
         mock_attribute.return_value = [
-            DialogueRecord(index=1, content="浣犲ソ", is_dialogue=True, speaker=["寮犱笁"], tone="寮虹‖"),
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["张三"], tone="强硬"),
         ]
 
         mock_client = MagicMock()
-        text = '"浣犲ソ"浠栬垂閬撱€?'
+        text = '"你好"他说道。'
 
-        speaker_lengths, attribution, dialogues, tones = await compute_dialogue_lengths_with_llm(
+        result = await compute_dialogue_lengths_with_llm(
             mock_client,
             text,
             return_tones=True,
         )
 
-        self.assertEqual(speaker_lengths.get("寮犱笁", 0), len(dialogues[0][1]))
-        self.assertEqual(attribution, {1: "寮犱笁"})
-        self.assertEqual(dialogues[0][0], 1)
-        self.assertEqual(tones, {1: "寮虹‖"})
+        self.assertEqual(result.speaker_lengths.get("张三", 0), len(result.dialogues[0][1]))
+        self.assertEqual(result.canonical_attribution, {1: ["张三"]})
+        self.assertEqual(result.dialogues[0][0], 1)
+        self.assertEqual(result.dialogue_tones, {1: "强硬"})
 
 
 class TestPostProcessValidationFix(unittest.TestCase):
