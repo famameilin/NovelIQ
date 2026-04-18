@@ -242,6 +242,92 @@ def _build_phase3_bundle() -> EvidenceBundle:
     )
 
 
+def _build_phase3_overflow_bundle() -> EvidenceBundle:
+    structured = [
+        EvidenceItem(
+            evidence_type="alias_mapping",
+            source="level1",
+            content=f"别名{i} -> 人物{i}",
+            metadata={"alias": f"别名{i}", "canonical": f"人物{i}"},
+        )
+        for i in range(1, 4)
+    ]
+    structured.extend(
+        [
+            EvidenceItem(
+                evidence_type="canonical_entity",
+                source="level1",
+                content=f"人物{i}",
+                metadata={"name": f"人物{i}", "entity_type": "character"},
+            )
+            for i in range(1, 4)
+        ]
+    )
+    structured.extend(
+        [
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content=f"人物{i}<盟友>人物{i + 1}",
+                metadata={
+                    "from_name": f"人物{i}",
+                    "to_name": f"人物{i + 1}",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            )
+            for i in range(1, 4)
+        ]
+    )
+
+    local = [
+        EvidenceItem(
+            evidence_type="active_entity",
+            source="level2",
+            content=f"人物{i}",
+            metadata={
+                "name": f"人物{i}",
+                "role": "speaker_candidate",
+                "recent_action": f"动作{i}",
+                "recent_emotion": f"情绪{i}",
+                "last_seen_chunk": 20 - i,
+            },
+        )
+        for i in range(1, 5)
+    ]
+    local.extend(
+        [
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content=f"「别名{i}」可能是：人物{i}",
+            )
+            for i in range(1, 4)
+        ]
+    )
+
+    semantic = [
+        EvidenceItem(
+            evidence_type="semantic_recall",
+            source="level3",
+            content=f"人物{i}历史片段：" + ("甲" * 150),
+            metadata={
+                "chunk_id": i,
+                "similarity": 0.9 - i * 0.01,
+                "text": f"人物{i}历史片段：" + ("甲" * 150),
+            },
+        )
+        for i in range(1, 4)
+    ]
+
+    return EvidenceBundle(
+        structured_evidence=structured,
+        local_evidence=local,
+        semantic_evidence=semantic,
+        requested_names=["别名1", "别名2", "别名3"],
+    )
+
+
 class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_attribute_dialogues_with_llm_appends_shared_evidence_blocks(self) -> None:
         bundle = _build_phase3_bundle()
@@ -344,6 +430,23 @@ class TestRenderDialogueAttributionEvidenceSections(unittest.TestCase):
         bundle = _build_phase3_bundle()
         result = self._call(bundle=bundle, active_entities="")
         self.assertTrue(all("【近期活跃角色】" not in s for s in result))
+
+    def test_phase3_sections_trim_overlong_shared_evidence_context(self) -> None:
+        """Phase3 task renderer 会裁剪过长的共享 evidence，避免 prompt 继续膨胀。"""
+        result = self._call(bundle=_build_phase3_overflow_bundle())
+
+        active_section = next(section for section in result if "【近期活跃角色】" in section)
+        level1_section = next(section for section in result if "<Narrative_Evidence_Level1>" in section)
+        disambig_section = next(section for section in result if "<Disambig_Candidates>" in section)
+        vector_section = next(section for section in result if "<Vector_Evidence>" in section)
+
+        self.assertEqual(sum(1 for line in active_section.splitlines() if line.startswith("- ")), 3)
+        self.assertEqual(sum(1 for line in level1_section.splitlines() if line.startswith("- ")), 6)
+        self.assertEqual(sum(1 for line in disambig_section.splitlines() if line.startswith("「")), 2)
+        self.assertEqual(vector_section.count("[Chunk "), 2)
+        self.assertNotIn("[Chunk 3]", vector_section)
+        self.assertIn("...", vector_section)
+        self.assertNotIn("人物1历史片段：" + ("甲" * 150), vector_section)
 
 
 class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
