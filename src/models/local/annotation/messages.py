@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from src.models.local.annotation.evidence_renderer import (
+    render_annotation_alias_map_text,
     render_annotation_evidence_blocks,
     render_annotation_prompt_blocks,
 )
@@ -25,39 +26,6 @@ from src.models.local.prompts import (
     SYSTEM_PROMPT_V2,
     USER_TEMPLATE_V2,
 )
-
-
-def _render_alias_map_text(
-    alias_map: dict[str, str] | None = None,
-    evidence_bundle=None,
-) -> str:
-    alias_rows: list[tuple[str, str]] = []
-
-    if alias_map is not None:
-        alias_rows.extend(alias_map.items())
-    elif evidence_bundle is not None and evidence_bundle.level1_snapshot is not None:
-        alias_rows.extend(
-            (mapping.alias, mapping.canonical) for mapping in evidence_bundle.level1_snapshot.alias_mappings
-        )
-
-    canonical_to_aliases: dict[str, list[str]] = {}
-    for alias, canonical in alias_rows:
-        if not alias or not canonical or alias == canonical:
-            continue
-        canonical_to_aliases.setdefault(canonical, [])
-        if alias not in canonical_to_aliases[canonical]:
-            canonical_to_aliases[canonical].append(alias)
-
-    if not canonical_to_aliases:
-        return "{}"
-
-    lines = []
-    for canonical, aliases in canonical_to_aliases.items():
-        alias_str = "、".join(aliases)
-        lines.append(f"- {alias_str} → {canonical}")
-    return "\n".join(lines)
-
-
 def _build_annotation_messages_v2(
     text: str,
     alias_map: dict[str, str] | None = None,
@@ -93,7 +61,7 @@ def _build_annotation_messages_v2(
         messages.append({"role": "user", "content": example["user"]})
         messages.append({"role": "assistant", "content": example["assistant"]})
 
-    alias_map_str = _render_alias_map_text(alias_map=alias_map, evidence_bundle=evidence_bundle)
+    alias_map_str = render_annotation_alias_map_text(alias_map=alias_map, evidence_bundle=evidence_bundle)
 
     if evidence_bundle is not None:
         blocks = render_annotation_prompt_blocks(
