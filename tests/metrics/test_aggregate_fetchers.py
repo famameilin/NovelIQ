@@ -7,25 +7,27 @@ from src.metrics.aggregate.fetchers import fetch_character_data, fetch_relation_
 
 
 class _DummyAnnotationRepo:
-    def __init__(self, pending=None):
+    def __init__(self, pending=None, character_rows=None, emotion_rows=None):
         self.session = object()
         self._pending = pending or []
+        self._character_rows = character_rows or [
+            ("主角", "主体", "mild_positive"),
+            ("同伴", "助手", None),
+        ]
+        self._emotion_rows = emotion_rows or [
+            ("主角", "mild_positive"),
+            ("主角", "mild_negative"),
+            ("同伴", "mild_positive"),
+        ]
 
     def fetch_pending_chunk_relations(self, run_id, to_chunk=None, limit=200):
         return self._pending
 
     def fetch_characters_with_scores(self, run_id):
-        return [
-            ("主角", "主体", "mild_positive"),
-            ("同伴", "助手", None),
-        ]
+        return self._character_rows
 
     def fetch_character_emotion_sequence(self, run_id):
-        return [
-            ("主角", "mild_positive"),
-            ("主角", "mild_negative"),
-            ("同伴", "mild_positive"),
-        ]
+        return self._emotion_rows
 
 
 def test_fetch_character_data_consumes_authority_stable_states():
@@ -38,6 +40,7 @@ def test_fetch_character_data_consumes_authority_stable_states():
             SimpleNamespace(name="旧敌", status="inactive", primary_role_function="反对者"),
         ]
     )
+    mock_service.build_level1_snapshot.return_value = SimpleNamespace(alias_mappings=[])
 
     with patch(
         "src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session",
@@ -47,6 +50,7 @@ def test_fetch_character_data_consumes_authority_stable_states():
 
     from_session.assert_called_once_with(annotation_repo.session)
     mock_service.build_graph_view.assert_called_once_with("run-1")
+    mock_service.build_level1_snapshot.assert_called_once_with("run-1")
     assert data.characters == [
         ("主角", "主体", 1),
         ("同伴", "助手", 0),
@@ -56,6 +60,48 @@ def test_fetch_character_data_consumes_authority_stable_states():
         ("同伴", [1.0]),
     ]
     assert data.protagonist_name == "主角"
+
+
+def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
+    annotation_repo = _DummyAnnotationRepo(
+        character_rows=[
+            ("灰衣人", "主体", "mild_positive"),
+            ("同伴", "助手", None),
+        ],
+        emotion_rows=[
+            ("灰衣人", "mild_positive"),
+            ("灰衣人", "mild_negative"),
+            ("同伴", "mild_positive"),
+        ],
+    )
+    mock_service = MagicMock()
+    mock_service.build_graph_view.return_value = SimpleNamespace(
+        stable_states=[
+            SimpleNamespace(name="白芷", status="active", primary_role_function="主体"),
+            SimpleNamespace(name="同伴", status="active", primary_role_function="助手"),
+        ]
+    )
+    mock_service.build_level1_snapshot.return_value = SimpleNamespace(
+        alias_mappings=[
+            SimpleNamespace(alias="灰衣人", canonical="白芷"),
+        ]
+    )
+
+    with patch(
+        "src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=mock_service,
+    ):
+        data = fetch_character_data(annotation_repo, "run-alias")
+
+    assert data.characters == [
+        ("白芷", "主体", 1),
+        ("同伴", "助手", 0),
+    ]
+    assert data.char_emotion_scores == [
+        ("白芷", [1.0, -1.0]),
+        ("同伴", [1.0]),
+    ]
+    assert data.protagonist_name == "白芷"
 
 
 def test_fetch_relation_data_raises_when_pending_exists_and_graph_empty():
