@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from src.models.local.evidence_renderer_shared import render_disambig_candidates as render_shared_disambig_candidates
@@ -9,13 +11,73 @@ if TYPE_CHECKING:
     from src.rag.evidence_types import EvidenceBundle
 
 
-def render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
-    return render_shared_disambig_candidates(bundle)
+@dataclass(slots=True)
+class DisambiguationPromptContext:
+    existing_character_hint: str | None = None
+    graph_hint: str | None = None
+    shared_evidence_context: str | None = None
 
 
-def render_disambig_prompt_context(bundle: EvidenceBundle) -> str | None:
+def build_disambiguation_prompt_context(
+    *,
+    existing_character_hint: str | None = None,
+    graph_hint: str | None = None,
+    shared_evidence_context: str | None = None,
+) -> DisambiguationPromptContext | None:
+    """构建消歧任务上下文对象。"""
+
+    if not any((existing_character_hint, graph_hint, shared_evidence_context)):
+        return None
+    return DisambiguationPromptContext(
+        existing_character_hint=existing_character_hint,
+        graph_hint=graph_hint,
+        shared_evidence_context=shared_evidence_context,
+    )
+
+
+def render_disambiguation_prompt_context_sections(
+    prompt_context: DisambiguationPromptContext | None,
+) -> list[str]:
+    """按固定顺序渲染消歧任务上下文。
+
+    中文注释：这里的顺序就是消歧公共接口的正式消费顺序，
+    先放已有角色锚点，再放图谱提示，最后放共享 evidence block。
+    """
+
+    if prompt_context is None:
+        return []
+    return [
+        section
+        for section in (
+            prompt_context.existing_character_hint,
+            prompt_context.graph_hint,
+            prompt_context.shared_evidence_context,
+        )
+        if section
+    ]
+
+
+def render_disambig_candidates(
+    bundle: EvidenceBundle,
+    *,
+    fallback_requested_names: Iterable[str] | None = None,
+) -> str | None:
+    return render_shared_disambig_candidates(
+        bundle,
+        fallback_requested_names=fallback_requested_names,
+    )
+
+
+def render_disambig_prompt_context(
+    bundle: EvidenceBundle,
+    *,
+    fallback_requested_names: Iterable[str] | None = None,
+) -> str | None:
     # 中文注释：消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法。
-    disambig_candidates = render_shared_disambig_candidates(bundle)
+    disambig_candidates = render_shared_disambig_candidates(
+        bundle,
+        fallback_requested_names=fallback_requested_names,
+    )
     vector_evidence = render_vector_evidence(bundle)
 
     if disambig_candidates and vector_evidence:

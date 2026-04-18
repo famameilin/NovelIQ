@@ -17,6 +17,8 @@
 修改内容: 改为 lazy export，避免 package 顶层导出触发循环导入
 """
 
+# ruff: noqa: F401
+
 from __future__ import annotations
 
 from importlib import import_module
@@ -26,8 +28,11 @@ if TYPE_CHECKING:
     from .api_call import call_disambiguate_api
     from .evidence import EvidenceProfile, build_evidence_profile, format_evidence_profile
     from .evidence_renderer import (
+        DisambiguationPromptContext,
+        build_disambiguation_prompt_context,
         render_disambig_candidates,
         render_disambig_prompt_context,
+        render_disambiguation_prompt_context_sections,
     )
     from .logging import (
         log_disambiguate_response,
@@ -52,8 +57,14 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "EvidenceProfile": (".evidence", "EvidenceProfile"),
     "build_evidence_profile": (".evidence", "build_evidence_profile"),
     "format_evidence_profile": (".evidence", "format_evidence_profile"),
+    "DisambiguationPromptContext": (".evidence_renderer", "DisambiguationPromptContext"),
+    "build_disambiguation_prompt_context": (".evidence_renderer", "build_disambiguation_prompt_context"),
     "render_disambig_candidates": (".evidence_renderer", "render_disambig_candidates"),
     "render_disambig_prompt_context": (".evidence_renderer", "render_disambig_prompt_context"),
+    "render_disambiguation_prompt_context_sections": (
+        ".evidence_renderer",
+        "render_disambiguation_prompt_context_sections",
+    ),
     "log_disambiguate_response": (".logging", "log_disambiguate_response"),
     "log_disambiguate_result": (".logging", "log_disambiguate_result"),
     "log_disambiguate_start": (".logging", "log_disambiguate_start"),

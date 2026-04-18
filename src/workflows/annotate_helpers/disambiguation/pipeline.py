@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -27,9 +27,12 @@ from src.models.disambiguation_types import NameCountCandidate
 from src.models.interactions import record_model_interaction
 from src.models.interfaces import DisambiguationLike
 from src.models.local.disambiguation import (
+    DisambiguationPromptContext,
     DisambiguationState,
     ExtendedDisambigResult,
     build_disambiguate_messages,
+    build_disambiguation_prompt_context,
+    render_disambig_prompt_context,
 )
 from src.models.local.disambiguation.result_builder import align_canonical_by_frequency
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
@@ -58,6 +61,9 @@ from .state_logic import (
     apply_disambiguation_decisions,
     validate_confidence_with_evidence,
 )
+
+if TYPE_CHECKING:
+    from src.rag import DisambigContextProvider
 
 DisambigStateSnapshot = dict[str, dict[str, str]]
 
@@ -261,6 +267,89 @@ def _build_disambig_response_text(result: Any) -> str:
     return json.dumps(response_dict, ensure_ascii=False)
 
 
+def _build_shared_evidence_query_text(
+    candidates: list[NameCountCandidate],
+    context_sentences: dict[str, str],
+) -> str | None:
+    """将候选名字的例句上下文拼成共享取证查询文本。"""
+
+    parts: list[str] = []
+    for item in candidates:
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        context = context_sentences.get(name, "").strip()
+        if context:
+            parts.append(f"{name}: {context}")
+
+    return "\n".join(parts) if parts else None
+
+
+async def _build_prompt_context_with_shared_evidence(
+    prompt_context: DisambiguationPromptContext | None,
+    rag_retriever: DisambigContextProvider | None,
+    candidates: list[NameCountCandidate],
+    context_sentences: dict[str, str],
+    *,
+    current_chunk: int | None = None,
+    active_entity_fallback_names: set[str] | None = None,
+) -> DisambiguationPromptContext | None:
+    """把共享 evidence renderer 输出补入消歧 prompt_context。"""
+
+    if rag_retriever is None or not candidates:
+        return prompt_context
+
+    names_in_chunk = [str(item.get("name", "")).strip() for item in candidates if str(item.get("name", "")).strip()]
+    if not names_in_chunk:
+        return prompt_context
+
+    query_text = _build_shared_evidence_query_text(candidates, context_sentences)
+    if rag_retriever.requires_level3():
+        if not rag_retriever.is_level3_available():
+            # 中文注释：这里是“补充 shared evidence prompt_context”的辅助链路，
+            # 不应在 final-only / resume 场景里替代 annotation 主流程的 readiness gate。
+            # Level 3 暂不可用时，退回 Level 1 / Level 2 证据，避免把已有 prompt_context 直接变成硬失败。
+            logger.warning(
+                "shared evidence prompt_context fallback to Level1/2 only because Level3 is required but unavailable"
+            )
+            evidence_bundle = rag_retriever.collect_evidence(
+                names_in_chunk=names_in_chunk,
+                current_chunk=current_chunk,
+            )
+        else:
+            evidence_bundle = await rag_retriever.collect_evidence_with_level3(
+                names_in_chunk=names_in_chunk,
+                current_chunk=current_chunk,
+                context_text=query_text,
+                exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
+            )
+    elif rag_retriever.is_level3_available():
+        evidence_bundle = await rag_retriever.collect_evidence_with_level3(
+            names_in_chunk=names_in_chunk,
+            current_chunk=current_chunk,
+            context_text=query_text,
+            exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
+        )
+    else:
+        evidence_bundle = rag_retriever.collect_evidence(
+            names_in_chunk=names_in_chunk,
+            current_chunk=current_chunk,
+        )
+
+    shared_evidence_context = render_disambig_prompt_context(
+        evidence_bundle,
+        fallback_requested_names=active_entity_fallback_names,
+    )
+    if not shared_evidence_context:
+        return prompt_context
+
+    return build_disambiguation_prompt_context(
+        existing_character_hint=prompt_context.existing_character_hint if prompt_context else None,
+        graph_hint=prompt_context.graph_hint if prompt_context else None,
+        shared_evidence_context=shared_evidence_context,
+    )
+
+
 async def _retry_disambig(
     client: DisambiguationLike,
     candidates: list[NameCountCandidate],
@@ -268,7 +357,7 @@ async def _retry_disambig(
     existing_names: list[str],
     stage_name: str,
     run_id: str | None = None,
-    rag_hint: str | None = None,
+    prompt_context: DisambiguationPromptContext | None = None,
 ) -> Any:
     """
     带重试的消歧调用
@@ -297,11 +386,16 @@ async def _retry_disambig(
                 candidates=candidates,
                 context_sentences=context_sentences,
                 existing_names=existing_names if existing_names else None,
-                rag_hint=rag_hint,
+                prompt_context=prompt_context,
             )
             duration_ms = int((time.time() - start_time) * 1000)
 
-            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
+            messages = build_disambiguate_messages(
+                candidates,
+                context_sentences,
+                existing_names,
+                prompt_context=prompt_context,
+            )
             response_text = _build_disambig_response_text(result)
             thinking_content = getattr(result, "_thinking_content", None)
 
@@ -325,7 +419,12 @@ async def _retry_disambig(
             last_exception = e
             duration_ms = int((time.time() - start_time) * 1000)
 
-            messages = build_disambiguate_messages(candidates, context_sentences, existing_names, rag_hint)
+            messages = build_disambiguate_messages(
+                candidates,
+                context_sentences,
+                existing_names,
+                prompt_context=prompt_context,
+            )
 
             record_model_interaction(
                 run_id=run_id,
@@ -360,6 +459,7 @@ async def _run_incremental_disambiguation_with_state(
     chunk_id: int,
     current_idx: int,
     disambig_interval: int,
+    rag_retriever: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
@@ -400,7 +500,7 @@ async def _run_incremental_disambiguation_with_state(
     existing_names = list(state.known_canonical_names)
     alias_map = state.get_alias_merges_dict()
     relations = _fetch_current_relations(conn, run_id)
-    rag_hint = _build_existing_character_hint_from_db(
+    prompt_context = _build_existing_character_hint_from_db(
         conn,
         new_names,
         existing_names,
@@ -408,6 +508,24 @@ async def _run_incremental_disambiguation_with_state(
         run_id,
         alias_map,
         relations,
+    )
+    new_candidate_names = {
+        str(item.get("name", "")).strip()
+        for item in truly_new_names
+        if str(item.get("name", "")).strip()
+    }
+    active_entity_fallback_names = {
+        str(item.get("name", "")).strip()
+        for item in all_disambig_candidates
+        if str(item.get("name", "")).strip() in new_candidate_names
+    }
+    prompt_context = await _build_prompt_context_with_shared_evidence(
+        prompt_context,
+        rag_retriever,
+        all_disambig_candidates,
+        context_sentences,
+        current_chunk=chunk_id,
+        active_entity_fallback_names=active_entity_fallback_names,
     )
 
     result = await _retry_disambig(
@@ -417,7 +535,7 @@ async def _run_incremental_disambiguation_with_state(
         existing_names,
         stage_name="incremental disambiguation",
         run_id=run_id,
-        rag_hint=rag_hint,
+        prompt_context=prompt_context,
     )
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
@@ -474,6 +592,7 @@ async def _run_final_disambiguation_with_state(
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
+    rag_retriever: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行最终消歧（使用新的三层状态）
@@ -540,7 +659,7 @@ async def _run_final_disambiguation_with_state(
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
         _inject_category_into_context(f_classifications, context_sentences)
         relations = _fetch_current_relations(conn, run_id)
-        rag_hint = _build_existing_character_hint_from_db(
+        prompt_context = _build_existing_character_hint_from_db(
             conn,
             all_names,
             existing_names,
@@ -549,6 +668,12 @@ async def _run_final_disambiguation_with_state(
             alias_map_dict,
             relations,
         )
+        prompt_context = await _build_prompt_context_with_shared_evidence(
+            prompt_context,
+            rag_retriever,
+            candidate_payload,
+            context_sentences,
+        )
         result = await _retry_disambig(
             full_disambig_client,
             candidate_payload,
@@ -556,7 +681,7 @@ async def _run_final_disambiguation_with_state(
             existing_names,
             stage_name="final disambiguation",
             run_id=run_id,
-            rag_hint=rag_hint,
+            prompt_context=prompt_context,
         )
         result = validate_confidence_with_evidence(result, existing_names, context_sentences)
         final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
