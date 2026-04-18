@@ -152,6 +152,23 @@ def test_render_disambiguation_graph_hint_renders_aliases_and_relations() -> Non
     assert "路人甲" not in rendered
 
 
+def test_render_disambiguation_graph_hint_skips_inactive_relations() -> None:
+    from src.models.local.disambiguation.evidence_renderer import render_disambiguation_graph_hint
+
+    rendered = render_disambiguation_graph_hint(
+        alias_map={"白老板": "白芷"},
+        relations=[
+            {"from_name": "白芷", "to_name": "侯飞白", "type": "盟友", "is_active": False},
+            {"from_name": "白芷", "to_name": "沈青禾", "type": "盟友", "is_active": True},
+        ],
+        existing_names=["白芷", "侯飞白", "沈青禾"],
+    )
+
+    assert rendered is not None
+    assert "- 白芷 ←盟友→ 沈青禾" in rendered
+    assert "- 白芷 ←盟友→ 侯飞白" not in rendered
+
+
 def test_render_disambiguation_graph_hint_returns_none_when_no_relevant_facts() -> None:
     from src.models.local.disambiguation.evidence_renderer import render_disambiguation_graph_hint
 

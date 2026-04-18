@@ -125,6 +125,89 @@ def build_phase4_bundle() -> EvidenceBundle:
     )
 
 
+def build_phase4_overflow_bundle() -> EvidenceBundle:
+    structured = [
+        EvidenceItem(
+            evidence_type="alias_mapping",
+            source="level1",
+            content=f"代称{i} -> 角色{i}",
+            metadata={"alias": f"代称{i}", "canonical": f"角色{i}"},
+        )
+        for i in range(1, 4)
+    ]
+    structured.extend(
+        [
+            EvidenceItem(
+                evidence_type="canonical_entity",
+                source="level1",
+                content=f"角色{i}",
+                metadata={"name": f"角色{i}", "entity_type": "character"},
+            )
+            for i in range(1, 4)
+        ]
+    )
+    structured.extend(
+        [
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content=f"角色{i}<盟友>角色{i + 1}",
+                metadata={
+                    "from_name": f"角色{i}",
+                    "to_name": f"角色{i + 1}",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            )
+            for i in range(1, 5)
+        ]
+    )
+
+    local = [
+        EvidenceItem(
+            evidence_type="active_entity",
+            source="level2",
+            content=f"角色{i}",
+            metadata={
+                "name": f"角色{i}",
+                "role": "主体",
+                "recent_action": f"动作{i}",
+                "recent_emotion": f"情绪{i}",
+                "last_seen_chunk": 30 - i,
+            },
+        )
+        for i in range(1, 6)
+    ]
+    local.append(
+        EvidenceItem(
+            evidence_type="disambig_candidate",
+            source="level2",
+            content="「代称1」可能是：角色1",
+        )
+    )
+
+    semantic = [
+        EvidenceItem(
+            evidence_type="semantic_recall",
+            source="level3",
+            content=f"角色{i}旧场景：" + ("乙" * 180),
+            metadata={
+                "chunk_id": i,
+                "similarity": 0.95 - i * 0.01,
+                "text": f"角色{i}旧场景：" + ("乙" * 180),
+            },
+        )
+        for i in range(1, 4)
+    ]
+
+    return EvidenceBundle(
+        structured_evidence=structured,
+        local_evidence=local,
+        semantic_evidence=semantic,
+        requested_names=["代称1"],
+    )
+
+
 class TestRenderRelationExtractionEvidenceSections(unittest.TestCase):
     def test_relation_extraction_sections_only_use_level1_level2_level3_main_sections(self) -> None:
         bundle = build_phase4_bundle()
@@ -138,6 +221,22 @@ class TestRenderRelationExtractionEvidenceSections(unittest.TestCase):
         self.assertIn("<Vector_Evidence>", combined)
         self.assertNotIn("<Disambig_Candidates>", combined)
         self.assertNotIn("<Structured_Evidence>", combined)
+
+    def test_relation_extraction_sections_trim_level1_active_and_vector_noise(self) -> None:
+        sections = render_relation_extraction_evidence_sections(build_phase4_overflow_bundle())
+        combined = "\n\n".join(sections)
+
+        level1_section = next(section for section in sections if "<Narrative_Evidence_Level1>" in section)
+        active_section = next(section for section in sections if "【近期活跃角色】" in section)
+        vector_section = next(section for section in sections if "<Vector_Evidence>" in section)
+
+        self.assertEqual(sum(1 for line in level1_section.splitlines() if line.startswith("- ")), 8)
+        self.assertEqual(sum(1 for line in active_section.splitlines() if line.startswith("- ")), 4)
+        self.assertEqual(vector_section.count("[Chunk "), 2)
+        self.assertNotIn("[Chunk 3]", vector_section)
+        self.assertIn("...", vector_section)
+        self.assertNotIn("角色1旧场景：" + ("乙" * 180), vector_section)
+        self.assertNotIn("<Disambig_Candidates>", combined)
 
 
 class TestBuildPhase4Messages(unittest.TestCase):
@@ -489,7 +588,10 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<Vector_Evidence>", call_messages[1]["content"])
 
     @patch("src.models.local.annotation.phase4.settings")
-    async def test_annotation_with_empty_bundle_falls_back_to_original_prompt_shape(self, mock_settings: MagicMock) -> None:
+    async def test_annotation_with_empty_bundle_falls_back_to_original_prompt_shape(
+        self,
+        mock_settings: MagicMock,
+    ) -> None:
         """空 bundle 不报错，并回退到无 evidence section 的旧 prompt 形状。"""
         mock_settings.prompts.phase4.system = "system"
         mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.models.local.evidence_renderer_shared import (
@@ -110,7 +110,11 @@ def render_disambiguation_graph_hint(
             alias_lines.append(f"- {alias} → {canonical}")
         parts.append("\n".join(alias_lines))
 
-    relevant_rels = [r for r in relations if r.get("from_name") in existing_set or r.get("to_name") in existing_set]
+    relevant_rels = [
+        r
+        for r in relations
+        if r.get("is_active") is not False and (r.get("from_name") in existing_set or r.get("to_name") in existing_set)
+    ]
     if relevant_rels:
         rel_lines = ["【图谱已确认的关系】"]
         for relation in relevant_rels[:10]:

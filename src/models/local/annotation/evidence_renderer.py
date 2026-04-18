@@ -20,6 +20,31 @@ class AnnotationPromptBlocks:
     vector_evidence: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TaskEvidenceRenderPolicy:
+    max_level1_lines: int | None = None
+    max_active_entities: int | None = None
+    max_disambig_candidates: int | None = None
+    max_vector_chunks: int = 3
+    max_vector_text_len: int = 200
+
+
+_PHASE3_EVIDENCE_POLICY = TaskEvidenceRenderPolicy(
+    max_level1_lines=6,
+    max_active_entities=3,
+    max_disambig_candidates=2,
+    max_vector_chunks=2,
+    max_vector_text_len=120,
+)
+
+_PHASE4_EVIDENCE_POLICY = TaskEvidenceRenderPolicy(
+    max_level1_lines=8,
+    max_active_entities=4,
+    max_vector_chunks=2,
+    max_vector_text_len=140,
+)
+
+
 def render_annotation_alias_map_text(
     *,
     alias_map: dict[str, str] | None = None,
@@ -59,6 +84,25 @@ def render_annotation_evidence_blocks(bundle: EvidenceBundle) -> list[str]:
     )
 
 
+def _render_task_scoped_shared_sections(
+    bundle: EvidenceBundle,
+    *,
+    include_level1_alias_mappings: bool = True,
+    policy: TaskEvidenceRenderPolicy,
+):
+    # 中文注释：task renderer 只在这里声明“每个任务最多吃多少共享证据”，
+    # 具体 evidence 语义仍由 shared renderer 统一维护，避免 phase 代码各自长出一套裁剪规则。
+    return render_shared_evidence_sections(
+        bundle,
+        include_level1_alias_mappings=include_level1_alias_mappings,
+        max_level1_lines=policy.max_level1_lines,
+        max_active_entities=policy.max_active_entities,
+        max_disambig_candidates=policy.max_disambig_candidates,
+        max_vector_chunks=policy.max_vector_chunks,
+        max_vector_text_len=policy.max_vector_text_len,
+    )
+
+
 def render_annotation_prompt_blocks(
     bundle: EvidenceBundle,
     *,
@@ -92,7 +136,10 @@ def render_relation_extraction_evidence_sections(
     if evidence_bundle is None:
         return []
 
-    shared_sections = render_shared_evidence_sections(evidence_bundle)
+    shared_sections = _render_task_scoped_shared_sections(
+        evidence_bundle,
+        policy=_PHASE4_EVIDENCE_POLICY,
+    )
     # 中文注释：Phase4 只选择稳定事实、局部活跃实体和历史语义召回三类 section；
     # 不把消歧候选或 raw structured block 带进去，避免把候选身份和重复事实噪音注入关系抽取。
     return select_shared_evidence_sections(
@@ -113,9 +160,10 @@ def render_dialogue_attribution_evidence_sections(
         return []
 
     shared_sections = (
-        render_shared_evidence_sections(
+        _render_task_scoped_shared_sections(
             evidence_bundle,
             include_level1_alias_mappings=alias_map is None,
+            policy=_PHASE3_EVIDENCE_POLICY,
         )
         if evidence_bundle is not None
         else None
