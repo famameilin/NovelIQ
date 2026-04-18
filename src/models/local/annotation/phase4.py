@@ -25,11 +25,13 @@ from src.config.constants import (
     SYMMETRIC_RELATION_TYPES,
 )
 from src.models.interactions import record_model_interaction
+from src.models.local.annotation.evidence_renderer import render_relation_extraction_evidence_sections
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import RelationChangeSnapshot, RelationExtractionResult
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+    from src.rag.evidence_types import EvidenceBundle
 
 
 class Phase4MaxRetriesExceededError(Exception):
@@ -52,6 +54,7 @@ _DEFAULT_RELATION_CONFIDENCE: float = 0.85
 def _build_phase4_messages(
     text: str,
     known_characters: list[str] | None,
+    evidence_sections: list[str] | None = None,
 ) -> list[dict[str, str]]:
     """
     构建 Phase4 消息
@@ -83,6 +86,10 @@ def _build_phase4_messages(
         chunk_text=text,
         known_characters=known_chars,
     )
+    if evidence_sections:
+        # 中文注释：Phase4 只追加 renderer 已经选好的共享 evidence blocks，
+        # 不在关系抽取阶段重新定义 Level1/2/3 的文案或 section 协议。
+        user_prompt += "\n\n" + "\n\n".join(evidence_sections)
 
     return [
         {"role": "system", "content": system_prompt},
@@ -219,6 +226,7 @@ async def annotate_chunk_phase4(
     client: AnnotationClient,
     text: str,
     known_characters: list[str] | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
 ) -> list[RelationChangeSnapshot]:
@@ -250,7 +258,12 @@ async def annotate_chunk_phase4(
         f"text_len={len(text)}, known_characters={known_characters}"
     )
 
-    messages = _build_phase4_messages(text, known_characters)
+    evidence_sections = render_relation_extraction_evidence_sections(evidence_bundle)
+    messages = _build_phase4_messages(
+        text,
+        known_characters,
+        evidence_sections=evidence_sections,
+    )
 
     config = RetryConfig(
         max_retries=PHASE_MAX_RETRIES,
