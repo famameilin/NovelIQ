@@ -24,6 +24,7 @@ from src.config import settings
 from src.config.schemas import ANNOTATION_CONFIG
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
+from src.models.local.evidence_renderer_shared import render_active_entities_from_authority
 
 if TYPE_CHECKING:
     from src.rag import DisambigContextProvider, EvidenceBundle
@@ -160,38 +161,12 @@ def _build_active_entities_prompt_from_authority(
 ) -> str | None:
     """Reuse the authority-owned Level 2 contract even when the RAG provider is unavailable."""
 
-    from src.rag import EvidenceBundle, EvidenceItem
-
     active_entities = KnowledgeGraphAuthorityService.from_session(conn).build_active_entity_view(
         run_id,
         current_chunk=chunk_id,
         lookback=lookback,
     )
-    if not active_entities:
-        return None
-
-    bundle = EvidenceBundle(
-        local_evidence=[
-            EvidenceItem(
-                evidence_type="active_entity",
-                source=item.source,
-                content=item.name,
-                metadata={
-                    "entity_id": item.entity_id,
-                    "name": item.name,
-                    "role": item.role or "other",
-                    "entity_type": item.entity_type,
-                    "status": item.status,
-                    "last_seen_chunk": item.last_seen_chunk,
-                    "recent_action": item.recent_action,
-                    "recent_emotion": item.recent_emotion,
-                },
-                chunk_id=item.last_seen_chunk,
-            )
-            for item in active_entities
-        ]
-    )
-    return render_annotation_prompt_blocks(bundle).active_entities
+    return render_active_entities_from_authority(active_entities)
 
 
 def _prepare_chunk_context(

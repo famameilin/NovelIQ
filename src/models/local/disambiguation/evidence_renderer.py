@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from src.models.local.evidence_renderer_shared import render_disambig_candidates as render_shared_disambig_candidates
-from src.models.local.evidence_renderer_shared import render_vector_evidence
+from src.models.local.evidence_renderer_shared import (
+    render_shared_evidence_sections,
+    select_shared_evidence_sections,
+)
 
 if TYPE_CHECKING:
     from src.rag.evidence_types import EvidenceBundle
@@ -62,10 +64,10 @@ def render_disambig_candidates(
     *,
     fallback_requested_names: Iterable[str] | None = None,
 ) -> str | None:
-    return render_shared_disambig_candidates(
+    return render_shared_evidence_sections(
         bundle,
         fallback_requested_names=fallback_requested_names,
-    )
+    ).disambig_candidates
 
 
 def render_disambig_prompt_context(
@@ -74,15 +76,15 @@ def render_disambig_prompt_context(
     fallback_requested_names: Iterable[str] | None = None,
 ) -> str | None:
     # 中文注释：消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法。
-    disambig_candidates = render_shared_disambig_candidates(
+    shared_sections = render_shared_evidence_sections(
         bundle,
         fallback_requested_names=fallback_requested_names,
     )
-    vector_evidence = render_vector_evidence(bundle)
-
-    if disambig_candidates and vector_evidence:
-        return disambig_candidates + "\n\n" + vector_evidence
-    return disambig_candidates or vector_evidence or None
+    ordered_sections = select_shared_evidence_sections(
+        shared_sections,
+        ("disambig_candidates", "vector_evidence"),
+    )
+    return "\n\n".join(ordered_sections) if ordered_sections else None
 
 
 def render_disambiguation_graph_hint(
