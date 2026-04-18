@@ -140,6 +140,22 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
     return candidates
 
 
+def _collect_priority_candidate_names(
+    evidence_bundle: EvidenceBundle | None,
+    batch_candidates: list[QuoteCandidate],
+) -> list[str] | None:
+    if evidence_bundle is None or not evidence_bundle.requested_names:
+        return None
+
+    batch_text = "\n".join(candidate.content for candidate in batch_candidates if candidate.content)
+    priority_names = [
+        name
+        for name in evidence_bundle.requested_names
+        if name and name in batch_text
+    ]
+    return priority_names or None
+
+
 async def attribute_dialogues_with_llm(
     client: AnnotationClient,
     chunk_text: str,
@@ -179,16 +195,6 @@ async def attribute_dialogues_with_llm(
     is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
     batch_size = settings.thinking.phase3_candidates_per_batch
-    # 中文注释：显式传入 alias_map，复用 Phase1 已经冻结的别名优先级规则；
-    # 显式传入 active_entities，优先使用上游已解析好的活跃实体（含 fallback），
-    # 当上游已决议 alias_map 时，不再把 bundle 里的 Level1 别名反向注入 prompt，
-    # 避免 prompt 中的 alias 事实和后处理归一化使用的 alias_map 不是同一套。
-    evidence_sections = render_dialogue_attribution_evidence_sections(
-        evidence_bundle,
-        alias_map=alias_map,
-        active_entities=active_entities,
-    )
-
     async def _execute_single_batch(
         current_client: AnnotationClient,
         batch_candidates: list[QuoteCandidate],
@@ -197,6 +203,14 @@ async def attribute_dialogues_with_llm(
     ) -> list[DialogueRecordSchema]:
         dialogue_list = "\n".join([f'{c.index}. content: "{c.content}"' for c in batch_candidates])
         known_chars = "、".join(known_characters) if known_characters else "无"
+        # 中文注释：Phase3 的共享 evidence 需要按当前 batch 重新裁剪，
+        # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选。
+        evidence_sections = render_dialogue_attribution_evidence_sections(
+            evidence_bundle,
+            alias_map=alias_map,
+            active_entities=active_entities,
+            priority_candidate_names=_collect_priority_candidate_names(evidence_bundle, batch_candidates),
+        )
 
         prompts = settings.prompts
         system_prompt = prompts.phase3.system
