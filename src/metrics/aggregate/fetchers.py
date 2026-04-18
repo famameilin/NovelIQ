@@ -55,6 +55,32 @@ def _build_aggregate_graph_view(
     return KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_graph_view(run_id)
 
 
+def _build_aggregate_alias_lookup(
+    authority_service: KnowledgeGraphAuthorityService,
+    run_id: str,
+) -> dict[str, str]:
+    """
+    构建 aggregate 可复用的 alias -> canonical 映射。
+
+    中文注释：chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
+    stable state 消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
+    和情绪序列时因为名称漂移被静默归零。
+    """
+
+    snapshot = authority_service.build_level1_snapshot(run_id)
+    return {
+        mapping.alias: mapping.canonical
+        for mapping in snapshot.alias_mappings
+        if mapping.alias and mapping.canonical
+    }
+
+
+def _canonicalize_aggregate_character_name(name: str, alias_lookup: dict[str, str]) -> str:
+    """将 chunk 侧角色名折叠到 authority 规范名。"""
+
+    return alias_lookup.get(name, name)
+
+
 def fetch_annotation_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
@@ -109,7 +135,9 @@ def fetch_character_data(
     任务: P2.1-downstream-switch
     修改内容: 从 graph_entities 读取权威角色列表，补充 chunk_characters 的情感分数
     """
-    graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    graph_view = authority_service.build_graph_view(run_id)
+    alias_lookup = _build_aggregate_alias_lookup(authority_service, run_id)
     active_states = [state for state in graph_view.stable_states if state.status == "active"]
 
     # 2. 从 chunk_characters 聚合情感分数（用于补充）
@@ -117,7 +145,8 @@ def fetch_character_data(
     emotion_map: dict[str, int] = {}
     for row in rows:
         name, _, emotion_score_raw = row
-        emotion_map[name] = map_emotion_score(emotion_score_raw)
+        canonical_name = _canonicalize_aggregate_character_name(name, alias_lookup)
+        emotion_map[canonical_name] = map_emotion_score(emotion_score_raw)
 
     # 3. 构建角色列表（使用 authority stable state 作为正式输入）
     characters = []
@@ -129,10 +158,11 @@ def fetch_character_data(
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
     char_emotion_map: dict[str, list[float]] = {}
     for name, score_raw in char_emotion_rows:
-        if name not in char_emotion_map:
-            char_emotion_map[name] = []
+        canonical_name = _canonicalize_aggregate_character_name(name, alias_lookup)
+        if canonical_name not in char_emotion_map:
+            char_emotion_map[canonical_name] = []
         score = float(map_emotion_score(score_raw))
-        char_emotion_map[name].append(score)
+        char_emotion_map[canonical_name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 
     # 5. 确定主角（从 authority stable state 中找 role_function 为"主体"的）
