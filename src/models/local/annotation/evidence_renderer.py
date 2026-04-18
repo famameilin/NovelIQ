@@ -84,6 +84,23 @@ def render_annotation_prompt_blocks(
     )
 
 
+def render_relation_extraction_evidence_sections(
+    evidence_bundle: EvidenceBundle | None,
+) -> list[str]:
+    """渲染 Phase 4 关系抽取可消费的共享证据区段。"""
+
+    if evidence_bundle is None:
+        return []
+
+    shared_sections = render_shared_evidence_sections(evidence_bundle)
+    # 中文注释：Phase4 只选择稳定事实、局部活跃实体和历史语义召回三类 section；
+    # 不把消歧候选或 raw structured block 带进去，避免把候选身份和重复事实噪音注入关系抽取。
+    return select_shared_evidence_sections(
+        shared_sections,
+        ("level1_facts", "active_entities", "vector_evidence"),
+    )
+
+
 def render_dialogue_attribution_evidence_sections(
     evidence_bundle: EvidenceBundle | None,
     *,
