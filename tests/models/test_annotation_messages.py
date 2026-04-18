@@ -222,6 +222,38 @@ def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
     assert "<Narrative_Evidence_Level1>" not in user_content
     assert "<Narrative_Evidence_Level2>" not in user_content
     assert "<Narrative_Evidence_Level3>" not in user_content
+    assert "【近期活跃角色】" not in user_content
+
+
+def test_build_foreshadowing_messages_uses_disambig_fallback_from_requested_names() -> None:
+    bundle = EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="白芷",
+                metadata={"name": "白芷", "role": "other"},
+            ),
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="侯飞白",
+                metadata={"name": "侯飞白", "role": "other"},
+            ),
+        ],
+        requested_names=["灰衣人"],
+    )
+
+    messages = _build_foreshadowing_messages(
+        text="灰衣人忽然掠过墙头。",
+        evidence_bundle=bundle,
+    )
+
+    user_content = messages[-1]["content"]
+    assert "<Disambig_Candidates>" in user_content
+    assert "「灰衣人」可能是：白芷、侯飞白" in user_content
+    assert "【近期活跃角色】" not in user_content
+    assert "<Narrative_Evidence_Level1>" not in user_content
 
 
 def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> None:
@@ -235,3 +267,16 @@ def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> Non
     assert "<Structured_Evidence>" not in user_content
     assert "<Disambig_Candidates>" not in user_content
     assert "<Vector_Evidence>" not in user_content
+
+
+def test_build_foreshadowing_messages_with_empty_bundle_sections_keeps_prompt_clean() -> None:
+    messages = _build_foreshadowing_messages(
+        text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
+        evidence_bundle=EvidenceBundle(),
+    )
+
+    user_content = messages[-1]["content"]
+    assert "<Structured_Evidence>" not in user_content
+    assert "<Disambig_Candidates>" not in user_content
+    assert "<Vector_Evidence>" not in user_content
+    assert "【近期活跃角色】" not in user_content
