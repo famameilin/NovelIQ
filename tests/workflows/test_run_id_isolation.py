@@ -102,6 +102,68 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
     assert "叛徒" not in context
 
 
+def test_build_context_sentences_respects_max_chunk_id(db_session) -> None:
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="novel_ctx_max_chunk", source_path="test", title="Run")
+
+    chunk_repo = ChunkRepository(db_session)
+    chunk_repo.insert_chunks(
+        run_id,
+        [
+            Chunk(index=1, start=0, end=10, text="白芷在旧宅门前停步。"),
+            Chunk(index=2, start=11, end=30, text="白芷忽然自称灰衣人。"),
+        ],
+    )
+
+    ann_repo = AnnotationRepository(db_session)
+    ann_repo.insert_chunk_characters(
+        run_id,
+        1,
+        [
+            CharacterSnapshot(
+                name="白芷",
+                role_function="主体",
+                action="停步",
+                action_type="移动",
+                emotion_score="neutral",
+            )
+        ],
+    )
+    ann_repo.insert_chunk_characters(
+        run_id,
+        2,
+        [
+            CharacterSnapshot(
+                name="白芷",
+                role_function="主体",
+                action="自称",
+                action_type="对话",
+                emotion_score="neutral",
+            )
+        ],
+    )
+    ann_repo.insert_chunk_dialogues(
+        run_id,
+        2,
+        [DialogueSnapshot(speaker=["白芷"], content="我是灰衣人", identity_clue="白芷自称灰衣人")],
+        [8],
+    )
+
+    result = build_context_sentences(
+        db_session,
+        _candidates("白芷"),
+        alias_keywords=["自称"],
+        run_id=run_id,
+        max_chunk_id=1,
+    )
+
+    assert "白芷" in result
+    context = result["白芷"]
+    assert "旧宅门前停步" in context
+    assert "自称灰衣人" not in context
+    assert "白芷自称灰衣人" not in context
+
+
 def test_diagnosis_repository_joins_are_run_isolated(db_session) -> None:
     run_repo = RunRepository(db_session)
     run_1 = run_repo.create_run(novel_id="novel_diag", source_path="test", title="Run1")
@@ -117,14 +179,20 @@ def test_diagnosis_repository_joins_are_run_isolated(db_session) -> None:
 
     db_session.execute(
         text(
-            "INSERT INTO chunk_curves (chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) "
+            "INSERT INTO chunk_curves ("
+            "chunk_id, pos_density, neg_density, net_density, smoothed_density, "
+            "tension_proxy, tension_composite, run_id"
+            ") "
             "VALUES (:chunk_id, :pos, :neg, :net, :smoothed, 0.5, 0.5, :run_id)"
         ),
         {"chunk_id": 0, "pos": 0.1, "neg": 0.05, "net": 0.2, "smoothed": 0.1, "run_id": run_1},
     )
     db_session.execute(
         text(
-            "INSERT INTO chunk_curves (chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) "
+            "INSERT INTO chunk_curves ("
+            "chunk_id, pos_density, neg_density, net_density, smoothed_density, "
+            "tension_proxy, tension_composite, run_id"
+            ") "
             "VALUES (:chunk_id, :pos, :neg, :net, :smoothed, 0.5, 0.5, :run_id)"
         ),
         {"chunk_id": 0, "pos": 0.1, "neg": 0.05, "net": 0.3, "smoothed": 0.1, "run_id": run_2},

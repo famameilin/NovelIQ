@@ -239,7 +239,7 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
                 existing_character_hint="【已存在角色锚点】\n- 白芷",
                 graph_hint="【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
             ),
-        ),
+        ) as mock_build_existing_hint,
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline._fetch_current_relations",
             return_value=[],
@@ -283,6 +283,8 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     assert rag_retriever.calls[0]["method"] == "collect_evidence_with_level3"
     assert rag_retriever.calls[0]["current_chunk"] == 12
     assert rag_retriever.calls[0]["exclude_chunk_ids"] == [12]
+    build_hint_call = mock_build_existing_hint.call_args
+    assert build_hint_call.kwargs["current_chunk_id"] == 12
 
     user_content = mock_record.call_args.kwargs["messages"][-1]["content"]
     assert "【已存在角色锚点】" in user_content
@@ -332,7 +334,7 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
                 existing_character_hint="【已存在角色锚点】\n- 白芷",
                 graph_hint="【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
             ),
-        ),
+        ) as mock_build_existing_hint,
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline._fetch_current_relations",
             return_value=[],
@@ -374,6 +376,8 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
     assert rag_retriever.calls[0]["method"] == "collect_evidence_with_level3"
     assert rag_retriever.calls[0]["current_chunk"] is None
+    build_hint_call = mock_build_existing_hint.call_args
+    assert build_hint_call.kwargs["current_chunk_id"] is None
 
     user_content = mock_record.call_args.kwargs["messages"][-1]["content"]
     assert "【已存在角色锚点】" in user_content
@@ -382,7 +386,8 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_prompt_context_with_shared_evidence_falls_back_to_level12_when_required_level3_unavailable() -> None:
+async def test_build_prompt_context_with_shared_evidence_falls_back_to_level12_when_required_level3_unavailable(
+) -> None:
     rag_retriever = _FakeRagRetriever(
         EvidenceBundle(
             local_evidence=[

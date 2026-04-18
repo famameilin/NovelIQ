@@ -197,13 +197,20 @@ def _build_existing_character_hint_from_db(
     run_id: str,
     alias_map: dict[str, str],
     relations: list[dict],
+    current_chunk_id: int | None = None,
 ) -> DisambiguationPromptContext | None:
-    all_names = fetch_all_character_names(conn, run_id)
+    all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)
     existing_payload = _build_candidate_payload_by_names(all_names, existing_names)
     if not existing_payload:
         return None
 
-    existing_context_sentences = build_context_sentences(conn, existing_payload, alias_keywords, run_id=run_id)
+    existing_context_sentences = build_context_sentences(
+        conn,
+        existing_payload,
+        alias_keywords,
+        run_id=run_id,
+        max_chunk_id=current_chunk_id,
+    )
     prompt_context = build_disambiguation_prompt_context(
         existing_character_hint=render_existing_character_hint(
             existing_names,

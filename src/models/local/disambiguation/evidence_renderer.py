@@ -76,6 +76,43 @@ def _split_bulleted_section_groups(section: str | None) -> tuple[list[str], list
     return header_lines, groups
 
 
+def _split_bulleted_sections(section: str | None) -> list[tuple[list[str], list[list[str]]]]:
+    if not section:
+        return []
+
+    sections: list[tuple[list[str], list[list[str]]]] = []
+    header_lines: list[str] = []
+    groups: list[list[str]] = []
+    current_group: list[str] | None = None
+
+    for line in section.splitlines():
+        if line.startswith("【") and not line.startswith("- "):
+            if current_group:
+                groups.append(current_group)
+                current_group = None
+            if header_lines or groups:
+                sections.append((header_lines, groups))
+            header_lines = [line]
+            groups = []
+            continue
+        if line.startswith("- "):
+            if current_group:
+                groups.append(current_group)
+            current_group = [line]
+            continue
+        if current_group is None:
+            header_lines.append(line)
+            continue
+        current_group.append(line)
+
+    if current_group:
+        groups.append(current_group)
+    if header_lines or groups:
+        sections.append((header_lines, groups))
+
+    return sections
+
+
 def _prioritize_section_groups(
     groups: list[list[str]],
     *,
@@ -108,18 +145,38 @@ def _limit_bulleted_section_groups(
     if not section:
         return None
 
-    header_lines, groups = _split_bulleted_section_groups(section)
-    if not groups:
+    sections = _split_bulleted_sections(section)
+    if not sections:
+        header_lines, groups = _split_bulleted_section_groups(section)
+        if not groups:
+            return section
+        groups = _prioritize_section_groups(groups, priority_names=priority_names)
+        if max_groups is not None and max_groups >= 0:
+            groups = groups[:max_groups]
+        if not groups:
+            return None
+        rendered_groups = ["\n".join(group) for group in groups]
+        return "\n".join(header_lines + rendered_groups)
+
+    remaining = max_groups
+    rendered_sections: list[str] = []
+    for header_lines, groups in sections:
+        if not groups:
+            continue
+        groups = _prioritize_section_groups(groups, priority_names=priority_names)
+        if remaining is not None:
+            if remaining <= 0:
+                break
+            groups = groups[:remaining]
+        if not groups:
+            continue
+        rendered_sections.append("\n".join(header_lines + ["\n".join(group) for group in groups]))
+        if remaining is not None:
+            remaining -= len(groups)
+
+    if not rendered_sections:
         return section
-
-    groups = _prioritize_section_groups(groups, priority_names=priority_names)
-    if max_groups is not None and max_groups >= 0:
-        groups = groups[:max_groups]
-    if not groups:
-        return None
-
-    rendered_groups = ["\n".join(group) for group in groups]
-    return "\n".join(header_lines + rendered_groups)
+    return "\n".join(rendered_sections)
 
 
 def render_existing_character_hint(

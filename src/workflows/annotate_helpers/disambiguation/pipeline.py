@@ -509,6 +509,7 @@ async def _run_incremental_disambiguation_with_state(
         run_id,
         alias_map,
         relations,
+        current_chunk_id=chunk_id,
     )
     new_candidate_names = {
         str(item.get("name", "")).strip()
@@ -668,6 +669,7 @@ async def _run_final_disambiguation_with_state(
             run_id,
             alias_map_dict,
             relations,
+            current_chunk_id=None,
         )
         prompt_context = await _build_prompt_context_with_shared_evidence(
             prompt_context,
