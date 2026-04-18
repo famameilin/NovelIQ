@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.models.local.annotation.evidence_renderer import render_dialogue_attribution_evidence_sections
 from src.models.local.annotation.phase3 import (
     attribute_dialogues_with_llm,
     compute_dialogue_lengths_with_llm,
@@ -286,12 +287,15 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertIs(mock_attribute.await_args.kwargs["evidence_bundle"], bundle)
 
 
-class TestBuildPhase3EvidenceSections(unittest.TestCase):
-    """测试 _build_phase3_evidence_sections 的 alias_map 和 active_entities 逻辑"""
+class TestRenderDialogueAttributionEvidenceSections(unittest.TestCase):
+    """测试 Phase3 renderer 的 alias_map 和 active_entities 逻辑"""
 
     def _call(self, bundle=None, alias_map=None, active_entities=None):
-        from src.models.local.annotation.phase3 import _build_phase3_evidence_sections
-        return _build_phase3_evidence_sections(bundle, alias_map, active_entities)
+        return render_dialogue_attribution_evidence_sections(
+            bundle,
+            alias_map=alias_map,
+            active_entities=active_entities,
+        )
 
     def test_both_none_returns_empty(self) -> None:
         """evidence_bundle=None 且 active_entities=None 时返回 []"""
@@ -328,6 +332,18 @@ class TestBuildPhase3EvidenceSections(unittest.TestCase):
         custom_entities = "【近期活跃角色】仅 fallback"
         result = self._call(bundle=None, active_entities=custom_entities)
         self.assertEqual(result, [custom_entities])
+
+    def test_explicit_empty_alias_map_still_suppresses_level1_alias_lines(self) -> None:
+        """显式 alias_map={} 时仍视为调用方已决议，不再反向注入 Level1 alias。"""
+        bundle = _build_phase3_bundle()
+        result = self._call(bundle=bundle, alias_map={})
+        self.assertTrue(all("已确认别名：灰衣人" not in s for s in result))
+
+    def test_explicit_empty_active_entities_suppresses_bundle_fallback(self) -> None:
+        """显式传入空字符串时，不回退 bundle active_entities，也不插入空白区段。"""
+        bundle = _build_phase3_bundle()
+        result = self._call(bundle=bundle, active_entities="")
+        self.assertTrue(all("【近期活跃角色】" not in s for s in result))
 
 
 class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):

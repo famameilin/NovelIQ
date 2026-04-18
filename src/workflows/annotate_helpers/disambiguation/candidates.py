@@ -9,12 +9,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.disambiguation import build_existing_character_hint
+from src.models.local.disambiguation.evidence_renderer import (
+    DisambiguationPromptContext,
+    build_disambiguation_prompt_context,
+)
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
@@ -161,34 +163,25 @@ def _collect_final_disambiguation_candidates(
     return candidates
 
 
-def _augment_hint_with_graph(
-    hint: str | None,
+def _augment_prompt_context_with_graph(
+    prompt_context: DisambiguationPromptContext | None,
     alias_map: dict[str, str],
     relations: list[dict],
     existing_names: list[str],
-) -> str | None:
-    """将图谱权威数据（别名、关系）追加到 rag_hint。
+) -> DisambiguationPromptContext | None:
+    """将图谱权威数据补入消歧任务上下文。"""
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-module-split
-
-    修改时间: 2026-04-17
-    修改者: TraeAI
-    任务: refactor/split-provider-bundle-renderer
-    修改内容: 改用 render_disambiguation_graph_hint() renderer 函数，
-              消除对 DisambigContextProvider 的直接依赖，符合 provider/renderer 职责分离原则。
-    """
     from src.models.local.disambiguation.evidence_renderer import render_disambiguation_graph_hint
 
     graph_hint = render_disambiguation_graph_hint(alias_map, relations, existing_names)
+    if prompt_context is None and graph_hint is None:
+        return None
 
-    if graph_hint is None:
-        return hint
-
-    if hint:
-        return f"{hint}\n\n{graph_hint}"
-    return graph_hint
+    return build_disambiguation_prompt_context(
+        existing_character_hint=prompt_context.existing_character_hint if prompt_context else None,
+        graph_hint=graph_hint or (prompt_context.graph_hint if prompt_context else None),
+        shared_evidence_context=prompt_context.shared_evidence_context if prompt_context else None,
+    )
 
 
 def _build_existing_character_hint_from_db(
@@ -199,17 +192,17 @@ def _build_existing_character_hint_from_db(
     run_id: str,
     alias_map: dict[str, str],
     relations: list[dict],
-) -> str | None:
+) -> DisambiguationPromptContext | None:
     existing_payload = _build_candidate_payload_by_names(all_names, existing_names)
     if not existing_payload:
         return None
 
     existing_context_sentences = build_context_sentences(conn, existing_payload, alias_keywords, run_id=run_id)
-    hint = build_existing_character_hint(existing_names, existing_context_sentences)
+    prompt_context = build_disambiguation_prompt_context(
+        existing_character_hint=build_existing_character_hint(existing_names, existing_context_sentences)
+    )
 
-    hint = _augment_hint_with_graph(hint, alias_map, relations, existing_names)
-
-    return hint
+    return _augment_prompt_context_with_graph(prompt_context, alias_map, relations, existing_names)
 
 
 def extract_new_names_from_db(

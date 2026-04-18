@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.rag.evidence_types import EvidenceBundle
 
 
-def render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
+def render_disambig_candidates(
+    bundle: EvidenceBundle,
+    *,
+    fallback_requested_names: Iterable[str] | None = None,
+) -> str | None:
     # 中文注释：这里是共享 evidence 渲染层，只把 bundle 中已有的结构转成 prompt block，
     # 不承担 provider 侧的取证职责。
     candidate_lines = [item.content for item in bundle.local_evidence if item.evidence_type == "disambig_candidate"]
     if not candidate_lines and bundle.requested_names:
+        fallback_name_set = (
+            {str(name).strip() for name in fallback_requested_names if str(name).strip()}
+            if fallback_requested_names is not None
+            else None
+        )
         exact_aliases = set(bundle.structured_alias_map().keys())
         active_names = [
             str(item.metadata.get("name", item.content)).strip()
@@ -18,6 +28,8 @@ def render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
             if item.evidence_type == "active_entity"
         ]
         for name in bundle.requested_names:
+            if fallback_name_set is not None and name not in fallback_name_set:
+                continue
             if name in exact_aliases:
                 continue
             candidates = [candidate for candidate in active_names if candidate and candidate != name][:5]
