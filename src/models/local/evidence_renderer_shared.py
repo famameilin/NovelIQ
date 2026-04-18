@@ -24,6 +24,12 @@ def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> N
         seen_lines.add(line)
 
 
+def _limit_items(items: list[Any], max_items: int | None) -> list[Any]:
+    if max_items is None or max_items < 0:
+        return items
+    return items[:max_items]
+
+
 def _collect_level1_lines_from_structured(
     bundle: EvidenceBundle,
     *,
@@ -116,6 +122,7 @@ def render_level1_facts(
     bundle: EvidenceBundle,
     *,
     include_alias_mappings: bool = True,
+    max_lines: int | None = None,
 ) -> str | None:
     lines = (
         _collect_level1_lines_from_structured(bundle, include_alias_mappings=include_alias_mappings)
@@ -127,6 +134,7 @@ def render_level1_facts(
             bundle.level1_snapshot,
             include_alias_mappings=include_alias_mappings,
         )
+    lines = _limit_items(lines, max_lines)
 
     if not lines:
         return None
@@ -179,8 +187,13 @@ def _render_active_entity_section(records: Iterable[dict[str, Any]]) -> str | No
     return "\n".join(lines) if len(lines) > 1 else None
 
 
-def render_active_entities(items: Sequence[EvidenceItem]) -> str | None:
-    return _render_active_entity_section(_build_active_entity_records(items))
+def render_active_entities(
+    items: Sequence[EvidenceItem],
+    *,
+    max_items: int | None = None,
+) -> str | None:
+    records = _build_active_entity_records(items)
+    return _render_active_entity_section(_limit_items(records, max_items))
 
 
 def render_active_entities_from_authority(active_entities: Iterable[ActiveEntityContext]) -> str | None:
@@ -201,6 +214,7 @@ def render_disambig_candidates(
     bundle: EvidenceBundle,
     *,
     fallback_requested_names: Iterable[str] | None = None,
+    max_candidates: int | None = None,
 ) -> str | None:
     # 中文注释：这里是共享 evidence 渲染层，只把 bundle 中已有的结构转成 prompt block，
     # 不承担 provider 侧的取证职责。
@@ -226,6 +240,7 @@ def render_disambig_candidates(
             if candidates:
                 candidate_lines.append(f"「{name}」可能是：{'、'.join(candidates)}")
 
+    candidate_lines = _limit_items(candidate_lines, max_candidates)
     if not candidate_lines:
         return None
     return "<Disambig_Candidates>\n" + "\n".join(candidate_lines) + "\n</Disambig_Candidates>"
@@ -263,6 +278,11 @@ def render_shared_evidence_sections(
     *,
     include_level1_alias_mappings: bool = True,
     fallback_requested_names: Iterable[str] | None = None,
+    max_level1_lines: int | None = None,
+    max_active_entities: int | None = None,
+    max_disambig_candidates: int | None = None,
+    max_vector_chunks: int = 3,
+    max_vector_text_len: int = 200,
 ) -> SharedEvidenceSections:
     if bundle is None:
         return SharedEvidenceSections()
@@ -270,13 +290,25 @@ def render_shared_evidence_sections(
     active_entity_items = [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
     return SharedEvidenceSections(
         structured_evidence=render_structured_evidence(bundle),
-        level1_facts=render_level1_facts(bundle, include_alias_mappings=include_level1_alias_mappings),
-        active_entities=render_active_entities(active_entity_items),
+        level1_facts=render_level1_facts(
+            bundle,
+            include_alias_mappings=include_level1_alias_mappings,
+            max_lines=max_level1_lines,
+        ),
+        active_entities=render_active_entities(
+            active_entity_items,
+            max_items=max_active_entities,
+        ),
         disambig_candidates=render_disambig_candidates(
             bundle,
             fallback_requested_names=fallback_requested_names,
+            max_candidates=max_disambig_candidates,
         ),
-        vector_evidence=render_vector_evidence(bundle),
+        vector_evidence=render_vector_evidence(
+            bundle,
+            max_chunks=max_vector_chunks,
+            max_text_len=max_vector_text_len,
+        ),
     )
 
 
