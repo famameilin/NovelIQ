@@ -208,3 +208,38 @@ def render_annotation_prompt_blocks(
         disambig_context=combined_disambig,
         vector_evidence=vector_evidence,
     )
+
+
+def render_dialogue_attribution_evidence_sections(
+    evidence_bundle: EvidenceBundle | None,
+    *,
+    alias_map: dict[str, str] | None = None,
+    active_entities: str | None = None,
+) -> list[str]:
+    """渲染 Phase 3 对话归属可消费的共享证据区段。"""
+
+    if evidence_bundle is None and active_entities is None:
+        return []
+
+    blocks = (
+        render_annotation_prompt_blocks(
+            evidence_bundle,
+            include_level1_alias_mappings=alias_map is None,
+        )
+        if evidence_bundle
+        else None
+    )
+
+    sections: list[str] = []
+    # 中文注释：active_entities 属于任务侧输入，不属于 EvidenceBundle 本体；
+    # 如果上游已经给出带 fallback 的活跃实体上下文，就优先沿用，不再让 renderer 从 bundle 反推覆盖它。
+    # 显式传入空字符串时，表示调用方要抑制该区段；这时也不应再回退 bundle 里的活跃实体。
+    if active_entities is not None:
+        if active_entities:
+            sections.append(active_entities)
+    elif blocks and blocks.active_entities:
+        sections.append(blocks.active_entities)
+
+    if blocks and blocks.disambig_context:
+        sections.append(blocks.disambig_context)
+    return sections

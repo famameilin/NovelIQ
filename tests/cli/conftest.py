@@ -101,7 +101,7 @@ class FakeLocalModelClient:
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context=None,
     ) -> dict[str, str]:
         result = {}
         for item in candidates:

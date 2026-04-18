@@ -40,6 +40,14 @@ def test_evidence_bundle_creation():
     assert len(bundle.local_evidence) == 1
 
 
+def test_evidence_bundle_does_not_carry_prompt_local_fields():
+    bundle = EvidenceBundle()
+
+    assert not hasattr(bundle, "alias_priority")
+    assert not hasattr(bundle, "active_entities_fallback")
+    assert not hasattr(bundle, "graph_hint")
+
+
 def test_level1_authority_snapshot_creation():
     snapshot = Level1AuthoritySnapshot(
         alias_mappings=[AliasMapping(alias="张三", canonical="张三丰", source="graph")],
