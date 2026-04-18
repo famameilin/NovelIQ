@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from src.knowledge.authority import KnowledgeGraphAuthorityService
+
 from .types import (
     AnnotationData,
     CharacterData,
@@ -37,6 +39,46 @@ if TYPE_CHECKING:
         ChunkRepository,
         StatsRepository,
     )
+
+
+def _build_aggregate_graph_view(
+    annotation_repo: AnnotationRepository,
+    run_id: str,
+):
+    """
+    获取 aggregate 允许依赖的 graph authority view。
+
+    中文注释：聚合指标属于 graph 下游消费者，只能读取 authority 暴露的稳定事实，
+    不能再直接依赖 GraphRepository 的原始 row 形状。
+    """
+
+    return KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_graph_view(run_id)
+
+
+def _build_aggregate_alias_lookup(
+    authority_service: KnowledgeGraphAuthorityService,
+    run_id: str,
+) -> dict[str, str]:
+    """
+    构建 aggregate 可复用的 alias -> canonical 映射。
+
+    中文注释：chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
+    stable state 消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
+    和情绪序列时因为名称漂移被静默归零。
+    """
+
+    snapshot = authority_service.build_level1_snapshot(run_id)
+    return {
+        mapping.alias: mapping.canonical
+        for mapping in snapshot.alias_mappings
+        if mapping.alias and mapping.canonical
+    }
+
+
+def _canonicalize_aggregate_character_name(name: str, alias_lookup: dict[str, str]) -> str:
+    """将 chunk 侧角色名折叠到 authority 规范名。"""
+
+    return alias_lookup.get(name, name)
 
 
 def fetch_annotation_data(
@@ -93,43 +135,41 @@ def fetch_character_data(
     任务: P2.1-downstream-switch
     修改内容: 从 graph_entities 读取权威角色列表，补充 chunk_characters 的情感分数
     """
-    from src.storage.repositories import GraphRepository
-
-    graph_repo = GraphRepository(annotation_repo.session)
-
-    # 1. 从 graph_entities 获取权威角色（仅 active 状态）
-    entities = graph_repo.fetch_entities(run_id, status="active")
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    graph_view = authority_service.build_graph_view(run_id)
+    alias_lookup = _build_aggregate_alias_lookup(authority_service, run_id)
+    active_states = [state for state in graph_view.stable_states if state.status == "active"]
 
     # 2. 从 chunk_characters 聚合情感分数（用于补充）
     rows = annotation_repo.fetch_characters_with_scores(run_id)
     emotion_map: dict[str, int] = {}
     for row in rows:
         name, _, emotion_score_raw = row
-        emotion_map[name] = map_emotion_score(emotion_score_raw)
+        canonical_name = _canonicalize_aggregate_character_name(name, alias_lookup)
+        emotion_map[canonical_name] = map_emotion_score(emotion_score_raw)
 
-    # 3. 构建角色列表（使用 canonical_name 作为权威名称）
+    # 3. 构建角色列表（使用 authority stable state 作为正式输入）
     characters = []
-    for entity in entities:
-        canonical = entity.canonical_name
-        # 情感分数优先从 chunk_characters 获取，否则使用 entity 的 last_emotion_score
-        emotion_score = emotion_map.get(canonical, map_emotion_score(entity.last_emotion_score))
-        characters.append((canonical, entity.primary_role_function or "其他", emotion_score))
+    for state in active_states:
+        emotion_score = emotion_map.get(state.name, 0)
+        characters.append((state.name, state.primary_role_function or "其他", emotion_score))
 
     # 4. 构建情感序列（仍从 chunk_characters 获取）
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
     char_emotion_map: dict[str, list[float]] = {}
     for name, score_raw in char_emotion_rows:
-        if name not in char_emotion_map:
-            char_emotion_map[name] = []
+        canonical_name = _canonicalize_aggregate_character_name(name, alias_lookup)
+        if canonical_name not in char_emotion_map:
+            char_emotion_map[canonical_name] = []
         score = float(map_emotion_score(score_raw))
-        char_emotion_map[name].append(score)
+        char_emotion_map[canonical_name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 
-    # 5. 确定主角（从 graph_entities 中找 role_function 为"主体"的）
+    # 5. 确定主角（从 authority stable state 中找 role_function 为"主体"的）
     protagonist_name = None
-    for entity in entities:
-        if entity.primary_role_function == "主体":
-            protagonist_name = entity.canonical_name
+    for state in active_states:
+        if state.primary_role_function == "主体":
+            protagonist_name = state.name
             break
 
     return CharacterData(
@@ -144,11 +184,9 @@ def fetch_relation_data(
     run_id: str,
 ) -> RelationData:
     """提取 graph_* 关系数据（权威来源）。"""
-    from src.storage.repositories import GraphRepository
-
-    graph_repo = GraphRepository(annotation_repo.session)
-    current_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
-    relation_events = graph_repo.fetch_relation_events(run_id)
+    graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
+    current_relations = list(graph_view.confirmed_relations)
+    relation_events = list(graph_view.relation_events)
     if not current_relations and not relation_events:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
@@ -158,9 +196,9 @@ def fetch_relation_data(
             )
 
     return RelationData(
-        relations=[(row["from_name"], row["to_name"]) for row in current_relations],
+        relations=[(relation.from_name, relation.to_name) for relation in current_relations],
         full_relations=[
-            (row["from_name"], row["to_name"], row["relation_type"], row["change_type"]) for row in relation_events
+            (event.from_name, event.to_name, event.relation_type, event.change_type) for event in relation_events
         ],
     )
 
