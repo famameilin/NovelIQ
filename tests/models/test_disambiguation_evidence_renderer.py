@@ -181,6 +181,95 @@ def test_render_disambiguation_graph_hint_returns_none_when_no_relevant_facts() 
     assert rendered is None
 
 
+def test_render_existing_character_hint_prefers_candidate_related_anchors_and_caps_to_six() -> None:
+    from src.models.local.disambiguation.evidence_renderer import render_existing_character_hint
+
+    rendered = render_existing_character_hint(
+        existing_names=[f"人物{i}" for i in range(1, 9)],
+        existing_context_sentences={
+            "人物1": "与当前候选无关",
+            "人物2": "灰衣人与人物2曾在旧宅相遇",
+            "人物3": "无关锚点",
+            "人物4": "白芷与人物4有过一面之缘",
+            "人物5": "灰衣人曾模仿人物5的口音",
+            "人物6": "白芷怀疑人物6知道真相",
+            "人物7": "灰衣人与人物7在夜色中交手",
+            "人物8": "白芷曾向人物8问路",
+        },
+        candidate_names=["灰衣人", "白芷"],
+    )
+
+    assert rendered is not None
+    assert "人物1" not in rendered
+    assert "人物3" not in rendered
+    assert sum(1 for line in rendered.splitlines() if line.startswith("- ")) == 6
+
+
+def test_render_disambiguation_graph_hint_filters_to_candidate_related_items_and_caps_total_lines() -> None:
+    from src.models.local.disambiguation.evidence_renderer import render_disambiguation_graph_hint
+
+    rendered = render_disambiguation_graph_hint(
+        alias_map={
+            "灰衣人": "白芷",
+            "白老板": "白芷",
+            "无关别名": "路人甲",
+        },
+        relations=[
+            {"from_name": "白芷", "to_name": "侯飞白", "type": "盟友", "is_active": True},
+            {"from_name": "白芷", "to_name": "沈青禾", "type": "同门", "is_active": True},
+            {"from_name": "白芷", "to_name": "褚大山", "type": "盟友", "is_active": True},
+            {"from_name": "白芷", "to_name": "赵兰英", "type": "家族", "is_active": True},
+            {"from_name": "白芷", "to_name": "伯安", "type": "盟友", "is_active": True},
+            {"from_name": "白芷", "to_name": "贺重明", "type": "敌对", "is_active": True},
+            {"from_name": "路人甲", "to_name": "路人乙", "type": "路过", "is_active": True},
+        ],
+        existing_names=["白芷", "侯飞白", "沈青禾", "褚大山", "赵兰英", "伯安", "贺重明"],
+        candidate_names=["灰衣人"],
+    )
+
+    assert rendered is not None
+    assert "无关别名" not in rendered
+    assert "路人甲" not in rendered
+    assert sum(1 for line in rendered.splitlines() if line.startswith("- ")) == 6
+    assert "- 灰衣人 → 白芷" in rendered
+
+
+def test_render_disambig_prompt_context_prioritizes_current_candidate_and_caps_sections() -> None:
+    from src.models.local.disambiguation import render_disambig_prompt_context
+
+    bundle = EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content=f"「别名{i}」可能是：人物{i}",
+            )
+            for i in range(1, 5)
+        ],
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content=f"片段{i}",
+                metadata={"chunk_id": i, "text": f"片段{i}" + ("甲" * 180), "similarity": 0.95 - i * 0.01},
+            )
+            for i in range(1, 4)
+        ],
+        requested_names=[f"别名{i}" for i in range(1, 5)],
+    )
+
+    rendered = render_disambig_prompt_context(
+        bundle,
+        priority_names=["别名4"],
+    )
+
+    assert rendered is not None
+    assert rendered.index("「别名4」可能是：人物4") < rendered.index("「别名1」可能是：人物1")
+    assert sum(1 for line in rendered.splitlines() if line.startswith("「")) == 3
+    assert rendered.count("[Chunk ") == 2
+    assert "[Chunk 3]" not in rendered
+
+
 def test_render_disambiguation_prompt_context_sections_keeps_fixed_order() -> None:
     from src.models.local.disambiguation.evidence_renderer import (
         DisambiguationPromptContext,

@@ -339,6 +339,7 @@ async def _build_prompt_context_with_shared_evidence(
     shared_evidence_context = render_disambig_prompt_context(
         evidence_bundle,
         fallback_requested_names=active_entity_fallback_names,
+        priority_names=names_in_chunk,
     )
     if not shared_evidence_context:
         return prompt_context
@@ -502,7 +503,7 @@ async def _run_incremental_disambiguation_with_state(
     relations = _fetch_current_relations(conn, run_id)
     prompt_context = _build_existing_character_hint_from_db(
         conn,
-        new_names,
+        [str(item.get("name", "")).strip() for item in all_disambig_candidates if str(item.get("name", "")).strip()],
         existing_names,
         alias_keywords,
         run_id,
@@ -661,7 +662,7 @@ async def _run_final_disambiguation_with_state(
         relations = _fetch_current_relations(conn, run_id)
         prompt_context = _build_existing_character_hint_from_db(
             conn,
-            all_names,
+            [str(item.get("name", "")).strip() for item in candidate_payload if str(item.get("name", "")).strip()],
             existing_names,
             alias_keywords,
             run_id,

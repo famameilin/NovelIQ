@@ -44,6 +44,17 @@ _PHASE3_EVIDENCE_POLICY = TaskEvidenceRenderPolicy(
     max_vector_text_len=120,
 )
 
+_PHASE1_EVIDENCE_POLICY = TaskEvidenceRenderPolicy(
+    max_level1_lines=8,
+    max_level1_alias_lines=3,
+    max_level1_entity_lines=2,
+    max_level1_relation_lines=3,
+    max_active_entities=4,
+    max_disambig_candidates=3,
+    max_vector_chunks=2,
+    max_vector_text_len=140,
+)
+
 _PHASE4_EVIDENCE_POLICY = TaskEvidenceRenderPolicy(
     max_level1_lines=8,
     max_level1_alias_lines=0,
@@ -123,9 +134,10 @@ def render_annotation_prompt_blocks(
     *,
     include_level1_alias_mappings: bool = True,
 ) -> AnnotationPromptBlocks:
-    shared_sections = render_shared_evidence_sections(
+    shared_sections = _render_task_scoped_shared_sections(
         bundle,
         include_level1_alias_mappings=include_level1_alias_mappings,
+        policy=_PHASE1_EVIDENCE_POLICY,
     )
     prompt_sections = select_shared_evidence_sections(
         shared_sections,
