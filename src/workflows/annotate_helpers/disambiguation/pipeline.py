@@ -292,6 +292,7 @@ async def _build_prompt_context_with_shared_evidence(
     context_sentences: dict[str, str],
     *,
     current_chunk: int | None = None,
+    active_entity_fallback_names: set[str] | None = None,
 ) -> DisambiguationPromptContext | None:
     """把共享 evidence renderer 输出补入消歧 prompt_context。"""
 
@@ -305,13 +306,23 @@ async def _build_prompt_context_with_shared_evidence(
     query_text = _build_shared_evidence_query_text(candidates, context_sentences)
     if rag_retriever.requires_level3():
         if not rag_retriever.is_level3_available():
-            raise RuntimeError("Level 3 vector retrieval is required but not available")
-        evidence_bundle = await rag_retriever.collect_evidence_with_level3(
-            names_in_chunk=names_in_chunk,
-            current_chunk=current_chunk,
-            context_text=query_text,
-            exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
-        )
+            # 中文注释：这里是“补充 shared evidence prompt_context”的辅助链路，
+            # 不应在 final-only / resume 场景里替代 annotation 主流程的 readiness gate。
+            # Level 3 暂不可用时，退回 Level 1 / Level 2 证据，避免把已有 prompt_context 直接变成硬失败。
+            logger.warning(
+                "shared evidence prompt_context fallback to Level1/2 only because Level3 is required but unavailable"
+            )
+            evidence_bundle = rag_retriever.collect_evidence(
+                names_in_chunk=names_in_chunk,
+                current_chunk=current_chunk,
+            )
+        else:
+            evidence_bundle = await rag_retriever.collect_evidence_with_level3(
+                names_in_chunk=names_in_chunk,
+                current_chunk=current_chunk,
+                context_text=query_text,
+                exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
+            )
     elif rag_retriever.is_level3_available():
         evidence_bundle = await rag_retriever.collect_evidence_with_level3(
             names_in_chunk=names_in_chunk,
@@ -325,7 +336,10 @@ async def _build_prompt_context_with_shared_evidence(
             current_chunk=current_chunk,
         )
 
-    shared_evidence_context = render_disambig_prompt_context(evidence_bundle)
+    shared_evidence_context = render_disambig_prompt_context(
+        evidence_bundle,
+        fallback_requested_names=active_entity_fallback_names,
+    )
     if not shared_evidence_context:
         return prompt_context
 
@@ -495,12 +509,23 @@ async def _run_incremental_disambiguation_with_state(
         alias_map,
         relations,
     )
+    new_candidate_names = {
+        str(item.get("name", "")).strip()
+        for item in truly_new_names
+        if str(item.get("name", "")).strip()
+    }
+    active_entity_fallback_names = {
+        str(item.get("name", "")).strip()
+        for item in all_disambig_candidates
+        if str(item.get("name", "")).strip() in new_candidate_names
+    }
     prompt_context = await _build_prompt_context_with_shared_evidence(
         prompt_context,
         rag_retriever,
         all_disambig_candidates,
         context_sentences,
         current_chunk=chunk_id,
+        active_entity_fallback_names=active_entity_fallback_names,
     )
 
     result = await _retry_disambig(

@@ -80,6 +80,37 @@ def test_render_disambig_candidates_uses_shared_bundle_fallback() -> None:
     assert "「灰衣人」可能是：白芷、侯飞白" in rendered
 
 
+def test_render_disambig_candidates_can_limit_active_entity_fallback_names() -> None:
+    from src.models.local.disambiguation import render_disambig_candidates
+
+    bundle = EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="白芷",
+                metadata={"name": "白芷"},
+            ),
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="侯飞白",
+                metadata={"name": "侯飞白"},
+            ),
+        ],
+        requested_names=["灰衣人", "旧别名"],
+    )
+
+    rendered = render_disambig_candidates(
+        bundle,
+        fallback_requested_names={"灰衣人"},
+    )
+
+    assert rendered is not None
+    assert "「灰衣人」可能是：白芷、侯飞白" in rendered
+    assert "「旧别名」可能是" not in rendered
+
+
 def test_render_disambig_prompt_context_returns_single_vector_block_when_no_candidates() -> None:
     from src.models.local.disambiguation import render_disambig_prompt_context
 
