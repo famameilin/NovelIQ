@@ -499,6 +499,9 @@ async def annotate_chunk_parallel(
             client=client,
             text=text,
             known_characters=known_characters,
+            # 中文注释：Phase4 和 Phase2/3 一样只复用上游准备好的 evidence_bundle，
+            # multi_phase 只负责透传，不在 workflow 里重建或拼接关系抽取证据文案。
+            evidence_bundle=evidence_bundle,
             chunk_id=chunk_id,
             run_id=run_id,
         ),
@@ -646,6 +649,8 @@ async def annotate_chunk_serial(
         client=client,
         text=text,
         known_characters=known_characters,
+        # 中文注释：串行路径也透传同一份 evidence_bundle，锁住 Phase4 的真实共享 evidence 消费链。
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
     )

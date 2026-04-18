@@ -8,11 +8,12 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config.constants import SYMMETRIC_RELATION_TYPES, VALID_CHANGE_TYPES, VALID_RELATION_TYPES
+from src.models.local.annotation.evidence_renderer import render_relation_extraction_evidence_sections
 from src.models.local.annotation.phase4 import (
     Phase4MaxRetriesExceededError,
     _build_phase4_messages,
@@ -20,6 +21,15 @@ from src.models.local.annotation.phase4 import (
     annotate_chunk_phase4,
 )
 from src.models.local.schema import RelationExtractionResult, RelationRecord
+from src.rag import (
+    AliasMapping,
+    CanonicalEntity,
+    ConfirmedRelation,
+    EntityTypeFact,
+    EvidenceBundle,
+    EvidenceItem,
+    Level1AuthoritySnapshot,
+)
 
 
 def make_relation_record(
@@ -39,6 +49,95 @@ def make_relation_record(
             "evidence": evidence,
         }
     )
+
+
+def build_phase4_bundle() -> EvidenceBundle:
+    return EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="alias_mapping",
+                source="level1",
+                content="灰衣人 -> 白芷",
+                metadata={"alias": "灰衣人", "canonical": "白芷"},
+            ),
+            EvidenceItem(
+                evidence_type="canonical_entity",
+                source="level1",
+                content="白芷",
+                metadata={"name": "白芷", "entity_type": "character"},
+            ),
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content="白芷<盟友>侯飞白",
+                metadata={
+                    "from_name": "白芷",
+                    "to_name": "侯飞白",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            ),
+            EvidenceItem(
+                evidence_type="entity_type",
+                source="level1",
+                content="白芷:character",
+                metadata={"name": "白芷", "entity_type": "character"},
+            ),
+        ],
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="白芷",
+                metadata={
+                    "name": "白芷",
+                    "role": "主体",
+                    "recent_action": "试探侯飞白",
+                    "recent_emotion": "警惕",
+                    "last_seen_chunk": 18,
+                },
+            ),
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content="「灰衣人」可能是：白芷",
+            ),
+        ],
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="灰衣人曾在旧宅与侯飞白短暂结盟。",
+                metadata={
+                    "chunk_id": 9,
+                    "similarity": 0.93,
+                    "text": "灰衣人曾在旧宅与侯飞白短暂结盟。",
+                },
+            )
+        ],
+        requested_names=["灰衣人"],
+        level1_snapshot=Level1AuthoritySnapshot(
+            alias_mappings=[AliasMapping(alias="灰衣人", canonical="白芷")],
+            canonical_entities=[CanonicalEntity(name="白芷", entity_type="character")],
+            confirmed_relations=[ConfirmedRelation(from_name="白芷", to_name="侯飞白", relation_type="盟友")],
+            entity_types=[EntityTypeFact(name="白芷", entity_type="character")],
+        ),
+    )
+
+
+class TestRenderRelationExtractionEvidenceSections(unittest.TestCase):
+    def test_relation_extraction_sections_only_use_level1_level2_level3_main_sections(self) -> None:
+        bundle = build_phase4_bundle()
+
+        sections = render_relation_extraction_evidence_sections(bundle)
+        combined = "\n\n".join(sections)
+
+        self.assertEqual(len(sections), 3)
+        self.assertIn("<Narrative_Evidence_Level1>", combined)
+        self.assertIn("【近期活跃角色】", combined)
+        self.assertIn("<Vector_Evidence>", combined)
+        self.assertNotIn("<Disambig_Candidates>", combined)
+        self.assertNotIn("<Structured_Evidence>", combined)
 
 
 class TestBuildPhase4Messages(unittest.TestCase):
@@ -63,6 +162,22 @@ class TestBuildPhase4Messages(unittest.TestCase):
         self.assertEqual(messages[0]["content"], "你是关系抽取专家")
         self.assertEqual(messages[1]["role"], "user")
         self.assertIn("张三、李四", messages[1]["content"])
+
+    @patch("src.models.local.annotation.phase4.settings")
+    def test_build_messages_appends_relation_extraction_evidence_sections(self, mock_settings: MagicMock) -> None:
+        """共享 evidence section 会被追加到 Phase4 prompt。"""
+        mock_settings.prompts.phase4.system = "system"
+        mock_settings.prompts.phase4.user_template = "文本：${chunk_text}\n人物：${known_characters}"
+
+        messages = _build_phase4_messages(
+            "灰衣人看向侯飞白。",
+            ["白芷", "侯飞白"],
+            evidence_sections=render_relation_extraction_evidence_sections(build_phase4_bundle()),
+        )
+
+        self.assertIn("<Narrative_Evidence_Level1>", messages[1]["content"])
+        self.assertIn("【近期活跃角色】", messages[1]["content"])
+        self.assertIn("<Vector_Evidence>", messages[1]["content"])
 
     @patch("src.models.local.annotation.phase4.settings")
     def test_build_messages_with_no_characters(self, mock_settings: MagicMock) -> None:
@@ -295,7 +410,7 @@ class TestConvertToSnapshots(unittest.TestCase):
         self.assertEqual(len(snapshots), 0)
 
 
-class TestAnnotateChunkPhase4(unittest.TestCase):
+class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
     """
     测试 Phase4 主函数
 
@@ -352,16 +467,52 @@ class TestAnnotateChunkPhase4(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.thinking_content = None
 
-        mock_client._call_annotation_api.return_value = (mock_result, mock_response)
+        mock_client._call_annotation_api = AsyncMock(return_value=(mock_result, mock_response))
 
         with patch("src.models.local.annotation.phase4.record_model_interaction"):
             result = await annotate_chunk_phase4(
-                mock_client, "张三打了李四", ["张三", "李四"], chunk_id=1, run_id="test-run"
+                mock_client,
+                "张三打了李四",
+                ["张三", "李四"],
+                chunk_id=1,
+                run_id="test-run",
+                evidence_bundle=build_phase4_bundle(),
             )
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].from_name, "张三")
         self.assertEqual(result[0].to_name, "李四")
+        call_messages = mock_client._call_annotation_api.await_args.kwargs["messages"]
+        self.assertIn("张三、李四", call_messages[1]["content"])
+        self.assertIn("<Narrative_Evidence_Level1>", call_messages[1]["content"])
+        self.assertIn("【近期活跃角色】", call_messages[1]["content"])
+        self.assertIn("<Vector_Evidence>", call_messages[1]["content"])
+
+    @patch("src.models.local.annotation.phase4.settings")
+    async def test_annotation_with_empty_bundle_falls_back_to_original_prompt_shape(self, mock_settings: MagicMock) -> None:
+        """空 bundle 不报错，并回退到无 evidence section 的旧 prompt 形状。"""
+        mock_settings.prompts.phase4.system = "system"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
+
+        mock_client = MagicMock()
+        mock_client._config.model = "test-model"
+        mock_client._is_cloud_api.return_value = False
+        mock_client._call_annotation_api = AsyncMock(return_value=(RelationExtractionResult(relations=[]), MagicMock()))
+
+        with patch("src.models.local.annotation.phase4.record_model_interaction"):
+            result = await annotate_chunk_phase4(
+                mock_client,
+                "白芷看向侯飞白。",
+                ["白芷", "侯飞白"],
+                evidence_bundle=EvidenceBundle(),
+            )
+
+        self.assertEqual(result, [])
+        call_messages = mock_client._call_annotation_api.await_args.kwargs["messages"]
+        self.assertEqual(call_messages[1]["content"], "白芷看向侯飞白。\n白芷、侯飞白")
+        self.assertNotIn("<Narrative_Evidence_Level1>", call_messages[1]["content"])
+        self.assertNotIn("【近期活跃角色】", call_messages[1]["content"])
+        self.assertNotIn("<Vector_Evidence>", call_messages[1]["content"])
 
 
 class TestConstantsConsistency(unittest.TestCase):
