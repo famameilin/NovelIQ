@@ -230,7 +230,10 @@ class TestRenderRelationExtractionEvidenceSections(unittest.TestCase):
         active_section = next(section for section in sections if "【近期活跃角色】" in section)
         vector_section = next(section for section in sections if "<Vector_Evidence>" in section)
 
-        self.assertEqual(sum(1 for line in level1_section.splitlines() if line.startswith("- ")), 8)
+        self.assertEqual(sum(1 for line in level1_section.splitlines() if line.startswith("- ")), 7)
+        self.assertNotIn("已确认别名：", level1_section)
+        self.assertEqual(sum(1 for line in level1_section.splitlines() if "已确认关系：" in line), 4)
+        self.assertIn("已确认关系：角色4 -盟友-> 角色5", level1_section)
         self.assertEqual(sum(1 for line in active_section.splitlines() if line.startswith("- ")), 4)
         self.assertEqual(vector_section.count("[Chunk "), 2)
         self.assertNotIn("[Chunk 3]", vector_section)

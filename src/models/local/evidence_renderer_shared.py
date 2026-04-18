@@ -18,6 +18,13 @@ class SharedEvidenceSections:
     vector_evidence: str | None = None
 
 
+@dataclass(slots=True)
+class Level1EvidenceBuckets:
+    alias_lines: list[str]
+    entity_lines: list[str]
+    relation_lines: list[str]
+
+
 def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> None:
     if line not in seen_lines:
         bucket.append(line)
@@ -30,11 +37,64 @@ def _limit_items(items: list[Any], max_items: int | None) -> list[Any]:
     return items[:max_items]
 
 
+def _trim_rendered_list_section(section: str | None, *, max_items: int | None) -> str | None:
+    if not section:
+        return None
+
+    lines = section.splitlines()
+    header_lines: list[str] = []
+    item_lines: list[str] = []
+    for line in lines:
+        if line.startswith("- "):
+            item_lines.append(line)
+        else:
+            header_lines.append(line)
+
+    if not item_lines:
+        return section
+
+    limited_items = _limit_items(item_lines, max_items)
+    if not limited_items:
+        return None
+    return "\n".join(header_lines + limited_items)
+
+
+def _extract_disambig_source_name(line: str) -> str | None:
+    if "「" not in line or "」" not in line:
+        return None
+    _, _, tail = line.partition("「")
+    source_name, _, _ = tail.partition("」")
+    source_name = source_name.strip()
+    return source_name or None
+
+
+def _prioritize_candidate_lines(
+    candidate_lines: list[str],
+    priority_names: Iterable[str] | None,
+) -> list[str]:
+    if not priority_names:
+        return candidate_lines
+
+    priority_name_set = {str(name).strip() for name in priority_names if str(name).strip()}
+    if not priority_name_set:
+        return candidate_lines
+
+    prioritized: list[str] = []
+    deferred: list[str] = []
+    for line in candidate_lines:
+        source_name = _extract_disambig_source_name(line)
+        if source_name and source_name in priority_name_set:
+            prioritized.append(line)
+        else:
+            deferred.append(line)
+    return prioritized + deferred
+
+
 def _collect_level1_lines_from_structured(
     bundle: EvidenceBundle,
     *,
     include_alias_mappings: bool = True,
-) -> list[str]:
+) -> Level1EvidenceBuckets:
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
@@ -75,14 +135,18 @@ def _collect_level1_lines_from_structured(
                     f"- 已确认关系：{from_name} -{relation_type}-> {to_name}",
                 )
 
-    return alias_lines + entity_lines + relation_lines
+    return Level1EvidenceBuckets(
+        alias_lines=alias_lines,
+        entity_lines=entity_lines,
+        relation_lines=relation_lines,
+    )
 
 
 def _collect_level1_lines_from_snapshot(
     snapshot: Level1AuthoritySnapshot,
     *,
     include_alias_mappings: bool = True,
-) -> list[str]:
+) -> Level1EvidenceBuckets:
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
@@ -115,7 +179,11 @@ def _collect_level1_lines_from_snapshot(
         if from_name and to_name and relation_type:
             _append_unique_line(relation_lines, seen_lines, f"- 已确认关系：{from_name} -{relation_type}-> {to_name}")
 
-    return alias_lines + entity_lines + relation_lines
+    return Level1EvidenceBuckets(
+        alias_lines=alias_lines,
+        entity_lines=entity_lines,
+        relation_lines=relation_lines,
+    )
 
 
 def render_level1_facts(
@@ -123,18 +191,37 @@ def render_level1_facts(
     *,
     include_alias_mappings: bool = True,
     max_lines: int | None = None,
+    max_alias_lines: int | None = None,
+    max_entity_lines: int | None = None,
+    max_relation_lines: int | None = None,
 ) -> str | None:
-    lines = (
+    buckets = (
         _collect_level1_lines_from_structured(bundle, include_alias_mappings=include_alias_mappings)
         if bundle.structured_evidence
-        else []
+        else Level1EvidenceBuckets(alias_lines=[], entity_lines=[], relation_lines=[])
     )
-    if not lines and bundle.level1_snapshot is not None:
-        lines = _collect_level1_lines_from_snapshot(
+    if (
+        not (buckets.alias_lines or buckets.entity_lines or buckets.relation_lines)
+        and bundle.level1_snapshot is not None
+    ):
+        buckets = _collect_level1_lines_from_snapshot(
             bundle.level1_snapshot,
             include_alias_mappings=include_alias_mappings,
         )
-    lines = _limit_items(lines, max_lines)
+
+    if any(limit is not None for limit in (max_alias_lines, max_entity_lines, max_relation_lines)):
+        lines = (
+            _limit_items(buckets.alias_lines, max_alias_lines)
+            + _limit_items(buckets.entity_lines, max_entity_lines)
+            + _limit_items(buckets.relation_lines, max_relation_lines)
+        )
+        if max_lines is not None:
+            lines = _limit_items(lines, max_lines)
+    else:
+        lines = _limit_items(
+            buckets.alias_lines + buckets.entity_lines + buckets.relation_lines,
+            max_lines,
+        )
 
     if not lines:
         return None
@@ -215,6 +302,7 @@ def render_disambig_candidates(
     *,
     fallback_requested_names: Iterable[str] | None = None,
     max_candidates: int | None = None,
+    priority_names: Iterable[str] | None = None,
 ) -> str | None:
     # 中文注释：这里是共享 evidence 渲染层，只把 bundle 中已有的结构转成 prompt block，
     # 不承担 provider 侧的取证职责。
@@ -240,6 +328,7 @@ def render_disambig_candidates(
             if candidates:
                 candidate_lines.append(f"「{name}」可能是：{'、'.join(candidates)}")
 
+    candidate_lines = _prioritize_candidate_lines(candidate_lines, priority_names)
     candidate_lines = _limit_items(candidate_lines, max_candidates)
     if not candidate_lines:
         return None
@@ -279,10 +368,14 @@ def render_shared_evidence_sections(
     include_level1_alias_mappings: bool = True,
     fallback_requested_names: Iterable[str] | None = None,
     max_level1_lines: int | None = None,
+    max_level1_alias_lines: int | None = None,
+    max_level1_entity_lines: int | None = None,
+    max_level1_relation_lines: int | None = None,
     max_active_entities: int | None = None,
     max_disambig_candidates: int | None = None,
     max_vector_chunks: int = 3,
     max_vector_text_len: int = 200,
+    priority_candidate_names: Iterable[str] | None = None,
 ) -> SharedEvidenceSections:
     if bundle is None:
         return SharedEvidenceSections()
@@ -294,6 +387,9 @@ def render_shared_evidence_sections(
             bundle,
             include_alias_mappings=include_level1_alias_mappings,
             max_lines=max_level1_lines,
+            max_alias_lines=max_level1_alias_lines,
+            max_entity_lines=max_level1_entity_lines,
+            max_relation_lines=max_level1_relation_lines,
         ),
         active_entities=render_active_entities(
             active_entity_items,
@@ -303,6 +399,7 @@ def render_shared_evidence_sections(
             bundle,
             fallback_requested_names=fallback_requested_names,
             max_candidates=max_disambig_candidates,
+            priority_names=priority_candidate_names,
         ),
         vector_evidence=render_vector_evidence(
             bundle,
@@ -322,3 +419,11 @@ def select_shared_evidence_sections(
         if value:
             selected.append(value)
     return selected
+
+
+def trim_active_entities_section(
+    active_entities: str | None,
+    *,
+    max_items: int | None,
+) -> str | None:
+    return _trim_rendered_list_section(active_entities, max_items=max_items)

@@ -328,6 +328,32 @@ def _build_phase3_overflow_bundle() -> EvidenceBundle:
     )
 
 
+def _build_phase3_priority_bundle() -> EvidenceBundle:
+    return EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="人物一",
+                metadata={"name": "人物一"},
+            ),
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="人物二",
+                metadata={"name": "人物二"},
+            ),
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="人物三",
+                metadata={"name": "人物三"},
+            ),
+        ],
+        requested_names=["别名一", "别名二", "别名三"],
+    )
+
+
 class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_attribute_dialogues_with_llm_appends_shared_evidence_blocks(self) -> None:
         bundle = _build_phase3_bundle()
@@ -372,6 +398,38 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(mock_attribute.await_args.kwargs["evidence_bundle"], bundle)
 
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_attribute_dialogues_with_llm_prioritizes_batch_relevant_candidates(
+        self,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Phase3 会优先保留当前 batch 真正提到的候选名，而不是机械截前两条。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+
+        mock_annotation_client = MagicMock()
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = False
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_response = MagicMock(dialogues=[], model_dump=MagicMock(return_value={}))
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
+
+        await attribute_dialogues_with_llm(
+            mock_annotation_client,
+            "“别名三，你终于开口了。”",
+            [QuoteCandidate(index=1, content="别名三，你终于开口了。")],
+            known_characters=["人物一", "人物二", "人物三"],
+            evidence_bundle=_build_phase3_priority_bundle(),
+        )
+
+        user_prompt = mock_annotation_client._call_annotation_api.await_args.kwargs["messages"][-1]["content"]
+        self.assertIn("「别名三」可能是：人物一、人物二、人物三", user_prompt)
+        self.assertLess(
+            user_prompt.index("「别名三」可能是：人物一、人物二、人物三"),
+            user_prompt.index("「别名一」可能是：人物一、人物二、人物三"),
+        )
+
 
 class TestRenderDialogueAttributionEvidenceSections(unittest.TestCase):
     """测试 Phase3 renderer 的 alias_map 和 active_entities 逻辑"""
@@ -412,6 +470,24 @@ class TestRenderDialogueAttributionEvidenceSections(unittest.TestCase):
         custom_entities = "【近期活跃角色】自定义实体"
         result = self._call(bundle=bundle, active_entities=custom_entities)
         self.assertIn(custom_entities, result)
+
+    def test_explicit_active_entities_string_is_trimmed_by_phase3_policy(self) -> None:
+        """真实入口传入的 active_entities 字符串也要经过 Phase3 裁剪。"""
+        custom_entities = "\n".join(
+            [
+                "【近期活跃角色】",
+                "- 角色一（speaker_candidate）：动作一 [chunk=1]",
+                "- 角色二（speaker_candidate）：动作二 [chunk=2]",
+                "- 角色三（speaker_candidate）：动作三 [chunk=3]",
+                "- 角色四（speaker_candidate）：动作四 [chunk=4]",
+            ]
+        )
+
+        result = self._call(bundle=_build_phase3_bundle(), active_entities=custom_entities)
+        active_section = next(section for section in result if "【近期活跃角色】" in section)
+
+        self.assertEqual(sum(1 for line in active_section.splitlines() if line.startswith("- ")), 3)
+        self.assertNotIn("角色四", active_section)
 
     def test_active_entities_without_bundle(self) -> None:
         """evidence_bundle=None 但 active_entities 非 None 时，只返回 active_entities"""
