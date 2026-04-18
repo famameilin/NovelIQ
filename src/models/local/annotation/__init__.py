@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from src.config.constants import PHASE_MAX_RETRIES
+from src.models.local.evidence_renderer_shared import render_vector_evidence
 from src.models.local.annotation.api_call import (
     execute_validation_retry_call,
     extract_names_from_annotation,
@@ -41,7 +42,6 @@ from src.models.local.annotation.context import (
 from src.models.local.annotation.evidence_renderer import (
     AnnotationPromptBlocks,
     render_annotation_prompt_blocks,
-    render_vector_evidence,
 )
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
