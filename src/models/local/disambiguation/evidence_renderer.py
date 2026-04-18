@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from src.models.local.evidence_renderer_shared import render_disambig_candidates as render_shared_disambig_candidates
@@ -56,13 +57,27 @@ def render_disambiguation_prompt_context_sections(
     ]
 
 
-def render_disambig_candidates(bundle: EvidenceBundle) -> str | None:
-    return render_shared_disambig_candidates(bundle)
+def render_disambig_candidates(
+    bundle: EvidenceBundle,
+    *,
+    fallback_requested_names: Iterable[str] | None = None,
+) -> str | None:
+    return render_shared_disambig_candidates(
+        bundle,
+        fallback_requested_names=fallback_requested_names,
+    )
 
 
-def render_disambig_prompt_context(bundle: EvidenceBundle) -> str | None:
+def render_disambig_prompt_context(
+    bundle: EvidenceBundle,
+    *,
+    fallback_requested_names: Iterable[str] | None = None,
+) -> str | None:
     # 中文注释：消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法。
-    disambig_candidates = render_shared_disambig_candidates(bundle)
+    disambig_candidates = render_shared_disambig_candidates(
+        bundle,
+        fallback_requested_names=fallback_requested_names,
+    )
     vector_evidence = render_vector_evidence(bundle)
 
     if disambig_candidates and vector_evidence:
