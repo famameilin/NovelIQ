@@ -234,6 +234,25 @@ def test_render_disambiguation_graph_hint_filters_to_candidate_related_items_and
     assert "- 灰衣人 → 白芷" in rendered
 
 
+def test_render_disambiguation_graph_hint_does_not_leave_bare_relation_header_after_truncation() -> None:
+    from src.models.local.disambiguation.evidence_renderer import render_disambiguation_graph_hint
+
+    rendered = render_disambiguation_graph_hint(
+        alias_map={f"别名{i}": "白芷" for i in range(1, 7)},
+        relations=[
+            {"from_name": "白芷", "to_name": "侯飞白", "type": "盟友", "is_active": True},
+        ],
+        existing_names=["白芷", "侯飞白"],
+        candidate_names=["别名1"],
+        max_lines=6,
+    )
+
+    assert rendered is not None
+    assert rendered.count("【图谱已裁决的别名映射】") == 1
+    assert "【图谱已确认的关系】\n- " not in rendered or "- 白芷 ←盟友→ 侯飞白" in rendered
+    assert not rendered.rstrip().endswith("【图谱已确认的关系】")
+
+
 def test_render_disambig_prompt_context_prioritizes_current_candidate_and_caps_sections() -> None:
     from src.models.local.disambiguation import render_disambig_prompt_context
 
