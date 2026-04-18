@@ -203,6 +203,92 @@ def _build_foreshadowing_bundle() -> EvidenceBundle:
     )
 
 
+def _build_phase1_overflow_bundle() -> EvidenceBundle:
+    structured = [
+        EvidenceItem(
+            evidence_type="alias_mapping",
+            source="level1",
+            content=f"别名{i} -> 人物{i}",
+            metadata={"alias": f"别名{i}", "canonical": f"人物{i}"},
+        )
+        for i in range(1, 5)
+    ]
+    structured.extend(
+        [
+            EvidenceItem(
+                evidence_type="canonical_entity",
+                source="level1",
+                content=f"人物{i}",
+                metadata={"name": f"人物{i}", "entity_type": "character"},
+            )
+            for i in range(1, 4)
+        ]
+    )
+    structured.extend(
+        [
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content=f"人物{i}<盟友>人物{i + 1}",
+                metadata={
+                    "from_name": f"人物{i}",
+                    "to_name": f"人物{i + 1}",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            )
+            for i in range(1, 5)
+        ]
+    )
+
+    local = [
+        EvidenceItem(
+            evidence_type="active_entity",
+            source="level2",
+            content=f"人物{i}",
+            metadata={
+                "name": f"人物{i}",
+                "role": "other",
+                "recent_action": f"动作{i}",
+                "recent_emotion": f"情绪{i}",
+                "last_seen_chunk": 20 - i,
+            },
+        )
+        for i in range(1, 6)
+    ]
+    local.extend(
+        [
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content=f"「别名{i}」可能是：人物{i}",
+            )
+            for i in range(1, 5)
+        ]
+    )
+
+    semantic = [
+        EvidenceItem(
+            evidence_type="semantic_recall",
+            source="level3",
+            content=f"人物{i}历史片段：" + ("甲" * 180),
+            metadata={
+                "chunk_id": i,
+                "similarity": 0.93 - i * 0.01,
+                "text": f"人物{i}历史片段：" + ("甲" * 180),
+            },
+        )
+        for i in range(1, 4)
+    ]
+
+    return EvidenceBundle(
+        structured_evidence=structured,
+        local_evidence=local,
+        semantic_evidence=semantic,
+        requested_names=[f"别名{i}" for i in range(1, 5)],
+    )
+
+
 def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
     bundle = _build_foreshadowing_bundle()
 
@@ -254,6 +340,33 @@ def test_build_foreshadowing_messages_uses_disambig_fallback_from_requested_name
     assert "「灰衣人」可能是：白芷、侯飞白" in user_content
     assert "【近期活跃角色】" not in user_content
     assert "<Narrative_Evidence_Level1>" not in user_content
+
+
+def test_render_annotation_prompt_blocks_trims_phase1_shared_evidence_context() -> None:
+    blocks = render_annotation_prompt_blocks(_build_phase1_overflow_bundle())
+
+    assert blocks.active_entities is not None
+    assert blocks.disambig_context is not None
+
+    active_section = blocks.active_entities
+    disambig_context = blocks.disambig_context
+
+    level1_start = disambig_context.index("<Narrative_Evidence_Level1>")
+    disambig_start = disambig_context.index("<Disambig_Candidates>")
+    vector_start = disambig_context.index("<Vector_Evidence>")
+    level1_section = disambig_context[level1_start:disambig_start]
+    disambig_section = disambig_context[disambig_start:vector_start]
+    vector_section = disambig_context[vector_start:]
+
+    assert sum(1 for line in active_section.splitlines() if line.startswith("- ")) == 4
+    assert sum(1 for line in level1_section.splitlines() if line.startswith("- ")) == 8
+    assert sum(1 for line in level1_section.splitlines() if "已确认别名：" in line) == 3
+    assert sum(1 for line in level1_section.splitlines() if "已确认实体：" in line) == 2
+    assert sum(1 for line in level1_section.splitlines() if "已确认关系：" in line) == 3
+    assert sum(1 for line in disambig_section.splitlines() if line.startswith("「")) == 3
+    assert vector_section.count("[Chunk ") == 2
+    assert "[Chunk 3]" not in vector_section
+    assert "..." in vector_section
 
 
 def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> None:

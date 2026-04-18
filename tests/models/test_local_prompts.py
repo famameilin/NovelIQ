@@ -32,6 +32,19 @@ from src.models.disambiguation import DisambiguationClient
 
 
 class TestLocalPrompts(unittest.TestCase):
+    def test_phase_prompts_declare_shared_evidence_priority_rules(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        phase1_prompt = (repo_root / "config" / "prompts" / "phase1.txt").read_text(encoding="utf-8")
+        disambig_prompt = (repo_root / "config" / "prompts" / "disambiguate.txt").read_text(encoding="utf-8")
+        phase3_prompt = (repo_root / "config" / "prompts" / "phase3.txt").read_text(encoding="utf-8")
+        phase4_prompt = (repo_root / "config" / "prompts" / "phase4.txt").read_text(encoding="utf-8")
+
+        self.assertIn("当前文本中明确出现的事实 > 显式输入", phase1_prompt)
+        self.assertIn("不得仅凭共享证据把未在 <Current_Chunk> 中逐字出现的人写入 characters", phase1_prompt)
+        self.assertIn("图谱提示、共享 evidence 和历史召回只能作为支持证据", disambig_prompt)
+        self.assertIn("当前文本里明确出现的说话动作、称呼关系、自报身份", phase3_prompt)
+        self.assertIn("关系 evidence 必须落在当前文本原句上", phase4_prompt)
+
     def test_annotation_client_initialization(self) -> None:
         """测试标注客户端能正确初始化"""
         config = TaskModelConfig(

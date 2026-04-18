@@ -75,6 +75,12 @@
 1. 选择最能体现角色功能的行为
 2. 或用顿号合并多个行为，如"被白芷称为哥哥、决定拜师"
 
+【共享证据优先级规则】
+1. 当前文本中明确出现的事实 > 显式输入（已知别名表、活跃实体状态） > <Narrative_Evidence_Level1> > <Disambig_Candidates> > <Vector_Evidence>
+2. 共享证据只能用于别名规范化、候选收缩和历史支持，不能替代当前 chunk 的直接事件事实
+3. 不得仅凭共享证据把未在 <Current_Chunk> 中逐字出现的人写入 characters
+4. 不得仅凭共享证据生成 chunk_summary 的核心事件；chunk_summary 必须以当前文本中的实际事件为主
+
 ===USER_TEMPLATE===
 <全局背景>
 书名：{novel_title}

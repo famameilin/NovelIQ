@@ -12,10 +12,11 @@ from __future__ import annotations
 from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
-from src.models.local.disambiguation import build_existing_character_hint
 from src.models.local.disambiguation.evidence_renderer import (
     DisambiguationPromptContext,
     build_disambiguation_prompt_context,
+    render_disambiguation_graph_hint,
+    render_existing_character_hint,
 )
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
@@ -168,12 +169,16 @@ def _augment_prompt_context_with_graph(
     alias_map: dict[str, str],
     relations: list[dict],
     existing_names: list[str],
+    candidate_names: list[str],
 ) -> DisambiguationPromptContext | None:
     """将图谱权威数据补入消歧任务上下文。"""
 
-    from src.models.local.disambiguation.evidence_renderer import render_disambiguation_graph_hint
-
-    graph_hint = render_disambiguation_graph_hint(alias_map, relations, existing_names)
+    graph_hint = render_disambiguation_graph_hint(
+        alias_map,
+        relations,
+        existing_names,
+        candidate_names=candidate_names,
+    )
     if prompt_context is None and graph_hint is None:
         return None
 
@@ -186,23 +191,34 @@ def _augment_prompt_context_with_graph(
 
 def _build_existing_character_hint_from_db(
     conn,
-    all_names: list[NameCountCandidate],
+    candidate_names: list[str],
     existing_names: list[str],
     alias_keywords: list[str],
     run_id: str,
     alias_map: dict[str, str],
     relations: list[dict],
 ) -> DisambiguationPromptContext | None:
+    all_names = fetch_all_character_names(conn, run_id)
     existing_payload = _build_candidate_payload_by_names(all_names, existing_names)
     if not existing_payload:
         return None
 
     existing_context_sentences = build_context_sentences(conn, existing_payload, alias_keywords, run_id=run_id)
     prompt_context = build_disambiguation_prompt_context(
-        existing_character_hint=build_existing_character_hint(existing_names, existing_context_sentences)
+        existing_character_hint=render_existing_character_hint(
+            existing_names,
+            existing_context_sentences,
+            candidate_names=candidate_names,
+        )
     )
 
-    return _augment_prompt_context_with_graph(prompt_context, alias_map, relations, existing_names)
+    return _augment_prompt_context_with_graph(
+        prompt_context,
+        alias_map,
+        relations,
+        existing_names,
+        candidate_names,
+    )
 
 
 def extract_new_names_from_db(
