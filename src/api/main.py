@@ -47,6 +47,7 @@ from __future__ import annotations
 import socket
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,6 +65,8 @@ from src.api.app_bootstrap import (
     timeline_router,
 )
 
+ORPHAN_TASK_HEARTBEAT_TIMEOUT = timedelta(minutes=5)
+
 
 def _recover_orphaned_tasks() -> tuple[int, int]:
     """
@@ -80,10 +83,11 @@ def _recover_orphaned_tasks() -> tuple[int, int]:
     from src.storage.db import get_session
     from src.storage.repositories import RunRepository
 
+    stale_before = datetime.now() - ORPHAN_TASK_HEARTBEAT_TIMEOUT
     with get_session() as session:
         repo = RunRepository(session)
-        failed_count = repo.mark_running_as_failed()
-        cancelled_count = repo.mark_cancelling_as_cancelled()
+        failed_count = repo.mark_running_as_failed(stale_before=stale_before)
+        cancelled_count = repo.mark_cancelling_as_cancelled(stale_before=stale_before)
         return failed_count, cancelled_count
 
 

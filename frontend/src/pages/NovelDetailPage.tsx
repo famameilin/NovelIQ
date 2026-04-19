@@ -224,7 +224,13 @@ export function NovelDetailPage() {
     if (!novelId || !currentTaskId) return;
     if (!window.confirm("确定要删除当前分析任务吗？此操作不可恢复。")) return;
     try {
-      await batchDeleteTasks(novelId, [currentTaskId]);
+      const result = await batchDeleteTasks(novelId, [currentTaskId]);
+      const deletedCurrentTask = result.deleted_ids.includes(currentTaskId);
+      if (!deletedCurrentTask) {
+        const reason = result.failed_ids[0]?.reason ?? result.message;
+        toast.error(`删除任务失败: ${reason}`);
+        return;
+      }
       setTask(null);
       setIsAnalyzing(false);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
