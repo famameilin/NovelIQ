@@ -74,7 +74,7 @@ class TestConvertResponseData:
         data = {
             "items": [
                 {"run_id": "0211f894-1a72-4444-a772-2ddc64334cd2", "name": "item1"},
-                {"run_id": "3a25baca-1a72-4444-a772-2ddc64334cd2", "name": "item2"}
+                {"run_id": "3a25baca-1a72-4444-a772-2ddc64334cd2", "name": "item2"},
             ]
         }
         result = convert_response_data(data)

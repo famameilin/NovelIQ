@@ -12,6 +12,11 @@
 
 from __future__ import annotations
 
+from src.models.local.annotation.evidence_renderer import (
+    render_annotation_alias_map_text,
+    render_annotation_evidence_blocks,
+    render_annotation_prompt_blocks,
+)
 from src.models.local.prompts import (
     FEW_SHOT_EXAMPLES_V2,
     FORESHADOWING_EXAMPLES,
@@ -21,8 +26,6 @@ from src.models.local.prompts import (
     SYSTEM_PROMPT_V2,
     USER_TEMPLATE_V2,
 )
-
-
 def _build_annotation_messages_v2(
     text: str,
     alias_map: dict[str, str] | None = None,
@@ -33,6 +36,7 @@ def _build_annotation_messages_v2(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     disambig_context: str | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建第一次调用（基础标注）的messages
@@ -57,18 +61,21 @@ def _build_annotation_messages_v2(
         messages.append({"role": "user", "content": example["user"]})
         messages.append({"role": "assistant", "content": example["assistant"]})
 
-    alias_map_str = "{}"
-    if alias_map:
-        canonical_to_aliases: dict[str, list[str]] = {}
-        for alias, canonical in alias_map.items():
-            if canonical not in canonical_to_aliases:
-                canonical_to_aliases[canonical] = []
-            canonical_to_aliases[canonical].append(alias)
-        lines = []
-        for canonical, aliases in canonical_to_aliases.items():
-            alias_str = "、".join(aliases)
-            lines.append(f"- {alias_str} → {canonical}")
-        alias_map_str = "\n".join(lines)
+    alias_map_str = render_annotation_alias_map_text(alias_map=alias_map, evidence_bundle=evidence_bundle)
+
+    if evidence_bundle is not None:
+        blocks = render_annotation_prompt_blocks(
+            evidence_bundle,
+            include_level1_alias_mappings=alias_map is None,
+        )
+        # 中文注释：EvidenceBundle 是新的主语义入口。
+        # 兼容层字符串只在 bundle 没有产出对应 prompt block 时兜底，避免旧字段反向覆盖新设计。
+        # 如果调用方显式给了 alias_map（包括空 dict），就不再把 bundle 里的 Level 1 别名裁决
+        # 通过 disambig_context 反向注入，避免新旧入口共存时出现优先级错位。
+        if blocks.active_entities is not None:
+            active_entities = blocks.active_entities
+        if blocks.disambig_context is not None:
+            disambig_context = blocks.disambig_context
 
     active_entities_str = active_entities or "[]"
 
@@ -104,6 +111,7 @@ def _build_foreshadowing_messages(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建第二次调用（伏笔分析）的messages
@@ -126,6 +134,13 @@ def _build_foreshadowing_messages(
         chunk_text=text,
         next_chunk_text=next_chunk_text or "（无后文）",
     )
+
+    if evidence_bundle is not None:
+        # 中文注释：Phase 2 只被动复用共享 evidence block，
+        # 不再引入 narrative 专用的二次渲染协议，避免这轮收口任务继续外扩。
+        evidence_sections = render_annotation_evidence_blocks(evidence_bundle)
+        if evidence_sections:
+            user_content += "\n\n" + "\n\n".join(evidence_sections)
 
     messages.append({"role": "user", "content": user_content})
     return messages

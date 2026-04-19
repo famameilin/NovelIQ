@@ -49,11 +49,11 @@ class TestLoggingConfig(unittest.TestCase):
                 logger.remove(file_handler_id)
             content = log_path.read_text(encoding="utf-8")
             self.assertIn("debug-test-message", content)
-    
+
     def test_setup_logging_console_file(self) -> None:
         """
         测试终端日志文件功能
-        
+
         创建时间: 2026-03-12
         创建者: TraeAI
         任务: 添加终端日志文件支持
@@ -73,10 +73,10 @@ class TestLoggingConfig(unittest.TestCase):
                 logger.remove(file_handler_id)
             if console_file_handler_id >= 0:
                 logger.remove(console_file_handler_id)
-            
+
             content = log_path.read_text(encoding="utf-8")
             self.assertIn("console-test-message", content)
-            
+
             console_content = console_log_path.read_text(encoding="utf-8")
             self.assertIn("console-test-message", console_content)
 

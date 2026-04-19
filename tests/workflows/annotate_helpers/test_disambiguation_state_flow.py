@@ -50,9 +50,7 @@ async def test_run_final_disambiguation_with_state_persists_canonicals_before_re
     state = DisambiguationState(
         discovered_names=frozenset({"bai_zhi", "hou_fei_bai"}),
         known_canonical_names=frozenset({"bai_zhi", "hou_fei_bai"}),
-        pending_relations=(
-            {"from": "bai_zhi", "to": "hou_fei_bai", "type": "师徒"},
-        ),
+        pending_relations=({"from": "bai_zhi", "to": "hou_fei_bai", "type": "师徒"},),
     )
 
     with (

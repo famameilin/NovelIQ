@@ -91,19 +91,15 @@ class TestEmotionPolarityDistribution(unittest.TestCase):
         self.assertEqual(result["neutral_ratio"], 0.0)
 
     def test_polarity_distribution_five_class(self) -> None:
-        result = compute_emotion_polarity_distribution([
-            "strong_positive", "mild_positive", 
-            "neutral", 
-            "mild_negative", "strong_negative"
-        ])
+        result = compute_emotion_polarity_distribution(
+            ["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
+        )
         self.assertAlmostEqual(result["positive_ratio"], 0.4, places=6)
         self.assertAlmostEqual(result["negative_ratio"], 0.4, places=6)
         self.assertAlmostEqual(result["neutral_ratio"], 0.2, places=6)
 
     def test_polarity_distribution_only_positive(self) -> None:
-        result = compute_emotion_polarity_distribution([
-            "strong_positive", "mild_positive", "strong_positive"
-        ])
+        result = compute_emotion_polarity_distribution(["strong_positive", "mild_positive", "strong_positive"])
         self.assertAlmostEqual(result["positive_ratio"], 1.0, places=6)
         self.assertAlmostEqual(result["negative_ratio"], 0.0, places=6)
         self.assertAlmostEqual(result["neutral_ratio"], 0.0, places=6)

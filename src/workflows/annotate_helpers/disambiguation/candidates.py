@@ -9,12 +9,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
-from src.models.local.disambiguation import build_existing_character_hint
+from src.models.local.disambiguation.evidence_renderer import (
+    DisambiguationPromptContext,
+    build_disambiguation_prompt_context,
+    render_disambiguation_graph_hint,
+    render_existing_character_hint,
+)
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
@@ -23,9 +26,6 @@ from .state_logic import (
     DISAMBIG_CONFIDENCE_HIGH,
     DISAMBIG_STATE_RESOLVED,
 )
-
-if TYPE_CHECKING:
-    from src.rag import DisambigContextProvider
 
 EXTENSION_REVIEW_MIN_GAP = 3
 EXTENSION_REVIEW_MIN_RATIO = 1.5
@@ -164,42 +164,68 @@ def _collect_final_disambiguation_candidates(
     return candidates
 
 
-def _augment_hint_with_graph(
-    hint: str | None,
-    disambig_provider: DisambigContextProvider,
+def _augment_prompt_context_with_graph(
+    prompt_context: DisambiguationPromptContext | None,
+    alias_map: dict[str, str],
+    relations: list[dict],
     existing_names: list[str],
-) -> str | None:
-    """将图谱权威数据（别名、关系）追加到 rag_hint。
+    candidate_names: list[str],
+) -> DisambiguationPromptContext | None:
+    """将图谱权威数据补入消歧任务上下文。"""
 
-    这形成了从图谱表回到消歧的反馈循环，
-    让 LLM 能看到已解析的别名映射和已确认的关系。
+    graph_hint = render_disambiguation_graph_hint(
+        alias_map,
+        relations,
+        existing_names,
+        candidate_names=candidate_names,
+    )
+    if prompt_context is None and graph_hint is None:
+        return None
 
-    委托给 DisambigContextProvider.build_graph_feedback_hint() 执行，
-    避免重复图谱查询逻辑。
-    """
-    return disambig_provider.build_graph_feedback_hint(existing_names, base_hint=hint)
+    return build_disambiguation_prompt_context(
+        existing_character_hint=prompt_context.existing_character_hint if prompt_context else None,
+        graph_hint=graph_hint or (prompt_context.graph_hint if prompt_context else None),
+        shared_evidence_context=prompt_context.shared_evidence_context if prompt_context else None,
+    )
 
 
 def _build_existing_character_hint_from_db(
     conn,
-    all_names: list[NameCountCandidate],
+    candidate_names: list[str],
     existing_names: list[str],
     alias_keywords: list[str],
     run_id: str,
-    disambig_provider: DisambigContextProvider | None = None,
-) -> str | None:
+    alias_map: dict[str, str],
+    relations: list[dict],
+    current_chunk_id: int | None = None,
+) -> DisambiguationPromptContext | None:
+    all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)
     existing_payload = _build_candidate_payload_by_names(all_names, existing_names)
     if not existing_payload:
         return None
 
-    existing_context_sentences = build_context_sentences(conn, existing_payload, alias_keywords, run_id=run_id)
-    hint = build_existing_character_hint(existing_names, existing_context_sentences)
+    existing_context_sentences = build_context_sentences(
+        conn,
+        existing_payload,
+        alias_keywords,
+        run_id=run_id,
+        max_chunk_id=current_chunk_id,
+    )
+    prompt_context = build_disambiguation_prompt_context(
+        existing_character_hint=render_existing_character_hint(
+            existing_names,
+            existing_context_sentences,
+            candidate_names=candidate_names,
+        )
+    )
 
-    # Augment with graph authority data
-    if disambig_provider is not None:
-        hint = _augment_hint_with_graph(hint, disambig_provider, existing_names)
-
-    return hint
+    return _augment_prompt_context_with_graph(
+        prompt_context,
+        alias_map,
+        relations,
+        existing_names,
+        candidate_names,
+    )
 
 
 def extract_new_names_from_db(

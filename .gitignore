@@ -46,6 +46,9 @@ env/
 CLAUDE.md
 .codex-tmp/
 
+# 文档草案不进 git
+generalize-rag-to-narrative-evidence.md
+
 # Issues 文件夹
 issues/
 
