@@ -48,7 +48,7 @@ export interface AnalysisTask {
   task_id: string;
   novel_id: string;
   status: TaskStatus;
-  created_at: string;
+  created_at: string | null;
   completed_at?: string;
   error?: string;
 }
@@ -57,6 +57,20 @@ export interface AnalysisStartResponse {
   novel_id: string;
   task_id: string;
   message: string;
+}
+
+export interface BatchDeleteTaskFailure {
+  task_id: string;
+  reason: string;
+}
+
+export interface BatchDeleteTasksResponse {
+  success: boolean;
+  message: string;
+  deleted_count: number;
+  failed_count: number;
+  deleted_ids: string[];
+  failed_ids: BatchDeleteTaskFailure[];
 }
 
 // ============================================================

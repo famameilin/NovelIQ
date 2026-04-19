@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 
 import { NovelDetailPage } from "@/pages/NovelDetailPage";
 import { useNovelStore } from "@/store/novelStore";
@@ -211,6 +212,14 @@ describe("NovelDetailPage", () => {
       task_id: "task-failed",
       message: "分析任务已继续执行",
     });
+    batchDeleteTasksMock.mockResolvedValue({
+      success: true,
+      message: "成功删除 1 个任务",
+      deleted_count: 1,
+      failed_count: 0,
+      deleted_ids: ["task-old"],
+      failed_ids: [],
+    });
     getNarrativeStructureMock.mockResolvedValue({});
     getEmotionStatsMock.mockResolvedValue({});
     getCharacterStatsMock.mockResolvedValue({});
@@ -265,7 +274,14 @@ describe("NovelDetailPage", () => {
     const user = userEvent.setup();
     currentSearchParams = "task_id=task-old";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: "task-old", novelsCache: [] });
-    batchDeleteTasksMock.mockResolvedValue({ deleted_count: 1, failed_count: 0 });
+    batchDeleteTasksMock.mockResolvedValue({
+      success: true,
+      message: "成功删除 1 个任务",
+      deleted_count: 1,
+      failed_count: 0,
+      deleted_ids: ["task-old"],
+      failed_ids: [],
+    });
 
     renderNovelDetailPage();
 
@@ -275,5 +291,33 @@ describe("NovelDetailPage", () => {
       expect(batchDeleteTasksMock).toHaveBeenCalledWith("novel-1", ["task-old"]);
     });
     expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1", { replace: true });
+  });
+
+  it("删除失败响应不应清理当前任务或误报成功", async () => {
+    const user = userEvent.setup();
+    const toastErrorSpy = vi.mocked(toast.error);
+    currentSearchParams = "task_id=task-old";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: "task-old", novelsCache: [] });
+    batchDeleteTasksMock.mockResolvedValue({
+      success: false,
+      message: "删除失败: 1 个任务无法删除",
+      deleted_count: 0,
+      failed_count: 1,
+      deleted_ids: [],
+      failed_ids: [{ task_id: "task-old", reason: "任务正在running中，请先取消任务后再删除" }],
+    });
+
+    renderNovelDetailPage();
+
+    await user.click(await screen.findByRole("button", { name: "mock-delete-task" }));
+
+    await waitFor(() => {
+      expect(batchDeleteTasksMock).toHaveBeenCalledWith("novel-1", ["task-old"]);
+      expect(toastErrorSpy).toHaveBeenCalledWith(
+        "删除任务失败: 任务正在running中，请先取消任务后再删除",
+      );
+    });
+    expect(useNovelStore.getState().currentTaskId).toBe("task-old");
+    expect(navigateMock).not.toHaveBeenCalledWith("/novels/novel-1", { replace: true });
   });
 });

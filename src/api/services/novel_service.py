@@ -175,23 +175,27 @@ class NovelService:
         pass
 
     def get_tasks_by_novel(self, novel_id: str, session: Session | None = None) -> list[dict]:
-        """获取小说的所有任务"""
-        try:
-            with self._get_session(session) as sess:
-                run_repo = RunRepository(sess)
-                runs = run_repo.get_runs_by_novel(novel_id)
-                return [
-                    {
-                        "task_id": run["run_id"][:8] if len(run["run_id"]) >= 8 else run["run_id"],
-                        "novel_id": run["novel_id"],
-                        "status": run["status"],
-                        "run_id": run["run_id"],
-                    }
-                    for run in runs
-                ]
-        except Exception as e:
-            logger.warning(f"Failed to get tasks from database: {e}")
-            return []
+        """
+        获取小说的所有任务
+
+        修改时间: 2026-04-19
+        修改者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 不再将 DB 查询失败伪装成空列表，并补齐 created_at 供任务面板显示真实时间。
+        """
+        with self._get_session(session) as sess:
+            run_repo = RunRepository(sess)
+            runs = run_repo.get_runs_by_novel(novel_id)
+            return [
+                {
+                    "task_id": run["run_id"][:8] if len(run["run_id"]) >= 8 else run["run_id"],
+                    "novel_id": run["novel_id"],
+                    "status": run["status"],
+                    "run_id": run["run_id"],
+                    "created_at": run["created_at"],
+                }
+                for run in runs
+            ]
 
     def get_latest_completed_task(self, novel_id: str, session: Session | None = None) -> dict | None:
         """获取小说的最新已完成任务"""

@@ -67,4 +67,23 @@ describe("TaskRow", () => {
     expect(onCancel).toHaveBeenCalledWith("pending01");
     expect(onDelete).not.toHaveBeenCalled();
   });
+
+  it("created_at 缺失时应显示未知时间而不是 epoch 假时间", () => {
+    render(
+      <TaskRow
+        task={{
+          task_id: "pending02",
+          status: "pending",
+          created_at: null,
+        }}
+        isActive={false}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+        onDelete={vi.fn()}
+        onResume={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("未知时间")).toBeInTheDocument();
+  });
 });

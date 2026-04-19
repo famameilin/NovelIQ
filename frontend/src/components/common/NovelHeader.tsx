@@ -130,7 +130,13 @@ export function NovelHeader({
     if (!novelId) return;
     if (!window.confirm("确定要删除此任务吗？此操作不可恢复。")) return;
     try {
-      await batchDeleteTasks(novelId, [taskId]);
+      const result = await batchDeleteTasks(novelId, [taskId]);
+      const deletedTask = result.deleted_ids.includes(taskId);
+      if (!deletedTask) {
+        const reason = result.failed_ids[0]?.reason ?? result.message;
+        toast.error(`删除任务失败: ${reason}`);
+        return;
+      }
       toast.success("任务已删除");
       if (currentTaskId === taskId) {
         setTask(null);
