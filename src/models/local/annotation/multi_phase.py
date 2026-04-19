@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -332,7 +332,6 @@ async def annotate_chunk_multi_phase(
     chapter_id: int | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
@@ -347,8 +346,6 @@ async def annotate_chunk_multi_phase(
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def，使用 asyncio.gather 并行执行
     """
-    # 中文注释：保留 rag_retriever 形参仅为兼容旧调用方；
-    # Phase2 的证据入口已经收敛为上游 evidence_bundle，这里不再继续向下透传新的取证职责。
     parallel = settings.analysis.multi_phase_annotation.parallel
 
     if parallel:
@@ -406,7 +403,6 @@ async def annotate_chunk_parallel(
     evidence_bundle: EvidenceBundle | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
 ) -> MultiPhaseAnnotationResult:
@@ -550,7 +546,6 @@ async def annotate_chunk_serial(
     evidence_bundle: EvidenceBundle | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
 ) -> MultiPhaseAnnotationResult:

@@ -131,7 +131,7 @@ class AnnotationPhaseResult:
         cloud_annotation_client: AnnotationLike | None,
         incremental_disambig_client: DisambiguationLike,
         full_disambig_client: DisambiguationLike,
-        rag_retriever: DisambigContextProvider | None,
+        evidence_provider: DisambigContextProvider | None,
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
@@ -141,7 +141,7 @@ class AnnotationPhaseResult:
         self.cloud_annotation_client = cloud_annotation_client
         self.incremental_disambig_client = incremental_disambig_client
         self.full_disambig_client = full_disambig_client
-        self.rag_retriever = rag_retriever
+        self.evidence_provider = evidence_provider
         self.alias_keywords = alias_keywords
         self.global_context_str = global_context_str
         self.alias_map = alias_map
@@ -164,7 +164,7 @@ async def _init_annotation_phase_with_config(
 ) -> AnnotationPhaseResult:
     """初始化标注阶段（使用配置对象）"""
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
-    from .context import _init_disambig_provider
+    from .context import _init_evidence_provider
     from .sentence import _extract_and_save_global_context
 
     if not config.run_id:
@@ -195,14 +195,14 @@ async def _init_annotation_phase_with_config(
 
     alias_keywords: list[str] = ["某", "名", "号", "就是", "称号", "全名"]
 
-    rag_retriever = _init_disambig_provider(
+    evidence_provider = _init_evidence_provider(
         config.conn,
         config.novel_id,
         config.use_rag,
         run_id=config.run_id,
     )
-    if rag_retriever is not None:
-        await rag_retriever.ensure_level3_ready()
+    if evidence_provider is not None:
+        await evidence_provider.ensure_level3_ready()
 
     global_context_str = await _extract_and_save_global_context(
         config.conn,
@@ -220,7 +220,7 @@ async def _init_annotation_phase_with_config(
         cloud_annotation_client=cloud_annotation_client,
         incremental_disambig_client=incremental_client,
         full_disambig_client=full_client,
-        rag_retriever=rag_retriever,
+        evidence_provider=evidence_provider,
         alias_keywords=alias_keywords,
         global_context_str=global_context_str,
         alias_map={},
@@ -334,7 +334,7 @@ async def _process_single_chunk(
     alias_map = state.get_alias_merges_dict()
 
     ctx = await _prepare_chunk_context_with_level3(
-        conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.rag_retriever, run_id=run_id
+        conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.evidence_provider, run_id=run_id
     )
 
     annotation_result = await _annotate_chunk(
@@ -379,7 +379,7 @@ async def _process_single_chunk(
         chunk_id,
         idx,
         incremental_interval,
-        rag_retriever=phase_result.rag_retriever,
+        evidence_provider=phase_result.evidence_provider,
     )
 
     return state
@@ -427,7 +427,7 @@ async def _process_chunks_phase(
     from .graph_projection import project_graph_tables
 
     already_annotated = len(annotated_ids)
-    success_count = already_annotated
+    success_count = 0
     newly_annotated = 0  # 本次运行新标注的 chunk 数，用于 checkpoint/projection 间隔
 
     checkpoint_interval = max(1, settings.analysis.checkpoint_interval)
@@ -485,16 +485,19 @@ async def _process_chunks_phase(
             )
             success_count += 1
             newly_annotated += 1
+            progress_count = already_annotated + success_count
             if emitter:
                 await emitter(
                     StreamEvent(
                         action="progress",
                         sub_stage="phase1",
-                        current=success_count,
+                        current=progress_count,
                         total=total_chunks,
-                        percent=10 + (success_count / total_chunks) * 70,
-                        sub_percent=(success_count / total_chunks) * 100,
-                        message=f"标注 chunk {success_count}/{total_chunks}",
+                        percent=10 + (progress_count / total_chunks) * 70,
+                        sub_percent=(progress_count / total_chunks) * 100,
+                        # 中文注释：resume 模式下进度条应继续从“已存在结果”往前走，
+                        # 但 workflow 返回值仍应只统计本次新成功处理的 chunk 数。
+                        message=f"标注 chunk {progress_count}/{total_chunks}",
                     )
                 )
             if run_id and newly_annotated % checkpoint_interval == 0:
@@ -502,8 +505,8 @@ async def _process_chunks_phase(
             if run_id and newly_annotated % projection_interval == 0:
                 project_graph_tables(run_id, to_chunk=chunk_id, session=conn)
                 # projection 更新了别名表，需刷新消歧缓存
-                if phase_result.rag_retriever:
-                    phase_result.rag_retriever.invalidate_cache()
+                if phase_result.evidence_provider:
+                    phase_result.evidence_provider.invalidate_cache()
 
         except ChunkAnnotationMaxRetriesExceededError as e:
             logger.error(f"chunk annotation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
@@ -516,8 +519,8 @@ async def _process_chunks_phase(
     if run_id and all_chunks:
         final_chunk_id = all_chunks[-1][0]
         project_graph_tables(run_id, to_chunk=final_chunk_id, session=conn)
-        if phase_result.rag_retriever:
-            phase_result.rag_retriever.invalidate_cache()
+        if phase_result.evidence_provider:
+            phase_result.evidence_provider.invalidate_cache()
 
     return success_count, state
 
@@ -546,7 +549,7 @@ async def _run_disambiguation_phase(
         phase_result.alias_keywords,
         novel_id,
         run_id=run_id,
-        rag_retriever=phase_result.rag_retriever,
+        evidence_provider=phase_result.evidence_provider,
     )
 
     return state

@@ -23,7 +23,7 @@ from .client_init import (
 )
 from .context import (
     ChunkContext,
-    _init_disambig_provider,
+    _init_evidence_provider,
     _prepare_chunk_context,
 )
 from .disambiguation import (
@@ -50,7 +50,7 @@ __all__ = [
     "AnnotationPhaseResult",
     "_init_annotation_clients",
     "_setup_token_usage_callback",
-    "_init_disambig_provider",
+    "_init_evidence_provider",
     "_prepare_chunk_context",
     "_store_annotation_results",
     "_run_incremental_disambiguation_with_state",
