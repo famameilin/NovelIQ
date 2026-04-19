@@ -23,7 +23,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.routes import analysis as analysis_mod
+from src.api.exceptions import NovelNotFoundError
 from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
+from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
@@ -85,7 +87,7 @@ class TestAnalysis:
 
         class MissingTaskNovelService:
             def get_task(self, task_id: str):
-                raise RuntimeError(f"db task missing: {task_id}")
+                raise NovelNotFoundError(message=f"db task missing: {task_id}")
 
         api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: MissingTaskNovelService()
         try:
@@ -94,6 +96,22 @@ class TestAnalysis:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
 
         assert response.status_code == 404
+
+    def test_get_task_status_returns_500_when_db_query_fails(self, api_client: TestClient):
+        """测试 DB 查询异常不会被错误降级成 404"""
+
+        class BrokenNovelService:
+            def get_task(self, task_id: str):
+                raise RuntimeError(f"db unavailable for {task_id}")
+
+        api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: BrokenNovelService()
+        try:
+            client = TestClient(api_client.app, raise_server_exceptions=False)
+            response = client.get("/api/novels/novel-1/tasks/broken123/status")
+        finally:
+            api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
+
+        assert response.status_code == 500
 
     def test_resume_pending_task_success(self, api_client: TestClient):
         """测试继续 pending 任务走专用 resume 路径"""
@@ -559,6 +577,38 @@ class TestCancellationStateCheck:
 
         with pytest.raises(CancellationStateCheckError, match="取消状态检查失败"):
             service._is_cancelled("deadbeef")
+
+
+class TestAnalysisErrorHandler:
+    """测试取消收口时会清理 DB 中的 cancel_requested 脏状态"""
+
+    @pytest.mark.asyncio
+    async def test_handle_cancel_clears_cancel_requested_in_db(self, db_session):
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="novel-1")
+        run_repo.update_run_task_fields(run_id, status="cancelling", cancel_requested=True)
+
+        task_manager = TaskManager()
+        task_manager.create_task(run_id[:8], "novel-1")
+        handler = AnalysisErrorHandler(
+            novel_service=MagicMock(),
+            task_manager=task_manager,
+        )
+
+        await handler.handle_cancel(
+            task_id=run_id[:8],
+            novel_id="novel-1",
+            session=db_session,
+            run_id=run_id,
+            analysis_logger=None,
+            bus=None,
+        )
+
+        refreshed_run = run_repo.get_run(run_id)
+        assert refreshed_run is not None
+        assert refreshed_run["status"] == "cancelled"
+        assert refreshed_run["cancel_requested"] is False
+        assert refreshed_run["completed_at"] is not None
 
 
 class TestTaskManagerDbWrite:

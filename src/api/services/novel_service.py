@@ -150,20 +150,24 @@ class NovelService:
         raise NovelNotFoundError(f"任务不存在: {task_id}")
 
     def _load_task_from_db(self, task_id: str, session: Session | None = None) -> dict | None:
-        """从数据库加载任务元数据"""
-        try:
-            with self._get_session(session) as sess:
-                run_repo = RunRepository(sess)
-                run = run_repo.get_run_by_run_id_prefix(task_id)
-                if run:
-                    return {
-                        "task_id": task_id,
-                        "novel_id": run["novel_id"],
-                        "status": run["status"],
-                        "run_id": run["run_id"],
-                    }
-        except Exception as e:
-            logger.warning(f"从数据库加载任务失败: {e}")
+        """
+        从数据库加载任务元数据
+
+        修改时间: 2026-04-19
+        修改者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 移除 DB 异常吞掉逻辑，基础设施故障应由上层按 5xx 处理，而不是伪装成任务不存在。
+        """
+        with self._get_session(session) as sess:
+            run_repo = RunRepository(sess)
+            run = run_repo.get_run_by_run_id_prefix(task_id)
+            if run:
+                return {
+                    "task_id": task_id,
+                    "novel_id": run["novel_id"],
+                    "status": run["status"],
+                    "run_id": run["run_id"],
+                }
         return None
 
     def update_task_status(self, task_id: str, status: str) -> None:
