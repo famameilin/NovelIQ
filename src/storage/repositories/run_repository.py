@@ -263,6 +263,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         message: str | None | object = _UNSET,
         error: str | None | object = _UNSET,
         cancel_requested: bool | None | object = _UNSET,
+        worker_id: str | None | object = _UNSET,
+        heartbeat_at: datetime | None | object = _UNSET,
         completed_at: datetime | None | object = _UNSET,
     ) -> None:
         """
@@ -284,6 +286,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             message: 提示信息
             error: 错误信息
             cancel_requested: 是否请求取消
+            worker_id: 当前执行该任务的 worker 标识
+            heartbeat_at: 最近一次心跳时间
             completed_at: 完成时间
         """
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
@@ -310,6 +314,10 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run.error = error
         if cancel_requested is not _UNSET:
             run.cancel_requested = cancel_requested
+        if worker_id is not _UNSET:
+            run.worker_id = worker_id
+        if heartbeat_at is not _UNSET:
+            run.heartbeat_at = heartbeat_at
         if completed_at is not _UNSET:
             run.completed_at = completed_at
         run.updated_at = now
@@ -433,11 +441,14 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         result = self.session.execute(stmt)
         return result.scalar() or 0
 
-    def mark_running_as_failed(self) -> int:
+    def mark_running_as_failed(self, *, stale_before: datetime) -> int:
         """
-        将所有 running 状态的任务标记为 failed。
+        将明确可判定为孤儿的 running 任务标记为 failed。
 
-        在服务启动时调用，清理上次进程异常退出遗留的僵尸任务。
+        修改时间: 2026-04-19
+        修改者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 仅回收带有 worker 归属且心跳超时的任务，避免新进程误收口其他活跃实例上的真实运行任务。
 
         Returns:
             受影响的行数
@@ -445,22 +456,29 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         from sqlalchemy import update
 
         now = datetime.now()
-        stmt = update(AnalysisRun).where(AnalysisRun.status == "running").values(status="failed", updated_at=now)
+        stmt = (
+            update(AnalysisRun)
+            .where(AnalysisRun.status == "running")
+            .where(AnalysisRun.worker_id.is_not(None))
+            .where(AnalysisRun.heartbeat_at.is_not(None))
+            .where(AnalysisRun.heartbeat_at < stale_before)
+            .values(status="failed", updated_at=now)
+        )
         result = self.session.execute(stmt)
         self.session.commit()
         count = result.rowcount  # type: ignore[attr-defined]
         if count > 0:
-            logger.info(f"Marked {count} zombie running task(s) as failed on startup")
+            logger.info(f"Marked {count} orphaned running task(s) as failed on startup")
         return count
 
-    def mark_cancelling_as_cancelled(self) -> int:
+    def mark_cancelling_as_cancelled(self, *, stale_before: datetime) -> int:
         """
-        将所有 cancelling 状态的孤儿任务收口为 cancelled。
+        将明确可判定为孤儿的 cancelling 任务收口为 cancelled。
 
         创建时间: 2026-04-19
         创建者: Codex (GPT-5)
         任务: fix-task-system-review-findings
-        修改内容: 启动恢复时补齐 cancelling 终态，避免任务永久卡在取消中。
+        修改内容: 仅回收带有 worker 归属且心跳超时的任务，避免误终结仍在其他实例中收尾的任务。
 
         Returns:
             受影响的行数
@@ -471,6 +489,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "cancelling")
+            .where(AnalysisRun.worker_id.is_not(None))
+            .where(AnalysisRun.heartbeat_at.is_not(None))
+            .where(AnalysisRun.heartbeat_at < stale_before)
             .values(
                 status="cancelled",
                 cancel_requested=False,

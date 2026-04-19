@@ -39,7 +39,7 @@ export interface TaskRowProps {
   task: {
     task_id: string;
     status: TaskStatus;
-    created_at: string;
+    created_at: string | null;
   };
   isActive: boolean;
   onSelect: (taskId: string) => void;
@@ -68,7 +68,10 @@ function getStatusIcon(status: TaskStatus) {
 }
 
 function formatRelativeTime(dateStr: string): string {
+  // 中文注释：列表接口历史上可能漏传 created_at，前端需要兜底避免显示 epoch 假时间。
+  if (!dateStr) return "未知时间";
   const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "未知时间";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);

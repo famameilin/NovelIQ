@@ -2,6 +2,7 @@ import { apiClient } from "./client";
 import type {
   AnalysisStartResponse,
   AnalysisTask,
+  BatchDeleteTasksResponse,
   TaskStatusResponse,
 } from "./types";
 
@@ -68,10 +69,10 @@ export async function cancelAnalysisTask(
 export async function batchDeleteTasks(
   novelId: string,
   taskIds: string[]
-): Promise<{ deleted_count: number; failed_count: number }> {
-  const { data } = await apiClient.post<{
-    deleted_count: number;
-    failed_count: number;
-  }>(`/api/novels/${novelId}/tasks/batch-delete`, { task_ids: taskIds });
+): Promise<BatchDeleteTasksResponse> {
+  const { data } = await apiClient.post<BatchDeleteTasksResponse>(
+    `/api/novels/${novelId}/tasks/batch-delete`,
+    { task_ids: taskIds }
+  );
   return data;
 }

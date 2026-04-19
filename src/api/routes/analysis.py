@@ -325,6 +325,11 @@ async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_no
     修改者: TraeAI
     任务: API接口参数统一优化
     修改内容: 移除 run_id 字段，统一使用 task_id
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: fix-task-system-review-findings
+    修改内容: 返回 created_at，避免前端任务面板显示错误时间。
     """
     tasks = novel_service.get_tasks_by_novel(novel_id)
     return TaskListResponse(
@@ -334,6 +339,7 @@ async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_no
                 task_id=t["task_id"],
                 novel_id=t["novel_id"],
                 status=t["status"],
+                created_at=t.get("created_at"),
             )
             for t in tasks
         ],

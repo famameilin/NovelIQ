@@ -15,7 +15,7 @@ API 分析端点测试
 import asyncio
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -82,6 +82,30 @@ class TestAnalysis:
         assert data["novel_id"] == novel_id
         assert data["task_id"] == task_id
 
+    def test_list_tasks_includes_created_at(self, api_client: TestClient):
+        """测试任务列表会返回 created_at，供前端显示真实创建时间"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("task_list_created_at_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        create_response = api_client.post(f"/api/novels/{novel_id}/tasks")
+        assert create_response.status_code == 200
+        task_id = create_response.json()["task_id"]
+
+        list_response = api_client.get(f"/api/novels/{novel_id}/tasks")
+        assert list_response.status_code == 200
+        tasks = list_response.json()["tasks"]
+        task = next(item for item in tasks if item["task_id"] == task_id)
+        assert task["created_at"] is not None
+
     def test_get_task_status_returns_404_when_db_record_missing(self, api_client: TestClient):
         """测试 DB-only 查询模式下，任务不存在时返回 404"""
 
@@ -108,6 +132,22 @@ class TestAnalysis:
         try:
             client = TestClient(api_client.app, raise_server_exceptions=False)
             response = client.get("/api/novels/novel-1/tasks/broken123/status")
+        finally:
+            api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
+
+        assert response.status_code == 500
+
+    def test_list_tasks_returns_500_when_db_query_fails(self, api_client: TestClient):
+        """测试任务列表查询失败时返回 500，而不是伪装成空列表"""
+
+        class BrokenNovelService:
+            def get_tasks_by_novel(self, novel_id: str):
+                raise RuntimeError(f"db unavailable for {novel_id}")
+
+        api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: BrokenNovelService()
+        try:
+            client = TestClient(api_client.app, raise_server_exceptions=False)
+            response = client.get("/api/novels/novel-1/tasks")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
 
@@ -326,28 +366,34 @@ class TestAnalysis:
         assert data["message"] == "正在分析第 42 个分块"
 
     def test_recover_orphaned_tasks_finalizes_cancelling_tasks(self, api_client: TestClient):
-        """测试启动恢复会将 orphaned cancelling 任务收口为 cancelled"""
+        """测试启动恢复只会收口带有旧心跳的孤儿任务"""
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
+        stale_heartbeat = datetime.now() - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
 
         with session_factory() as session:
             run_repo = RunRepository(session)
-            running_before = len(run_repo.get_by_status("running"))
-            cancelling_before = len(run_repo.get_by_status("cancelling"))
             running_run_id = run_repo.create_run(novel_id="novel-running")
             cancelling_run_id = run_repo.create_run(novel_id="novel-cancelling")
-            run_repo.update_run_task_fields(running_run_id, status="running")
+            run_repo.update_run_task_fields(
+                running_run_id,
+                status="running",
+                worker_id="worker-a",
+                heartbeat_at=stale_heartbeat,
+            )
             run_repo.update_run_task_fields(
                 cancelling_run_id,
                 status="cancelling",
                 cancel_requested=True,
+                worker_id="worker-a",
+                heartbeat_at=stale_heartbeat,
             )
 
         failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
 
-        assert failed_count == running_before + 1
-        assert cancelled_count == cancelling_before + 1
+        assert failed_count == 1
+        assert cancelled_count == 1
 
         with session_factory() as session:
             run_repo = RunRepository(session)
@@ -360,6 +406,39 @@ class TestAnalysis:
         assert cancelling_run["status"] == "cancelled"
         assert cancelling_run["cancel_requested"] is False
         assert cancelling_run["completed_at"] is not None
+
+    def test_recover_orphaned_tasks_skips_rows_without_worker_heartbeat(self, api_client: TestClient):
+        """测试没有 worker/heartbeat 归属信息的任务不会被启动恢复误收口"""
+        from src.api import main as main_mod
+
+        session_factory = get_session_factory()
+
+        with session_factory() as session:
+            run_repo = RunRepository(session)
+            running_run_id = run_repo.create_run(novel_id="novel-running-no-owner")
+            cancelling_run_id = run_repo.create_run(novel_id="novel-cancelling-no-owner")
+            run_repo.update_run_task_fields(running_run_id, status="running")
+            run_repo.update_run_task_fields(
+                cancelling_run_id,
+                status="cancelling",
+                cancel_requested=True,
+            )
+
+        failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
+
+        assert failed_count == 0
+        assert cancelled_count == 0
+
+        with session_factory() as session:
+            run_repo = RunRepository(session)
+            running_run = run_repo.get_run(running_run_id)
+            cancelling_run = run_repo.get_run(cancelling_run_id)
+
+        assert running_run is not None
+        assert running_run["status"] == "running"
+        assert cancelling_run is not None
+        assert cancelling_run["status"] == "cancelling"
+        assert cancelling_run["cancel_requested"] is True
 
     def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
         """测试未知 task_id 查询详情时返回 None"""
