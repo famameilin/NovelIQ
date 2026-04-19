@@ -91,29 +91,18 @@ def _resolve_task_for_novel(
     task_id: str,
 ) -> dict[str, Any]:
     """
-    获取并校验任务是否属于指定小说。
+    获取并校验任务是否属于指定小说（DB-only 查询）。
 
     创建时间: 2026-04-19
     创建者: Codex (GPT-5)
     任务: task-api-decouple
 
     修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: fix-review-findings
-    修改内容: 优先使用内存中的 TaskInfo，避免 run 表临时落库失败时把活跃任务误判为不存在。
+    修改者: AI Assistant
+    任务: 统一任务状态查询为 DB-only
+    修改内容: 移除对内存 TaskManager 的优先查询，改为仅从 DB 查询任务是否属于指定小说。
+    说明: 保留 task_manager 参数，因为调用方可能还需要用它来操作运行态缓存（如 _cleanup_task_runtime_before_delete）。
     """
-    # 先查内存态：create_task 成功但 run 表写入失败时，任务仍可能已经在执行。
-    task_info = task_manager.get_task(task_id)
-    if task_info is not None:
-        if task_info.novel_id != novel_id:
-            raise HTTPException(status_code=400, detail="任务不属于该小说")
-        status = task_info.status.value if isinstance(task_info.status, TaskStatus) else str(task_info.status)
-        return {
-            "task_id": task_info.task_id,
-            "novel_id": task_info.novel_id,
-            "status": status,
-        }
-
     try:
         task = novel_service.get_task(task_id)
     except Exception:
@@ -124,45 +113,41 @@ def _resolve_task_for_novel(
     return task
 
 
-def _build_status_response(novel_id: str, task_id: str, task_manager: TaskManager) -> StatusResponse:
+def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
     """
-    构建单任务状态响应。
+    构建单任务状态响应（DB-only 查询）。
 
     创建时间: 2026-04-19
     创建者: Codex (GPT-5)
     任务: task-api-decouple
-    说明: 统一 /tasks/{task_id}/status 与兼容 /status 的状态返回逻辑。
+
+    修改时间: 2026-04-19
+    修改者: AI Assistant
+    任务: 统一任务状态查询为 DB-only
+    修改内容: 移除对内存 TaskManager 的依赖,改为仅从 DB 查询状态。
+    说明: 保留 TaskManager 用于执行缓存(asyncio.Task、cancel_event),但不用于业务状态判断。
     """
-    task_info = task_manager.get_task(task_id)
-    if task_info is None:
-        run = _get_task_detail_from_db(task_id)
-        if run is None:
-            return StatusResponse(
-                novel_id=novel_id,
-                task_id=task_id,
-                status=TaskStatus.PENDING,
-                progress=0.0,
-            )
-        mapped_status = _map_status_to_task_status(run["status"])
+    run = _get_task_detail_from_db(task_id)
+    if run is None:
         return StatusResponse(
             novel_id=novel_id,
             task_id=task_id,
-            status=mapped_status,
-            progress=run.get("progress", 0.0),
-            stage=run.get("stage"),
+            status=TaskStatus.PENDING,
+            progress=0.0,
         )
+    mapped_status = _map_status_to_task_status(run["status"])
     return StatusResponse(
         novel_id=novel_id,
         task_id=task_id,
-        status=task_info.status,
-        progress=task_info.progress,
-        stage=task_info.stage,
-        sub_stage=task_info.sub_stage,
-        current=task_info.current,
-        total=task_info.total,
-        message=task_info.message,
-        llm_outputs=task_info.llm_outputs[-20:] if task_info.llm_outputs else None,
-        error=task_info.error,
+        status=mapped_status,
+        progress=run.get("progress", 0.0),
+        stage=run.get("stage"),
+        sub_stage=run.get("sub_stage"),
+        current=run.get("current"),
+        total=run.get("total"),
+        message=run.get("message"),
+        llm_outputs=None,  # DB 中不存储 llm_outputs
+        error=run.get("error"),
     )
 
 
@@ -174,6 +159,11 @@ async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMa
     创建者: Codex (GPT-5)
     任务: fix-review-findings
     说明: 统一单删与批删的运行态停止逻辑，避免删除后后台协程继续写状态。
+
+    修改时间: 2026-04-19
+    修改者: TraeAI
+    任务: task-6-task-manager-responsibility-shrink
+    修改内容: 补充 DB cancel_requested 写入逻辑（原在 TaskManager.cancel_task 中，现已移除）。
     """
     task_info = task_manager.get_task(task_id)
     if task_info is None:
@@ -181,7 +171,21 @@ async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMa
 
     running_statuses = (TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.CANCELLING)
     if task_info.status in running_statuses:
+        # 设置内存取消信号
         task_manager.cancel_task(task_id)
+
+        # 同步写入 DB cancel_requested（保证持久化）
+        session_factory = get_session_factory()
+        try:
+            with session_factory() as session:
+                run_id = task_id_to_run_id(task_id, session.connection())
+                run_repo = RunRepository(session)
+                run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelling")
+                session.commit()
+        except (TaskIDNotFoundError, ValueError):
+            logger.warning(f"Task {task_id} run_id not found, skipping run table cancel_requested update")
+        except Exception as e:
+            logger.warning(f"Failed to update cancel_requested for task {task_id}: {e}")
 
     if task_info.asyncio_task and not task_info.asyncio_task.done():
         task_info.asyncio_task.cancel()
@@ -309,10 +313,37 @@ async def delete_task(
     novel_service: NovelService = Depends(get_novel_service),
     task_manager: TaskManager = Depends(get_task_manager),
 ):
-    _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+    """
+    删除单个分析任务。
+
+    创建时间: 2026-03-16
+    创建者: TraeAI
+    任务: 任务管理功能
+
+    修改时间: 2026-04-19
+    修改者: AI Assistant
+    任务: Task 8 - 统一任务删除逻辑
+    修改内容: 基于 DB 状态机的删除逻辑，运行中任务拒绝删除，需先取消。
+
+    删除顺序:
+        1. DB 状态判断（任务是否存在、是否属于该小说、是否运行中）
+        2. 清理运行态缓存（停止后台协程）
+        3. 删除 DB 记录
+        4. 删除内存缓存
+    """
+    task = _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+    task_status = task.get("status", "")
+
+    running_statuses = ("pending", "running", "cancelling")
+    if task_status in running_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"任务正在{task_status}中，请先取消任务后再删除",
+        )
+
     await _cleanup_task_runtime_before_delete(task_id, task_manager)
-    task_manager.delete_task(task_id)
     novel_service.delete_task(task_id)
+    task_manager.delete_task(task_id)
     return {"message": "任务删除成功", "novel_id": novel_id, "task_id": task_id}
 
 
@@ -331,7 +362,7 @@ async def get_task_status(
     任务: task-api-decouple
     """
     _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
-    return _build_status_response(novel_id, task_id, task_manager)
+    return _build_status_response(novel_id, task_id)
 
 
 @router.post("/{novel_id}/tasks/{task_id}/cancel")
@@ -353,6 +384,11 @@ async def cancel_task(
     修改者: TraeAI
     任务: code-review-fix
     修改内容: 任务不在内存时同步更新 run 表状态，确保数据一致性
+
+    修改时间: 2026-04-19
+    修改者: TraeAI
+    任务: task-5-db-driven-cancel
+    修改内容: DB 优先取消机制，先写入 DB cancel_requested，再设置内存 cancel_event
     """
     task = _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
     task_status = task.get("status", "")
@@ -364,8 +400,22 @@ async def cancel_task(
     cancelled = task_manager.cancel_task(task_id)
 
     if cancelled:
+        # 任务在内存中，需同步写入 DB cancel_requested 保证持久化
+        session_factory = get_session_factory()
+        try:
+            with session_factory() as session:
+                run_id = task_id_to_run_id(task_id, session.connection())
+                run_repo = RunRepository(session)
+                run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelling")
+                session.commit()
+        except (TaskIDNotFoundError, ValueError):
+            logger.warning(f"Task {task_id} run_id not found, skipping run table cancel_requested update")
+        except Exception as e:
+            logger.warning(f"Failed to update cancel_requested for task {task_id}: {e}")
+
         return {"task_id": task_id, "status": "cancelling", "message": "任务将在当前处理单元完成后停止"}
 
+    # 任务不在内存中（如服务重启后），直接写 DB cancel_requested + status=cancelled
     if task_status in ("pending", "running"):
         novel_service.update_task_status(task_id, "cancelled")
 
@@ -374,14 +424,15 @@ async def cancel_task(
             with session_factory() as session:
                 run_id = task_id_to_run_id(task_id, session.connection())
                 run_repo = RunRepository(session)
-                run_repo.update_run_status(run_id, "cancelled")
+                # DB 优先：写入 cancel_requested 和 status=cancelled
+                run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelled")
                 session.commit()
         except (TaskIDNotFoundError, ValueError):
             logger.warning(f"Task {task_id} run_id not found, skipping run table update")
         except Exception as e:
             logger.warning(f"Failed to update run status for cancelled task {task_id}: {e}")
 
-        logger.info(f"Task {task_id} cancelled (not in memory), status updated to cancelled")
+        logger.info(f"Task {task_id} cancelled (not in memory), DB cancel_requested=true and status=cancelled")
         return {"task_id": task_id, "status": "cancelled", "message": "任务已标记为取消"}
 
     raise HTTPException(status_code=400, detail=f"任务状态为 {task_status}，无法取消")
@@ -395,27 +446,38 @@ async def batch_delete_tasks(
     task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
 ) -> BatchDeleteTasksResponse:
     """
-    批量删除任务
+    批量删除指定的分析任务。
 
     创建时间: 2026-03-19
     创建者: TraeAI
     任务: 新增批量删除功能
 
-    批量删除指定的分析任务。
+    修改时间: 2026-04-19
+    修改者: AI Assistant
+    任务: Task 8 - 统一任务删除逻辑
+    修改内容: 统一删除逻辑，基于 DB 状态机，运行中任务拒绝删除。
+
     即使部分删除失败，也会继续处理其他任务。
     """
     deleted_ids: list[str] = []
     failed_ids: list[dict[str, str]] = []
 
+    running_statuses = ("pending", "running", "cancelling")
+
     for task_id in request.task_ids:
         try:
-            # 验证任务是否属于该小说
-            _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
-            await _cleanup_task_runtime_before_delete(task_id, task_manager)
+            task = _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+            task_status = task.get("status", "")
 
-            # 先从内存中移除，防止后台协程继续更新已删除的数据
-            task_manager.delete_task(task_id)
+            if task_status in running_statuses:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"任务正在{task_status}中，请先取消任务后再删除",
+                )
+
+            await _cleanup_task_runtime_before_delete(task_id, task_manager)
             novel_service.delete_task(task_id)
+            task_manager.delete_task(task_id)
             deleted_ids.append(task_id)
             logger.info(f"Batch delete: task {task_id} deleted successfully")
         except HTTPException as exc:
@@ -489,4 +551,4 @@ async def get_analysis_status(
         )
 
     _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
-    return _build_status_response(novel_id, task_id, task_manager)
+    return _build_status_response(novel_id, task_id)

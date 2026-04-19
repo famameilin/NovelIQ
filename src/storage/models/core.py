@@ -12,6 +12,11 @@
 修改者: TraeAI
 任务: fix-disambiguation-three-phase
 修改内容: 新增 DisambigCheckpoint 模型用于保存消歧检查点
+
+修改时间: 2026-04-19
+修改者: TraeAI
+任务: task-system-db-driven-refactor
+修改内容: 为 AnalysisRun 添加运行态字段（error, completed_at, cancel_requested, worker_id, heartbeat_at, sub_stage, current, total）
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, Index, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -36,6 +41,11 @@ class AnalysisRun(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 记录每次分析任务的运行信息，作为所有数据的隔离主键
+
+    修改时间: 2026-04-19
+    修改者: TraeAI
+    任务: task-system-db-driven-refactor
+    修改内容: 添加完整运行态字段，使 DB 成为任务唯一真相源
     """
 
     __tablename__ = "analysis_runs"
@@ -48,6 +58,17 @@ class AnalysisRun(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
     progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     stage: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # 运行态字段（task-system-db-driven-refactor 新增）
+    sub_stage: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+
     created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

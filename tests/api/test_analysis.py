@@ -68,29 +68,20 @@ class TestAnalysis:
         assert data["novel_id"] == novel_id
         assert data["task_id"] == task_id
 
-    def test_get_task_status_uses_in_memory_task_when_db_record_missing(self, api_client: TestClient):
-        """测试 run 表暂未写入时，状态接口仍可读取内存中的活跃任务"""
+    def test_get_task_status_returns_404_when_db_record_missing(self, api_client: TestClient):
+        """测试 DB-only 查询模式下，任务不存在时返回 404"""
 
         class MissingTaskNovelService:
             def get_task(self, task_id: str):
                 raise RuntimeError(f"db task missing: {task_id}")
 
-        task_manager = TaskManager()
-        task_manager.create_task("memory123", "novel-1")
-
         api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: MissingTaskNovelService()
-        api_client.app.dependency_overrides[analysis_mod.get_task_manager] = lambda: task_manager
         try:
             response = api_client.get("/api/novels/novel-1/tasks/memory123/status")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
-            api_client.app.dependency_overrides.pop(analysis_mod.get_task_manager, None)
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["novel_id"] == "novel-1"
-        assert data["task_id"] == "memory123"
-        assert data["status"] == "pending"
+        assert response.status_code == 404
 
     def test_resume_pending_task_success(self, api_client: TestClient):
         """测试继续 pending 任务走专用 resume 路径"""
