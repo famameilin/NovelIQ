@@ -151,6 +151,34 @@ def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
     )
 
 
+def _persist_task_cancellation_request(task_id: str) -> None:
+    """
+    将取消请求可靠写入数据库。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: fix-task-system-review-findings
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: 修复 cancel 持久化失败仍返回成功
+    修改内容: 将 cancel_requested/status=cancelling 的 DB 写入收口到统一入口，失败时直接报错而不是静默降级。
+    """
+    session_factory = get_session_factory()
+    try:
+        with session_factory() as session:
+            run_id = task_id_to_run_id(task_id, session.connection())
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelling")
+            session.commit()
+    except (TaskIDNotFoundError, ValueError) as exc:
+        logger.error(f"Task {task_id} run_id not found when persisting cancellation request: {exc}")
+        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+    except Exception as exc:
+        logger.error(f"Failed to persist cancellation request for task {task_id}: {exc}")
+        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+
+
 async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
     """
     删除任务前清理运行态缓存与后台协程。
@@ -397,43 +425,19 @@ async def cancel_task(
     if task_status == "failed":
         raise HTTPException(status_code=400, detail="任务已失败，无法取消")
 
+    # 先持久化 DB 真相，再设置本进程内存 cancel_event 做加速响应。
+    _persist_task_cancellation_request(task_id)
+
     cancelled = task_manager.cancel_task(task_id)
 
     if cancelled:
-        # 任务在内存中，需同步写入 DB cancel_requested 保证持久化
-        session_factory = get_session_factory()
-        try:
-            with session_factory() as session:
-                run_id = task_id_to_run_id(task_id, session.connection())
-                run_repo = RunRepository(session)
-                run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelling")
-                session.commit()
-        except (TaskIDNotFoundError, ValueError):
-            logger.warning(f"Task {task_id} run_id not found, skipping run table cancel_requested update")
-        except Exception as e:
-            logger.warning(f"Failed to update cancel_requested for task {task_id}: {e}")
-
         return {"task_id": task_id, "status": "cancelling", "message": "任务将在当前处理单元完成后停止"}
 
-    # 任务不在内存中（如服务重启后），直接写 DB cancel_requested + status=cancelled
+    # 任务不在内存中（如服务重启后），DB 真相已更新为 cancelling，
+    # 后续由实际执行方或恢复流程在安全点完成最终 cancelled 收尾。
     if task_status in ("pending", "running"):
-        novel_service.update_task_status(task_id, "cancelled")
-
-        session_factory = get_session_factory()
-        try:
-            with session_factory() as session:
-                run_id = task_id_to_run_id(task_id, session.connection())
-                run_repo = RunRepository(session)
-                # DB 优先：写入 cancel_requested 和 status=cancelled
-                run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelled")
-                session.commit()
-        except (TaskIDNotFoundError, ValueError):
-            logger.warning(f"Task {task_id} run_id not found, skipping run table update")
-        except Exception as e:
-            logger.warning(f"Failed to update run status for cancelled task {task_id}: {e}")
-
-        logger.info(f"Task {task_id} cancelled (not in memory), DB cancel_requested=true and status=cancelled")
-        return {"task_id": task_id, "status": "cancelled", "message": "任务已标记为取消"}
+        logger.info(f"Task {task_id} cancellation requested (not in memory), DB cancel_requested=true and status=cancelling")
+        return {"task_id": task_id, "status": "cancelling", "message": "任务已标记为取消中，等待执行方收尾"}
 
     raise HTTPException(status_code=400, detail=f"任务状态为 {task_status}，无法取消")
 

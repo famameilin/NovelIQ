@@ -119,6 +119,11 @@ class NovelService:
     def create_task(self, novel_id: str, task_id: str | None = None, session: Session | None = None) -> str:
         """
         创建分析任务
+
+        修改时间: 2026-04-19
+        修改者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: DB 创建失败时不再吞异常，避免接口返回成功但无持久化真相
         """
         self.get_novel(novel_id, session)
         if task_id is None:
@@ -129,7 +134,8 @@ class NovelService:
                 run_repo = RunRepository(sess)
                 run_repo.create_run(novel_id=novel_id, run_id=task_id)
         except Exception as e:
-            logger.warning(f"Failed to create run in DB: {e}")
+            logger.error(f"Failed to create run in DB for novel {novel_id}, task {task_id}: {e}")
+            raise
 
         logger.info(f"Created task: {task_id} for novel {novel_id}")
         return task_id

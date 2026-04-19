@@ -336,21 +336,22 @@ class AnalysisService:
 
         if task_info is None:
             self.task_manager.create_task(task_id, novel_id)
-        else:
-            # 重置内存态，避免沿用上一次失败任务的残留信息。
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.PENDING,
-                progress=0.0,
-                stage=None,
-                sub_stage=None,
-                current=0,
-                total=100,
-                message=None,
-                error=None,
-                llm_outputs=[],
-                completed_at=None,
-            )
+
+        # 重置内存态与 DB 运行态，避免 DB-only 状态接口短暂暴露上一轮失败残留。
+        self.task_manager.update_task(
+            task_id,
+            status=TaskStatus.PENDING,
+            progress=0.0,
+            stage=None,
+            sub_stage=None,
+            current=0,
+            total=100,
+            message=None,
+            error=None,
+            cancel_requested=False,
+            llm_outputs=[],
+            completed_at=None,
+        )
 
         self._schedule_analysis_task(task_id, novel, AnalyzeRequest(task_id=task_id))
         return task_id
