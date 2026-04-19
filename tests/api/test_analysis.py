@@ -199,8 +199,8 @@ class TestAnalysis:
             with pytest.raises(RuntimeError, match="db unavailable"):
                 service.create_task(novel_id)
 
-    def test_cancel_pending_task_not_in_memory_finalizes_cancelled_in_db(self, api_client: TestClient):
-        """测试未启动的 DB-only pending 任务会直接收口为 cancelled，避免永久卡在 cancelling"""
+    def test_cancel_pending_task_not_in_memory_stays_cancelling_in_db(self, api_client: TestClient):
+        """测试 DB-only pending 任务也只会写入取消请求，避免提前写终态后又被真实 worker 覆盖"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -221,15 +221,15 @@ class TestAnalysis:
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "cancelled"
+        assert data["status"] == "cancelling"
 
         with get_session_factory()() as session:
             run = RunRepository(session).get_run(task_id)
 
         assert run is not None
-        assert run["status"] == "cancelled"
-        assert run["cancel_requested"] is False
-        assert run["completed_at"] is not None
+        assert run["status"] == "cancelling"
+        assert run["cancel_requested"] is True
+        assert run["completed_at"] is None
 
     def test_cancel_running_task_not_in_memory_stays_cancelling_in_db(self, api_client: TestClient):
         """测试进程外取消真实 running 任务时仍保留 cancelling，等待执行方收尾"""
