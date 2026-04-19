@@ -67,7 +67,11 @@ function getStatusIcon(status: TaskStatus) {
   }
 }
 
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string | null): string {
+  // 修改时间: 2026-04-20
+  // 修改者: Codex (GPT-5)
+  // 任务: fix-null-created-at-build
+  // 修改内容: 与 TaskRowProps.created_at 的可空语义保持一致，避免严格类型检查构建失败。
   // 中文注释：列表接口历史上可能漏传 created_at，前端需要兜底避免显示 epoch 假时间。
   if (!dateStr) return "未知时间";
   const date = new Date(dateStr);
