@@ -19,7 +19,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useSSEListener } from "./useEventSource";
 import { useStreamStore } from "@/store/streamStore";
 import { appConfig } from "@/config";
-import { getAnalysisStatus } from "@/api/analysis";
+import { getTaskStatus } from "@/api/analysis";
 import type {
   SSEEventType,
   StreamEventData,
@@ -233,7 +233,7 @@ export function useAnalysisStatus(
       setWsStable(false);
       stageStartTimeRef.current = null;
 
-      getAnalysisStatus(novelId, taskId)
+      getTaskStatus(novelId, taskId)
         .then((status) => {
           // 将 HTTP 返回的进度数据写入 streamStore，解决刷新后进度面板空白问题
           if (status.status === "running" && status.stage) {
