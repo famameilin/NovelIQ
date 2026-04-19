@@ -28,6 +28,38 @@ class AnalyzeResponse(BaseModel):
     message: str = "分析任务已启动"
 
 
+class CreateTaskResponse(BaseModel):
+    """
+    创建并启动任务响应
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: task-api-decouple
+    说明: 对应 POST /api/novels/{novel_id}/tasks。
+    """
+
+    novel_id: str
+    task_id: str
+    status: TaskStatus = TaskStatus.PENDING
+    message: str = "分析任务已创建并启动"
+
+
+class ResumeTaskResponse(BaseModel):
+    """
+    继续任务响应
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: task-api-decouple
+    说明: 对应 POST /api/novels/{novel_id}/tasks/{task_id}/resume。
+    """
+
+    novel_id: str
+    task_id: str
+    status: TaskStatus = TaskStatus.PENDING
+    message: str = "分析任务已继续执行"
+
+
 class StatusResponse(BaseModel):
     """
     2026-03-12: Claude修改，添加task_id字段

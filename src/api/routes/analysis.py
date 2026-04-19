@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
-from src.api.exceptions import AnalysisError
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import (
     AnalyzeResponse,
     BatchDeleteTasksRequest,
     BatchDeleteTasksResponse,
+    CreateTaskResponse,
     ReanalyzeResponse,
+    ResumeTaskResponse,
     StatusResponse,
     TaskInfoResponse,
     TaskListResponse,
@@ -82,6 +84,136 @@ def get_task_manager() -> TaskManager:
     return _task_manager
 
 
+def _resolve_task_for_novel(
+    novel_service: NovelService,
+    task_manager: TaskManager,
+    novel_id: str,
+    task_id: str,
+) -> dict[str, Any]:
+    """
+    获取并校验任务是否属于指定小说。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: task-api-decouple
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: fix-review-findings
+    修改内容: 优先使用内存中的 TaskInfo，避免 run 表临时落库失败时把活跃任务误判为不存在。
+    """
+    # 先查内存态：create_task 成功但 run 表写入失败时，任务仍可能已经在执行。
+    task_info = task_manager.get_task(task_id)
+    if task_info is not None:
+        if task_info.novel_id != novel_id:
+            raise HTTPException(status_code=400, detail="任务不属于该小说")
+        status = task_info.status.value if isinstance(task_info.status, TaskStatus) else str(task_info.status)
+        return {
+            "task_id": task_info.task_id,
+            "novel_id": task_info.novel_id,
+            "status": status,
+        }
+
+    try:
+        task = novel_service.get_task(task_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="任务不存在") from None
+
+    if task.get("novel_id") != novel_id:
+        raise HTTPException(status_code=400, detail="任务不属于该小说")
+    return task
+
+
+def _build_status_response(novel_id: str, task_id: str, task_manager: TaskManager) -> StatusResponse:
+    """
+    构建单任务状态响应。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: task-api-decouple
+    说明: 统一 /tasks/{task_id}/status 与兼容 /status 的状态返回逻辑。
+    """
+    task_info = task_manager.get_task(task_id)
+    if task_info is None:
+        run = _get_task_detail_from_db(task_id)
+        if run is None:
+            return StatusResponse(
+                novel_id=novel_id,
+                task_id=task_id,
+                status=TaskStatus.PENDING,
+                progress=0.0,
+            )
+        mapped_status = _map_status_to_task_status(run["status"])
+        return StatusResponse(
+            novel_id=novel_id,
+            task_id=task_id,
+            status=mapped_status,
+            progress=run.get("progress", 0.0),
+            stage=run.get("stage"),
+        )
+    return StatusResponse(
+        novel_id=novel_id,
+        task_id=task_id,
+        status=task_info.status,
+        progress=task_info.progress,
+        stage=task_info.stage,
+        sub_stage=task_info.sub_stage,
+        current=task_info.current,
+        total=task_info.total,
+        message=task_info.message,
+        llm_outputs=task_info.llm_outputs[-20:] if task_info.llm_outputs else None,
+        error=task_info.error,
+    )
+
+
+async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
+    """
+    删除任务前清理运行态缓存与后台协程。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: fix-review-findings
+    说明: 统一单删与批删的运行态停止逻辑，避免删除后后台协程继续写状态。
+    """
+    task_info = task_manager.get_task(task_id)
+    if task_info is None:
+        return
+
+    running_statuses = (TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.CANCELLING)
+    if task_info.status in running_statuses:
+        task_manager.cancel_task(task_id)
+
+    if task_info.asyncio_task and not task_info.asyncio_task.done():
+        task_info.asyncio_task.cancel()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(task_info.asyncio_task, return_exceptions=True),
+                timeout=5.0,
+            )
+        except TimeoutError:
+            logger.warning(f"Delete task: task {task_id} cancel timed out, background coroutine may still be running")
+        except Exception as e:
+            logger.warning(f"Delete task: unexpected error cancelling task {task_id}: {e}")
+
+
+@router.post("/{novel_id}/tasks", response_model=CreateTaskResponse)
+async def create_and_start_task(
+    novel_id: str,
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
+) -> CreateTaskResponse:
+    """
+    创建并启动一个新的分析任务。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: task-api-decouple
+    """
+    analysis_service = AnalysisService(novel_service, task_manager)
+    task_id = await analysis_service.create_task_and_start(novel_id)
+    return CreateTaskResponse(novel_id=novel_id, task_id=task_id)
+
+
 @router.post("/{novel_id}/analyze", response_model=AnalyzeResponse)
 async def start_analysis(
     novel_id: str,
@@ -89,9 +221,44 @@ async def start_analysis(
     novel_service: NovelService = Depends(get_novel_service),
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> AnalyzeResponse:
+    """
+    兼容旧入口：仅保留“创建并启动新任务”语义。
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: task-api-decouple
+    修改内容: 不再接收 task_id 触发续跑，续跑请改用 /tasks/{task_id}/resume。
+    """
+    if request and request.task_id:
+        raise HTTPException(
+            status_code=400,
+            detail="analyze 接口不再支持 task_id 续跑，请使用 /api/novels/{novel_id}/tasks/{task_id}/resume",
+        )
     analysis_service = AnalysisService(novel_service, task_manager)
-    task_id = await analysis_service.start_analysis(novel_id, request)
+    task_id = await analysis_service.create_task_and_start(novel_id)
     return AnalyzeResponse(novel_id=novel_id, task_id=task_id)
+
+
+@router.post("/{novel_id}/tasks/{task_id}/resume", response_model=ResumeTaskResponse)
+async def resume_task(
+    novel_id: str,
+    task_id: str,
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
+) -> ResumeTaskResponse:
+    """
+    继续执行指定的 pending/failed 任务。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: task-api-decouple
+    """
+    analysis_service = AnalysisService(novel_service, task_manager)
+    try:
+        resumed_task_id = await analysis_service.resume_task(novel_id, task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ResumeTaskResponse(novel_id=novel_id, task_id=resumed_task_id)
 
 
 @router.post("/{novel_id}/reanalyze", response_model=ReanalyzeResponse)
@@ -136,9 +303,35 @@ async def list_tasks(novel_id: str, novel_service: NovelService = Depends(get_no
 
 
 @router.delete("/{novel_id}/tasks/{task_id}")
-async def delete_task(novel_id: str, task_id: str, novel_service: NovelService = Depends(get_novel_service)):
+async def delete_task(
+    novel_id: str,
+    task_id: str,
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
+):
+    _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+    await _cleanup_task_runtime_before_delete(task_id, task_manager)
+    task_manager.delete_task(task_id)
     novel_service.delete_task(task_id)
     return {"message": "任务删除成功", "novel_id": novel_id, "task_id": task_id}
+
+
+@router.get("/{novel_id}/tasks/{task_id}/status", response_model=StatusResponse)
+async def get_task_status(
+    novel_id: str,
+    task_id: str,
+    novel_service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),
+) -> StatusResponse:
+    """
+    查询单个任务状态（推荐入口）。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: task-api-decouple
+    """
+    _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+    return _build_status_response(novel_id, task_id, task_manager)
 
 
 @router.post("/{novel_id}/tasks/{task_id}/cancel")
@@ -161,14 +354,7 @@ async def cancel_task(
     任务: code-review-fix
     修改内容: 任务不在内存时同步更新 run 表状态，确保数据一致性
     """
-    try:
-        task = novel_service.get_task(task_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="任务不存在") from None
-
-    if task.get("novel_id") != novel_id:
-        raise HTTPException(status_code=400, detail="任务不属于该小说")
-
+    task = _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
     task_status = task.get("status", "")
     if task_status in ("completed", "cancelled", "cancelling"):
         raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
@@ -224,45 +410,17 @@ async def batch_delete_tasks(
     for task_id in request.task_ids:
         try:
             # 验证任务是否属于该小说
-            try:
-                task = novel_service.get_task(task_id)
-            except Exception:
-                failed_ids.append({"task_id": task_id, "reason": "任务不存在"})
-                logger.warning(f"Batch delete task: task {task_id} not found")
-                continue
-
-            if task.get("novel_id") != novel_id:
-                failed_ids.append({"task_id": task_id, "reason": f"任务不属于小说 {novel_id}"})
-                logger.warning(f"Batch delete task: task {task_id} does not belong to novel {novel_id}")
-                continue
-
-            # 先取消运行中的任务，再删除
-            running_statuses = ("pending", "running", "cancelling")
-            if task.get("status") in running_statuses:
-                task_manager.cancel_task(task_id)
-            # 取消 asyncio.Task，使用 gather + return_exceptions 避免异常泄露
-            task_info = task_manager.get_task(task_id)
-            if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():
-                task_info.asyncio_task.cancel()
-                try:
-                    import asyncio
-
-                    await asyncio.wait_for(
-                        asyncio.gather(task_info.asyncio_task, return_exceptions=True),
-                        timeout=5.0,
-                    )
-                except TimeoutError:
-                    logger.warning(
-                        f"Batch delete: task {task_id} cancel timed out, background coroutine may still be running"
-                    )
-                except Exception as e:
-                    logger.warning(f"Batch delete: unexpected error cancelling task {task_id}: {e}")
+            _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+            await _cleanup_task_runtime_before_delete(task_id, task_manager)
 
             # 先从内存中移除，防止后台协程继续更新已删除的数据
             task_manager.delete_task(task_id)
             novel_service.delete_task(task_id)
             deleted_ids.append(task_id)
             logger.info(f"Batch delete: task {task_id} deleted successfully")
+        except HTTPException as exc:
+            failed_ids.append({"task_id": task_id, "reason": str(exc.detail)})
+            logger.warning(f"Batch delete: task {task_id} rejected - {exc.detail}")
         except Exception as e:
             failed_ids.append({"task_id": task_id, "reason": f"删除失败: {e}"})
             logger.error(f"Batch delete: failed to delete task {task_id}: {e}")
@@ -318,79 +476,17 @@ async def get_analysis_status(
     修改者: TraeAI
     任务: implement-task-cancellation
     修改内容: 返回详细进度字段，使 HTTP 轮询与 WebSocket 行为一致
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: task-api-decouple
+    修改内容: 不再按任务数量猜状态，要求显式 task_id。
     """
-    if task_id:
-        task_info = task_manager.get_task(task_id)
-        if task_info is None:
-            run = _get_task_detail_from_db(task_id)
-            if run is None:
-                return StatusResponse(
-                    novel_id=novel_id,
-                    task_id=task_id,
-                    status=TaskStatus.PENDING,
-                    progress=0.0,
-                )
-            mapped_status = _map_status_to_task_status(run["status"])
-            return StatusResponse(
-                novel_id=novel_id,
-                task_id=task_id,
-                status=mapped_status,
-                progress=run.get("progress", 0.0),
-                stage=run.get("stage"),
-            )
-        return StatusResponse(
-            novel_id=novel_id,
-            task_id=task_id,
-            status=task_info.status,
-            progress=task_info.progress,
-            stage=task_info.stage,
-            sub_stage=task_info.sub_stage,
-            current=task_info.current,
-            total=task_info.total,
-            message=task_info.message,
-            llm_outputs=task_info.llm_outputs[-20:] if task_info.llm_outputs else None,
-            error=task_info.error,
+    if not task_id:
+        raise HTTPException(
+            status_code=400,
+            detail="请提供 task_id；推荐使用 /api/novels/{novel_id}/tasks/{task_id}/status",
         )
 
-    task, error = novel_service.get_single_valid_task(novel_id)
-
-    if error:
-        raise AnalysisError(error)
-
-    if task is None:
-        return StatusResponse(novel_id=novel_id, status=TaskStatus.PENDING, progress=0.0)
-
-    task_id = task["task_id"]
-    task_status = task.get("status", "unknown")
-
-    task_info = task_manager.get_task(task_id)
-    if task_info is None:
-        run = _get_task_detail_from_db(task_id)
-        if run is None:
-            return StatusResponse(
-                novel_id=novel_id,
-                task_id=task_id,
-                status=_map_status_to_task_status(task_status),
-                progress=0.0,
-            )
-        return StatusResponse(
-            novel_id=novel_id,
-            task_id=task_id,
-            status=_map_status_to_task_status(run["status"]),
-            progress=run.get("progress", 0.0),
-            stage=run.get("stage"),
-        )
-
-    return StatusResponse(
-        novel_id=novel_id,
-        task_id=task_id,
-        status=task_info.status,
-        progress=task_info.progress,
-        stage=task_info.stage,
-        sub_stage=task_info.sub_stage,
-        current=task_info.current,
-        total=task_info.total,
-        message=task_info.message,
-        llm_outputs=task_info.llm_outputs[-20:] if task_info.llm_outputs else None,
-        error=task_info.error,
-    )
+    _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+    return _build_status_response(novel_id, task_id, task_manager)

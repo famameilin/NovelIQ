@@ -14,7 +14,7 @@ import {
   getChunkCurves,
 } from "@/api/results";
 import { getNovel } from "@/api/novels";
-import { startAnalysis, batchDeleteTasks, cancelAnalysisTask } from "@/api/analysis";
+import { createAnalysisTask, resumeAnalysisTask, batchDeleteTasks, cancelAnalysisTask } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
 import { useThemeStore } from "@/store/themeStore";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
@@ -113,7 +113,7 @@ function EmptyTaskPrompt({ onAnalyze, isAnalyzing }: {
           点击下方按钮开始对这本小说进行量化分析
         </p>
       </div>
-      <Button onClick={onAnalyze} disabled={isAnalyzing}>
+      <Button onClick={() => onAnalyze()} disabled={isAnalyzing}>
         {isAnalyzing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         {isAnalyzing ? "正在创建分析任务..." : "开始分析"}
       </Button>
@@ -172,8 +172,11 @@ export function NovelDetailPage() {
 
   // Reflect currentTaskId to URL for shareability
   useEffect(() => {
+    if (!novelId) return;
     if (currentTaskId) {
       navigate(`/novels/${novelId}?task_id=${currentTaskId}`, { replace: true });
+    } else {
+      navigate(`/novels/${novelId}`, { replace: true });
     }
   }, [currentTaskId, novelId, navigate]);
 
@@ -184,20 +187,38 @@ export function NovelDetailPage() {
     }
   }, [currentTaskId]);
 
-  /** 启动/继续分析：调用 startAnalysis → 设置 taskId → 设置 isAnalyzing */
-  const handleStartAnalysis = useCallback(async (taskId?: string) => {
+  /** 创建任务并启动分析：调用 createAnalysisTask → 刷新任务列表 → 设置 taskId */
+  const handleCreateTask = useCallback(async () => {
     if (!novelId || isAnalyzing) return;
     setIsAnalyzing(true);
     try {
-      const result = await startAnalysis(novelId, taskId);
+      const result = await createAnalysisTask(novelId);
+      queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
       const newTaskId = result.task_id;
       setTask(newTaskId);
-      toast.info(taskId ? "继续分析任务已启动..." : "分析任务已创建，正在执行...");
+      toast.info("分析任务已创建，正在执行...");
     } catch {
       setIsAnalyzing(false);
-      toast.error(taskId ? "继续分析失败" : "创建分析任务失败");
+      toast.error("创建分析任务失败");
     }
-  }, [novelId, isAnalyzing, setTask]);
+  }, [novelId, isAnalyzing, queryClient, setTask]);
+
+  /** 继续失败/待处理任务：调用 resumeAnalysisTask → 刷新任务列表 → 保持 task_id 不变 */
+  const handleResumeTask = useCallback(async (taskId: string) => {
+    if (!novelId || isAnalyzing) return;
+    const normalizedTaskId = taskId.trim();
+    if (!normalizedTaskId) return;
+    setIsAnalyzing(true);
+    try {
+      const result = await resumeAnalysisTask(novelId, normalizedTaskId);
+      queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
+      setTask(result.task_id);
+      toast.info("继续分析任务已启动...");
+    } catch {
+      setIsAnalyzing(false);
+      toast.error("继续分析失败");
+    }
+  }, [novelId, isAnalyzing, queryClient, setTask]);
 
   const handleDeleteTask = useCallback(async () => {
     if (!novelId || !currentTaskId) return;
@@ -218,10 +239,11 @@ export function NovelDetailPage() {
     try {
       await cancelAnalysisTask(novelId, taskId);
       toast.success("任务取消请求已发送");
+      queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
     } catch {
       toast.error("取消任务失败");
     }
-  }, [novelId]);
+  }, [novelId, queryClient]);
 
   // Parallel data fetching
   const enabled = !!novelId && !!currentTaskId;
@@ -341,15 +363,16 @@ export function NovelDetailPage() {
       <NovelHeader
         title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
         novelId={novelId}
-        onResumeAnalysis={handleStartAnalysis}
-        onDelete={currentTaskId ? handleDeleteTask : undefined}
+        onCreateTask={handleCreateTask}
+        onResumeTask={handleResumeTask}
+        onDeleteCurrentTask={currentTaskId ? handleDeleteTask : undefined}
         isResuming={isAnalyzing}
         className="mb-4"
       />
 
       {/* No task selected — offer start analysis */}
       {!currentTaskId && (
-        <EmptyTaskPrompt onAnalyze={handleStartAnalysis} isAnalyzing={isAnalyzing} />
+        <EmptyTaskPrompt onAnalyze={handleCreateTask} isAnalyzing={isAnalyzing} />
       )}
 
       {/* Analysis in progress — show progress panel, hide everything else */}

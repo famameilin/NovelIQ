@@ -5,24 +5,34 @@ import type {
   TaskStatusResponse,
 } from "./types";
 
-export async function startAnalysis(
-  novelId: string,
-  taskId?: string
+// 2026-04-19, task-api-decouple: 显式创建并启动新任务。
+export async function createAnalysisTask(
+  novelId: string
 ): Promise<AnalysisStartResponse> {
   const { data } = await apiClient.post<AnalysisStartResponse>(
-    `/api/novels/${novelId}/analyze`,
-    taskId ? { task_id: taskId } : undefined
+    `/api/novels/${novelId}/tasks`
   );
   return data;
 }
 
-export async function getAnalysisStatus(
+// 2026-04-19, task-api-decouple: 仅继续指定 pending/failed 任务。
+export async function resumeAnalysisTask(
+  novelId: string,
+  taskId: string
+): Promise<AnalysisStartResponse> {
+  const { data } = await apiClient.post<AnalysisStartResponse>(
+    `/api/novels/${novelId}/tasks/${taskId}/resume`
+  );
+  return data;
+}
+
+// 2026-04-19, task-api-decouple: 单任务状态查询走专用路由。
+export async function getTaskStatus(
   novelId: string,
   taskId: string
 ): Promise<TaskStatusResponse> {
   const { data } = await apiClient.get<TaskStatusResponse>(
-    `/api/novels/${novelId}/status`,
-    { params: { task_id: taskId } }
+    `/api/novels/${novelId}/tasks/${taskId}/status`
   );
   return data;
 }

@@ -20,6 +20,11 @@
  * 修改者: TraeAI
  * 任务: code-review-fix
  * 修改内容: 移除未使用的 onCancelTask 属性，简化组件接口
+ *
+ * 修改时间: 2026-04-19
+ * 修改者: Codex (GPT-5)
+ * 任务: task-api-decouple
+ * 修改内容: 拆分 onCreateTask / onResumeTask / onDeleteCurrentTask，避免混合动作语义。
  */
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
@@ -39,8 +44,9 @@ import type { AnalysisTask } from "@/api/types";
 export interface NovelHeaderProps {
   title: string;
   novelId?: string;
-  onResumeAnalysis?: (taskId?: string) => void;
-  onDelete?: () => void;
+  onCreateTask?: () => void;
+  onResumeTask?: (taskId: string) => void;
+  onDeleteCurrentTask?: () => void;
   isResuming?: boolean;
   className?: string;
 }
@@ -60,8 +66,9 @@ function getCurrentTaskDisplay(tasks: AnalysisTask[], currentTaskId: string | nu
 export function NovelHeader({
   title,
   novelId: novelIdProp,
-  onResumeAnalysis,
-  onDelete,
+  onCreateTask,
+  onResumeTask,
+  onDeleteCurrentTask,
   isResuming = false,
   className,
 }: NovelHeaderProps) {
@@ -129,8 +136,8 @@ export function NovelHeader({
     }
   };
 
-  const handleRetry = (taskId: string) => {
-    onResumeAnalysis?.(taskId);
+  const handleResume = (taskId: string) => {
+    onResumeTask?.(taskId);
   };
 
   return (
@@ -213,7 +220,7 @@ export function NovelHeader({
                             onSelect={handleSelect}
                             onCancel={handleCancel}
                             onDelete={handleDelete}
-                            onRetry={handleRetry}
+                            onResume={handleResume}
                           />
                         ))
                       )}
@@ -225,7 +232,7 @@ export function NovelHeader({
                         variant="outline"
                         size="sm"
                         className="w-full"
-                        onClick={() => onResumeAnalysis?.()}
+                        onClick={onCreateTask}
                         disabled={isResuming}
                       >
                         <Plus className="mr-1 h-3.5 w-3.5" />
@@ -240,19 +247,19 @@ export function NovelHeader({
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {onResumeAnalysis && (
+          {onCreateTask && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => onResumeAnalysis()}
+              onClick={onCreateTask}
               disabled={isResuming}
             >
               <Plus className={cn("h-3.5 w-3.5")} />
               新建分析
             </Button>
           )}
-          {onDelete && (
-            <Button variant="ghost" size="sm" onClick={onDelete}>
+          {onDeleteCurrentTask && (
+            <Button variant="ghost" size="sm" onClick={onDeleteCurrentTask}>
               <Trash2 className="h-3.5 w-3.5" />
               删除
             </Button>
