@@ -10,6 +10,7 @@
 任务: 移动废弃测试
 修改内容: 移除 culture_stats 相关测试（功能已废弃），移动到 deprecated/tests/api/
 """
+
 import pytest
 
 from src.api.routes.results_converters import (

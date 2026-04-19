@@ -52,7 +52,6 @@ class _DummyAnnotationRepo2:
         return self._pending
 
 
-
 class _DummyStatsRepo:
     def __init__(self, payload):
         self.payload = payload
@@ -109,8 +108,7 @@ def test_normalize_text_by_alias_map_skips_embedded_suffixes_in_longer_names():
     }
 
     assert _normalize_text_by_alias_map(text, alias_map) == (
-        "\u738b\u4f2f\u5b89\u770b\u89c1\u4e86\u8d3a\u4f2f\u5b89\uff0c"
-        "\u4f46\u6ca1\u7406\u4f1a\u963f\u4f2f\u5b89\u3002"
+        "\u738b\u4f2f\u5b89\u770b\u89c1\u4e86\u8d3a\u4f2f\u5b89\uff0c\u4f46\u6ca1\u7406\u4f1a\u963f\u4f2f\u5b89\u3002"
     )
 
 
@@ -175,8 +173,7 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     assert result.arc_scores == {"\u4faf\u98de\u767d": 6.5, "\u6797\u7acb\u679c": 6.0}
     assert result.topic_labels == ["\u67f3\u5a49\u513f", "\u767d\u82b7"]
     assert result.diagnosis == (
-        "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c"
-        "\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
+        "\u4faf\u98de\u767d\u5e2e\u52a9\u67f3\u5a49\u513f\uff0c\u6797\u7acb\u679c\u968f\u540e\u51fa\u73b0\u3002"
     )
     assert result.value_logic_reason == "\u67f3\u5a49\u513f\u5f71\u54cd\u4e86\u4faf\u98de\u767d\u7684\u5224\u65ad\u3002"
     assert result.power_stance_reason == "\u6797\u7acb\u679c\u538b\u5236\u4e86\u67f3\u5a49\u513f\u3002"
@@ -267,7 +264,6 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     rel2 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "林立果")
     assert rel2.chunk_id == 5
     assert rel2.type == "盟友"
-
 
 
 def test_fetch_character_relations_uses_last_seen_chunk_id():

@@ -2,6 +2,7 @@
 云端诊断 CLI 测试
 
 """
+
 import sys
 import uuid
 from pathlib import Path

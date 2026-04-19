@@ -27,14 +27,12 @@ from src.rag.retriever import (
     ActiveEntityLookup,
     AliasLookup,
     DisambigContextProvider,
-    DisambigResult,
     Level3NotReadyError,
     Level3VectorEvidence,
 )
 
 __all__ = [
     "DisambigContextProvider",
-    "DisambigResult",
     "AliasLookup",
     "ActiveEntityLookup",
     "AliasMapping",

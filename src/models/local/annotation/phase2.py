@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from src.config.constants import PHASE_MAX_RETRIES
 from src.models.interactions import record_model_interaction
@@ -114,7 +114,7 @@ async def annotate_chunk_phase2(
     chapter_id: int | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
+    evidence_bundle=None,
 ) -> ForeshadowingResult | None:
     """
     第二次调用：伏笔分析（带独立重试机制）
@@ -128,18 +128,6 @@ async def annotate_chunk_phase2(
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
     """
-    messages = _build_foreshadowing_messages(
-        text=text,
-        prev_chunk_summary=prev_chunk_summary,
-        chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
-        novel_title=novel_title,
-        main_characters=main_characters,
-        position_pct=position_pct,
-        chapter_id=chapter_id,
-    )
-
     from src.models.local.schema import ForeshadowingResult
 
     config = RetryConfig(
@@ -152,6 +140,21 @@ async def annotate_chunk_phase2(
         local_client=client,
         cloud_client=cloud_client,
         exception_type=Phase2MaxRetriesExceededError,
+    )
+
+    # 中文注释：Phase2 只消费调用方已经准备好的 evidence_bundle，
+    # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界。
+    messages = _build_foreshadowing_messages(
+        text=text,
+        prev_chunk_summary=prev_chunk_summary,
+        chunk_id=chunk_id,
+        prev_chunk_text=prev_chunk_text,
+        next_chunk_text=next_chunk_text,
+        novel_title=novel_title,
+        main_characters=main_characters,
+        position_pct=position_pct,
+        chapter_id=chapter_id,
+        evidence_bundle=evidence_bundle,
     )
 
     async def operation(

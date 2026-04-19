@@ -15,6 +15,7 @@ CLI preprocess 模块测试
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """
+
 import sys
 import uuid
 from pathlib import Path
@@ -34,11 +35,38 @@ class MockEmbeddingClient:
 
     def get_embedding(self, text: str):
         import random
-        return [random.random() for _ in range(768)]
+
+        return [random.random() for _ in range(1536)]
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         import random
-        return [[random.random() for _ in range(768)] for _ in texts]
+
+        return [[random.random() for _ in range(1536)] for _ in texts]
+
+    async def detect_embedding_dimension(self, probe_text: str = "dimension probe") -> int:
+        return 1536
+
+    @staticmethod
+    def compute_similarity(vec1, vec2):
+        return 0.5
+
+
+class MockEmbeddingClientPreprocess:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def get_embedding(self, text: str):
+        import random
+
+        return [random.random() for _ in range(1536)]
+
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        import random
+
+        return [[random.random() for _ in range(1536)] for _ in texts]
+
+    async def detect_embedding_dimension(self, probe_text: str = "dimension probe") -> int:
+        return 1536
 
     @staticmethod
     def compute_similarity(vec1, vec2):
@@ -52,7 +80,7 @@ class TestPreprocess:
         return source_path
 
     @pytest.mark.asyncio()
-    @patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient)
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_basic(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
@@ -79,7 +107,7 @@ class TestPreprocess:
         assert len(rows) == chunks_inserted
 
     @pytest.mark.asyncio()
-    @patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient)
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_empty_file(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "")
 
@@ -121,7 +149,7 @@ class TestPreprocess:
         assert chunks_inserted > 0
 
     @pytest.mark.asyncio()
-    @patch("src.chunking.chunker.EmbeddingClient", MockEmbeddingClient)
+    @patch("src.models.local.embedding.EmbeddingClient", MockEmbeddingClientPreprocess)
     async def test_preprocess_resume(self, db_session, tmp_path) -> None:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 

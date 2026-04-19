@@ -27,7 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 from src.api.models.events import StreamEvent
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.annotation import MultiPhaseAnnotationResult
-from src.models.local.disambiguation import ExtendedDisambigResult
+from src.models.local.disambiguation import DisambiguationPromptContext, ExtendedDisambigResult
 
 
 @runtime_checkable
@@ -50,6 +50,7 @@ class AnnotationLike(Protocol):
         chunk_id: int | None = None,
         global_context: str | None = None,
         active_entities: str | None = None,
+        evidence_bundle: Any | None = None,
         cloud_client: AnnotationLike | None = None,
         run_id: str | None = None,
         disambig_context: str | None = None,
@@ -74,7 +75,7 @@ class DisambiguationLike(Protocol):
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context: DisambiguationPromptContext | None = None,
     ) -> ExtendedDisambigResult: ...
 
     def is_cloud_api(self) -> bool: ...

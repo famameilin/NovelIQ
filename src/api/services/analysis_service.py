@@ -298,11 +298,146 @@ class AnalysisService:
         return task_id
 
     async def _run_analysis(self, task_id: str, novel: dict, request: AnalyzeRequest | None) -> None:
+        """
+        执行分析任务
+
+        修改时间: 2026-04-14
+        修改者: TraeAI
+        任务: refactor-analysis-service-duplicate-code
+        修改内容: 提取公共逻辑到 _run_analysis_core 方法
+        """
+        num_topics = settings.topic_model.single_book.num_topics
+        max_chars = settings.chunking.max_chars
+        overlap = settings.chunking.overlap
+
+        def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
+            return self.env_initializer.check_stage_completion_status(session, run_id)
+
+        def pre_execute_hook(novel_id: str, skip_stages: dict[str, bool]) -> bool:
+            if self._check_all_stages_completed(skip_stages):
+                self._handle_already_completed(task_id, novel_id, None)
+                return True
+            return False
+
+        await self._run_analysis_core(
+            task_id=task_id,
+            novel=novel,
+            skip_stages_builder=skip_stages_builder,
+            num_topics=num_topics,
+            log_prefix="Analysis",
+            max_chars=max_chars,
+            overlap=overlap,
+            pre_execute_hook=pre_execute_hook,
+        )
+
+    async def _run_reanalysis(self, task_id: str, novel: dict, request: ReanalyzeRequest | None) -> None:
+        """
+        执行重新分析任务
+
+        修改时间: 2026-04-14
+        修改者: TraeAI
+        任务: refactor-analysis-service-duplicate-code
+        修改内容: 提取公共逻辑到 _run_analysis_core 方法
+        """
+        skip_stages = self._build_reanalysis_skip_stages(request)
+        logger.info(f"Reanalysis skip_stages: {skip_stages}")
+        num_topics = request.num_topics if request else settings.topic_model.single_book.num_topics
+
+        def skip_stages_builder(session: Session, run_id: str) -> dict[str, bool]:
+            return skip_stages
+
+        await self._run_analysis_core(
+            task_id=task_id,
+            novel=novel,
+            skip_stages_builder=skip_stages_builder,
+            num_topics=num_topics,
+            log_prefix="Reanalysis",
+        )
+
+    async def _call_execute_analysis_stages(
+        self,
+        bus: AnalysisEventBus,
+        session: Session,
+        run_id: str,
+        source_path: Path,
+        novel_id: str,
+        novel_title: str | None,
+        analysis_logger: AnalysisLogger | None,
+        skip_stages: dict[str, bool],
+        num_topics: int,
+        max_chars: int | None = None,
+        overlap: int | None = None,
+    ) -> None:
+        """
+        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数。
+
+        创建时间: 2026-04-17
+        创建者: TraeAI
+        任务: refactor/split-provider-bundle-renderer
+        说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑。
+        """
+        if max_chars is not None and overlap is not None:
+            await self._execute_analysis_stages(
+                bus=bus,
+                session=session,
+                run_id=run_id,
+                source_path=source_path,
+                novel_id=novel_id,
+                novel_title=novel_title,
+                analysis_logger=analysis_logger,
+                skip_stages=skip_stages,
+                num_topics=num_topics,
+                max_chars=max_chars,
+                overlap=overlap,
+            )
+        else:
+            await self._execute_analysis_stages(
+                bus=bus,
+                session=session,
+                run_id=run_id,
+                source_path=source_path,
+                novel_id=novel_id,
+                novel_title=novel_title,
+                analysis_logger=analysis_logger,
+                skip_stages=skip_stages,
+                num_topics=num_topics,
+            )
+
+    async def _run_analysis_core(
+        self,
+        task_id: str,
+        novel: dict,
+        skip_stages_builder: Callable[[Session, str], dict[str, bool]],
+        num_topics: int,
+        log_prefix: str = "Analysis",
+        max_chars: int | None = None,
+        overlap: int | None = None,
+        pre_execute_hook: Callable[[str, dict[str, bool]], bool] | None = None,
+    ) -> None:
+        """
+        统一的分析执行核心逻辑
+
+        创建时间: 2026-04-14
+        创建者: TraeAI
+        任务: refactor-analysis-service-duplicate-code
+        说明: 封装 _run_analysis 和 _run_reanalysis 的公共逻辑
+
+        Args:
+            task_id: 任务ID
+            novel: 小说信息字典
+            skip_stages_builder: 构建 skip_stages 的函数
+            num_topics: 主题数量
+            log_prefix: 日志前缀
+            max_chars: 分块最大字符数
+            overlap: 分块重叠字符数
+            pre_execute_hook: 执行前的钩子函数，返回 True 表示跳过执行
+        """
         start_time = time.time()
         analysis_logger: AnalysisLogger | None = None
         session: Session | None = None
         run_id: str | None = None
         bus: AnalysisEventBus | None = None
+
         try:
             self.task_manager.update_task(task_id, cancel_event=asyncio.Event())
 
@@ -315,22 +450,16 @@ class AnalysisService:
                 run_id,
             ) = self.env_initializer.init_analysis_environment(task_id, novel)
 
-            num_topics = settings.topic_model.single_book.num_topics
-            max_chars = settings.chunking.max_chars
-            overlap = settings.chunking.overlap
+            skip_stages = skip_stages_builder(session, run_id)
 
-            skip_stages = self.env_initializer.check_stage_completion_status(session, run_id)
-
-            if self._check_all_stages_completed(skip_stages):
-                self._handle_already_completed(task_id, novel_id, analysis_logger)
+            if pre_execute_hook and pre_execute_hook(novel_id, skip_stages):
                 return
 
             self.task_manager.update_task(task_id, status=TaskStatus.RUNNING, stage="preprocess", progress=0)
 
-            # 创建 EventBus：所有 SSE 事件的统一发送口
             bus = AnalysisEventBus(task_id, self.task_manager)
 
-            await self._execute_analysis_stages(
+            await self._call_execute_analysis_stages(
                 bus=bus,
                 session=session,
                 run_id=run_id,
@@ -349,82 +478,11 @@ class AnalysisService:
 
             elapsed = time.time() - start_time
             await self.error_handler.handle_success(
-                task_id, novel_id, elapsed, analysis_logger, session, run_id, bus=bus, log_prefix="Analysis"
+                task_id, novel_id, elapsed, analysis_logger, session, run_id, bus=bus, log_prefix=log_prefix
             )
 
         except asyncio.CancelledError:
             logger.info(f"Task {task_id} was cancelled via asyncio.Task.cancel()")
-            if session and run_id:
-                await self.error_handler.handle_cancel(
-                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
-                )
-        except Exception as e:
-            elapsed = time.time() - start_time
-            if self._is_cancelled(task_id) and session and run_id:
-                await self.error_handler.handle_cancel(
-                    task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
-                )
-            elif session and run_id:
-                await self.error_handler.handle_failure(
-                    task_id, novel.get("novel_id", "unknown"), elapsed, e, analysis_logger, session, run_id, bus=bus
-                )
-            else:
-                self.novel_service.update_task_status(task_id, "failed")
-                self.task_manager.complete_task(task_id, success=False, error=str(e))
-        finally:
-            if analysis_logger:
-                analysis_logger.close()
-            if session:
-                session.close()
-
-    async def _run_reanalysis(self, task_id: str, novel: dict, request: ReanalyzeRequest | None) -> None:
-        start_time = time.time()
-        analysis_logger: AnalysisLogger | None = None
-        session: Session | None = None
-        run_id: str | None = None
-        bus: AnalysisEventBus | None = None
-        try:
-            self.task_manager.update_task(task_id, cancel_event=asyncio.Event())
-
-            (
-                novel_id,
-                source_path,
-                novel_title,
-                session,
-                analysis_logger,
-                run_id,
-            ) = self.env_initializer.init_analysis_environment(task_id, novel)
-
-            skip_stages = self._build_reanalysis_skip_stages(request)
-            logger.info(f"Reanalysis skip_stages: {skip_stages}")
-            num_topics = request.num_topics if request else settings.topic_model.single_book.num_topics
-
-            self.task_manager.update_task(task_id, status=TaskStatus.RUNNING, stage="preprocess", progress=0)
-
-            bus = AnalysisEventBus(task_id, self.task_manager)
-
-            await self._execute_analysis_stages(
-                bus=bus,
-                session=session,
-                run_id=run_id,
-                source_path=source_path,
-                novel_id=novel_id,
-                novel_title=novel_title,
-                analysis_logger=analysis_logger,
-                skip_stages=skip_stages,
-                num_topics=num_topics,
-            )
-
-            if self._is_cancelled(task_id):
-                return
-
-            elapsed = time.time() - start_time
-            await self.error_handler.handle_success(
-                task_id, novel_id, elapsed, analysis_logger, session, run_id, bus=bus, log_prefix="Reanalysis"
-            )
-
-        except asyncio.CancelledError:
-            logger.info(f"Reanalysis task {task_id} was cancelled via asyncio.Task.cancel()")
             if session and run_id:
                 await self.error_handler.handle_cancel(
                     task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
@@ -445,7 +503,7 @@ class AnalysisService:
                     session,
                     run_id,
                     bus=bus,
-                    log_prefix="Reanalysis",
+                    log_prefix=log_prefix,
                 )
             else:
                 self.novel_service.update_task_status(task_id, "failed")

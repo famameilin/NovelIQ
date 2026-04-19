@@ -10,9 +10,7 @@ def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None
 
     session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-    table_exists = session.execute(
-        text("SELECT to_regclass('public.chunk_embeddings')")
-    ).scalar_one_or_none()
+    table_exists = session.execute(text("SELECT to_regclass('public.chunk_embeddings')")).scalar_one_or_none()
 
     if table_exists is None:
         session.execute(
@@ -40,10 +38,7 @@ def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None
             )
 
     session.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id "
-            "ON public.chunk_embeddings USING btree (run_id)"
-        )
+        text("CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON public.chunk_embeddings USING btree (run_id)")
     )
     # Drop the legacy global ANN index so existing environments do not keep
     # using an approximation path that mixes rows from different runs.
@@ -54,15 +49,11 @@ def validate_chunk_embeddings_schema(session: Session, embedding_dim: int) -> No
     if embedding_dim <= 0:
         raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
 
-    extension_exists = session.execute(
-        text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
-    ).scalar_one_or_none()
+    extension_exists = session.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")).scalar_one_or_none()
     if extension_exists is None:
         raise ValueError("pgvector extension 'vector' is not installed")
 
-    table_exists = session.execute(
-        text("SELECT to_regclass('public.chunk_embeddings')")
-    ).scalar_one_or_none()
+    table_exists = session.execute(text("SELECT to_regclass('public.chunk_embeddings')")).scalar_one_or_none()
     if table_exists is None:
         raise ValueError("chunk_embeddings table does not exist")
 
@@ -70,8 +61,7 @@ def validate_chunk_embeddings_schema(session: Session, embedding_dim: int) -> No
     expected_type = f"vector({embedding_dim})"
     if vector_type != expected_type:
         raise ValueError(
-            "chunk_embeddings.embedding_vector type mismatch: "
-            f"expected {expected_type}, got {vector_type or 'unknown'}"
+            f"chunk_embeddings.embedding_vector type mismatch: expected {expected_type}, got {vector_type or 'unknown'}"
         )
 
 

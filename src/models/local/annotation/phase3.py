@@ -31,6 +31,11 @@
 修改者: TraeAI
 任务: consolidate-codebase-architecture
 修改内容: 从 constants 导入 PHASE3_MAX_RETRIES，移除本地重复定义
+
+修改时间: 2026-04-17
+修改者: TraeAI
+任务: fix-phase3-alias-priority-conflict
+修改内容: Phase3 evidence sections 改由 renderer helper 产出，复用 Phase1 别名优先级规则
 """
 
 from __future__ import annotations
@@ -46,11 +51,13 @@ from src.config import settings
 from src.config.constants import PHASE3_MAX_RETRIES
 from src.models.interactions import record_model_interaction
 from src.models.local.annotation.context import DialogueAttributionError
+from src.models.local.annotation.evidence_renderer import render_dialogue_attribution_evidence_sections
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import DialogueAttributionResult, DialogueRecord, DialogueRecordSchema, QuoteCandidate
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+    from src.rag.evidence_types import EvidenceBundle
 
 
 @dataclass
@@ -133,14 +140,32 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
     return candidates
 
 
+def _collect_priority_candidate_names(
+    evidence_bundle: EvidenceBundle | None,
+    batch_candidates: list[QuoteCandidate],
+) -> list[str] | None:
+    if evidence_bundle is None or not evidence_bundle.requested_names:
+        return None
+
+    batch_text = "\n".join(candidate.content for candidate in batch_candidates if candidate.content)
+    priority_names = [
+        name
+        for name in evidence_bundle.requested_names
+        if name and name in batch_text
+    ]
+    return priority_names or None
+
+
 async def attribute_dialogues_with_llm(
     client: AnnotationClient,
     chunk_text: str,
     candidates: list[QuoteCandidate],
     known_characters: list[str] | None = None,
     alias_map: dict[str, str] | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
+    active_entities: str | None = None,
 ) -> list[DialogueRecord]:
     """
     使用 LLM 判断对话候选是否是对话，并识别说话者和语气
@@ -154,6 +179,11 @@ async def attribute_dialogues_with_llm(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-17
+    修改者: TraeAI
+    任务: fix-phase3-active-entities-fallback
+    修改内容: 新增 active_entities 参数，优先使用上游已解析好的活跃实体上下文
     """
     if not candidates:
         return []
@@ -165,7 +195,6 @@ async def attribute_dialogues_with_llm(
     is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
     batch_size = settings.thinking.phase3_candidates_per_batch
-
     async def _execute_single_batch(
         current_client: AnnotationClient,
         batch_candidates: list[QuoteCandidate],
@@ -174,6 +203,14 @@ async def attribute_dialogues_with_llm(
     ) -> list[DialogueRecordSchema]:
         dialogue_list = "\n".join([f'{c.index}. content: "{c.content}"' for c in batch_candidates])
         known_chars = "、".join(known_characters) if known_characters else "无"
+        # 中文注释：Phase3 的共享 evidence 需要按当前 batch 重新裁剪，
+        # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选。
+        evidence_sections = render_dialogue_attribution_evidence_sections(
+            evidence_bundle,
+            alias_map=alias_map,
+            active_entities=active_entities,
+            priority_candidate_names=_collect_priority_candidate_names(evidence_bundle, batch_candidates),
+        )
 
         prompts = settings.prompts
         system_prompt = prompts.phase3.system
@@ -183,6 +220,10 @@ async def attribute_dialogues_with_llm(
             dialogue_list=dialogue_list,
             known_characters=known_chars,
         )
+        if evidence_sections:
+            # 中文注释：Phase3 只消费上游已经准备好的共享 evidence blocks，
+            # 不在对话归属阶段重新发起取证，避免 Phase3 再次长成独立上下文体系。
+            user_prompt += "\n\n" + "\n\n".join(evidence_sections)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -366,22 +407,20 @@ def _post_process_validation(
             valid_records.append(record)
 
     if unknown_count > 0:
-        logger.info(
-            f"phase3_validation summary: unknown_speakers={unknown_count}, chunk_id={chunk_id}"
-        )
+        logger.info(f"phase3_validation summary: unknown_speakers={unknown_count}, chunk_id={chunk_id}")
 
     return valid_records
-
-
 async def compute_dialogue_lengths_with_llm(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
     known_characters: list[str] | None = None,
     return_tones: bool = False,
     return_identity_clues: bool = False,
+    active_entities: str | None = None,
 ) -> DialogueLengthResult:
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
@@ -419,8 +458,10 @@ async def compute_dialogue_lengths_with_llm(
         candidates,
         known_characters=known_characters,
         alias_map=alias_map,
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
+        active_entities=active_entities,
     )
     logger.info(f"compute_dialogue_lengths_with_llm: got {len(records)} records")
 

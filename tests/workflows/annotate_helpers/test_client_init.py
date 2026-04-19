@@ -29,7 +29,9 @@ def test_init_annotation_clients_respects_explicit_disambiguation_clients() -> N
 
 
 @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
-def test_init_annotation_clients_falls_back_to_annotation_config_when_disambig_missing(mock_disambiguation_client) -> None:
+def test_init_annotation_clients_falls_back_to_annotation_config_when_disambig_missing(
+    mock_disambiguation_client,
+) -> None:
     annotation_client = AnnotationClient(task_type="annotation")
     fallback_incremental = MagicMock(name="fallback_incremental")
     fallback_full = MagicMock(name="fallback_full")

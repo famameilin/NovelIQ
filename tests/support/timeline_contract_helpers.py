@@ -268,10 +268,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
 
 
 def index_by_chunk_id(items: list[Any]) -> dict[int, Any]:
-    return {
-        int(item["chunk_id"]) if isinstance(item, dict) else int(item.chunk_id): item
-        for item in items
-    }
+    return {int(item["chunk_id"]) if isinstance(item, dict) else int(item.chunk_id): item for item in items}
 
 
 def relation_change_tuples(relation_changes: list[Any] | None) -> set[tuple[str, str, str]]:

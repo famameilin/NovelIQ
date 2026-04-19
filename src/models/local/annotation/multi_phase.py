@@ -23,13 +23,18 @@
 修改者: TraeAI
 任务: remove-unused-annotation-fields
 修改内容: 移除 character_appearances 参数
+
+修改时间: 2026-04-17
+修改者: TraeAI
+任务: fix-phase3-active-entities-fallback
+修改内容: _run_phase3_if_needed 新增 active_entities 参数，透传上游活跃实体上下文（含 fallback）
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -46,6 +51,7 @@ from .phase4 import annotate_chunk_phase4
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
+    from src.rag.evidence_types import EvidenceBundle
 
 
 @dataclass
@@ -94,6 +100,7 @@ async def _run_phase1(
     position_pct: float | None,
     chapter_id: int | None,
     active_entities: str | None,
+    evidence_bundle: EvidenceBundle | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
     disambig_context: str | None = None,
@@ -119,6 +126,7 @@ async def _run_phase1(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
         disambig_context=disambig_context,
@@ -135,9 +143,9 @@ async def _run_phase2(
     main_characters: str | None,
     position_pct: float | None,
     chapter_id: int | None,
+    evidence_bundle: EvidenceBundle | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None,
-    rag_retriever: Any | None,
 ) -> ForeshadowingResult | None:
     """执行 Phase2 伏笔分析
 
@@ -160,9 +168,11 @@ async def _run_phase2(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
+        # 中文注释：优先透传上游已准备好的 evidence bundle，
+        # 保证 AnnotationClient -> multi_phase -> Phase2 的真实入口也能复用同一份证据上下文。
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
-        rag_retriever=rag_retriever,
     )
 
 
@@ -170,9 +180,11 @@ async def _run_phase3_if_needed(
     client: AnnotationClient,
     text: str,
     alias_map: dict[str, str] | None,
+    evidence_bundle: EvidenceBundle | None,
     chunk_id: int | None,
     run_id: str | None,
     known_characters: list[str] | None,
+    active_entities: str | None = None,
 ) -> _Phase3Result:
     """根据条件执行 Phase3 对话归属判断
 
@@ -184,6 +196,11 @@ async def _run_phase3_if_needed(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-17
+    修改者: TraeAI
+    任务: fix-phase3-active-entities-fallback
+    修改内容: 新增 active_entities 参数，透传上游已解析好的活跃实体上下文（含 fallback）
     """
     result = _Phase3Result()
 
@@ -201,11 +218,16 @@ async def _run_phase3_if_needed(
         client=client,
         text=text,
         alias_map=alias_map,
+        # 中文注释：Phase3 和 Phase2 一样只复用上游同一份 evidence_bundle，
+        # 保持多阶段标注共享同一组 Level1/2/3 证据，而不是各阶段各自拼上下文。
+        # 透传 active_entities，确保 Phase3 使用与 Phase1 相同的活跃实体上下文（含 fallback）。
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
         known_characters=known_characters,
         return_tones=True,
         return_identity_clues=True,
+        active_entities=active_entities,
     )
 
     result.dialogue_lengths = dlg_result.speaker_lengths or None
@@ -301,6 +323,7 @@ async def annotate_chunk_multi_phase(
     global_context: str | None = None,
     prev_chunk_text: str | None = None,
     active_entities: str | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     disambig_context: str | None = None,
     next_chunk_text: str | None = None,
     novel_title: str | None = None,
@@ -309,7 +332,6 @@ async def annotate_chunk_multi_phase(
     chapter_id: int | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> MultiPhaseAnnotationResult:
     """
@@ -340,9 +362,10 @@ async def annotate_chunk_multi_phase(
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
-            rag_retriever=rag_retriever,
             active_entities=active_entities,
+            evidence_bundle=evidence_bundle,
             emitter=emitter,
+            disambig_context=disambig_context,
         )
     else:
         return await annotate_chunk_serial(
@@ -358,9 +381,10 @@ async def annotate_chunk_multi_phase(
             chapter_id=chapter_id,
             cloud_client=cloud_client,
             run_id=run_id,
-            rag_retriever=rag_retriever,
             active_entities=active_entities,
+            evidence_bundle=evidence_bundle,
             emitter=emitter,
+            disambig_context=disambig_context,
         )
 
 
@@ -376,9 +400,9 @@ async def annotate_chunk_parallel(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
 ) -> MultiPhaseAnnotationResult:
@@ -417,6 +441,7 @@ async def annotate_chunk_parallel(
             position_pct=position_pct,
             chapter_id=chapter_id,
             active_entities=active_entities,
+            evidence_bundle=evidence_bundle,
             cloud_client=cloud_client,
             run_id=run_id,
             disambig_context=disambig_context,
@@ -431,9 +456,9 @@ async def annotate_chunk_parallel(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
+            evidence_bundle=evidence_bundle,
             cloud_client=cloud_client,
             run_id=run_id,
-            rag_retriever=rag_retriever,
         ),
     )
 
@@ -460,14 +485,19 @@ async def annotate_chunk_parallel(
             client=client,
             text=text,
             alias_map=alias_map,
+            evidence_bundle=evidence_bundle,
             chunk_id=chunk_id,
             run_id=run_id,
             known_characters=known_characters,
+            active_entities=active_entities,
         ),
         annotate_chunk_phase4(
             client=client,
             text=text,
             known_characters=known_characters,
+            # 中文注释：Phase4 和 Phase2/3 一样只复用上游准备好的 evidence_bundle，
+            # multi_phase 只负责透传，不在 workflow 里重建或拼接关系抽取证据文案。
+            evidence_bundle=evidence_bundle,
             chunk_id=chunk_id,
             run_id=run_id,
         ),
@@ -513,9 +543,9 @@ async def annotate_chunk_serial(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
+    evidence_bundle: EvidenceBundle | None = None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
-    rag_retriever: Any | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
 ) -> MultiPhaseAnnotationResult:
@@ -547,6 +577,7 @@ async def annotate_chunk_serial(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
         disambig_context=disambig_context,
@@ -570,9 +601,9 @@ async def annotate_chunk_serial(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
+        evidence_bundle=evidence_bundle,
         cloud_client=cloud_client,
         run_id=run_id,
-        rag_retriever=rag_retriever,
     )
     if emitter:
         await emitter(
@@ -594,9 +625,11 @@ async def annotate_chunk_serial(
         client=client,
         text=text,
         alias_map=alias_map,
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
         known_characters=known_characters,
+        active_entities=active_entities,
     )
     if emitter:
         await emitter(
@@ -611,6 +644,8 @@ async def annotate_chunk_serial(
         client=client,
         text=text,
         known_characters=known_characters,
+        # 中文注释：串行路径也透传同一份 evidence_bundle，锁住 Phase4 的真实共享 evidence 消费链。
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
     )

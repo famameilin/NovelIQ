@@ -178,9 +178,7 @@ def _validate_authority_dependency_items(
     for item in items:
         missing_fields = [field_name for field_name in required_fields if not hasattr(item, field_name)]
         if missing_fields:
-            raise RuntimeError(
-                f"{contract_name} is missing required authority fields: {', '.join(missing_fields)}"
-            )
+            raise RuntimeError(f"{contract_name} is missing required authority fields: {', '.join(missing_fields)}")
 
 
 def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], list[Any], list[Any]]:
@@ -603,8 +601,8 @@ def _fetch_chunk_annotations(
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
 
     if export_graph_view is None:
-        export_graph_view = (
-            KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(run_id)
+        export_graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(
+            run_id
         )
 
     if not export_graph_view.relation_events:
@@ -720,8 +718,8 @@ def _fetch_character_relations(
 ) -> list:
     """获取角色关系数据（graph_relations_current 权威来源）。"""
     if export_graph_view is None:
-        export_graph_view = (
-            KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(run_id)
+        export_graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(
+            run_id
         )
 
     if not export_graph_view.current_relations:
@@ -1020,12 +1018,8 @@ def _fetch_graph_snapshot(
     # 中文注释：graph page 的 summary / quality 属于 product-layer contract，
     # 这里显式从 authority facts 组装页面 DTO，避免 diagnosis/export 共享层再被
     # 页面高亮或样本字段反向污染。
-    summary = _serialize_graph_page_summary(
-        build_graph_page_summary(stable_states, confirmed_relations)
-    )
-    quality = _serialize_graph_page_quality(
-        build_graph_page_quality(confirmed_relations, relation_events)
-    )
+    summary = _serialize_graph_page_summary(build_graph_page_summary(stable_states, confirmed_relations))
+    quality = _serialize_graph_page_quality(build_graph_page_quality(confirmed_relations, relation_events))
 
     return {
         "nodes": nodes,

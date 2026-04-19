@@ -20,6 +20,7 @@ CLI aggregate 模块测试
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SessionFactory 依赖
 """
+
 import sys
 import uuid
 from pathlib import Path
@@ -46,7 +47,10 @@ class TestAggregate:
 
     def _create_chunks_with_style(self, chunk_count: int) -> None:
         chunk_repo = ChunkRepository(self.db_session)
-        chunks = [Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本。包含快乐和悲伤的词语。") for i in range(chunk_count)]
+        chunks = [
+            Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本。包含快乐和悲伤的词语。")
+            for i in range(chunk_count)
+        ]
         chunk_repo.insert_chunks(self.run_id, chunks)
 
         style_rows = [
@@ -107,7 +111,9 @@ class TestAggregate:
         await run_aggregate(run_id=self.run_id, session=self.db_session)
 
         rows = self.db_session.execute(
-            text("SELECT chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite FROM chunk_curves WHERE run_id = :run_id ORDER BY chunk_id"),
+            text(
+                "SELECT chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite FROM chunk_curves WHERE run_id = :run_id ORDER BY chunk_id"
+            ),
             {"run_id": self.run_id},
         ).fetchall()
         assert len(rows) == 3

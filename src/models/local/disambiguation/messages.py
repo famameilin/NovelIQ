@@ -11,6 +11,7 @@ from src.models.disambiguation_types import NameCountCandidate
 
 from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
 from .evidence import build_evidence_profile, format_evidence_profile
+from .evidence_renderer import DisambiguationPromptContext, render_disambiguation_prompt_context_sections
 
 if TYPE_CHECKING:
     from src.workflows.annotate_helpers.disambiguation.candidate_filter import CandidateClassification
@@ -202,7 +203,7 @@ def build_disambiguate_messages(
     candidates: list[NameCountCandidate],
     context_sentences: dict[str, str] | None = None,
     existing_names: list[str] | None = None,
-    rag_hint: str | None = None,
+    prompt_context: DisambiguationPromptContext | None = None,
     classifications: list[CandidateClassification] | None = None,
 ) -> list[dict[str, str]]:
     """构建角色消歧消息，仅接受标准候选结构。"""
@@ -248,8 +249,7 @@ def build_disambiguate_messages(
         "以下候选人名可能是同一人物的不同称呼，也可能是不同人物。",
         "请根据例句中的上下文判断，若两人明显是不同人物请不要合并。",
     ]
-    if rag_hint:
-        user_parts.append(rag_hint)
+    user_parts.extend(render_disambiguation_prompt_context_sections(prompt_context))
     user_parts.append(f"\n候选人名列表：\n{body}")
     user_content = "\n".join(user_parts)
 

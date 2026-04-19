@@ -16,7 +16,6 @@ def serialize_graph_report_signals(graph_report: GraphAuthorityReport) -> tuple[
 
     if type(graph_report) is not GraphAuthorityReport:
         raise TypeError(
-            "shared graph signal consumers require GraphAuthorityReport; "
-            f"got {type(graph_report).__name__}"
+            f"shared graph signal consumers require GraphAuthorityReport; got {type(graph_report).__name__}"
         )
     return graph_report.summary.to_contract_dict(), graph_report.quality.to_contract_dict()

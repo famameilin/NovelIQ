@@ -773,9 +773,9 @@ def test_fetch_graph_events_page_uses_incremental_authority_page_builder(monkeyp
         "returned_count": 2,
         "total": 5,
         "has_more": True,
-        "next_cursor": base64.urlsafe_b64encode(
-            json.dumps({"offset": 3}, separators=(",", ":")).encode("utf-8")
-        ).decode("ascii").rstrip("="),
+        "next_cursor": base64.urlsafe_b64encode(json.dumps({"offset": 3}, separators=(",", ":")).encode("utf-8"))
+        .decode("ascii")
+        .rstrip("="),
     }
 
 
@@ -793,8 +793,8 @@ def test_get_graph_events_invalid_cursor_returns_400(api_client, db_session) -> 
 
 def test_get_graph_events_out_of_range_cursor_returns_400(api_client, db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
-    out_of_range_cursor = base64.urlsafe_b64encode(json.dumps({"offset": 99}).encode("utf-8")).decode("ascii").rstrip(
-        "="
+    out_of_range_cursor = (
+        base64.urlsafe_b64encode(json.dumps({"offset": 99}).encode("utf-8")).decode("ascii").rstrip("=")
     )
 
     response = api_client.get(

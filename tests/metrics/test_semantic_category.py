@@ -12,9 +12,7 @@ from src.metrics.style_metrics import (
 
 class TestParseSemanticCategoryLexicon(unittest.TestCase):
     def setUp(self) -> None:
-        self.lexicon_path = str(
-            Path(__file__).resolve().parents[2] / "data" / "lexicons" / "semantic_category.txt"
-        )
+        self.lexicon_path = str(Path(__file__).resolve().parents[2] / "data" / "lexicons" / "semantic_category.txt")
 
     def test_parse_returns_dict(self) -> None:
         result = parse_semantic_category_lexicon(self.lexicon_path)
@@ -156,9 +154,7 @@ class TestSemanticCategoryDensities(unittest.TestCase):
             self.assertGreaterEqual(result[key], 0.0)
 
     def test_with_real_lexicon(self) -> None:
-        lexicon_path = str(
-            Path(__file__).resolve().parents[2] / "data" / "lexicons" / "semantic_category.txt"
-        )
+        lexicon_path = str(Path(__file__).resolve().parents[2] / "data" / "lexicons" / "semantic_category.txt")
         category_terms = parse_semantic_category_lexicon(lexicon_path)
         text = "他手持长剑，修炼神功，心中思考着父亲的教诲。"
         result = semantic_category_densities(text, category_terms)

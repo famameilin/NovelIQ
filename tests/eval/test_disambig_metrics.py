@@ -63,9 +63,7 @@ def test_compute_metrics_by_entity_type_groups_by_type():
             "src.storage.repositories.GraphRepository",
             lambda session: mock_graph_repo,
         )
-        result = compute_metrics_by_entity_type(
-            gold_records, system_merges, "run-1", session
-        )
+        result = compute_metrics_by_entity_type(gold_records, system_merges, "run-1", session)
 
     assert "character" in result
     assert "group" in result
@@ -93,13 +91,11 @@ def test_compute_metrics_by_entity_type_missing_type_warning(caplog):
     )
 
     with pytest.MonkeyPatch().context() as m:
-            m.setattr(
-                "src.storage.repositories.GraphRepository",
-                lambda session: mock_graph_repo,
-            )
-            type_metrics = compute_metrics_by_entity_type(
-                gold_records, system_merges, "run-1", session
-            )
+        m.setattr(
+            "src.storage.repositories.GraphRepository",
+            lambda session: mock_graph_repo,
+        )
+        type_metrics = compute_metrics_by_entity_type(gold_records, system_merges, "run-1", session)
 
     logger.remove(handler_id)
     assert "灵禽" in caplog.text

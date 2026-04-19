@@ -50,6 +50,7 @@ async def execute_phase1_call(
     messages: list[dict],
     alias_map: dict[str, str] | None,
     active_entities: str | None,
+    evidence_bundle,
     chunk_id: int | None,
     retry_messages: list[dict] | None = None,
     run_id: str | None = None,
@@ -106,6 +107,7 @@ async def execute_phase1_call(
         "text": text,
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
+        "evidence_bundle": evidence_bundle,
     }
 
     result = client._validate_annotation(result, sources, chunk_id, content_clean)
@@ -121,6 +123,7 @@ async def execute_phase1_with_retry(
     messages: list[dict],
     alias_map: dict[str, str] | None,
     active_entities: str | None,
+    evidence_bundle,
     chunk_id: int | None,
     cloud_client: AnnotationClient | None,
     run_id: str | None = None,
@@ -159,6 +162,7 @@ async def execute_phase1_with_retry(
             messages,
             alias_map,
             active_entities,
+            evidence_bundle,
             chunk_id,
             retry_messages,
             run_id=run_id,
@@ -197,6 +201,7 @@ async def annotate_chunk_phase1(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     active_entities: str | None = None,
+    evidence_bundle=None,
     cloud_client: AnnotationClient | None = None,
     run_id: str | None = None,
     disambig_context: str | None = None,
@@ -223,6 +228,7 @@ async def annotate_chunk_phase1(
         chapter_id=chapter_id,
         active_entities=active_entities,
         disambig_context=disambig_context,
+        evidence_bundle=evidence_bundle,
     )
 
     return await execute_phase1_with_retry(
@@ -231,6 +237,7 @@ async def annotate_chunk_phase1(
         messages=messages,
         alias_map=alias_map,
         active_entities=active_entities,
+        evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         cloud_client=cloud_client,
         run_id=run_id,

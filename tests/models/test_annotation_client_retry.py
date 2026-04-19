@@ -10,10 +10,11 @@ Phase1/Phase2 独立重试机制测试
 任务: code-quality-refactor - Task 9 拆分annotation_client
 修改内容: 更新测试以调用子模块函数
 """
+
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -25,10 +26,33 @@ from src.models.local.annotation import (
 from src.models.local.annotation.multi_phase import annotate_chunk_multi_phase
 from src.models.local.annotation.phase1 import annotate_chunk_phase1
 from src.models.local.annotation.phase2 import annotate_chunk_phase2
-from src.models.local.schema import ChunkAnnotation, ForeshadowingResult
+from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, ForeshadowingResult
+from src.rag import (
+    AliasMapping,
+    CanonicalEntity,
+    ConfirmedRelation,
+    EntityTypeFact,
+    EvidenceBundle,
+    EvidenceItem,
+    Level1AuthoritySnapshot,
+)
 
 
-def create_mock_annotation() -> ChunkAnnotation:
+def create_mock_annotation(character_names: list[str] | None = None) -> ChunkAnnotation:
+    characters = (
+        [
+            CharacterSnapshot(
+                name=name,
+                role_function="主体",
+                action="观察",
+                action_type="其他",
+                emotion_score="neutral",
+            )
+            for name in character_names
+        ]
+        if character_names
+        else []
+    )
     return ChunkAnnotation(
         emotional_valence="neutral",
         event_type="铺垫",
@@ -37,7 +61,7 @@ def create_mock_annotation() -> ChunkAnnotation:
         has_foreshadowing=False,
         foreshadowing_type=None,
         foreshadowing_desc="",
-        characters=[],
+        characters=characters,
         relations=[],
         dialogues=[],
         character_appearances=[],
@@ -55,10 +79,84 @@ def create_mock_foreshadowing() -> ForeshadowingResult:
     )
 
 
+def create_phase4_evidence_bundle() -> EvidenceBundle:
+    return EvidenceBundle(
+        structured_evidence=[
+            EvidenceItem(
+                evidence_type="alias_mapping",
+                source="level1",
+                content="灰衣人 -> 白芷",
+                metadata={"alias": "灰衣人", "canonical": "白芷"},
+            ),
+            EvidenceItem(
+                evidence_type="canonical_entity",
+                source="level1",
+                content="白芷",
+                metadata={"name": "白芷", "entity_type": "character"},
+            ),
+            EvidenceItem(
+                evidence_type="confirmed_relation",
+                source="level1",
+                content="白芷<盟友>侯飞白",
+                metadata={
+                    "from_name": "白芷",
+                    "to_name": "侯飞白",
+                    "relation_type": "盟友",
+                    "is_active": True,
+                },
+            ),
+            EvidenceItem(
+                evidence_type="entity_type",
+                source="level1",
+                content="白芷:character",
+                metadata={"name": "白芷", "entity_type": "character"},
+            ),
+        ],
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="active_entity",
+                source="level2",
+                content="白芷",
+                metadata={
+                    "name": "白芷",
+                    "role": "主体",
+                    "recent_action": "试探侯飞白",
+                    "recent_emotion": "警惕",
+                    "last_seen_chunk": 18,
+                },
+            ),
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content="「灰衣人」可能是：白芷",
+            ),
+        ],
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="灰衣人曾在旧宅与侯飞白短暂结盟。",
+                metadata={
+                    "chunk_id": 9,
+                    "similarity": 0.93,
+                    "text": "灰衣人曾在旧宅与侯飞白短暂结盟。",
+                },
+            )
+        ],
+        requested_names=["灰衣人"],
+        level1_snapshot=Level1AuthoritySnapshot(
+            alias_mappings=[AliasMapping(alias="灰衣人", canonical="白芷")],
+            canonical_entities=[CanonicalEntity(name="白芷", entity_type="character")],
+            confirmed_relations=[ConfirmedRelation(from_name="白芷", to_name="侯飞白", relation_type="盟友")],
+            entity_types=[EntityTypeFact(name="白芷", entity_type="character")],
+        ),
+    )
+
+
 class MockAnnotationClient:
     """
     Mock AnnotationClient for testing
-    
+
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Phase1/Phase2独立重试机制
@@ -126,7 +224,7 @@ class MockAnnotationClient:
     def _get_instructor_client(self):
         return None
 
-    def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None):
+    async def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None):
         self._call_count += 1
         if self.should_fail:
             raise ConnectionError("Connection failed")
@@ -156,7 +254,7 @@ class MockAnnotationClient:
         pass
 
 
-class TestPhase1Retry(unittest.TestCase):
+class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
     """
     Phase1 重试机制测试
 
@@ -175,7 +273,7 @@ class TestPhase1Retry(unittest.TestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id):
             call_count[0] += 1
             return MagicMock()
 
@@ -195,7 +293,7 @@ class TestPhase1Retry(unittest.TestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id):
             call_count[0] += 1
             if call_count[0] < 3:
                 raise ConnectionError("Connection failed")
@@ -220,11 +318,11 @@ class TestPhase1Retry(unittest.TestCase):
         local_call_count = [0]
         cloud_call_count = [0]
 
-        def local_call_api(messages, enable_thinking, chunk_id):
+        async def local_call_api(messages, enable_thinking, chunk_id):
             local_call_count[0] += 1
             raise ConnectionError("Local connection failed")
 
-        def cloud_call_api(messages, enable_thinking, chunk_id):
+        async def cloud_call_api(messages, enable_thinking, chunk_id):
             cloud_call_count[0] += 1
             return MagicMock()
 
@@ -247,7 +345,7 @@ class TestPhase1Retry(unittest.TestCase):
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        def always_fail(messages, enable_thinking, chunk_id):
+        async def always_fail(messages, enable_thinking, chunk_id):
             raise ConnectionError("Connection failed")
 
         local_client._call_annotation_api = always_fail
@@ -262,7 +360,7 @@ class TestPhase1Retry(unittest.TestCase):
             )
 
 
-class TestPhase2Retry(unittest.TestCase):
+class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
     """
     Phase2 重试机制测试
 
@@ -293,7 +391,7 @@ class TestPhase2Retry(unittest.TestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        def mock_call_annotation_api(*args, **kwargs):
+        async def mock_call_annotation_api(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] < 3:
                 raise ConnectionError("Instructor connection failed")
@@ -322,11 +420,11 @@ class TestPhase2Retry(unittest.TestCase):
         local_call_count = [0]
         cloud_call_count = [0]
 
-        def local_call_annotation_api(*args, **kwargs):
+        async def local_call_annotation_api(*args, **kwargs):
             local_call_count[0] += 1
             raise ConnectionError("Local connection failed")
 
-        def cloud_call_annotation_api(*args, **kwargs):
+        async def cloud_call_annotation_api(*args, **kwargs):
             cloud_call_count[0] += 1
             result = create_mock_foreshadowing()
             response = MagicMock()
@@ -352,7 +450,7 @@ class TestPhase2Retry(unittest.TestCase):
         local_client = MockAnnotationClient()
         cloud_client = MockAnnotationClient()
 
-        def always_fail(*args, **kwargs):
+        async def always_fail(*args, **kwargs):
             raise ConnectionError("Connection failed")
 
         local_client._call_annotation_api = always_fail
@@ -366,8 +464,27 @@ class TestPhase2Retry(unittest.TestCase):
                 cloud_client=cloud_client,
             )
 
+    async def test_phase2_passes_supplied_evidence_bundle_to_message_builder(self):
+        """Phase2 只消费上游 evidence_bundle，不再自行触发新的取证分支。"""
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="phase2_evidence_bundle")
 
-class TestTwoPhaseIntegration(unittest.TestCase):
+        with patch(
+            "src.models.local.annotation.phase2._build_foreshadowing_messages",
+            return_value=[{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
+        ) as mock_build_messages:
+            result = await annotate_chunk_phase2(
+                client=client,
+                text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
+                chunk_id=12,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result, ForeshadowingResult)
+        self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
+
+
+class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):
     """
     双次调用集成测试
 
@@ -381,7 +498,7 @@ class TestTwoPhaseIntegration(unittest.TestCase):
     修改内容: 更新测试以调用子模块函数
     """
 
-    @patch('src.models.local.annotation.multi_phase.settings')
+    @patch("src.models.local.annotation.multi_phase.settings")
     async def test_two_phase_serial_passes_cloud_client(self, mock_settings):
         """串行模式传递 cloud_client 参数"""
         mock_settings.analysis.multi_phase_annotation.parallel = False
@@ -398,7 +515,35 @@ class TestTwoPhaseIntegration(unittest.TestCase):
 
         self.assertIsInstance(result.annotation, ChunkAnnotation)
 
-    @patch('src.models.local.annotation.multi_phase.settings')
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_serial_passes_evidence_bundle_to_phase2(self, mock_settings):
+        """串行模式会把上游 evidence_bundle 继续透传给 Phase2。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = False
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ) as mock_phase2,
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="测试文本",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase2.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
     async def test_two_phase_parallel_passes_cloud_client(self, mock_settings):
         """并行模式传递 cloud_client 参数"""
         mock_settings.analysis.multi_phase_annotation.parallel = True
@@ -414,6 +559,256 @@ class TestTwoPhaseIntegration(unittest.TestCase):
         )
 
         self.assertIsInstance(result.annotation, ChunkAnnotation)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_parallel_passes_evidence_bundle_to_phase2(self, mock_settings):
+        """并行模式也会把上游 evidence_bundle 继续透传给 Phase2。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = True
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ) as mock_phase2,
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="测试文本",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase2.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_serial_passes_evidence_bundle_to_phase3(self, mock_settings):
+        """串行模式也会把上游 evidence_bundle 继续透传给 Phase3。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = False
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+        phase3_result = MagicMock(
+            speaker_lengths={},
+            canonical_attribution={},
+            dialogues=[],
+            dialogue_tones={},
+            dialogue_identity_clues={},
+        )
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.compute_dialogue_lengths_with_llm",
+                new=AsyncMock(return_value=phase3_result),
+            ) as mock_phase3,
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="他说：“你好。”",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase3.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_parallel_passes_evidence_bundle_to_phase3(self, mock_settings):
+        """并行模式也会把上游 evidence_bundle 继续透传给 Phase3。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = True
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+        phase3_result = MagicMock(
+            speaker_lengths={},
+            canonical_attribution={},
+            dialogues=[],
+            dialogue_tones={},
+            dialogue_identity_clues={},
+        )
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.compute_dialogue_lengths_with_llm",
+                new=AsyncMock(return_value=phase3_result),
+            ) as mock_phase3,
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="他说：“你好。”",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase3.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_serial_passes_evidence_bundle_to_phase4(self, mock_settings):
+        """串行模式也会把上游 evidence_bundle 继续透传给 Phase4。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = False
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation(["白芷", "侯飞白"])),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+                new=AsyncMock(return_value=[]),
+            ) as mock_phase4,
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="白芷看向侯飞白。",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase4.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_parallel_passes_evidence_bundle_to_phase4(self, mock_settings):
+        """并行模式也会把上游 evidence_bundle 继续透传给 Phase4。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = True
+
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="shared_phase_evidence_bundle")
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation(["白芷", "侯飞白"])),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase4",
+                new=AsyncMock(return_value=[]),
+            ) as mock_phase4,
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="白芷看向侯飞白。",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        self.assertIs(mock_phase4.await_args.kwargs["evidence_bundle"], evidence_bundle)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_serial_phase4_prompt_contains_shared_evidence_sections(self, mock_settings):
+        """串行模式的 Phase4 真实 prompt 会消费 Level1/2/3 section。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = False
+
+        client = MockAnnotationClient()
+        evidence_bundle = create_phase4_evidence_bundle()
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation(["白芷", "侯飞白"])),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.phase4.execute_phase4_call",
+                new=AsyncMock(return_value=[]),
+            ) as mock_phase4_call,
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="灰衣人抬眼看向侯飞白。",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        phase4_prompt = mock_phase4_call.await_args.kwargs["messages"][1]["content"]
+        self.assertIn("<Narrative_Evidence_Level1>", phase4_prompt)
+        self.assertIn("【近期活跃角色】", phase4_prompt)
+        self.assertIn("<Vector_Evidence>", phase4_prompt)
+        self.assertNotIn("<Disambig_Candidates>", phase4_prompt)
+
+    @patch("src.models.local.annotation.multi_phase.settings")
+    async def test_two_phase_parallel_phase4_prompt_contains_shared_evidence_sections(self, mock_settings):
+        """并行模式的 Phase4 真实 prompt 也会消费同一组 Level1/2/3 section。"""
+        mock_settings.analysis.multi_phase_annotation.parallel = True
+
+        client = MockAnnotationClient()
+        evidence_bundle = create_phase4_evidence_bundle()
+
+        with (
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase1",
+                new=AsyncMock(return_value=create_mock_annotation(["白芷", "侯飞白"])),
+            ),
+            patch(
+                "src.models.local.annotation.multi_phase.annotate_chunk_phase2",
+                new=AsyncMock(return_value=create_mock_foreshadowing()),
+            ),
+            patch(
+                "src.models.local.annotation.phase4.execute_phase4_call",
+                new=AsyncMock(return_value=[]),
+            ) as mock_phase4_call,
+        ):
+            result = await annotate_chunk_multi_phase(
+                client=client,
+                text="灰衣人抬眼看向侯飞白。",
+                chunk_id=1,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result.annotation, ChunkAnnotation)
+        phase4_prompt = mock_phase4_call.await_args.kwargs["messages"][1]["content"]
+        self.assertIn("<Narrative_Evidence_Level1>", phase4_prompt)
+        self.assertIn("【近期活跃角色】", phase4_prompt)
+        self.assertIn("<Vector_Evidence>", phase4_prompt)
+        self.assertNotIn("<Disambig_Candidates>", phase4_prompt)
 
 
 if __name__ == "__main__":

@@ -14,15 +14,17 @@ from src.models.local.schema import ChunkAnnotation
 
 class TestJsonParsing(unittest.TestCase):
     def test_parse_valid_json(self) -> None:
-        content = json.dumps({
-            "emotional_valence": "neutral",
-            "event_type": "铺垫",
-            "pivot_moment": False,
-            "cliffhanger": False,
-            "has_foreshadowing": False,
-            "foreshadowing_type": None,
-            "foreshadowing_desc": "",
-        })
+        content = json.dumps(
+            {
+                "emotional_valence": "neutral",
+                "event_type": "铺垫",
+                "pivot_moment": False,
+                "cliffhanger": False,
+                "has_foreshadowing": False,
+                "foreshadowing_type": None,
+                "foreshadowing_desc": "",
+            }
+        )
         result = try_parse_json(content)
         self.assertIsNotNone(result)
         assert result is not None

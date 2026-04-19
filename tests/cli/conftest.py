@@ -12,6 +12,7 @@
 任务: phase4-code-review-fix
 修改内容: 移除已废弃的 relations 和 character_appearances 字段，使用 location_appearances
 """
+
 import sys
 from pathlib import Path
 
@@ -100,7 +101,7 @@ class FakeLocalModelClient:
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context=None,
     ) -> dict[str, str]:
         result = {}
         for item in candidates:

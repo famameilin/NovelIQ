@@ -9,15 +9,19 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
+
+# Keep uv state inside the repo to avoid user-profile permission issues.
+$env:UV_CACHE_DIR = Join-Path $RepoRoot ".uv-cache"
+$env:UV_PYTHON_INSTALL_DIR = Join-Path $RepoRoot ".uv-python"
+
+# Normalize remaining args so strict mode does not trip on null/object values.
 $CommandArgs = @(
     $CommandArgs |
     Where-Object { $null -ne $_ -and $_ -ne "" } |
     ForEach-Object { [string]$_ }
 )
-# 中文注释：不要和 PowerShell 自动变量 `$Args` 重名；同时把剩余参数归一化成数组，
-# 避免 test/lint/typecheck 的无参入口在严格模式下因为空值直接崩掉。
 
 function Test-CommandExists {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -56,6 +60,11 @@ function Run-Uv {
     & uv run @CommandArgs
 }
 
+function Run-VenvPython {
+    param([Parameter(Mandatory = $true)][string[]]$CommandArgs)
+    & ".venv\Scripts\python.exe" @CommandArgs
+}
+
 function Show-Help {
     @"
 Usage:
@@ -65,7 +74,7 @@ Commands:
   setup                Create .venv if missing and sync dependencies (uv sync --all-groups)
   api [args...]        Run API via uv run python -m src.api.main [args...]
   cli [args...]        Run CLI via uv run python -m src.cli.main [args...]
-  test [args...]       Run tests via uv run python -m pytest [args...]
+  test [args...]       Run tests via .venv\Scripts\python.exe -m pytest [args...]
   lint [args...]       Run ruff via uv run ruff check [args...]
   typecheck [args...]  Run mypy for src via uv run mypy [args...]
   help                 Show this help
@@ -99,10 +108,10 @@ switch ($Command.ToLowerInvariant()) {
     "test" {
         Ensure-Setup
         if ($CommandArgs.Count -eq 0) {
-            Run-Uv -CommandArgs @("--group", "dev", "python", "-m", "pytest", "tests/", "-v")
+            Run-VenvPython -CommandArgs @("-m", "pytest", "tests/", "-v")
         } else {
-            $commandArgs = @("--group", "dev", "python", "-m", "pytest") + $CommandArgs
-            Run-Uv -CommandArgs $commandArgs
+            $commandArgs = @("-m", "pytest") + $CommandArgs
+            Run-VenvPython -CommandArgs $commandArgs
         }
     }
     "lint" {

@@ -34,6 +34,7 @@ def build_phase1_messages(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     disambig_context: str | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建Phase1消息
@@ -62,6 +63,7 @@ def build_phase1_messages(
         chapter_id=chapter_id,
         active_entities=active_entities,
         disambig_context=disambig_context,
+        evidence_bundle=evidence_bundle,
     )
 
 
@@ -75,6 +77,7 @@ def build_phase2_messages(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
+    evidence_bundle=None,
 ) -> list[dict]:
     """
     构建Phase2消息
@@ -93,6 +96,7 @@ def build_phase2_messages(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
+        evidence_bundle=evidence_bundle,
     )
 
 
@@ -100,6 +104,7 @@ def build_validation_sources(
     text: str,
     active_entities: str | None = None,
     alias_map: dict[str, str] | None = None,
+    evidence_bundle=None,
 ) -> dict:
     """
     构建验证来源字典
@@ -126,4 +131,5 @@ def build_validation_sources(
         "text": text,
         "active_entities": parse_active_entities(active_entities),
         "alias_map": alias_map or {},
+        "evidence_bundle": evidence_bundle,
     }

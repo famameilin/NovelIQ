@@ -41,7 +41,9 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"贺重明": DISAMBIG_CONFIDENCE_HIGH},
-            evidence_profiles={"贺重明": build_evidence_profile("贺重明的真实身份是伯安 | 【身份提示】贺重明其实就是伯安")},
+            evidence_profiles={
+                "贺重明": build_evidence_profile("贺重明的真实身份是伯安 | 【身份提示】贺重明其实就是伯安")
+            },
         )
 
         validated = validate_confidence_with_evidence(result, [])
@@ -68,7 +70,9 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"贺重明": DISAMBIG_CONFIDENCE_HIGH},
-            evidence_profiles={"贺重明": build_evidence_profile("贺重明的真实身份是伯安 | 【身份提示】贺重明其实就是伯安")},
+            evidence_profiles={
+                "贺重明": build_evidence_profile("贺重明的真实身份是伯安 | 【身份提示】贺重明其实就是伯安")
+            },
         )
 
         validated = validate_confidence_with_evidence(result, ["伯安"])
@@ -82,7 +86,9 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
             entity_types={"伯安": "character"},
             entity_relations=[],
             alias_confidence={"贺重明": DISAMBIG_CONFIDENCE_HIGH},
-            evidence_profiles={"贺重明": build_evidence_profile("【前文总结】伯安出手 | 【身份提示】贺重明其实就是伯安")},
+            evidence_profiles={
+                "贺重明": build_evidence_profile("【前文总结】伯安出手 | 【身份提示】贺重明其实就是伯安")
+            },
         )
 
         validated = validate_confidence_with_evidence(result, [])
