@@ -386,6 +386,21 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, ForeshadowingResult)
 
+    @patch("src.models.local.annotation.phase2.record_model_interaction")
+    async def test_phase2_persists_thinking_content(self, mock_record_model_interaction: MagicMock):
+        """Phase2 会持久化 _process_annotation_response 提取出的 thinking_content。"""
+        client = MockAnnotationClient()
+        client._process_annotation_response = MagicMock(return_value=("{}", "thinking", MagicMock()))
+
+        result = await annotate_chunk_phase2(
+            client=client,
+            text="测试文本",
+            chunk_id=1,
+        )
+
+        self.assertIsInstance(result, ForeshadowingResult)
+        self.assertEqual(mock_record_model_interaction.call_args.kwargs["thinking_content"], "thinking")
+
     async def test_phase2_retry_on_instructor_failure(self):
         """Phase2 Instructor 调用失败时重试"""
         client = MockAnnotationClient()

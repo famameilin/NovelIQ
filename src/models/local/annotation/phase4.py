@@ -195,6 +195,9 @@ async def execute_phase4_call(
     duration_ms = int((time.time() - start_time) * 1000)
     content_clean = str(parsed.model_dump())
     thinking_content = getattr(response, "thinking_content", None)
+    process_response = getattr(client, "_process_annotation_response", None)
+    if callable(process_response) and hasattr(response, "choices"):
+        content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase4")
 
     record_model_interaction(
         run_id=run_id,

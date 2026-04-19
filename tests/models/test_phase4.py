@@ -554,6 +554,11 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         mock_client = MagicMock()
         mock_client._config.model = "test-model"
         mock_client._is_cloud_api.return_value = False
+        mock_client._process_annotation_response.return_value = (
+            '{"relations": []}',
+            "phase4 thinking",
+            MagicMock(),
+        )
 
         mock_result = RelationExtractionResult(
             relations=[
@@ -567,11 +572,11 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
             ]
         )
         mock_response = MagicMock()
-        mock_response.thinking_content = None
+        mock_response.choices = [MagicMock(message=MagicMock(content='{"relations": []}', reasoning_content="phase4 thinking"))]
 
         mock_client._call_annotation_api = AsyncMock(return_value=(mock_result, mock_response))
 
-        with patch("src.models.local.annotation.phase4.record_model_interaction"):
+        with patch("src.models.local.annotation.phase4.record_model_interaction") as mock_record_model_interaction:
             result = await annotate_chunk_phase4(
                 mock_client,
                 "张三打了李四",
@@ -584,6 +589,7 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].from_name, "张三")
         self.assertEqual(result[0].to_name, "李四")
+        self.assertEqual(mock_record_model_interaction.call_args.kwargs["thinking_content"], "phase4 thinking")
         call_messages = mock_client._call_annotation_api.await_args.kwargs["messages"]
         self.assertIn("张三、李四", call_messages[1]["content"])
         self.assertIn("<Narrative_Evidence_Level1>", call_messages[1]["content"])
