@@ -491,11 +491,23 @@ async def _run_incremental_disambiguation_with_state(
     if not all_disambig_candidates:
         return state
 
-    # Candidate quality filter: remove blacklist, keep protected + normal
-    context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
+    # 增量消歧只能读取当前 chunk 及之前的例句，避免 future-chunk 线索提前泄漏。
+    context_sentences = build_context_sentences(
+        conn,
+        all_disambig_candidates,
+        alias_keywords,
+        run_id=run_id,
+        max_chunk_id=chunk_id,
+    )
     _, all_disambig_candidates, classifications = filter_candidates_by_class(all_disambig_candidates, context_sentences)
     # Rebuild context for filtered candidates only
-    context_sentences = build_context_sentences(conn, all_disambig_candidates, alias_keywords, run_id=run_id)
+    context_sentences = build_context_sentences(
+        conn,
+        all_disambig_candidates,
+        alias_keywords,
+        run_id=run_id,
+        max_chunk_id=chunk_id,
+    )
     # Inject protected category labels into context for prompt
     _inject_category_into_context(classifications, context_sentences)
     existing_names = list(state.known_canonical_names)

@@ -228,7 +228,7 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline.build_context_sentences",
             return_value={"灰衣人": "【身份线索】她自称白芷"},
-        ),
+        ) as mock_build_context_sentences,
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline.filter_candidates_by_class",
             return_value=([], [{"name": "灰衣人", "count": 3}], []),
@@ -283,6 +283,10 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     assert rag_retriever.calls[0]["method"] == "collect_evidence_with_level3"
     assert rag_retriever.calls[0]["current_chunk"] == 12
     assert rag_retriever.calls[0]["exclude_chunk_ids"] == [12]
+    assert mock_build_context_sentences.call_count == 2
+    for call in mock_build_context_sentences.call_args_list:
+        assert call.kwargs["max_chunk_id"] == 12
+        assert call.kwargs["run_id"] == "run-1"
     build_hint_call = mock_build_existing_hint.call_args
     assert build_hint_call.kwargs["current_chunk_id"] == 12
 
