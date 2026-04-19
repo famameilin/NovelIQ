@@ -40,7 +40,7 @@ export interface TaskRowProps {
   onSelect: (taskId: string) => void;
   onCancel: (taskId: string) => void;
   onDelete: (taskId: string) => void;
-  onRetry?: (taskId: string) => void;
+  onResume?: (taskId: string) => void;
 }
 
 function getStatusIcon(status: TaskStatus) {
@@ -87,7 +87,7 @@ export function TaskRow({
   onSelect,
   onCancel,
   onDelete,
-  onRetry,
+  onResume,
 }: TaskRowProps) {
   const config = taskStatusConfig[task.status] ?? taskStatusConfig.pending;
   const isRunning = isRunningStatus(task.status);
@@ -178,7 +178,7 @@ export function TaskRow({
               className="h-6 w-6 text-primary hover:text-primary"
               onClick={(e) => {
                 e.stopPropagation();
-                onRetry?.(task.task_id);
+                onResume?.(task.task_id);
               }}
               title="继续分析"
             >
