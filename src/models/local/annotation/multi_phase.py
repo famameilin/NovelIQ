@@ -45,7 +45,7 @@ from src.models.local.parser import validate_foreshadowing_result
 from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
 from .phase2 import annotate_chunk_phase2
-from .phase3 import DialogueLengthResult, compute_dialogue_lengths_with_llm, extract_dialogues_from_text
+from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_text
 from .phase4 import annotate_chunk_phase4
 
 if TYPE_CHECKING:

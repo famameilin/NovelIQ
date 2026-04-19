@@ -249,10 +249,21 @@ def get_pool_status() -> dict | None:
         return None
 
     pool = _engine.pool
+    if not isinstance(pool, QueuePool):
+        return {
+            "pool_size": 0,
+            "checked_in": 0,
+            "checked_out": 0,
+            "overflow": 0,
+            "invalid": 0,
+        }
+
+    invalidated_count_attr = getattr(pool, "invalidatedcount", None)
+    invalidated_count = int(invalidated_count_attr()) if callable(invalidated_count_attr) else 0
     return {
-        "pool_size": pool.size(),  # type: ignore[attr-defined]
-        "checked_in": pool.checkedin(),  # type: ignore[attr-defined]
-        "checked_out": pool.checkedout(),  # type: ignore[attr-defined]
-        "overflow": pool.overflow(),  # type: ignore[attr-defined]
-        "invalid": pool.invalidatedcount() if hasattr(pool, "invalidatedcount") else 0,
+        "pool_size": pool.size(),
+        "checked_in": pool.checkedin(),
+        "checked_out": pool.checkedout(),
+        "overflow": pool.overflow(),
+        "invalid": invalidated_count,
     }

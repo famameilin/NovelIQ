@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 from src.config.constants import PHASE_MAX_RETRIES
-from src.models.local.evidence_renderer_shared import render_vector_evidence
 from src.models.local.annotation.api_call import (
     execute_validation_retry_call,
     extract_names_from_annotation,
@@ -68,6 +67,7 @@ from src.models.local.annotation.validation import (
     retry_with_validation,
     validate_annotation_names,
 )
+from src.models.local.evidence_renderer_shared import render_vector_evidence
 
 __all__ = [
     "PHASE_MAX_RETRIES",

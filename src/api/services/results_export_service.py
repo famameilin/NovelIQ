@@ -14,6 +14,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.api.routes.results_converters import build_aggregate_metrics_contract, validate_aggregate_metrics_contract
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
@@ -27,7 +28,6 @@ from src.api.routes.results_fetchers import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
-from src.api.routes.results_converters import build_aggregate_metrics_contract, validate_aggregate_metrics_contract
 from src.knowledge.authority import (
     ExportGraphAuthorityView,
     GraphAuthorityReport,
