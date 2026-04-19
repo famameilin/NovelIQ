@@ -7,9 +7,12 @@
 import { setupWorker } from "msw/browser";
 import { novelListHandler, novelUploadHandler, novelDeleteHandler, novelBatchDeleteHandler } from "./handlers/novels";
 import {
+  createTaskHandler,
   analyzeHandler,
   reanalyzeHandler,
+  taskStatusHandler,
   analysisStatusHandler,
+  resumeTaskHandler,
   analysisTasksHandler,
   deleteTaskHandler,
   batchDeleteTasksHandler,
@@ -37,9 +40,12 @@ export const worker = setupWorker(
   novelDeleteHandler,
   novelBatchDeleteHandler,
   // 分析
+  createTaskHandler,
   analyzeHandler,
   reanalyzeHandler,
+  taskStatusHandler,
   analysisStatusHandler,
+  resumeTaskHandler,
   analysisTasksHandler,
   deleteTaskHandler,
   batchDeleteTasksHandler,

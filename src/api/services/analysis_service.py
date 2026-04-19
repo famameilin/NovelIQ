@@ -246,45 +246,89 @@ class AnalysisService:
             "skip_diagnose": not request.force_diagnose,
         }
 
-    async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
-        novel = self.novel_service.get_novel(novel_id)
+    def _schedule_analysis_task(self, task_id: str, novel: dict, request: AnalyzeRequest | None = None) -> None:
+        """
+        安排分析协程并记录 asyncio.Task 引用。
 
-        if request and request.task_id:
-            specified_task_id = request.task_id
-            specified_task = self.novel_service.get_task(specified_task_id)
-            if specified_task.get("novel_id") != novel_id:
-                raise AnalysisError(f"任务 {specified_task_id} 不属于小说 {novel_id}")
-            logger.info(f"Using specified task_id: {specified_task_id}")
-
-            if specified_task.get("status") in ("pending", "failed"):
-                task = asyncio.create_task(self._run_analysis(specified_task_id, novel, request))
-                self.task_manager.store_asyncio_task(specified_task_id, task)
-
-            return specified_task_id
-
-        existing_task, error = self.novel_service.get_single_valid_task(novel_id)
-
-        if error:
-            raise AnalysisError(error)
-
-        if existing_task:
-            task_id = existing_task["task_id"]
-            status = existing_task.get("status", "unknown")
-            logger.info(f"Found existing task {task_id} (status={status}) for novel {novel_id}, reusing it")
-
-            if status == "pending":
-                task = asyncio.create_task(self._run_analysis(task_id, novel, request))
-                self.task_manager.store_asyncio_task(task_id, task)
-
-            return task_id
-
-        task_id = self.novel_service.create_task(novel_id)
-        self.task_manager.create_task(task_id, novel_id)
-
+        创建时间: 2026-04-19
+        创建者: Codex (GPT-5)
+        任务: task-api-decouple
+        说明: 统一 create/resume 两条路径的协程调度，避免重复代码。
+        """
         task = asyncio.create_task(self._run_analysis(task_id, novel, request))
         self.task_manager.store_asyncio_task(task_id, task)
 
+    async def create_task_and_start(self, novel_id: str) -> str:
+        """
+        创建新任务并立即启动分析。
+
+        创建时间: 2026-04-19
+        创建者: Codex (GPT-5)
+        任务: task-api-decouple
+        说明: 只负责“创建+启动”，不做复用/猜测行为。
+        """
+        novel = self.novel_service.get_novel(novel_id)
+        task_id = self.novel_service.create_task(novel_id)
+        self.task_manager.create_task(task_id, novel_id)
+        self._schedule_analysis_task(task_id, novel)
         return task_id
+
+    async def resume_task(self, novel_id: str, task_id: str) -> str:
+        """
+        继续执行 pending/failed 任务。
+
+        创建时间: 2026-04-19
+        创建者: Codex (GPT-5)
+        任务: task-api-decouple
+        说明: 只负责“继续已有任务”，不创建新任务。
+        """
+        novel = self.novel_service.get_novel(novel_id)
+        task = self.novel_service.get_task(task_id)
+
+        if task.get("novel_id") != novel_id:
+            raise ValueError(f"任务 {task_id} 不属于小说 {novel_id}")
+
+        status = task.get("status", "")
+        if status not in ("pending", "failed"):
+            raise ValueError(f"仅支持继续 pending/failed 任务，当前状态为 {status}")
+
+        task_info = self.task_manager.get_task(task_id)
+        if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():
+            raise ValueError(f"任务 {task_id} 正在运行，不能重复继续")
+
+        if task_info is None:
+            self.task_manager.create_task(task_id, novel_id)
+        else:
+            # 重置内存态，避免沿用上一次失败任务的残留信息。
+            self.task_manager.update_task(
+                task_id,
+                status=TaskStatus.PENDING,
+                progress=0.0,
+                stage=None,
+                sub_stage=None,
+                current=0,
+                total=100,
+                message=None,
+                error=None,
+                llm_outputs=[],
+                completed_at=None,
+            )
+
+        self._schedule_analysis_task(task_id, novel, AnalyzeRequest(task_id=task_id))
+        return task_id
+
+    async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
+        """
+        兼容入口：保留旧方法名，语义收敛为“创建新任务并启动”。
+
+        修改时间: 2026-04-19
+        修改者: Codex (GPT-5)
+        任务: task-api-decouple
+        修改内容: 移除 create/reuse/resume 混合逻辑，改为仅创建新任务。
+        """
+        if request and request.task_id:
+            raise AnalysisError("analyze 接口不再支持 task_id 续跑，请改用 /tasks/{task_id}/resume")
+        return await self.create_task_and_start(novel_id)
 
     async def start_reanalysis(self, novel_id: str, request: ReanalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
