@@ -6,6 +6,7 @@ Metrics 模块测试
 任务: 移除向后兼容代码
 修改内容: 移除旧版精确匹配函数测试，保留 phrase 模式匹配测试
 """
+
 import sys
 import unittest
 from pathlib import Path
@@ -76,7 +77,7 @@ class TestTextUtils(unittest.TestCase):
         self.assertEqual(split_sentences(text), ["你好", "我来了", "好么", "行"])
 
     def test_dialogue_length(self) -> None:
-        text = "他说：「你好」然后说\"再见\""
+        text = '他说：「你好」然后说"再见"'
         self.assertEqual(dialogue_length(text), 4)
 
     def test_tokenize_words(self) -> None:

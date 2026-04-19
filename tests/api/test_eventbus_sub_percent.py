@@ -1,6 +1,7 @@
 """
 Tests for EventBus.emit sub_percent propagation.
 """
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.api.models.events import StreamEvent, AnalysisEventBus

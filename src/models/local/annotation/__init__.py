@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from src.config.constants import PHASE_MAX_RETRIES
+from src.models.local.evidence_renderer_shared import render_vector_evidence
 from src.models.local.annotation.api_call import (
     execute_validation_retry_call,
     extract_names_from_annotation,
@@ -37,6 +38,10 @@ from src.models.local.annotation.context import (
     NameValidationMaxRetriesExceededError,
     Phase1MaxRetriesExceededError,
     Phase2MaxRetriesExceededError,
+)
+from src.models.local.annotation.evidence_renderer import (
+    AnnotationPromptBlocks,
+    render_annotation_prompt_blocks,
 )
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
@@ -71,7 +76,10 @@ __all__ = [
     "Phase1MaxRetriesExceededError",
     "Phase2MaxRetriesExceededError",
     "MultiPhaseAnnotationResult",
+    "AnnotationPromptBlocks",
     "DialogueLengthResult",
+    "render_annotation_prompt_blocks",
+    "render_vector_evidence",
     "_build_annotation_messages_v2",
     "_build_foreshadowing_messages",
     "build_phase1_messages",

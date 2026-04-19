@@ -74,6 +74,7 @@ def build_context_sentences(
     alias_keywords: list[str] | None = None,
     prev_chunks: int = ANNOTATION_CONFIG.prev_chunks,
     run_id: str | None = None,
+    max_chunk_id: int | None = None,
 ) -> dict[str, str]:
     """为候选名构建上下文句子
 
@@ -89,8 +90,8 @@ def build_context_sentences(
 
     name_list = [candidate["name"] for candidate in candidates]
 
-    result = _build_sentence_pool(conn, name_list, alias_keywords, run_id)
-    _add_identity_clues(conn, result, name_list, run_id)
+    result = _build_sentence_pool(conn, name_list, alias_keywords, run_id, max_chunk_id=max_chunk_id)
+    _add_identity_clues(conn, result, name_list, run_id, max_chunk_id=max_chunk_id)
 
     return result
 
@@ -169,6 +170,7 @@ def _build_sentence_pool(
     name_list: list[str],
     alias_keywords: list[str],
     run_id: str,
+    max_chunk_id: int | None = None,
 ) -> dict[str, str]:
     """构建句子池。
 
@@ -204,10 +206,16 @@ def _build_sentence_pool(
     high_pool: dict[str, list[str]] = {name: [] for name in name_list}
     normal_pool: dict[str, list[str]] = {name: [] for name in name_list}
 
-    rows = conn.execute(
-        text("SELECT text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"),
-        {"run_id": run_id},
-    ).fetchall()
+    if max_chunk_id is None:
+        rows = conn.execute(
+            text("SELECT text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"),
+            {"run_id": run_id},
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            text("SELECT text FROM chunks WHERE run_id = :run_id AND chunk_id <= :max_chunk_id ORDER BY chunk_id"),
+            {"run_id": run_id, "max_chunk_id": max_chunk_id},
+        ).fetchall()
     for (text_content,) in rows:
         for sentence in split_sentences(text_content):
             matched: dict[str, bool] = {}
@@ -251,8 +259,10 @@ def _build_sentence_pool(
             conn.query(ChunkCharacter.name)
             .filter(ChunkCharacter.run_id == run_id)
             .filter(ChunkCharacter.name.in_(name_list))
-            .all()
         )
+        if max_chunk_id is not None:
+            char_rows = char_rows.filter(ChunkCharacter.chunk_id <= max_chunk_id)
+        char_rows = char_rows.all()
         for row in char_rows:
             if row.name:
                 counts_dict[row.name] = counts_dict.get(row.name, 0) + 1
@@ -261,8 +271,10 @@ def _build_sentence_pool(
             conn.query(ChunkDialogue.speaker)
             .filter(ChunkDialogue.run_id == run_id)
             .filter(ChunkDialogue.speaker.isnot(None))
-            .all()
         )
+        if max_chunk_id is not None:
+            dialogue_rows = dialogue_rows.filter(ChunkDialogue.chunk_id <= max_chunk_id)
+        dialogue_rows = dialogue_rows.all()
         for row in dialogue_rows:
             for s in row.speaker or []:
                 if s in name_set_for_count:
@@ -296,6 +308,7 @@ def _add_identity_clues(
     result: dict[str, str],
     name_list: list[str],
     run_id: str,
+    max_chunk_id: int | None = None,
 ) -> None:
     """添加身份线索
 
@@ -320,8 +333,10 @@ def _add_identity_clues(
         .filter(ChunkDialogue.run_id == run_id)
         .filter(ChunkDialogue.identity_clue.isnot(None))
         .filter(ChunkDialogue.identity_clue != "")
-        .all()
     )
+    if max_chunk_id is not None:
+        dialogues = dialogues.filter(ChunkDialogue.chunk_id <= max_chunk_id)
+    dialogues = dialogues.all()
 
     for row in dialogues:
         if row.identity_clue:

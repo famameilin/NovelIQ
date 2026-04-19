@@ -28,7 +28,7 @@ from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interfaces import AnnotationLike, DisambiguationLike
-from src.models.local.disambiguation import ExtendedDisambigResult
+from src.models.local.disambiguation import DisambiguationPromptContext, ExtendedDisambigResult
 
 
 class _NoopDisambiguationClient:
@@ -52,7 +52,7 @@ class _NoopDisambiguationClient:
         candidates: list[NameCountCandidate],
         context_sentences: dict[str, str] | None = None,
         existing_names: list[str] | None = None,
-        rag_hint: str | None = None,
+        prompt_context: DisambiguationPromptContext | None = None,
     ) -> ExtendedDisambigResult:
         return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 

@@ -12,6 +12,7 @@
 任务: postgresql-migration-cleanup
 修改内容: 改用 PostgreSQL db_session fixture，移除 SQLite 依赖
 """
+
 import sys
 import uuid
 from pathlib import Path
@@ -31,10 +32,7 @@ from src.storage.repositories import (
 
 def _create_chunks(count: int = 3) -> list[Chunk]:
     """创建测试用的chunks"""
-    return [
-        Chunk(index=i, text=f"测试文本{i}" * 100, start=i * 100, end=(i + 1) * 100)
-        for i in range(count)
-    ]
+    return [Chunk(index=i, text=f"测试文本{i}" * 100, start=i * 100, end=(i + 1) * 100) for i in range(count)]
 
 
 class TestStageCompleteChecks:
