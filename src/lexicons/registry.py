@@ -25,6 +25,7 @@ import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -139,8 +140,6 @@ class LexiconRegistry:
         self.ensure_loaded()
         hasher = hashlib.sha256()
 
-        import yaml
-
         hasher.update(yaml.safe_dump(self._registry).encode())
 
         for key in sorted(self._cache.keys()):
@@ -162,8 +161,6 @@ class LexiconRegistry:
 
     def _load_registry(self) -> None:
         """读取 registry.yaml"""
-        import yaml
-
         path = self._base_dir / _REGISTRY_FILE
         if not path.exists():
             logger.warning("registry.yaml not found at {}, using empty registry", path)
@@ -175,8 +172,6 @@ class LexiconRegistry:
 
     def _load_conflict_matrix(self) -> None:
         """读取 conflict_matrix.yaml"""
-        import yaml
-
         path = self._base_dir / _CONFLICT_MATRIX_FILE
         if not path.exists():
             logger.debug("conflict_matrix.yaml not found, no overlap tracking")

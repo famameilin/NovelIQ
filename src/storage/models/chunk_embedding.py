@@ -10,11 +10,11 @@
 
 from __future__ import annotations
 
-from src.config import settings
-
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
+
+from src.config import settings
 
 from .base import Base
 

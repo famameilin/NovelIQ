@@ -26,6 +26,8 @@ from src.models.local.prompts import (
     SYSTEM_PROMPT_V2,
     USER_TEMPLATE_V2,
 )
+
+
 def _build_annotation_messages_v2(
     text: str,
     alias_map: dict[str, str] | None = None,
