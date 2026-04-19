@@ -65,6 +65,8 @@ class TaskInfo:
     result: Any = None
     cancel_event: asyncio.Event | None = None
     asyncio_task: asyncio.Task | None = None
+    heartbeat_stop_event: asyncio.Event | None = None
+    heartbeat_task: asyncio.Task | None = None
 
 
 class TaskManager:
@@ -104,6 +106,7 @@ class TaskManager:
         self,
         progress_callback: Callable[[str, str, float, str], None] | None = None,
         worker_id: str | None = None,
+        heartbeat_interval_seconds: float = 30.0,
     ):
         """
         初始化任务执行缓存管理器。
@@ -117,6 +120,7 @@ class TaskManager:
         self._progress_callback = progress_callback
         self._db_session_factory: Callable[[], Session] | None = None
         self._worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
+        self._heartbeat_interval_seconds = heartbeat_interval_seconds
 
     def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
         """设置数据库会话工厂"""
@@ -238,6 +242,7 @@ class TaskManager:
             status=TaskStatus.PENDING,
             started_at=datetime.now(),
             cancel_event=asyncio.Event(),
+            heartbeat_stop_event=asyncio.Event(),
         )
         self._tasks[task_id] = task
         logger.info(f"Task created: {task_id} for novel {novel_id}")
@@ -302,6 +307,7 @@ class TaskManager:
             logger.warning(f"Task {task_id} not in memory, skipping complete_task")
             return
 
+        self._stop_runtime_heartbeat(task_id)
         self.update_task(
             task_id,
             status=TaskStatus.COMPLETED if success else TaskStatus.FAILED,
@@ -315,6 +321,7 @@ class TaskManager:
 
     def delete_task(self, task_id: str) -> bool:
         if task_id in self._tasks:
+            self._stop_runtime_heartbeat(task_id)
             del self._tasks[task_id]
             logger.info(f"Task deleted: {task_id}")
             return True
@@ -376,6 +383,8 @@ class TaskManager:
             logger.warning(f"Task {task_id} not in memory, skipping cancel_completed_task")
             return
 
+        self._stop_runtime_heartbeat(task_id)
+
         self.update_task(
             task_id,
             status=TaskStatus.CANCELLED,
@@ -393,8 +402,109 @@ class TaskManager:
                 task.llm_outputs = task.llm_outputs[-100:]
 
     def store_asyncio_task(self, task_id: str, asyncio_task: asyncio.Task) -> None:
-        """保存 asyncio.Task 引用"""
+        """
+        保存 asyncio.Task 引用并启动独立心跳。
+
+        修改时间: 2026-04-20
+        修改者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 为长时间无进度事件的运行阶段增加独立 heartbeat，避免启动恢复误判活跃任务为 orphan。
+        """
         task_info = self._tasks.get(task_id)
         if task_info:
             task_info.asyncio_task = asyncio_task
+            self._start_runtime_heartbeat(task_id)
             logger.debug(f"Asyncio task stored for {task_id}")
+
+    def _start_runtime_heartbeat(self, task_id: str) -> None:
+        """
+        为当前运行任务启动独立心跳协程。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        说明: 心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at。
+        """
+        task_info = self._tasks.get(task_id)
+        if task_info is None:
+            return
+
+        if task_info.heartbeat_task and not task_info.heartbeat_task.done():
+            return
+
+        stop_event = task_info.heartbeat_stop_event
+        if stop_event is None or stop_event.is_set():
+            stop_event = asyncio.Event()
+            task_info.heartbeat_stop_event = stop_event
+
+        heartbeat_task = asyncio.create_task(self._runtime_heartbeat_loop(task_id, stop_event))
+        task_info.heartbeat_task = heartbeat_task
+        heartbeat_task.add_done_callback(lambda finished_task: self._handle_heartbeat_task_done(task_id, finished_task))
+
+    def _stop_runtime_heartbeat(self, task_id: str) -> None:
+        """
+        停止任务心跳协程。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        说明: 在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness。
+        """
+        task_info = self._tasks.get(task_id)
+        if task_info is None:
+            return
+
+        if task_info.heartbeat_stop_event and not task_info.heartbeat_stop_event.is_set():
+            task_info.heartbeat_stop_event.set()
+        if task_info.heartbeat_task and not task_info.heartbeat_task.done():
+            task_info.heartbeat_task.cancel()
+
+    async def _runtime_heartbeat_loop(self, task_id: str, stop_event: asyncio.Event) -> None:
+        """
+        周期性刷新活跃任务的 worker 心跳。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        说明: 即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at。
+        """
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=self._heartbeat_interval_seconds)
+                break
+            except TimeoutError:
+                pass
+
+            task_info = self._tasks.get(task_id)
+            if task_info is None:
+                break
+
+            runtime_task = task_info.asyncio_task
+            if runtime_task is None or runtime_task.done():
+                break
+
+            try:
+                # 中文注释：heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”。
+                self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now())
+            except Exception as exc:
+                logger.error(f"Failed to refresh runtime heartbeat for task {task_id}: {exc}")
+
+    def _handle_heartbeat_task_done(self, task_id: str, heartbeat_task: asyncio.Task) -> None:
+        """
+        收尾 heartbeat 协程并记录异常。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        说明: 避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception。
+        """
+        task_info = self._tasks.get(task_id)
+        if task_info and task_info.heartbeat_task is heartbeat_task:
+            task_info.heartbeat_task = None
+
+        try:
+            heartbeat_task.result()
+        except asyncio.CancelledError:
+            logger.debug(f"Runtime heartbeat stopped for task {task_id}")
+        except Exception as exc:
+            logger.error(f"Runtime heartbeat crashed for task {task_id}: {exc}")

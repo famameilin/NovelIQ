@@ -199,8 +199,8 @@ class TestAnalysis:
             with pytest.raises(RuntimeError, match="db unavailable"):
                 service.create_task(novel_id)
 
-    def test_cancel_task_not_in_memory_marks_cancelling_in_db(self, api_client: TestClient):
-        """测试进程外取消只写 cancelling/cancel_requested，不会提前写成 cancelled"""
+    def test_cancel_pending_task_not_in_memory_finalizes_cancelled_in_db(self, api_client: TestClient):
+        """测试未启动的 DB-only pending 任务会直接收口为 cancelled，避免永久卡在 cancelling"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -217,6 +217,47 @@ class TestAnalysis:
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
+
+        response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "cancelled"
+
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+
+        assert run is not None
+        assert run["status"] == "cancelled"
+        assert run["cancel_requested"] is False
+        assert run["completed_at"] is not None
+
+    def test_cancel_running_task_not_in_memory_stays_cancelling_in_db(self, api_client: TestClient):
+        """测试进程外取消真实 running 任务时仍保留 cancelling，等待执行方收尾"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("cancel_running_out_of_process_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(
+                task_id,
+                status="running",
+                worker_id="worker-running",
+                heartbeat_at=datetime.now(),
+            )
 
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
@@ -750,6 +791,44 @@ class TestTaskManagerDbWrite:
         assert refreshed_run is not None
         assert refreshed_run["worker_id"] == "worker-test"
         assert refreshed_run["heartbeat_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_store_asyncio_task_starts_independent_runtime_heartbeat(self):
+        """测试没有进度事件时也会通过独立 heartbeat 持续刷新 heartbeat_at"""
+        run_id = str(uuid.uuid4())
+        task_id = run_id[:8]
+
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.create_run(novel_id="novel-1", run_id=run_id)
+
+        task_manager = TaskManager(worker_id="worker-heartbeat", heartbeat_interval_seconds=0.02)
+        task_manager.set_db_session_factory(lambda: get_session_factory()())
+        task_manager.create_task(task_id, "novel-1")
+
+        async def _silent_long_stage():
+            await asyncio.sleep(0.08)
+
+        runtime_task = asyncio.create_task(_silent_long_stage())
+        task_manager.store_asyncio_task(task_id, runtime_task)
+
+        await asyncio.sleep(0.035)
+        with get_session_factory()() as session:
+            first_run = RunRepository(session).get_run(run_id)
+
+        await asyncio.sleep(0.035)
+        with get_session_factory()() as session:
+            second_run = RunRepository(session).get_run(run_id)
+
+        assert first_run is not None
+        assert second_run is not None
+        assert first_run["worker_id"] == "worker-heartbeat"
+        assert first_run["heartbeat_at"] is not None
+        assert second_run["heartbeat_at"] is not None
+        assert second_run["heartbeat_at"] >= first_run["heartbeat_at"]
+
+        await runtime_task
+        task_manager.complete_task(task_id, success=True)
 
 
 class TestAnalysisEventBus:

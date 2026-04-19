@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -182,6 +183,37 @@ def _persist_task_cancellation_request(task_id: str) -> None:
         raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
     except Exception as exc:
         logger.error(f"Failed to persist cancellation request for task {task_id}: {exc}")
+        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+
+
+def _finalize_unstarted_task_cancellation(task_id: str) -> None:
+    """
+    直接将未启动的 pending 任务收口为 cancelled。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: fix-task-system-review-findings
+    说明: 仅当任务仍处于 DB-only pending 且当前进程没有任何运行态缓存时调用，
+          避免把根本没有执行方的任务挂成永久 cancelling。
+    """
+    session_factory = get_session_factory()
+    try:
+        with session_factory() as session:
+            run_id = task_id_to_run_id(task_id, session.connection())
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(
+                run_id,
+                status="cancelled",
+                cancel_requested=False,
+                completed_at=datetime.now(),
+                message="任务在启动前已取消",
+            )
+            session.commit()
+    except (TaskIDNotFoundError, ValueError) as exc:
+        logger.error(f"Task {task_id} run_id not found when finalizing pending cancellation: {exc}")
+        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+    except Exception as exc:
+        logger.error(f"Failed to finalize pending cancellation for task {task_id}: {exc}")
         raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
 
 
@@ -436,6 +468,12 @@ async def cancel_task(
         raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
     if task_status == "failed":
         raise HTTPException(status_code=400, detail="任务已失败，无法取消")
+
+    task_info = task_manager.get_task(task_id)
+    if task_status == "pending" and task_info is None:
+        _finalize_unstarted_task_cancellation(task_id)
+        logger.info(f"Task {task_id} cancelled immediately because it never started in any live runtime cache")
+        return {"task_id": task_id, "status": "cancelled", "message": "任务尚未启动，已直接取消"}
 
     # 先持久化 DB 真相，再设置本进程内存 cancel_event 做加速响应。
     _persist_task_cancellation_request(task_id)
