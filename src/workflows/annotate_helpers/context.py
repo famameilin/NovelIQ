@@ -93,13 +93,13 @@ class ChunkContext:
         return None
 
 
-def _init_disambig_provider(
+def _init_evidence_provider(
     conn,
     novel_id: str,
     use_context: bool,
     run_id: str | None = None,
 ) -> DisambigContextProvider | None:
-    """初始化消歧上下文提供器
+    """初始化 evidence provider
 
     修改时间: 2026-04-10
     修改者: TraeAI
@@ -112,7 +112,7 @@ def _init_disambig_provider(
     from src.rag import DisambigContextProvider
     from src.storage.repositories import GraphRepository
 
-    logger.info("initializing disambig context provider")
+    logger.info("initializing evidence provider")
 
     graph_repo = GraphRepository(conn)
 
@@ -129,7 +129,7 @@ def _init_disambig_provider(
                 f"checks: {e}"
             )
 
-    provider = DisambigContextProvider(
+    evidence_provider = DisambigContextProvider(
         graph_repo=graph_repo,
         novel_id=novel_id,
         run_id=run_id,
@@ -143,7 +143,7 @@ def _init_disambig_provider(
         level3_top_k=settings.rag.level3_top_k,
     )
 
-    return provider
+    return evidence_provider
 
 
 def _extract_names_from_text(text: str) -> list[str]:
