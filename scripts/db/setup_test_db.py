@@ -37,10 +37,10 @@ def create_test_database():
         exists = result.fetchone()
 
         if exists:
-            print("✓ 数据库 novel_analysis_test 已存在")
+            print("[OK] 数据库 novel_analysis_test 已存在")
         else:
             conn.execute(text("CREATE DATABASE novel_analysis_test"))
-            print("✓ 数据库 novel_analysis_test 创建成功")
+            print("[OK] 数据库 novel_analysis_test 创建成功")
 
     engine.dispose()
 
@@ -52,21 +52,28 @@ def setup_pgvector():
     with engine.connect() as conn:
         conn.execution_options(isolation_level="AUTOCOMMIT")
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        print("✓ pgvector 扩展安装成功")
+        print("[OK] pgvector 扩展安装成功")
 
     engine.dispose()
 
 
 def create_tables():
-    """创建所有表"""
+    """
+    创建所有表
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: fix-test-db-schema-bootstrap
+    修改内容: 复用 src.storage.db.init_db(include_level3_tables=True) 统一测试库建表入口，避免脚本和应用 schema 漂移。
+    """
     sys.path.insert(0, str(project_root))
-    from src.storage.models import Base
+    from src.storage import db as db_module
 
-    engine = create_engine(TEST_DB_URL, echo=False)
-    Base.metadata.create_all(bind=engine)
-    print("✓ 所有表创建成功")
-
-    engine.dispose()
+    os.environ["DATABASE_URL"] = TEST_DB_URL
+    db_module.dispose_engine()
+    db_module.init_db(include_level3_tables=True)
+    db_module.dispose_engine()
+    print("[OK] 测试库表结构已补全")
 
 
 def main():
@@ -79,11 +86,11 @@ def main():
         setup_pgvector()
         create_tables()
         print("=" * 50)
-        print("✓ 测试数据库配置完成！")
+        print("[OK] 测试数据库配置完成！")
         print("=" * 50)
         return 0
     except Exception as e:
-        print(f"✗ 错误: {e}")
+        print(f"[ERROR] 错误: {e}")
         return 1
 
 

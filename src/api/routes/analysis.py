@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
+from src.api.exceptions import NovelNotFoundError
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import (
     AnalyzeResponse,
@@ -102,10 +103,15 @@ def _resolve_task_for_novel(
     任务: 统一任务状态查询为 DB-only
     修改内容: 移除对内存 TaskManager 的优先查询，改为仅从 DB 查询任务是否属于指定小说。
     说明: 保留 task_manager 参数，因为调用方可能还需要用它来操作运行态缓存（如 _cleanup_task_runtime_before_delete）。
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: fix-task-system-review-findings
+    修改内容: 仅将真实“任务不存在”映射为 404，数据库异常继续上抛为 5xx，避免把 DB 故障伪装成业务不存在。
     """
     try:
         task = novel_service.get_task(task_id)
-    except Exception:
+    except NovelNotFoundError:
         raise HTTPException(status_code=404, detail="任务不存在") from None
 
     if task.get("novel_id") != novel_id:

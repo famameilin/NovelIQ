@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -117,12 +118,24 @@ class AnalysisErrorHandler:
         analysis_logger: AnalysisLogger | None,
         bus: AnalysisEventBus | None = None,
     ) -> None:
-        """处理分析取消"""
+        """
+        处理分析取消
+
+        修改时间: 2026-04-19
+        修改者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 取消收口时同步清除 cancel_requested，并写入 completed_at，避免 DB 终态留下自相矛盾的脏状态。
+        """
         self.task_manager.cancel_completed_task(task_id, error="用户取消")
         self.novel_service.update_task_status(task_id, "cancelled")
 
         run_repo = RunRepository(session)
-        run_repo.update_run_status(run_id, "cancelled")
+        run_repo.update_run_task_fields(
+            run_id,
+            status="cancelled",
+            cancel_requested=False,
+            completed_at=datetime.now(),
+        )
         session.commit()
 
         if bus:

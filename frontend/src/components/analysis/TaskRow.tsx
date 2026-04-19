@@ -12,6 +12,11 @@
  * 修改内容:
  * - 移除伪状态 (chunking/annotating/...)，统一使用后端 TaskStatus
  * - 运行中任务从 streamStore 读取 progress.stage 显示具体阶段
+ *
+ * 修改时间: 2026-04-19
+ * 修改者: Codex (GPT-5)
+ * 任务: fix-task-system-review-findings
+ * 修改内容: 为 pending 任务补齐继续入口，并把“实时流式中”语义收窄到 running/cancelling，避免把可恢复任务误显示成运行中。
  */
 import { Circle, CheckCircle, XCircle, Loader2, Square, Eye, Trash2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -77,8 +82,16 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
-function isRunningStatus(status: TaskStatus): boolean {
-  return ["pending", "running", "cancelling"].includes(status);
+function isStreamingStatus(status: TaskStatus): boolean {
+  return ["running", "cancelling"].includes(status);
+}
+
+function canCancelStatus(status: TaskStatus): boolean {
+  return ["pending", "running"].includes(status);
+}
+
+function canResumeStatus(status: TaskStatus): boolean {
+  return ["pending", "failed"].includes(status);
 }
 
 export function TaskRow({
@@ -90,14 +103,16 @@ export function TaskRow({
   onResume,
 }: TaskRowProps) {
   const config = taskStatusConfig[task.status] ?? taskStatusConfig.pending;
-  const isRunning = isRunningStatus(task.status);
+  const isStreaming = isStreamingStatus(task.status);
+  const canCancel = canCancelStatus(task.status);
+  const canResume = canResumeStatus(task.status);
 
   // 从 streamStore 读取当前 SSE 推送的 stage，仅对活跃的运行中任务生效
   const progress = useStreamStore((s) => s.progress);
   const currentTaskId = useStreamStore((s) => s.currentTaskId);
 
   // 活跃的运行中任务显示具体阶段，否则用默认 label
-  const isActiveRunning = isActive && isRunning && currentTaskId === task.task_id && progress?.stage;
+  const isActiveRunning = isActive && isStreaming && currentTaskId === task.task_id && progress?.stage;
   const displayLabel = isActiveRunning && progress?.stage
     ? `${STAGE_LABELS[progress.stage] ?? progress.stage}中`
     : config.label;
@@ -142,7 +157,7 @@ export function TaskRow({
           </Button>
         )}
 
-        {isRunning && task.status !== "cancelling" && (
+        {canCancel && (
           <Button
             variant="ghost"
             size="icon"
@@ -156,7 +171,7 @@ export function TaskRow({
           </Button>
         )}
 
-        {!isRunning && task.status !== "failed" && (
+        {!canCancel && task.status !== "failed" && task.status !== "pending" && (
           <Button
             variant="ghost"
             size="icon"
@@ -170,7 +185,7 @@ export function TaskRow({
           </Button>
         )}
 
-        {task.status === "failed" && (
+        {canResume && (
           <>
             <Button
               variant="ghost"
@@ -184,17 +199,19 @@ export function TaskRow({
             >
               <RotateCcw className="h-3 w-3" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-text-muted hover:text-destructive"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(task.task_id);
-              }}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
+            {task.status === "failed" && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-text-muted hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(task.task_id);
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
           </>
         )}
       </div>

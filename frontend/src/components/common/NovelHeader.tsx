@@ -25,6 +25,11 @@
  * 修改者: Codex (GPT-5)
  * 任务: task-api-decouple
  * 修改内容: 拆分 onCreateTask / onResumeTask / onDeleteCurrentTask，避免混合动作语义。
+ *
+ * 修改时间: 2026-04-19
+ * 修改者: Codex (GPT-5)
+ * 任务: fix-task-system-review-findings
+ * 修改内容: “运行中”计数仅统计真正执行中的 running/cancelling，避免把可恢复的 pending 任务误标成运行中。
  */
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";
@@ -100,7 +105,7 @@ export function NovelHeader({
   }, [taskPanelOpen]);
 
   const runningCount = tasks.filter((t) =>
-    ["pending", "running", "cancelling"].includes(t.status)
+    ["running", "cancelling"].includes(t.status)
   ).length;
 
   const currentTaskDisplay = getCurrentTaskDisplay(tasks, currentTaskId);
