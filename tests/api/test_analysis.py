@@ -5,18 +5,28 @@ API 分析端点测试
 修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
+
+修改时间: 2026-04-19
+修改者: Codex (GPT-5)
+任务: fix-task-system-review-findings
+修改内容: 补充 DB-first 任务系统回归测试，覆盖创建失败、进程外取消、resume 清脏字段、message 持久化
 """
 
 import asyncio
 import tempfile
+from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.routes import analysis as analysis_mod
+from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
+from src.storage.db import get_session_factory
 from src.storage.id_mapping import TaskIDNotFoundError
+from src.storage.repositories import RunRepository
 
 
 class TestAnalysis:
@@ -109,12 +119,191 @@ class TestAnalysis:
         assert data["novel_id"] == novel_id
         assert data["task_id"] == task_id
 
+    def test_create_task_raises_when_db_insert_fails(self, api_client: TestClient):
+        """测试创建任务时 DB 写入失败会直接抛错，不再静默返回 task_id"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("create_task_failure_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+        service = NovelService(upload_dir=Path("data/uploads"))
+
+        with patch("src.api.services.novel_service.RunRepository.create_run", side_effect=RuntimeError("db unavailable")):
+            with pytest.raises(RuntimeError, match="db unavailable"):
+                service.create_task(novel_id)
+
+    def test_cancel_task_not_in_memory_marks_cancelling_in_db(self, api_client: TestClient):
+        """测试进程外取消只写 cancelling/cancel_requested，不会提前写成 cancelled"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("cancel_out_of_process_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "cancelling"
+
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+
+        assert run is not None
+        assert run["status"] == "cancelling"
+        assert run["cancel_requested"] is True
+
+    def test_cancel_task_returns_500_when_db_persistence_fails(self, api_client: TestClient):
+        """测试 cancel 持久化失败时接口报错，且不会先改内存为 cancelling"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("cancel_db_failure_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        task_manager = TaskManager()
+        task_manager.create_task(task_id, novel_id)
+        api_client.app.dependency_overrides[analysis_mod.get_task_manager] = lambda: task_manager
+        try:
+            with patch.object(analysis_mod.RunRepository, "update_run_task_fields", side_effect=RuntimeError("db write failed")):
+                response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
+        finally:
+            api_client.app.dependency_overrides.pop(analysis_mod.get_task_manager, None)
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "任务取消持久化失败，请稍后重试"
+        task_info = task_manager.get_task(task_id)
+        assert task_info is not None
+        assert task_info.status == analysis_mod.TaskStatus.PENDING
+        assert task_info.cancel_event is not None
+        assert task_info.cancel_event.is_set() is False
+
+    def test_resume_task_clears_stale_runtime_fields_in_db(self, api_client: TestClient):
+        """测试 resume 会先清空 DB 中上一轮失败留下的运行态脏字段"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("resume_clear_state_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.update_run_task_fields(
+                task_id,
+                status="failed",
+                progress=63.5,
+                stage="annotate",
+                sub_stage="phase3",
+                current=12,
+                total=20,
+                message="旧进度文案",
+                error="旧错误",
+                cancel_requested=True,
+                completed_at=datetime.now(),
+            )
+
+        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
+            resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
+
+        assert resume_response.status_code == 200
+
+        status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
+        assert status_response.status_code == 200
+        data = status_response.json()
+        assert data["status"] == "pending"
+        assert data["progress"] == 0.0
+        assert data["stage"] is None
+        assert data["sub_stage"] is None
+        assert data["message"] is None
+        assert data["error"] is None
+
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+
+        assert run is not None
+        assert run["cancel_requested"] is False
+        assert run["completed_at"] is None
+
     def test_analyze_with_task_id_returns_400(self, api_client: TestClient):
         """测试旧 analyze 入口不再接受 task_id 续跑"""
         response = api_client.post("/api/novels/nonexistent/analyze", json={"task_id": "resume-me"})
         assert response.status_code == 400
         data = response.json()
         assert "resume" in data["detail"]
+
+    def test_db_only_status_restores_persisted_message(self, api_client: TestClient):
+        """测试 DB-only 状态查询可以恢复持久化的 message 文案"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("status_message_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        task_manager = TaskManager()
+        task_manager.set_db_session_factory(lambda: get_session_factory()())
+        task_manager.create_task(task_id, novel_id)
+        task_manager.update_task(
+            task_id,
+            status=analysis_mod.TaskStatus.RUNNING,
+            progress=42.0,
+            stage="annotate",
+            message="正在分析第 42 个分块",
+        )
+
+        status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
+        assert status_response.status_code == 200
+        data = status_response.json()
+        assert data["status"] == "running"
+        assert data["message"] == "正在分析第 42 个分块"
 
     def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
         """测试未知 task_id 查询详情时返回 None"""
@@ -263,3 +452,72 @@ class TestDeleteAnalysis:
         data = delete_response.json()
         assert "删除成功" in data["message"] or "任务删除成功" in data["message"]
         assert data["task_id"] == task_id
+
+
+class TestRunRepository:
+    """测试 RunRepository 的任务运行态更新"""
+
+    def test_update_run_task_fields_can_clear_nullable_runtime_fields(self, db_session):
+        """测试 update_run_task_fields 支持将 nullable 运行态字段清空为 None"""
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="novel-1")
+
+        run_repo.update_run_task_fields(
+            run_id,
+            stage="annotate",
+            sub_stage="phase4",
+            message="旧消息",
+            error="旧错误",
+            completed_at=datetime.now(),
+        )
+
+        run_repo.update_run_task_fields(
+            run_id,
+            status="pending",
+            stage=None,
+            sub_stage=None,
+            message=None,
+            error=None,
+            cancel_requested=False,
+            completed_at=None,
+        )
+
+        run = run_repo.get_run(run_id)
+        assert run is not None
+        assert run["status"] == "pending"
+        assert run["stage"] is None
+        assert run["sub_stage"] is None
+        assert run["message"] is None
+        assert run["error"] is None
+        assert run["completed_at"] is None
+
+
+class TestTaskManagerDbWrite:
+    """测试 TaskManager 的 DB 写回使用真实 run_id"""
+
+    def test_update_task_resolves_full_run_id_before_writing_db(self):
+        """测试 8 位 task_id 写回时会先解析到完整 run_id，而不是直接精确匹配失败"""
+        full_run_id = "feedbeef-1234-5678-90ab-cdef12345678"
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.create_run(novel_id="novel-1", run_id=full_run_id)
+
+        task_manager = TaskManager()
+        task_manager.set_db_session_factory(lambda: get_session_factory()())
+        task_manager.create_task("feedbeef", "novel-1")
+
+        task_manager.update_task(
+            "feedbeef",
+            status=analysis_mod.TaskStatus.RUNNING,
+            progress=12.5,
+            stage="annotate",
+            message="历史任务继续运行中",
+        )
+
+        with get_session_factory()() as session:
+            refreshed_run = RunRepository(session).get_run(full_run_id)
+        assert refreshed_run is not None
+        assert refreshed_run["status"] == "running"
+        assert refreshed_run["progress"] == 12.5
+        assert refreshed_run["stage"] == "annotate"
+        assert refreshed_run["message"] == "历史任务继续运行中"
