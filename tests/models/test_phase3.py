@@ -141,19 +141,40 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].speaker, ["张三"])
         self.assertEqual(result[1].speaker, ["李四"])
 
+    @patch("src.models.local.annotation.phase3.record_model_interaction")
     @patch("src.models.local.annotation.phase3.settings")
-    async def test_exception_raises_dialogue_attribution_error(self, mock_settings: MagicMock) -> None:
-        """异常时抛出 ValueError（model 未配置）"""
+    async def test_persists_thinking_from_reasoning_content(
+        self,
+        mock_settings: MagicMock,
+        mock_record_model_interaction: MagicMock,
+    ) -> None:
+        """Phase3 会把 response 中的 reasoning_content 持久化。"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
 
         mock_annotation_client = MagicMock()
-        mock_annotation_client._config.model = None
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = True
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_annotation_client._process_annotation_response.return_value = (
+            '{"dialogues": []}',
+            "phase3 thinking",
+            MagicMock(),
+        )
+        parsed = MagicMock(dialogues=[], model_dump=MagicMock(return_value={}))
+        response = MagicMock()
+        response.choices = [MagicMock(message=MagicMock(content='{"dialogues": []}', reasoning_content="phase3 thinking"))]
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(parsed, response))
 
-        candidates = [QuoteCandidate(index=1, content="你好")]
+        await attribute_dialogues_with_llm(
+            mock_annotation_client,
+            "对话文本",
+            [QuoteCandidate(index=1, content="你好")],
+            known_characters=["张三"],
+        )
 
-        with self.assertRaises(ValueError):
-            await attribute_dialogues_with_llm(mock_annotation_client, "对话文本", candidates, ["张三"])
+        self.assertEqual(mock_record_model_interaction.call_args.kwargs["thinking_content"], "phase3 thinking")
 
     @patch("src.models.local.annotation.phase3.settings")
     async def test_alias_speaker_normalized_before_known_filter(self, mock_settings: MagicMock) -> None:

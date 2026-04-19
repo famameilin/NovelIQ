@@ -240,6 +240,10 @@ async def attribute_dialogues_with_llm(
 
         duration_ms = int((time.time() - start_time) * 1000)
         content_clean = str(parsed.model_dump())
+        thinking_content = getattr(response, "thinking_content", None)
+        process_response = getattr(current_client, "_process_annotation_response", None)
+        if callable(process_response) and hasattr(response, "choices"):
+            content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase3")
 
         record_model_interaction(
             run_id=run_id,
@@ -249,7 +253,7 @@ async def attribute_dialogues_with_llm(
             attempt_number=batch_idx + 1,
             messages=messages,
             response_text=content_clean,
-            thinking_content=None,
+            thinking_content=thinking_content,
             duration_ms=duration_ms,
             model_name=current_client._config.model,
             model_provider="cloud" if is_cloud else "local",
