@@ -453,6 +453,38 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             logger.info(f"Marked {count} zombie running task(s) as failed on startup")
         return count
 
+    def mark_cancelling_as_cancelled(self) -> int:
+        """
+        将所有 cancelling 状态的孤儿任务收口为 cancelled。
+
+        创建时间: 2026-04-19
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 启动恢复时补齐 cancelling 终态，避免任务永久卡在取消中。
+
+        Returns:
+            受影响的行数
+        """
+        from sqlalchemy import update
+
+        now = datetime.now()
+        stmt = (
+            update(AnalysisRun)
+            .where(AnalysisRun.status == "cancelling")
+            .values(
+                status="cancelled",
+                cancel_requested=False,
+                completed_at=now,
+                updated_at=now,
+            )
+        )
+        result = self.session.execute(stmt)
+        self.session.commit()
+        count = result.rowcount  # type: ignore[attr-defined]
+        if count > 0:
+            logger.info(f"Marked {count} orphaned cancelling task(s) as cancelled on startup")
+        return count
+
     def list_novels_with_latest_run(self) -> list[dict[str, Any]]:
         """
         获取所有有分析记录的小说列表
