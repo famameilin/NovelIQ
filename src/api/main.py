@@ -95,8 +95,12 @@ def _recover_orphaned_tasks() -> tuple[int, int]:
 async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
 
-    # 清理僵尸任务：running 视为异常中断，cancelling 视为取消请求未完成收尾。
+    # 中文注释：当前仓库以最新 schema 为唯一真相，启动时只初始化缺失表，
+    # 然后再做孤儿任务恢复。
     try:
+        from src.storage.db import init_db
+
+        init_db()
         failed_count, cancelled_count = _recover_orphaned_tasks()
         if failed_count > 0:
             logger.info(f"Successfully cleaned {failed_count} orphaned running task(s)")

@@ -28,6 +28,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import socket
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -98,10 +100,23 @@ class TaskManager:
     - 业务真相唯一来源: 数据库 run 表
     """
 
-    def __init__(self, progress_callback: Callable[[str, str, float, str], None] | None = None):
+    def __init__(
+        self,
+        progress_callback: Callable[[str, str, float, str], None] | None = None,
+        worker_id: str | None = None,
+    ):
+        """
+        初始化任务执行缓存管理器。
+
+        修改时间: 2026-04-20
+        修改者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 为当前进程生成稳定 worker_id，后续所有运行态写回都会带上 worker 归属与心跳。
+        """
         self._tasks: dict[str, TaskInfo] = {}
         self._progress_callback = progress_callback
         self._db_session_factory: Callable[[], Session] | None = None
+        self._worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
 
     def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
         """设置数据库会话工厂"""
@@ -143,6 +158,16 @@ class TaskManager:
             update_params["cancel_requested"] = kwargs["cancel_requested"]
         if "completed_at" in kwargs:
             update_params["completed_at"] = kwargs["completed_at"]
+        if "worker_id" in kwargs:
+            update_params["worker_id"] = kwargs["worker_id"]
+        if "heartbeat_at" in kwargs:
+            update_params["heartbeat_at"] = kwargs["heartbeat_at"]
+
+        if self._should_refresh_worker_heartbeat(update_params):
+            # 中文注释：只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
+            # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”。
+            update_params.setdefault("worker_id", self._worker_id)
+            update_params["heartbeat_at"] = datetime.now()
 
         if not update_params:
             return
@@ -161,6 +186,28 @@ class TaskManager:
             raise
         finally:
             session.close()
+
+    def _should_refresh_worker_heartbeat(self, update_params: dict[str, Any]) -> bool:
+        """
+        判断本次写回是否应刷新 worker 归属和心跳。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+        修改内容: 仅在活跃运行态写回时注入 worker_id/heartbeat_at，避免终态字段误刷新心跳。
+        """
+        active_statuses = {
+            TaskStatus.PENDING.value,
+            TaskStatus.RUNNING.value,
+            TaskStatus.CANCELLING.value,
+        }
+        tracked_runtime_fields = {"progress", "stage", "sub_stage", "current", "total", "message"}
+
+        status = update_params.get("status")
+        if status in active_statuses:
+            return True
+
+        return any(field in update_params for field in tracked_runtime_fields)
 
     def _resolve_run_id_for_db_write(self, task_id: str, session: Session) -> str:
         """

@@ -17,13 +17,14 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.routes import analysis as analysis_mod
 from src.api.exceptions import NovelNotFoundError
+from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.novel_service import NovelService
@@ -721,3 +722,55 @@ class TestTaskManagerDbWrite:
         assert refreshed_run["progress"] == 12.5
         assert refreshed_run["stage"] == "annotate"
         assert refreshed_run["message"] == "历史任务继续运行中"
+
+    def test_update_task_persists_worker_id_and_heartbeat_for_active_task(self):
+        """测试活跃运行态写回会自动带上 worker_id 和 heartbeat_at"""
+        run_id = str(uuid.uuid4())
+        task_id = run_id[:8]
+
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.create_run(novel_id="novel-1", run_id=run_id)
+
+        task_manager = TaskManager(worker_id="worker-test")
+        task_manager.set_db_session_factory(lambda: get_session_factory()())
+        task_manager.create_task(task_id, "novel-1")
+
+        task_manager.update_task(
+            task_id,
+            status=analysis_mod.TaskStatus.RUNNING,
+            progress=1.0,
+            stage="preprocess",
+            message="开始执行",
+        )
+
+        with get_session_factory()() as session:
+            refreshed_run = RunRepository(session).get_run(run_id)
+
+        assert refreshed_run is not None
+        assert refreshed_run["worker_id"] == "worker-test"
+        assert refreshed_run["heartbeat_at"] is not None
+
+
+class TestAnalysisEventBus:
+    """测试 SSE 写回失败时不会静默继续执行"""
+
+    @pytest.mark.asyncio
+    async def test_emit_raises_when_task_status_persistence_fails(self):
+        """测试任务状态写库失败会直接上抛，而不是只打日志继续运行"""
+        task_manager = MagicMock()
+        task_manager.update_task.side_effect = RuntimeError("db write failed")
+        bus = AnalysisEventBus("task-1", task_manager)
+
+        with patch("src.api.services.event_manager.event_manager.send", new=AsyncMock()):
+            with pytest.raises(RuntimeError, match="db write failed"):
+                await bus.emit(
+                    StreamEvent(
+                        action="progress",
+                        stage="annotate",
+                        current=1,
+                        total=10,
+                        percent=10.0,
+                        message="正在写回进度",
+                    )
+                )

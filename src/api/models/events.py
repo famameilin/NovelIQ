@@ -234,18 +234,17 @@ class AnalysisEventBus:
 
         # 同步更新 TaskManager
         if resolved_event.action in ("start", "progress", "complete"):
-            try:
-                self.task_manager.update_task(
-                    self.task_id,
-                    stage=resolved_event.stage,
-                    sub_stage=resolved_event.sub_stage,
-                    current=resolved_event.current,
-                    total=resolved_event.total,
-                    progress=resolved_event.percent,
-                    message=resolved_event.message,
-                )
-            except Exception as e:
-                logger.error(f"Failed to update task status: {e}")
+            # 中文注释：这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
+            # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源。
+            self.task_manager.update_task(
+                self.task_id,
+                stage=resolved_event.stage,
+                sub_stage=resolved_event.sub_stage,
+                current=resolved_event.current,
+                total=resolved_event.total,
+                progress=resolved_event.percent,
+                message=resolved_event.message,
+            )
         elif resolved_event.action == "output":
             try:
                 self.task_manager.append_llm_output(self.task_id, resolved_event.content)
