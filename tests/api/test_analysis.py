@@ -14,6 +14,7 @@ API 分析端点测试
 
 import asyncio
 import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.routes import analysis as analysis_mod
+from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
@@ -305,6 +307,42 @@ class TestAnalysis:
         assert data["status"] == "running"
         assert data["message"] == "正在分析第 42 个分块"
 
+    def test_recover_orphaned_tasks_finalizes_cancelling_tasks(self, api_client: TestClient):
+        """测试启动恢复会将 orphaned cancelling 任务收口为 cancelled"""
+        from src.api import main as main_mod
+
+        session_factory = get_session_factory()
+
+        with session_factory() as session:
+            run_repo = RunRepository(session)
+            running_before = len(run_repo.get_by_status("running"))
+            cancelling_before = len(run_repo.get_by_status("cancelling"))
+            running_run_id = run_repo.create_run(novel_id="novel-running")
+            cancelling_run_id = run_repo.create_run(novel_id="novel-cancelling")
+            run_repo.update_run_task_fields(running_run_id, status="running")
+            run_repo.update_run_task_fields(
+                cancelling_run_id,
+                status="cancelling",
+                cancel_requested=True,
+            )
+
+        failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
+
+        assert failed_count == running_before + 1
+        assert cancelled_count == cancelling_before + 1
+
+        with session_factory() as session:
+            run_repo = RunRepository(session)
+            running_run = run_repo.get_run(running_run_id)
+            cancelling_run = run_repo.get_run(cancelling_run_id)
+
+        assert running_run is not None
+        assert running_run["status"] == "failed"
+        assert cancelling_run is not None
+        assert cancelling_run["status"] == "cancelled"
+        assert cancelling_run["cancel_requested"] is False
+        assert cancelling_run["completed_at"] is not None
+
     def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
         """测试未知 task_id 查询详情时返回 None"""
         mock_session = MagicMock()
@@ -492,22 +530,55 @@ class TestRunRepository:
         assert run["completed_at"] is None
 
 
+class TestCancellationStateCheck:
+    """测试取消状态检查失败时不会静默继续执行"""
+
+    def test_is_cancelled_raises_when_db_check_fails(self):
+        """测试 DB 取消状态检查失败时抛出明确异常，而不是返回 False"""
+
+        class BrokenDbSession:
+            @property
+            def connection(self):
+                raise RuntimeError("db unavailable")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        class BrokenSessionFactory:
+            def get_session(self):
+                return BrokenDbSession()
+
+        service = AnalysisService(
+            novel_service=MagicMock(),
+            task_manager=TaskManager(),
+            session_factory=BrokenSessionFactory(),
+        )
+
+        with pytest.raises(CancellationStateCheckError, match="取消状态检查失败"):
+            service._is_cancelled("deadbeef")
+
+
 class TestTaskManagerDbWrite:
     """测试 TaskManager 的 DB 写回使用真实 run_id"""
 
     def test_update_task_resolves_full_run_id_before_writing_db(self):
         """测试 8 位 task_id 写回时会先解析到完整 run_id，而不是直接精确匹配失败"""
-        full_run_id = "feedbeef-1234-5678-90ab-cdef12345678"
+        hex_id = uuid.uuid4().hex
+        task_id = hex_id[:8]
+        full_run_id = f"{task_id}-{hex_id[8:12]}-{hex_id[12:16]}-{hex_id[16:20]}-{hex_id[20:32]}"
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
             run_repo.create_run(novel_id="novel-1", run_id=full_run_id)
 
         task_manager = TaskManager()
         task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task("feedbeef", "novel-1")
+        task_manager.create_task(task_id, "novel-1")
 
         task_manager.update_task(
-            "feedbeef",
+            task_id,
             status=analysis_mod.TaskStatus.RUNNING,
             progress=12.5,
             stage="annotate",
