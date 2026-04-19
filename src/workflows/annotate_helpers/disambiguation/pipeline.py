@@ -287,7 +287,7 @@ def _build_shared_evidence_query_text(
 
 async def _build_prompt_context_with_shared_evidence(
     prompt_context: DisambiguationPromptContext | None,
-    rag_retriever: DisambigContextProvider | None,
+    evidence_provider: DisambigContextProvider | None,
     candidates: list[NameCountCandidate],
     context_sentences: dict[str, str],
     *,
@@ -296,7 +296,7 @@ async def _build_prompt_context_with_shared_evidence(
 ) -> DisambiguationPromptContext | None:
     """把共享 evidence renderer 输出补入消歧 prompt_context。"""
 
-    if rag_retriever is None or not candidates:
+    if evidence_provider is None or not candidates:
         return prompt_context
 
     names_in_chunk = [str(item.get("name", "")).strip() for item in candidates if str(item.get("name", "")).strip()]
@@ -304,34 +304,34 @@ async def _build_prompt_context_with_shared_evidence(
         return prompt_context
 
     query_text = _build_shared_evidence_query_text(candidates, context_sentences)
-    if rag_retriever.requires_level3():
-        if not rag_retriever.is_level3_available():
+    if evidence_provider.requires_level3():
+        if not evidence_provider.is_level3_available():
             # 中文注释：这里是“补充 shared evidence prompt_context”的辅助链路，
             # 不应在 final-only / resume 场景里替代 annotation 主流程的 readiness gate。
             # Level 3 暂不可用时，退回 Level 1 / Level 2 证据，避免把已有 prompt_context 直接变成硬失败。
             logger.warning(
                 "shared evidence prompt_context fallback to Level1/2 only because Level3 is required but unavailable"
             )
-            evidence_bundle = rag_retriever.collect_evidence(
+            evidence_bundle = evidence_provider.collect_evidence(
                 names_in_chunk=names_in_chunk,
                 current_chunk=current_chunk,
             )
         else:
-            evidence_bundle = await rag_retriever.collect_evidence_with_level3(
+            evidence_bundle = await evidence_provider.collect_evidence_with_level3(
                 names_in_chunk=names_in_chunk,
                 current_chunk=current_chunk,
                 context_text=query_text,
                 exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
             )
-    elif rag_retriever.is_level3_available():
-        evidence_bundle = await rag_retriever.collect_evidence_with_level3(
+    elif evidence_provider.is_level3_available():
+        evidence_bundle = await evidence_provider.collect_evidence_with_level3(
             names_in_chunk=names_in_chunk,
             current_chunk=current_chunk,
             context_text=query_text,
             exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
         )
     else:
-        evidence_bundle = rag_retriever.collect_evidence(
+        evidence_bundle = evidence_provider.collect_evidence(
             names_in_chunk=names_in_chunk,
             current_chunk=current_chunk,
         )
@@ -460,7 +460,7 @@ async def _run_incremental_disambiguation_with_state(
     chunk_id: int,
     current_idx: int,
     disambig_interval: int,
-    rag_retriever: DisambigContextProvider | None = None,
+    evidence_provider: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
@@ -535,7 +535,7 @@ async def _run_incremental_disambiguation_with_state(
     }
     prompt_context = await _build_prompt_context_with_shared_evidence(
         prompt_context,
-        rag_retriever,
+        evidence_provider,
         all_disambig_candidates,
         context_sentences,
         current_chunk=chunk_id,
@@ -606,7 +606,7 @@ async def _run_final_disambiguation_with_state(
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
-    rag_retriever: DisambigContextProvider | None = None,
+    evidence_provider: DisambigContextProvider | None = None,
 ) -> DisambiguationState:
     """
     执行最终消歧（使用新的三层状态）
@@ -685,7 +685,7 @@ async def _run_final_disambiguation_with_state(
         )
         prompt_context = await _build_prompt_context_with_shared_evidence(
             prompt_context,
-            rag_retriever,
+            evidence_provider,
             candidate_payload,
             context_sentences,
         )
