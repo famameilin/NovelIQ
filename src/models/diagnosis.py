@@ -138,7 +138,7 @@ class DiagnosisClient(BaseModelClient):
 
         return response_model.model_validate(json_data)
 
-    async def _call_api(  # type: ignore[override]
+    async def _call_api_with_request_params(
         self,
         request_params: dict[str, Any],
         is_cloud: bool = False,
@@ -178,7 +178,7 @@ class DiagnosisClient(BaseModelClient):
         if self._client is None:
             raise ValueError("client is required")
 
-        response = await self._call_api(request_params, is_cloud=self.is_cloud_api())
+        response = await self._call_api_with_request_params(request_params, is_cloud=self.is_cloud_api())
         result = self._parse_structured_response(response, CloudAnalysis)
 
         duration_ms = int((time.time() - start_time) * 1000)

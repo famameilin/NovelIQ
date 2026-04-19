@@ -1,5 +1,5 @@
-from .shared_signals import serialize_graph_report_signals
 from .service import KnowledgeGraphAuthorityService
+from .shared_signals import serialize_graph_report_signals
 from .types import (
     EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS,
     GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,

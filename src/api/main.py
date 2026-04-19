@@ -50,16 +50,15 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy import text
 
-# 导入 config 模块会先加载 .env 文件
-from src.config import settings  # noqa: F401
-from src.config.logging_config import setup_logging
-
-setup_logging(verbose=True, debug=False)
-
-# ruff: noqa: E402
-from src.api.middleware import register_exception_handlers, register_middlewares
-from src.api.routes import analysis_router, novels_router, results_router, timeline_router
-from src.api.routes.sse import router as sse_router
+from src.api.app_bootstrap import (
+    analysis_router,
+    novels_router,
+    register_exception_handlers,
+    register_middlewares,
+    results_router,
+    sse_router,
+    timeline_router,
+)
 
 
 @asynccontextmanager

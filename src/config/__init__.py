@@ -12,15 +12,7 @@
 修改内容: 在模块导入时优先加载 .env 文件，确保环境变量在其他导入之前设置
 """
 
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-# 在导入其他模块之前加载 .env 文件，确保环境变量正确设置
-env_path = Path(__file__).parent.parent.parent / ".env"
-load_dotenv(env_path)
-
-# ruff: noqa: E402
+from . import bootstrap
 from .constants import (
     CHAPTER_PATTERN,
     CLASSICAL_PATTERNS,
@@ -98,6 +90,7 @@ __all__ = [
     "ThinkingConfig",
     "ThinkingSettings",
     "TopicModelSettings",
+    "bootstrap",
     "load_task_config",
     "settings",
     "setup_logging",

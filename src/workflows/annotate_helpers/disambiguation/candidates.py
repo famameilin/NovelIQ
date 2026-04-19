@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
@@ -38,15 +40,25 @@ def _extract_names_from_candidates(candidates: list[NameCountCandidate]) -> list
 
 
 def _build_candidate_payload_by_names(
-    all_names: list[NameCountCandidate],
+    all_names: Sequence[NameCountCandidate | dict[str, str | int]],
     candidate_names: list[str],
 ) -> list[NameCountCandidate]:
     names_set = set(candidate_names)
     payload: list[NameCountCandidate] = []
     for item in all_names:
         name = str(item.get("name", ""))
-        if name in names_set:
-            payload.append(item)
+        if name not in names_set:
+            continue
+
+        raw_count = item.get("count", 0)
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            count = 0
+
+        # 中文注释：数据库返回的是宽松字典，这里收口成 NameCountCandidate，
+        # 避免把仓储层的松散返回形状继续泄漏到消歧主链。
+        payload.append({"name": name, "count": count})
     return payload
 
 

@@ -105,7 +105,6 @@ def _store_annotation_results(
     任务: fix-multi-speaker-support
     修改内容: 删除 dialogue_evidences 参数，speaker 改为 list[str]
     """
-    import json
 
     from src.models.local.schema import DialogueSnapshot
     from src.storage.repositories import AnnotationRepository

@@ -34,6 +34,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "ruff>=0.11.0",
     "mypy>=1.15.0",
+    "types-pyyaml>=6.0.12.20260408",
 ]
 
 [tool.pytest.ini_options]
