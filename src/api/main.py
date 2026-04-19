@@ -65,22 +65,41 @@ from src.api.app_bootstrap import (
 )
 
 
+def _recover_orphaned_tasks() -> tuple[int, int]:
+    """
+    启动时收口上次进程遗留的孤儿任务。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: fix-task-system-review-findings
+    修改内容: 同时清理 orphaned running 与 orphaned cancelling，避免取消中的任务永久卡死。
+
+    Returns:
+        tuple[int, int]: (failed_count, cancelled_count)
+    """
+    from src.storage.db import get_session
+    from src.storage.repositories import RunRepository
+
+    with get_session() as session:
+        repo = RunRepository(session)
+        failed_count = repo.mark_running_as_failed()
+        cancelled_count = repo.mark_cancelling_as_cancelled()
+        return failed_count, cancelled_count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
 
-    # 清理僵尸任务：将上次进程遗留的 running 状态标记为 failed
+    # 清理僵尸任务：running 视为异常中断，cancelling 视为取消请求未完成收尾。
     try:
-        from src.storage.db import get_session
-        from src.storage.repositories import RunRepository
-
-        with get_session() as session:
-            repo = RunRepository(session)
-            cleaned_count = repo.mark_running_as_failed()
-            if cleaned_count > 0:
-                logger.info(f"Successfully cleaned {cleaned_count} orphaned running task(s)")
-            else:
-                logger.debug("No orphaned running tasks found on startup")
+        failed_count, cancelled_count = _recover_orphaned_tasks()
+        if failed_count > 0:
+            logger.info(f"Successfully cleaned {failed_count} orphaned running task(s)")
+        if cancelled_count > 0:
+            logger.info(f"Successfully finalized {cancelled_count} orphaned cancelling task(s)")
+        if failed_count == 0 and cancelled_count == 0:
+            logger.debug("No orphaned running/cancelling tasks found on startup")
     except Exception as e:
         logger.warning(f"Failed to clean up zombie tasks on startup: {e}")
 

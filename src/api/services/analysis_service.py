@@ -39,6 +39,17 @@ from src.config.analysis_logger import AnalysisLogger
 from src.storage.session import SessionFactory
 
 
+class CancellationStateCheckError(RuntimeError):
+    """
+    取消状态检查失败异常。
+
+    创建时间: 2026-04-19
+    创建者: Codex (GPT-5)
+    任务: fix-task-system-review-findings
+    修改内容: 区分“用户请求取消”和“DB 取消状态检查失败”，避免静默继续执行。
+    """
+
+
 class AnalysisService:
     def __init__(
         self,
@@ -201,25 +212,27 @@ class AnalysisService:
 
         # DB 检查：查询 cancel_requested 字段
         if self.session_factory:
-            try:
-                from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
-                from src.storage.repositories import RunRepository
+            from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
+            from src.storage.repositories import RunRepository
 
+            try:
                 db_session = self.session_factory.get_session()
                 with db_session:
-                    # 使用底层 SQLAlchemy Session
+                    # 使用底层 SQLAlchemy Session。
                     sql_session = db_session.connection
                     try:
                         run_id = task_id_to_run_id(task_id, sql_session)
-                        run_repo = RunRepository(sql_session)
-                        run = run_repo.get_run(run_id)
-                        if run and run.get("cancel_requested", False):
-                            return True
                     except (TaskIDNotFoundError, ValueError):
-                        # 不存在对应 run 记录，忽略
-                        pass
+                        # 不存在对应 run 记录时，说明没有可持久化的取消请求。
+                        return False
+
+                    run_repo = RunRepository(sql_session)
+                    run = run_repo.get_run(run_id)
+                    if run and run.get("cancel_requested", False):
+                        return True
             except Exception as e:
-                logger.warning(f"Failed to check DB cancel_requested for task {task_id}: {e}")
+                logger.error(f"Failed to check DB cancel_requested for task {task_id}: {e}")
+                raise CancellationStateCheckError(f"任务 {task_id} 取消状态检查失败") from e
 
         return False
 
@@ -572,7 +585,32 @@ class AnalysisService:
                 )
         except Exception as e:
             elapsed = time.time() - start_time
-            if self._is_cancelled(task_id) and session and run_id:
+            if isinstance(e, CancellationStateCheckError):
+                if session and run_id:
+                    await self.error_handler.handle_failure(
+                        task_id,
+                        novel.get("novel_id", "unknown"),
+                        elapsed,
+                        e,
+                        analysis_logger,
+                        session,
+                        run_id,
+                        bus=bus,
+                        log_prefix=log_prefix,
+                    )
+                else:
+                    self.novel_service.update_task_status(task_id, "failed")
+                    self.task_manager.complete_task(task_id, success=False, error=str(e))
+                return
+
+            cancelled = False
+            try:
+                cancelled = self._is_cancelled(task_id)
+            except CancellationStateCheckError as cancel_check_error:
+                # 原始异常已经存在时，取消状态检查失败不应覆盖原始失败，只记录并按失败路径收口。
+                logger.error(f"Failed to re-check cancellation state for task {task_id}: {cancel_check_error}")
+
+            if cancelled and session and run_id:
                 await self.error_handler.handle_cancel(
                     task_id, novel.get("novel_id", "unknown"), session, run_id, analysis_logger, bus=bus
                 )
