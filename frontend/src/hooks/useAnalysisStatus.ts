@@ -25,8 +25,41 @@ import type {
   StreamEventData,
   ErrorData,
 } from "@/api/streamTypes";
+import type { TaskStatusResponse } from "@/api/types";
 
 const SSE_URL = appConfig.apiBaseUrl;
+
+function buildBackfillProgress(status: TaskStatusResponse): StreamEventData {
+  // 中文注释：HTTP backfill 需要对 pending/running/cancelling 做统一归一化，
+  // 避免切换任务或刷新页面时沿用上一个任务留下来的旧进度面板状态。
+  const fallbackStage =
+    status.stage ??
+    (status.status === "pending"
+      ? "preprocess"
+      : status.status === "cancelling"
+        ? "cancelling"
+        : "");
+  const fallbackMessage =
+    status.message ??
+    (status.status === "pending"
+      ? "任务待执行"
+      : status.status === "cancelling"
+        ? "任务取消中"
+        : "任务执行中");
+
+  return {
+    action: status.status === "pending" ? "start" : "progress",
+    stage: fallbackStage,
+    sub_stage: status.sub_stage ?? "",
+    chunk_id: 0,
+    current: status.current ?? 0,
+    total: status.total ?? 0,
+    percent: status.progress,
+    sub_percent: 0,
+    content: "",
+    message: fallbackMessage,
+  };
+}
 
 function isMockEnabled(): boolean {
   return (
@@ -235,25 +268,11 @@ export function useAnalysisStatus(
 
       getTaskStatus(novelId, taskId)
         .then((status) => {
-          // 将 HTTP 返回的进度数据写入 streamStore，解决刷新后进度面板空白问题
-          if (status.status === "running" && status.stage) {
-            updateProgress({
-              action: "progress",
-              stage: status.stage,
-              sub_stage: status.sub_stage ?? "",
-              chunk_id: 0,
-              current: status.current ?? 0,
-              total: status.total ?? 0,
-              percent: status.progress,
-              sub_percent: 0,
-              content: "",
-              message: status.message ?? "",
-            });
-          }
-
-          if (status.status === "running") {
+          // 中文注释：pending/cancelling 也是当前选中的活跃任务，需要显式覆盖旧进度并恢复“分析中”UI。
+          if (status.status === "pending" || status.status === "running" || status.status === "cancelling") {
+            updateProgress(buildBackfillProgress(status));
             optionsRef.current?.onRunning?.();
-            prevStatusRef.current = "running";
+            prevStatusRef.current = status.status;
           } else if (status.status === "completed") {
             optionsRef.current?.onCompleted?.();
             prevStatusRef.current = "completed";
