@@ -1,9 +1,10 @@
 /**
- * MSW Handler — 分析任务：开始、重新分析、状态、任务列表、删除
+ * MSW Handler — 分析任务：创建、继续、状态、重新分析、删除
  *
  * 关键设计：
- * - startAnalysis / reanalyze 会创建新任务，并以定时器模拟进度推进
- * - getAnalysisStatus 返回当前进度（由模拟计时器更新）
+ * - createTask / reanalyze 会创建新任务，并以定时器模拟进度推进
+ * - resumeTask 会继续指定任务，并复用同一个 task_id
+ * - taskStatus 返回当前进度（由模拟计时器更新）
  * - 任务完成后所有结果 API 可正常返回数据
  *
  * 修改时间: 2026-04-07
@@ -59,6 +60,26 @@ const MOCK_LLM_OUTPUTS = [
   "生成诊断报告...",
 ];
 
+// 2026-04-19, fix-review-findings: 同步 taskDb 中的任务状态，避免 mock 列表与运行态漂移。
+function updateTaskRecord(
+  novelId: string,
+  taskId: string,
+  updates: Partial<Pick<SimulatedTask, "status">> & {
+    completed_at?: string | undefined;
+  }
+) {
+  const tasks = taskDb.get(novelId) ?? [];
+  const task = tasks.find((item) => item.task_id === taskId);
+  if (!task) return;
+
+  if (updates.status) {
+    task.status = updates.status;
+  }
+  if ("completed_at" in updates) {
+    task.completed_at = updates.completed_at;
+  }
+}
+
 function startSimulation(novelId: string, taskId: string) {
   const sim: SimulatedTask = {
     novelId,
@@ -89,13 +110,10 @@ function startSimulation(novelId: string, taskId: string) {
       sim.currentStep = "分析完成";
       sim.stage = "completed";
       sim.progress = 100;
-
-      const tasks = taskDb.get(novelId) ?? [];
-      const task = tasks.find((t) => t.task_id === taskId);
-      if (task) {
-        task.status = "completed";
-        task.completed_at = new Date().toISOString();
-      }
+      updateTaskRecord(novelId, taskId, {
+        status: "completed",
+        completed_at: new Date().toISOString(),
+      });
 
       if (sim.timer) {
         clearInterval(sim.timer);
@@ -127,6 +145,7 @@ function startSimulation(novelId: string, taskId: string) {
           diagnose: "running",
         };
         sim.status = statusMap[stage.key] ?? "pending";
+        updateTaskRecord(novelId, taskId, { status: sim.status, completed_at: undefined });
 
         if (Math.random() < 0.15 && sim.llmOutputs.length < MOCK_LLM_OUTPUTS.length) {
           const outputIdx = Math.floor(progress / 15);
@@ -141,27 +160,162 @@ function startSimulation(novelId: string, taskId: string) {
   }, 200);
 }
 
-export const analyzeHandler = http.post(`${BASE}/api/novels/:novelId/analyze`, async ({ params }) => {
-  await delay(500);
-  const { novelId } = params;
+function createAndStartTask(novelId: string) {
   const taskId = Math.random().toString(36).slice(2, 10);
-
-  const task = createTask(novelId as string, "pending", {
+  const task = createTask(novelId, "pending", {
     task_id: taskId,
   });
-
-  const tasks = taskDb.get(novelId as string) ?? [];
+  const tasks = taskDb.get(novelId) ?? [];
   tasks.unshift(task);
-  taskDb.set(novelId as string, tasks);
+  taskDb.set(novelId, tasks);
+  startSimulation(novelId, taskId);
+  return taskId;
+}
 
-  startSimulation(novelId as string, taskId);
+export const createTaskHandler = http.post(`${BASE}/api/novels/:novelId/tasks`, async ({ params }) => {
+  await delay(500);
+  const { novelId } = params;
+  const taskId = createAndStartTask(novelId as string);
 
   return HttpResponse.json({
     novel_id: novelId,
     task_id: taskId,
-    message: "分析任务已创建",
+    message: "分析任务已创建并启动",
   });
 });
+
+// 兼容旧入口：语义对齐为“创建新任务”，不再承载 resume 行为。
+export const analyzeHandler = http.post(`${BASE}/api/novels/:novelId/analyze`, async ({ params, request }) => {
+  await delay(500);
+  const body = await request.clone().json().catch(() => null) as { task_id?: string } | null;
+  if (body?.task_id) {
+    return HttpResponse.json(
+      { detail: "analyze 接口不再支持 task_id 续跑，请使用 /api/novels/{novel_id}/tasks/{task_id}/resume" },
+      { status: 400 }
+    );
+  }
+  const { novelId } = params;
+  const taskId = createAndStartTask(novelId as string);
+
+  return HttpResponse.json({
+    novel_id: novelId,
+    task_id: taskId,
+    message: "分析任务已创建并启动",
+  });
+});
+
+export const reanalyzeHandler = http.post(`${BASE}/api/novels/:novelId/reanalyze`, async ({ params }) => {
+  await delay(500);
+  const { novelId } = params;
+  const taskId = createAndStartTask(novelId as string);
+
+  return HttpResponse.json({
+    novel_id: novelId,
+    task_id: taskId,
+    message: "重新分析任务已创建",
+  });
+});
+
+function buildTaskStatusPayload(novelId: string, taskId: string) {
+  const sim = simulatedTasks.get(taskId);
+  if (sim) {
+    return HttpResponse.json({
+      novel_id: novelId,
+      task_id: taskId,
+      status: sim.status,
+      progress: sim.progress,
+      current_step: sim.currentStep,
+      stage: sim.stage,
+      sub_stage: sim.subStage,
+      current: sim.current,
+      total: sim.total,
+      message: sim.currentStep,
+      llm_outputs: sim.llmOutputs,
+    });
+  }
+
+  const tasks = taskDb.get(novelId) ?? [];
+  const task = tasks.find((item) => item.task_id === taskId);
+  if (task) {
+    return HttpResponse.json({
+      novel_id: novelId,
+      task_id: taskId,
+      status: task.status,
+      progress: task.status === "completed" ? 100 : 0,
+      current_step: task.status === "completed" ? "分析完成" : "等待开始",
+      stage: task.status,
+    });
+  }
+
+  return HttpResponse.json({ detail: "任务不存在" }, { status: 404 });
+}
+
+export const taskStatusHandler = http.get(
+  `${BASE}/api/novels/:novelId/tasks/:taskId/status`,
+  async ({ params }) => {
+    await delay(100);
+    const { novelId, taskId } = params;
+    return buildTaskStatusPayload(novelId as string, taskId as string);
+  }
+);
+
+// 兼容旧入口：仍允许通过 query 读取，但前端主流程已切到 /tasks/{taskId}/status。
+export const analysisStatusHandler = http.get(
+  `${BASE}/api/novels/:novelId/status`,
+  async ({ params, request }) => {
+    await delay(100);
+    const { novelId } = params;
+    const url = new URL(request.url);
+    const taskId = url.searchParams.get("task_id");
+
+    if (!taskId) {
+      return HttpResponse.json({ detail: "必须提供 task_id" }, { status: 400 });
+    }
+
+    return buildTaskStatusPayload(novelId as string, taskId);
+  }
+);
+
+export const resumeTaskHandler = http.post(
+  `${BASE}/api/novels/:novelId/tasks/:taskId/resume`,
+  async ({ params }) => {
+    await delay(300);
+    const { novelId, taskId } = params;
+    const tasks = taskDb.get(novelId as string) ?? [];
+    const task = tasks.find((item) => item.task_id === taskId);
+
+    if (!task) {
+      return HttpResponse.json({ detail: "任务不存在" }, { status: 404 });
+    }
+
+    if (!["pending", "failed"].includes(task.status)) {
+      return HttpResponse.json({ detail: `仅支持继续 pending/failed 任务，当前状态为 ${task.status}` }, { status: 400 });
+    }
+
+    const existingSim = simulatedTasks.get(taskId as string);
+    if (existingSim) {
+      if (existingSim.timer && ["pending", "running", "cancelling"].includes(existingSim.status)) {
+        return HttpResponse.json(
+          { detail: `仅支持继续 pending/failed 任务，当前状态为 ${existingSim.status}` },
+          { status: 400 }
+        );
+      }
+      if (existingSim.timer) {
+        clearInterval(existingSim.timer);
+      }
+      simulatedTasks.delete(taskId as string);
+    }
+
+    task.status = "pending";
+    startSimulation(novelId as string, taskId as string);
+
+    return HttpResponse.json({
+      novel_id: novelId,
+      task_id: taskId,
+      message: "分析任务已继续执行",
+    });
+  }
+);
 
 export const batchDeleteTasksHandler = http.post(
   `${BASE}/api/novels/:novelId/tasks/batch-delete`,
@@ -197,105 +351,6 @@ export const batchDeleteTasksHandler = http.post(
       failed_count: failed.length,
       deleted_ids: deleted,
       failed_ids: failed,
-    });
-  }
-);
-
-export const reanalyzeHandler = http.post(`${BASE}/api/novels/:novelId/reanalyze`, async ({ params }) => {
-  await delay(500);
-  const { novelId } = params;
-  const taskId = Math.random().toString(36).slice(2, 10);
-
-  const task = createTask(novelId as string, "pending", {
-    task_id: taskId,
-  });
-
-  const tasks = taskDb.get(novelId as string) ?? [];
-  tasks.unshift(task);
-  taskDb.set(novelId as string, tasks);
-
-  startSimulation(novelId as string, taskId);
-
-  return HttpResponse.json({
-    novel_id: novelId,
-    task_id: taskId,
-    message: "重新分析任务已创建",
-  });
-});
-
-export const analysisStatusHandler = http.get(
-  `${BASE}/api/novels/:novelId/status`,
-  async ({ params, request }) => {
-    await delay(100);
-    const { novelId } = params;
-    const url = new URL(request.url);
-    const taskId = url.searchParams.get("task_id");
-
-    if (taskId) {
-      const sim = simulatedTasks.get(taskId);
-      if (sim) {
-        return HttpResponse.json({
-          novel_id: novelId,
-          task_id: taskId,
-          status: sim.status,
-          progress: sim.progress,
-          current_step: sim.currentStep,
-          stage: sim.stage,
-          sub_stage: sim.subStage,
-          current: sim.current,
-          total: sim.total,
-          message: sim.currentStep,
-          llm_outputs: sim.llmOutputs,
-        });
-      }
-
-      const tasks = taskDb.get(novelId as string) ?? [];
-      const task = tasks.find((t) => t.task_id === taskId);
-      if (task) {
-        return HttpResponse.json({
-          novel_id: novelId,
-          task_id: taskId,
-          status: task.status,
-          progress: task.status === "completed" ? 100 : 0,
-          current_step: task.status === "completed" ? "分析完成" : "等待开始",
-          stage: task.status,
-        });
-      }
-
-      return HttpResponse.json(
-        { detail: "任务不存在" },
-        { status: 404 }
-      );
-    }
-
-    const tasks = taskDb.get(novelId as string) ?? [];
-    const runningTask = tasks.find((t) =>
-      ["pending", "running", "cancelling"].includes(t.status)
-    );
-
-    if (runningTask) {
-      const sim = simulatedTasks.get(runningTask.task_id);
-      if (sim) {
-        return HttpResponse.json({
-          novel_id: novelId,
-          task_id: sim.taskId,
-          status: sim.status,
-          progress: sim.progress,
-          current_step: sim.currentStep,
-          stage: sim.stage,
-          sub_stage: sim.subStage,
-          current: sim.current,
-          total: sim.total,
-          message: sim.currentStep,
-          llm_outputs: sim.llmOutputs,
-        });
-      }
-    }
-
-    return HttpResponse.json({
-      novel_id: novelId,
-      status: "pending",
-      progress: 0,
     });
   }
 );
