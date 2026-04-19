@@ -12,12 +12,17 @@
 - threading.Event → asyncio.Event，与异步分析流程语义一致
 - cancel_event.is_set() 和 set() 行为保持兼容
 
-修改时间: 2026-04-19
-修改者: TraeAI
-任务: task-system-db-driven-refactor
-修改内容:
-- 重构 _update_db() 为可靠写入，移除静默失败
-- TaskManager 职责收缩为执行缓存容器，不再承担业务真相判断
+    修改时间: 2026-04-19
+    修改者: TraeAI
+    任务: task-system-db-driven-refactor
+    修改内容:
+    - 重构 _update_db() 为可靠写入，移除静默失败
+    - TaskManager 职责收缩为执行缓存容器，不再承担业务真相判断
+
+    修改时间: 2026-04-19
+    修改者: Codex (GPT-5)
+    任务: fix-task-system-review-findings
+    修改内容: 持久化 message 字段，并在 DB 写入后主动关闭短生命周期 Session
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from src.api.models.responses import TaskStatus
+from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
 from src.storage.repositories import RunRepository
 
 if TYPE_CHECKING:
@@ -114,8 +120,6 @@ class TaskManager:
             logger.warning(f"DB session factory not set, skipping DB update for task {task_id}")
             return
 
-        run_repo = RunRepository(self._db_session_factory())
-
         # 构建更新参数字典
         update_params: dict[str, Any] = {}
         if "status" in kwargs:
@@ -131,6 +135,8 @@ class TaskManager:
             update_params["current"] = kwargs["current"]
         if "total" in kwargs:
             update_params["total"] = kwargs["total"]
+        if "message" in kwargs:
+            update_params["message"] = kwargs["message"]
         if "error" in kwargs:
             update_params["error"] = kwargs["error"]
         if "cancel_requested" in kwargs:
@@ -142,12 +148,41 @@ class TaskManager:
             return
 
         # 可靠写入，失败时向上抛出异常
+        session = self._db_session_factory()
         try:
-            run_repo.update_run_task_fields(task_id, **update_params)
-            logger.debug(f"Task DB updated: {task_id} - {update_params}")
+            run_repo = RunRepository(session)
+            run_id = self._resolve_run_id_for_db_write(task_id, session)
+            if run_repo.get_run(run_id) is None:
+                raise RuntimeError(f"Run not found for DB update: task_id={task_id}, run_id={run_id}")
+            run_repo.update_run_task_fields(run_id, **update_params)
+            logger.debug(f"Task DB updated: task_id={task_id}, run_id={run_id} - {update_params}")
         except Exception as e:
             logger.error(f"Failed to update task DB (task_id={task_id}): {e}")
             raise
+        finally:
+            session.close()
+
+    def _resolve_run_id_for_db_write(self, task_id: str, session: Session) -> str:
+        """
+        将任务写回统一解析到真实 run_id。
+
+        创建时间: 2026-04-19
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-review-findings
+
+        修改时间: 2026-04-19
+        修改者: Codex (GPT-5)
+        任务: 修复 task_id/run_id 混写
+        修改内容: 对 8 位 task_id 先查映射，再按完整 run_id 落库，避免历史 full run_id 任务静默不更新。
+        """
+        # 历史数据里 run_id 可能是完整 UUID，当前 API 层仍主要传 8 位 task_id。
+        # 这里统一先解析成真实 run_id，再进行精确更新，避免 DB-only 状态查询读到旧值。
+        if len(task_id) == 8:
+            try:
+                return task_id_to_run_id(task_id, session)
+            except (TaskIDNotFoundError, ValueError) as exc:
+                raise RuntimeError(f"Cannot resolve run_id from task_id={task_id}") from exc
+        return task_id
 
     def create_task(self, task_id: str, novel_id: str) -> TaskInfo:
         task = TaskInfo(

@@ -23,6 +23,8 @@ from src.storage.models import AnalysisRun
 
 from .base import BaseRepository
 
+_UNSET = object()
+
 
 class RunRepository(BaseRepository[dict[str, Any]]):
     """
@@ -51,6 +53,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "sub_stage": run.sub_stage,
             "current": run.current,
             "total": run.total,
+            "message": run.message,
             "error": run.error,
             "cancel_requested": run.cancel_requested,
             "worker_id": run.worker_id,
@@ -251,16 +254,16 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         self,
         run_id: str,
         *,
-        status: str | None = None,
-        progress: float | None = None,
-        stage: str | None = None,
-        sub_stage: str | None = None,
-        current: int | None = None,
-        total: int | None = None,
-        message: str | None = None,
-        error: str | None = None,
-        cancel_requested: bool | None = None,
-        completed_at: datetime | None = None,
+        status: str | None | object = _UNSET,
+        progress: float | None | object = _UNSET,
+        stage: str | None | object = _UNSET,
+        sub_stage: str | None | object = _UNSET,
+        current: int | None | object = _UNSET,
+        total: int | None | object = _UNSET,
+        message: str | None | object = _UNSET,
+        error: str | None | object = _UNSET,
+        cancel_requested: bool | None | object = _UNSET,
+        completed_at: datetime | None | object = _UNSET,
     ) -> None:
         """
         批量更新任务的运行态字段。
@@ -278,7 +281,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             sub_stage: 子阶段名称
             current: 当前进度分子
             total: 总量
-            message: 提示信息（存储到 error 字段）
+            message: 提示信息
             error: 错误信息
             cancel_requested: 是否请求取消
             completed_at: 完成时间
@@ -289,23 +292,25 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             return
 
         now = datetime.now()
-        if status is not None:
+        if status is not _UNSET:
             run.status = status
-        if progress is not None:
+        if progress is not _UNSET:
             run.progress = progress
-        if stage is not None:
+        if stage is not _UNSET:
             run.stage = stage
-        if sub_stage is not None:
+        if sub_stage is not _UNSET:
             run.sub_stage = sub_stage
-        if current is not None:
+        if current is not _UNSET:
             run.current = current
-        if total is not None:
+        if total is not _UNSET:
             run.total = total
-        if error is not None:
+        if message is not _UNSET:
+            run.message = message
+        if error is not _UNSET:
             run.error = error
-        if cancel_requested is not None:
+        if cancel_requested is not _UNSET:
             run.cancel_requested = cancel_requested
-        if completed_at is not None:
+        if completed_at is not _UNSET:
             run.completed_at = completed_at
         run.updated_at = now
         self.session.commit()

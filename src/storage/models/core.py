@@ -16,7 +16,7 @@
 修改时间: 2026-04-19
 修改者: TraeAI
 任务: task-system-db-driven-refactor
-修改内容: 为 AnalysisRun 添加运行态字段（error, completed_at, cancel_requested, worker_id, heartbeat_at, sub_stage, current, total）
+修改内容: 为 AnalysisRun 添加运行态字段（error, message, completed_at, cancel_requested, worker_id, heartbeat_at, sub_stage, current, total）
 """
 
 from __future__ import annotations
@@ -42,10 +42,15 @@ class AnalysisRun(Base):
     任务: postgresql-migration
     说明: 记录每次分析任务的运行信息，作为所有数据的隔离主键
 
-    修改时间: 2026-04-19
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 添加完整运行态字段，使 DB 成为任务唯一真相源
+修改时间: 2026-04-19
+修改者: TraeAI
+任务: task-system-db-driven-refactor
+修改内容: 添加完整运行态字段，使 DB 成为任务唯一真相源
+
+修改时间: 2026-04-19
+修改者: Codex (GPT-5)
+任务: fix-task-system-review-findings
+修改内容: 补充 message 持久化字段，保证 DB-only 状态查询可恢复进度文案
     """
 
     __tablename__ = "analysis_runs"
@@ -63,6 +68,7 @@ class AnalysisRun(Base):
     sub_stage: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
