@@ -46,6 +46,16 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "title": run.title,
             "author": run.author,
             "status": run.status,
+            "progress": run.progress,
+            "stage": run.stage,
+            "sub_stage": run.sub_stage,
+            "current": run.current,
+            "total": run.total,
+            "error": run.error,
+            "cancel_requested": run.cancel_requested,
+            "worker_id": run.worker_id,
+            "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
             "created_at": run.created_at.isoformat() if run.created_at else None,
             "updated_at": run.updated_at.isoformat() if run.updated_at else None,
         }
@@ -176,6 +186,129 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = select(AnalysisRun).where(AnalysisRun.novel_id == novel_id).order_by(AnalysisRun.created_at.desc())
         runs = self.session.execute(stmt).scalars().all()
         return [self._to_dict(run) for run in runs]
+
+    def cancel_run(self, run_id: str) -> bool:
+        """
+        原子性地设置任务的取消请求标记。
+
+        创建时间: 2026-04-19
+        创建者: TraeAI
+        任务: task-system-db-driven-refactor
+        说明: DB 驱动的取消机制，通过 cancel_requested flag 传递取消信号
+
+        Args:
+            run_id: 运行ID
+
+        Returns:
+            是否成功设置取消标记
+        """
+        from sqlalchemy import update
+
+        stmt = (
+            update(AnalysisRun)
+            .where(AnalysisRun.run_id == run_id)
+            .where(AnalysisRun.cancel_requested == False)  # noqa: E712
+            .values(cancel_requested=True, updated_at=datetime.now())
+        )
+        result = self.session.execute(stmt)
+        self.session.commit()
+        return result.rowcount > 0  # type: ignore[attr-defined]
+
+    def get_by_status(self, status: str) -> list[dict[str, Any]]:
+        """
+        按状态查询任务。
+
+        创建时间: 2026-04-19
+        创建者: TraeAI
+        任务: task-system-db-driven-refactor
+        说明: 用于查询指定状态的所有任务
+
+        Args:
+            status: 任务状态
+
+        Returns:
+            符合状态的任务记录列表
+        """
+        stmt = select(AnalysisRun).where(AnalysisRun.status == status).order_by(AnalysisRun.created_at.desc())
+        runs = self.session.execute(stmt).scalars().all()
+        return [self._to_dict(run) for run in runs]
+
+    def get_running_tasks(self) -> list[dict[str, Any]]:
+        """
+        获取所有运行中的任务。
+
+        创建时间: 2026-04-19
+        创建者: TraeAI
+        任务: task-system-db-driven-refactor
+        说明: 用于启动时清理孤儿任务和运行时状态检查
+
+        Returns:
+            所有 status=running 的任务记录列表
+        """
+        return self.get_by_status("running")
+
+    def update_run_task_fields(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        progress: float | None = None,
+        stage: str | None = None,
+        sub_stage: str | None = None,
+        current: int | None = None,
+        total: int | None = None,
+        message: str | None = None,
+        error: str | None = None,
+        cancel_requested: bool | None = None,
+        completed_at: datetime | None = None,
+    ) -> None:
+        """
+        批量更新任务的运行态字段。
+
+        创建时间: 2026-04-19
+        创建者: TraeAI
+        任务: task-system-db-driven-refactor
+        说明: 统一的运行态字段更新方法，支持选择性更新
+
+        Args:
+            run_id: 运行ID
+            status: 任务状态
+            progress: 进度 (0-100)
+            stage: 阶段名称
+            sub_stage: 子阶段名称
+            current: 当前进度分子
+            total: 总量
+            message: 提示信息（存储到 error 字段）
+            error: 错误信息
+            cancel_requested: 是否请求取消
+            completed_at: 完成时间
+        """
+        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
+        run = self.session.execute(stmt).scalar_one_or_none()
+        if not run:
+            return
+
+        now = datetime.now()
+        if status is not None:
+            run.status = status
+        if progress is not None:
+            run.progress = progress
+        if stage is not None:
+            run.stage = stage
+        if sub_stage is not None:
+            run.sub_stage = sub_stage
+        if current is not None:
+            run.current = current
+        if total is not None:
+            run.total = total
+        if error is not None:
+            run.error = error
+        if cancel_requested is not None:
+            run.cancel_requested = cancel_requested
+        if completed_at is not None:
+            run.completed_at = completed_at
+        run.updated_at = now
+        self.session.commit()
 
     def get_run_by_run_id_prefix(self, run_id_prefix: str) -> dict[str, Any] | None:
         """

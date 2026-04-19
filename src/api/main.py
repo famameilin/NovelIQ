@@ -36,6 +36,10 @@ FastAPI 应用入口模块
 修改者: TraeAI
 任务: 实现 SSE 路由和事件管理器
 修改内容: 注册 SSE 路由，支持 Server-Sent Events 实时推送
+修改时间: 2026-04-19
+修改者: TraeAI
+任务: Task 7 - 实现启动时任务恢复逻辑
+修改内容: 完善孤儿任务清理日志,记录清理的任务数量
 """
 
 from __future__ import annotations
@@ -72,7 +76,11 @@ async def lifespan(app: FastAPI):
 
         with get_session() as session:
             repo = RunRepository(session)
-            repo.mark_running_as_failed()
+            cleaned_count = repo.mark_running_as_failed()
+            if cleaned_count > 0:
+                logger.info(f"Successfully cleaned {cleaned_count} orphaned running task(s)")
+            else:
+                logger.debug("No orphaned running tasks found on startup")
     except Exception as e:
         logger.warning(f"Failed to clean up zombie tasks on startup: {e}")
 

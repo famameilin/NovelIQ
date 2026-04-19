@@ -179,10 +179,48 @@ class AnalysisService:
             await bus.emit_stage_complete("diagnose")
 
     def _is_cancelled(self, task_id: str) -> bool:
-        """检查任务是否已被请求取消"""
+        """
+        检查任务是否已被请求取消
+
+        创建时间: 2025-03-11
+        创建者: TraeAI
+        任务: 分析服务
+
+        修改时间: 2026-04-19
+        修改者: TraeAI
+        任务: task-5-db-driven-cancel
+        修改内容: DB 优先取消机制，同时检查内存 cancel_event（加速缓存）和 DB cancel_requested（持久化真相）
+
+        返回:
+            True 表示任务已请求取消，False 表示未取消
+        """
+        # 优先检查内存缓存（加速响应）
         task_info = self.task_manager.get_task(task_id)
         if task_info and task_info.cancel_event and task_info.cancel_event.is_set():
             return True
+
+        # DB 检查：查询 cancel_requested 字段
+        if self.session_factory:
+            try:
+                from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
+                from src.storage.repositories import RunRepository
+
+                db_session = self.session_factory.get_session()
+                with db_session:
+                    # 使用底层 SQLAlchemy Session
+                    sql_session = db_session.connection
+                    try:
+                        run_id = task_id_to_run_id(task_id, sql_session)
+                        run_repo = RunRepository(sql_session)
+                        run = run_repo.get_run(run_id)
+                        if run and run.get("cancel_requested", False):
+                            return True
+                    except (TaskIDNotFoundError, ValueError):
+                        # 不存在对应 run 记录，忽略
+                        pass
+            except Exception as e:
+                logger.warning(f"Failed to check DB cancel_requested for task {task_id}: {e}")
+
         return False
 
     def _check_all_stages_completed(self, skip_stages: dict[str, bool]) -> bool:
@@ -559,32 +597,32 @@ class AnalysisService:
                 session.close()
 
     def get_task_status(self, task_id: str) -> dict | None:
-        task = self.task_manager.get_task(task_id)
+        """
+        获取任务状态（DB-only 查询）。
+
+        创建时间: 2026-04-19
+        创建者: AI Assistant
+        任务: 统一任务状态查询为 DB-only
+        说明: 从数据库查询任务状态，不再依赖内存中的 TaskManager。
+        """
+        task = self.novel_service.get_run_by_task_id(task_id)
         if not task:
             return None
         return {
-            "task_id": task.task_id,
-            "novel_id": task.novel_id,
-            "status": task.status,
-            "progress": task.progress,
-            "stage": task.stage,
-            "error": task.error,
-            "started_at": task.started_at,
-            "completed_at": task.completed_at,
+            "task_id": task["task_id"],
+            "novel_id": task["novel_id"],
+            "status": task["status"],
+            "run_id": task["run_id"],
         }
 
     def get_novel_tasks(self, novel_id: str) -> list[dict]:
-        tasks = self.task_manager.get_tasks_by_novel(novel_id)
-        return [
-            {
-                "task_id": t.task_id,
-                "novel_id": t.novel_id,
-                "status": t.status,
-                "progress": t.progress,
-                "stage": t.stage,
-                "error": t.error,
-                "started_at": t.started_at,
-                "completed_at": t.completed_at,
-            }
-            for t in tasks
-        ]
+        """
+        获取小说的所有任务（DB-only 查询）。
+
+        创建时间: 2026-04-19
+        创建者: AI Assistant
+        任务: 统一任务状态查询为 DB-only
+        说明: 从数据库查询小说的任务列表，不再依赖内存中的 TaskManager。
+        """
+        tasks = self.novel_service.get_tasks_by_novel(novel_id)
+        return tasks
