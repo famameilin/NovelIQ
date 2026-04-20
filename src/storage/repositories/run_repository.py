@@ -392,6 +392,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
                 status="running",
                 worker_id=worker_id,
                 heartbeat_at=now,
+                started_at=now,
                 updated_at=now,
             )
         )
@@ -446,6 +447,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         cancel_requested: bool | None | object = _UNSET,
         worker_id: str | None | object = _UNSET,
         heartbeat_at: datetime | None | object = _UNSET,
+        started_at: datetime | None | object = _UNSET,
         completed_at: datetime | None | object = _UNSET,
     ) -> None:
         """
@@ -469,6 +471,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             cancel_requested: 是否请求取消
             worker_id: 当前执行该任务的 worker 标识
             heartbeat_at: 最近一次心跳时间
+            started_at: 任务实际开始执行时间
             completed_at: 完成时间
         """
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
@@ -503,6 +506,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run.worker_id = worker_id
         if heartbeat_at is not _UNSET:
             run.heartbeat_at = heartbeat_at
+        if started_at is not _UNSET:
+            run.started_at = started_at
         if completed_at is not _UNSET:
             run.completed_at = completed_at
         run.updated_at = now
