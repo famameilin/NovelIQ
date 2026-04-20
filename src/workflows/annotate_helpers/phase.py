@@ -66,7 +66,7 @@ async def _annotate_chunk(
     global_context: str | None = None,
     active_entities: str | None = None,
     evidence_bundle: EvidenceBundle | None = None,
-    cloud_client: AnnotationLike | None = None,
+    fallback_client: AnnotationLike | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
@@ -98,9 +98,9 @@ async def _annotate_chunk(
     修改内容: 改为 async def
 
     重试策略:
-    - 内层: 本地模型最多3次（任何错误类型）
-    - 内层: 本地失败后云端1次
-    - 云端失败直接终止整个任务
+    - 内层: 主标注客户端最多3次（任何错误类型）
+    - 内层: 主客户端失败后兜底客户端1次
+    - 兜底客户端失败直接终止整个任务
     """
     try:
         return await client.annotate_chunk(
@@ -111,7 +111,7 @@ async def _annotate_chunk(
             global_context=global_context,
             active_entities=active_entities,
             evidence_bundle=evidence_bundle,
-            cloud_client=cloud_client,
+            fallback_client=fallback_client,
             run_id=run_id,
             emitter=emitter,
             disambig_context=disambig_context,
@@ -128,7 +128,7 @@ class AnnotationPhaseResult:
     def __init__(
         self,
         annotation_client: AnnotationLike,
-        cloud_annotation_client: AnnotationLike | None,
+        annotation_fallback_client: AnnotationLike | None,
         incremental_disambig_client: DisambiguationLike,
         full_disambig_client: DisambiguationLike,
         evidence_provider: DisambigContextProvider | None,
@@ -138,7 +138,7 @@ class AnnotationPhaseResult:
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> None:
         self.annotation_client = annotation_client
-        self.cloud_annotation_client = cloud_annotation_client
+        self.annotation_fallback_client = annotation_fallback_client
         self.incremental_disambig_client = incremental_disambig_client
         self.full_disambig_client = full_disambig_client
         self.evidence_provider = evidence_provider
@@ -170,7 +170,7 @@ async def _init_annotation_phase_with_config(
     if not config.run_id:
         raise ValueError("run_id is required for annotation phase")
 
-    (annotation_client, cloud_annotation_client, incremental_client, full_client) = _init_annotation_clients(
+    (annotation_client, annotation_fallback_client, incremental_client, full_client) = _init_annotation_clients(
         config.analysis_logger,
         config.annotate_client,
         config.incremental_disambig_client,
@@ -181,13 +181,13 @@ async def _init_annotation_phase_with_config(
     # 设置 session 用于保存模型交互记录
     if config.conn is not None:
         _set_client_session(annotation_client, config.conn)
-        _set_client_session(cloud_annotation_client, config.conn)
+        _set_client_session(annotation_fallback_client, config.conn)
         _set_client_session(incremental_client, config.conn)
         _set_client_session(full_client, config.conn)
 
     clients = [
         annotation_client,
-        cloud_annotation_client,
+        annotation_fallback_client,
         incremental_client,
         full_client,
     ]
@@ -217,7 +217,7 @@ async def _init_annotation_phase_with_config(
 
     return AnnotationPhaseResult(
         annotation_client=annotation_client,
-        cloud_annotation_client=cloud_annotation_client,
+        annotation_fallback_client=annotation_fallback_client,
         incremental_disambig_client=incremental_client,
         full_disambig_client=full_client,
         evidence_provider=evidence_provider,
@@ -347,7 +347,7 @@ async def _process_single_chunk(
         active_entities=ctx.prompt_active_entities,
         evidence_bundle=ctx.evidence_bundle,
         disambig_context=ctx.prompt_disambig_context,
-        cloud_client=phase_result.cloud_annotation_client,
+        fallback_client=phase_result.annotation_fallback_client,
         run_id=run_id,
         emitter=phase_result.emitter,
     )

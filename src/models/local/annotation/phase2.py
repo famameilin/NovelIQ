@@ -112,7 +112,7 @@ async def annotate_chunk_phase2(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
-    cloud_client: AnnotationClient | None = None,
+    fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     evidence_bundle=None,
 ) -> ForeshadowingResult | None:
@@ -138,8 +138,8 @@ async def annotate_chunk_phase2(
     )
     handler = AnnotationRetryHandler[ForeshadowingResult](
         config=config,
-        local_client=client,
-        cloud_client=cloud_client,
+        primary_client=client,
+        fallback_client=fallback_client,
         exception_type=Phase2MaxRetriesExceededError,
     )
 
@@ -159,10 +159,19 @@ async def annotate_chunk_phase2(
     )
 
     async def operation(
-        local_client: AnnotationClient, retry_messages: list[dict] | None = None
+        primary_client: AnnotationClient,
+        retry_messages: list[dict] | None = None,
     ) -> ForeshadowingResult:
         """执行单次Phase2调用"""
         msgs = retry_messages if retry_messages else messages
-        return await _do_phase2(local_client, msgs, text, prev_chunk_summary, chunk_id, run_id, handler.state.attempt)
+        return await _do_phase2(
+            primary_client,
+            msgs,
+            text,
+            prev_chunk_summary,
+            chunk_id,
+            run_id,
+            handler.state.attempt,
+        )
 
     return await handler.execute(operation)
