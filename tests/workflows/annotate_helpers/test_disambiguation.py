@@ -308,9 +308,13 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     assert mock_build_context_sentences.call_count == 2
     for call in mock_build_context_sentences.call_args_list:
         assert call.kwargs["max_chunk_id"] == 12
+        assert call.kwargs["chunk_start_id"] == 10
+        assert call.kwargs["chunk_end_id"] == 12
         assert call.kwargs["run_id"] == "run-1"
     build_hint_call = mock_build_existing_hint.call_args
     assert build_hint_call.kwargs["current_chunk_id"] == 12
+    assert build_hint_call.kwargs["chunk_start_id"] == 10
+    assert build_hint_call.kwargs["chunk_end_id"] == 12
 
     user_content = mock_record.call_args.kwargs["messages"][-1]["content"]
     assert "【已存在角色锚点】" in user_content
@@ -536,6 +540,17 @@ async def test_incremental_pipeline_skips_active_entity_fallback_for_review_cand
     assert client.received_prompt_context.shared_evidence_context is not None
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
     assert "<Disambig_Candidates>" not in client.received_prompt_context.shared_evidence_context
+
+
+def test_resolve_incremental_batch_window_aligns_with_disambig_interval() -> None:
+    """
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: align-incremental-disambig-batch-window
+    说明: 增量消歧上下文窗口应与批次区间对齐，而不是由 sentence 层隐式按 prev_chunks 裁剪。
+    """
+    assert pipeline_mod._resolve_incremental_batch_window(9, 10) == (0, 9)
+    assert pipeline_mod._resolve_incremental_batch_window(29, 10) == (20, 29)
 
 
 @pytest.mark.asyncio

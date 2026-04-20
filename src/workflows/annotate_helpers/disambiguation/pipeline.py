@@ -160,6 +160,20 @@ def _inject_category_into_context(
             context_sentences[cls.name] = f"【受保护-默认不合并】{ctx}"
 
 
+def _resolve_incremental_batch_window(current_chunk_id: int, disambig_interval: int) -> tuple[int, int]:
+    """
+    解析增量消歧批次窗口。
+
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: align-incremental-disambig-batch-window
+    说明: 增量消歧的触发语义是“对前 N 个尚未触发增量消歧的 chunk 做一轮消歧”，
+         因此上下文窗口也必须显式对齐到同一个批次区间，不能再隐式依赖 prev_chunks。
+    """
+    batch_start_chunk_id = max(0, current_chunk_id - disambig_interval + 1)
+    return batch_start_chunk_id, current_chunk_id
+
+
 def _merge_deferred_candidates_into_state(
     state: DisambiguationState,
     deferred_candidates: list[NameCountCandidate],
@@ -546,6 +560,8 @@ async def _run_incremental_disambiguation_with_state(
     if (current_idx + 1) % disambig_interval != 0:
         return state
 
+    batch_start_chunk_id, batch_end_chunk_id = _resolve_incremental_batch_window(chunk_id, disambig_interval)
+
     alias_map_dict = state.get_alias_merges_dict()
     new_names = extract_new_names_from_db(conn, alias_map_dict, run_id, current_chunk_id=chunk_id)
 
@@ -568,6 +584,8 @@ async def _run_incremental_disambiguation_with_state(
         alias_keywords,
         run_id=run_id,
         max_chunk_id=chunk_id,
+        chunk_start_id=batch_start_chunk_id,
+        chunk_end_id=batch_end_chunk_id,
     )
     _, deferred_candidates, all_disambig_candidates, classifications = filter_candidates_by_class(
         all_disambig_candidates,
@@ -586,6 +604,8 @@ async def _run_incremental_disambiguation_with_state(
         alias_keywords,
         run_id=run_id,
         max_chunk_id=chunk_id,
+        chunk_start_id=batch_start_chunk_id,
+        chunk_end_id=batch_end_chunk_id,
     )
     # Inject protected category labels into context for prompt
     _inject_category_into_context(classifications, context_sentences)
@@ -601,6 +621,8 @@ async def _run_incremental_disambiguation_with_state(
         alias_map,
         relations,
         current_chunk_id=chunk_id,
+        chunk_start_id=batch_start_chunk_id,
+        chunk_end_id=batch_end_chunk_id,
     )
     new_candidate_names = {
         str(item.get("name", "")).strip()
