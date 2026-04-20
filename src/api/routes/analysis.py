@@ -185,6 +185,31 @@ def _persist_task_cancellation_request(task_id: str) -> None:
         raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
 
 
+def _cancel_unclaimed_pending_task(task_id: str) -> bool:
+    """
+    直接终结尚未被任何 worker 领取的 pending 任务。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: fix-pending-task-pickup
+    修改内容: 对进程外取消 pending 的场景做原子收口，避免把任务送进不可恢复的 cancelling 死状态。
+    """
+    session_factory = get_session_factory()
+    try:
+        with session_factory() as session:
+            run_id = task_id_to_run_id(task_id, session.connection())
+            run_repo = RunRepository(session)
+            cancelled = run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
+            session.commit()
+            return cancelled
+    except (TaskIDNotFoundError, ValueError) as exc:
+        logger.error(f"Task {task_id} run_id not found when cancelling unclaimed pending task: {exc}")
+        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+    except Exception as exc:
+        logger.error(f"Failed to cancel unclaimed pending task {task_id}: {exc}")
+        raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
+
+
 async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
     """
     删除任务前清理运行态缓存与后台协程。
@@ -436,6 +461,18 @@ async def cancel_task(
         raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
     if task_status == "failed":
         raise HTTPException(status_code=400, detail="任务已失败，无法取消")
+
+    task_info = task_manager.get_task(task_id)
+    if task_status == "pending" and task_info is None:
+        cancelled = _cancel_unclaimed_pending_task(task_id)
+        if cancelled:
+            logger.info(f"Task {task_id} cancelled immediately before any worker claim")
+            return {"task_id": task_id, "status": "cancelled", "message": "任务尚未启动，已直接取消"}
+
+        # 中文注释：原子终结失败意味着另一个执行方已经先一步把 pending 任务领取走了，
+        # 这里必须回退到常规 cancelling 语义，而不能继续假设它仍是“未启动任务”。
+        task = _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
+        task_status = task.get("status", "")
 
     # 先持久化 DB 真相，再设置本进程内存 cancel_event 做加速响应。
     #

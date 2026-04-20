@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -297,6 +298,139 @@ class AnalysisService:
             "skip_diagnose": not request.force_diagnose,
         }
 
+    def _prepare_task_execution_claim(self, task_id: str) -> str:
+        """
+        在真正启动分析前，先把任务从 DB 侧收口到可执行状态。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-pending-task-pickup
+        修改内容:
+        - 为 pending 任务增加原子 claim，避免多个实例重复执行
+        - 为启动前已取消的 pending/cancelling 任务做终态收口，避免 worker 把取消任务重新写回 running
+
+        Returns:
+            claimed: 当前 worker 已成功领取任务，可继续执行
+            cancelled: 任务在真正执行前已被取消，调用方应直接结束
+            skipped: 当前 worker 未获得执行权，调用方应静默退出
+        """
+        from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
+        from src.storage.repositories import RunRepository
+
+        db_session = self.session_factory.get_session()
+        try:
+            with db_session:
+                sql_session = db_session.connection
+                try:
+                    run_id = task_id_to_run_id(task_id, sql_session)
+                except (TaskIDNotFoundError, ValueError) as exc:
+                    raise AnalysisError(f"任务 {task_id} 不存在，无法启动执行") from exc
+
+                run_repo = RunRepository(sql_session)
+                run = run_repo.get_run(run_id)
+                if run is None:
+                    raise AnalysisError(f"任务 {task_id} 不存在，无法启动执行")
+
+                status = run.get("status", "")
+                cancel_requested = bool(run.get("cancel_requested", False))
+
+                if status == "pending":
+                    if cancel_requested:
+                        # 中文注释：用户在 worker 真正领取前就已经点了取消，此时直接落终态，
+                        # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义。
+                        run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
+                        return "cancelled"
+
+                    claimed = run_repo.claim_pending_run(
+                        run_id,
+                        worker_id=self.task_manager.get_worker_id(),
+                        heartbeat_at=datetime.now(),
+                    )
+                    if claimed:
+                        return "claimed"
+
+                    refreshed = run_repo.get_run(run_id)
+                    if refreshed and refreshed.get("status") == "cancelled":
+                        return "cancelled"
+                    return "skipped"
+
+                if status == "cancelling" and cancel_requested:
+                    # 中文注释：这类任务没有真实 worker 可收尾时，直接在启动前完成取消收口，
+                    # 避免卡在无 owner 的 cancelling 历史脏状态。
+                    if refreshed_worker_id := run.get("worker_id"):
+                        logger.info(
+                            f"Task {task_id} is cancelling under worker {refreshed_worker_id}, current worker skips execution claim"
+                        )
+                        return "skipped"
+
+                    run_repo.update_run_task_fields(
+                        run_id,
+                        status="cancelled",
+                        cancel_requested=False,
+                        completed_at=datetime.now(),
+                        message=run.get("message") or "任务在启动前已取消",
+                        worker_id=None,
+                        heartbeat_at=None,
+                    )
+                    return "cancelled"
+
+                if status in ("running", "completed", "cancelled"):
+                    return "skipped"
+
+                return "skipped"
+        except AnalysisError:
+            raise
+        except Exception as exc:
+            logger.error(f"Failed to prepare execution claim for task {task_id}: {exc}")
+            raise AnalysisError(f"任务 {task_id} 执行领取失败") from exc
+
+    async def recover_pending_tasks(self) -> tuple[int, int]:
+        """
+        启动时把 DB 中的 pending 任务重新接回当前执行器。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-pending-task-pickup
+        修改内容:
+        - 扫描 DB 中的 pending 任务并重新调度
+        - 对已经带 cancel_requested 的 pending 任务直接收口为 cancelled
+
+        Returns:
+            tuple[int, int]: (scheduled_count, cancelled_count)
+        """
+        from src.storage.repositories import RunRepository
+
+        scheduled_count = 0
+        cancelled_count = 0
+        db_session = self.session_factory.get_session()
+        try:
+            with db_session:
+                run_repo = RunRepository(db_session.connection)
+                pending_runs = run_repo.get_pending_tasks()
+
+            for run in pending_runs:
+                task_id = run["run_id"][:8] if len(run["run_id"]) >= 8 else run["run_id"]
+                if run.get("cancel_requested", False):
+                    db_session = self.session_factory.get_session()
+                    with db_session:
+                        RunRepository(db_session.connection).cancel_unclaimed_pending_run(
+                            run["run_id"],
+                            message="任务在启动恢复前已取消",
+                        )
+                    cancelled_count += 1
+                    continue
+
+                try:
+                    await self.resume_task(run["novel_id"], task_id)
+                    scheduled_count += 1
+                except ValueError as exc:
+                    logger.warning(f"Skip pending task {task_id} during startup recovery: {exc}")
+        except Exception as exc:
+            logger.error(f"Failed to recover pending tasks on startup: {exc}")
+            raise
+
+        return scheduled_count, cancelled_count
+
     def _schedule_analysis_task(self, task_id: str, novel: dict, request: AnalyzeRequest | None = None) -> None:
         """
         安排分析协程并记录 asyncio.Task 引用。
@@ -362,6 +496,8 @@ class AnalysisService:
             message=None,
             error=None,
             cancel_requested=False,
+            worker_id=None,
+            heartbeat_at=None,
             llm_outputs=[],
             completed_at=None,
         )
@@ -536,6 +672,15 @@ class AnalysisService:
 
         try:
             self.task_manager.update_task(task_id, cancel_event=asyncio.Event())
+
+            claim_result = self._prepare_task_execution_claim(task_id)
+            if claim_result == "cancelled":
+                self.task_manager.cancel_completed_task(task_id, error="用户取消")
+                logger.info(f"Task {task_id} was cancelled before execution claim completed")
+                return
+            if claim_result == "skipped":
+                logger.info(f"Task {task_id} execution claim skipped because another state transition won the DB truth")
+                return
 
             (
                 novel_id,

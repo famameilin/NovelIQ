@@ -126,6 +126,17 @@ class TaskManager:
         """设置数据库会话工厂"""
         self._db_session_factory = factory
 
+    def get_worker_id(self) -> str:
+        """
+        返回当前进程的稳定 worker_id。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-pending-task-pickup
+        修改内容: 为 DB claim / startup recovery 提供统一 worker 标识读取入口。
+        """
+        return self._worker_id
+
     def _update_db(self, task_id: str, **kwargs) -> None:
         """
         可靠地更新数据库中的任务状态。
