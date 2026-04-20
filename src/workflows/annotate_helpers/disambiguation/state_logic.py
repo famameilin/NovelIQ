@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+import re
 import time
+from dataclasses import replace
 from typing import Any, Literal
 
 from loguru import logger
@@ -67,6 +69,27 @@ _PROTECTED_MERGE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
         EVIDENCE_SIGNAL_KINSHIP_IDENTITY,
         EVIDENCE_SIGNAL_IDENTITY_REVEAL,
     }
+)
+
+_CANONICAL_EVIDENCE_SCORE: dict[str, int] = {
+    EVIDENCE_SIGNAL_IDENTITY_REVEAL: 50,
+    EVIDENCE_SIGNAL_NAMING_SCENE: 45,
+    EVIDENCE_SIGNAL_KINSHIP_IDENTITY: 35,
+    EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER: 30,
+    EVIDENCE_SIGNAL_STABLE_TITLE: 10,
+    "original_sentence": 8,
+}
+
+_EVIDENCE_STRENGTH_SCORE: dict[str | None, int] = {
+    None: 0,
+    "weak": 1,
+    "mixed": 2,
+    "strong": 3,
+}
+
+_DESCRIPTOR_LIKE_NAME_PATTERN = re.compile(
+    r"(?:[黑白灰青赤紫蓝红金银][^，。；：]{0,4}(?:人|少女|少年|女子|男子|公子)|"
+    r"(?:灰衣人|黑衣人|青衣人|白发少女|少年|少女|男子|女子|婴儿|婴孩|灵禽))"
 )
 
 
@@ -145,6 +168,24 @@ def _normalize_evidence_strength(strength: Any) -> Literal["weak", "mixed", "str
     return None
 
 
+def _load_protected_canonical_penalty_names() -> frozenset[str]:
+    """
+    加载需要在 canonical 重选时降权的泛指/职位称呼。
+
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: 这里复用候选过滤阶段的 protected 名单，避免 canonical 重选再次把
+          “侍卫/丫鬟/某人”这类泛称推成 cluster 的代表名。
+    """
+    from .candidate_filter import CandidateFilter
+
+    return CandidateFilter().protected
+
+
+_PROTECTED_CANONICAL_PENALTY_NAMES = _load_protected_canonical_penalty_names()
+
+
 def _name_variants_for_matching(name: str) -> set[str]:
     return {name} if name else set()
 
@@ -191,6 +232,228 @@ def _is_protected_candidate_context(context: str | None) -> bool:
     if not context:
         return False
     return context.strip().startswith(_PROTECTED_CONTEXT_PREFIX)
+
+
+def _is_descriptor_like_name(name: str) -> bool:
+    """
+    判断一个称呼是否更像外貌/泛指描述，而不是稳定 canonical。
+
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: 配对完成后，canonical 选择不能再被“灰衣人/侍卫/某人”这类描述称呼卡死。
+          这里故意只做保守降权，不直接判死刑，真正的 tie-break 仍会结合证据与频次。
+    """
+    stripped_name = name.strip()
+    if not stripped_name:
+        return True
+    if stripped_name in _PROTECTED_CANONICAL_PENALTY_NAMES:
+        return True
+    return _DESCRIPTOR_LIKE_NAME_PATTERN.search(stripped_name) is not None
+
+
+def _canonical_signal_score(review: NameReviewState | None) -> int:
+    """
+    计算单个名字作为 canonical 候选时的证据分。
+
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: 这里使用 review_status 里的审计字段，而不是依赖当前 alias 方向；
+          这样即便 earlier post-process 已经把方向翻错，终消歧阶段仍可重新纠正。
+    """
+    if review is None:
+        return 0
+
+    score = 0
+    for evidence_type in review.decision_evidence_types:
+        score += _CANONICAL_EVIDENCE_SCORE.get(evidence_type, 0)
+    score += review.decision_evidence_count
+    return score
+
+
+def _canonical_choice_key(
+    name: str,
+    review: NameReviewState | None,
+    name_counts: dict[str, int] | None,
+) -> tuple[int, int, int, int, int, str]:
+    """
+    生成 canonical 候选排序键。
+
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: canonical 选择明确拆成独立阶段后，优先级应是：
+          1. 避免描述称呼卡住 canonical
+          2. 看程序化证据和证据强度
+          3. 再把频次作为最后兜底，而不是直接改写 alias 语义
+    """
+    review_confidence = _normalize_disambig_confidence(review.confidence) if review is not None else "medium"
+    return (
+        0 if _is_descriptor_like_name(name) else 1,
+        _canonical_signal_score(review),
+        _EVIDENCE_STRENGTH_SCORE.get(review.evidence_strength if review is not None else None, 0),
+        _disambig_confidence_rank(review_confidence),
+        int(name_counts.get(name, 0)) if name_counts else 0,
+        name,
+    )
+
+
+def _collect_alias_clusters(
+    alias_merges: dict[str, str],
+    affected_names: set[str] | None = None,
+) -> list[set[str]]:
+    """
+    从 alias_merges 构建待重选的 cluster。
+
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: alias 配对与 canonical 选择必须解耦；这里先只关心“哪些名字已被判成同一人”。
+    """
+    adjacency: dict[str, set[str]] = {}
+    for alias, canonical in alias_merges.items():
+        adjacency.setdefault(alias, set()).add(canonical)
+        adjacency.setdefault(canonical, set()).add(alias)
+
+    if not adjacency:
+        return []
+
+    remaining_nodes = set(adjacency)
+    candidate_roots = set(adjacency) if affected_names is None else (set(affected_names) & set(adjacency))
+    clusters: list[set[str]] = []
+
+    while candidate_roots:
+        root = candidate_roots.pop()
+        if root not in remaining_nodes:
+            continue
+
+        stack = [root]
+        cluster: set[str] = set()
+        while stack:
+            node = stack.pop()
+            if node in cluster:
+                continue
+            cluster.add(node)
+            stack.extend(adjacency.get(node, ()))
+
+        remaining_nodes.difference_update(cluster)
+        candidate_roots.difference_update(cluster)
+        if len(cluster) > 1:
+            clusters.append(cluster)
+
+    return clusters
+
+
+def reselect_cluster_canonicals(
+    state: DisambiguationState,
+    *,
+    name_counts: dict[str, int] | None = None,
+    affected_names: set[str] | None = None,
+) -> DisambiguationState:
+    """
+    在 alias 配对完成后，独立重选每个 cluster 的 canonical。
+
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: 旧逻辑会在写入前按频次直接翻转 canonical 方向，导致
+          “灰衣人 -> 白芷”这类已配对成功的结果被反写成“白芷 -> 灰衣人”。
+          现在改为：
+          1. 先保留 alias 配对语义；
+          2. 再按 cluster 维度独立重选 canonical；
+          3. 频次只做 tie-break，不再直接改写配对阶段的判断。
+    """
+    alias_merges_dict = state.get_alias_merges_dict()
+    clusters = _collect_alias_clusters(alias_merges_dict, affected_names=affected_names)
+    if not clusters:
+        return state
+
+    review_status = state.get_review_status_dict()
+    new_known_canonical = set(state.known_canonical_names)
+    new_alias_merges = dict(alias_merges_dict)
+    new_review_status = dict(review_status)
+    rewired_clusters: list[tuple[list[str], str]] = []
+
+    for cluster in clusters:
+        # 中文注释：这里不再信任“当前 alias 方向”本身，因为它可能已经被旧的频次翻转污染；
+        # 我们只把 cluster 当作“这些名字属于同一人”的集合，再重新挑代表名。
+        selected_canonical = max(
+            cluster,
+            key=lambda candidate_name: _canonical_choice_key(
+                candidate_name,
+                review_status.get(candidate_name),
+                name_counts,
+            ),
+        )
+
+        cluster_changed = False
+        for name in cluster:
+            if name == selected_canonical:
+                if new_alias_merges.pop(name, None) is not None:
+                    cluster_changed = True
+                review = new_review_status.get(name)
+                if review is not None:
+                    normalized_status = (
+                        review.status
+                        if review.status != DISAMBIG_STATE_UNRESOLVED
+                        else DISAMBIG_STATE_REVIEW
+                    )
+                    updated_review = replace(
+                        review,
+                        status=normalized_status,
+                        proposed_canonical=name,
+                    )
+                    if updated_review != review:
+                        new_review_status[name] = updated_review
+                        cluster_changed = True
+                continue
+
+            previous_target = new_alias_merges.get(name)
+            if previous_target != selected_canonical:
+                new_alias_merges[name] = selected_canonical
+                cluster_changed = True
+
+            review = new_review_status.get(name)
+            if review is not None:
+                normalized_status = (
+                    review.status
+                    if review.status != DISAMBIG_STATE_UNRESOLVED
+                    else DISAMBIG_STATE_REVIEW
+                )
+                updated_review = replace(
+                    review,
+                    status=normalized_status,
+                    proposed_canonical=selected_canonical,
+                )
+                if updated_review != review:
+                    new_review_status[name] = updated_review
+                    cluster_changed = True
+
+        new_known_canonical.difference_update(cluster)
+        new_known_canonical.add(selected_canonical)
+        if cluster_changed:
+            rewired_clusters.append((sorted(cluster), selected_canonical))
+
+    new_state = state.with_updates(
+        known_canonical_names=frozenset(new_known_canonical),
+        alias_merges=frozenset(
+            (alias, canonical)
+            for alias, canonical in new_alias_merges.items()
+            if alias != canonical
+        ),
+        review_status=tuple(new_review_status.items()),
+    )
+    validate_state_invariants(new_state)
+
+    if rewired_clusters:
+        logger.info(
+            "Reselected canonicals for {} alias clusters: {}",
+            len(rewired_clusters),
+            rewired_clusters,
+        )
+
+    return new_state
 
 
 def _has_protected_merge_evidence(profile: EvidenceProfile | None) -> bool:
