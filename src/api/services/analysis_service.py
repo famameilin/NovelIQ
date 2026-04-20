@@ -296,6 +296,39 @@ class AnalysisService:
                 }
             )
 
+    def _write_failure_to_db(self, task_id: str, error_message: str) -> None:
+        """
+        将任务失败状态写入 DB（兜底路径专用）。
+
+        创建时间: 2026-04-20
+        创建者: TraeAI
+        任务: task-system-db-driven-refactor
+        说明: 当 session 或 run_id 为 None 时（环境初始化失败），无法走常规 error_handler 路径，
+              此方法通过 task_id 直接查询 run_id 并写入 DB 终态，确保 DB 状态一致性。
+              这是极端异常路径的兜底保护。
+        """
+        from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
+        from src.storage.repositories import RunRepository
+
+        try:
+            sf = self.session_factory or SessionFactory()
+            db_session = sf.get_session()
+            with db_session:
+                sql_session = db_session.connection
+                with sql_session.begin():
+                    run_repo = RunRepository(sql_session)
+                    run_id = task_id_to_run_id(task_id, sql_session)
+                    run_repo.update_run_task_fields(
+                        run_id,
+                        status="failed",
+                        error=error_message,
+                        completed_at=datetime.now(timezone.utc),
+                    )
+        except TaskIDNotFoundError:
+            logger.warning(f"Task {task_id} not found in id_mapping during failure DB write, skipping")
+        except Exception as e:
+            logger.error(f"Failed to write failure status to DB for task {task_id}: {e}")
+
     def _build_reanalysis_skip_stages(self, request: ReanalyzeRequest | None) -> dict[str, bool]:
         if request is None:
             return {
@@ -846,6 +879,7 @@ class AnalysisService:
                 else:
                     self.novel_service.update_task_status(task_id, "failed")
                     self.task_manager.complete_task(task_id, success=False, error=str(e))
+                    self._write_failure_to_db(task_id, str(e))
                 return
 
             cancelled = False
