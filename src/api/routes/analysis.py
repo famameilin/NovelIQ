@@ -157,7 +157,22 @@ def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
     )
 
 
-def _persist_task_cancellation_request(task_id: str) -> None:
+def _raise_cancel_not_allowed(task_status: str) -> None:
+    """
+    统一校验任务是否允许进入取消流程。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: fix-task-system-db-driven-review-findings
+    修改内容: 把取消前置状态机判断收口到单点，避免竞态重查后漏掉终态保护。
+    """
+    if task_status in ("completed", "cancelled", "cancelling"):
+        raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
+    if task_status == "failed":
+        raise HTTPException(status_code=400, detail="任务已失败，无法取消")
+
+
+def _persist_task_cancellation_request(task_id: str) -> str:
     """
     将取消请求可靠写入数据库。
 
@@ -169,14 +184,21 @@ def _persist_task_cancellation_request(task_id: str) -> None:
     修改者: Codex (GPT-5)
     任务: 修复 cancel 持久化失败仍返回成功
     修改内容: 将 cancel_requested/status=cancelling 的 DB 写入收口到统一入口，失败时直接报错而不是静默降级。
+
+    修改时间: 2026-04-20
+    修改者: Codex (GPT-5)
+    任务: fix-task-system-db-driven-review-findings
+    修改内容: 改为原子状态迁移；若竞态赢家已把任务推进到终态，则返回最新状态而不是覆写回 cancelling。
     """
     session_factory = get_session_factory()
     try:
         with session_factory() as session:
             run_id = task_id_to_run_id(task_id, session.connection())
             run_repo = RunRepository(session)
-            run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelling")
-            session.commit()
+            latest_status = run_repo.request_task_cancellation(run_id)
+            if latest_status is None:
+                raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试")
+            return latest_status
     except (TaskIDNotFoundError, ValueError) as exc:
         logger.error(f"Task {task_id} run_id not found when persisting cancellation request: {exc}")
         raise HTTPException(status_code=500, detail="任务取消持久化失败，请稍后重试") from exc
@@ -457,10 +479,7 @@ async def cancel_task(
     """
     task = _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
     task_status = task.get("status", "")
-    if task_status in ("completed", "cancelled", "cancelling"):
-        raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
-    if task_status == "failed":
-        raise HTTPException(status_code=400, detail="任务已失败，无法取消")
+    _raise_cancel_not_allowed(task_status)
 
     task_info = task_manager.get_task(task_id)
     if task_status == "pending" and task_info is None:
@@ -473,6 +492,7 @@ async def cancel_task(
         # 这里必须回退到常规 cancelling 语义，而不能继续假设它仍是“未启动任务”。
         task = _resolve_task_for_novel(novel_service, task_manager, novel_id, task_id)
         task_status = task.get("status", "")
+        _raise_cancel_not_allowed(task_status)
 
     # 先持久化 DB 真相，再设置本进程内存 cancel_event 做加速响应。
     #
@@ -482,7 +502,12 @@ async def cancel_task(
     # 修改内容: 即使当前实例没有运行态缓存，也不能把 pending 任务直接终结为 cancelled。
     # 原因: 真实执行协程可能已经在别的实例或事件循环里排队启动；若这里提前写终态，
     # 后续 worker 仍可能把状态改回 running，形成“接口已返回取消、任务却继续执行”的竞态。
-    _persist_task_cancellation_request(task_id)
+    latest_status = _persist_task_cancellation_request(task_id)
+    if latest_status != "cancelling":
+        # 中文注释：这里说明 DB 真相在最后一次持久化前又被其他执行方推进了，
+        # 当前请求必须尊重赢家状态，不能再把终态或失败态误报成 cancelling。
+        _raise_cancel_not_allowed(latest_status)
+        raise HTTPException(status_code=400, detail=f"任务状态为 {latest_status}，无法取消")
 
     cancelled = task_manager.cancel_task(task_id)
 

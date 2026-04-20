@@ -26,7 +26,7 @@ from pathlib import Path
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.exceptions import AnalysisError
+from src.api.exceptions import AnalysisError, NovelNotFoundError
 from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
 from src.api.models.responses import TaskStatus
@@ -459,7 +459,7 @@ class AnalysisService:
                 try:
                     await self.resume_task(run["novel_id"], task_id)
                     scheduled_count += 1
-                except ValueError as exc:
+                except (ValueError, NovelNotFoundError) as exc:
                     logger.warning(f"Skip pending task {task_id} during startup recovery: {exc}")
         except Exception as exc:
             logger.error(f"Failed to recover pending tasks on startup: {exc}")

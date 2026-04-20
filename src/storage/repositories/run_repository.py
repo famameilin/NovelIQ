@@ -250,6 +250,41 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         self.session.commit()
         return result.rowcount > 0  # type: ignore[attr-defined]
 
+    def request_task_cancellation(self, run_id: str) -> str | None:
+        """
+        原子性地把可取消任务推进到 cancelling。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-task-system-db-driven-review-findings
+        修改内容: 仅允许 pending/running -> cancelling，避免取消竞态把已终态任务回写成 cancelling。
+
+        Returns:
+            最新任务状态；若成功写入则固定返回 "cancelling"，若任务不存在则返回 None。
+        """
+        from sqlalchemy import update
+
+        now = datetime.now()
+        stmt = (
+            update(AnalysisRun)
+            .where(AnalysisRun.run_id == run_id)
+            .where(AnalysisRun.status.in_(("pending", "running")))
+            .values(
+                status="cancelling",
+                cancel_requested=True,
+                updated_at=now,
+            )
+        )
+        result = self.session.execute(stmt)
+        self.session.commit()
+        if result.rowcount > 0:  # type: ignore[attr-defined]
+            return "cancelling"
+
+        refreshed = self.get_run(run_id)
+        if refreshed is None:
+            return None
+        return str(refreshed["status"])
+
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
         """
         按状态查询任务。
