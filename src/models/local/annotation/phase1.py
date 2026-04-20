@@ -30,7 +30,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from src.config.constants import PHASE_MAX_RETRIES
+from src.config import settings
 from src.models.interactions import record_model_interaction
 from src.models.local.parser import parse_active_entities
 from src.models.local.prompts import build_retry_prompt
@@ -142,8 +142,9 @@ async def execute_phase1_with_retry(
     """
     from src.models.local.schema import ChunkAnnotation
 
+    phase_max_retries = settings.runtime.annotation.phase_max_retries
     config = RetryConfig(
-        max_retries=PHASE_MAX_RETRIES,
+        max_retries=phase_max_retries,
         operation_name="phase1",
         chunk_id=chunk_id,
     )

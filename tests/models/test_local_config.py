@@ -47,16 +47,6 @@ class TestTaskModelConfigValidate(unittest.TestCase):
             config.validate()
         self.assertIn("model 不能为空", str(ctx.exception))
 
-    def test_validate_negative_max_retries_raises(self) -> None:
-        config = TaskModelConfig(
-            base_url="http://localhost:8000/v1",
-            model="test-model",
-            max_retries=-1,
-        )
-        with self.assertRaises(ValueError) as ctx:
-            config.validate()
-        self.assertIn("max_retries must be non-negative", str(ctx.exception))
-
 
 class TestLoadTaskConfig(unittest.TestCase):
     def test_load_annotation_config(self) -> None:

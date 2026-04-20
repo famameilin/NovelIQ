@@ -12,6 +12,11 @@
 修改时间: 2026-03-19
 修改者: TraeAI
 修改内容: 移除 load_dotenv，改为在 config/__init__.py 中统一加载
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: runtime-behavior-settings
+修改内容: 添加 runtime 配置入口，统一承载流程行为参数
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from .schemas import (
     PathSettings,
     PromptSettings,
     RAGSettings,
+    RuntimeSettings,
     StreamingSettings,
     ThinkingSettings,
     TopicModelSettings,
@@ -48,6 +54,7 @@ from .schemas import (
     _parse_path_settings,
     _parse_prompt_settings,
     _parse_rag_settings,
+    _parse_runtime_settings,
     _parse_streaming_settings,
     _parse_thinking_settings,
     _parse_topic_model_settings,
@@ -66,9 +73,15 @@ class Settings:
     修改时间: 2026-03-16
     修改者: TraeAI
     修改内容: 添加 streaming 配置字段
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: runtime-behavior-settings
+    修改内容: 添加 runtime 配置字段，统一管理流程重试与上下文窗口
     """
 
     models: ModelsSettings = field(default_factory=ModelsSettings)
+    runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     thinking: ThinkingSettings = field(default_factory=ThinkingSettings)
     streaming: StreamingSettings = field(default_factory=StreamingSettings)
     logging: LoggingSettings = field(default_factory=LoggingSettings)
@@ -118,6 +131,7 @@ class Settings:
         """从字典解析配置"""
         return cls(
             models=_parse_models_settings(data.get("models")),
+            runtime=_parse_runtime_settings(data.get("runtime")),
             thinking=_parse_thinking_settings(data.get("thinking")),
             streaming=_parse_streaming_settings(data.get("streaming")),
             logging=_parse_logging_settings(data.get("logging")),

@@ -18,11 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.local.annotation import (
-    PHASE_MAX_RETRIES,
-    Phase1MaxRetriesExceededError,
-    Phase2MaxRetriesExceededError,
-)
+from src.config import settings
+from src.models.local.annotation import Phase1MaxRetriesExceededError, Phase2MaxRetriesExceededError
 from src.models.local.annotation.multi_phase import annotate_chunk_multi_phase
 from src.models.local.annotation.phase1 import annotate_chunk_phase1
 from src.models.local.annotation.phase2 import annotate_chunk_phase2
@@ -170,7 +167,6 @@ class MockAnnotationClient:
     def __init__(self, mock_content="{}", should_fail=False):
         self._config = MagicMock()
         self._config.thinking_enabled = False
-        self._config.max_retries = 2
         self._config.temperature = 0.7
         self._config.max_tokens = 4096
         self._config.model = "test-model"
@@ -336,7 +332,7 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
             cloud_client=cloud_client,
         )
 
-        self.assertEqual(local_call_count[0], PHASE_MAX_RETRIES)
+        self.assertEqual(local_call_count[0], settings.runtime.annotation.phase_max_retries)
         self.assertEqual(cloud_call_count[0], 1)
         self.assertIsInstance(result, ChunkAnnotation)
 
@@ -456,7 +452,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
             cloud_client=cloud_client,
         )
 
-        self.assertEqual(local_call_count[0], PHASE_MAX_RETRIES)
+        self.assertEqual(local_call_count[0], settings.runtime.annotation.phase_max_retries)
         self.assertEqual(cloud_call_count[0], 1)
         self.assertIsInstance(result, ForeshadowingResult)
 
