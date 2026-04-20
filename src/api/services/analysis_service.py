@@ -275,14 +275,15 @@ class AnalysisService:
         db_session = sf.get_session()
         with db_session:
             sql_session = db_session.connection
-            run_repo = RunRepository(sql_session)
-            run_id = task_id_to_run_id(task_id, sql_session)
-            run_repo.update_run_task_fields(
-                run_id,
-                status="completed",
-                progress=100.0,
-                completed_at=datetime.now(timezone.utc),
-            )
+            with sql_session.begin():
+                run_repo = RunRepository(sql_session)
+                run_id = task_id_to_run_id(task_id, sql_session)
+                run_repo.update_run_task_fields(
+                    run_id,
+                    status="completed",
+                    progress=100.0,
+                    completed_at=datetime.now(timezone.utc),
+                )
 
         if analysis_logger:
             analysis_logger.write_summary(
