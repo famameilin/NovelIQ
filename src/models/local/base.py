@@ -107,6 +107,47 @@ def _ensure_strict_json_schema(node: Any) -> None:
             _ensure_strict_json_schema(item)
 
 
+def _strip_internal_schema_properties(node: Any) -> None:
+    """
+    递归移除仅供运行时内部使用的 schema 字段。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-disambig-cloud-schema-internal-field
+    说明: `_thinking_content` 这类内部字段并不要求模型通过 JSON 输出返回，
+    而是由流式响应中的 reasoning_content 单独提取，因此不应进入 strict response_format。
+    """
+    if isinstance(node, dict):
+        if node.get("type") == "object" and "properties" in node and isinstance(node["properties"], dict):
+            internal_keys = [key for key in node["properties"].keys() if isinstance(key, str) and key.startswith("_")]
+            for key in internal_keys:
+                node["properties"].pop(key, None)
+            if "required" in node and isinstance(node["required"], list):
+                node["required"] = [key for key in node["required"] if key not in internal_keys]
+
+        for key in ("properties", "$defs"):
+            child = node.get(key)
+            if isinstance(child, dict):
+                for value in child.values():
+                    _strip_internal_schema_properties(value)
+
+        for key in ("items", "additionalProperties", "contains", "if", "then", "else", "not"):
+            child = node.get(key)
+            if child is not None:
+                _strip_internal_schema_properties(child)
+
+        for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
+            child = node.get(key)
+            if isinstance(child, list):
+                for item in child:
+                    _strip_internal_schema_properties(item)
+        return
+
+    if isinstance(node, list):
+        for item in node:
+            _strip_internal_schema_properties(item)
+
+
 class TokenUsage(NamedTuple):
     """Token使用量记录"""
 
@@ -288,8 +329,14 @@ class BaseModelClient:
         创建者: TraeAI
         任务: code-quality-refactor - 提取API调用基类
         说明: 使用 Pydantic 的 model_json_schema() 方法生成 JSON Schema
+
+        修改时间: 2026-04-20
+        修改者: Codex
+        任务: fix-disambig-cloud-schema-internal-field
+        修改内容: 从 response_format 中剔除内部字段，避免云端 strict schema 校验误伤。
         """
         schema = response_model.model_json_schema()
+        _strip_internal_schema_properties(schema)
         _ensure_strict_json_schema(schema)
         return {
             "type": "json_schema",

@@ -80,6 +80,19 @@ class TestStructuredOutputSchema(unittest.TestCase):
         self.assertIsInstance(canonical_decisions["additionalProperties"], dict)
         self.assertEqual(canonical_decisions["additionalProperties"]["type"], "string")
 
+    def test_internal_thinking_field_is_excluded_from_response_schema(self) -> None:
+        """
+        创建时间: 2026-04-20
+        创建者: Codex
+        任务: fix-disambig-cloud-schema-internal-field
+        说明: `_thinking_content` 属于运行时内部回填字段，不应要求模型通过 JSON 返回，
+        否则云端 strict schema 校验可能把内部字段也当成公开契约。
+        """
+        schema = self.disambiguation_client._build_json_schema(DisambiguateResponseModel)["json_schema"]["schema"]
+        self.assertNotIn("_thinking_content", schema["properties"])
+        self.assertNotIn("_thinking_content", schema["required"])
+        self.assertEqual(schema["required"], list(schema["properties"].keys()))
+
 
 if __name__ == "__main__":
     unittest.main()
