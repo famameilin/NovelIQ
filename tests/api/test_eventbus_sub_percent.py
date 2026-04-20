@@ -196,3 +196,32 @@ async def test_eventbus_start_event_without_current_does_not_write_none_progress
     assert "current" not in update_kwargs
     assert "total" not in update_kwargs
     assert "progress" not in update_kwargs
+
+
+@pytest.mark.asyncio
+async def test_eventbus_demotes_llm_output_and_thinking_logs_to_debug():
+    """
+    验证 EventBus 会把高频 LLM 流式事件记录到 DEBUG，而不是 INFO。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: demote-llm-output-eventbus-log
+    说明: output/thinking 会携带原始模型分片，若落到 INFO 会污染运行日志；
+          start/progress/complete 仍应保留在 INFO，便于跟踪任务进度。
+    """
+    task_manager = MagicMock()
+    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
+
+    with (
+        patch("src.api.services.event_manager.event_manager") as mock_em,
+        patch("src.api.models.events.logger.debug") as mock_debug,
+        patch("src.api.models.events.logger.info") as mock_info,
+    ):
+        mock_em.send = AsyncMock()
+
+        await bus.emit(StreamEvent(action="output", content='{"raw_name":"室内"}'))
+        await bus.emit(StreamEvent(action="thinking", content="思考片段"))
+        await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="phase1", percent=10.0))
+
+    assert mock_debug.call_count == 2
+    assert mock_info.call_count == 1
