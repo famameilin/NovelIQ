@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from src.api.routes import analysis as analysis_mod
 from src.api.exceptions import NovelNotFoundError
 from src.api.models.events import AnalysisEventBus, StreamEvent
+from src.api.models.requests import ReanalyzeRequest
 from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.novel_service import NovelService
@@ -522,6 +523,58 @@ class TestAnalysis:
         assert cancelled_count == 0
         assert (task_id, novel_id) in scheduled_calls
 
+    @pytest.mark.asyncio
+    async def test_resume_pending_reanalysis_restores_original_request(self, api_client: TestClient):
+        """测试启动恢复 pending 的 reanalysis 时会恢复原始请求参数，而不是退化成普通分析"""
+        from src.api import main as main_mod
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("startup_pending_reanalyze_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        expected_request = ReanalyzeRequest(force_annotate=True, force_topic_model=True, num_topics=7, label="resume")
+        task_id = service.create_task(
+            novel_id,
+            task_kind="reanalysis",
+            request_payload=expected_request.model_dump(mode="json", exclude_none=True),
+        )
+
+        reanalysis_calls: list[tuple[str, str, ReanalyzeRequest | None]] = []
+        analysis_calls: list[str] = []
+
+        def _record_reanalysis(self, scheduled_task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
+            reanalysis_calls.append((scheduled_task_id, novel["novel_id"], request))
+
+        def _record_analysis(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+            analysis_calls.append(scheduled_task_id)
+
+        with (
+            patch.object(analysis_mod.AnalysisService, "_schedule_reanalysis_task", new=_record_reanalysis),
+            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_analysis),
+        ):
+            scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
+
+        target_calls = [call for call in reanalysis_calls if call[0] == task_id]
+        assert target_calls
+        assert cancelled_count == 0
+        assert task_id not in analysis_calls
+        assert scheduled_count >= len(reanalysis_calls)
+        _, restored_novel_id, restored_request = target_calls[0]
+        assert restored_novel_id == novel_id
+        assert isinstance(restored_request, ReanalyzeRequest)
+        assert restored_request == expected_request
+
     def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
         """测试未知 task_id 查询详情时返回 None"""
         mock_session = MagicMock()
@@ -567,6 +620,41 @@ class TestReanalysis:
         assert "task_id" in data
         assert data["status"] == "pending"
 
+    def test_reanalyze_persists_request_payload_for_resume(self, api_client: TestClient):
+        """测试 reanalyze 会持久化原始请求参数，供后续 resume/recovery 恢复语义"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("reanalyze_payload_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        request_payload = {
+            "force_preprocess": True,
+            "force_topic_model": True,
+            "num_topics": 12,
+            "label": "rerun-v2",
+        }
+        expected_payload = ReanalyzeRequest(**request_payload).model_dump(mode="json", exclude_none=True)
+
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
+            reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json=request_payload)
+
+        assert reanalyze_response.status_code == 200
+        task_id = reanalyze_response.json()["task_id"]
+
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+
+        assert run is not None
+        assert run["task_kind"] == "reanalysis"
+        assert run["request_payload"] == expected_payload
+
     def test_reanalyze_auto_label(self, api_client: TestClient):
         """测试重新分析自动生成标签"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
@@ -585,6 +673,56 @@ class TestReanalysis:
         data = response.json()
         assert "task_id" in data
         assert data["status"] == "pending"
+
+    def test_resume_failed_reanalysis_restores_original_request(self, api_client: TestClient):
+        """测试 failed 的重分析任务 resume 时会恢复原始 force 参数与主题数"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("resume_reanalyze_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        expected_request = ReanalyzeRequest(force_preprocess=True, force_diagnose=True, num_topics=9, label="retry-v3")
+        task_id = service.create_task(
+            novel_id,
+            task_kind="reanalysis",
+            request_payload=expected_request.model_dump(mode="json", exclude_none=True),
+        )
+
+        with get_session_factory()() as session:
+            RunRepository(session).update_run_task_fields(task_id, status="failed")
+
+        scheduled: dict[str, object] = {}
+
+        def _record_reanalysis(self, scheduled_task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
+            scheduled["task_id"] = scheduled_task_id
+            scheduled["novel_id"] = novel["novel_id"]
+            scheduled["request"] = request
+
+        def _unexpected_analysis(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+            raise AssertionError(f"resume 错误走到了 analysis 调度: {scheduled_task_id}")
+
+        with (
+            patch.object(analysis_mod.AnalysisService, "_schedule_reanalysis_task", new=_record_reanalysis),
+            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_unexpected_analysis),
+        ):
+            resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
+
+        assert resume_response.status_code == 200
+        assert scheduled["task_id"] == task_id
+        assert scheduled["novel_id"] == novel_id
+        assert isinstance(scheduled["request"], ReanalyzeRequest)
+        restored_request = scheduled["request"]
+        assert restored_request == expected_request
 
 
 class TestAnalysesList:
