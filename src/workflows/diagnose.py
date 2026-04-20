@@ -32,14 +32,15 @@ from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
 from src.config.analysis_logger import AnalysisLogger
-from src.models.cloud import ConfiguredCloudModelClient, build_diagnosis_payload
+from src.models.cloud import build_diagnosis_payload
 from src.models.cloud.schema import CloudAnalysis
+from src.models.diagnosis import DiagnosisClient
 from src.pipeline.pipeline import FileCache, MemoryCache
 from src.storage.repositories import StatsRepository
 
 
 def _setup_diagnose_callback(
-    cloud_client: ConfiguredCloudModelClient,
+    cloud_client: DiagnosisClient,
     session: Session,
     novel_id: str,
     run_id: str,
@@ -116,7 +117,7 @@ async def run_diagnose(
     run_id: str,
     session: Session,
     cache_path: Path | None = None,
-    client: ConfiguredCloudModelClient | None = None,
+    client: DiagnosisClient | None = None,
     analysis_logger: AnalysisLogger | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> CloudAnalysis:
@@ -140,7 +141,7 @@ async def run_diagnose(
         run_id: 运行ID
         session: 数据库连接
         cache_path: 缓存路径
-        client: 云端客户端
+        client: 诊断客户端
         analysis_logger: 分析日志器
 
     Returns:
@@ -157,7 +158,7 @@ async def run_diagnose(
     cache_key_base = f"diagnose:{run_id}"
     cache = FileCache(cache_path) if cache_path else MemoryCache()
 
-    cloud_client = client or ConfiguredCloudModelClient(analysis_logger=analysis_logger)
+    cloud_client = client or DiagnosisClient(analysis_logger=analysis_logger)
 
     _setup_diagnose_callback(cloud_client, session, novel_id, run_id=run_id)
 
