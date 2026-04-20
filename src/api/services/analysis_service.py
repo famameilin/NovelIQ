@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
@@ -282,7 +282,7 @@ class AnalysisService:
                     run_id,
                     status="completed",
                     progress=100.0,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
 
         if analysis_logger:
@@ -322,7 +322,7 @@ class AnalysisService:
                         run_id,
                         status="failed",
                         error=error_message,
-                        completed_at=datetime.now(timezone.utc),
+                        completed_at=datetime.now(UTC),
                     )
         except TaskIDNotFoundError:
             logger.warning(f"Task {task_id} not found in id_mapping during failure DB write, skipping")
@@ -439,7 +439,7 @@ class AnalysisService:
                     claimed = run_repo.claim_pending_run(
                         run_id,
                         worker_id=self.task_manager.get_worker_id(),
-                        heartbeat_at=datetime.now(timezone.utc),
+                        heartbeat_at=datetime.now(UTC),
                     )
                     if claimed:
                         return "claimed"
@@ -454,7 +454,10 @@ class AnalysisService:
                     # 避免卡在无 owner 的 cancelling 历史脏状态。
                     if refreshed_worker_id := run.get("worker_id"):
                         logger.info(
-                            f"Task {task_id} is cancelling under worker {refreshed_worker_id}, current worker skips execution claim"
+                            "Task {} is cancelling under worker {}, "
+                            "current worker skips execution claim",
+                            task_id,
+                            refreshed_worker_id,
                         )
                         return "skipped"
 
@@ -462,7 +465,7 @@ class AnalysisService:
                         run_id,
                         status="cancelled",
                         cancel_requested=False,
-                        completed_at=datetime.now(timezone.utc),
+                        completed_at=datetime.now(UTC),
                         message=run.get("message") or "任务在启动前已取消",
                         worker_id=None,
                         heartbeat_at=None,
