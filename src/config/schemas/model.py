@@ -198,6 +198,12 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
     修改者: Codex
     任务: 清理无效模型配置项
     修改内容: 删除模型级 max_retries 解析，保留真正被运行时消费的 embedding_dim
+
+    修改时间: 2026-04-20
+    修改者: Codex (GPT-5)
+    任务: fix-embedding-dimension-config-contract
+    修改内容: 恢复 embedding_dim 的显式配置契约。系统只信任 settings/env 中声明的维度，
+              首次建表使用配置值，后续由“代码配置/模型返回/数据库表结构”三方一致性校验决定是否继续执行。
     """
     env_base_url = _get_env_var(env_prefix, "BASE_URL")
     env_model = _get_env_var(env_prefix, "MODEL")

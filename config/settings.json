@@ -39,7 +39,7 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "embedding_dim": 1536
+      "embedding_dim": 1024
     },
     "full_disambig": {
       "base_url": null,
