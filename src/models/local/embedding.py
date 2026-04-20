@@ -31,6 +31,11 @@
 修改者: Codex
 任务: 清理无效模型配置项
 修改内容: 删除未生效的 max_retries 参数和缓存字段，避免 EmbeddingClient 暴露伪配置
+
+修改时间: 2026-04-20
+修改者: Codex (GPT-5)
+任务: batch-embedding-requests
+修改内容: 将语义分块 embedding 从逐条请求改为批量请求，降低本地 embedding 服务的请求往返开销
 """
 
 from __future__ import annotations
@@ -78,6 +83,7 @@ class EmbeddingClient:
                 )
             self._timeout_s = timeout_s if timeout_s is not None else semantic_config.timeout_s
             self._embedding_dim = embedding_dim if embedding_dim is not None else semantic_config.embedding_dim
+            self._batch_size = semantic_config.batch_size
         else:
             self._base_url = base_url
             self._model = model
@@ -90,9 +96,12 @@ class EmbeddingClient:
             self._embedding_dim = (
                 embedding_dim if embedding_dim is not None else settings.models.semantic_chunking.embedding_dim
             )
+            self._batch_size = settings.models.semantic_chunking.batch_size
 
         if self._embedding_dim <= 0:
             raise ValueError(f"embedding dimension must be positive, got {self._embedding_dim}")
+        if self._batch_size <= 0:
+            raise ValueError(f"embedding batch size must be positive, got {self._batch_size}")
 
         self._token_usage_callback = token_usage_callback
         self._novel_id = novel_id
@@ -288,16 +297,118 @@ class EmbeddingClient:
         任务: 重构 EmbeddingClient 使用 AsyncOpenAI
         修改内容: 将 embed_texts 改为异步方法
 
+        修改时间: 2026-04-20
+        修改者: Codex (GPT-5)
+        任务: batch-embedding-requests
+        修改内容: 改为按配置批量请求 embedding API，默认每批 8 条，减少语义分块时的连续单条请求开销
+
         Args:
             texts: 文本列表
 
         Returns:
             embedding向量列表
         """
-        embeddings = []
+        if not self._model:
+            raise ValueError("embedding model is required")
+        if not texts:
+            return []
+
+        embeddings: list[list[float]] = [[] for _ in texts]
+        valid_items = [(idx, text) for idx, text in enumerate(texts) if text and text.strip()]
+
+        for batch_start in range(0, len(valid_items), self._batch_size):
+            batch_items = valid_items[batch_start : batch_start + self._batch_size]
+            batch_texts = [text for _, text in batch_items]
+
+            self._log(
+                "info",
+                "embed_texts 批处理开始: model={} batch_size={} batch_start={}",
+                "embed_texts batch start model={} batch_size={} batch_start={}",
+                self._model,
+                len(batch_texts),
+                batch_start,
+            )
+
+            try:
+                response = await self._client.embeddings.create(
+                    model=self._model,
+                    input=batch_texts,
+                    encoding_format="float",
+                )
+            except APIConnectionError as e:
+                self._log(
+                    "error",
+                    "embed_texts 连接错误: base_url={} error={}",
+                    "embed_texts connection error: base_url={} error={}",
+                    self._base_url,
+                    str(e),
+                )
+                raise ConnectionError(f"无法连接到 embedding 服务 ({self._base_url})，请检查服务是否启动") from e
+            except APITimeoutError as e:
+                self._log(
+                    "error",
+                    "embed_texts 超时错误: base_url={} error={}",
+                    "embed_texts timeout error: base_url={} error={}",
+                    self._base_url,
+                    str(e),
+                )
+                raise TimeoutError("embedding 服务请求超时，请检查服务响应") from e
+            except BadRequestError as e:
+                self._log(
+                    "error",
+                    "embed_texts API错误: status={} base_url={} error={}",
+                    "embed_texts api status error: status={} base_url={} error={}",
+                    e.status_code if hasattr(e, "status_code") else "unknown",
+                    self._base_url,
+                    str(e),
+                )
+                raise RuntimeError(f"embedding 服务错误: {e}") from e
+            except Exception as e:
+                self._log(
+                    "error",
+                    "embed_texts 未知错误: {}",
+                    "embed_texts unexpected error: {}",
+                    str(e),
+                )
+                raise
+
+            response_items = sorted(response.data, key=lambda item: getattr(item, "index", 0))
+            if len(response_items) != len(batch_items):
+                raise RuntimeError(
+                    f"embedding batch result count mismatch: expected {len(batch_items)}, got {len(response_items)}"
+                )
+
+            # 中文注释：批量接口返回后仍按 index 回填到原始位置，避免上层语义分块逻辑感知到请求模式变化。
+            for (original_idx, _), item in zip(batch_items, response_items, strict=True):
+                embedding = item.embedding
+                self._validate_embedding_dimension(embedding)
+                embeddings[original_idx] = embedding
+
+            if self._token_usage_callback and response.usage:
+                self._token_usage_callback(
+                    self._novel_id or "unknown",
+                    "embedding",
+                    "local",
+                    response.usage.prompt_tokens,
+                    response.usage.total_tokens,
+                    None,
+                    None,
+                )
+
+            self._log(
+                "info",
+                "embed_texts 批处理完成: batch_size={} prompt_tokens={} total_tokens={}",
+                "embed_texts batch complete batch_size={} prompt_tokens={} total_tokens={}",
+                len(batch_texts),
+                response.usage.prompt_tokens if response.usage else 0,
+                response.usage.total_tokens if response.usage else 0,
+            )
+
         for text in texts:
-            embedding = await self.get_embedding(text)
-            embeddings.append(embedding)
+            if text and text.strip():
+                continue
+            logger.warning("empty text provided for embedding")
+
         return embeddings
 
     @staticmethod
