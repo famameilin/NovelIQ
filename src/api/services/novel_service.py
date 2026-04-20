@@ -113,10 +113,19 @@ class NovelService:
                     "novel_id": run["novel_id"],
                     "status": run["status"],
                     "run_id": run["run_id"],
+                    "task_kind": run["task_kind"],
+                    "request_payload": run["request_payload"],
                 }
         return None
 
-    def create_task(self, novel_id: str, task_id: str | None = None, session: Session | None = None) -> str:
+    def create_task(
+        self,
+        novel_id: str,
+        task_id: str | None = None,
+        session: Session | None = None,
+        task_kind: str = "analysis",
+        request_payload: dict | None = None,
+    ) -> str:
         """
         创建分析任务
 
@@ -132,7 +141,12 @@ class NovelService:
         try:
             with self._get_session(session) as sess:
                 run_repo = RunRepository(sess)
-                run_repo.create_run(novel_id=novel_id, run_id=task_id)
+                run_repo.create_run(
+                    novel_id=novel_id,
+                    run_id=task_id,
+                    task_kind=task_kind,
+                    request_payload=request_payload,
+                )
         except Exception as e:
             logger.error(f"Failed to create run in DB for novel {novel_id}, task {task_id}: {e}")
             raise
@@ -167,6 +181,8 @@ class NovelService:
                     "novel_id": run["novel_id"],
                     "status": run["status"],
                     "run_id": run["run_id"],
+                    "task_kind": run["task_kind"],
+                    "request_payload": run["request_payload"],
                 }
         return None
 

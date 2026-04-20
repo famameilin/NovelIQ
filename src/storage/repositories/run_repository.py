@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Any
@@ -39,6 +40,32 @@ class RunRepository(BaseRepository[dict[str, Any]]):
     修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
 
+    def _serialize_request_payload(self, request_payload: dict[str, Any] | None) -> str | None:
+        """
+        序列化任务请求载荷。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-reanalysis-resume-regression
+        修改内容: 将重分析请求参数持久化到 analysis_runs.request_payload，供 resume/recovery 恢复原始语义。
+        """
+        if request_payload is None:
+            return None
+        return json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
+
+    def _deserialize_request_payload(self, request_payload: str | None) -> dict[str, Any] | None:
+        """
+        反序列化任务请求载荷。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-reanalysis-resume-regression
+        修改内容: 读取 analysis_runs.request_payload 时恢复为语义化字典，避免上层直接处理 JSON 字符串。
+        """
+        if not request_payload:
+            return None
+        return json.loads(request_payload)
+
     def _to_dict(self, run: AnalysisRun) -> dict[str, Any]:
         """将 ORM 对象转换为字典"""
         return {
@@ -55,6 +82,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "total": run.total,
             "message": run.message,
             "error": run.error,
+            "task_kind": run.task_kind,
+            "request_payload": self._deserialize_request_payload(run.request_payload),
             "cancel_requested": run.cancel_requested,
             "worker_id": run.worker_id,
             "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
@@ -70,6 +99,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         title: str | None = None,
         author: str | None = None,
         run_id: str | None = None,
+        task_kind: str = "analysis",
+        request_payload: dict[str, Any] | None = None,
     ) -> str:
         """
         创建新的分析运行记录
@@ -95,6 +126,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             title=title,
             author=author,
             status="pending",
+            task_kind=task_kind,
+            request_payload=self._serialize_request_payload(request_payload),
             created_at=now,
             updated_at=now,
         )
@@ -331,6 +364,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         total: int | None | object = _UNSET,
         message: str | None | object = _UNSET,
         error: str | None | object = _UNSET,
+        task_kind: str | None | object = _UNSET,
+        request_payload: dict[str, Any] | None | object = _UNSET,
         cancel_requested: bool | None | object = _UNSET,
         worker_id: str | None | object = _UNSET,
         heartbeat_at: datetime | None | object = _UNSET,
@@ -381,6 +416,10 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run.message = message
         if error is not _UNSET:
             run.error = error
+        if task_kind is not _UNSET:
+            run.task_kind = task_kind
+        if request_payload is not _UNSET:
+            run.request_payload = self._serialize_request_payload(request_payload)
         if cancel_requested is not _UNSET:
             run.cancel_requested = cancel_requested
         if worker_id is not _UNSET:

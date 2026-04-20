@@ -51,6 +51,10 @@ class CancellationStateCheckError(RuntimeError):
     """
 
 
+TASK_KIND_ANALYSIS = "analysis"
+TASK_KIND_REANALYSIS = "reanalysis"
+
+
 class AnalysisService:
     def __init__(
         self,
@@ -298,6 +302,38 @@ class AnalysisService:
             "skip_diagnose": not request.force_diagnose,
         }
 
+    def _build_reanalysis_request_payload(self, request: ReanalyzeRequest | None) -> dict[str, object] | None:
+        """
+        构建可持久化的重分析请求载荷。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-reanalysis-resume-regression
+        修改内容: 将 reanalyze 的 force_* / num_topics 等参数持久化，供 resume 与 startup recovery 恢复原始执行语义。
+        """
+        if request is None:
+            return None
+        return request.model_dump(mode="json", exclude_none=True)
+
+    def _restore_execution_request(self, task: dict) -> tuple[str, AnalyzeRequest | ReanalyzeRequest | None]:
+        """
+        从任务元数据恢复执行类型与请求参数。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-reanalysis-resume-regression
+        修改内容: resume/recovery 不再盲目按普通分析续跑，而是从 DB 恢复任务原始类型与参数。
+        """
+        task_kind = task["task_kind"]
+        if task_kind == TASK_KIND_ANALYSIS:
+            return task_kind, AnalyzeRequest(task_id=task["task_id"])
+        if task_kind == TASK_KIND_REANALYSIS:
+            request_payload = task.get("request_payload")
+            if request_payload is None:
+                return task_kind, None
+            return task_kind, ReanalyzeRequest.model_validate(request_payload)
+        raise ValueError(f"任务 {task['task_id']} 的 task_kind 非法: {task_kind}")
+
     def _prepare_task_execution_claim(self, task_id: str) -> str:
         """
         在真正启动分析前，先把任务从 DB 侧收口到可执行状态。
@@ -443,6 +479,41 @@ class AnalysisService:
         task = asyncio.create_task(self._run_analysis(task_id, novel, request))
         self.task_manager.store_asyncio_task(task_id, task)
 
+    def _schedule_reanalysis_task(self, task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
+        """
+        安排重分析协程并记录 asyncio.Task 引用。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-reanalysis-resume-regression
+        修改内容: 为 resume/startup recovery 提供与普通分析对称的重分析调度入口，避免丢失原始 request。
+        """
+        task = asyncio.create_task(self._run_reanalysis(task_id, novel, request))
+        self.task_manager.store_asyncio_task(task_id, task)
+
+    def _schedule_task_execution(
+        self,
+        task_id: str,
+        novel: dict,
+        task_kind: str,
+        request: AnalyzeRequest | ReanalyzeRequest | None,
+    ) -> None:
+        """
+        按任务类型调度执行协程。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-reanalysis-resume-regression
+        修改内容: 将 analysis/reanalysis 的调度分发收口到单入口，确保 create/resume/recovery 走同一套类型恢复逻辑。
+        """
+        if task_kind == TASK_KIND_ANALYSIS:
+            self._schedule_analysis_task(task_id, novel, request if isinstance(request, AnalyzeRequest) else None)
+            return
+        if task_kind == TASK_KIND_REANALYSIS:
+            self._schedule_reanalysis_task(task_id, novel, request if isinstance(request, ReanalyzeRequest) else None)
+            return
+        raise ValueError(f"任务 {task_id} 的 task_kind 非法: {task_kind}")
+
     async def create_task_and_start(self, novel_id: str) -> str:
         """
         创建新任务并立即启动分析。
@@ -453,9 +524,9 @@ class AnalysisService:
         说明: 只负责“创建+启动”，不做复用/猜测行为。
         """
         novel = self.novel_service.get_novel(novel_id)
-        task_id = self.novel_service.create_task(novel_id)
+        task_id = self.novel_service.create_task(novel_id, task_kind=TASK_KIND_ANALYSIS)
         self.task_manager.create_task(task_id, novel_id)
-        self._schedule_analysis_task(task_id, novel)
+        self._schedule_task_execution(task_id, novel, TASK_KIND_ANALYSIS, None)
         return task_id
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
@@ -502,7 +573,8 @@ class AnalysisService:
             completed_at=None,
         )
 
-        self._schedule_analysis_task(task_id, novel, AnalyzeRequest(task_id=task_id))
+        task_kind, execution_request = self._restore_execution_request(task)
+        self._schedule_task_execution(task_id, novel, task_kind, execution_request)
         return task_id
 
     async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
@@ -521,11 +593,13 @@ class AnalysisService:
     async def start_reanalysis(self, novel_id: str, request: ReanalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
 
-        task_id = self.novel_service.create_task(novel_id)
+        task_id = self.novel_service.create_task(
+            novel_id,
+            task_kind=TASK_KIND_REANALYSIS,
+            request_payload=self._build_reanalysis_request_payload(request),
+        )
         self.task_manager.create_task(task_id, novel_id)
-
-        task = asyncio.create_task(self._run_reanalysis(task_id, novel, request))
-        self.task_manager.store_asyncio_task(task_id, task)
+        self._schedule_task_execution(task_id, novel, TASK_KIND_REANALYSIS, request)
 
         return task_id
 
