@@ -118,15 +118,13 @@ class DiagnosisClient(BaseModelClient):
         )
 
     def _build_json_schema(self, response_model: type[T]) -> dict[str, Any]:
-        schema = response_model.model_json_schema()
-        return {
-            "type": "json_schema",
-            "json_schema": {
-                "name": response_model.__name__,
-                "schema": schema,
-                "strict": True,
-            },
-        }
+        """
+        修改时间: 2026-04-20
+        修改者: Codex
+        任务: fix-phase2-response-format-schema
+        修改内容: 诊断链路复用 BaseModelClient 的 strict schema 构建逻辑，避免与 annotation/disambiguation 再次分叉。
+        """
+        return super()._build_json_schema(response_model)
 
     def _parse_structured_response(self, response: Any, response_model: type[T]) -> T:
         if not response.choices:
