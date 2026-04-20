@@ -1,9 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.chunking.chunker import Chunk
-from src.workflows.preprocess import _generate_chunk_embeddings
+from src.workflows.preprocess import _generate_chunk_embeddings, run_preprocess
 
 
 @pytest.mark.asyncio
@@ -13,7 +14,7 @@ async def test_generate_chunk_embeddings_uses_chunk_index_as_chunk_id() -> None:
         Chunk(index=8, text="第二段文本", start=5, end=9),
     ]
     mock_client = MagicMock()
-    mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
+    mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
     mock_client.get_embedding = AsyncMock(side_effect=[[0.1, 0.2], [0.3, 0.4]])
 
     with (
@@ -41,7 +42,7 @@ async def test_generate_chunk_embeddings_uses_chunk_index_as_chunk_id() -> None:
 @pytest.mark.asyncio
 async def test_generate_chunk_embeddings_fails_fast_on_dimension_mismatch() -> None:
     mock_client = MagicMock()
-    mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
+    mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
     mock_client.get_embedding = AsyncMock()
 
     with (
@@ -57,3 +58,76 @@ async def test_generate_chunk_embeddings_fails_fast_on_dimension_mismatch() -> N
 
     mock_client.get_embedding.assert_not_called()
     mock_ensure_schema.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> None:
+    chunks = [
+        Chunk(index=1, text="第一段文本", start=0, end=4),
+        Chunk(index=2, text="第二段文本", start=5, end=9),
+    ]
+    mock_client = MagicMock()
+    mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
+    mock_client.get_embedding = AsyncMock(side_effect=[[0.1, 0.2], [0.3, 0.4]])
+    mock_session = MagicMock()
+    observed_commit_counts: list[int] = []
+
+    async def record_event(event) -> None:
+        observed_commit_counts.append(mock_session.commit.call_count)
+
+    with (
+        patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
+        patch("src.workflows.preprocess.ensure_chunk_embeddings_schema"),
+        patch("src.storage.repositories.chunk.insert_chunk_embeddings"),
+        patch("src.workflows.preprocess.settings.models.semantic_chunking.embedding_dim", 1024),
+    ):
+        inserted = await _generate_chunk_embeddings(
+            session=mock_session,
+            run_id="run-1",
+            all_chunks=chunks,
+            emitter=record_event,
+        )
+
+    assert inserted == 2
+    assert mock_session.commit.call_count == 2
+    assert observed_commit_counts[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_preprocess_commits_before_entering_embedding_stage() -> None:
+    mock_session = MagicMock()
+    mock_chunk_repo = MagicMock()
+    mock_chunk_repo.is_preprocess_complete.return_value = False
+    embedding_stage_commit_counts: list[int] = []
+
+    async def fake_generate_chunk_embeddings(session, run_id, all_chunks, emitter=None) -> int:
+        embedding_stage_commit_counts.append(session.commit.call_count)
+        return len(all_chunks)
+
+    with (
+        patch("src.workflows.preprocess.ingest_path", return_value=[SimpleNamespace(text="测试文本")]),
+        patch("src.workflows.preprocess.normalize_text", side_effect=lambda text: text),
+        patch(
+            "src.workflows.preprocess.chunk_documents",
+            new=AsyncMock(return_value=[Chunk(index=1, text="测试文本", start=0, end=4)]),
+        ),
+        patch("src.workflows.preprocess.tokenize", return_value=["测试", "文本"]),
+        patch("src.workflows.preprocess.ChunkRepository", return_value=mock_chunk_repo),
+        patch("src.workflows.preprocess._generate_chunk_embeddings", new=fake_generate_chunk_embeddings),
+        patch("src.workflows.preprocess.settings.rag.embedding_enabled", True),
+        patch("src.workflows.preprocess.settings.rag.level3_enabled", True),
+        patch("src.workflows.preprocess.settings.chunking.use_semantic_chunking", False),
+        patch(
+            "src.workflows.preprocess_helpers._load_all_lexicons_for_preprocess",
+            return_value={"sensory": [], "function_words": [], "semantic_categories": {}, "imagery": []},
+        ),
+        patch("src.workflows.preprocess_helpers._compute_chunk_style_metrics", return_value=MagicMock()),
+    ):
+        inserted, _, _ = await run_preprocess(
+            source_path=SimpleNamespace(),
+            run_id="run-1",
+            session=mock_session,
+        )
+
+    assert inserted == 1
+    assert embedding_stage_commit_counts == [2]
