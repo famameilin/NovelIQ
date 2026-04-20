@@ -153,6 +153,48 @@ class TestValidateConfidenceWithEvidence(unittest.TestCase):
 
         self.assertEqual(validated.canonical_decisions["白芷"], "白芷")
 
+    def test_protected_candidate_without_strong_evidence_cannot_merge(self) -> None:
+        """
+        创建时间: 2026-04-20
+        创建者: Codex
+        任务: enforce-protected-disambig-gate
+        说明: 受保护候选即便被模型判成 merge，如果只有一般上下文而无强证据，后端也必须打回自映射。
+        """
+        context = "【受保护-默认不合并】侍卫一路跟在伯安身侧，替他牵马开路"
+        result = ExtendedDisambigResult(
+            canonical_decisions={"侍卫": "伯安"},
+            entity_types={"伯安": "character"},
+            entity_relations=[],
+            alias_confidence={"侍卫": DISAMBIG_CONFIDENCE_HIGH},
+            evidence_profiles={"侍卫": build_evidence_profile(context)},
+        )
+
+        validated = validate_confidence_with_evidence(result, ["伯安"], {"侍卫": context})
+
+        self.assertEqual(validated.canonical_decisions["侍卫"], "侍卫")
+        self.assertEqual(validated.alias_confidence["侍卫"], DISAMBIG_CONFIDENCE_MEDIUM)
+
+    def test_protected_candidate_with_naming_scene_can_merge(self) -> None:
+        """
+        创建时间: 2026-04-20
+        创建者: Codex
+        任务: enforce-protected-disambig-gate
+        说明: 受保护候选若出现“本名/人称”这类命名场景，应保留强证据合并通道。
+        """
+        context = "【受保护-默认不合并】【命名场景】此女本名柳婉儿，人称柳妹妹"
+        result = ExtendedDisambigResult(
+            canonical_decisions={"丫鬟": "柳婉儿"},
+            entity_types={"柳婉儿": "character"},
+            entity_relations=[],
+            alias_confidence={"丫鬟": DISAMBIG_CONFIDENCE_HIGH},
+            evidence_profiles={"丫鬟": build_evidence_profile(context)},
+        )
+
+        validated = validate_confidence_with_evidence(result, ["柳婉儿"], {"丫鬟": context})
+
+        self.assertEqual(validated.canonical_decisions["丫鬟"], "柳婉儿")
+        self.assertEqual(validated.alias_confidence["丫鬟"], DISAMBIG_CONFIDENCE_HIGH)
+
 
 if __name__ == "__main__":
     unittest.main()

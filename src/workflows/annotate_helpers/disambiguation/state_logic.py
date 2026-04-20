@@ -55,6 +55,20 @@ _OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
     }
 )
 
+_PROTECTED_CONTEXT_PREFIX = "【受保护-默认不合并】"
+
+# protected 候选的硬门禁比普通候选更严格：
+# 只有明确身份揭示、命名场景、亲缘身份或独特身体标记这类强证据，
+# 才允许把“侍卫/丫鬟/某人”之类的受保护称呼合并到具体角色。
+_PROTECTED_MERGE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
+    {
+        EVIDENCE_SIGNAL_UNIQUE_BODY_MARKER,
+        EVIDENCE_SIGNAL_NAMING_SCENE,
+        EVIDENCE_SIGNAL_KINSHIP_IDENTITY,
+        EVIDENCE_SIGNAL_IDENTITY_REVEAL,
+    }
+)
+
 
 def _normalize_disambig_confidence(confidence: Any) -> Literal["low", "medium", "high"]:
     if isinstance(confidence, str):
@@ -164,6 +178,38 @@ def _has_strong_merge_signal(profile: EvidenceProfile | None) -> bool:
     return any(signal in _OVERRIDE_ALLOWED_SIGNALS for signal in profile.strong_signals)
 
 
+def _is_protected_candidate_context(context: str | None) -> bool:
+    """
+    判断上下文是否来自 protected 候选。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: enforce-protected-disambig-gate
+    说明: protected 分类不会单独进入响应 schema，因此这里复用 prompt 前缀把分类带到
+          证据门禁层，统一覆盖增量/最终、本地/云端消歧链路。
+    """
+    if not context:
+        return False
+    return context.strip().startswith(_PROTECTED_CONTEXT_PREFIX)
+
+
+def _has_protected_merge_evidence(profile: EvidenceProfile | None) -> bool:
+    """
+    判断受保护候选是否具备允许合并的强证据。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: enforce-protected-disambig-gate
+    说明: “默认不合并”在后端必须是硬约束，只有明确身份揭示/命名/亲缘/唯一标记
+          这类强证据才能放行，避免模型凭共现或一般上下文把通用职位直接并错。
+    """
+    if profile is None:
+        return False
+    if profile.strength != EVIDENCE_STRENGTH_STRONG:
+        return False
+    return any(signal in _PROTECTED_MERGE_ALLOWED_SIGNALS for signal in profile.strong_signals)
+
+
 def _apply_strong_evidence_merge_override(
     name: str,
     result: ExtendedDisambigResult,
@@ -214,6 +260,11 @@ def validate_confidence_with_evidence(
     任务: 简化消歧响应模型
     修改内容: 将 merge_target_map 改为 alias_map
 
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: enforce-protected-disambig-gate
+    修改内容: 将 protected 候选的“默认不合并”补成后端硬门禁，仅强证据允许合并
+
     Args:
         result: 消歧结果
         existing_names: 已存在的角色名列表
@@ -240,8 +291,20 @@ def validate_confidence_with_evidence(
         canonical = result.canonical_decisions.get(name, canonical)
         profile = result.evidence_profiles.get(name)
         only_weak_evidence = _has_only_weak_evidence(profile)
+        context = context_sentences.get(name, "") if context_sentences else ""
+        is_protected_candidate = _is_protected_candidate_context(context)
 
         current_confidence = result.alias_confidence.get(name, DISAMBIG_CONFIDENCE_MEDIUM)
+
+        if canonical != name and is_protected_candidate and not _has_protected_merge_evidence(profile):
+            logger.info(
+                "Preventing protected-candidate merge for '{}' -> '{}': no strong protected evidence",
+                name,
+                canonical,
+            )
+            result.canonical_decisions[name] = name
+            result.alias_confidence[name] = DISAMBIG_CONFIDENCE_MEDIUM
+            continue
 
         if only_weak_evidence and current_confidence == DISAMBIG_CONFIDENCE_HIGH:
             logger.debug(f"Downgrading confidence for '{name}' from high to medium due to weak evidence only")
