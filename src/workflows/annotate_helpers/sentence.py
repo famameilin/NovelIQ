@@ -27,6 +27,12 @@
 任务: runtime-prev-chunks-windowing
 修改内容: 将 runtime.annotation.prev_chunks 接入例句池和身份线索窗口
 
+修改时间: 2026-04-21
+修改者: Codex
+任务: align-incremental-disambig-batch-window
+修改内容: 支持由调用方显式传入 chunk_start_id/chunk_end_id，
+         避免增量消歧批次语义被 runtime.annotation.prev_chunks 隐式截断
+
 说明: 本模块包含例句构建、全局上下文抽取等辅助函数。
 """
 
@@ -72,7 +78,12 @@ def annotate_dialogue_structure(sentence: str) -> str:
     return sentence
 
 
-def _resolve_chunk_window(max_chunk_id: int | None, prev_chunks: int | None) -> tuple[int | None, int | None]:
+def _resolve_chunk_window(
+    max_chunk_id: int | None,
+    prev_chunks: int | None,
+    chunk_start_id: int | None = None,
+    chunk_end_id: int | None = None,
+) -> tuple[int | None, int | None]:
     """解析上下文检索使用的 chunk 窗口。
 
     创建时间: 2026-04-20
@@ -80,7 +91,22 @@ def _resolve_chunk_window(max_chunk_id: int | None, prev_chunks: int | None) -> 
     任务: runtime-prev-chunks-windowing
     说明: 只有增量消歧这类带 current chunk 锚点的场景才按 prev_chunks 回看；
          没有当前 chunk 时继续保留全量历史，避免截断 final 阶段证据。
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: align-incremental-disambig-batch-window
+    修改内容: 新增显式 chunk_start_id/chunk_end_id 优先级，允许上层直接按业务批次
+             指定上下文窗口，不再被 prev_chunks 隐式改写。
     """
+    if chunk_start_id is not None or chunk_end_id is not None:
+        if chunk_start_id is None or chunk_end_id is None:
+            raise ValueError("chunk_start_id and chunk_end_id must be provided together")
+        if chunk_start_id < 0:
+            raise ValueError("chunk_start_id must be non-negative")
+        if chunk_end_id < chunk_start_id:
+            raise ValueError("chunk_end_id must be greater than or equal to chunk_start_id")
+        return chunk_start_id, chunk_end_id
+
     if max_chunk_id is None:
         return None, None
 
@@ -100,6 +126,8 @@ def build_context_sentences(
     run_id: str | None = None,
     max_chunk_id: int | None = None,
     prev_chunks: int | None = None,
+    chunk_start_id: int | None = None,
+    chunk_end_id: int | None = None,
 ) -> dict[str, str]:
     """为候选名构建上下文句子
 
@@ -112,6 +140,12 @@ def build_context_sentences(
     修改者: Codex
     任务: runtime-prev-chunks-windowing
     修改内容: 将 runtime.annotation.prev_chunks 接入上下文检索窗口
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: align-incremental-disambig-batch-window
+    修改内容: 支持调用方显式传入 chunk_start_id/chunk_end_id，让增量消歧按批次窗口
+             取上下文，而不是隐式走 prev_chunks。
     """
     if not run_id:
         raise ValueError("run_id is required for build_context_sentences")
@@ -129,6 +163,8 @@ def build_context_sentences(
         run_id,
         max_chunk_id=max_chunk_id,
         prev_chunks=prev_chunks,
+        chunk_start_id=chunk_start_id,
+        chunk_end_id=chunk_end_id,
     )
     _add_identity_clues(
         conn,
@@ -137,6 +173,8 @@ def build_context_sentences(
         run_id,
         max_chunk_id=max_chunk_id,
         prev_chunks=prev_chunks,
+        chunk_start_id=chunk_start_id,
+        chunk_end_id=chunk_end_id,
     )
 
     return result
@@ -218,6 +256,8 @@ def _build_sentence_pool(
     run_id: str,
     max_chunk_id: int | None = None,
     prev_chunks: int | None = None,
+    chunk_start_id: int | None = None,
+    chunk_end_id: int | None = None,
 ) -> dict[str, str]:
     """构建句子池。
 
@@ -230,10 +270,20 @@ def _build_sentence_pool(
     修改者: Codex
     任务: runtime-prev-chunks-windowing
     修改内容: 在带 max_chunk_id 的场景下，仅扫描最近 prev_chunks 个 chunk
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: align-incremental-disambig-batch-window
+    修改内容: 显式批次窗口优先于 prev_chunks，供增量消歧主流程按业务批次指定范围。
     """
     from src.metrics.text_utils import split_sentences
 
-    chunk_start_id, chunk_end_id = _resolve_chunk_window(max_chunk_id, prev_chunks)
+    chunk_start_id, chunk_end_id = _resolve_chunk_window(
+        max_chunk_id,
+        prev_chunks,
+        chunk_start_id=chunk_start_id,
+        chunk_end_id=chunk_end_id,
+    )
     name_set = set(name_list)
 
     variant_to_name: dict[str, str] = {}
@@ -376,6 +426,8 @@ def _add_identity_clues(
     run_id: str,
     max_chunk_id: int | None = None,
     prev_chunks: int | None = None,
+    chunk_start_id: int | None = None,
+    chunk_end_id: int | None = None,
 ) -> None:
     """添加身份线索
 
@@ -393,13 +445,23 @@ def _add_identity_clues(
     修改者: Codex
     任务: runtime-prev-chunks-windowing
     修改内容: 身份线索查询与例句池使用同一个 chunk 窗口
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: align-incremental-disambig-batch-window
+    修改内容: 显式批次窗口优先于 prev_chunks，避免身份线索窗口与增量批次语义脱节。
     """
     if not name_list:
         return
 
     from src.storage.models.annotation import ChunkDialogue
 
-    chunk_start_id, chunk_end_id = _resolve_chunk_window(max_chunk_id, prev_chunks)
+    chunk_start_id, chunk_end_id = _resolve_chunk_window(
+        max_chunk_id,
+        prev_chunks,
+        chunk_start_id=chunk_start_id,
+        chunk_end_id=chunk_end_id,
+    )
     name_set = set(name_list)
     dialogues = (
         conn.query(ChunkDialogue.speaker, ChunkDialogue.identity_clue)
