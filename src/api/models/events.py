@@ -159,9 +159,11 @@ class AnalysisEventBus:
         - 同步更新 TaskManager
 
         修改时间: 2026-04-20
-        修改任务: fix-eventbus-null-progress-write
-        修改内容: 区分“字段缺失”和“字段显式赋值”，避免把 current/total/progress 的 None
-                  误写回 DB 非空列，保持事件上下文补全语义与任务持久化语义一致。
+        修改任务: fix-eventbus-null-progress-write / demote-llm-output-eventbus-log
+        修改内容: 1. 区分“字段缺失”和“字段显式赋值”，避免把 current/total/progress 的 None
+                    误写回 DB 非空列，保持事件上下文补全语义与任务持久化语义一致。
+                  2. 将高频 LLM 原始流式事件（output / thinking）降为 DEBUG，避免 JSON 片段污染
+                    INFO 级运行日志，同时保留 start / progress / complete 这些业务阶段事件的可见性。
         """
         # 补全上下文：构建新事件对象，避免修改原始事件
         resolved_stage = event.stage or self._stage
@@ -221,7 +223,8 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        log_level = logger.debug if resolved_event.action == "thinking" else logger.info
+        # 中文注释：LLM 流式正文/思考片段属于高频诊断信息，降到 DEBUG，避免 INFO 日志被原始输出刷屏。
+        log_level = logger.debug if resolved_event.action in {"output", "thinking"} else logger.info
         log_level(
             f"[EventBus] task_id={self.task_id}, action={resolved_event.action}, "
             f"stage={resolved_event.stage}, sub_stage={resolved_event.sub_stage}, "
