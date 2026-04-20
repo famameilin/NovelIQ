@@ -15,7 +15,7 @@ API 分析端点测试
 import asyncio
 import tempfile
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -465,7 +465,7 @@ class TestAnalysis:
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
-        stale_heartbeat = datetime.now() - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
+        stale_heartbeat = datetime.now(timezone.utc) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
 
         # 使用唯一 ID 避免测试间数据污染
         running_novel_id = f"novel-running-{uuid.uuid4()}"
