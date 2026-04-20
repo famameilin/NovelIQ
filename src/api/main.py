@@ -47,7 +47,7 @@ from __future__ import annotations
 import socket
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,7 +83,7 @@ def _recover_orphaned_tasks() -> tuple[int, int]:
     from src.storage.db import get_session
     from src.storage.repositories import RunRepository
 
-    stale_before = datetime.now(timezone.utc) - ORPHAN_TASK_HEARTBEAT_TIMEOUT
+    stale_before = datetime.now(UTC) - ORPHAN_TASK_HEARTBEAT_TIMEOUT
     with get_session() as session:
         repo = RunRepository(session)
         failed_count = repo.mark_running_as_failed(stale_before=stale_before)

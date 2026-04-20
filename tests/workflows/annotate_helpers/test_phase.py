@@ -21,7 +21,7 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
 
     phase_result = SimpleNamespace(
         annotation_client=MagicMock(),
-        cloud_annotation_client=None,
+        annotation_fallback_client=None,
         incremental_disambig_client=MagicMock(),
         alias_keywords=["称号"],
         global_context_str="global-context",
@@ -89,7 +89,7 @@ async def test_process_single_chunk_prefers_prompt_blocks_over_legacy_strings() 
 
     phase_result = SimpleNamespace(
         annotation_client=MagicMock(),
-        cloud_annotation_client=None,
+        annotation_fallback_client=None,
         incremental_disambig_client=MagicMock(),
         alias_keywords=["称号"],
         global_context_str="global-context",
@@ -155,7 +155,7 @@ async def test_init_annotation_phase_validates_level3_once_up_front() -> None:
     evidence_provider.ensure_level3_ready = AsyncMock()
 
     annotation_client = MagicMock()
-    cloud_annotation_client = MagicMock()
+    annotation_fallback_client = MagicMock()
     incremental_client = MagicMock()
     full_client = MagicMock()
 
@@ -170,7 +170,7 @@ async def test_init_annotation_phase_validates_level3_once_up_front() -> None:
     with (
         patch(
             "src.workflows.annotate_helpers.client_init._init_annotation_clients",
-            return_value=(annotation_client, cloud_annotation_client, incremental_client, full_client),
+            return_value=(annotation_client, annotation_fallback_client, incremental_client, full_client),
         ),
         patch("src.workflows.annotate_helpers.client_init._setup_token_usage_callback"),
         patch("src.workflows.annotate_helpers.context._init_evidence_provider", return_value=evidence_provider),
@@ -191,7 +191,7 @@ async def test_init_annotation_phase_fails_early_when_level3_not_ready() -> None
     evidence_provider.ensure_level3_ready = AsyncMock(side_effect=Level3NotReadyError("schema missing"))
 
     annotation_client = MagicMock()
-    cloud_annotation_client = MagicMock()
+    annotation_fallback_client = MagicMock()
     incremental_client = MagicMock()
     full_client = MagicMock()
 
@@ -206,7 +206,7 @@ async def test_init_annotation_phase_fails_early_when_level3_not_ready() -> None
     with (
         patch(
             "src.workflows.annotate_helpers.client_init._init_annotation_clients",
-            return_value=(annotation_client, cloud_annotation_client, incremental_client, full_client),
+            return_value=(annotation_client, annotation_fallback_client, incremental_client, full_client),
         ),
         patch("src.workflows.annotate_helpers.client_init._setup_token_usage_callback"),
         patch("src.workflows.annotate_helpers.context._init_evidence_provider", return_value=evidence_provider),
