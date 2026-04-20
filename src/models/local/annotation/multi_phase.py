@@ -185,6 +185,7 @@ async def _run_phase3_if_needed(
     run_id: str | None,
     known_characters: list[str] | None,
     active_entities: str | None = None,
+    fallback_client: AnnotationClient | None = None,
 ) -> _Phase3Result:
     """根据条件执行 Phase3 对话归属判断
 
@@ -201,6 +202,11 @@ async def _run_phase3_if_needed(
     修改者: TraeAI
     任务: fix-phase3-active-entities-fallback
     修改内容: 新增 active_entities 参数，透传上游已解析好的活跃实体上下文（含 fallback）
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: strict-phase34-fallback
+    修改内容: 继续透传 fallback_client，统一多阶段标注的失败语义
     """
     result = _Phase3Result()
 
@@ -228,6 +234,7 @@ async def _run_phase3_if_needed(
         return_tones=True,
         return_identity_clues=True,
         active_entities=active_entities,
+        fallback_client=fallback_client,
     )
 
     result.dialogue_lengths = dlg_result.speaker_lengths or None
@@ -490,6 +497,7 @@ async def annotate_chunk_parallel(
             run_id=run_id,
             known_characters=known_characters,
             active_entities=active_entities,
+            fallback_client=fallback_client,
         ),
         annotate_chunk_phase4(
             client=client,
@@ -500,6 +508,7 @@ async def annotate_chunk_parallel(
             evidence_bundle=evidence_bundle,
             chunk_id=chunk_id,
             run_id=run_id,
+            fallback_client=fallback_client,
         ),
     )
 
@@ -630,6 +639,7 @@ async def annotate_chunk_serial(
         run_id=run_id,
         known_characters=known_characters,
         active_entities=active_entities,
+        fallback_client=fallback_client,
     )
     if emitter:
         await emitter(
@@ -648,6 +658,7 @@ async def annotate_chunk_serial(
         evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,
+        fallback_client=fallback_client,
     )
     phase4_result = _Phase4Result(relations=phase4_relations)
     if emitter:
