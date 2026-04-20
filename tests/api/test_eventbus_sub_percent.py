@@ -167,3 +167,32 @@ async def test_eventbus_calculates_percent_for_different_stages():
 
     # 未知阶段: 0-100%
     assert bus._calculate_percent_for_stage("unknown", 5, 10) == 50.0
+
+
+@pytest.mark.asyncio
+async def test_eventbus_start_event_without_current_does_not_write_none_progress_fields():
+    """
+    验证 start 事件缺少 current 时，不会把 None 透传给 TaskManager。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: fix-eventbus-null-progress-write
+    说明: workflow 内部的 start 事件通常只有 stage/message，不带 current。
+          这里要求 EventBus 只写回已解析出的字段，避免 DB 非空列收到 None。
+    """
+    task_manager = MagicMock()
+    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
+
+    with patch("src.api.services.event_manager.event_manager") as mock_em:
+        mock_em.send = AsyncMock()
+
+        await bus.emit(StreamEvent(action="start", stage="preprocess", message="开始预处理", sub_percent=0.0))
+
+    task_manager.update_task.assert_called_once()
+    update_kwargs = task_manager.update_task.call_args.kwargs
+    assert update_kwargs["stage"] == "preprocess"
+    assert update_kwargs["sub_stage"] == ""
+    assert update_kwargs["message"] == "开始预处理"
+    assert "current" not in update_kwargs
+    assert "total" not in update_kwargs
+    assert "progress" not in update_kwargs
