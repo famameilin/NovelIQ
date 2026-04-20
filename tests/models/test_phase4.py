@@ -572,7 +572,9 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
             ]
         )
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock(message=MagicMock(content='{"relations": []}', reasoning_content="phase4 thinking"))]
+        mock_response.choices = [
+            MagicMock(message=MagicMock(content='{"relations": []}', reasoning_content="phase4 thinking"))
+        ]
 
         mock_client._call_annotation_api = AsyncMock(return_value=(mock_result, mock_response))
 
@@ -604,10 +606,14 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         """空 bundle 不报错，并回退到无 evidence section 的旧 prompt 形状。"""
         mock_settings.prompts.phase4.system = "system"
         mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
+        mock_settings.runtime.annotation.phase_max_retries = 3
 
         mock_client = MagicMock()
         mock_client._config.model = "test-model"
+        mock_client._config.thinking_enabled = False
         mock_client._is_cloud_api.return_value = False
+        mock_client._process_annotation_response = MagicMock(return_value=('{"relations": []}', None, None))
+        mock_client._session = None
         mock_client._call_annotation_api = AsyncMock(return_value=(RelationExtractionResult(relations=[]), MagicMock()))
 
         with patch("src.models.local.annotation.phase4.record_model_interaction"):
@@ -624,6 +630,103 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<Narrative_Evidence_Level1>", call_messages[1]["content"])
         self.assertNotIn("【近期活跃角色】", call_messages[1]["content"])
         self.assertNotIn("<Vector_Evidence>", call_messages[1]["content"])
+
+    @patch("src.models.local.annotation.phase4.record_model_interaction")
+    @patch("src.models.local.annotation.phase4.settings")
+    async def test_phase4_uses_fallback_client_after_primary_retries(
+        self,
+        mock_settings: MagicMock,
+        _mock_record_model_interaction: MagicMock,
+    ) -> None:
+        """Phase4 主客户端失败后会切到 fallback_client。"""
+        mock_settings.prompts.phase4.system = "system"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
+        mock_settings.runtime.annotation.phase_max_retries = 3
+
+        primary_client = MagicMock()
+        primary_client._config.model = "primary-model"
+        primary_client._config.thinking_enabled = False
+        primary_client._is_cloud_api.return_value = False
+        primary_client._session = None
+        primary_client._process_annotation_response = MagicMock(return_value=('{"relations": []}', None, None))
+
+        fallback_client = MagicMock()
+        fallback_client._config.model = "fallback-model"
+        fallback_client._config.thinking_enabled = False
+        fallback_client._is_cloud_api.return_value = True
+        fallback_client._session = None
+        fallback_client._process_annotation_response = MagicMock(return_value=('{"relations": []}', None, None))
+
+        primary_calls = 0
+        fallback_calls = 0
+        parsed = RelationExtractionResult(
+            relations=[
+                make_relation_record(
+                    from_name="张三",
+                    to_name="李四",
+                    type="敌对",
+                    change="新建",
+                    evidence="证据",
+                )
+            ]
+        )
+        response = MagicMock()
+
+        async def primary_call(*args, **kwargs):
+            nonlocal primary_calls
+            primary_calls += 1
+            raise ConnectionError("primary failed")
+
+        async def fallback_call(*args, **kwargs):
+            nonlocal fallback_calls
+            fallback_calls += 1
+            return parsed, response
+
+        primary_client._call_annotation_api = AsyncMock(side_effect=primary_call)
+        fallback_client._call_annotation_api = AsyncMock(side_effect=fallback_call)
+
+        result = await annotate_chunk_phase4(
+            primary_client,
+            "张三打了李四",
+            ["张三", "李四"],
+            fallback_client=fallback_client,
+        )
+
+        self.assertEqual(primary_calls, 3)
+        self.assertEqual(fallback_calls, 1)
+        self.assertGreaterEqual(len(result), 1)
+        self.assertEqual(result[0].from_name, "张三")
+        self.assertEqual(result[0].to_name, "李四")
+
+    @patch("src.models.local.annotation.phase4.settings")
+    async def test_phase4_retries_exhausted_raises_error(self, mock_settings: MagicMock) -> None:
+        """Phase4 主客户端和兜底客户端都失败时应抛错。"""
+        mock_settings.prompts.phase4.system = "system"
+        mock_settings.prompts.phase4.user_template = "${chunk_text}\n${known_characters}"
+        mock_settings.runtime.annotation.phase_max_retries = 3
+
+        primary_client = MagicMock()
+        primary_client._config.model = "primary-model"
+        primary_client._config.thinking_enabled = False
+        primary_client._is_cloud_api.return_value = False
+        primary_client._process_annotation_response = MagicMock(return_value=('{"relations": []}', None, None))
+
+        fallback_client = MagicMock()
+        fallback_client._config.model = "fallback-model"
+        fallback_client._config.thinking_enabled = False
+        fallback_client._is_cloud_api.return_value = True
+        fallback_client._process_annotation_response = MagicMock(return_value=('{"relations": []}', None, None))
+
+        primary_client._call_annotation_api = AsyncMock(side_effect=ConnectionError("primary failed"))
+        fallback_client._call_annotation_api = AsyncMock(side_effect=ConnectionError("fallback failed"))
+
+        with self.assertRaises(Phase4MaxRetriesExceededError):
+            await annotate_chunk_phase4(
+                primary_client,
+                "张三打了李四",
+                ["张三", "李四"],
+                fallback_client=fallback_client,
+            )
 
 
 class TestConstantsConsistency(unittest.TestCase):
