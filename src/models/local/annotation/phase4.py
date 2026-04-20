@@ -231,6 +231,7 @@ async def annotate_chunk_phase4(
     evidence_bundle: EvidenceBundle | None = None,
     chunk_id: int | None = None,
     run_id: str | None = None,
+    fallback_client: AnnotationClient | None = None,
 ) -> list[RelationChangeSnapshot]:
     """
     Phase4: 关系抽取（使用 LLM）
@@ -249,6 +250,11 @@ async def annotate_chunk_phase4(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: strict-phase34-fallback
+    修改内容: 接入 fallback_client，并在主/兜底全部失败后继续抛错，避免静默吞掉关系抽取失败
     """
     if not text:
         return []
@@ -276,7 +282,7 @@ async def annotate_chunk_phase4(
     handler = AnnotationRetryHandler[list[RelationChangeSnapshot]](
         config=config,
         primary_client=client,
-        fallback_client=None,
+        fallback_client=fallback_client,
         exception_type=Phase4MaxRetriesExceededError,
     )
 
@@ -299,8 +305,8 @@ async def annotate_chunk_phase4(
         result = await handler.execute(operation)
         return result if result else []
     except Phase4MaxRetriesExceededError:
-        logger.warning("Phase4 max retries exceeded for chunk_id={}", chunk_id)
-        return []
+        logger.error("Phase4 exhausted primary/fallback retries chunk_id={}", chunk_id)
+        raise
     except Exception as e:
         logger.error("Phase4 unexpected error for chunk_id={}: {}", chunk_id, e)
         raise
