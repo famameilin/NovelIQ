@@ -36,12 +36,13 @@ from .input_config import (
 from .logging_config import LoggingConfig, setup_logging
 from .schemas import (
     AnalysisSettings,
+    AnnotationRuntimeSettings,
     APISettings,
     ChunkingSettings,
     CommonTopicSettings,
     DatabaseSettings,
-    DiagnosisSettings,
     DiagnosisRuntimeSettings,
+    DiagnosisSettings,
     DisambiguationRuntimeSettings,
     EmbeddingModelSettings,
     LoggingModuleSettings,
@@ -60,7 +61,6 @@ from .schemas import (
     ThinkingConfig,
     ThinkingSettings,
     TopicModelSettings,
-    AnnotationRuntimeSettings,
 )
 from .settings import Settings, settings
 

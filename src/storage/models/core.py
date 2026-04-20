@@ -16,7 +16,8 @@
 修改时间: 2026-04-19
 修改者: TraeAI
 任务: task-system-db-driven-refactor
-修改内容: 为 AnalysisRun 添加运行态字段（error, message, completed_at, cancel_requested, worker_id, heartbeat_at, sub_stage, current, total）
+修改内容: 为 AnalysisRun 添加运行态字段
+          （error, message, completed_at, cancel_requested, worker_id, heartbeat_at, sub_stage, current, total）
 """
 
 from __future__ import annotations
