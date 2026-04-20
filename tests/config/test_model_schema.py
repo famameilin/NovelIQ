@@ -7,13 +7,11 @@ def test_parse_embedding_model_settings_includes_dimension() -> None:
             "base_url": "http://localhost:8000",
             "model": "test-embedding-model",
             "embedding_dim": 1024,
-            "max_retries": 3,
         }
     )
 
     assert settings.model == "test-embedding-model"
     assert settings.embedding_dim == 1024
-    assert settings.max_retries == 3
 
 
 def test_parse_embedding_model_settings_supports_env_override(monkeypatch) -> None:

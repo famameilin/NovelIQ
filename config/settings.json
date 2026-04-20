@@ -5,7 +5,6 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2,
       "temperature": 0.7,
       "top_p": 0.8,
       "top_k": 20,
@@ -18,7 +17,6 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2,
       "temperature": 0.7,
       "top_p": 0.8,
       "top_k": 20,
@@ -31,7 +29,6 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2,
       "temperature": 1.0,
       "top_p": 0.95,
       "top_k": 20,
@@ -42,7 +39,6 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2,
       "embedding_dim": 1536
     },
     "full_disambig": {
@@ -50,7 +46,6 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2,
       "temperature": 1.0,
       "top_p": 0.95,
       "top_k": 20,
@@ -61,11 +56,24 @@
       "model": null,
       "api_key": null,
       "timeout_s": null,
-      "max_retries": 2,
       "temperature": 1.0,
       "top_p": 0.95,
       "top_k": 20,
       "presence_penalty": 1.5
+    }
+  },
+  "runtime": {
+    "annotation": {
+      "phase_max_retries": 3,
+      "phase3_max_retries": 3,
+      "prev_chunks": 3,
+      "lookback": 10
+    },
+    "disambiguation": {
+      "max_retries": 3
+    },
+    "diagnosis": {
+      "max_retries": 3
     }
   },
   "thinking": {

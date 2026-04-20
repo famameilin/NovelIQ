@@ -25,7 +25,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from src.config.constants import PHASE_MAX_RETRIES
+from src.config import settings
 from src.models.interactions import record_model_interaction
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import ForeshadowingResult
@@ -130,8 +130,9 @@ async def annotate_chunk_phase2(
     """
     from src.models.local.schema import ForeshadowingResult
 
+    phase_max_retries = settings.runtime.annotation.phase_max_retries
     config = RetryConfig(
-        max_retries=PHASE_MAX_RETRIES,
+        max_retries=phase_max_retries,
         operation_name="phase2",
         chunk_id=chunk_id,
     )

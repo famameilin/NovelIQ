@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
-from src.config.schemas import ANNOTATION_CONFIG
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
 from src.models.local.evidence_renderer_shared import render_active_entities_from_authority
@@ -203,11 +202,12 @@ def _prepare_chunk_context(
         chunk_repo = ChunkRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
+        lookback = settings.runtime.annotation.lookback
         context.active_entities_fallback = _build_active_entities_prompt_from_authority(
             conn,
             run_id,
             chunk_id,
-            lookback=ANNOTATION_CONFIG.lookback,
+            lookback=lookback,
         )
 
     if disambig_provider:
@@ -255,11 +255,12 @@ async def _prepare_chunk_context_with_level3(
         chunk_repo = ChunkRepository(conn)
         context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
         context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
+        lookback = settings.runtime.annotation.lookback
         context.active_entities_fallback = _build_active_entities_prompt_from_authority(
             conn,
             run_id,
             chunk_id,
-            lookback=ANNOTATION_CONFIG.lookback,
+            lookback=lookback,
         )
 
     if disambig_provider:
