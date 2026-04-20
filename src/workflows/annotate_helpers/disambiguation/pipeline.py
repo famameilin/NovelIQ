@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.config.constants import MAX_DISAMBIG_RETRIES
+from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interactions import record_model_interaction
 from src.models.interfaces import DisambiguationLike
@@ -377,7 +377,7 @@ async def _retry_disambig(
     任务: 创建统一的模型交互记录接口
     修改内容: 使用 record_model_interaction 替代 _save_disambiguation_interaction
     """
-    max_retries = MAX_DISAMBIG_RETRIES
+    max_retries = settings.runtime.disambiguation.max_retries
     last_exception = None
 
     for attempt in range(1, max_retries + 1):

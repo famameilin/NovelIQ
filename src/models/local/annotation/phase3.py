@@ -48,7 +48,6 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from src.config import settings
-from src.config.constants import PHASE3_MAX_RETRIES
 from src.models.interactions import record_model_interaction
 from src.models.local.annotation.context import DialogueAttributionError
 from src.models.local.annotation.evidence_renderer import render_dialogue_attribution_evidence_sections
@@ -279,8 +278,9 @@ async def attribute_dialogues_with_llm(
             batch_candidates = candidates[i : i + batch_size]
             batch_idx = i // batch_size
 
+            phase3_max_retries = settings.runtime.annotation.phase3_max_retries
             retry_config = RetryConfig(
-                max_retries=PHASE3_MAX_RETRIES,
+                max_retries=phase3_max_retries,
                 operation_name=f"phase3_dialogue_attribution_batch_{batch_idx}",
                 chunk_id=chunk_id,
             )

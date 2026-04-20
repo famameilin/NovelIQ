@@ -10,6 +10,11 @@
 修改时间: 2026-03-19
 修改者: TraeAI
 修改内容: 在模块导入时优先加载 .env 文件，确保环境变量在其他导入之前设置
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: runtime-behavior-settings
+修改内容: 导出 runtime 配置 schema 类型
 """
 
 from . import bootstrap
@@ -36,6 +41,8 @@ from .schemas import (
     CommonTopicSettings,
     DatabaseSettings,
     DiagnosisSettings,
+    DiagnosisRuntimeSettings,
+    DisambiguationRuntimeSettings,
     EmbeddingModelSettings,
     LoggingModuleSettings,
     LoggingSettings,
@@ -46,24 +53,29 @@ from .schemas import (
     ProgressSettings,
     PromptSettings,
     RAGSettings,
+    RuntimeSettings,
     SingleBookTopicSettings,
     TaskModelSettings,
     TextLimitsSettings,
     ThinkingConfig,
     ThinkingSettings,
     TopicModelSettings,
+    AnnotationRuntimeSettings,
 )
 from .settings import Settings, settings
 
 __all__ = [
     "APISettings",
     "AnalysisSettings",
+    "AnnotationRuntimeSettings",
     "CHAPTER_PATTERN",
     "ChunkingSettings",
     "CLASSICAL_PATTERNS",
     "CommonTopicSettings",
     "DatabaseSettings",
     "DiagnosisSettings",
+    "DiagnosisRuntimeSettings",
+    "DisambiguationRuntimeSettings",
     "EmbeddingModelSettings",
     "EVENT_TYPE_SCORES",
     "InputConfig",
@@ -79,6 +91,7 @@ __all__ = [
     "ProgressSettings",
     "PromptSettings",
     "RAGSettings",
+    "RuntimeSettings",
     "SEMANTIC_CATEGORY_MAPPING",
     "Settings",
     "SingleBookTopicSettings",

@@ -10,13 +10,24 @@
 修改者: TraeAI
 任务: remove-unused-annotation-fields
 修改内容: 移除摘要质量校验函数（不再使用）
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: runtime-behavior-settings
+修改内容: 移除对 ANNOTATION_CONFIG 的依赖，静态校验枚举统一改从 constants 读取
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.config.schemas import ANNOTATION_CONFIG
+from src.config.constants import (
+    VALID_ACTION_TYPES,
+    VALID_EMOTION_SCORES,
+    VALID_EVENT_TYPES,
+    VALID_FORESHADOWING_TYPES,
+    VALID_ROLE_FUNCTIONS,
+)
 
 from ..schema import (
     CharacterSnapshot,
@@ -25,12 +36,12 @@ from ..schema import (
     LocationAppearance,
 )
 
-_VALID_ROLE_FUNCTIONS = ANNOTATION_CONFIG.valid_role_functions or []
-_VALID_ACTION_TYPES = ANNOTATION_CONFIG.valid_action_types or []
-_VALID_EMOTION_SCORES = ANNOTATION_CONFIG.valid_emotion_scores or []
-_VALID_EMOTIONAL_VALENCES = ANNOTATION_CONFIG.valid_emotion_scores or []
-_VALID_EVENT_TYPES = ANNOTATION_CONFIG.valid_event_types or []
-_VALID_FORESHADOWING_TYPES = ANNOTATION_CONFIG.valid_foreshadowing_types or []
+_VALID_ROLE_FUNCTIONS = set(VALID_ROLE_FUNCTIONS)
+_VALID_ACTION_TYPES = set(VALID_ACTION_TYPES)
+_VALID_EMOTION_SCORES = set(VALID_EMOTION_SCORES)
+_VALID_EMOTIONAL_VALENCES = set(VALID_EMOTION_SCORES)
+_VALID_EVENT_TYPES = set(VALID_EVENT_TYPES)
+_VALID_FORESHADOWING_TYPES = set(VALID_FORESHADOWING_TYPES)
 
 
 def make_empty_annotation() -> ChunkAnnotation:
