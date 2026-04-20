@@ -5,10 +5,10 @@
 
 本模块包含所有配置数据类的导出。
 
-修改时间: 2026-03-17
-修改者: TraeAI
-任务: code-quality-refactor - 消除魔法数字
-修改内容: 添加 AnnotationConfig 配置类
+修改时间: 2026-04-20
+修改者: Codex
+任务: runtime-behavior-settings
+修改内容: 导出 runtime 配置 schema，移除已弃用的 ANNOTATION_CONFIG 导出
 """
 
 from .analysis import (
@@ -32,10 +32,6 @@ from .analysis import (
     _parse_progress_settings,
     _parse_rag_settings,
     _parse_topic_model_settings,
-)
-from .annotation import (
-    ANNOTATION_CONFIG,
-    AnnotationConfig,
 )
 from .api import (
     APISettings,
@@ -63,16 +59,27 @@ from .model import (
     _parse_task_model_settings,
     _parse_thinking_settings,
 )
+from .runtime import (
+    AnnotationRuntimeSettings,
+    DiagnosisRuntimeSettings,
+    DisambiguationRuntimeSettings,
+    RuntimeSettings,
+    _parse_annotation_runtime_settings,
+    _parse_diagnosis_runtime_settings,
+    _parse_disambiguation_runtime_settings,
+    _parse_runtime_settings,
+)
 
 __all__ = [
     "AnalysisSettings",
-    "AnnotationConfig",
-    "ANNOTATION_CONFIG",
     "APISettings",
+    "AnnotationRuntimeSettings",
     "ChunkingSettings",
     "CommonTopicSettings",
     "DatabaseSettings",
     "DiagnosisSettings",
+    "DiagnosisRuntimeSettings",
+    "DisambiguationRuntimeSettings",
     "EmbeddingModelSettings",
     "LoggingModuleSettings",
     "LoggingSettings",
@@ -83,6 +90,7 @@ __all__ = [
     "ProgressSettings",
     "PromptSettings",
     "RAGSettings",
+    "RuntimeSettings",
     "SingleBookTopicSettings",
     "StreamingSettings",
     "TaskModelSettings",
@@ -103,8 +111,12 @@ __all__ = [
     "_parse_progress_settings",
     "_parse_prompt_settings",
     "_parse_rag_settings",
+    "_parse_runtime_settings",
     "_parse_streaming_settings",
     "_parse_task_model_settings",
     "_parse_thinking_settings",
     "_parse_topic_model_settings",
+    "_parse_annotation_runtime_settings",
+    "_parse_diagnosis_runtime_settings",
+    "_parse_disambiguation_runtime_settings",
 ]

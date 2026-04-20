@@ -91,9 +91,7 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
         [10],
     )
 
-    result = build_context_sentences(
-        db_session, _candidates("zhangsan"), alias_keywords=["就是"], prev_chunks=1, run_id=run_1
-    )
+    result = build_context_sentences(db_session, _candidates("zhangsan"), alias_keywords=["就是"], run_id=run_1)
 
     assert "zhangsan" in result
     context = result["zhangsan"]

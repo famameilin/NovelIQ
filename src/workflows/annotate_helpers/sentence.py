@@ -34,7 +34,6 @@ from loguru import logger
 from sqlalchemy import text
 
 from src.config import settings
-from src.config.schemas import ANNOTATION_CONFIG
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interfaces import AnnotationLike
 
@@ -72,7 +71,6 @@ def build_context_sentences(
     conn,
     candidates: list[NameCountCandidate],
     alias_keywords: list[str] | None = None,
-    prev_chunks: int = ANNOTATION_CONFIG.prev_chunks,
     run_id: str | None = None,
     max_chunk_id: int | None = None,
 ) -> dict[str, str]:

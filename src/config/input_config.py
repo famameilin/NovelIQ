@@ -26,38 +26,35 @@ class TaskModelConfig:
 
     修改时间: 2026-03-16
     修改者: TraeAI
-    修改内容: 添加 provider 字段，支持明确指定 LLM provider
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
     修改内容: 添加 stream_enabled 和 stream_cloud_only 字段支持流式响应
 
     修改时间: 2026-03-21
     修改者: TraeAI
     任务: migrate-litellm-to-openai-sdk
     修改内容: 移除 backend_name 字段，迁移到 OpenAI SDK 后不再需要区分后端
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: 清理无效模型配置项
+    修改内容: 删除 provider 和模型级 max_retries 字段，避免 TaskModelConfig 暴露未生效参数
     """
 
     base_url: str | None = None
     model: str | None = None
     api_key: str | None = None
     timeout_s: float | None = None
-    max_retries: int = 2
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 20
     presence_penalty: float = 1.5
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
-    provider: str | None = None
     stream_enabled: bool = False
     stream_cloud_only: bool = True
 
     def validate(self) -> None:
         if self.timeout_s is not None and self.timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
-        if self.max_retries < 0:
-            raise ValueError("max_retries must be non-negative")
         if self.base_url is None:
             raise ValueError("base_url 不能为空")
         if self.model is None:
@@ -77,16 +74,17 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
 
     修改时间: 2026-03-16
     修改者: TraeAI
-    修改内容: 添加 provider 字段支持
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
     修改内容: 添加 stream_enabled 支持
 
     修改时间: 2026-03-21
     修改者: TraeAI
     任务: migrate-litellm-to-openai-sdk
     修改内容: 移除 backend_name 字段
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: 清理无效模型配置项
+    修改内容: 不再向运行时配置对象透传 provider 和模型级 max_retries
     """
     task_settings = getattr(settings.models, task_type, None)
     if task_settings is None:
@@ -102,14 +100,12 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
         model=task_settings.model,
         api_key=task_settings.api_key,
         timeout_s=task_settings.timeout_s,
-        max_retries=task_settings.max_retries,
         temperature=task_settings.temperature,
         top_p=task_settings.top_p,
         top_k=task_settings.top_k,
         presence_penalty=task_settings.presence_penalty,
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=None,
-        provider=getattr(task_settings, "provider", None),
         stream_enabled=stream_enabled,
         stream_cloud_only=stream_cloud_only,
     )
