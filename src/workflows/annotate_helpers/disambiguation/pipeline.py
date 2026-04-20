@@ -35,7 +35,6 @@ from src.models.local.disambiguation import (
     build_disambiguation_prompt_context,
     render_disambig_prompt_context,
 )
-from src.models.local.disambiguation.result_builder import align_canonical_by_frequency
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
@@ -62,6 +61,7 @@ from .state_logic import (
     DISAMBIG_STATE_RESOLVED,
     DISAMBIG_STATE_UNRESOLVED,
     apply_disambiguation_decisions,
+    reselect_cluster_canonicals,
     validate_confidence_with_evidence,
 )
 
@@ -555,7 +555,8 @@ async def _run_incremental_disambiguation_with_state(
     3. 调模型得到 canonical_decisions
     4. 走 evidence validation
     5. state = apply_disambiguation_decisions(state, result)
-    6. 保存 checkpoint
+    6. 按 alias cluster 重选 canonical，避免频次直接改写配对语义
+    7. 保存 checkpoint
     """
     if (current_idx + 1) % disambig_interval != 0:
         return state
@@ -655,9 +656,15 @@ async def _run_incremental_disambiguation_with_state(
 
     result = validate_confidence_with_evidence(result, existing_names, context_sentences)
     incremental_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in new_names}
-    result = align_canonical_by_frequency(result, all_disambig_candidates, global_freq=incremental_global_freq)
 
     new_state = apply_disambiguation_decisions(state_after_deferred, result)
+    if result.canonical_decisions:
+        affected_cluster_names = set(result.canonical_decisions) | set(result.canonical_decisions.values())
+        new_state = reselect_cluster_canonicals(
+            new_state,
+            name_counts=incremental_global_freq,
+            affected_names=affected_cluster_names,
+        )
 
     # Accumulate entity_types from LLM output into state
     if result.entity_types:
@@ -722,11 +729,12 @@ async def _run_final_disambiguation_with_state(
     2. 用 review_status 决定复审候选
     3. 调模型
     4. state = apply_disambiguation_decisions(state, result)
-    5. 落库：
+    5. 全量重选 alias cluster canonical，确保最终图谱不被中途频次翻转污染
+    6. 落库：
        - 用 known_canonical_names 建实体
        - 用 alias_merges 执行名字修正
        - 用 pending_relations + alias_merges 归一化关系
-    6. 保存最终 checkpoint
+    7. 保存最终 checkpoint
     """
     pending_relations = list(state.pending_relations)
     if pending_relations:
@@ -749,6 +757,7 @@ async def _run_final_disambiguation_with_state(
         except (TypeError, ValueError):
             count = 0
         all_names.append({"name": name, "count": count})
+    final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
 
     review_status_dict = state.get_review_status_dict()
     alias_map_dict = state.get_alias_merges_dict()
@@ -805,8 +814,6 @@ async def _run_final_disambiguation_with_state(
                 prompt_context=prompt_context,
             )
             result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-            final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
-            result = align_canonical_by_frequency(result, candidate_payload, global_freq=final_global_freq)
         else:
             logger.info("final disambiguation skipped: no remaining candidates after filtering")
             result = ExtendedDisambigResult(
@@ -828,6 +835,8 @@ async def _run_final_disambiguation_with_state(
     new_state = state
     if result.canonical_decisions:
         new_state = apply_disambiguation_decisions(state, result)
+    if new_state.alias_merges:
+        new_state = reselect_cluster_canonicals(new_state, name_counts=final_global_freq)
 
     # Merge final disambig entity_types into accumulated state
     if result.entity_types:

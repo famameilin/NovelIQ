@@ -9,11 +9,13 @@ from src.models.local.disambiguation import (
     DisambiguationPromptContext,
     DisambiguationState,
     ExtendedDisambigResult,
+    NameReviewState,
     build_evidence_profile,
 )
 from src.rag import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
+from src.workflows.annotate_helpers.disambiguation.state_logic import reselect_cluster_canonicals
 
 
 def _candidates(*names: str) -> list[dict[str, int | str]]:
@@ -271,8 +273,8 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
             side_effect=lambda result, *_: result,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.align_canonical_by_frequency",
-            side_effect=lambda result, *_args, **_kwargs: result,
+            "src.workflows.annotate_helpers.disambiguation.pipeline.reselect_cluster_canonicals",
+            side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline.apply_disambiguation_decisions",
@@ -374,8 +376,8 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
             side_effect=lambda result, *_: result,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.align_canonical_by_frequency",
-            side_effect=lambda result, *_args, **_kwargs: result,
+            "src.workflows.annotate_helpers.disambiguation.pipeline.reselect_cluster_canonicals",
+            side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline.apply_disambiguation_decisions",
@@ -509,8 +511,8 @@ async def test_incremental_pipeline_skips_active_entity_fallback_for_review_cand
             side_effect=lambda result, *_: result,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.align_canonical_by_frequency",
-            side_effect=lambda result, *_args, **_kwargs: result,
+            "src.workflows.annotate_helpers.disambiguation.pipeline.reselect_cluster_canonicals",
+            side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline.apply_disambiguation_decisions",
@@ -551,6 +553,56 @@ def test_resolve_incremental_batch_window_aligns_with_disambig_interval() -> Non
     """
     assert pipeline_mod._resolve_incremental_batch_window(9, 10) == (0, 9)
     assert pipeline_mod._resolve_incremental_batch_window(29, 10) == (20, 29)
+
+
+def test_reselect_cluster_canonicals_prefers_real_name_over_descriptor_alias() -> None:
+    """
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: 即便历史状态已经被旧的频次翻转污染成 `白芷 -> 灰衣人`，
+          cluster 级 canonical 重选也应能把 canonical 纠回真实名字 `白芷`。
+    """
+    polluted_state = DisambiguationState(
+        discovered_names=frozenset({"灰衣人", "白芷"}),
+        known_canonical_names=frozenset({"灰衣人"}),
+        alias_merges=frozenset({("白芷", "灰衣人")}),
+        review_status=(
+            (
+                "灰衣人",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="灰衣人",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("identity_reveal",),
+                ),
+            ),
+            (
+                "白芷",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="灰衣人",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("naming_scene",),
+                ),
+            ),
+        ),
+    )
+
+    corrected_state = reselect_cluster_canonicals(
+        polluted_state,
+        name_counts={"白芷": 7, "灰衣人": 2},
+    )
+
+    assert corrected_state.known_canonical_names == frozenset({"白芷"})
+    assert corrected_state.get_alias_merges_dict() == {"灰衣人": "白芷"}
+    corrected_review = corrected_state.get_review_status_dict()
+    assert corrected_review["灰衣人"].proposed_canonical == "白芷"
+    assert corrected_review["白芷"].proposed_canonical == "白芷"
 
 
 @pytest.mark.asyncio
@@ -656,4 +708,83 @@ async def test_final_pipeline_preserves_deferred_names_without_model_call() -> N
     assert review.status == disambig_mod.DISAMBIG_STATE_UNRESOLVED
     assert review.decision_source == "candidate_filter"
     retry_mock.assert_not_called()
+    save_checkpoint_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_model_decision() -> None:
+    """
+    创建时间: 2026-04-21
+    创建者: Codex
+    任务: reselect-disambig-cluster-canonical
+    说明: 终消歧阶段即便这轮模型没有重新输出 `灰衣人/白芷`，也要能基于已有 cluster
+          和全量频次把被旧逻辑翻反的 canonical 纠正回来。
+    """
+
+    class _DummyAnnRepo:
+        def __init__(self, _conn) -> None:
+            pass
+
+        def ensure_canonical_entities(self, run_id, known_canonical_names, novel_id=None, entity_types=None):
+            return {name: index for index, name in enumerate(sorted(known_canonical_names), start=1)}
+
+        def cleanup_self_loop_relations(self, run_id):
+            return None
+
+    class _DummyConn:
+        def commit(self):
+            pass
+
+    polluted_state = DisambiguationState(
+        discovered_names=frozenset({"灰衣人", "白芷"}),
+        known_canonical_names=frozenset({"灰衣人"}),
+        alias_merges=frozenset({("白芷", "灰衣人")}),
+        review_status=(
+            (
+                "灰衣人",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="灰衣人",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("identity_reveal",),
+                ),
+            ),
+            (
+                "白芷",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="灰衣人",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("naming_scene",),
+                ),
+            ),
+        ),
+    )
+
+    with (
+        patch.object(pipeline_mod, "AnnotationRepository", _DummyAnnRepo),
+        patch.object(
+            pipeline_mod,
+            "fetch_all_character_names",
+            return_value=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
+        ),
+        patch.object(pipeline_mod, "_collect_final_disambiguation_candidates", return_value=[]),
+        patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
+    ):
+        new_state = await disambig_mod._run_final_disambiguation_with_state(
+            conn=_DummyConn(),
+            state=polluted_state,
+            full_disambig_client=MagicMock(),
+            alias_keywords=["号"],
+            novel_id="novel-1",
+            run_id="run-1",
+        )
+
+    assert new_state.known_canonical_names == frozenset({"白芷"})
+    assert new_state.get_alias_merges_dict() == {"灰衣人": "白芷"}
     save_checkpoint_mock.assert_called_once()
