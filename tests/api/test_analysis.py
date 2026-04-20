@@ -865,6 +865,46 @@ class TestDeleteAnalysis:
         assert background_task.done()
         assert background_task.cancelled()
 
+    @pytest.mark.asyncio
+    async def test_cleanup_task_runtime_before_delete_does_not_rewrite_terminal_db_status(self):
+        """测试删除前清理遇到内存脏状态时，不会把 DB 终态误写回 cancelling"""
+
+        async def _never_finish():
+            await asyncio.sleep(60)
+
+        run_id = "cleanup1"
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.create_run(novel_id="novel-cleanup", run_id=run_id)
+            run_repo.update_run_task_fields(
+                run_id,
+                status="completed",
+                completed_at=datetime.now(),
+                message="任务已在 DB 中完成",
+            )
+
+        task_manager = TaskManager()
+        task_manager.create_task(run_id, "novel-cleanup")
+        task_manager.set_db_session_factory(lambda: get_session_factory()())
+        task_info = task_manager.get_task(run_id)
+        assert task_info is not None
+        task_info.status = analysis_mod.TaskStatus.RUNNING
+
+        background_task = asyncio.create_task(_never_finish())
+        task_manager.store_asyncio_task(run_id, background_task)
+
+        await analysis_mod._cleanup_task_runtime_before_delete(run_id, task_manager)
+
+        assert background_task.done()
+        assert background_task.cancelled()
+
+        with get_session_factory()() as session:
+            refreshed_run = RunRepository(session).get_run(run_id)
+
+        assert refreshed_run is not None
+        assert refreshed_run["status"] == "completed"
+        assert refreshed_run["cancel_requested"] is False
+
     def test_delete_analysis_not_found(self, api_client: TestClient):
         """测试删除不存在的分析版本"""
         response = api_client.delete("/api/novels/nonexistent/analyses/nonexistent_analysis")

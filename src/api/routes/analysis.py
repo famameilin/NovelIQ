@@ -245,6 +245,11 @@ async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMa
     修改者: TraeAI
     任务: task-6-task-manager-responsibility-shrink
     修改内容: 补充 DB cancel_requested 写入逻辑（原在 TaskManager.cancel_task 中，现已移除）。
+
+    修改时间: 2026-04-20
+    修改者: Codex (GPT-5)
+    任务: fix-task-system-db-driven-review-findings
+    修改内容: 删除前的运行态清理也改走原子取消入口，避免内存脏状态把 DB 终态误写回 cancelling。
     """
     task_info = task_manager.get_task(task_id)
     if task_info is None:
@@ -255,14 +260,21 @@ async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMa
         # 设置内存取消信号
         task_manager.cancel_task(task_id)
 
-        # 同步写入 DB cancel_requested（保证持久化）
+        # 中文注释：这里只是删除前的运行态清理，DB 真相必须仍然遵守同一套状态机护栏。
+        # 如果 DB 已经是 completed/failed/cancelled，就不能因为内存里残留旧状态而把它回写成 cancelling。
         session_factory = get_session_factory()
         try:
             with session_factory() as session:
                 run_id = task_id_to_run_id(task_id, session.connection())
                 run_repo = RunRepository(session)
-                run_repo.update_run_task_fields(run_id, cancel_requested=True, status="cancelling")
-                session.commit()
+                latest_status = run_repo.request_task_cancellation(run_id)
+                if latest_status is None:
+                    logger.warning(f"Task {task_id} missing from DB during delete cleanup, skipping cancel persistence")
+                elif latest_status != "cancelling":
+                    logger.info(
+                        f"Task {task_id} DB already in terminal state {latest_status} during delete cleanup; "
+                        "skipping cancel persistence"
+                    )
         except (TaskIDNotFoundError, ValueError):
             logger.warning(f"Task {task_id} run_id not found, skipping run table cancel_requested update")
         except Exception as e:
