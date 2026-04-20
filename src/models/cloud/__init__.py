@@ -14,14 +14,12 @@
 """
 
 from .base import CloudModelClient, NullCloudModelClient, TokenUsageCallback, make_empty_analysis
-from .client import ConfiguredCloudModelClient
 from .payload import build_diagnosis_payload
 from .schema import CloudAnalysis
 
 __all__ = [
     "CloudAnalysis",
     "CloudModelClient",
-    "ConfiguredCloudModelClient",
     "NullCloudModelClient",
     "TokenUsageCallback",
     "build_diagnosis_payload",

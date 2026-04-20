@@ -8,6 +8,11 @@
 修改者: TraeAI
 任务: 删除 cultural_density 字段
 修改内容: 移除 cultural_density 字段
+
+修改时间: 2026-04-20
+修改者: Codex (GPT-5)
+任务: remove-compat-layers
+修改内容: 将 imagery_lexicon_density 并入 ChunkStyleData，移除独立 culture 兼容写入链路。
 """
 
 from __future__ import annotations
@@ -60,6 +65,7 @@ class ChunkStyleData:
     category_density_measure: float
     category_density_emotion: float
     category_density_color: float
+    imagery_lexicon_density: float | None = None
 
     def to_tuple(
         self,
@@ -88,6 +94,7 @@ class ChunkStyleData:
         float,
         float,
         float,
+        float | None,
     ]:
         return (
             self.chunk_id,
@@ -114,6 +121,7 @@ class ChunkStyleData:
             self.category_density_measure,
             self.category_density_emotion,
             self.category_density_color,
+            self.imagery_lexicon_density,
         )
 
     def to_dict(self, run_id: str) -> dict:
@@ -143,5 +151,6 @@ class ChunkStyleData:
             "category_density_measure": self.category_density_measure,
             "category_density_emotion": self.category_density_emotion,
             "category_density_color": self.category_density_color,
+            "imagery_lexicon_density": self.imagery_lexicon_density,
             "run_id": run_id,
         }

@@ -6,7 +6,7 @@ class _StubChunkRepo:
     def __init__(self, rows):
         self._rows = rows
 
-    def fetch_chunk_cultures_full(self, run_id: str):
+    def fetch_chunk_imagery_lexicon_densities(self, run_id: str):
         return self._rows
 
 
