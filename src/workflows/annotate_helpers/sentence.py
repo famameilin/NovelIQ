@@ -22,6 +22,11 @@
 任务: 移除向后兼容代码
 修改内容: 移除 _load_alias_keywords 死代码和旧 loader 导入
 
+修改时间: 2026-04-20
+修改者: Codex
+任务: runtime-prev-chunks-windowing
+修改内容: 将 runtime.annotation.prev_chunks 接入例句池和身份线索窗口
+
 说明: 本模块包含例句构建、全局上下文抽取等辅助函数。
 """
 
@@ -67,12 +72,34 @@ def annotate_dialogue_structure(sentence: str) -> str:
     return sentence
 
 
+def _resolve_chunk_window(max_chunk_id: int | None, prev_chunks: int | None) -> tuple[int | None, int | None]:
+    """解析上下文检索使用的 chunk 窗口。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: runtime-prev-chunks-windowing
+    说明: 只有增量消歧这类带 current chunk 锚点的场景才按 prev_chunks 回看；
+         没有当前 chunk 时继续保留全量历史，避免截断 final 阶段证据。
+    """
+    if max_chunk_id is None:
+        return None, None
+
+    if prev_chunks is None:
+        prev_chunks = settings.runtime.annotation.prev_chunks
+    if prev_chunks <= 0:
+        raise ValueError("prev_chunks must be positive")
+
+    chunk_start_id = max(0, max_chunk_id - prev_chunks + 1)
+    return chunk_start_id, max_chunk_id
+
+
 def build_context_sentences(
     conn,
     candidates: list[NameCountCandidate],
     alias_keywords: list[str] | None = None,
     run_id: str | None = None,
     max_chunk_id: int | None = None,
+    prev_chunks: int | None = None,
 ) -> dict[str, str]:
     """为候选名构建上下文句子
 
@@ -80,16 +107,37 @@ def build_context_sentences(
     修改者: TraeAI
     任务: feature/chunk-summary-timeline-only
     修改内容: 移除 _add_prev_summaries 调用，summary 仅用于 Timeline 展示，不参与消歧证据链
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: runtime-prev-chunks-windowing
+    修改内容: 将 runtime.annotation.prev_chunks 接入上下文检索窗口
     """
     if not run_id:
         raise ValueError("run_id is required for build_context_sentences")
     if alias_keywords is None:
         alias_keywords = ["某", "名", "号", "就是", "称号", "全名"]
+    if prev_chunks is None:
+        prev_chunks = settings.runtime.annotation.prev_chunks
 
     name_list = [candidate["name"] for candidate in candidates]
 
-    result = _build_sentence_pool(conn, name_list, alias_keywords, run_id, max_chunk_id=max_chunk_id)
-    _add_identity_clues(conn, result, name_list, run_id, max_chunk_id=max_chunk_id)
+    result = _build_sentence_pool(
+        conn,
+        name_list,
+        alias_keywords,
+        run_id,
+        max_chunk_id=max_chunk_id,
+        prev_chunks=prev_chunks,
+    )
+    _add_identity_clues(
+        conn,
+        result,
+        name_list,
+        run_id,
+        max_chunk_id=max_chunk_id,
+        prev_chunks=prev_chunks,
+    )
 
     return result
 
@@ -169,6 +217,7 @@ def _build_sentence_pool(
     alias_keywords: list[str],
     run_id: str,
     max_chunk_id: int | None = None,
+    prev_chunks: int | None = None,
 ) -> dict[str, str]:
     """构建句子池。
 
@@ -176,9 +225,15 @@ def _build_sentence_pool(
     修改者: CodeBuddy
     任务: P1 候选质量治理 - 例句池优先级优化
     修改内容: 分离高优命名句和普通句，命名句优先入选
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: runtime-prev-chunks-windowing
+    修改内容: 在带 max_chunk_id 的场景下，仅扫描最近 prev_chunks 个 chunk
     """
     from src.metrics.text_utils import split_sentences
 
+    chunk_start_id, chunk_end_id = _resolve_chunk_window(max_chunk_id, prev_chunks)
     name_set = set(name_list)
 
     variant_to_name: dict[str, str] = {}
@@ -204,16 +259,25 @@ def _build_sentence_pool(
     high_pool: dict[str, list[str]] = {name: [] for name in name_list}
     normal_pool: dict[str, list[str]] = {name: [] for name in name_list}
 
-    if max_chunk_id is None:
+    if chunk_start_id is None or chunk_end_id is None:
         rows = conn.execute(
             text("SELECT text FROM chunks WHERE run_id = :run_id ORDER BY chunk_id"),
             {"run_id": run_id},
         ).fetchall()
     else:
         rows = conn.execute(
-            text("SELECT text FROM chunks WHERE run_id = :run_id AND chunk_id <= :max_chunk_id ORDER BY chunk_id"),
-            {"run_id": run_id, "max_chunk_id": max_chunk_id},
+            text(
+                "SELECT text FROM chunks "
+                "WHERE run_id = :run_id AND chunk_id >= :chunk_start_id AND chunk_id <= :chunk_end_id "
+                "ORDER BY chunk_id"
+            ),
+            {
+                "run_id": run_id,
+                "chunk_start_id": chunk_start_id,
+                "chunk_end_id": chunk_end_id,
+            },
         ).fetchall()
+
     for (text_content,) in rows:
         for sentence in split_sentences(text_content):
             matched: dict[str, bool] = {}
@@ -258,8 +322,10 @@ def _build_sentence_pool(
             .filter(ChunkCharacter.run_id == run_id)
             .filter(ChunkCharacter.name.in_(name_list))
         )
-        if max_chunk_id is not None:
-            char_rows = char_rows.filter(ChunkCharacter.chunk_id <= max_chunk_id)
+        if chunk_start_id is not None and chunk_end_id is not None:
+            char_rows = char_rows.filter(ChunkCharacter.chunk_id >= chunk_start_id).filter(
+                ChunkCharacter.chunk_id <= chunk_end_id
+            )
         char_rows = char_rows.all()
         for row in char_rows:
             if row.name:
@@ -270,8 +336,10 @@ def _build_sentence_pool(
             .filter(ChunkDialogue.run_id == run_id)
             .filter(ChunkDialogue.speaker.isnot(None))
         )
-        if max_chunk_id is not None:
-            dialogue_rows = dialogue_rows.filter(ChunkDialogue.chunk_id <= max_chunk_id)
+        if chunk_start_id is not None and chunk_end_id is not None:
+            dialogue_rows = dialogue_rows.filter(ChunkDialogue.chunk_id >= chunk_start_id).filter(
+                ChunkDialogue.chunk_id <= chunk_end_id
+            )
         dialogue_rows = dialogue_rows.all()
         for row in dialogue_rows:
             for s in row.speaker or []:
@@ -280,7 +348,7 @@ def _build_sentence_pool(
 
         rare_counts = {name: cnt for name, cnt in counts_dict.items() if cnt <= 2}
         for name in rare_counts:
-            # 稀有名：重新扫描所有句子，不受 pool 大小限制
+            # 稀有名：重新扫描当前窗口中的所有句子，不受 pool 大小限制
             rare_sentences: list[str] = []
             for (text_content,) in rows:
                 for sentence in split_sentences(text_content):
@@ -307,6 +375,7 @@ def _add_identity_clues(
     name_list: list[str],
     run_id: str,
     max_chunk_id: int | None = None,
+    prev_chunks: int | None = None,
 ) -> None:
     """添加身份线索
 
@@ -319,12 +388,18 @@ def _add_identity_clues(
     修改者: TraeAI
     任务: fix-multi-speaker-support
     修改内容: speaker 改为 text[] 数组，使用 ORM 查询替代 unnest() SQL
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: runtime-prev-chunks-windowing
+    修改内容: 身份线索查询与例句池使用同一个 chunk 窗口
     """
     if not name_list:
         return
 
     from src.storage.models.annotation import ChunkDialogue
 
+    chunk_start_id, chunk_end_id = _resolve_chunk_window(max_chunk_id, prev_chunks)
     name_set = set(name_list)
     dialogues = (
         conn.query(ChunkDialogue.speaker, ChunkDialogue.identity_clue)
@@ -332,8 +407,10 @@ def _add_identity_clues(
         .filter(ChunkDialogue.identity_clue.isnot(None))
         .filter(ChunkDialogue.identity_clue != "")
     )
-    if max_chunk_id is not None:
-        dialogues = dialogues.filter(ChunkDialogue.chunk_id <= max_chunk_id)
+    if chunk_start_id is not None and chunk_end_id is not None:
+        dialogues = dialogues.filter(ChunkDialogue.chunk_id >= chunk_start_id).filter(
+            ChunkDialogue.chunk_id <= chunk_end_id
+        )
     dialogues = dialogues.all()
 
     for row in dialogues:
