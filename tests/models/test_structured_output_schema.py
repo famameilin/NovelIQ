@@ -43,10 +43,12 @@ class TestStructuredOutputSchema(unittest.TestCase):
         创建时间: 2026-04-20
         创建者: Codex
         任务: fix-phase2-response-format-schema
-        说明: 锁定 phase2 伏笔结果根对象会显式输出 additionalProperties=false。
+        说明: 锁定 phase2 伏笔结果根对象会显式输出 additionalProperties=false，
+        且 required 会覆盖所有 properties。
         """
         schema = self.annotation_client._build_json_schema(ForeshadowingResult)["json_schema"]["schema"]
         self.assertIs(schema["additionalProperties"], False)
+        self.assertEqual(schema["required"], list(schema["properties"].keys()))
 
     def test_nested_model_schema_forbids_unknown_fields(self) -> None:
         """
@@ -57,7 +59,12 @@ class TestStructuredOutputSchema(unittest.TestCase):
         """
         schema = self.annotation_client._build_json_schema(DialogueAttributionResult)["json_schema"]["schema"]
         self.assertIs(schema["additionalProperties"], False)
+        self.assertEqual(schema["required"], list(schema["properties"].keys()))
         self.assertIs(schema["$defs"]["DialogueRecordSchema"]["additionalProperties"], False)
+        self.assertEqual(
+            schema["$defs"]["DialogueRecordSchema"]["required"],
+            list(schema["$defs"]["DialogueRecordSchema"]["properties"].keys()),
+        )
 
     def test_mapping_schema_keeps_value_definition(self) -> None:
         """
@@ -69,6 +76,7 @@ class TestStructuredOutputSchema(unittest.TestCase):
         schema = self.disambiguation_client._build_json_schema(DisambiguateResponseModel)["json_schema"]["schema"]
         canonical_decisions = schema["properties"]["canonical_decisions"]
         self.assertIs(schema["additionalProperties"], False)
+        self.assertEqual(schema["required"], list(schema["properties"].keys()))
         self.assertIsInstance(canonical_decisions["additionalProperties"], dict)
         self.assertEqual(canonical_decisions["additionalProperties"]["type"], "string")
 
