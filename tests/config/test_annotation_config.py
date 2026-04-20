@@ -81,7 +81,6 @@ class TestRuntimeSettings(unittest.TestCase):
         self.assertEqual(runtime.annotation.phase3_max_retries, 3)
         self.assertEqual(runtime.annotation.validation_max_retries, 3)
         self.assertEqual(runtime.annotation.prev_chunks, 3)
-        self.assertEqual(runtime.annotation.last_n_chunks, 10)
         self.assertEqual(runtime.annotation.lookback, 10)
         self.assertEqual(runtime.disambiguation.max_retries, 3)
         self.assertEqual(runtime.diagnosis.max_retries, 3)

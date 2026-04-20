@@ -68,7 +68,6 @@
       "phase3_max_retries": 3,
       "validation_max_retries": 3,
       "prev_chunks": 3,
-      "last_n_chunks": 10,
       "lookback": 10
     },
     "disambiguation": {
