@@ -19,6 +19,11 @@
 修改者: TraeAI
 任务: 创建统一的模型交互记录接口
 修改内容: 使用 record_model_interaction 替代内联保存逻辑
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: runtime-behavior-settings
+修改内容: 诊断重试次数改由 settings.runtime.diagnosis 驱动，移除类级硬编码常量
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ from typing import Any, TypeVar
 from loguru import logger
 from pydantic import BaseModel
 
-from src.config import TaskModelConfig
+from src.config import TaskModelConfig, settings
 from src.config.analysis_logger import AnalysisLogger
 from src.models.cloud.schema import CloudAnalysis
 from src.models.interactions import record_model_interaction
@@ -47,7 +52,6 @@ class DiagnosisClient(BaseModelClient):
     同时支持本地和云端模型，通过 base_url 自动检测。
     """
 
-    MAX_RETRIES = 3
     RETRY_DELAY_SECONDS = 2
 
     def __init__(
@@ -97,8 +101,9 @@ class DiagnosisClient(BaseModelClient):
 
         from src.workflows.retry_utils import RetryableOperation
 
+        max_retries = settings.runtime.diagnosis.max_retries
         operation = RetryableOperation(
-            max_retries=self.MAX_RETRIES,
+            max_retries=max_retries,
             retryable_exceptions=(ValueError,),
             operation_name="diagnosis",
         )

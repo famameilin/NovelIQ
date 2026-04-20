@@ -21,7 +21,6 @@ from loguru import logger
 
 from src.config import settings
 from src.config.constants import (
-    PHASE_MAX_RETRIES,
     SYMMETRIC_RELATION_TYPES,
 )
 from src.models.interactions import record_model_interaction
@@ -268,8 +267,9 @@ async def annotate_chunk_phase4(
         evidence_sections=evidence_sections,
     )
 
+    phase_max_retries = settings.runtime.annotation.phase_max_retries
     config = RetryConfig(
-        max_retries=PHASE_MAX_RETRIES,
+        max_retries=phase_max_retries,
         operation_name="phase4",
         chunk_id=chunk_id,
     )

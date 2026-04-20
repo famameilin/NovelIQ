@@ -19,12 +19,11 @@ class TestDiagnosisConfig(unittest.TestCase):
             model="gpt-test",
             api_key="test-key",
             timeout_s=10,
-            max_retries=1,
         )
         config.validate()
         self.assertEqual(config.base_url, "http://example.com")
         self.assertEqual(config.model, "gpt-test")
-        self.assertEqual(config.max_retries, 1)
+        self.assertEqual(config.timeout_s, 10)
 
 
 if __name__ == "__main__":

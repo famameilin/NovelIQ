@@ -18,11 +18,15 @@
 修改者: TraeAI
 任务: refactor-phase3-to-annotation-layer
 修改内容: 添加 phase3 模块导出（对话归属判断）
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: runtime-behavior-settings
+修改内容: 移除 PHASE_MAX_RETRIES 导出，阶段重试统一从 settings.runtime 读取
 """
 
 from __future__ import annotations
 
-from src.config.constants import PHASE_MAX_RETRIES
 from src.models.local.annotation.api_call import (
     execute_validation_retry_call,
     extract_names_from_annotation,
@@ -70,7 +74,6 @@ from src.models.local.annotation.validation import (
 from src.models.local.evidence_renderer_shared import render_vector_evidence
 
 __all__ = [
-    "PHASE_MAX_RETRIES",
     "AnnotationContext",
     "NameValidationMaxRetriesExceededError",
     "Phase1MaxRetriesExceededError",

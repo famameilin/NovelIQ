@@ -12,6 +12,11 @@
 修改时间: 2026-03-16
 修改者: TraeAI
 修改内容: 支持从环境变量读取模型配置，敏感信息不再硬编码在 settings.json
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: 清理无效模型配置项
+修改内容: 删除 provider 和模型级 max_retries 配置，避免暴露未生效的伪配置入口
 """
 
 from __future__ import annotations
@@ -34,10 +39,6 @@ class TaskModelSettings:
     """
     任务模型配置（不包含thinking，thinking统一在顶层配置）
 
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 添加 provider 字段，支持明确指定 LLM provider
-
     修改时间: 2026-03-21
     修改者: TraeAI
     任务: migrate-litellm-to-openai-sdk
@@ -48,12 +49,10 @@ class TaskModelSettings:
     model: str | None = None
     api_key: str | None = None
     timeout_s: float | None = None
-    max_retries: int = 2
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 20
     presence_penalty: float = 1.5
-    provider: str | None = None
 
 
 @dataclass
@@ -64,7 +63,6 @@ class EmbeddingModelSettings:
     model: str | None = None
     api_key: str | None = None
     timeout_s: float | None = None
-    max_retries: int = 2
     embedding_dim: int = 1536
 
 
@@ -144,23 +142,20 @@ def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = ""
     """
     解析任务模型配置
 
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容:
-    1. 支持从环境变量覆盖配置，优先级：环境变量 > JSON配置
-    2. 添加 provider 字段支持
-
     修改时间: 2026-03-21
     修改者: TraeAI
     任务: migrate-litellm-to-openai-sdk
     修改内容: 移除 backend_name 字段
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: 清理无效模型配置项
+    修改内容: 不再解析 provider 和模型级 max_retries，避免配置看似可调但运行时无效
     """
     env_base_url = _get_env_var(env_prefix, "BASE_URL")
     env_model = _get_env_var(env_prefix, "MODEL")
     env_api_key = _get_env_var(env_prefix, "API_KEY")
     env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
-    env_max_retries = _get_env_var(env_prefix, "MAX_RETRIES")
-    env_provider = _get_env_var(env_prefix, "PROVIDER")
 
     json_data = data or {}
 
@@ -173,26 +168,15 @@ def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = ""
     elif json_data.get("timeout_s") is not None:
         timeout_val = json_data.get("timeout_s")
 
-    max_retries_val = 2
-    if env_max_retries:
-        try:
-            max_retries_val = int(env_max_retries)
-        except ValueError:
-            max_retries_val = json_data.get("max_retries", 2)
-    else:
-        max_retries_val = json_data.get("max_retries", 2)
-
     return TaskModelSettings(
         base_url=env_base_url or json_data.get("base_url"),
         model=env_model or json_data.get("model"),
         api_key=env_api_key or json_data.get("api_key"),
         timeout_s=timeout_val,
-        max_retries=max_retries_val,
         temperature=json_data.get("temperature", 0.7),
         top_p=json_data.get("top_p", 0.8),
         top_k=json_data.get("top_k", 20),
         presence_penalty=json_data.get("presence_penalty", 1.5),
-        provider=env_provider or json_data.get("provider"),
     )
 
 
@@ -203,12 +187,16 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
     修改时间: 2026-03-16
     修改者: TraeAI
     修改内容: 支持从环境变量覆盖配置，优先级：环境变量 > JSON配置
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: 清理无效模型配置项
+    修改内容: 删除模型级 max_retries 解析，保留真正被运行时消费的 embedding_dim
     """
     env_base_url = _get_env_var(env_prefix, "BASE_URL")
     env_model = _get_env_var(env_prefix, "MODEL")
     env_api_key = _get_env_var(env_prefix, "API_KEY")
     env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
-    env_max_retries = _get_env_var(env_prefix, "MAX_RETRIES")
     env_embedding_dim = _get_env_var(env_prefix, "EMBEDDING_DIM")
 
     json_data = data or {}
@@ -221,15 +209,6 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
             pass
     elif json_data.get("timeout_s") is not None:
         timeout_val = json_data.get("timeout_s")
-
-    max_retries_val = 2
-    if env_max_retries:
-        try:
-            max_retries_val = int(env_max_retries)
-        except ValueError:
-            max_retries_val = json_data.get("max_retries", 2)
-    else:
-        max_retries_val = json_data.get("max_retries", 2)
 
     embedding_dim_val = 1536
     if env_embedding_dim:
@@ -245,7 +224,6 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
         model=env_model or json_data.get("model"),
         api_key=env_api_key or json_data.get("api_key"),
         timeout_s=timeout_val,
-        max_retries=max_retries_val,
         embedding_dim=embedding_dim_val,
     )
 
