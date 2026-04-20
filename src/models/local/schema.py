@@ -329,6 +329,71 @@ class HierarchicalRelation(BaseModel):
     type: str = Field(description="关系类型：belongs_to, member_of, leader_of, affiliated_with")
 
 
+class CanonicalDecisionRecord(BaseModel):
+    """
+    云端兼容的规范名决策记录。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-cloud-disambig-mapping-schema
+    说明: 某些云端 provider 的 strict schema 不接受 dict[str, T] 形式的映射字段，
+          因此改为显式数组记录，后续再在本地归一化回内部 dict 结构。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="候选称呼")
+    canonical: str = Field(description="规范名；允许与 name 相同，表示保持独立")
+
+
+class AliasConfidenceRecord(BaseModel):
+    """
+    云端兼容的置信度记录。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-cloud-disambig-mapping-schema
+    说明: 将 alias_confidence 从 dict 改成数组记录，避免 provider 拒绝动态键对象 schema。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="候选称呼")
+    confidence: DisambigConfidence = Field(description="置信度：low/medium/high")
+
+
+class EntityTypeRecord(BaseModel):
+    """
+    云端兼容的实体类型记录。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-cloud-disambig-mapping-schema
+    说明: 将 entity_types 从动态映射改成显式列表，兼容云端 strict schema 校验器。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="实体名称")
+    entity_type: EntityType = Field(description="实体类型：character/group/organization/creature/artifact")
+
+
+class EvidenceSourceRecord(BaseModel):
+    """
+    云端兼容的证据来源记录。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-cloud-disambig-mapping-schema
+    说明: 将 evidence_sources 从 dict[str, list[str]] 改成显式记录列表。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(description="候选称呼")
+    sources: list[str] = Field(default_factory=list, description="证据来源列表")
+
+
 class DisambiguateResponseModel(BaseModel):
     """
     消歧响应数据结构
@@ -380,6 +445,41 @@ class DisambiguateResponseModel(BaseModel):
     evidence_sources: dict[str, list[str]] = Field(
         default_factory=dict,
         description="每个候选名的证据来源列表，如 ['原文例句', '身份线索', '前文摘要-弱证据']",
+    )
+
+
+class CloudDisambiguateResponseModel(BaseModel):
+    """
+    云端兼容的消歧响应数据结构。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-cloud-disambig-mapping-schema
+    说明: 部分云端 provider 的 strict json_schema 不支持 dict[str, ...] 映射字段。
+          这里将所有动态键对象改为显式记录数组，解析后再归一化回内部标准模型。
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
+
+    canonical_decisions: list[CanonicalDecisionRecord] = Field(
+        default_factory=list,
+        description="规范名决策列表，每条记录包含候选称呼与对应规范名。",
+    )
+    alias_confidence: list[AliasConfidenceRecord] = Field(
+        default_factory=list,
+        description="候选称呼的置信度列表。",
+    )
+    entity_types: list[EntityTypeRecord] = Field(
+        default_factory=list,
+        description="实体类型列表。",
+    )
+    entity_relations: list[HierarchicalRelation] = Field(
+        default_factory=list,
+        description="实体间的层级关系列表。",
+    )
+    evidence_sources: list[EvidenceSourceRecord] = Field(
+        default_factory=list,
+        description="候选称呼的证据来源列表。",
     )
 
 

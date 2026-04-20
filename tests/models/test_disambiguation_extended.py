@@ -8,8 +8,9 @@ from src.models.local.disambiguation import (
     EvidenceProfile,
     ExtendedDisambigResult,
     build_extended_result_from_response,
+    normalize_disambiguate_response,
 )
-from src.models.local.schema import DisambiguateResponseModel, HierarchicalRelation
+from src.models.local.schema import CloudDisambiguateResponseModel, DisambiguateResponseModel, HierarchicalRelation
 
 
 def _candidates(*names: str) -> list[dict[str, int | str]]:
@@ -59,6 +60,43 @@ class TestExtendedDisambigResult(unittest.TestCase):
 
 
 class TestBuildExtendedResultFromResponse(unittest.TestCase):
+    def test_cloud_compatible_response_is_normalized_before_building_result(self) -> None:
+        """
+        创建时间: 2026-04-20
+        创建者: Codex
+        任务: fix-cloud-disambig-mapping-schema
+        说明: 云端兼容响应模型应在入口处归一化回内部标准结构，避免影响后续状态机与结果构建逻辑。
+        """
+        cloud_response = CloudDisambiguateResponseModel(
+            canonical_decisions=[
+                {"name": "he_zhong_ming", "canonical": "bo_an"},
+                {"name": "red_guard", "canonical": "red_guard"},
+            ],
+            alias_confidence=[
+                {"name": "he_zhong_ming", "confidence": "high"},
+                {"name": "red_guard", "confidence": "medium"},
+            ],
+            entity_types=[
+                {"name": "bo_an", "entity_type": "character"},
+                {"name": "red_guard", "entity_type": "group"},
+            ],
+            entity_relations=[
+                {"from": "bo_an", "to": "he_family", "type": "belongs_to"},
+            ],
+            evidence_sources=[
+                {"name": "he_zhong_ming", "sources": ["原文例句", "身份线索"]},
+            ],
+        )
+
+        normalized = normalize_disambiguate_response(cloud_response)
+        result = build_extended_result_from_response(normalized, _candidates("he_zhong_ming", "red_guard", "he_family"))
+
+        self.assertEqual(normalized.canonical_decisions["he_zhong_ming"], "bo_an")
+        self.assertEqual(normalized.alias_confidence["red_guard"], "medium")
+        self.assertEqual(normalized.entity_types["bo_an"], "character")
+        self.assertEqual(result.canonical_decisions["he_zhong_ming"], "bo_an")
+        self.assertEqual(result.entity_relations[0]["type"], "belongs_to")
+
     def test_basic_parsing(self) -> None:
         response = DisambiguateResponseModel(
             canonical_decisions={"he_zhong_ming": "bo_an", "red_guard": "red_guard"},

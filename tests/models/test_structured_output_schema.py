@@ -11,7 +11,12 @@ from unittest.mock import MagicMock
 from src.config import TaskModelConfig
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
-from src.models.local.schema import DialogueAttributionResult, DisambiguateResponseModel, ForeshadowingResult
+from src.models.local.schema import (
+    CloudDisambiguateResponseModel,
+    DialogueAttributionResult,
+    DisambiguateResponseModel,
+    ForeshadowingResult,
+)
 
 
 class TestStructuredOutputSchema(unittest.TestCase):
@@ -92,6 +97,26 @@ class TestStructuredOutputSchema(unittest.TestCase):
         self.assertNotIn("_thinking_content", schema["properties"])
         self.assertNotIn("_thinking_content", schema["required"])
         self.assertEqual(schema["required"], list(schema["properties"].keys()))
+
+    def test_cloud_disambiguation_schema_uses_record_arrays_for_dynamic_mappings(self) -> None:
+        """
+        创建时间: 2026-04-20
+        创建者: Codex
+        任务: fix-cloud-disambig-mapping-schema
+        说明: 云端 provider 不兼容 dict[str, T] 形式的 strict schema，
+        因此 cloud 版消歧响应必须改成显式数组记录，避免再次触发 invalid_json_schema。
+        """
+        schema = self.disambiguation_client._build_json_schema(CloudDisambiguateResponseModel)["json_schema"]["schema"]
+        canonical_decisions = schema["properties"]["canonical_decisions"]
+        alias_confidence = schema["properties"]["alias_confidence"]
+        entity_types = schema["properties"]["entity_types"]
+        evidence_sources = schema["properties"]["evidence_sources"]
+
+        self.assertEqual(canonical_decisions["type"], "array")
+        self.assertEqual(alias_confidence["type"], "array")
+        self.assertEqual(entity_types["type"], "array")
+        self.assertEqual(evidence_sources["type"], "array")
+        self.assertNotIn("additionalProperties", canonical_decisions)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,8 @@ from loguru import logger
 from src.api.models.events import StreamEvent
 from src.utils.token_counter import count_messages_tokens, count_tokens
 
-from ..schema import DisambiguateResponseModel
+from ..schema import CloudDisambiguateResponseModel, DisambiguateResponseModel
+from .result_builder import normalize_disambiguate_response
 
 if TYPE_CHECKING:
     from src.config import TaskModelConfig
@@ -93,7 +94,9 @@ async def call_disambiguate_api(
         messages=messages,
         enable_thinking=config.thinking_enabled,
     )
-    request_params["response_format"] = client._build_json_schema(DisambiguateResponseModel)
+    response_model: type[DisambiguateResponseModel] | type[CloudDisambiguateResponseModel]
+    response_model = CloudDisambiguateResponseModel if client.is_cloud_api() else DisambiguateResponseModel
+    request_params["response_format"] = client._build_json_schema(response_model)
 
     model_for_token_count = config.model
     prompt_tokens = count_messages_tokens(messages, model_for_token_count)
@@ -111,10 +114,11 @@ async def call_disambiguate_api(
         if thinking_content:
             logger.debug(f"Extracted thinking_content: {len(thinking_content)} chars")
 
-    parsed_response = client._parse_structured_response(response, DisambiguateResponseModel)
+    parsed_response = client._parse_structured_response(response, response_model)
+    normalized_response = normalize_disambiguate_response(parsed_response)
 
     if thinking_content:
-        parsed_response = parsed_response.model_copy(update={"thinking_content": thinking_content})
+        normalized_response = normalized_response.model_copy(update={"thinking_content": thinking_content})
 
     response_content = response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
     completion_tokens = count_tokens(response_content, model_for_token_count)
@@ -127,4 +131,4 @@ async def call_disambiguate_api(
         call_type=log_type,
     )
 
-    return parsed_response
+    return normalized_response
