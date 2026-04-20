@@ -22,13 +22,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.models.local.annotation.context import DialogueAttributionError
 from src.models.local.annotation.evidence_renderer import render_dialogue_attribution_evidence_sections
 from src.models.local.annotation.phase3 import (
     attribute_dialogues_with_llm,
     compute_dialogue_lengths_with_llm,
     extract_dialogues_from_text,
 )
-from src.models.local.schema import DialogueRecord, QuoteCandidate
+from src.models.local.schema import DialogueRecord, DialogueRecordSchema, QuoteCandidate
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 
@@ -164,7 +165,9 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         )
         parsed = MagicMock(dialogues=[], model_dump=MagicMock(return_value={}))
         response = MagicMock()
-        response.choices = [MagicMock(message=MagicMock(content='{"dialogues": []}', reasoning_content="phase3 thinking"))]
+        response.choices = [
+            MagicMock(message=MagicMock(content='{"dialogues": []}', reasoning_content="phase3 thinking"))
+        ]
         mock_annotation_client._call_annotation_api = AsyncMock(return_value=(parsed, response))
 
         await attribute_dialogues_with_llm(
@@ -182,6 +185,7 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
 
@@ -210,6 +214,106 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].speaker, ["侯飞白"])
+
+    @patch("src.models.local.annotation.phase3.record_model_interaction")
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_fallback_client_used_after_primary_retries(
+        self,
+        mock_settings: MagicMock,
+        _mock_record_model_interaction: MagicMock,
+    ) -> None:
+        """Phase3 主客户端失败后会切到 fallback_client。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.runtime.annotation.phase3_max_retries = 3
+
+        primary_client = MagicMock()
+        primary_client._config.model = "primary-model"
+        primary_client._config.thinking_enabled = False
+        primary_client._is_cloud_api.return_value = False
+        primary_client._session = None
+        primary_client._process_annotation_response = MagicMock(return_value=('{"dialogues": []}', None, None))
+
+        fallback_client = MagicMock()
+        fallback_client._config.model = "fallback-model"
+        fallback_client._config.thinking_enabled = False
+        fallback_client._is_cloud_api.return_value = True
+        fallback_client._session = None
+        fallback_client._process_annotation_response = MagicMock(return_value=('{"dialogues": []}', None, None))
+
+        primary_calls = 0
+        fallback_calls = 0
+        parsed = MagicMock(
+            dialogues=[
+                DialogueRecordSchema(
+                    index=1,
+                    is_dialogue=True,
+                    speaker=["张三"],
+                    tone=None,
+                    is_inner_monologue=False,
+                )
+            ],
+            model_dump=MagicMock(return_value={}),
+        )
+        response = MagicMock()
+
+        async def primary_call(*args, **kwargs):
+            nonlocal primary_calls
+            primary_calls += 1
+            raise ConnectionError("primary failed")
+
+        async def fallback_call(*args, **kwargs):
+            nonlocal fallback_calls
+            fallback_calls += 1
+            return parsed, response
+
+        primary_client._call_annotation_api = AsyncMock(side_effect=primary_call)
+        fallback_client._call_annotation_api = AsyncMock(side_effect=fallback_call)
+
+        result = await attribute_dialogues_with_llm(
+            primary_client,
+            "“你好”",
+            [QuoteCandidate(index=1, content="你好")],
+            known_characters=["张三"],
+            fallback_client=fallback_client,
+        )
+
+        self.assertEqual(primary_calls, 3)
+        self.assertEqual(fallback_calls, 1)
+        self.assertEqual(result[0].speaker, ["张三"])
+
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_fallback_client_failure_raises_dialogue_attribution_error(self, mock_settings: MagicMock) -> None:
+        """Phase3 主客户端与兜底客户端都失败时应抛错。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.runtime.annotation.phase3_max_retries = 3
+
+        primary_client = MagicMock()
+        primary_client._config.model = "primary-model"
+        primary_client._config.thinking_enabled = False
+        primary_client._is_cloud_api.return_value = False
+        primary_client._process_annotation_response = MagicMock(return_value=('{"dialogues": []}', None, None))
+
+        fallback_client = MagicMock()
+        fallback_client._config.model = "fallback-model"
+        fallback_client._config.thinking_enabled = False
+        fallback_client._is_cloud_api.return_value = True
+        fallback_client._process_annotation_response = MagicMock(return_value=('{"dialogues": []}', None, None))
+
+        primary_client._call_annotation_api = AsyncMock(side_effect=ConnectionError("primary failed"))
+        fallback_client._call_annotation_api = AsyncMock(side_effect=ConnectionError("fallback failed"))
+
+        with self.assertRaises(DialogueAttributionError):
+            await attribute_dialogues_with_llm(
+                primary_client,
+                "“你好”",
+                [QuoteCandidate(index=1, content="你好")],
+                known_characters=["张三"],
+                fallback_client=fallback_client,
+            )
 
 
 def _build_phase3_bundle() -> EvidenceBundle:

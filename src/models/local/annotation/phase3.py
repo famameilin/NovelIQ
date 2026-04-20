@@ -165,6 +165,7 @@ async def attribute_dialogues_with_llm(
     chunk_id: int | None = None,
     run_id: str | None = None,
     active_entities: str | None = None,
+    fallback_client: AnnotationClient | None = None,
 ) -> list[DialogueRecord]:
     """
     使用 LLM 判断对话候选是否是对话，并识别说话者和语气
@@ -183,6 +184,11 @@ async def attribute_dialogues_with_llm(
     修改者: TraeAI
     任务: fix-phase3-active-entities-fallback
     修改内容: 新增 active_entities 参数，优先使用上游已解析好的活跃实体上下文
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: strict-phase34-fallback
+    修改内容: 接入 fallback_client，确保 Phase3 与 Phase1/2 一致走主客户端重试后再兜底
     """
     if not candidates:
         return []
@@ -288,15 +294,21 @@ async def attribute_dialogues_with_llm(
             retry_handler: AnnotationRetryHandler[list[DialogueRecordSchema]] = AnnotationRetryHandler(
                 config=retry_config,
                 primary_client=current_client,
-                fallback_client=None,
+                fallback_client=fallback_client,
                 exception_type=DialogueAttributionError,
             )
 
-            batch_results = await retry_handler.execute(
-                lambda _, bc=batch_candidates, bi=batch_idx, tb=total_batches: _execute_single_batch(
-                    current_client, bc, bi, tb
-                )
-            )
+            async def batch_operation(
+                working_client: AnnotationClient,
+                bc: list[QuoteCandidate] = batch_candidates,
+                bi: int = batch_idx,
+                tb: int = total_batches,
+            ) -> list[DialogueRecordSchema]:
+                # 中文注释：重试器可能把执行客户端切到 fallback_client，这里必须消费传入的 working_client，
+                # 不能继续闭包捕获 current_client，否则 fallback 分支永远不会真正生效。
+                return await _execute_single_batch(working_client, bc, bi, tb)
+
+            batch_results = await retry_handler.execute(batch_operation)
 
             if batch_results:
                 batch_records = _post_process_validation(
@@ -425,6 +437,7 @@ async def compute_dialogue_lengths_with_llm(
     return_tones: bool = False,
     return_identity_clues: bool = False,
     active_entities: str | None = None,
+    fallback_client: AnnotationClient | None = None,
 ) -> DialogueLengthResult:
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
@@ -444,6 +457,11 @@ async def compute_dialogue_lengths_with_llm(
     任务: fix/disambig-retriever-integration
     修改内容: 返回 DialogueLengthResult 替代多类型 tuple，
               修复 speakers_str 二次归一化无效问题
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: strict-phase34-fallback
+    修改内容: 接入 fallback_client，确保 Phase3 的批次归属也支持云端兜底
     """
     logger.info(f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}")
 
@@ -466,6 +484,7 @@ async def compute_dialogue_lengths_with_llm(
         chunk_id=chunk_id,
         run_id=run_id,
         active_entities=active_entities,
+        fallback_client=fallback_client,
     )
     logger.info(f"compute_dialogue_lengths_with_llm: got {len(records)} records")
 
