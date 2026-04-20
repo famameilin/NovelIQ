@@ -69,6 +69,7 @@ class EmbeddingModelSettings:
     api_key: str | None = None
     timeout_s: float | None = None
     embedding_dim: int = 1536
+    batch_size: int = 8
 
 
 @dataclass
@@ -204,12 +205,18 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
     任务: fix-embedding-dimension-config-contract
     修改内容: 恢复 embedding_dim 的显式配置契约。系统只信任 settings/env 中声明的维度，
               首次建表使用配置值，后续由“代码配置/模型返回/数据库表结构”三方一致性校验决定是否继续执行。
+
+    修改时间: 2026-04-20
+    修改者: Codex (GPT-5)
+    任务: batch-embedding-requests
+    修改内容: 增加 batch_size 配置，控制语义分块批量请求 embedding API 时每批发送的文本数。
     """
     env_base_url = _get_env_var(env_prefix, "BASE_URL")
     env_model = _get_env_var(env_prefix, "MODEL")
     env_api_key = _get_env_var(env_prefix, "API_KEY")
     env_timeout = _get_env_var(env_prefix, "TIMEOUT_S")
     env_embedding_dim = _get_env_var(env_prefix, "EMBEDDING_DIM")
+    env_batch_size = _get_env_var(env_prefix, "BATCH_SIZE")
 
     json_data = data or {}
 
@@ -231,12 +238,22 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
     else:
         embedding_dim_val = json_data.get("embedding_dim", 1536)
 
+    batch_size_val = 8
+    if env_batch_size:
+        try:
+            batch_size_val = int(env_batch_size)
+        except ValueError:
+            batch_size_val = json_data.get("batch_size", 8)
+    else:
+        batch_size_val = json_data.get("batch_size", 8)
+
     return EmbeddingModelSettings(
         base_url=env_base_url or json_data.get("base_url"),
         model=env_model or json_data.get("model"),
         api_key=env_api_key or json_data.get("api_key"),
         timeout_s=timeout_val,
         embedding_dim=embedding_dim_val,
+        batch_size=batch_size_val,
     )
 
 
