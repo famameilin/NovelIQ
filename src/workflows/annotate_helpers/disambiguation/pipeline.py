@@ -30,6 +30,7 @@ from src.models.local.disambiguation import (
     DisambiguationPromptContext,
     DisambiguationState,
     ExtendedDisambigResult,
+    NameReviewState,
     build_disambiguate_messages,
     build_disambiguation_prompt_context,
     render_disambig_prompt_context,
@@ -58,6 +59,8 @@ from .relations import (
     _process_entity_relations,
 )
 from .state_logic import (
+    DISAMBIG_STATE_RESOLVED,
+    DISAMBIG_STATE_UNRESOLVED,
     apply_disambiguation_decisions,
     validate_confidence_with_evidence,
 )
@@ -157,6 +160,69 @@ def _inject_category_into_context(
             context_sentences[cls.name] = f"【受保护-默认不合并】{ctx}"
 
 
+def _merge_deferred_candidates_into_state(
+    state: DisambiguationState,
+    deferred_candidates: list[NameCountCandidate],
+) -> DisambiguationState:
+    """
+    将延后处理的候选写回状态，避免低频正式名在候选阶段蒸发。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: preserve-deferred-disambig-candidates
+    说明: deferred 候选本轮不送模型，但仍要进入 discovered_names，并在 review_status
+    中留下 unresolved 记录，供后续增量复审和终消歧重新评估。
+    """
+    if not deferred_candidates:
+        return state
+
+    new_discovered = set(state.discovered_names)
+    new_review_status = dict(state.review_status)
+    recorded_names: list[str] = []
+    current_time = time.time()
+
+    for candidate in deferred_candidates:
+        name = str(candidate.get("name", "")).strip()
+        if not name:
+            continue
+
+        new_discovered.add(name)
+
+        if name in state.known_canonical_names:
+            continue
+
+        old_review = new_review_status.get(name)
+        if old_review is not None and old_review.status == DISAMBIG_STATE_RESOLVED:
+            continue
+        if old_review is not None and old_review.status != DISAMBIG_STATE_UNRESOLVED:
+            continue
+
+        new_review_status[name] = NameReviewState(
+            status=DISAMBIG_STATE_UNRESOLVED,
+            confidence="low",
+            proposed_canonical=None,
+            evidence_strength=None,
+            decision_source="candidate_filter",
+            decision_timestamp=current_time,
+        )
+        recorded_names.append(name)
+
+    if not recorded_names:
+        if new_discovered != state.discovered_names:
+            return state.with_updates(discovered_names=frozenset(new_discovered))
+        return state
+
+    logger.info(
+        "Deferred {} candidates for later disambiguation: {}",
+        len(recorded_names),
+        recorded_names,
+    )
+    return state.with_updates(
+        discovered_names=frozenset(new_discovered),
+        review_status=tuple(new_review_status.items()),
+    )
+
+
 def _collect_review_candidates(
     state: DisambiguationState,
 ) -> list[NameCountCandidate]:
@@ -165,6 +231,10 @@ def _collect_review_candidates(
     条件（严格，避免推翻已有正确决策）：
     1. status != resolved
     2. confidence == low（medium 的不再复审，已有合并决策的不动）
+
+    说明:
+    - 这里也会把 candidate_filter 标成 unresolved 的 deferred 名字重新带回主链路；
+      如果后续 chunk 补出了上下文，它们就能重新进入模型。
     """
     review_dict = state.get_review_status_dict()
     candidates: list[NameCountCandidate] = []
@@ -173,7 +243,7 @@ def _collect_review_candidates(
             continue
         if review.confidence != "low":
             continue
-        candidates.append({"name": name, "count": 0})  # count 不重要，复审阶段已有上下文
+        candidates.append({"name": name, "count": 0})  # count 仅作占位，真正是否可送模型由上下文和分类器决定
     return candidates
 
 
@@ -499,7 +569,16 @@ async def _run_incremental_disambiguation_with_state(
         run_id=run_id,
         max_chunk_id=chunk_id,
     )
-    _, all_disambig_candidates, classifications = filter_candidates_by_class(all_disambig_candidates, context_sentences)
+    _, deferred_candidates, all_disambig_candidates, classifications = filter_candidates_by_class(
+        all_disambig_candidates,
+        context_sentences,
+    )
+    state_after_deferred = _merge_deferred_candidates_into_state(state, deferred_candidates)
+    if not all_disambig_candidates:
+        if state_after_deferred != state:
+            _save_disambig_checkpoint(conn, run_id, state_after_deferred)
+        logger.info("incremental disambiguation skipped: no remaining candidates after filtering")
+        return state_after_deferred
     # Rebuild context for filtered candidates only
     context_sentences = build_context_sentences(
         conn,
@@ -510,8 +589,8 @@ async def _run_incremental_disambiguation_with_state(
     )
     # Inject protected category labels into context for prompt
     _inject_category_into_context(classifications, context_sentences)
-    existing_names = list(state.known_canonical_names)
-    alias_map = state.get_alias_merges_dict()
+    existing_names = list(state_after_deferred.known_canonical_names)
+    alias_map = state_after_deferred.get_alias_merges_dict()
     relations = _fetch_current_relations(conn, run_id)
     prompt_context = _build_existing_character_hint_from_db(
         conn,
@@ -556,7 +635,7 @@ async def _run_incremental_disambiguation_with_state(
     incremental_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in new_names}
     result = align_canonical_by_frequency(result, all_disambig_candidates, global_freq=incremental_global_freq)
 
-    new_state = apply_disambiguation_decisions(state, result)
+    new_state = apply_disambiguation_decisions(state_after_deferred, result)
 
     # Accumulate entity_types from LLM output into state
     if result.entity_types:
@@ -669,38 +748,52 @@ async def _run_final_disambiguation_with_state(
     if candidates:
         candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
         context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-        _, candidate_payload, f_classifications = filter_candidates_by_class(candidate_payload, context_sentences)
-        context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-        _inject_category_into_context(f_classifications, context_sentences)
-        relations = _fetch_current_relations(conn, run_id)
-        prompt_context = _build_existing_character_hint_from_db(
-            conn,
-            [str(item.get("name", "")).strip() for item in candidate_payload if str(item.get("name", "")).strip()],
-            existing_names,
-            alias_keywords,
-            run_id,
-            alias_map_dict,
-            relations,
-            current_chunk_id=None,
-        )
-        prompt_context = await _build_prompt_context_with_shared_evidence(
-            prompt_context,
-            evidence_provider,
+        _, deferred_candidates, candidate_payload, f_classifications = filter_candidates_by_class(
             candidate_payload,
             context_sentences,
         )
-        result = await _retry_disambig(
-            full_disambig_client,
-            candidate_payload,
-            context_sentences,
-            existing_names,
-            stage_name="final disambiguation",
-            run_id=run_id,
-            prompt_context=prompt_context,
-        )
-        result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-        final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
-        result = align_canonical_by_frequency(result, candidate_payload, global_freq=final_global_freq)
+        state_with_deferred = _merge_deferred_candidates_into_state(state, deferred_candidates)
+        if candidate_payload:
+            context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+            _inject_category_into_context(f_classifications, context_sentences)
+            relations = _fetch_current_relations(conn, run_id)
+            prompt_context = _build_existing_character_hint_from_db(
+                conn,
+                [str(item.get("name", "")).strip() for item in candidate_payload if str(item.get("name", "")).strip()],
+                existing_names,
+                alias_keywords,
+                run_id,
+                alias_map_dict,
+                relations,
+                current_chunk_id=None,
+            )
+            prompt_context = await _build_prompt_context_with_shared_evidence(
+                prompt_context,
+                evidence_provider,
+                candidate_payload,
+                context_sentences,
+            )
+            result = await _retry_disambig(
+                full_disambig_client,
+                candidate_payload,
+                context_sentences,
+                existing_names,
+                stage_name="final disambiguation",
+                run_id=run_id,
+                prompt_context=prompt_context,
+            )
+            result = validate_confidence_with_evidence(result, existing_names, context_sentences)
+            final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
+            result = align_canonical_by_frequency(result, candidate_payload, global_freq=final_global_freq)
+        else:
+            logger.info("final disambiguation skipped: no remaining candidates after filtering")
+            result = ExtendedDisambigResult(
+                canonical_decisions={},
+                entity_types={},
+                entity_relations=[],
+                alias_confidence={},
+            )
+        state = state_with_deferred
     else:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(

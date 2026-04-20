@@ -2,10 +2,9 @@
 
 设计决策：
 1. 精确匹配受保护名单 → 标记为 protected（默认不合并但仍送消歧）
-2. 噪音过滤（≤1次+无上下文）→ 唯一的硬丢弃规则
-3. 不做外貌描述名匹配 — "灰衣人""白衣少女"在小说中经常是真正有身份揭示的角色，
-   正则无法区分，交给 LLM 自己判断
-4. 不做后缀匹配 — "赵军"、"张卫"是正常人名，不能因为结尾字就标 protected
+2. 低频且暂无上下文的真实候选 → 标记为 deferred，暂不送模型，但必须保留到后续复审/终消歧
+3. 只有明显脏 token 才进入 blacklist，避免把低频正式名直接蒸发
+4. 不做外貌描述名匹配、不做后缀匹配，避免用脆弱正则误杀真实角色
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from typing import Literal
 
 from src.config import settings
 
-Category = Literal["blacklist", "protected", "normal"]
+Category = Literal["blacklist", "protected", "deferred", "normal"]
 
 
 @dataclass(frozen=True)
@@ -25,6 +24,40 @@ class CandidateClassification:
     name: str
     category: Category
     reason: str  # 分类原因，用于审计日志
+
+
+def _contains_name_like_char(name: str) -> bool:
+    """
+    判断候选中是否包含常见的人名字符。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: preserve-deferred-disambig-candidates
+    说明: 这里只做极保守判断，用来区分“明显脏 token”和“至少像一个名字/称呼”的候选。
+    """
+    for char in name:
+        if "\u4e00" <= char <= "\u9fff":
+            return True
+        if char.isalpha():
+            return True
+    return False
+
+
+def _is_obvious_noise_candidate(name: str) -> bool:
+    """
+    判断候选是否明显属于脏 token。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: preserve-deferred-disambig-candidates
+    说明: 仅对空串、纯数字、纯符号等明显不可能成为角色名的候选做硬丢弃。
+    """
+    stripped = name.strip()
+    if not stripped:
+        return True
+    if stripped.isdigit():
+        return True
+    return not _contains_name_like_char(stripped)
 
 
 def _load_protected_list() -> frozenset[str]:
@@ -65,8 +98,9 @@ class CandidateFilter:
     """基于规则的候选名分类器。
 
     分类规则（按优先级）：
-    - blacklist: 出现次数 ≤ 1 且无上下文例句 → 丢弃（可能是噪音）
+    - blacklist: 明显脏 token（空串/纯数字/纯符号）→ 丢弃
     - protected: 精确匹配受保护名单 → 送消歧，但 prompt 中标记为"默认不合并"
+    - deferred: 出现次数 ≤ 1 且无上下文例句 → 暂不送消歧，但保留到后续复审/终消歧
     - normal: 以上均不匹配 → 正常处理
     """
 
@@ -84,24 +118,34 @@ class CandidateFilter:
         has_context: bool = False,
     ) -> CandidateClassification:
         """对单个候选名进行分类。"""
-        # 1. 噪音过滤：唯一硬丢弃规则
-        if count <= 1 and not has_context:
+        stripped_name = name.strip()
+
+        # 1. 明显脏 token：唯一硬丢弃规则
+        if _is_obvious_noise_candidate(stripped_name):
             return CandidateClassification(
-                name=name,
+                name=stripped_name,
                 category="blacklist",
-                reason="出现次数≤1且无上下文例句（噪音过滤）",
+                reason="明显脏 token（空串/纯数字/纯符号）",
             )
 
         # 2. 精确匹配受保护名单 → 送消歧但默认不合并
-        if name in self._protected:
+        if stripped_name in self._protected:
             return CandidateClassification(
-                name=name,
+                name=stripped_name,
                 category="protected",
                 reason="精确匹配受保护名单",
             )
 
+        # 3. 低频且暂无上下文：先保留，延后到后续复审/终消歧
+        if count <= 1 and not has_context:
+            return CandidateClassification(
+                name=stripped_name,
+                category="deferred",
+                reason="出现次数≤1且暂无可用上下文（延后处理）",
+            )
+
         return CandidateClassification(
-            name=name,
+            name=stripped_name,
             category="normal",
             reason="普通候选",
         )
@@ -110,13 +154,15 @@ class CandidateFilter:
         self,
         candidates: list[dict],
         context_sentences: dict[str, str] | None = None,
-    ) -> tuple[list[CandidateClassification], list[CandidateClassification]]:
-        """批量分类候选名，返回 (filtered, remaining)。
+    ) -> tuple[list[CandidateClassification], list[CandidateClassification], list[CandidateClassification]]:
+        """批量分类候选名，返回 (filtered, deferred, remaining)。
 
         filtered: blacklist 候选（被丢弃）
+        deferred: deferred 候选（暂不送模型，但保留）
         remaining: protected + normal 候选（保留送消歧）
         """
         filtered: list[CandidateClassification] = []
+        deferred: list[CandidateClassification] = []
         remaining: list[CandidateClassification] = []
 
         for item in candidates:
@@ -127,7 +173,9 @@ class CandidateFilter:
 
             if cls.category == "blacklist":
                 filtered.append(cls)
+            elif cls.category == "deferred":
+                deferred.append(cls)
             else:
                 remaining.append(cls)
 
-        return filtered, remaining
+        return filtered, deferred, remaining
