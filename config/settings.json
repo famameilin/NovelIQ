@@ -66,7 +66,6 @@
     "annotation": {
       "phase_max_retries": 3,
       "phase3_max_retries": 3,
-      "validation_max_retries": 3,
       "prev_chunks": 3,
       "lookback": 10
     },

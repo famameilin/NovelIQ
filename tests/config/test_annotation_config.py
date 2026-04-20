@@ -79,7 +79,6 @@ class TestRuntimeSettings(unittest.TestCase):
         runtime = _parse_runtime_settings(None)
         self.assertEqual(runtime.annotation.phase_max_retries, 3)
         self.assertEqual(runtime.annotation.phase3_max_retries, 3)
-        self.assertEqual(runtime.annotation.validation_max_retries, 3)
         self.assertEqual(runtime.annotation.prev_chunks, 3)
         self.assertEqual(runtime.annotation.lookback, 10)
         self.assertEqual(runtime.disambiguation.max_retries, 3)
