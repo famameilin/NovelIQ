@@ -143,6 +143,28 @@ def test_validate_confidence_with_evidence_does_not_merge_on_suffix_only_anchor_
     assert validated.alias_confidence["灰衣公子"] == "medium"
 
 
+def test_validate_confidence_with_evidence_blocks_protected_merge_without_strong_evidence() -> None:
+    """
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: enforce-protected-disambig-gate
+    说明: `受保护-默认不合并` 不能只靠 prompt 约束；若没有强证据，后端也必须回退为自映射。
+    """
+    context = "【受保护-默认不合并】侍卫一直守在伯安身旁，替他拦下门外闲人"
+    result = ExtendedDisambigResult(
+        canonical_decisions={"侍卫": "伯安"},
+        entity_types={"伯安": "character"},
+        entity_relations=[],
+        alias_confidence={"侍卫": "high"},
+        evidence_profiles={"侍卫": build_evidence_profile(context)},
+    )
+
+    validated = disambig_mod.validate_confidence_with_evidence(result, ["伯安"], {"侍卫": context})
+
+    assert validated.canonical_decisions["侍卫"] == "侍卫"
+    assert validated.alias_confidence["侍卫"] == "medium"
+
+
 def test_collect_final_disambiguation_candidates_prefers_state_snapshot() -> None:
     snapshot = {
         "bai_zhi": {"state": "resolved", "confidence": "high", "canonical": "bai_zhi"},
