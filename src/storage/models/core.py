@@ -70,6 +70,8 @@ class AnalysisRun(Base):
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    task_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="analysis")
+    request_payload: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
