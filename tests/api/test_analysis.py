@@ -301,7 +301,11 @@ class TestAnalysis:
         task_manager.create_task(task_id, novel_id)
         api_client.app.dependency_overrides[analysis_mod.get_task_manager] = lambda: task_manager
         try:
-            with patch.object(analysis_mod.RunRepository, "update_run_task_fields", side_effect=RuntimeError("db write failed")):
+            with patch.object(
+                analysis_mod.RunRepository,
+                "request_task_cancellation",
+                side_effect=RuntimeError("db write failed"),
+            ):
                 response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_task_manager, None)
@@ -313,6 +317,48 @@ class TestAnalysis:
         assert task_info.status == analysis_mod.TaskStatus.PENDING
         assert task_info.cancel_event is not None
         assert task_info.cancel_event.is_set() is False
+
+    def test_cancel_pending_task_does_not_rewrite_terminal_winner_to_cancelling(self, api_client: TestClient):
+        """测试 pending 取消竞态中若别的执行方已写入终态，接口不会再把任务覆写回 cancelling"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("cancel_race_terminal_winner_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        def _simulate_other_worker_finished(_task_id: str) -> bool:
+            with get_session_factory()() as session:
+                RunRepository(session).update_run_task_fields(
+                    task_id,
+                    status="completed",
+                    completed_at=datetime.now(),
+                    message="另一执行方已完成任务",
+                )
+            return False
+
+        with patch.object(analysis_mod, "_cancel_unclaimed_pending_task", side_effect=_simulate_other_worker_finished):
+            response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
+
+        assert response.status_code == 400
+        assert "completed" in response.json()["detail"]
+
+        with get_session_factory()() as session:
+            run = RunRepository(session).get_run(task_id)
+
+        assert run is not None
+        assert run["status"] == "completed"
+        assert run["cancel_requested"] is False
 
     def test_resume_task_clears_stale_runtime_fields_in_db(self, api_client: TestClient):
         """测试 resume 会先清空 DB 中上一轮失败留下的运行态脏字段"""
@@ -522,6 +568,44 @@ class TestAnalysis:
         assert scheduled_count == len(scheduled_calls)
         assert cancelled_count == 0
         assert (task_id, novel_id) in scheduled_calls
+
+    @pytest.mark.asyncio
+    async def test_resume_pending_tasks_skips_dangling_rows_and_continues(self, api_client: TestClient):
+        """测试启动恢复遇到 dangling pending 行时只跳过该任务，不影响后续有效任务恢复"""
+        from src.api import main as main_mod
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("startup_pending_skip_dangling_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        valid_task_id = service.create_task(novel_id)
+
+        with get_session_factory()() as session:
+            dangling_run_id = RunRepository(session).create_run(novel_id="deleted-novel")
+
+        scheduled_calls: list[tuple[str, str]] = []
+
+        def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+            scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
+
+        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule):
+            scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
+
+        assert cancelled_count == 0
+        assert scheduled_count == len(scheduled_calls)
+        assert (valid_task_id, novel_id) in scheduled_calls
+        assert all(task_id != dangling_run_id for task_id, _ in scheduled_calls)
 
     @pytest.mark.asyncio
     async def test_resume_pending_reanalysis_restores_original_request(self, api_client: TestClient):
