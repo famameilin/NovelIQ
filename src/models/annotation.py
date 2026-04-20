@@ -96,7 +96,7 @@ class AnnotationClient(BaseModelClient):
         main_characters: str | None = None,
         position_pct: float | None = None,
         chapter_id: int | None = None,
-        cloud_client: AnnotationClient | None = None,
+        fallback_client: AnnotationClient | None = None,
         run_id: str | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         disambig_context: str | None = None,
@@ -117,7 +117,7 @@ class AnnotationClient(BaseModelClient):
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
-            cloud_client=cloud_client,
+            fallback_client=fallback_client,
             run_id=run_id,
         )
 
@@ -135,7 +135,7 @@ class AnnotationClient(BaseModelClient):
             main_characters=ctx.main_characters,
             position_pct=ctx.position_pct,
             chapter_id=ctx.chapter_id,
-            cloud_client=ctx.cloud_client,
+            fallback_client=ctx.fallback_client,
             run_id=ctx.run_id,
             emitter=emitter,
         )

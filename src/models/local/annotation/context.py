@@ -64,7 +64,7 @@ class AnnotationContext:
     main_characters: str | None = None
     position_pct: float | None = None
     chapter_id: int | None = None
-    cloud_client: AnnotationClient | None = None
+    fallback_client: AnnotationClient | None = None
     run_id: str | None = None
 
 
