@@ -125,7 +125,7 @@ async def execute_phase1_with_retry(
     active_entities: str | None,
     evidence_bundle,
     chunk_id: int | None,
-    cloud_client: AnnotationClient | None,
+    fallback_client: AnnotationClient | None,
     run_id: str | None = None,
 ) -> ChunkAnnotation:
     """
@@ -150,15 +150,15 @@ async def execute_phase1_with_retry(
     )
     handler = AnnotationRetryHandler[ChunkAnnotation](
         config=config,
-        local_client=client,
-        cloud_client=cloud_client,
+        primary_client=client,
+        fallback_client=fallback_client,
         exception_type=Phase1MaxRetriesExceededError,
     )
 
-    async def operation(local_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ChunkAnnotation:
+    async def operation(primary_client: AnnotationClient, retry_messages: list[dict] | None = None) -> ChunkAnnotation:
         """执行单次Phase1调用"""
         result, _ = await execute_phase1_call(
-            local_client,
+            primary_client,
             text,
             messages,
             alias_map,
@@ -203,7 +203,7 @@ async def annotate_chunk_phase1(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     evidence_bundle=None,
-    cloud_client: AnnotationClient | None = None,
+    fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     disambig_context: str | None = None,
 ) -> ChunkAnnotation:
@@ -240,6 +240,6 @@ async def annotate_chunk_phase1(
         active_entities=active_entities,
         evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
-        cloud_client=cloud_client,
+        fallback_client=fallback_client,
         run_id=run_id,
     )

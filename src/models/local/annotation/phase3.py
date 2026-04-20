@@ -287,8 +287,8 @@ async def attribute_dialogues_with_llm(
 
             retry_handler: AnnotationRetryHandler[list[DialogueRecordSchema]] = AnnotationRetryHandler(
                 config=retry_config,
-                local_client=current_client,
-                cloud_client=None,
+                primary_client=current_client,
+                fallback_client=None,
                 exception_type=DialogueAttributionError,
             )
 

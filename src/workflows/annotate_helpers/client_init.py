@@ -118,20 +118,21 @@ def _init_annotation_clients(
         annotate_client or AnnotationClient(task_type="annotation", analysis_logger=analysis_logger),
     )
 
-    cloud_annotation_client: AnnotationLike | None = None
-    cloud_fallback_enabled = settings.analysis.cloud_annotation_fallback_enabled
+    annotation_fallback_client: AnnotationLike | None = None
+    fallback_enabled = settings.analysis.annotation_fallback_enabled
 
-    if cloud_fallback_enabled:
+    if fallback_enabled:
         try:
-            cloud_client = AnnotationClient(task_type="cloud_annotation", analysis_logger=analysis_logger)
-            cloud_annotation_client = cast(AnnotationLike, cloud_client)
+            fallback_client = AnnotationClient(task_type="annotation_fallback", analysis_logger=analysis_logger)
+            annotation_fallback_client = cast(AnnotationLike, fallback_client)
             logger.info(
-                f"cloud annotation client initialized for fallback (thinking={cloud_client._config.thinking_enabled})"
+                "annotation fallback client initialized "
+                f"(thinking={fallback_client._config.thinking_enabled})"
             )
         except Exception as e:
-            logger.warning(f"cloud annotation client initialization failed, fallback disabled: {e}")
+            logger.warning(f"annotation fallback client initialization failed, fallback disabled: {e}")
     else:
-        logger.info("cloud annotation fallback is disabled by config")
+        logger.info("annotation fallback is disabled by config")
 
     # 增量消歧客户端：如果配置为空，回退到标注模型
     if incremental_disambig_client:
@@ -165,7 +166,7 @@ def _init_annotation_clients(
                 analysis_logger=analysis_logger,
             )
 
-    return annotation_client, cloud_annotation_client, incremental_client, full_client
+    return annotation_client, annotation_fallback_client, incremental_client, full_client
 
 
 def _setup_token_usage_callback(
