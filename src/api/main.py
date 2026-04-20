@@ -91,6 +91,26 @@ def _recover_orphaned_tasks() -> tuple[int, int]:
         return failed_count, cancelled_count
 
 
+async def _resume_pending_tasks() -> tuple[int, int]:
+    """
+    启动时把 DB 中可恢复的 pending 任务重新接回执行器。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: fix-pending-task-pickup
+    修改内容: 为 DB 中遗留的 pending 任务补启动恢复链，避免进程重启后只能人工点击 resume。
+
+    Returns:
+        tuple[int, int]: (scheduled_count, cancelled_count)
+    """
+    from src.api.dependencies import get_novel_service
+    from src.api.routes.analysis import get_task_manager
+    from src.api.services.analysis_service import AnalysisService
+
+    analysis_service = AnalysisService(get_novel_service(), get_task_manager())
+    return await analysis_service.recover_pending_tasks()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
@@ -102,12 +122,17 @@ async def lifespan(app: FastAPI):
 
         init_db()
         failed_count, cancelled_count = _recover_orphaned_tasks()
+        scheduled_pending_count, cancelled_pending_count = await _resume_pending_tasks()
         if failed_count > 0:
             logger.info(f"Successfully cleaned {failed_count} orphaned running task(s)")
         if cancelled_count > 0:
             logger.info(f"Successfully finalized {cancelled_count} orphaned cancelling task(s)")
-        if failed_count == 0 and cancelled_count == 0:
-            logger.debug("No orphaned running/cancelling tasks found on startup")
+        if scheduled_pending_count > 0:
+            logger.info(f"Successfully rescheduled {scheduled_pending_count} pending task(s) on startup")
+        if cancelled_pending_count > 0:
+            logger.info(f"Successfully finalized {cancelled_pending_count} pending cancellation(s) on startup")
+        if failed_count == 0 and cancelled_count == 0 and scheduled_pending_count == 0 and cancelled_pending_count == 0:
+            logger.debug("No orphaned running/cancelling or pending tasks found on startup")
     except Exception as e:
         logger.warning(f"Failed to clean up zombie tasks on startup: {e}")
 

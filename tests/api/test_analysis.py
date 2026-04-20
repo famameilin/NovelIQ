@@ -199,8 +199,8 @@ class TestAnalysis:
             with pytest.raises(RuntimeError, match="db unavailable"):
                 service.create_task(novel_id)
 
-    def test_cancel_pending_task_not_in_memory_stays_cancelling_in_db(self, api_client: TestClient):
-        """测试 DB-only pending 任务也只会写入取消请求，避免提前写终态后又被真实 worker 覆盖"""
+    def test_cancel_pending_task_not_in_memory_finishes_cancelled_and_can_delete(self, api_client: TestClient):
+        """测试 DB-only pending 任务会直接终结为 cancelled，随后可正常删除"""
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
@@ -221,15 +221,21 @@ class TestAnalysis:
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "cancelling"
+        assert data["status"] == "cancelled"
 
         with get_session_factory()() as session:
             run = RunRepository(session).get_run(task_id)
 
         assert run is not None
-        assert run["status"] == "cancelling"
-        assert run["cancel_requested"] is True
-        assert run["completed_at"] is None
+        assert run["status"] == "cancelled"
+        assert run["cancel_requested"] is False
+        assert run["completed_at"] is not None
+
+        delete_response = api_client.post(f"/api/novels/{novel_id}/tasks/batch-delete", json={"task_ids": [task_id]})
+        assert delete_response.status_code == 200
+        delete_data = delete_response.json()
+        assert delete_data["deleted_ids"] == [task_id]
+        assert delete_data["failed_count"] == 0
 
     def test_cancel_running_task_not_in_memory_stays_cancelling_in_db(self, api_client: TestClient):
         """测试进程外取消真实 running 任务时仍保留 cancelling，等待执行方收尾"""
@@ -449,8 +455,8 @@ class TestAnalysis:
         assert cancelling_run["cancel_requested"] is False
         assert cancelling_run["completed_at"] is not None
 
-    def test_recover_orphaned_tasks_skips_rows_without_worker_heartbeat(self, api_client: TestClient):
-        """测试没有 worker/heartbeat 归属信息的任务不会被启动恢复误收口"""
+    def test_recover_orphaned_tasks_finalizes_cancelling_rows_without_worker_heartbeat(self, api_client: TestClient):
+        """测试无 owner 的 cancelling 行也会在启动恢复时收口，避免遗留死状态"""
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
@@ -469,7 +475,7 @@ class TestAnalysis:
         failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
 
         assert failed_count == 0
-        assert cancelled_count == 0
+        assert cancelled_count == 1
 
         with session_factory() as session:
             run_repo = RunRepository(session)
@@ -479,8 +485,42 @@ class TestAnalysis:
         assert running_run is not None
         assert running_run["status"] == "running"
         assert cancelling_run is not None
-        assert cancelling_run["status"] == "cancelling"
-        assert cancelling_run["cancel_requested"] is True
+        assert cancelling_run["status"] == "cancelled"
+        assert cancelling_run["cancel_requested"] is False
+
+    @pytest.mark.asyncio
+    async def test_resume_pending_tasks_reschedules_pending_runs(self, api_client: TestClient):
+        """测试启动恢复会把 DB 中的 pending 任务重新调度回执行器"""
+        from src.api import main as main_mod
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("startup_pending_resume_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+
+        from src.api.dependencies import get_novel_service
+
+        service = get_novel_service()
+        task_id = service.create_task(novel_id)
+
+        scheduled_calls: list[tuple[str, str]] = []
+
+        def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
+            scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
+
+        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule):
+            scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
+
+        assert scheduled_count == len(scheduled_calls)
+        assert cancelled_count == 0
+        assert (task_id, novel_id) in scheduled_calls
 
     def test_get_task_detail_from_db_returns_none_for_unknown_task_id(self):
         """测试未知 task_id 查询详情时返回 None"""
@@ -667,6 +707,21 @@ class TestRunRepository:
         assert run["message"] is None
         assert run["error"] is None
         assert run["completed_at"] is None
+
+    def test_claim_pending_run_is_atomic(self, db_session):
+        """测试 pending 任务只能被一个 worker 原子领取一次"""
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="novel-claim")
+
+        first_claim = run_repo.claim_pending_run(run_id, worker_id="worker-a")
+        second_claim = run_repo.claim_pending_run(run_id, worker_id="worker-b")
+        run = run_repo.get_run(run_id)
+
+        assert first_claim is True
+        assert second_claim is False
+        assert run is not None
+        assert run["status"] == "running"
+        assert run["worker_id"] == "worker-a"
 
 
 class TestCancellationStateCheck:
