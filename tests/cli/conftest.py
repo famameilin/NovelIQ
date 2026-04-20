@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.cloud.client import CloudModelClient
+from src.models.cloud import CloudModelClient
 from src.models.cloud.schema import CloudAnalysis
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.local.schema import (

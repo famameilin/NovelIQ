@@ -103,3 +103,24 @@ def fetch_chunk_styles_full(session: Session, run_id: str) -> Sequence[Row]:
     )
     result = session.execute(stmt)
     return result.fetchall()
+
+
+def fetch_chunk_imagery_lexicon_densities(session: Session, run_id: str) -> list[tuple[int, float | None]]:
+    """
+    获取每个 chunk 的 imagery_lexicon_density。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: remove-compat-layers
+    说明: 直接从 chunk_style 读取 imagery 字段，替代历史 culture 兼容接口。
+    """
+    stmt = (
+        select(
+            ChunkStyle.chunk_id,
+            ChunkStyle.imagery_lexicon_density,
+        )
+        .where(ChunkStyle.run_id == run_id)
+        .order_by(ChunkStyle.chunk_id)
+    )
+    result = session.execute(stmt)
+    return [(row.chunk_id, row.imagery_lexicon_density) for row in result.fetchall()]

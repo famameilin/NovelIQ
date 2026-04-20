@@ -110,12 +110,17 @@ class StageExecutor:
         修改时间: 2026-04-08
         修改者: TraeAI
         任务: 修复诊断交互记录未保存问题
-        修改内容: 创建 ConfiguredCloudModelClient 时传递 session 参数
+        修改内容: 创建 DiagnosisClient 时传递 session 参数
+
+        修改时间: 2026-04-20
+        修改者: Codex (GPT-5)
+        任务: remove-compat-layers
+        修改内容: 删除 ConfiguredCloudModelClient 兼容壳，诊断阶段直接使用 DiagnosisClient。
         """
-        from src.models.cloud import ConfiguredCloudModelClient
+        from src.models.diagnosis import DiagnosisClient
         from src.workflows import run_diagnose
 
-        diagnose_client = ConfiguredCloudModelClient(analysis_logger=analysis_logger, session=session)
+        diagnose_client = DiagnosisClient(analysis_logger=analysis_logger, session=session)
         await run_diagnose(
             run_id=run_id,
             session=session,

@@ -85,7 +85,6 @@ async def run_preprocess(
         Tuple[int, int, float]: (总块数, 总字符数, 耗时)
     """
     from src.workflows.preprocess_helpers import (
-        _compute_chunk_culture_metrics,
         _compute_chunk_style_metrics,
         _load_all_lexicons_for_preprocess,
     )
@@ -129,8 +128,6 @@ async def run_preprocess(
     logger.info(f"inserted {total_chunks} chunks into db (run_id={run_id})")
 
     style_rows: list[ChunkStyleData] = []
-    culture_rows: list[tuple[int, float | None]] = []
-
     for idx, chunk in enumerate(all_chunks):
         if total_chunks > 1:
             logger.info(f"Processing chunk {idx + 1}/{total_chunks}")
@@ -142,18 +139,11 @@ async def run_preprocess(
             cast(list[str], lexicons.get("sensory", [])),
             cast(list[str], lexicons.get("function_words", [])),
             cast(dict, lexicons.get("semantic_categories", {})),
+            cast(list[str], lexicons.get("imagery", [])),
         )
         style_rows.append(style_data)
 
-        culture_data = _compute_chunk_culture_metrics(
-            chunk,
-            tokens,
-            cast(list[str], lexicons.get("imagery", [])),
-        )
-        culture_rows.append(culture_data)
-
     chunk_repo.insert_chunk_style(run_id, style_rows)
-    chunk_repo.insert_chunk_culture(run_id, culture_rows)
 
     if settings.rag.embedding_enabled and settings.rag.level3_enabled:
         logger.info("generating chunk embeddings for Level 3 vector retrieval")

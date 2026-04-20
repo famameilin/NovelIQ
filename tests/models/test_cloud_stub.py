@@ -8,8 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import TaskModelConfig
-from src.models.cloud.client import ConfiguredCloudModelClient, NullCloudModelClient
+from src.models.cloud import NullCloudModelClient
+from src.models.diagnosis import DiagnosisClient
+from src.models.disambiguation import DisambiguationClient
 from src.models.local.disambiguation import DisambiguationPromptContext
+from src.models.local.schema import DisambiguateResponseModel
 
 
 def _candidates(*names: str) -> list[dict[str, int | str]]:
@@ -40,7 +43,7 @@ class TestCloudStub(unittest.TestCase):
         payload = analysis.to_dict()
         self.assertIn("foreshadow_rate", payload)
 
-    def test_configured_client(self) -> None:
+    def test_diagnosis_client(self) -> None:
         content = json.dumps(
             {
                 "novel_id": "n1",
@@ -58,7 +61,7 @@ class TestCloudStub(unittest.TestCase):
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         config = TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k")
-        client = ConfiguredCloudModelClient(config, client=mock_client)
+        client = DiagnosisClient(config, client=mock_client)
 
         analysis = asyncio.run(client.diagnose({"novel_id": "n1", "summary": "test"}))
 
@@ -66,17 +69,18 @@ class TestCloudStub(unittest.TestCase):
         self.assertEqual(analysis.foreshadow_rate, 0.5)
         self.assertEqual(analysis.topic_labels, ["growth"])
 
-    def test_configured_client_disambiguate_delegates(self) -> None:
+    def test_disambiguation_client_disambiguate_delegates(self) -> None:
         mock_client = MagicMock()
         config = TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k")
-        client = ConfiguredCloudModelClient(config, client=mock_client)
+        client = DisambiguationClient(config=config, client=mock_client)
 
         expected_canonical_decisions = {"alias_a": "zhangsan"}
-        fake_result = MagicMock(canonical_decisions=expected_canonical_decisions)
+        fake_response = DisambiguateResponseModel(canonical_decisions=expected_canonical_decisions)
 
-        with patch.object(
-            client._disambiguation_client, "disambiguate_characters", return_value=fake_result
-        ) as mock_disambiguate:
+        with patch(
+            "src.models.disambiguation.call_disambiguate_api",
+            new=AsyncMock(return_value=fake_response),
+        ) as mock_call:
             result = asyncio.run(
                 client.disambiguate_characters(
                     candidates=_candidates("zhangsan", "alias_a"),
@@ -85,29 +89,31 @@ class TestCloudStub(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(result, expected_canonical_decisions)
-        mock_disambiguate.assert_called_once_with(
-            candidates=_candidates("zhangsan", "alias_a"),
-            context_sentences={"alias_a": "alias_a smiled"},
-            existing_names=["zhangsan"],
-            prompt_context=None,
-        )
+        mock_call.assert_awaited_once()
+        self.assertEqual(mock_call.await_args.kwargs["client"], client)
+        self.assertEqual(mock_call.await_args.kwargs["config"], client._config)
+        self.assertEqual(mock_call.await_args.kwargs["log_type"], "disambiguate_characters")
+        self.assertIsInstance(mock_call.await_args.kwargs["messages"], list)
+        self.assertGreater(len(mock_call.await_args.kwargs["messages"]), 0)
+        self.assertEqual(result.canonical_decisions["alias_a"], expected_canonical_decisions["alias_a"])
+        self.assertEqual(result.canonical_decisions["zhangsan"], "zhangsan")
 
-    def test_configured_client_disambiguate_delegates_non_empty_prompt_context(self) -> None:
+    def test_disambiguation_client_disambiguate_delegates_non_empty_prompt_context(self) -> None:
         mock_client = MagicMock()
         config = TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k")
-        client = ConfiguredCloudModelClient(config, client=mock_client)
+        client = DisambiguationClient(config=config, client=mock_client)
 
         prompt_context = DisambiguationPromptContext(
             existing_character_hint="【已存在角色锚点】\n- 张三",
             graph_hint="【图谱已确认的关系】\n- 张三 ←朋友→ 李四",
             shared_evidence_context="<Vector_Evidence>\n[Chunk 7] 灰衣人忽然开口。\n</Vector_Evidence>",
         )
-        fake_result = MagicMock(canonical_decisions={"alias_a": "zhangsan"})
+        fake_response = DisambiguateResponseModel(canonical_decisions={"alias_a": "zhangsan"})
 
-        with patch.object(
-            client._disambiguation_client, "disambiguate_characters", return_value=fake_result
-        ) as mock_disambiguate:
+        with patch(
+            "src.models.disambiguation.call_disambiguate_api",
+            new=AsyncMock(return_value=fake_response),
+        ) as mock_call:
             asyncio.run(
                 client.disambiguate_characters(
                     candidates=_candidates("zhangsan", "alias_a"),
@@ -117,12 +123,12 @@ class TestCloudStub(unittest.TestCase):
                 )
             )
 
-        mock_disambiguate.assert_called_once_with(
-            candidates=_candidates("zhangsan", "alias_a"),
-            context_sentences={"alias_a": "alias_a smiled"},
-            existing_names=["zhangsan"],
-            prompt_context=prompt_context,
-        )
+        mock_call.assert_awaited_once()
+        self.assertIsInstance(mock_call.await_args.kwargs["messages"], list)
+        prompt_text = json.dumps(mock_call.await_args.kwargs["messages"], ensure_ascii=False)
+        self.assertIn("已存在角色锚点", prompt_text)
+        self.assertIn("图谱已确认的关系", prompt_text)
+        self.assertIn("Vector_Evidence", prompt_text)
 
 
 if __name__ == "__main__":

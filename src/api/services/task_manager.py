@@ -93,7 +93,7 @@ class TaskManager:
     不属于本类职责（由业务层/DB层处理）:
     - 任务存在性判断（应查询数据库）
     - 业务状态合法性判断（如 cancel/delete 前置条件）
-    - 任务列表查询（list_tasks/get_tasks_by_novel 已 deprecated）
+    - 任务列表查询（应直接查询数据库）
     - 决定 cancel/resume/delete 操作是否合法
 
     调用方须知:
@@ -286,18 +286,6 @@ class TaskManager:
         """
         return self._tasks.get(task_id)
 
-    def get_tasks_by_novel(self, novel_id: str) -> list[TaskInfo]:
-        """
-        已弃用: 业务查询应使用数据库层（NovelService.get_tasks_by_novel）。
-
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-6-task-manager-responsibility-shrink
-        说明: 此方法仅返回进程内存中的任务，不代表完整的业务数据。调用方应改用 DB 查询。
-              由于 TaskInfo 不再存储 novel_id，当前实现返回空列表。
-        """
-        return []
-
     def update_task(self, task_id: str, **kwargs) -> None:
         if task_id in self._tasks:
             task = self._tasks[task_id]
@@ -352,20 +340,6 @@ class TaskManager:
             logger.info(f"Task deleted: {task_id}")
             return True
         return False
-
-    def list_tasks(self, status: TaskStatus | None = None) -> list[TaskInfo]:
-        """
-        已弃用: 业务查询应使用数据库层（RunRepository.get_by_status 或类似方法）。
-
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-6-task-manager-responsibility-shrink
-        说明: 此方法仅枚举进程内存中的任务，不代表完整的业务数据。调用方应改用 DB 查询。
-              由于 TaskInfo 不再存储 status，传入 status 过滤已无意义，直接返回所有内存任务。
-        """
-        if status is not None:
-            logger.warning("list_tasks(status=...) filtering is deprecated; TaskInfo no longer stores status")
-        return list(self._tasks.values())
 
     def cancel_task(self, task_id: str) -> bool:
         """
