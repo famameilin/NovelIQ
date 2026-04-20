@@ -44,7 +44,12 @@ if TYPE_CHECKING:
         build_disambiguate_messages,
         build_existing_character_hint,
     )
-    from .result_builder import ExtendedDisambigResult, build_extended_result_from_response, build_result_from_response
+    from .result_builder import (
+        ExtendedDisambigResult,
+        build_extended_result_from_response,
+        build_result_from_response,
+        normalize_disambiguate_response,
+    )
     from .state import (
         DisambiguationState,
         NameReviewState,
@@ -74,6 +79,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ExtendedDisambigResult": (".result_builder", "ExtendedDisambigResult"),
     "build_extended_result_from_response": (".result_builder", "build_extended_result_from_response"),
     "build_result_from_response": (".result_builder", "build_result_from_response"),
+    "normalize_disambiguate_response": (".result_builder", "normalize_disambiguate_response"),
     "DisambiguationState": (".state", "DisambiguationState"),
     "NameReviewState": (".state", "NameReviewState"),
     "validate_state_invariants": (".state", "validate_state_invariants"),

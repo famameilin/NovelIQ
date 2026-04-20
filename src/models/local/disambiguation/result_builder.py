@@ -25,7 +25,7 @@ from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
 
-from ..schema import DisambiguateResponseModel, EntityType
+from ..schema import CloudDisambiguateResponseModel, DisambiguateResponseModel, EntityType
 from .evidence import EvidenceProfile, build_evidence_profile
 
 
@@ -74,8 +74,48 @@ def _candidate_names(candidates: list[NameCountCandidate] | list[str]) -> list[s
     return [str(candidate["name"]) for candidate in candidates]  # type: ignore[index]
 
 
+def normalize_disambiguate_response(
+    response_data: DisambiguateResponseModel | CloudDisambiguateResponseModel,
+) -> DisambiguateResponseModel:
+    """
+    将云端兼容响应归一化为内部标准消歧模型。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-cloud-disambig-mapping-schema
+    说明: 运行时内部逻辑仍以 dict 结构消费消歧结果，因此在 API 入口把
+          CloudDisambiguateResponseModel 转回 DisambiguateResponseModel，避免影响下游状态机。
+    """
+    if isinstance(response_data, DisambiguateResponseModel):
+        return response_data
+
+    canonical_decisions: dict[str, str] = {}
+    for item in response_data.canonical_decisions:
+        canonical_decisions[str(item.name)] = str(item.canonical)
+
+    alias_confidence: dict[str, str] = {}
+    for item in response_data.alias_confidence:
+        alias_confidence[str(item.name)] = str(item.confidence)
+
+    entity_types: dict[str, EntityType] = {}
+    for item in response_data.entity_types:
+        entity_types[str(item.name)] = item.entity_type
+
+    evidence_sources: dict[str, list[str]] = {}
+    for item in response_data.evidence_sources:
+        evidence_sources[str(item.name)] = [str(source) for source in item.sources]
+
+    return DisambiguateResponseModel(
+        canonical_decisions=canonical_decisions,
+        alias_confidence=alias_confidence,
+        entity_types=entity_types,
+        entity_relations=list(response_data.entity_relations),
+        evidence_sources=evidence_sources,
+    )
+
+
 def build_result_from_response(
-    response_data: DisambiguateResponseModel,
+    response_data: DisambiguateResponseModel | CloudDisambiguateResponseModel,
     candidates: list[NameCountCandidate] | list[str],
 ) -> dict[str, str]:
     """
@@ -100,19 +140,20 @@ def build_result_from_response(
     任务: 简化消歧响应模型
     修改内容: 将 alias_map 改为 canonical_decisions
     """
+    normalized_response = normalize_disambiguate_response(response_data)
     name_list = _candidate_names(candidates)
 
     result: dict[str, str] = {}
     for name in name_list:
-        if name in response_data.canonical_decisions:
-            result[name] = str(response_data.canonical_decisions[name])
+        if name in normalized_response.canonical_decisions:
+            result[name] = str(normalized_response.canonical_decisions[name])
         else:
             result[name] = name
     return result
 
 
 def build_extended_result_from_response(
-    response_data: DisambiguateResponseModel,
+    response_data: DisambiguateResponseModel | CloudDisambiguateResponseModel,
     candidates: list[NameCountCandidate],
     context_sentences: dict[str, str] | None = None,
 ) -> ExtendedDisambigResult:
@@ -139,17 +180,18 @@ def build_extended_result_from_response(
     任务: disambiguation-state-three-layer
     修改内容: 将 alias_map 改为 canonical_decisions，明确表达模型判断而非运行时状态
     """
-    canonical_decisions = build_result_from_response(response_data, candidates)
+    normalized_response = normalize_disambiguate_response(response_data)
+    canonical_decisions = build_result_from_response(normalized_response, candidates)
     name_list = _candidate_names(candidates)
 
     alias_confidence: dict[str, str] = {}
     for name in name_list:
-        alias_confidence[name] = str(response_data.alias_confidence.get(name, "medium"))
+        alias_confidence[name] = str(normalized_response.alias_confidence.get(name, "medium"))
     evidence_profiles: dict[str, EvidenceProfile] = {}
     for name in name_list:
         context = context_sentences.get(name, "") if context_sentences else ""
         evidence_profiles[name] = build_evidence_profile(context)
-    entity_types = dict(response_data.entity_types)
+    entity_types = dict(normalized_response.entity_types)
     valid_entity_type_keys = set(name_list) | set(canonical_decisions.values())
     filtered_entity_types = {k: v for k, v in entity_types.items() if k in valid_entity_type_keys}
     if len(filtered_entity_types) < len(entity_types):
@@ -161,7 +203,7 @@ def build_extended_result_from_response(
         )
     entity_types = filtered_entity_types
     entity_relations: list[dict[str, str]] = []
-    for rel in response_data.entity_relations:
+    for rel in normalized_response.entity_relations:
         entity_relations.append(
             {
                 "from": rel.from_entity,
@@ -169,8 +211,8 @@ def build_extended_result_from_response(
                 "type": rel.type,
             }
         )
-    thinking_content = getattr(response_data, "_thinking_content", None) or getattr(
-        response_data, "thinking_content", None
+    thinking_content = getattr(normalized_response, "_thinking_content", None) or getattr(
+        normalized_response, "thinking_content", None
     )
     return ExtendedDisambigResult(
         canonical_decisions=canonical_decisions,
