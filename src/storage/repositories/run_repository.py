@@ -250,6 +250,75 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         return self.get_by_status("running")
 
+    def get_pending_tasks(self) -> list[dict[str, Any]]:
+        """
+        获取所有 pending 任务。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-pending-task-pickup
+        修改内容: 为启动恢复和 DB worker pickup 提供统一的 pending 查询入口。
+        """
+        return self.get_by_status("pending")
+
+    def claim_pending_run(self, run_id: str, *, worker_id: str, heartbeat_at: datetime | None = None) -> bool:
+        """
+        原子性领取一个尚未执行的 pending 任务。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-pending-task-pickup
+        修改内容: 通过单条 UPDATE 将 pending->running，避免多个实例同时把同一任务拉起执行。
+        """
+        from sqlalchemy import update
+
+        now = heartbeat_at or datetime.now()
+        stmt = (
+            update(AnalysisRun)
+            .where(AnalysisRun.run_id == run_id)
+            .where(AnalysisRun.status == "pending")
+            .where(AnalysisRun.cancel_requested == False)  # noqa: E712
+            .values(
+                status="running",
+                worker_id=worker_id,
+                heartbeat_at=now,
+                updated_at=now,
+            )
+        )
+        result = self.session.execute(stmt)
+        self.session.commit()
+        return result.rowcount > 0  # type: ignore[attr-defined]
+
+    def cancel_unclaimed_pending_run(self, run_id: str, *, message: str) -> bool:
+        """
+        原子性终结尚未被任何 worker 领取的 pending 任务。
+
+        创建时间: 2026-04-20
+        创建者: Codex (GPT-5)
+        任务: fix-pending-task-pickup
+        修改内容: 允许进程外取消在任务真正启动前直接落终态，避免进入不可恢复的 cancelling 死状态。
+        """
+        from sqlalchemy import update
+
+        now = datetime.now()
+        stmt = (
+            update(AnalysisRun)
+            .where(AnalysisRun.run_id == run_id)
+            .where(AnalysisRun.status == "pending")
+            .values(
+                status="cancelled",
+                cancel_requested=False,
+                completed_at=now,
+                message=message,
+                worker_id=None,
+                heartbeat_at=None,
+                updated_at=now,
+            )
+        )
+        result = self.session.execute(stmt)
+        self.session.commit()
+        return result.rowcount > 0  # type: ignore[attr-defined]
+
     def update_run_task_fields(
         self,
         run_id: str,
@@ -489,9 +558,11 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "cancelling")
-            .where(AnalysisRun.worker_id.is_not(None))
-            .where(AnalysisRun.heartbeat_at.is_not(None))
-            .where(AnalysisRun.heartbeat_at < stale_before)
+            .where(
+                AnalysisRun.worker_id.is_(None)
+                | AnalysisRun.heartbeat_at.is_(None)
+                | (AnalysisRun.heartbeat_at < stale_before)
+            )
             .values(
                 status="cancelled",
                 cancel_requested=False,
