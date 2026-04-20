@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from src.api.exceptions import AnalysisError, NovelNotFoundError
 from src.api.models.events import AnalysisEventBus, StreamEvent
-from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
+from src.api.models.requests import ReanalyzeRequest
 from src.api.models.responses import TaskStatus
 from src.api.services.analysis.environment_initializer import EnvironmentInitializer
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
@@ -374,7 +374,7 @@ class AnalysisService:
             return None
         return request.model_dump(mode="json", exclude_none=True)
 
-    def _restore_execution_request(self, task: dict) -> tuple[str, AnalyzeRequest | ReanalyzeRequest | None]:
+    def _restore_execution_request(self, task: dict) -> tuple[str, ReanalyzeRequest | None]:
         """
         从任务元数据恢复执行类型与请求参数。
 
@@ -385,7 +385,7 @@ class AnalysisService:
         """
         task_kind = task["task_kind"]
         if task_kind == TASK_KIND_ANALYSIS:
-            return task_kind, AnalyzeRequest(task_id=task["task_id"])
+            return task_kind, None
         if task_kind == TASK_KIND_REANALYSIS:
             request_payload = task.get("request_payload")
             if request_payload is None:
@@ -529,7 +529,7 @@ class AnalysisService:
 
         return scheduled_count, cancelled_count
 
-    def _schedule_analysis_task(self, task_id: str, novel: dict, request: AnalyzeRequest | None = None) -> None:
+    def _schedule_analysis_task(self, task_id: str, novel: dict) -> None:
         """
         安排分析协程并记录 asyncio.Task 引用。
 
@@ -538,7 +538,7 @@ class AnalysisService:
         任务: task-api-decouple
         说明: 统一 create/resume 两条路径的协程调度，避免重复代码。
         """
-        task = asyncio.create_task(self._run_analysis(task_id, novel, request))
+        task = asyncio.create_task(self._run_analysis(task_id, novel))
         self.task_manager.store_asyncio_task(task_id, task)
 
     def _schedule_reanalysis_task(self, task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
@@ -558,7 +558,7 @@ class AnalysisService:
         task_id: str,
         novel: dict,
         task_kind: str,
-        request: AnalyzeRequest | ReanalyzeRequest | None,
+        request: ReanalyzeRequest | None,
     ) -> None:
         """
         按任务类型调度执行协程。
@@ -567,12 +567,17 @@ class AnalysisService:
         创建者: Codex (GPT-5)
         任务: fix-reanalysis-resume-regression
         修改内容: 将 analysis/reanalysis 的调度分发收口到单入口，确保 create/resume/recovery 走同一套类型恢复逻辑。
+
+        修改时间: 2026-04-20
+        修改者: Codex (GPT-5)
+        任务: remove-compat-layers
+        修改内容: 删除普通分析的 AnalyzeRequest 兼容层，analysis 任务不再构造伪请求对象。
         """
         if task_kind == TASK_KIND_ANALYSIS:
-            self._schedule_analysis_task(task_id, novel, request if isinstance(request, AnalyzeRequest) else None)
+            self._schedule_analysis_task(task_id, novel)
             return
         if task_kind == TASK_KIND_REANALYSIS:
-            self._schedule_reanalysis_task(task_id, novel, request if isinstance(request, ReanalyzeRequest) else None)
+            self._schedule_reanalysis_task(task_id, novel, request)
             return
         raise ValueError(f"任务 {task_id} 的 task_kind 非法: {task_kind}")
 
@@ -639,19 +644,6 @@ class AnalysisService:
         self._schedule_task_execution(task_id, novel, task_kind, execution_request)
         return task_id
 
-    async def start_analysis(self, novel_id: str, request: AnalyzeRequest | None = None) -> str:
-        """
-        兼容入口：保留旧方法名，语义收敛为“创建新任务并启动”。
-
-        修改时间: 2026-04-19
-        修改者: Codex (GPT-5)
-        任务: task-api-decouple
-        修改内容: 移除 create/reuse/resume 混合逻辑，改为仅创建新任务。
-        """
-        if request and request.task_id:
-            raise AnalysisError("analyze 接口不再支持 task_id 续跑，请改用 /tasks/{task_id}/resume")
-        return await self.create_task_and_start(novel_id)
-
     async def start_reanalysis(self, novel_id: str, request: ReanalyzeRequest | None = None) -> str:
         novel = self.novel_service.get_novel(novel_id)
 
@@ -665,7 +657,7 @@ class AnalysisService:
 
         return task_id
 
-    async def _run_analysis(self, task_id: str, novel: dict, request: AnalyzeRequest | None) -> None:
+    async def _run_analysis(self, task_id: str, novel: dict) -> None:
         """
         执行分析任务
 

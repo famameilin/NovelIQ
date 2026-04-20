@@ -62,15 +62,6 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_chunk_culture(self, rows: Sequence[tuple[int, float | None]]) -> None:
-        """
-        插入分块文化数据
-
-        Args:
-            rows: 文化数据行 (chunk_id, imagery_lexicon_density)
-        """
-        ...
-
     def insert_chunk_topics(self, rows: Sequence[tuple[int, int, float]]) -> None:
         """
         插入分块主题数据
