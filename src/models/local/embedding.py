@@ -26,6 +26,11 @@
 修改内容:
 1. 移除 API 密钥硬编码默认值，改为从环境变量读取
 2. 修复云端 API 错误降级为 info 级别的问题，统一使用 error 级别
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: 清理无效模型配置项
+修改内容: 删除未生效的 max_retries 参数和缓存字段，避免 EmbeddingClient 暴露伪配置
 """
 
 from __future__ import annotations
@@ -58,7 +63,6 @@ class EmbeddingClient:
         model: str | None = None,
         api_key: str | None = None,
         timeout_s: float | None = None,
-        max_retries: int | None = None,
         embedding_dim: int | None = None,
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
@@ -73,7 +77,6 @@ class EmbeddingClient:
                     "API key is required: provide api_key parameter or set OPENAI_API_KEY environment variable"
                 )
             self._timeout_s = timeout_s if timeout_s is not None else semantic_config.timeout_s
-            self._max_retries = max_retries if max_retries is not None else semantic_config.max_retries
             self._embedding_dim = embedding_dim if embedding_dim is not None else semantic_config.embedding_dim
         else:
             self._base_url = base_url
@@ -84,7 +87,6 @@ class EmbeddingClient:
                     "API key is required: provide api_key parameter or set OPENAI_API_KEY environment variable"
                 )
             self._timeout_s = timeout_s
-            self._max_retries = max_retries if max_retries is not None else 2
             self._embedding_dim = (
                 embedding_dim if embedding_dim is not None else settings.models.semantic_chunking.embedding_dim
             )

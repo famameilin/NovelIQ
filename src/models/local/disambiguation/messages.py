@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from src.config import settings
-from src.config.schemas.annotation import ANNOTATION_CONFIG
+from src.config.constants import VALID_ENTITY_TYPES
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
@@ -175,7 +175,7 @@ def _build_relation_types_union() -> str:
 
 def _build_entity_types_section() -> str:
     """根据配置动态构建实体类型说明。"""
-    valid_types = ANNOTATION_CONFIG.valid_entity_types or ["character"]
+    valid_types = list(VALID_ENTITY_TYPES) or ["character"]
     lines = ["【实体类型识别规则】"]
     for etype in valid_types:
         desc = _ENTITY_TYPE_DESCRIPTIONS.get(etype, f"{etype} 类型")
@@ -185,7 +185,7 @@ def _build_entity_types_section() -> str:
 
 def _build_entity_types_union() -> str:
     """构建实体类型联合字符串，用于 JSON 格式说明。"""
-    valid_types = ANNOTATION_CONFIG.valid_entity_types or ["character"]
+    valid_types = list(VALID_ENTITY_TYPES) or ["character"]
     return "|".join(valid_types)
 
 
