@@ -7,9 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from src.api.exceptions import NovelNotFoundError
-from src.api.models.requests import AnalyzeRequest, ReanalyzeRequest
+from src.api.models.requests import ReanalyzeRequest
 from src.api.models.responses import (
-    AnalyzeResponse,
     BatchDeleteTasksRequest,
     BatchDeleteTasksResponse,
     CreateTaskResponse,
@@ -316,31 +315,6 @@ async def create_and_start_task(
     analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.create_task_and_start(novel_id)
     return CreateTaskResponse(novel_id=novel_id, task_id=task_id)
-
-
-@router.post("/{novel_id}/analyze", response_model=AnalyzeResponse)
-async def start_analysis(
-    novel_id: str,
-    request: AnalyzeRequest | None = None,
-    novel_service: NovelService = Depends(get_novel_service),
-    task_manager: TaskManager = Depends(get_task_manager),
-) -> AnalyzeResponse:
-    """
-    兼容旧入口：仅保留“创建并启动新任务”语义。
-
-    修改时间: 2026-04-19
-    修改者: Codex (GPT-5)
-    任务: task-api-decouple
-    修改内容: 不再接收 task_id 触发续跑，续跑请改用 /tasks/{task_id}/resume。
-    """
-    if request and request.task_id:
-        raise HTTPException(
-            status_code=400,
-            detail="analyze 接口不再支持 task_id 续跑，请使用 /api/novels/{novel_id}/tasks/{task_id}/resume",
-        )
-    analysis_service = AnalysisService(novel_service, task_manager)
-    task_id = await analysis_service.create_task_and_start(novel_id)
-    return AnalyzeResponse(novel_id=novel_id, task_id=task_id)
 
 
 @router.post("/{novel_id}/tasks/{task_id}/resume", response_model=ResumeTaskResponse)

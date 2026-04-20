@@ -29,6 +29,11 @@
 修改者: TraeAI
 任务: fix-pause-density-d-value-equality
 修改内容: fetch_chunk_styles_full 返回 Sequence[Row] 支持字段名访问
+
+修改时间: 2026-04-20
+修改者: Codex (GPT-5)
+任务: remove-compat-layers
+修改内容: 删除 culture 兼容接口，imagery_lexicon_density 统一走 ChunkStyle 主仓储链路。
 """
 
 from __future__ import annotations
@@ -47,11 +52,10 @@ from src.storage.repositories.base import BaseRepository
 from src.storage.repositories.chunk import (
     ChunkStyleData,
     clear_chunk_topics,
-    fetch_chunk_cultures_full,
+    fetch_chunk_imagery_lexicon_densities,
     fetch_chunk_styles,
     fetch_chunk_styles_full,
     fetch_chunk_topics_agg,
-    insert_chunk_culture,
     insert_chunk_style,
     insert_chunk_topics,
 )
@@ -125,13 +129,6 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def insert_chunk_style(self, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]) -> None:
         insert_chunk_style(self.session, run_id, rows)
 
-    def insert_chunk_culture(
-        self,
-        run_id: str,
-        rows: Iterable[tuple[int, float | None]],
-    ) -> None:
-        insert_chunk_culture(self.session, run_id, rows)
-
     def insert_chunk_topics(self, run_id: str, rows: Iterable[tuple[int, int, float]]) -> None:
         insert_chunk_topics(self.session, run_id, rows)
 
@@ -141,8 +138,8 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
     def fetch_chunk_styles_full(self, run_id: str) -> Sequence[Row]:
         return fetch_chunk_styles_full(self.session, run_id)
 
-    def fetch_chunk_cultures_full(self, run_id: str) -> list[tuple[int, float | None]]:
-        return fetch_chunk_cultures_full(self.session, run_id)
+    def fetch_chunk_imagery_lexicon_densities(self, run_id: str) -> list[tuple[int, float | None]]:
+        return fetch_chunk_imagery_lexicon_densities(self.session, run_id)
 
     def fetch_chunk_topics_agg(self, run_id: str) -> Sequence[Row]:
         """
