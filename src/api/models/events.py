@@ -157,6 +157,11 @@ class AnalysisEventBus:
         - 将 action 翻译为 SSE event type
         - 调用 event_manager.send() 唯一发送口
         - 同步更新 TaskManager
+
+        修改时间: 2026-04-20
+        修改任务: fix-eventbus-null-progress-write
+        修改内容: 区分“字段缺失”和“字段显式赋值”，避免把 current/total/progress 的 None
+                  误写回 DB 非空列，保持事件上下文补全语义与任务持久化语义一致。
         """
         # 补全上下文：构建新事件对象，避免修改原始事件
         resolved_stage = event.stage or self._stage
@@ -236,15 +241,21 @@ class AnalysisEventBus:
         if resolved_event.action in ("start", "progress", "complete"):
             # 中文注释：这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
             # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源。
-            self.task_manager.update_task(
-                self.task_id,
-                stage=resolved_event.stage,
-                sub_stage=resolved_event.sub_stage,
-                current=resolved_event.current,
-                total=resolved_event.total,
-                progress=resolved_event.percent,
-                message=resolved_event.message,
-            )
+            task_update_kwargs: dict[str, Any] = {
+                "stage": resolved_event.stage,
+                "sub_stage": resolved_event.sub_stage,
+                "message": resolved_event.message,
+            }
+            # 中文注释：EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”。
+            # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库。
+            if resolved_event.current is not None:
+                task_update_kwargs["current"] = resolved_event.current
+            if resolved_event.total is not None:
+                task_update_kwargs["total"] = resolved_event.total
+            if resolved_event.percent is not None:
+                task_update_kwargs["progress"] = resolved_event.percent
+
+            self.task_manager.update_task(self.task_id, **task_update_kwargs)
         elif resolved_event.action == "output":
             try:
                 self.task_manager.append_llm_output(self.task_id, resolved_event.content)
