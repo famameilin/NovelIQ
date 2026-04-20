@@ -10,7 +10,6 @@
 修改内容: 新增 embedding 操作函数导出
 """
 
-from .culture_ops import fetch_chunk_cultures_full, insert_chunk_culture
 from .embedding_ops import (
     get_chunk_embedding,
     get_missing_embedding_chunk_ids,
@@ -19,7 +18,12 @@ from .embedding_ops import (
     search_similar_chunks,
 )
 from .style_data import ChunkStyleData
-from .style_ops import fetch_chunk_styles, fetch_chunk_styles_full, insert_chunk_style
+from .style_ops import (
+    fetch_chunk_imagery_lexicon_densities,
+    fetch_chunk_styles,
+    fetch_chunk_styles_full,
+    insert_chunk_style,
+)
 from .topic_ops import clear_chunk_topics, fetch_chunk_topics_agg, insert_chunk_topics
 
 __all__ = [
@@ -27,8 +31,7 @@ __all__ = [
     "fetch_chunk_styles",
     "insert_chunk_style",
     "fetch_chunk_styles_full",
-    "insert_chunk_culture",
-    "fetch_chunk_cultures_full",
+    "fetch_chunk_imagery_lexicon_densities",
     "insert_chunk_topics",
     "clear_chunk_topics",
     "fetch_chunk_topics_agg",

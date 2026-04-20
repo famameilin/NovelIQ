@@ -73,6 +73,7 @@ def _compute_chunk_style_metrics(
     sensory_terms: list[str],
     function_words: list[str],
     semantic_categories: dict,
+    imagery_terms: list[str],
 ) -> ChunkStyleData:
     """
     计算单个chunk的风格指标
@@ -81,8 +82,13 @@ def _compute_chunk_style_metrics(
     创建者: TraeAI
     任务: refactor-analysis-layer-functions
     说明: 从 run_preprocess 中提取，负责计算chunk的风格指标
+
+    修改时间: 2026-04-20
+    修改者: Codex (GPT-5)
+    任务: remove-compat-layers
+    修改内容: 直接计算 imagery_lexicon_density 并写入 ChunkStyleData，移除独立 culture 兼容写入链路。
     """
-    from src.metrics.style_metrics import sensory_density
+    from src.metrics.style_metrics import imagery_density, sensory_density
 
     mtld_val = mtld(tokens)
     ttr_val = ttr(tokens)
@@ -94,6 +100,7 @@ def _compute_chunk_style_metrics(
     sensory_val = 0.0
     if sensory_terms:
         sensory_val = sensory_density(chunk.text, sensory_terms)
+    imagery_lexicon_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else None
 
     fw_dist = {}
     if function_words:
@@ -129,32 +136,5 @@ def _compute_chunk_style_metrics(
         category_density_measure=cat_densities.get("measure", 0.0),
         category_density_emotion=cat_densities.get("emotion", 0.0),
         category_density_color=cat_densities.get("color", 0.0),
-    )
-
-
-def _compute_chunk_culture_metrics(
-    chunk: Chunk,
-    tokens: list[str],
-    imagery_terms: list[str],
-) -> tuple[int, float | None]:
-    """
-    计算单个chunk的文化指标
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
-    说明: 从 run_preprocess 中提取，负责计算chunk的文化指标
-
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度计算，只保留 imagery_lexicon_density
-    """
-    from src.metrics.style_metrics import imagery_density
-
-    imagery_lexicon_val = imagery_density(chunk.text, imagery_terms) if imagery_terms else None
-
-    return (
-        chunk.index,
-        imagery_lexicon_val,
+        imagery_lexicon_density=imagery_lexicon_val,
     )

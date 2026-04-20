@@ -21,13 +21,6 @@ class UploadResponse(BaseModel):
     message: str = "文件上传成功"
 
 
-class AnalyzeResponse(BaseModel):
-    novel_id: str
-    task_id: str
-    status: TaskStatus = TaskStatus.PENDING
-    message: str = "分析任务已启动"
-
-
 class CreateTaskResponse(BaseModel):
     """
     创建并启动任务响应

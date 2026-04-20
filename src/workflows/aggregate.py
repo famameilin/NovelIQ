@@ -193,9 +193,9 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
     imagery_density = traditional_culture.get("imagery_density")
     imagery_non_null = imagery_density is not None
 
-    culture_rows = chunk_repo.fetch_chunk_cultures_full(run_id)
+    imagery_rows = chunk_repo.fetch_chunk_imagery_lexicon_densities(run_id)
     null_chunk_ids: list[int] = []
-    for row in culture_rows:
+    for row in imagery_rows:
         if not row:
             continue
         chunk_id = int(row[0])
@@ -203,7 +203,7 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
         if density_values and any(value is None for value in density_values):
             null_chunk_ids.append(chunk_id)
 
-    null_ratio = (len(null_chunk_ids) / len(culture_rows)) if culture_rows else 0.0
+    null_ratio = (len(null_chunk_ids) / len(imagery_rows)) if imagery_rows else 0.0
 
     return {
         "tone_distribution_non_empty_rate": 1.0 if tone_non_empty else 0.0,

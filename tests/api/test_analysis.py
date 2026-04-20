@@ -21,19 +21,19 @@ import asyncio
 import os
 import tempfile
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.routes import analysis as analysis_mod
 from src.api.exceptions import NovelNotFoundError
 from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.models.requests import ReanalyzeRequest
-from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
+from src.api.routes import analysis as analysis_mod
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
+from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
@@ -222,7 +222,10 @@ class TestAnalysis:
         novel_id = upload_response.json()["novel_id"]
         service = NovelService(upload_dir=Path("data/uploads"))
 
-        with patch("src.api.services.novel_service.RunRepository.create_run", side_effect=RuntimeError("db unavailable")):
+        with patch(
+            "src.api.services.novel_service.RunRepository.create_run",
+            side_effect=RuntimeError("db unavailable"),
+        ):
             with pytest.raises(RuntimeError, match="db unavailable"):
                 service.create_task(novel_id)
 
@@ -443,12 +446,10 @@ class TestAnalysis:
         assert run["cancel_requested"] is False
         assert run["completed_at"] is None
 
-    def test_analyze_with_task_id_returns_400(self, api_client: TestClient):
-        """测试旧 analyze 入口不再接受 task_id 续跑"""
+    def test_legacy_analyze_route_is_removed(self, api_client: TestClient):
+        """测试旧 /analyze 兼容入口已删除"""
         response = api_client.post("/api/novels/nonexistent/analyze", json={"task_id": "resume-me"})
-        assert response.status_code == 400
-        data = response.json()
-        assert "resume" in data["detail"]
+        assert response.status_code == 404
 
     def test_db_only_status_restores_persisted_message(self, api_client: TestClient):
         """测试 DB-only 状态查询可以恢复持久化的 message 文案"""
@@ -491,7 +492,7 @@ class TestAnalysis:
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
-        stale_heartbeat = datetime.now(timezone.utc) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
+        stale_heartbeat = datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
 
         # 使用唯一 ID 避免测试间数据污染
         running_novel_id = f"novel-running-{uuid.uuid4()}"
@@ -669,7 +670,12 @@ class TestAnalysis:
         reanalysis_calls: list[tuple[str, str, ReanalyzeRequest | None]] = []
         analysis_calls: list[str] = []
 
-        def _record_reanalysis(self, scheduled_task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
+        def _record_reanalysis(
+            self,
+            scheduled_task_id: str,
+            novel: dict,
+            request: ReanalyzeRequest | None = None,
+        ) -> None:
             reanalysis_calls.append((scheduled_task_id, novel["novel_id"], request))
 
         def _record_analysis(self, scheduled_task_id: str, novel: dict, request=None) -> None:
@@ -819,7 +825,12 @@ class TestReanalysis:
 
         scheduled: dict[str, object] = {}
 
-        def _record_reanalysis(self, scheduled_task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
+        def _record_reanalysis(
+            self,
+            scheduled_task_id: str,
+            novel: dict,
+            request: ReanalyzeRequest | None = None,
+        ) -> None:
             scheduled["task_id"] = scheduled_task_id
             scheduled["novel_id"] = novel["novel_id"]
             scheduled["request"] = request
