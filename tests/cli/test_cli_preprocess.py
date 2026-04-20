@@ -36,15 +36,15 @@ class MockEmbeddingClient:
     def get_embedding(self, text: str):
         import random
 
-        return [random.random() for _ in range(1536)]
+        return [random.random() for _ in range(1024)]
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         import random
 
-        return [[random.random() for _ in range(1536)] for _ in texts]
+        return [[random.random() for _ in range(1024)] for _ in texts]
 
     async def detect_embedding_dimension(self, probe_text: str = "dimension probe") -> int:
-        return 1536
+        return 1024
 
     @staticmethod
     def compute_similarity(vec1, vec2):
@@ -58,15 +58,15 @@ class MockEmbeddingClientPreprocess:
     def get_embedding(self, text: str):
         import random
 
-        return [random.random() for _ in range(1536)]
+        return [random.random() for _ in range(1024)]
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         import random
 
-        return [[random.random() for _ in range(1536)] for _ in texts]
+        return [[random.random() for _ in range(1024)] for _ in texts]
 
     async def detect_embedding_dimension(self, probe_text: str = "dimension probe") -> int:
-        return 1536
+        return 1024
 
     @staticmethod
     def compute_similarity(vec1, vec2):
