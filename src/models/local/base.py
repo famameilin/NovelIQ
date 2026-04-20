@@ -70,11 +70,19 @@ def _ensure_strict_json_schema(node: Any) -> None:
     任务: fix-phase2-response-format-schema
     说明: 仅为声明了 properties 的对象补充 additionalProperties=false，
     避免把 dict[str, T] 这类映射 schema 误改成不允许任何键。
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: fix-phase2-response-format-schema
+    修改内容: strict provider 还要求 properties 中的所有字段都进入 required，
+    因此对对象 schema 统一补全 required，避免 phase2/3/4 再因默认值字段缺席而被拒绝。
     """
     if isinstance(node, dict):
-        # 只有真正的对象模型才补 false；映射类型会以 additionalProperties: {...} 表示值 schema。
-        if node.get("type") == "object" and "properties" in node:
+        # 只有真正的对象模型才补 false 和完整 required；
+        # 映射类型会以 additionalProperties: {...} 表示值 schema，不能把它误改成封闭对象。
+        if node.get("type") == "object" and "properties" in node and isinstance(node["properties"], dict):
             node.setdefault("additionalProperties", False)
+            node["required"] = list(node["properties"].keys())
 
         for key in ("properties", "$defs"):
             child = node.get(key)
