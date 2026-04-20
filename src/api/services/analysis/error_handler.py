@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -134,7 +134,7 @@ class AnalysisErrorHandler:
             run_id,
             status="cancelled",
             cancel_requested=False,
-            completed_at=datetime.now(),
+            completed_at=datetime.now(timezone.utc),
         )
         session.commit()
 
