@@ -61,6 +61,44 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
+def _ensure_strict_json_schema(node: Any) -> None:
+    """
+    递归收紧 JSON Schema，满足 strict structured output 的对象约束。
+
+    创建时间: 2026-04-20
+    创建者: Codex
+    任务: fix-phase2-response-format-schema
+    说明: 仅为声明了 properties 的对象补充 additionalProperties=false，
+    避免把 dict[str, T] 这类映射 schema 误改成不允许任何键。
+    """
+    if isinstance(node, dict):
+        # 只有真正的对象模型才补 false；映射类型会以 additionalProperties: {...} 表示值 schema。
+        if node.get("type") == "object" and "properties" in node:
+            node.setdefault("additionalProperties", False)
+
+        for key in ("properties", "$defs"):
+            child = node.get(key)
+            if isinstance(child, dict):
+                for value in child.values():
+                    _ensure_strict_json_schema(value)
+
+        for key in ("items", "additionalProperties", "contains", "if", "then", "else", "not"):
+            child = node.get(key)
+            if child is not None:
+                _ensure_strict_json_schema(child)
+
+        for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
+            child = node.get(key)
+            if isinstance(child, list):
+                for item in child:
+                    _ensure_strict_json_schema(item)
+        return
+
+    if isinstance(node, list):
+        for item in node:
+            _ensure_strict_json_schema(item)
+
+
 class TokenUsage(NamedTuple):
     """Token使用量记录"""
 
@@ -244,6 +282,7 @@ class BaseModelClient:
         说明: 使用 Pydantic 的 model_json_schema() 方法生成 JSON Schema
         """
         schema = response_model.model_json_schema()
+        _ensure_strict_json_schema(schema)
         return {
             "type": "json_schema",
             "json_schema": {
