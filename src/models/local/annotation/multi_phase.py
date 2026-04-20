@@ -101,7 +101,7 @@ async def _run_phase1(
     chapter_id: int | None,
     active_entities: str | None,
     evidence_bundle: EvidenceBundle | None,
-    cloud_client: AnnotationClient | None,
+    fallback_client: AnnotationClient | None,
     run_id: str | None,
     disambig_context: str | None = None,
 ) -> ChunkAnnotation:
@@ -127,7 +127,7 @@ async def _run_phase1(
         chapter_id=chapter_id,
         active_entities=active_entities,
         evidence_bundle=evidence_bundle,
-        cloud_client=cloud_client,
+        fallback_client=fallback_client,
         run_id=run_id,
         disambig_context=disambig_context,
     )
@@ -144,7 +144,7 @@ async def _run_phase2(
     position_pct: float | None,
     chapter_id: int | None,
     evidence_bundle: EvidenceBundle | None,
-    cloud_client: AnnotationClient | None,
+    fallback_client: AnnotationClient | None,
     run_id: str | None,
 ) -> ForeshadowingResult | None:
     """执行 Phase2 伏笔分析
@@ -171,7 +171,7 @@ async def _run_phase2(
         # 中文注释：优先透传上游已准备好的 evidence bundle，
         # 保证 AnnotationClient -> multi_phase -> Phase2 的真实入口也能复用同一份证据上下文。
         evidence_bundle=evidence_bundle,
-        cloud_client=cloud_client,
+        fallback_client=fallback_client,
         run_id=run_id,
     )
 
@@ -330,7 +330,7 @@ async def annotate_chunk_multi_phase(
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
-    cloud_client: AnnotationClient | None = None,
+    fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> MultiPhaseAnnotationResult:
@@ -360,7 +360,7 @@ async def annotate_chunk_multi_phase(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
-            cloud_client=cloud_client,
+            fallback_client=fallback_client,
             run_id=run_id,
             active_entities=active_entities,
             evidence_bundle=evidence_bundle,
@@ -379,7 +379,7 @@ async def annotate_chunk_multi_phase(
             main_characters=main_characters,
             position_pct=position_pct,
             chapter_id=chapter_id,
-            cloud_client=cloud_client,
+            fallback_client=fallback_client,
             run_id=run_id,
             active_entities=active_entities,
             evidence_bundle=evidence_bundle,
@@ -401,7 +401,7 @@ async def annotate_chunk_parallel(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     evidence_bundle: EvidenceBundle | None = None,
-    cloud_client: AnnotationClient | None = None,
+    fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
@@ -442,7 +442,7 @@ async def annotate_chunk_parallel(
             chapter_id=chapter_id,
             active_entities=active_entities,
             evidence_bundle=evidence_bundle,
-            cloud_client=cloud_client,
+            fallback_client=fallback_client,
             run_id=run_id,
             disambig_context=disambig_context,
         ),
@@ -457,7 +457,7 @@ async def annotate_chunk_parallel(
             position_pct=position_pct,
             chapter_id=chapter_id,
             evidence_bundle=evidence_bundle,
-            cloud_client=cloud_client,
+            fallback_client=fallback_client,
             run_id=run_id,
         ),
     )
@@ -544,7 +544,7 @@ async def annotate_chunk_serial(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     evidence_bundle: EvidenceBundle | None = None,
-    cloud_client: AnnotationClient | None = None,
+    fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     disambig_context: str | None = None,
@@ -578,7 +578,7 @@ async def annotate_chunk_serial(
         chapter_id=chapter_id,
         active_entities=active_entities,
         evidence_bundle=evidence_bundle,
-        cloud_client=cloud_client,
+        fallback_client=fallback_client,
         run_id=run_id,
         disambig_context=disambig_context,
     )
@@ -602,7 +602,7 @@ async def annotate_chunk_serial(
         position_pct=position_pct,
         chapter_id=chapter_id,
         evidence_bundle=evidence_bundle,
-        cloud_client=cloud_client,
+        fallback_client=fallback_client,
         run_id=run_id,
     )
     if emitter:

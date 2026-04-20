@@ -51,7 +51,7 @@ class AnnotationLike(Protocol):
         global_context: str | None = None,
         active_entities: str | None = None,
         evidence_bundle: Any | None = None,
-        cloud_client: AnnotationLike | None = None,
+        fallback_client: AnnotationLike | None = None,
         run_id: str | None = None,
         disambig_context: str | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
