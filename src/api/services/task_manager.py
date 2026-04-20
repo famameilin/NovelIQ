@@ -32,7 +32,7 @@ import os
 import socket
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -189,7 +189,7 @@ class TaskManager:
             # 中文注释：只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
             # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”。
             update_params.setdefault("worker_id", self._worker_id)
-            update_params["heartbeat_at"] = datetime.now(timezone.utc)
+            update_params["heartbeat_at"] = datetime.now(UTC)
 
         if not update_params:
             return
@@ -511,7 +511,7 @@ class TaskManager:
 
             try:
                 # 中文注释：heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”。
-                self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now(timezone.utc))
+                self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now(UTC))
             except Exception as exc:
                 logger.error(f"Failed to refresh runtime heartbeat for task {task_id}: {exc}")
 

@@ -536,7 +536,11 @@ async def cancel_task(
     # 任务不在内存中（如服务重启后），DB 真相已更新为 cancelling，
     # 后续由实际执行方或恢复流程在安全点完成最终 cancelled 收尾。
     if task_status in ("pending", "running"):
-        logger.info(f"Task {task_id} cancellation requested (not in memory), DB cancel_requested=true and status=cancelling")
+        logger.info(
+            "Task {} cancellation requested (not in memory), "
+            "DB cancel_requested=true and status=cancelling",
+            task_id,
+        )
         return {"task_id": task_id, "status": "cancelling", "message": "任务已标记为取消中，等待执行方收尾"}
 
     raise HTTPException(status_code=400, detail=f"任务状态为 {task_status}，无法取消")

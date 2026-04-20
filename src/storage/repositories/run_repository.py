@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, TypeGuard, TypeVar
 
 from loguru import logger
 from sqlalchemy import select
@@ -25,6 +25,19 @@ from src.storage.models import AnalysisRun
 from .base import BaseRepository
 
 _UNSET = object()
+T = TypeVar("T")
+
+
+def _is_set[T](value: T | object) -> TypeGuard[T]:
+    """
+    判断参数是否不是 `_UNSET` 哨兵值。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: fix-src-static-checks
+    说明: 统一收窄 `T | object` 到真实字段类型，避免 mypy 把 `_UNSET` 联合类型传进 ORM 字段赋值。
+    """
+    return value is not _UNSET
 
 
 class RunRepository(BaseRepository[dict[str, Any]]):
@@ -159,7 +172,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         if run_id is None:
             run_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         run = AnalysisRun(
             run_id=run_id,
@@ -201,7 +214,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             status: 新状态
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -222,7 +235,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             progress: 进度值 (0-100)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -243,7 +256,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             stage: 阶段名称
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -286,7 +299,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
             .where(AnalysisRun.cancel_requested == False)  # noqa: E712
-            .values(cancel_requested=True, updated_at=datetime.now(timezone.utc))
+            .values(cancel_requested=True, updated_at=datetime.now(UTC))
         )
         result = self.session.execute(stmt)
         self.session.commit()
@@ -306,7 +319,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -382,7 +395,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = heartbeat_at or datetime.now(timezone.utc)
+        now = heartbeat_at or datetime.now(UTC)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -411,7 +424,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -479,36 +492,36 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if not run:
             return
 
-        now = datetime.now(timezone.utc)
-        if status is not _UNSET:
+        now = datetime.now(UTC)
+        if _is_set(status):
             run.status = status
-        if progress is not _UNSET:
+        if _is_set(progress):
             run.progress = progress
-        if stage is not _UNSET:
+        if _is_set(stage):
             run.stage = stage
-        if sub_stage is not _UNSET:
+        if _is_set(sub_stage):
             run.sub_stage = sub_stage
-        if current is not _UNSET:
+        if _is_set(current):
             run.current = current
-        if total is not _UNSET:
+        if _is_set(total):
             run.total = total
-        if message is not _UNSET:
+        if _is_set(message):
             run.message = message
-        if error is not _UNSET:
+        if _is_set(error):
             run.error = error
-        if task_kind is not _UNSET:
+        if _is_set(task_kind):
             run.task_kind = task_kind
-        if request_payload is not _UNSET:
+        if _is_set(request_payload):
             run.request_payload = self._serialize_request_payload(request_payload)
-        if cancel_requested is not _UNSET:
+        if _is_set(cancel_requested):
             run.cancel_requested = cancel_requested
-        if worker_id is not _UNSET:
+        if _is_set(worker_id):
             run.worker_id = worker_id
-        if heartbeat_at is not _UNSET:
+        if _is_set(heartbeat_at):
             run.heartbeat_at = heartbeat_at
-        if started_at is not _UNSET:
+        if _is_set(started_at):
             run.started_at = started_at
-        if completed_at is not _UNSET:
+        if _is_set(completed_at):
             run.completed_at = completed_at
         run.updated_at = now
         self.session.commit()
@@ -623,7 +636,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "running")
@@ -653,7 +666,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "cancelling")
