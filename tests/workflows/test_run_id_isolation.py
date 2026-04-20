@@ -228,6 +228,58 @@ def test_build_context_sentences_respects_prev_chunks_setting(db_session) -> Non
     assert "old-clue" not in context
 
 
+def test_build_context_sentences_explicit_chunk_range_overrides_prev_chunks_setting(db_session) -> None:
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id="novel_ctx_explicit_window", source_path="test", title="Run")
+
+    chunk_repo = ChunkRepository(db_session)
+    chunk_repo.insert_chunks(
+        run_id,
+        [
+            Chunk(index=1, start=0, end=10, text="linliguo 在假山前停步。"),
+            Chunk(index=2, start=11, end=30, text="linliguo 被大家叫作算盘。"),
+            Chunk(index=3, start=31, end=50, text="linliguo 此时已经沉默。"),
+        ],
+    )
+
+    ann_repo = AnnotationRepository(db_session)
+    for chunk_id, action in ((1, "停步"), (2, "表明身份"), (3, "沉默")):
+        ann_repo.insert_chunk_characters(
+            run_id,
+            chunk_id,
+            [
+                CharacterSnapshot(
+                    name="linliguo",
+                    role_function="主体",
+                    action=action,
+                    action_type="叙事",
+                    emotion_score="neutral",
+                )
+            ],
+        )
+
+    original_prev_chunks = settings.runtime.annotation.prev_chunks
+    settings.runtime.annotation.prev_chunks = 1
+    try:
+        result = build_context_sentences(
+            db_session,
+            _candidates("linliguo"),
+            alias_keywords=["叫作"],
+            run_id=run_id,
+            max_chunk_id=3,
+            chunk_start_id=1,
+            chunk_end_id=3,
+        )
+    finally:
+        settings.runtime.annotation.prev_chunks = original_prev_chunks
+
+    assert "linliguo" in result
+    context = result["linliguo"]
+    assert "假山前停步" in context
+    assert "叫作算盘" in context
+    assert "此时已经沉默" in context
+
+
 def test_diagnosis_repository_joins_are_run_isolated(db_session) -> None:
     run_repo = RunRepository(db_session)
     run_1 = run_repo.create_run(novel_id="novel_diag", source_path="test", title="Run1")
