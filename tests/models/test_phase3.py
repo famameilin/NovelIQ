@@ -215,6 +215,76 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].speaker, ["侯飞白"])
 
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_batched_dialogues_must_return_global_indices(self, mock_settings: MagicMock) -> None:
+        """跨 batch 调用时，模型必须返回候选列表里显示的全局索引。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 5
+        mock_settings.runtime.annotation.phase3_max_retries = 3
+
+        mock_annotation_client = MagicMock()
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = False
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_annotation_client._session = None
+        mock_annotation_client._process_annotation_response = MagicMock(
+            return_value=('{"dialogues": []}', None, None)
+        )
+
+        async def _call_annotation_api(*args, **kwargs):
+            messages = kwargs["messages"]
+            user_prompt = messages[1]["content"]
+            if '1. content: "对话1"' in user_prompt:
+                parsed = MagicMock(
+                    dialogues=[
+                        DialogueRecordSchema(
+                            index=index,
+                            is_dialogue=True,
+                            speaker=["张三"],
+                            tone=None,
+                            is_inner_monologue=False,
+                            identity_clue=None,
+                        )
+                        for index in range(1, 6)
+                    ],
+                    model_dump=MagicMock(return_value={}),
+                )
+                return parsed, MagicMock()
+
+            if '6. content: "对话6"' in user_prompt:
+                self.assertIn('10. content: "对话10"', user_prompt)
+                parsed = MagicMock(
+                    dialogues=[
+                        DialogueRecordSchema(
+                            index=index,
+                            is_dialogue=True,
+                            speaker=["张三"],
+                            tone=None,
+                            is_inner_monologue=False,
+                            identity_clue=None,
+                        )
+                        for index in range(6, 11)
+                    ],
+                    model_dump=MagicMock(return_value={}),
+                )
+                return parsed, MagicMock()
+
+            raise AssertionError(f"Unexpected prompt batch: {user_prompt}")
+
+        mock_annotation_client._call_annotation_api = AsyncMock(side_effect=_call_annotation_api)
+
+        candidates = [QuoteCandidate(index=index, content=f"对话{index}") for index in range(1, 11)]
+        result = await attribute_dialogues_with_llm(
+            mock_annotation_client,
+            "测试文本",
+            candidates,
+            known_characters=["张三"],
+        )
+
+        self.assertEqual([record.index for record in result], list(range(1, 11)))
+        self.assertTrue(all(record.speaker == ["张三"] for record in result))
+
     @patch("src.models.local.annotation.phase3.record_model_interaction")
     @patch("src.models.local.annotation.phase3.settings")
     async def test_fallback_client_used_after_primary_retries(
