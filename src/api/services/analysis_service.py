@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -256,9 +256,34 @@ class AnalysisService:
         novel_id: str,
         analysis_logger: AnalysisLogger | None,
     ) -> None:
+        """处理已完成的分析任务，确保 DB 状态一致。
+
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: complete_task() 已改为仅更新内存，此处需自行完成 DB 状态更新。
+        """
         logger.info(f"Task {task_id} already completed, no action needed")
         self.novel_service.update_task_status(task_id, "completed")
         self.task_manager.complete_task(task_id, success=True)
+
+        # DB 终态写入：由于 complete_task() 不再写 DB，需自行操作
+        from src.storage.id_mapping import task_id_to_run_id
+        from src.storage.repositories import RunRepository
+
+        sf = self.session_factory or SessionFactory()
+        db_session = sf.get_session()
+        with db_session:
+            sql_session = db_session.connection
+            run_repo = RunRepository(sql_session)
+            run_id = task_id_to_run_id(task_id, sql_session)
+            run_repo.update_run_task_fields(
+                run_id,
+                status="completed",
+                progress=100.0,
+                completed_at=datetime.now(timezone.utc),
+            )
+
         if analysis_logger:
             analysis_logger.write_summary(
                 {
@@ -380,7 +405,7 @@ class AnalysisService:
                     claimed = run_repo.claim_pending_run(
                         run_id,
                         worker_id=self.task_manager.get_worker_id(),
-                        heartbeat_at=datetime.now(),
+                        heartbeat_at=datetime.now(timezone.utc),
                     )
                     if claimed:
                         return "claimed"
@@ -403,7 +428,7 @@ class AnalysisService:
                         run_id,
                         status="cancelled",
                         cancel_requested=False,
-                        completed_at=datetime.now(),
+                        completed_at=datetime.now(timezone.utc),
                         message=run.get("message") or "任务在启动前已取消",
                         worker_id=None,
                         heartbeat_at=None,

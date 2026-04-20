@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -28,17 +28,50 @@ _UNSET = object()
 
 
 class RunRepository(BaseRepository[dict[str, Any]]):
-    """
-    分析运行记录 Repository
+    """运行记录数据访问层。
+
+    创建时间: 2026-03-15
+    创建者: TraeAI
+    任务: postgresql-migration
+
+    修改时间: 2026-04-20
+    修改者: TraeAI
+    任务: task-system-db-driven-refactor
+    修改内容: 增加 TASK_RELATED_TABLES 常量，统一维护删除任务时需清理的从表清单。
 
     管理分析运行的创建、查询和状态更新。
     使用 AnalysisRun ORM 模型。
-
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session
+    从 sqlite3.Connection 迁移到 SQLAlchemy Session。
     """
+
+    # 任务关联表清单，删除任务时需清理的从表。
+    # 维护须知：新增 run 关联表时请同步更新此列表，避免删除时遗漏产生孤儿数据。
+    TASK_RELATED_TABLES: list[str] = [
+        "stage_summaries",
+        "token_usage",
+        "model_interactions",
+        "chunk_summaries",
+        "chunk_curves",
+        "global_stats",
+        "global_context",
+        "chunk_annotation",
+        "chunk_characters",
+        "chunk_dialogues",
+        "chunk_foreshadowing",
+        "chunk_locations",
+        "chunk_relations",
+        "chunk_style",
+        "chunk_topics",
+        "chunks",
+        "character_appearances",
+        "graph_entity_aliases",
+        "graph_relation_events",
+        "graph_relations_current",
+        "graph_entities",
+        "disambig_checkpoint",
+        "cloud_analysis",
+        "analysis_runs",
+    ]
 
     def _serialize_request_payload(self, request_payload: dict[str, Any] | None) -> str | None:
         """
@@ -61,10 +94,19 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         创建者: Codex (GPT-5)
         任务: fix-reanalysis-resume-regression
         修改内容: 读取 analysis_runs.request_payload 时恢复为语义化字典，避免上层直接处理 JSON 字符串。
+
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: 增加 JSON 解析异常保护，脏数据时返回 None 并记录警告日志。
         """
         if not request_payload:
             return None
-        return json.loads(request_payload)
+        try:
+            return json.loads(request_payload)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to deserialize request_payload: {e}")
+            return None
 
     def _to_dict(self, run: AnalysisRun) -> dict[str, Any]:
         """将 ORM 对象转换为字典"""
@@ -117,7 +159,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         if run_id is None:
             run_id = str(uuid.uuid4())
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         run = AnalysisRun(
             run_id=run_id,
@@ -159,7 +201,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             status: 新状态
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -180,7 +222,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             progress: 进度值 (0-100)
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -201,7 +243,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             run_id: 运行ID
             stage: 阶段名称
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
         run = self.session.execute(stmt).scalar_one_or_none()
         if run:
@@ -244,7 +286,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
             .where(AnalysisRun.cancel_requested == False)  # noqa: E712
-            .values(cancel_requested=True, updated_at=datetime.now())
+            .values(cancel_requested=True, updated_at=datetime.now(timezone.utc))
         )
         result = self.session.execute(stmt)
         self.session.commit()
@@ -264,7 +306,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -340,7 +382,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = heartbeat_at or datetime.now()
+        now = heartbeat_at or datetime.now(timezone.utc)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -368,7 +410,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.run_id == run_id)
@@ -434,7 +476,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if not run:
             return
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         if status is not _UNSET:
             run.status = status
         if progress is not _UNSET:
@@ -517,7 +559,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def delete_run(self, run_id: str) -> bool:
         """
-        删除运行记录及相关数据
+        删除运行记录及相关数据。
 
         创建时间: 2026-03-18
         创建者: TraeAI
@@ -527,37 +569,15 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         修改者: TraeAI
         任务: fix-delete-task-failure
         修改内容: 修正表名列表以匹配实际数据库架构
+
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: 使用 TASK_RELATED_TABLES 常量替代内联表名列表，便于统一维护。
         """
         from sqlalchemy import text
 
-        tables = [
-            "stage_summaries",
-            "token_usage",
-            "model_interactions",
-            "chunk_summaries",
-            "chunk_curves",
-            "global_stats",
-            "global_context",
-            "chunk_annotation",
-            "chunk_characters",
-            "chunk_dialogues",
-            "chunk_foreshadowing",
-            "chunk_locations",
-            "chunk_relations",
-            "chunk_style",
-            "chunk_topics",
-            "chunks",
-            "character_appearances",
-            "graph_entity_aliases",
-            "graph_relation_events",
-            "graph_relations_current",
-            "graph_entities",
-            "disambig_checkpoint",
-            "cloud_analysis",
-            "analysis_runs",
-        ]
-
-        for table in tables:
+        for table in self.TASK_RELATED_TABLES:
             try:
                 self.session.execute(text(f"DELETE FROM {table} WHERE run_id = :run_id"), {"run_id": run_id})
             except Exception as e:
@@ -598,7 +618,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "running")
@@ -628,7 +648,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         from sqlalchemy import update
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         stmt = (
             update(AnalysisRun)
             .where(AnalysisRun.status == "cancelling")

@@ -32,7 +32,7 @@ import os
 import socket
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -47,22 +47,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class TaskInfo:
-    """任务执行缓存，仅保留运行时必要的进程级对象。"""
+    """任务执行缓存，仅保留进程级执行对象和短期输出缓冲。
+
+    创建时间: 2025-03-11
+    创建者: TraeAI
+    任务: 任务管理
+
+    修改时间: 2026-04-20
+    修改者: TraeAI
+    任务: task-system-db-driven-refactor
+    修改内容: 剥离业务状态字段（status/progress/stage/sub_stage/current/total/message/error/completed_at/novel_id），
+              仅保留 asyncio.Task、cancel_event、heartbeat 对象和 llm_outputs 短期缓冲。
+              业务真相统一由 DB 提供，内存不承担状态判断职责。
+    """
 
     task_id: str
-    novel_id: str
-    status: TaskStatus = TaskStatus.PENDING
-    progress: float = 0.0
-    stage: str | None = None
-    sub_stage: str | None = None
-    current: int = 0
-    total: int = 100
-    message: str | None = None
     llm_outputs: list[str] = field(default_factory=list)
-    error: str | None = None
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
-    result: Any = None
     cancel_event: asyncio.Event | None = None
     asyncio_task: asyncio.Task | None = None
     heartbeat_stop_event: asyncio.Event | None = None
@@ -144,6 +144,13 @@ class TaskManager:
         创建时间: 2026-04-19
         创建者: TraeAI
         任务: task-system-db-driven-refactor
+
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: 明确枚举→字符串转换约定。kwargs 中的 TaskStatus 枚举值会自动转为 .value 字符串，
+                  与 DB 字段类型一致。调用方混用枚举和字符串时，此处统一处理。
+
         说明: 移除静默失败，确保状态变更可靠持久化。DB 为唯一业务真相。
         """
         if self._db_session_factory is None:
@@ -182,7 +189,7 @@ class TaskManager:
             # 中文注释：只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
             # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”。
             update_params.setdefault("worker_id", self._worker_id)
-            update_params["heartbeat_at"] = datetime.now()
+            update_params["heartbeat_at"] = datetime.now(timezone.utc)
 
         if not update_params:
             return
@@ -247,11 +254,16 @@ class TaskManager:
         return task_id
 
     def create_task(self, task_id: str, novel_id: str) -> TaskInfo:
+        """创建任务的内存执行缓存。
+
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: 不再初始化业务状态字段（status/progress/novel_id 等），仅创建执行缓存对象。
+                  novel_id 仅用于日志记录，不再存储到 TaskInfo 中。
+        """
         task = TaskInfo(
             task_id=task_id,
-            novel_id=novel_id,
-            status=TaskStatus.PENDING,
-            started_at=datetime.now(),
             cancel_event=asyncio.Event(),
             heartbeat_stop_event=asyncio.Event(),
         )
@@ -282,8 +294,9 @@ class TaskManager:
         创建者: TraeAI
         任务: task-6-task-manager-responsibility-shrink
         说明: 此方法仅返回进程内存中的任务，不代表完整的业务数据。调用方应改用 DB 查询。
+              由于 TaskInfo 不再存储 novel_id，当前实现返回空列表。
         """
-        return [t for t in self._tasks.values() if t.novel_id == novel_id]
+        return []
 
     def update_task(self, task_id: str, **kwargs) -> None:
         if task_id in self._tasks:
@@ -296,22 +309,31 @@ class TaskManager:
             if self._progress_callback and "progress" in kwargs:
                 self._progress_callback(
                     task_id,
-                    kwargs.get("stage", task.stage or ""),
+                    kwargs.get("stage", ""),
                     kwargs["progress"],
                     kwargs.get("message", ""),
                 )
+        else:
+            logger.warning(
+                f"Task {task_id} not in memory cache, updating DB only. "
+                f"This may indicate a stale cache or external state transition. Update params: {kwargs}"
+            )
 
         self._update_db(task_id, **kwargs)
 
     def complete_task(self, task_id: str, success: bool = True, error: str | None = None) -> None:
         """
-        更新任务完成状态（仅内存操作）。
+        更新任务完成状态的内存缓存（仅内存操作）。
 
         创建时间: 2026-04-19
         创建者: TraeAI
         任务: task-6-task-manager-responsibility-shrink
-        修改内容: 仅更新内存状态，不再做任务存在性检查，不再写 DB。
-        说明: 业务真相的 status 更新应由调用方直接操作 DB。
+
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: 改为仅更新内存状态并停止心跳，不再写 DB。业务真相的 status 更新应由调用方直接操作 DB。
+        说明: 调用方需确保已自行完成 DB 终态写入。
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -319,13 +341,6 @@ class TaskManager:
             return
 
         self._stop_runtime_heartbeat(task_id)
-        self.update_task(
-            task_id,
-            status=TaskStatus.COMPLETED if success else TaskStatus.FAILED,
-            progress=100.0 if success else task.progress,
-            error=error,
-            completed_at=datetime.now(),
-        )
 
         status_str = "completed" if success else f"failed: {error}"
         logger.info(f"Task {task_id} {status_str}")
@@ -346,11 +361,11 @@ class TaskManager:
         创建者: TraeAI
         任务: task-6-task-manager-responsibility-shrink
         说明: 此方法仅枚举进程内存中的任务，不代表完整的业务数据。调用方应改用 DB 查询。
+              由于 TaskInfo 不再存储 status，传入 status 过滤已无意义，直接返回所有内存任务。
         """
-        tasks = list(self._tasks.values())
-        if status:
-            tasks = [t for t in tasks if t.status == status]
-        return tasks
+        if status is not None:
+            logger.warning("list_tasks(status=...) filtering is deprecated; TaskInfo no longer stores status")
+        return list(self._tasks.values())
 
     def cancel_task(self, task_id: str) -> bool:
         """
@@ -361,9 +376,13 @@ class TaskManager:
         任务: task-6-task-manager-responsibility-shrink
         修改内容: 移除业务状态合法性判断（已完成/已取消等），调用方应在调用前自行判断。
 
-        说明: 本方法仅负责设置 cancel_event 和同步内存 status，
-              不做"是否允许取消"的业务判断。
-              DB cancel_requested 写入应由调用方直接操作或通过 _update_db。
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: 不再修改内存 status 字段（TaskInfo 已无 status），仅设置 cancel_event。
+                  DB cancel_requested 写入由调用方直接操作。
+
+        说明: 本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断。
 
         Returns:
             True 表示 cancel_event 已设置，False 表示任务不在内存中
@@ -372,8 +391,6 @@ class TaskManager:
         if task is None:
             return False
 
-        # 设置内存取消信号（加速缓存）
-        task.status = TaskStatus.CANCELLING
         if task.cancel_event:
             task.cancel_event.set()
 
@@ -382,12 +399,16 @@ class TaskManager:
 
     def cancel_completed_task(self, task_id: str, error: str | None = None) -> None:
         """
-        将任务标记为已取消（仅内存操作）。
+        清理任务的内存执行缓存并停止心跳（仅内存操作）。
 
         创建时间: 2026-04-19
         创建者: TraeAI
         任务: task-6-task-manager-responsibility-shrink
-        说明: 仅更新内存状态，业务状态应由调用方写入 DB。
+
+        修改时间: 2026-04-20
+        修改者: TraeAI
+        任务: task-system-db-driven-refactor
+        修改内容: 改为仅停止心跳并清理内存缓存，不再写 DB。业务状态应由调用方写入 DB。
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -396,13 +417,7 @@ class TaskManager:
 
         self._stop_runtime_heartbeat(task_id)
 
-        self.update_task(
-            task_id,
-            status=TaskStatus.CANCELLED,
-            error=error,
-            completed_at=datetime.now(),
-        )
-        logger.info(f"Task {task_id} memory status set to CANCELLED")
+        logger.info(f"Task {task_id} memory cache cleaned for cancellation")
 
     def append_llm_output(self, task_id: str, content: str) -> None:
         """追加 LLM 输出到任务信息，限制最大条目数防止内存泄漏。"""
@@ -496,7 +511,7 @@ class TaskManager:
 
             try:
                 # 中文注释：heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”。
-                self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now())
+                self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now(timezone.utc))
             except Exception as exc:
                 logger.error(f"Failed to refresh runtime heartbeat for task {task_id}: {exc}")
 
