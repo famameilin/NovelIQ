@@ -17,6 +17,11 @@
 修改者: Codex
 任务: 清理无效模型配置项
 修改内容: 删除 provider 和模型级 max_retries 配置，避免暴露未生效的伪配置入口
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: refactor-role-based-model-client-names
+修改内容: 将 cloud_annotation 重命名为 annotation_fallback，明确它表达的是标注兜底角色而非部署位置
 """
 
 from __future__ import annotations
@@ -71,13 +76,14 @@ class ModelsSettings:
     """
     任务级模型配置集合
 
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 添加 cloud_annotation 配置，用于本地标注失败后的云端fallback
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: refactor-role-based-model-client-names
+    修改内容: 将 cloud_annotation 重命名为 annotation_fallback，避免把客户端角色误命名为 provider
     """
 
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
-    cloud_annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
+    annotation_fallback: TaskModelSettings = field(default_factory=TaskModelSettings)
     incremental_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
     semantic_chunking: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
     full_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
@@ -100,7 +106,7 @@ class ThinkingSettings:
     """
 
     annotation: bool = False
-    cloud_annotation: bool = True
+    annotation_fallback: bool = True
     incremental_disambig: bool = True
     full_disambig: bool = True
     diagnosis: bool = True
@@ -122,7 +128,7 @@ class StreamingSettings:
     """
 
     annotation: bool = False
-    cloud_annotation: bool = True
+    annotation_fallback: bool = True
     incremental_disambig: bool = True
     full_disambig: bool = True
     diagnosis: bool = True
@@ -232,19 +238,23 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
     """
     解析任务级模型配置集合
 
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 添加 cloud_annotation 配置解析
-
     修改时间: 2026-03-16
     修改者: TraeAI
     修改内容: 传递环境变量前缀给各模型配置解析器
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: refactor-role-based-model-client-names
+    修改内容: 将 cloud_annotation 配置解析重命名为 annotation_fallback
     """
     if not data:
         data = {}
     return ModelsSettings(
         annotation=_parse_task_model_settings(data.get("annotation"), "ANNOTATION"),
-        cloud_annotation=_parse_task_model_settings(data.get("cloud_annotation"), "CLOUD_ANNOTATION"),
+        annotation_fallback=_parse_task_model_settings(
+            data.get("annotation_fallback"),
+            "ANNOTATION_FALLBACK",
+        ),
         incremental_disambig=_parse_task_model_settings(data.get("incremental_disambig"), "INCREMENTAL_DISAMBIG"),
         semantic_chunking=_parse_embedding_model_settings(data.get("semantic_chunking"), "SEMANTIC_CHUNKING"),
         full_disambig=_parse_task_model_settings(data.get("full_disambig"), "FULL_DISAMBIG"),
@@ -269,7 +279,7 @@ def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
         raise ValueError("thinking 配置不能为空，请检查 config/settings.json 中的 thinking 配置项")
     return ThinkingSettings(
         annotation=data.get("annotation", False),
-        cloud_annotation=data.get("cloud_annotation", True),
+        annotation_fallback=data.get("annotation_fallback", True),
         incremental_disambig=data.get("incremental_disambig", True),
         full_disambig=data.get("full_disambig", True),
         diagnosis=data.get("diagnosis", True),
@@ -288,7 +298,7 @@ def _parse_streaming_settings(data: dict[str, Any] | None) -> StreamingSettings:
         return StreamingSettings()
     return StreamingSettings(
         annotation=data.get("annotation", False),
-        cloud_annotation=data.get("cloud_annotation", True),
+        annotation_fallback=data.get("annotation_fallback", True),
         incremental_disambig=data.get("incremental_disambig", True),
         full_disambig=data.get("full_disambig", True),
         diagnosis=data.get("diagnosis", True),

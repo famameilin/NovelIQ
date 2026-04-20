@@ -275,18 +275,18 @@ async def annotate_chunk_phase4(
     )
     handler = AnnotationRetryHandler[list[RelationChangeSnapshot]](
         config=config,
-        local_client=client,
-        cloud_client=None,
+        primary_client=client,
+        fallback_client=None,
         exception_type=Phase4MaxRetriesExceededError,
     )
 
     async def operation(
-        local_client: AnnotationClient,
+        primary_client: AnnotationClient,
         retry_messages: list[dict] | None = None,
     ) -> list[RelationChangeSnapshot]:
         current_messages = retry_messages if retry_messages else messages
         return await execute_phase4_call(
-            client=local_client,
+            client=primary_client,
             text=text,
             known_characters=known_characters,
             messages=current_messages,

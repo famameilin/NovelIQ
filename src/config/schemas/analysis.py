@@ -4,6 +4,11 @@
 任务: 项目文件结构整理与拆解 - 从 settings.py 拆分分析相关配置类
 
 本模块包含分析相关的配置数据类。
+
+修改时间: 2026-04-20
+修改者: Codex
+任务: refactor-role-based-model-client-names
+修改内容: 将 cloud_annotation_fallback_enabled 重命名为 annotation_fallback_enabled，强调它控制的是标注兜底角色
 """
 
 from __future__ import annotations
@@ -112,11 +117,6 @@ class AnalysisSettings:
     修改内容: 添加双次调用标注配置
     - multi_phase_annotation: 多阶段标注配置
 
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 添加云端标注fallback开关配置
-    - cloud_annotation_fallback_enabled: 是否启用云端chunk兜底，默认true
-
     修改时间: 2026-03-19
     修改者: TraeAI
     修改内容: 添加有效层级关系类型配置
@@ -133,7 +133,7 @@ class AnalysisSettings:
     analysis_log_retention: str = "30 days"
     sentence_preview_max_chars: int = 100
     sentence_pool_max_chars: int = 80
-    cloud_annotation_fallback_enabled: bool = True
+    annotation_fallback_enabled: bool = True
     progress: ProgressSettings = field(default_factory=ProgressSettings)
     multi_phase_annotation: MultiPhaseAnnotationSettings = field(default_factory=MultiPhaseAnnotationSettings)
     valid_relation_types: list[str] = field(
@@ -367,13 +367,14 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
     修改者: TraeAI
     修改内容: 添加双次调用标注配置解析
 
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 添加云端标注fallback开关配置解析
-
     修改时间: 2026-03-19
     修改者: TraeAI
     修改内容: 添加有效层级关系类型配置解析
+
+    修改时间: 2026-04-20
+    修改者: Codex
+    任务: refactor-role-based-model-client-names
+    修改内容: 将 cloud_annotation_fallback_enabled 重命名为 annotation_fallback_enabled
     """
     if not data:
         return AnalysisSettings()
@@ -385,7 +386,7 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
         analysis_log_retention=data.get("analysis_log_retention", "30 days"),
         sentence_preview_max_chars=data.get("sentence_preview_max_chars", 100),
         sentence_pool_max_chars=data.get("sentence_pool_max_chars", 80),
-        cloud_annotation_fallback_enabled=data.get("cloud_annotation_fallback_enabled", True),
+        annotation_fallback_enabled=data.get("annotation_fallback_enabled", True),
         progress=_parse_progress_settings(data.get("progress")),
         multi_phase_annotation=_parse_multi_phase_annotation_settings(data.get("multi_phase_annotation")),
         valid_relation_types=data.get(

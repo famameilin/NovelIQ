@@ -12,7 +12,7 @@
       "presence_penalty": 1.5,
       "repetition_penalty": 1.0
     },
-    "cloud_annotation": {
+    "annotation_fallback": {
       "base_url": null,
       "model": null,
       "api_key": null,
@@ -78,7 +78,7 @@
   },
   "thinking": {
     "annotation": false,
-    "cloud_annotation": false,
+    "annotation_fallback": false,
     "incremental_disambig": true,
     "full_disambig": true,
     "diagnosis": true,
@@ -86,7 +86,7 @@
   },
   "streaming": {
     "annotation": true,
-    "cloud_annotation": true,
+    "annotation_fallback": true,
     "incremental_disambig": true,
     "full_disambig": true,
     "diagnosis": true,
@@ -181,7 +181,7 @@
     "analysis_log_retention": "30 days",
     "sentence_preview_max_chars": 100,
     "sentence_pool_max_chars": 80,
-    "cloud_annotation_fallback_enabled": true,
+    "annotation_fallback_enabled": true,
     "multi_phase_annotation": {
       "parallel": false
     },

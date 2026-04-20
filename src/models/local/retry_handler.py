@@ -4,7 +4,7 @@
 创建时间: 2026-03-17
 创建者: TraeAI
 任务: code-quality-refactor - 统一重试机制
-说明: 提供AnnotationClient专用的重试逻辑，支持本地重试和云端fallback
+说明: 提供 AnnotationClient 专用的重试逻辑，支持主客户端重试和兜底客户端 fallback
 
 修改时间: 2026-04-09
 修改者: TraeAI
@@ -50,7 +50,7 @@ class AnnotationRetryHandler[T]:
     创建时间: 2026-03-17
     创建者: TraeAI
     任务: code-quality-refactor - 统一重试机制
-    说明: 处理标注客户端的复杂重试逻辑，包括本地重试和云端fallback
+    说明: 处理标注客户端的复杂重试逻辑，包括主客户端重试和兜底客户端 fallback
 
     修改时间: 2026-04-09
     修改者: TraeAI
@@ -61,13 +61,13 @@ class AnnotationRetryHandler[T]:
     def __init__(
         self,
         config: RetryConfig,
-        local_client: Any,
-        cloud_client: Any | None = None,
+        primary_client: Any,
+        fallback_client: Any | None = None,
         exception_type: type[Exception] | None = None,
     ) -> None:
         self.config = config
-        self.local_client = local_client
-        self.cloud_client = cloud_client
+        self.primary_client = primary_client
+        self.fallback_client = fallback_client
         self.exception_type = exception_type
         self.state = RetryState()
 
@@ -101,9 +101,9 @@ class AnnotationRetryHandler[T]:
 
                 if build_retry_messages and self.state.last_bad_output:
                     messages = build_retry_messages()
-                    result = await operation(self.local_client, messages)
+                    result = await operation(self.primary_client, messages)
                 else:
-                    result = await operation(self.local_client)
+                    result = await operation(self.primary_client)
 
                 if attempt > 0:
                     logger.info(
@@ -118,8 +118,8 @@ class AnnotationRetryHandler[T]:
                 self.state.last_error = e
                 self._handle_error(e)
 
-        if self.cloud_client is not None:
-            return await self._try_cloud_fallback(operation, build_retry_messages)
+        if self.fallback_client is not None:
+            return await self._try_fallback_client(operation, build_retry_messages)
 
         self._raise_max_retries_error()
 
@@ -142,14 +142,14 @@ class AnnotationRetryHandler[T]:
             self.config.chunk_id,
         )
 
-    async def _try_cloud_fallback(
+    async def _try_fallback_client(
         self,
         operation: Callable[..., Any],
         build_retry_messages: Callable[[], Any] | None = None,
     ) -> T:
-        """尝试云端fallback"""
+        """尝试兜底客户端。"""
         logger.warning(
-            "{} local model failed after {} attempts, falling back to cloud model chunk_id={}",
+            "{} primary client failed after {} attempts, falling back to fallback client chunk_id={}",
             self.config.operation_name,
             self.config.max_retries,
             self.config.chunk_id,
@@ -157,19 +157,19 @@ class AnnotationRetryHandler[T]:
 
         try:
             logger.debug(
-                "{} cloud attempt chunk_id={}",
+                "{} fallback attempt chunk_id={}",
                 self.config.operation_name,
                 self.config.chunk_id,
             )
 
             if build_retry_messages and self.state.last_bad_output:
                 messages = build_retry_messages()
-                result = await operation(self.cloud_client, messages)
+                result = await operation(self.fallback_client, messages)
             else:
-                result = await operation(self.cloud_client)
+                result = await operation(self.fallback_client)
 
             logger.info(
-                "{} cloud succeeded chunk_id={}",
+                "{} fallback succeeded chunk_id={}",
                 self.config.operation_name,
                 self.config.chunk_id,
             )
@@ -178,7 +178,7 @@ class AnnotationRetryHandler[T]:
         except Exception as e:
             self.state.last_error = e
             logger.error(
-                "{} cloud failed: {} chunk_id={}",
+                "{} fallback failed: {} chunk_id={}",
                 self.config.operation_name,
                 str(e),
                 self.config.chunk_id,
@@ -189,7 +189,7 @@ class AnnotationRetryHandler[T]:
         """抛出最大重试次数 exceeded 错误"""
         error_msg = (
             f"{self.config.operation_name} failed after "
-            f"{self.config.max_retries} local + 1 cloud retries: "
+            f"{self.config.max_retries} primary + 1 fallback retries: "
             f"{str(self.state.last_error)}"
         )
         logger.error(
