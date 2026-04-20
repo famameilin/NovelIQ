@@ -72,6 +72,11 @@ async def run_preprocess(
     任务: workflows 使用 Repository 模式重构
     修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
+    修改时间: 2026-04-20
+    修改者: Codex (GPT-5)
+    任务: fix-preprocess-transaction-boundary
+    修改内容: 将 chunks/style/embedding 写入切成短事务，避免长事务阻塞 analysis_runs 状态写回
+
     Args:
         source_path: 源文件路径
         run_id: 运行ID
@@ -125,6 +130,7 @@ async def run_preprocess(
     logger.info(f"chunked {total_chunks} chunks total_chars={total_chars}")
 
     chunk_repo.insert_chunks(run_id, all_chunks)
+    _commit_preprocess_writes(session, step="insert_chunks")
     logger.info(f"inserted {total_chunks} chunks into db (run_id={run_id})")
 
     style_rows: list[ChunkStyleData] = []
@@ -144,6 +150,7 @@ async def run_preprocess(
         style_rows.append(style_data)
 
     chunk_repo.insert_chunk_style(run_id, style_rows)
+    _commit_preprocess_writes(session, step="insert_chunk_style")
 
     if settings.rag.embedding_enabled and settings.rag.level3_enabled:
         logger.info("generating chunk embeddings for Level 3 vector retrieval")
@@ -164,6 +171,23 @@ async def run_preprocess(
     return total_chunks, total_chars, elapsed
 
 
+def _commit_preprocess_writes(session: Session, *, step: str) -> None:
+    """
+    提交 preprocess 阶段的分段写入，及时释放事务锁。
+
+    创建时间: 2026-04-20
+    创建者: Codex (GPT-5)
+    任务: fix-preprocess-transaction-boundary
+    说明: preprocess 会连续写 chunks、chunk_style、chunk_embeddings，这些表都外键关联 analysis_runs。
+          若整段预处理共用一个长事务，EventBus 另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout。
+          因此这里在关键批量写入后立即提交，主动切断长事务。
+    """
+    # 中文注释：这里的 commit 目标是缩短锁持有时间，而不是改变业务原子性边界；
+    # preprocess 本身已是可恢复阶段，分段提交比让状态写回超时更符合当前系统语义。
+    session.commit()
+    logger.debug(f"Committed preprocess writes after step={step}")
+
+
 async def _generate_chunk_embeddings(
     session: Session,
     run_id: str,
@@ -177,6 +201,11 @@ async def _generate_chunk_embeddings(
     创建者: TraeAI
     任务: implement-level3-vector-retrieval
     说明: 为 Level 3 向量检索生成 chunk embedding
+
+    修改时间: 2026-04-20
+    修改者: Codex (GPT-5)
+    任务: fix-preprocess-transaction-boundary
+    修改内容: 在 schema 准备后和 embedding 落库后及时提交，避免 embedding 长阶段阻塞 analysis_runs 状态写回
 
     Args:
         session: 数据库连接
@@ -202,6 +231,7 @@ async def _generate_chunk_embeddings(
         raise ValueError(f"Level 3 embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}")
 
     ensure_chunk_embeddings_schema(session, expected_dim)
+    _commit_preprocess_writes(session, step="ensure_chunk_embeddings_schema")
 
     total_chunks = len(all_chunks)
     if emitter:
@@ -240,6 +270,7 @@ async def _generate_chunk_embeddings(
 
     if embeddings:
         insert_chunk_embeddings(session, run_id, embeddings)
+        _commit_preprocess_writes(session, step="insert_chunk_embeddings")
         logger.info(f"inserted {len(embeddings)} chunk embeddings into db (run_id={run_id})")
 
     if emitter:
