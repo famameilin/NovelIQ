@@ -45,7 +45,6 @@ class AnnotationRuntimeSettings:
 
     phase_max_retries: int = 3
     phase3_max_retries: int = 3
-    validation_max_retries: int = 3
     prev_chunks: int = 3
     lookback: int = 10
 
@@ -55,10 +54,6 @@ class AnnotationRuntimeSettings:
         self.phase3_max_retries = _parse_positive_int(
             self.phase3_max_retries,
             "runtime.annotation.phase3_max_retries",
-        )
-        self.validation_max_retries = _parse_positive_int(
-            self.validation_max_retries,
-            "runtime.annotation.validation_max_retries",
         )
         self.prev_chunks = _parse_positive_int(self.prev_chunks, "runtime.annotation.prev_chunks")
         self.lookback = _parse_positive_int(self.lookback, "runtime.annotation.lookback")
@@ -135,7 +130,6 @@ def _parse_annotation_runtime_settings(data: dict[str, Any] | None) -> Annotatio
     settings = AnnotationRuntimeSettings(
         phase_max_retries=json_data.get("phase_max_retries", 3),
         phase3_max_retries=json_data.get("phase3_max_retries", 3),
-        validation_max_retries=json_data.get("validation_max_retries", 3),
         prev_chunks=json_data.get("prev_chunks", 3),
         lookback=json_data.get("lookback", 10),
     )
