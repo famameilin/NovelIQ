@@ -18,6 +18,12 @@
  * 修改内容:
  *   - 统一使用 NovelHeader 承担页面标题，避免重复标题层级
  *   - 移除页面内额外说明文案，使时间轴页与主题页保持一致的头部结构
+ *
+ * 修改时间: 2026-04-22
+ * 任务: 收紧时间轴页统计卡高度
+ * 修改内容:
+ *   - 仅压缩时间轴页顶部三张统计卡的内边距与说明区，避免影响其他页面的 MetricCard
+ *   - 保留原有视觉风格，只降低这组三卡的纵向占用
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -31,7 +37,6 @@ import { useNovelStore } from "@/store/novelStore";
 import { MetricCard } from "@/components/common/MetricCard";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   TimelineLegend,
@@ -275,7 +280,7 @@ export function TimelinePage() {
     <PageContainer>
       <NovelHeader title="叙事时间轴" />
 
-      <div className="mt-4 space-y-6">
+      <div className="mt-3 space-y-5">
         {selectionHint && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -294,16 +299,17 @@ export function TimelinePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
         >
-          <div className="space-y-4">
+          <div className="space-y-3">
               <div className="grid gap-3 md:grid-cols-3">
                 <MetricCard
                   label="Overview"
                   value={nodes.length}
                   format="raw"
                   accent="chart-1"
-                  icon={<TrendingUp className="h-5 w-5" />}
+                  icon={<TrendingUp className="h-4 w-4" />}
                   description="当前筛选层级下保留下来的关键叙事节点数量。"
-                  footer={<p className="mt-3 text-sm text-text-muted">当前筛选下的关键叙事节点</p>}
+                  footer={<p className="mt-2 text-xs text-text-muted">当前筛选下的关键叙事节点</p>}
+                  className="!p-4"
                   showOrb
                 />
                 <MetricCard
@@ -311,9 +317,10 @@ export function TimelinePage() {
                   value={pivotCount}
                   format="raw"
                   accent="chart-5"
-                  icon={<Sparkles className="h-5 w-5" />}
+                  icon={<Sparkles className="h-4 w-4" />}
                   description="被标记为转折点的节点数量，适合优先阅读。"
-                  footer={<p className="mt-3 text-sm text-text-muted">转折点，适合优先阅读</p>}
+                  footer={<p className="mt-2 text-xs text-text-muted">转折点，适合优先阅读</p>}
+                  className="!p-4"
                   showOrb
                 />
                 <MetricCard
@@ -321,9 +328,10 @@ export function TimelinePage() {
                   value={relationChangeCount}
                   format="raw"
                   accent="chart-2"
-                  icon={<GitBranch className="h-5 w-5" />}
+                  icon={<GitBranch className="h-4 w-4" />}
                   description="关系变化节点数量，通常最适合联动图谱排查。"
-                  footer={<p className="mt-3 text-sm text-text-muted">关系变化节点，最适合联动图谱排查</p>}
+                  footer={<p className="mt-2 text-xs text-text-muted">关系变化节点，最适合联动图谱排查</p>}
+                  className="!p-4"
                   showOrb
                 />
               </div>
@@ -354,7 +362,7 @@ export function TimelinePage() {
                   暂无时间轴节点
                 </div>
               ) : (
-                <div className="space-y-4 pb-4">
+                <div className="space-y-3 pb-3">
                   <div className="rounded-[28px] border border-border/60 bg-surface/75 p-4">
                     <TimelineControls
                       variant="inline"
@@ -362,7 +370,7 @@ export function TimelinePage() {
                       onMaxLevelChange={handleMaxLevelChange}
                     />
 
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-3 flex flex-wrap gap-2">
                       {phases.length === 0 ? (
                         <p className="text-sm text-text-muted">暂无阶段数据</p>
                       ) : (
@@ -388,7 +396,7 @@ export function TimelinePage() {
                       )}
                     </div>
 
-                    <TimelineLegend className="mt-4" />
+                    <TimelineLegend className="mt-3" />
                   </div>
 
                   <TimelineTrack
