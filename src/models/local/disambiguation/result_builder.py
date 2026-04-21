@@ -25,7 +25,7 @@ from loguru import logger
 
 from src.models.disambiguation_types import NameCountCandidate
 
-from ..schema import CloudDisambiguateResponseModel, DisambiguateResponseModel, EntityType
+from ..schema import CloudDisambiguateResponseModel, DisambigConfidence, DisambiguateResponseModel, EntityType
 from .evidence import EvidenceProfile, build_evidence_profile
 
 
@@ -89,27 +89,35 @@ def normalize_disambiguate_response(
     if isinstance(response_data, DisambiguateResponseModel):
         return response_data
 
-    canonical_decisions: dict[str, str] = {}
-    for item in response_data.canonical_decisions:
-        canonical_decisions[str(item.name)] = str(item.canonical)
+    cloud_response = response_data
+    thinking_content = getattr(cloud_response, "_thinking_content", None) or getattr(
+        cloud_response,
+        "thinking_content",
+        None,
+    )
 
-    alias_confidence: dict[str, str] = {}
-    for item in response_data.alias_confidence:
-        alias_confidence[str(item.name)] = str(item.confidence)
+    canonical_decisions: dict[str, str] = {}
+    for decision_record in cloud_response.canonical_decisions:
+        canonical_decisions[str(decision_record.name)] = str(decision_record.canonical)
+
+    alias_confidence: dict[str, DisambigConfidence] = {}
+    for confidence_record in cloud_response.alias_confidence:
+        alias_confidence[str(confidence_record.name)] = confidence_record.confidence
 
     entity_types: dict[str, EntityType] = {}
-    for item in response_data.entity_types:
-        entity_types[str(item.name)] = item.entity_type
+    for entity_type_record in cloud_response.entity_types:
+        entity_types[str(entity_type_record.name)] = entity_type_record.entity_type
 
     evidence_sources: dict[str, list[str]] = {}
-    for item in response_data.evidence_sources:
-        evidence_sources[str(item.name)] = [str(source) for source in item.sources]
+    for evidence_record in cloud_response.evidence_sources:
+        evidence_sources[str(evidence_record.name)] = [str(source) for source in evidence_record.sources]
 
     return DisambiguateResponseModel(
         canonical_decisions=canonical_decisions,
         alias_confidence=alias_confidence,
         entity_types=entity_types,
-        entity_relations=list(response_data.entity_relations),
+        entity_relations=list(cloud_response.entity_relations),
+        _thinking_content=thinking_content,
         evidence_sources=evidence_sources,
     )
 
