@@ -40,6 +40,24 @@
  *   - 移除中部旧基线，让张力曲线直接承担时间轴主轴角色
  *   - 将张力曲线提升到画布中段，节点围绕曲线分布而不是落在下半区
  *   - 将内部留白转移为色块与上下标签卡之间的呼吸空间，减少无效空白
+ *
+ * 修改时间: 2026-04-22
+ * 任务: 收紧时间轴底部空白
+ * 修改内容:
+ *   - 收紧主画布高度与阶段底边，减少下方无效空带
+ *   - 让张力底图更贴近底部，同时缩小底部说明行与主图之间的间距
+ *
+ * 修改时间: 2026-04-22
+ * 任务: 回收时间轴底部文字区空间
+ * 修改内容:
+ *   - 移除底部“开篇/叙事张力逐步累积/结尾”文字区，将高度回灌给主画布
+ *   - 适当放宽下方标签卡的容纳高度，避免底部节点卡被裁切
+ *
+ * 修改时间: 2026-04-22
+ * 任务: 收紧时间轴整体卡片高度
+ * 修改内容:
+ *   - 缩小顶部保留区与外层内边距，减少主图上方无效空白
+ *   - 轻微压缩主画布高度，让整块时间轴卡片更紧凑
  */
 
 import { motion } from "framer-motion";
@@ -74,19 +92,19 @@ const TRACK_CURVE_START_PADDING_PX = 28;
 const TRACK_CURVE_END_PADDING_PX = 68;
 const TRACK_LABEL_START_GAP_PX = 16;
 const TRACK_LABEL_END_GAP_PX = 38;
-const TRACK_HEIGHT_PX = 376;
+const TRACK_HEIGHT_PX = 378;
 const TRACK_BASELINE_Y = 172;
 const TRACK_MIN_WIDTH_PX = 980;
 const TRACK_NODE_SPACING_PX = 136;
 const TRACK_CHUNK_SPACING_PX = 46;
 const LANE_GAP_PX = 48;
-const LABEL_HEIGHT_PX = 58;
+const LABEL_HEIGHT_PX = 72;
 const TOP_LABEL_MARGIN_PX = 12;
 const BOTTOM_LABEL_MARGIN_PX = 44;
-const PHASE_BAND_TOP_PX = 28;
-const PHASE_BAND_BOTTOM_PX = 28;
-const TOP_LABEL_CLEARANCE_PX = 18;
-const BOTTOM_LABEL_CLEARANCE_PX = 20;
+const PHASE_BAND_TOP_PX = 16;
+const PHASE_BAND_BOTTOM_PX = 0;
+const TOP_LABEL_CLEARANCE_PX = 12;
+const BOTTOM_LABEL_CLEARANCE_PX = 10;
 const CURVE_CENTER_Y = 176;
 const CURVE_AMPLITUDE_PX = 52;
 const NODE_RENDER_OFFSET_X_PX = -8;
@@ -171,7 +189,7 @@ export function TimelineTrack({
     <div className={cn("relative overflow-hidden rounded-[28px] border border-border/70 bg-background/80", className)}>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.8),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,240,236,0.76))]" />
 
-      <div className="relative pb-5 pt-4">
+      <div className="relative pb-3 pt-2">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-border/70 bg-background/85 text-text">
@@ -189,7 +207,7 @@ export function TimelineTrack({
           <div className="text-xs text-text-muted">点击节点可在下方查看完整叙事细节</div>
         </div>
 
-        <div className="overflow-x-auto overflow-y-hidden px-2 pb-3">
+        <div className="overflow-x-auto overflow-y-hidden px-2 pb-2">
           <div className="w-max min-w-full">
             <div
               className="relative overflow-hidden rounded-[24px] border border-white/60 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.7),rgba(247,240,236,0.4))]"
@@ -338,11 +356,6 @@ export function TimelineTrack({
               </div>
             </div>
 
-            <div className="mt-4 flex items-center justify-between px-1 text-xs text-text-muted">
-              <span>开篇</span>
-              <span>叙事张力逐步累积</span>
-              <span>结尾</span>
-            </div>
           </div>
         </div>
       </div>
@@ -422,7 +435,7 @@ function buildTensionAreaPath(tensionCurve: number[], totalChunks: number, canva
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
     .join(" ");
 
-  const areaFloor = TRACK_HEIGHT_PX - 34;
+  const areaFloor = TRACK_HEIGHT_PX;
   const areaPath = `${linePath} L ${normalizedPoints[normalizedPoints.length - 1]?.x.toFixed(2)} ${areaFloor} L ${normalizedPoints[0]?.x.toFixed(2)} ${areaFloor} Z`;
 
   return { linePath, areaPath };
