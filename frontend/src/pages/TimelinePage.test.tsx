@@ -87,6 +87,7 @@ vi.mock("@/components/timeline", () => ({
     </div>
   ),
   PhaseBar: passthroughComponent("phase-bar"),
+  TimelineLegend: passthroughComponent("timeline-legend"),
   TensionOverlay: passthroughComponent("tension-overlay"),
   TimelineTrack: ({ nodes, onNodeClick }: { nodes: TimelineResponse["nodes"]; onNodeClick: (node: TimelineResponse["nodes"][number]) => void }) => (
     <div data-testid="timeline-track">
@@ -311,8 +312,7 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    expect(await screen.findByText("selected-none")).toBeInTheDocument();
-    expect(screen.getByText("event-none")).toBeInTheDocument();
+    expect(await screen.findByText("点击任意节点查看详情")).toBeInTheDocument();
     expect(screen.getByText("未定位到对应事件。")).toBeInTheDocument();
   });
 

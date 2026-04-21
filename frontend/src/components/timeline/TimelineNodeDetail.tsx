@@ -5,6 +5,12 @@
  * 创建者: GLM-5
  * 任务: Phase 2-B 叙事时间轴
  * 说明: 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
+ *
+ * 修改时间: 2026-04-21
+ * 任务: 修复叙事时间轴页面布局与节点语义表达
+ * 修改内容:
+ *   - 复用统一节点语义配置，避免详情标题与时间轴图例颜色含义不一致
+ *   - 允许详情卡片直接作为侧边栏使用，适配新的时间轴总览布局
  */
 
 import { useCallback, useMemo } from "react";
@@ -23,37 +29,9 @@ import {
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { DashboardCardShell, type MetricAccent } from "@/components/common/DashboardCardShell";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import type { TimelineNode as TimelineNodeType } from "@/api/types";
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
-
-const NODE_TYPE_CONFIG: Record<
-  string,
-  { icon: typeof Zap; colorClass: string; label: string; accent: MetricAccent }
-> = {
-  plot: { icon: Zap, colorClass: "text-primary", label: "情节节点", accent: "primary" },
-  character_entry: {
-    icon: User,
-    colorClass: "text-chart-positive",
-    label: "角色登场",
-    accent: "chart-3",
-  },
-  character_exit: {
-    icon: UserMinus,
-    colorClass: "text-chart-negative",
-    label: "角色退场",
-    accent: "chart-5",
-  },
-  relation_change: {
-    icon: Link2,
-    colorClass: "text-chart-2",
-    label: "关系变化",
-    accent: "chart-2",
-  },
-};
+import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -82,8 +60,8 @@ export function TimelineNodeDetail({
 }: TimelineNodeDetailProps) {
   const navigate = useNavigate();
 
-  const config = node ? (NODE_TYPE_CONFIG[node.node_type] || NODE_TYPE_CONFIG.plot) : null;
-  const Icon = config?.icon;
+  const presentation = node ? getTimelineNodePresentation(node.node_type) : null;
+  const Icon = presentation?.icon;
 
   const handleCharacterClick = useCallback((characterName: string) => {
     navigate(`/novels/${novelId}/characters?highlight=${encodeURIComponent(characterName)}`);
@@ -120,7 +98,7 @@ export function TimelineNodeDetail({
 
   return (
     <AnimatePresence mode="wait">
-      {node && config && Icon && (
+      {node && presentation && Icon && (
         <motion.div
           key="node-detail"
           initial={{ opacity: 0, height: 0 }}
@@ -130,9 +108,9 @@ export function TimelineNodeDetail({
           className={cn("overflow-hidden", className)}
         >
           <DashboardCardShell
-            title={config.label}
-            icon={<Icon className={cn("h-4 w-4", config.colorClass)} />}
-            accent={config.accent}
+            title={presentation.label}
+            icon={<Icon className={cn("h-4 w-4", presentation.iconClassName)} />}
+            accent={presentation.accent}
             showOrb
             headerRight={
               onClose ? (
