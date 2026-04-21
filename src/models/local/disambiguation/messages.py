@@ -10,6 +10,7 @@ from src.config.constants import VALID_ENTITY_TYPES
 from src.models.disambiguation_types import NameCountCandidate
 
 from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
+from .constants import PROTECTED_CATEGORY_LABEL
 from .evidence import build_evidence_profile, format_evidence_profile
 from .evidence_renderer import DisambiguationPromptContext, render_disambiguation_prompt_context_sections
 
@@ -86,7 +87,7 @@ def _format_evidence_annotation(evidence_types: list[str]) -> str:
 def _get_category_label(category: str | None) -> str:
     """将分类类别转为中文标签。"""
     if category == "protected":
-        return "受保护-默认不合并"
+        return PROTECTED_CATEGORY_LABEL
     return "普通"
 
 

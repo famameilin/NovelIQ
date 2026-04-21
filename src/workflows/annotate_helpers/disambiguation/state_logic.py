@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import replace
+from functools import lru_cache
 from typing import Any, Literal
 
 from loguru import logger
@@ -22,6 +23,7 @@ from src.models.local.disambiguation import (
     NameReviewState,
     validate_state_invariants,
 )
+from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.disambiguation.evidence import (
     EVIDENCE_SIGNAL_IDENTITY_REVEAL,
     EVIDENCE_SIGNAL_KINSHIP_IDENTITY,
@@ -56,8 +58,6 @@ _OVERRIDE_ALLOWED_SIGNALS: frozenset[str] = frozenset(
         EVIDENCE_SIGNAL_IDENTITY_REVEAL,
     }
 )
-
-_PROTECTED_CONTEXT_PREFIX = "【受保护-默认不合并】"
 
 # protected 候选的硬门禁比普通候选更严格：
 # 只有明确身份揭示、命名场景、亲缘身份或独特身体标记这类强证据，
@@ -168,6 +168,7 @@ def _normalize_evidence_strength(strength: Any) -> Literal["weak", "mixed", "str
     return None
 
 
+@lru_cache(maxsize=1)
 def _load_protected_canonical_penalty_names() -> frozenset[str]:
     """
     加载需要在 canonical 重选时降权的泛指/职位称呼。
@@ -178,12 +179,11 @@ def _load_protected_canonical_penalty_names() -> frozenset[str]:
     说明: 这里复用候选过滤阶段的 protected 名单，避免 canonical 重选再次把
           “侍卫/丫鬟/某人”这类泛称推成 cluster 的代表名。
     """
+    # 中文注释：这里改成惰性 + 缓存加载，避免 import state_logic 时立刻触发
+    # CandidateFilter 初始化，把“canonical 重选需要的 protected 名单”收敛为按需依赖。
     from .candidate_filter import CandidateFilter
 
     return CandidateFilter().protected
-
-
-_PROTECTED_CANONICAL_PENALTY_NAMES = _load_protected_canonical_penalty_names()
 
 
 def _name_variants_for_matching(name: str) -> set[str]:
@@ -231,7 +231,7 @@ def _is_protected_candidate_context(context: str | None) -> bool:
     """
     if not context:
         return False
-    return context.strip().startswith(_PROTECTED_CONTEXT_PREFIX)
+    return context.strip().startswith(PROTECTED_CONTEXT_PREFIX)
 
 
 def _is_descriptor_like_name(name: str) -> bool:
@@ -247,7 +247,7 @@ def _is_descriptor_like_name(name: str) -> bool:
     stripped_name = name.strip()
     if not stripped_name:
         return True
-    if stripped_name in _PROTECTED_CANONICAL_PENALTY_NAMES:
+    if stripped_name in _load_protected_canonical_penalty_names():
         return True
     return _DESCRIPTOR_LIKE_NAME_PATTERN.search(stripped_name) is not None
 
