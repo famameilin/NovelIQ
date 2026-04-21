@@ -13,6 +13,7 @@ import binascii
 import json
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -262,6 +263,40 @@ def _build_graph_events_page_info(
     }
 
 
+def _build_chunk_curve_points(rows: Sequence[Any]) -> list[ChunkCurvePoint]:
+    """
+    创建时间: 2026-04-21
+    修改时间: 2026-04-21
+    任务: split-raw-vs-display-chunk-curves
+    新建原因: chunk_curves 现在同时服务原始导出与展示层曲线，统一在这里做 DTO 映射，避免两条路径再次悄悄串语义。
+    """
+    return [
+        ChunkCurvePoint(
+            chunk_id=row.chunk_id,
+            pos_density=row.pos_density,
+            neg_density=row.neg_density,
+            net_density=row.net_density,
+            smoothed_density=row.smoothed_density,
+            tension_proxy=row.tension_proxy,
+            tension_composite=row.tension_composite,
+        )
+        for row in rows
+    ]
+
+
+def _fetch_raw_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list[ChunkCurvePoint]:
+    """
+    获取数据库中持久化的原始 chunk_curves。
+
+    创建时间: 2026-04-21
+    修改时间: 2026-04-21
+    任务: split-raw-vs-display-chunk-curves
+    新建原因: 导出接口需要稳定复用落库后的 lexical density，不能误吃展示层融合后的单曲线结果。
+    """
+    rows = stats_repo.fetch_chunk_curves_full(run_id)
+    return _build_chunk_curve_points(rows)
+
+
 def _fetch_chunk_curves(
     run_id: str,
     stats_repo: StatsRepository,
@@ -295,18 +330,7 @@ def _fetch_chunk_curves(
         style_rows=chunk_repo.fetch_chunk_styles_full(run_id),
         dialogue_rows=annotation_repo.fetch_chunk_dialogues_full(run_id),
     )
-    return [
-        ChunkCurvePoint(
-            chunk_id=row.chunk_id,
-            pos_density=row.pos_density,
-            neg_density=row.neg_density,
-            net_density=row.net_density,
-            smoothed_density=row.smoothed_density,
-            tension_proxy=row.tension_proxy,
-            tension_composite=row.tension_composite,
-        )
-        for row in fused_rows
-    ]
+    return _build_chunk_curve_points(fused_rows)
 
 
 def _fetch_characters(
