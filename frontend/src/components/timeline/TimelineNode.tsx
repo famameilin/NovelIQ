@@ -37,6 +37,7 @@ export interface TimelineNodeProps {
   showLabel?: boolean;
   baselineY?: number;
   position?: string;
+  verticalOffset?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -51,12 +52,13 @@ export function TimelineNode({
   showLabel = false,
   baselineY = 72,
   position,
+  verticalOffset,
 }: TimelineNodeProps) {
   const presentation = getTimelineNodePresentation(node.node_type);
   const Icon = presentation.icon;
 
   const size = calculateNodeSize(node.importance_score);
-  const verticalOffset = calculateVerticalOffset(node.tension_percentile);
+  const resolvedVerticalOffset = verticalOffset ?? calculateDefaultVerticalOffset(node.tension_percentile);
 
   return (
     <motion.button
@@ -70,7 +72,7 @@ export function TimelineNode({
       style={{
         top: baselineY,
         left: position ?? `${node.progress * 100}%`,
-        transform: `translateX(-50%) translateY(-50%) translateY(${verticalOffset}px)`,
+        transform: `translateX(-50%) translateY(-50%) translateY(${resolvedVerticalOffset}px)`,
         width: size,
         height: size,
       }}
@@ -134,7 +136,11 @@ function calculateNodeSize(importanceScore: number): number {
   return NODE_SIZE_MIN + ratio * (NODE_SIZE_MAX - NODE_SIZE_MIN);
 }
 
-function calculateVerticalOffset(tensionPercentile: number): number {
+/**
+ * 2026-04-21，任务：重设计叙事时间轴主视觉
+ * 新建原因：默认节点仍保留基于张力的轻微偏移，但轨道组件也可以显式覆盖为分层布局偏移。
+ */
+function calculateDefaultVerticalOffset(tensionPercentile: number): number {
   const normalized = Math.min(Math.max(tensionPercentile, 0), 100);
   const offset = (normalized - 50) * 0.3;
   return -offset;
