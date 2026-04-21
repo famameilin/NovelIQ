@@ -35,6 +35,7 @@ from src.models.local.disambiguation import (
     build_disambiguation_prompt_context,
     render_disambig_prompt_context,
 )
+from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
@@ -157,7 +158,7 @@ def _inject_category_into_context(
     for cls in classifications:
         if cls.category == "protected" and cls.name in context_sentences:
             ctx = context_sentences[cls.name]
-            context_sentences[cls.name] = f"【受保护-默认不合并】{ctx}"
+            context_sentences[cls.name] = f"{PROTECTED_CONTEXT_PREFIX}{ctx}"
 
 
 def _resolve_incremental_batch_window(current_chunk_id: int, disambig_interval: int) -> tuple[int, int]:

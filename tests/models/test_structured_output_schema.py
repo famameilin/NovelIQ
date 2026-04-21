@@ -11,10 +11,15 @@ from unittest.mock import MagicMock
 from src.config import TaskModelConfig
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
+from src.models.local.disambiguation.result_builder import normalize_disambiguate_response
 from src.models.local.schema import (
+    AliasConfidenceRecord,
+    CanonicalDecisionRecord,
     CloudDisambiguateResponseModel,
     DialogueAttributionResult,
     DisambiguateResponseModel,
+    EntityTypeRecord,
+    EvidenceSourceRecord,
     ForeshadowingResult,
 )
 
@@ -117,6 +122,26 @@ class TestStructuredOutputSchema(unittest.TestCase):
         self.assertEqual(entity_types["type"], "array")
         self.assertEqual(evidence_sources["type"], "array")
         self.assertNotIn("additionalProperties", canonical_decisions)
+
+    def test_cloud_disambiguation_normalization_preserves_thinking_content(self) -> None:
+        """
+        创建时间: 2026-04-21
+        创建者: Codex
+        任务: fix-disambig-result-builder-thinking-and-types
+        说明: 云端兼容响应在归一化回内部标准模型时，不能把 API 层单独回填的 thinking_content 丢掉。
+        """
+        cloud_response = CloudDisambiguateResponseModel(
+            canonical_decisions=[CanonicalDecisionRecord(name="灰衣人", canonical="白芷")],
+            alias_confidence=[AliasConfidenceRecord(name="灰衣人", confidence="high")],
+            entity_types=[EntityTypeRecord(name="白芷", entity_type="character")],
+            evidence_sources=[EvidenceSourceRecord(name="灰衣人", sources=["原文例句"])],
+        ).model_copy(update={"thinking_content": "她其实就是白芷"})
+
+        normalized = normalize_disambiguate_response(cloud_response)
+
+        self.assertEqual(normalized.canonical_decisions["灰衣人"], "白芷")
+        self.assertEqual(normalized.alias_confidence["灰衣人"], "high")
+        self.assertEqual(normalized.thinking_content, "她其实就是白芷")
 
 
 if __name__ == "__main__":
