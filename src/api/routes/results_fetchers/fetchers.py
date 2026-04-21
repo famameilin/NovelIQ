@@ -262,7 +262,12 @@ def _build_graph_events_page_info(
     }
 
 
-def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
+def _fetch_chunk_curves(
+    run_id: str,
+    stats_repo: StatsRepository,
+    annotation_repo: AnnotationRepository,
+    chunk_repo: ChunkRepository,
+) -> list:
     """
     获取分块曲线数据（情绪 + 节奏）
 
@@ -275,8 +280,21 @@ def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
     修改者: TraeAI
     任务: refactor-hardcoded-index-access
     修改内容: 使用字段名访问替代硬编码索引
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fuse-display-emotion-curve
+    修改内容: 读取 annotation/style/dialogue 辅助信号，返回 AI 主导的展示层情绪曲线
     """
+    from src.metrics.emotion_curve_fusion import build_display_emotion_curve
+
     rows = stats_repo.fetch_chunk_curves_full(run_id)
+    fused_rows = build_display_emotion_curve(
+        curve_rows=rows,
+        annotation_rows=annotation_repo.fetch_chunk_annotations_full(run_id),
+        style_rows=chunk_repo.fetch_chunk_styles_full(run_id),
+        dialogue_rows=annotation_repo.fetch_chunk_dialogues_full(run_id),
+    )
     return [
         ChunkCurvePoint(
             chunk_id=row.chunk_id,
@@ -287,7 +305,7 @@ def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
             tension_proxy=row.tension_proxy,
             tension_composite=row.tension_composite,
         )
-        for row in rows
+        for row in fused_rows
     ]
 
 

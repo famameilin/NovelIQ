@@ -1,5 +1,5 @@
 /**
- * EmotionCurveChart - 词汇情绪密度曲线图表组件
+ * EmotionCurveChart - 情绪趋势曲线图表组件
  * 
  * 创建时间: 2026-04-04
  * 创建者: AI Assistant
@@ -104,7 +104,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
-        // 中文注释：词汇情绪曲线允许后端返回 null 表示缺值，这里保留空洞，
+    // 中文注释：情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
         // 避免把“没算出来”和“真实为 0”混成同一条贴地折线。
         const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
         const isActive = activeSeries.has(config.key);
