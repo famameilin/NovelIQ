@@ -4,13 +4,34 @@
  * 创建时间: 2026-04-04
  * 创建者: AI Assistant
  * 任务: Phase 1-D 情绪/节奏曲线
- * 说明: 展示张力代理和综合张力曲线，支持三幕分界线和高潮标注
+ * 说明: 展示表层张力和综合张力曲线，支持三幕分界线和高潮标注
  * 
  * 修改时间: 2026-04-04
  * 修改者: AI Assistant
  * 修改内容: 
  *   - 添加 dataZoom 支持，用于 Brush 缩放同步
  *   - 添加 chartRef 转发，支持外部访问 ECharts 实例
+ *
+ * 修改时间: 2026-04-21
+ * 修改者: Codex
+ * 任务: 修复节奏张力曲线图例颜色错位
+ * 修改内容:
+ *   - 将 series 主色显式绑定到 CSS 变量
+ *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
+ *
+ * 修改时间: 2026-04-21
+ * 修改者: Codex
+ * 任务: display-surface-tension
+ * 修改内容:
+ *   - 将展示层第一条节奏曲线切换为 surface_tension
+ *   - 高潮标记改为绑定综合张力，避免语义与落点错位
+ *
+ * 修改时间: 2026-04-21
+ * 修改者: Codex
+ * 任务: display-surface-tension
+ * 修改内容:
+ *   - 当前端检测到表层张力仍是 0-1 而综合张力是 0-10 量级时，仅在显示层对前者做 x10 适配
+ *   - 保持后端原始返回值不变，先验证产品显示效果
  */
 import { useMemo, forwardRef } from "react";
 import ReactEChartsCore from "echarts-for-react";
@@ -56,7 +77,7 @@ export interface RhythmCurveChartProps {
 }
 
 const SERIES_CONFIG = [
-  { key: "tension_proxy", name: "张力代理", colorVar: "--chart-2" },
+  { key: "surface_tension", name: "表层张力", colorVar: "--chart-2" },
   { key: "tension_composite", name: "综合张力", colorVar: "--chart-3" },
 ] as const;
 
@@ -98,6 +119,9 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
       const xData = data.map((d) => d.chunk_id);
       const totalChunks = xData.length;
+      const compositeMax = Math.max(...data.map((d) => d.tension_composite ?? 0));
+      const surfaceMax = Math.max(...data.map((d) => d.surface_tension ?? 0));
+      const surfaceDisplayScale = surfaceMax <= 1.05 && compositeMax >= 2 ? 10 : 1;
 
       const act1Ratio = narrativeStructure?.act1_ratio ?? 0.25;
       const act2Ratio = narrativeStructure?.act2_ratio ?? 0.55;
@@ -111,7 +135,16 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
-        const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
+        // 中文注释：老 run 的综合张力仍可能是 0-10 量级，而新的 surface_tension 目前是 0-1。
+        // 这里先只在前端显示层把表层张力按 x10 对齐，便于验证视觉效果，不改后端语义。
+        const values = data.map((d) => {
+          const rawValue = d[config.key as keyof ChunkCurvePoint];
+          if (typeof rawValue !== "number") return null;
+          if (config.key === "surface_tension") {
+            return rawValue * surfaceDisplayScale;
+          }
+          return rawValue;
+        });
         const isActive = activeSeries.has(config.key);
 
         const markLineData: Array<{ xAxis: number; label?: object; lineStyle?: object }> = [];
@@ -136,9 +169,11 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         return {
           name: config.name,
           type: "line" as const,
+          color,
           data: isActive ? values : [],
           smooth: true,
           showSymbol: false,
+          itemStyle: { color },
           lineStyle: { width: 2, color },
           emphasis: {
             focus: "series" as const,
@@ -154,7 +189,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
       const climaxMarkPoint = climaxPositions.length > 0 ? {
         data: climaxPositions.map((chunkIdx) => ({
-          coord: [chunkIdx, Math.max(...data.map((d) => d.tension_proxy ?? 0))],
+          coord: [chunkIdx, Math.max(...data.map((d) => d.tension_composite ?? 0))],
           value: "高潮",
           itemStyle: { color: chart3Color },
           symbolSize: 40,
@@ -243,7 +278,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
         },
         series: series.map((s, idx) => ({
           ...s,
-          markPoint: idx === 0 && climaxMarkPoint ? climaxMarkPoint : undefined,
+          markPoint: SERIES_CONFIG[idx]?.key === "tension_composite" && climaxMarkPoint ? climaxMarkPoint : undefined,
         })),
       };
 

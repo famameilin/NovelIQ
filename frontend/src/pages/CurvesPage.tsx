@@ -44,7 +44,7 @@ const STALE_TIME = 5 * 60 * 1000;
 /* ------------------------------------------------------------------ */
 
 type EmotionSeriesKey = "pos_density" | "neg_density" | "net_density" | "smoothed_density";
-type RhythmSeriesKey = "tension_proxy" | "tension_composite";
+type RhythmSeriesKey = "surface_tension" | "tension_composite";
 
 interface VisibleSeriesState {
   emotion: Set<EmotionSeriesKey>;
@@ -68,7 +68,7 @@ export function CurvesPage() {
 
   const [visibleSeries, setVisibleSeries] = useState<VisibleSeriesState>({
     emotion: new Set<EmotionSeriesKey>(["pos_density", "neg_density", "net_density", "smoothed_density"]),
-    rhythm: new Set<RhythmSeriesKey>(["tension_proxy", "tension_composite"]),
+    rhythm: new Set<RhythmSeriesKey>(["surface_tension", "tension_composite"]),
   });
 
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);

@@ -86,6 +86,7 @@ class ChunkCurvePoint(BaseModel):
     smoothed_density: float | None = None
     tension_proxy: float | None = None
     tension_composite: float | None = None
+    surface_tension: float | None = None
 
 
 class CharacterStats(BaseModel):
