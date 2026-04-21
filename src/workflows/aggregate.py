@@ -43,6 +43,8 @@ QUALITY_TARGETS = {
     "tone_distribution_non_empty_rate": 1.0,
     "imagery_density_non_null_rate": 1.0,
     "imagery_lexicon_null_chunk_ratio_max": 0.0,
+    "lexical_curve_zero_chunk_ratio_max": 0.5,
+    "lexical_curve_late_zero_chunk_ratio_max": 0.5,
 }
 
 
@@ -213,16 +215,81 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
     }
 
 
+def _build_lexical_curve_quality_report(
+    chunk_curves: list[tuple[int, float, float, float, float, float, float]],
+) -> dict[str, Any]:
+    """
+    构建词汇情绪曲线质量报告。
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fix-emotion-curve-weighting
+    修改内容: 新增整体/后半段全零分块占比诊断，便于定位情绪曲线稀疏退化
+    """
+    if not chunk_curves:
+        return {
+            "lexical_curve_zero_chunk_ratio": 0.0,
+            "lexical_curve_zero_chunk_ids": [],
+            "lexical_curve_late_zero_chunk_ratio": 0.0,
+            "lexical_curve_late_zero_chunk_ids": [],
+            "lexical_curve_late_start_index": 0,
+        }
+
+    zero_chunk_ids: list[int] = []
+    for (
+        chunk_id,
+        pos_density,
+        neg_density,
+        net_density,
+        _smoothed_density,
+        _tension_proxy,
+        _tension_composite,
+    ) in chunk_curves:
+        if pos_density == 0 and neg_density == 0 and net_density == 0:
+            zero_chunk_ids.append(chunk_id)
+
+    late_start_index = len(chunk_curves) // 2
+    late_curves = chunk_curves[late_start_index:]
+    late_zero_chunk_ids = [
+        chunk_id
+        for (
+            chunk_id,
+            pos_density,
+            neg_density,
+            net_density,
+            _smoothed_density,
+            _tension_proxy,
+            _tension_composite,
+        ) in late_curves
+        if pos_density == 0 and neg_density == 0 and net_density == 0
+    ]
+
+    return {
+        "lexical_curve_zero_chunk_ratio": len(zero_chunk_ids) / len(chunk_curves),
+        "lexical_curve_zero_chunk_ids": zero_chunk_ids,
+        "lexical_curve_late_zero_chunk_ratio": (len(late_zero_chunk_ids) / len(late_curves)) if late_curves else 0.0,
+        "lexical_curve_late_zero_chunk_ids": late_zero_chunk_ids,
+        "lexical_curve_late_start_index": late_start_index,
+    }
+
+
 def _log_quality_gate_report(run_id: str, report: dict[str, Any]) -> None:
     tone_rate = float(report.get("tone_distribution_non_empty_rate", 0.0))
     imagery_rate = float(report.get("imagery_density_non_null_rate", 0.0))
     null_ratio = float(report.get("imagery_lexicon_null_chunk_ratio", 0.0))
     null_chunk_ids = report.get("imagery_lexicon_null_chunk_ids", [])
+    zero_ratio = float(report.get("lexical_curve_zero_chunk_ratio", 0.0))
+    zero_chunk_ids = report.get("lexical_curve_zero_chunk_ids", [])
+    late_zero_ratio = float(report.get("lexical_curve_late_zero_chunk_ratio", 0.0))
+    late_zero_chunk_ids = report.get("lexical_curve_late_zero_chunk_ids", [])
+    late_start_index = int(report.get("lexical_curve_late_start_index", 0))
 
     logger.info("\n=== Aggregate Quality Gate ===")
     logger.info(f"tone_distribution_non_empty_rate={tone_rate:.0%}")
     logger.info(f"imagery_density_non_null_rate={imagery_rate:.0%}")
     logger.info(f"imagery_lexicon_null_chunk_ratio={null_ratio:.2%}")
+    logger.info(f"lexical_curve_zero_chunk_ratio={zero_ratio:.2%}")
+    logger.info(f"lexical_curve_late_zero_chunk_ratio={late_zero_ratio:.2%} (from index={late_start_index})")
 
     if tone_rate < QUALITY_TARGETS["tone_distribution_non_empty_rate"]:
         logger.warning(f"[quality-gate] tone_distribution empty (run_id={run_id})")
@@ -236,6 +303,20 @@ def _log_quality_gate_report(run_id: str, report: dict[str, Any]) -> None:
             f"{QUALITY_TARGETS['imagery_lexicon_null_chunk_ratio_max'] * 100:.2f}% (run_id={run_id})"
         )
         logger.warning(f"[quality-gate] imagery lexicon null chunk_ids={null_chunk_ids}")
+
+    if zero_ratio > QUALITY_TARGETS["lexical_curve_zero_chunk_ratio_max"]:
+        logger.warning(
+            f"[quality-gate] lexical curve zero chunk ratio {zero_ratio * 100:.2f}% exceeds target "
+            f"{QUALITY_TARGETS['lexical_curve_zero_chunk_ratio_max'] * 100:.2f}% (run_id={run_id})"
+        )
+        logger.warning(f"[quality-gate] lexical curve zero chunk_ids={zero_chunk_ids}")
+
+    if late_zero_ratio > QUALITY_TARGETS["lexical_curve_late_zero_chunk_ratio_max"]:
+        logger.warning(
+            f"[quality-gate] lexical curve late zero chunk ratio {late_zero_ratio * 100:.2f}% exceeds target "
+            f"{QUALITY_TARGETS['lexical_curve_late_zero_chunk_ratio_max'] * 100:.2f}% (run_id={run_id})"
+        )
+        logger.warning(f"[quality-gate] lexical curve late zero chunk_ids={late_zero_chunk_ids}")
 
 
 async def run_aggregate(
@@ -348,7 +429,7 @@ async def run_aggregate(
     emotion_rows, raw_densities = compute_emotion_curve_weighted(chunk_texts, weighted_lexicons)
 
     # 合并所有类型的 fight_terms（tension_proxy 使用 fuzzy 模式，性能开销大，不适合加权计算）
-    all_fight_terms: dict[str, int] = {}
+    all_fight_terms: dict[str, float] = {}
     for lex in weighted_lexicons:
         all_fight_terms.update(lex.fight_terms)
     logger.info(f"Merged fight_terms: {len(all_fight_terms)} unique terms")
@@ -376,6 +457,7 @@ async def run_aggregate(
         )
     )
 
+    lexical_curve_quality_report = _build_lexical_curve_quality_report(chunk_curves)
     stats_repo.insert_chunk_curve(run_id, chunk_curves)
     logger.info(f"inserted {len(chunk_curves)} chunk curve rows")
 
@@ -389,6 +471,7 @@ async def run_aggregate(
         agg_result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
         _log_aggregate_results(agg_result)
         quality_report = _build_quality_gate_report(run_id, agg_result, chunk_repo)
+        quality_report.update(lexical_curve_quality_report)
         _log_quality_gate_report(run_id, quality_report)
     except Exception as e:
         logger.warning(f"Failed to compute aggregate metrics: {e}")
