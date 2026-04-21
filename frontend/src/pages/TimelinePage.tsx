@@ -362,18 +362,6 @@ export function TimelinePage() {
                       onMaxLevelChange={handleMaxLevelChange}
                     />
 
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium text-text">阅读顺序</p>
-                        <p className="mt-1 text-sm text-text-muted">
-                          先看阶段，再沿着轨道阅读标签；选中节点完整语义会放到时间轴下方。
-                        </p>
-                      </div>
-                      <Badge variant="outline" className="border-border/60 text-text-muted">
-                        张力曲线常显
-                      </Badge>
-                    </div>
-
                     <div className="mt-4 flex flex-wrap gap-2">
                       {phases.length === 0 ? (
                         <p className="text-sm text-text-muted">暂无阶段数据</p>
