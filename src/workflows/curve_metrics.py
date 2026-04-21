@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from sqlalchemy import text as sql_text
@@ -42,17 +43,48 @@ from src.config.constants import EVENT_TYPE_SCORES
 class WeightedLexiconSet:
     """加权词表集合"""
 
-    pos_terms: dict[str, int]
-    neg_terms: dict[str, int]
-    fight_terms: dict[str, int]
+    pos_terms: Mapping[str, float]
+    neg_terms: Mapping[str, float]
+    fight_terms: Mapping[str, float]
     weight: float = 1.0
     genre: str = ""
 
 
+def _compute_emotion_curve_raw(
+    chunk_texts: list[tuple[int, str]],
+    pos_terms: Mapping[str, float],
+    neg_terms: Mapping[str, float],
+) -> tuple[list[tuple[int, float, float, float]], list[float]]:
+    """
+    计算未平滑的情感密度序列。
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fix-emotion-curve-weighting
+    修改内容: 将原始密度计算与平滑拆开，供多 genre 曲线按 chunk 级加权合并复用
+    """
+    from src.metrics.emotion_metrics import lexical_sentiment_density
+
+    emotion_rows: list[tuple[int, float, float, float]] = []
+    raw_densities: list[float] = []
+    for chunk_id, text in chunk_texts:
+        result = lexical_sentiment_density(text, pos_terms, neg_terms)
+        emotion_rows.append(
+            (
+                chunk_id,
+                result["pos_density"],
+                result["neg_density"],
+                result["net_density"],
+            )
+        )
+        raw_densities.append(result["net_density"])
+    return emotion_rows, raw_densities
+
+
 def compute_emotion_curve(
     chunk_texts: list[tuple[int, str]],
-    pos_terms: dict[str, int],
-    neg_terms: dict[str, int],
+    pos_terms: Mapping[str, float],
+    neg_terms: Mapping[str, float],
 ) -> tuple[list[tuple[int, float, float, float, float]], list[float]]:
     """
     计算情感曲线
@@ -70,24 +102,16 @@ def compute_emotion_curve(
     修改者: GLM-5
     任务: 张力曲线傅里叶平滑 - 配置抽离
     修改内容: keep_ratio 从配置读取
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fix-emotion-curve-weighting
+    修改内容: 允许浮点权重输入，并复用原始密度 helper 保持单路径计算
     """
-    from src.metrics.emotion_metrics import lexical_sentiment_density
     from src.metrics.fourier_filter import fourier_smooth
 
-    emotion_rows: list[tuple[int, float, float, float, float]] = []
-    raw_densities: list[float] = []
-    for chunk_id, text in chunk_texts:
-        result = lexical_sentiment_density(text, pos_terms, neg_terms)
-        emotion_rows.append(
-            (
-                chunk_id,
-                result["pos_density"],
-                result["neg_density"],
-                result["net_density"],
-                0.0,
-            )
-        )
-        raw_densities.append(result["net_density"])
+    raw_rows, raw_densities = _compute_emotion_curve_raw(chunk_texts, pos_terms, neg_terms)
+    emotion_rows = [(chunk_id, pos_d, neg_d, net_d, 0.0) for chunk_id, pos_d, neg_d, net_d in raw_rows]
     smoothed = fourier_smooth(raw_densities, keep_ratio=settings.metrics.fourier_smooth_keep_ratio)
     for idx, (chunk_id, pos_d, neg_d, net_d, _) in enumerate(emotion_rows):
         emotion_rows[idx] = (chunk_id, pos_d, neg_d, net_d, smoothed[idx])
@@ -123,33 +147,57 @@ def compute_emotion_curve_weighted(
     修改者: GLM-5
     任务: 性能优化
     修改内容: 合并词典优化，性能提升3倍
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fix-emotion-curve-weighting
+    修改内容: 改为按 genre 分别计算 raw 曲线后再按 chunk 级加权合并，避免低权重词被整型归零
     """
+    from src.metrics.fourier_filter import fourier_smooth
+
     if not weighted_lexicons:
         return compute_emotion_curve(chunk_texts, {}, {})
 
-    if len(weighted_lexicons) == 1:
-        lex = weighted_lexicons[0]
+    active_lexicons = [lex for lex in weighted_lexicons if lex.weight > 0]
+    if not active_lexicons:
+        return compute_emotion_curve(chunk_texts, {}, {})
+
+    if len(active_lexicons) == 1:
+        lex = active_lexicons[0]
         return compute_emotion_curve(chunk_texts, lex.pos_terms, lex.neg_terms)
 
-    merged_pos: dict[str, float] = {}
-    merged_neg: dict[str, float] = {}
+    per_genre_rows: list[tuple[float, list[tuple[int, float, float, float]]]] = []
+    for lex_set in active_lexicons:
+        raw_rows, _ = _compute_emotion_curve_raw(chunk_texts, lex_set.pos_terms, lex_set.neg_terms)
+        per_genre_rows.append((lex_set.weight, raw_rows))
 
-    for lex_set in weighted_lexicons:
-        weight = lex_set.weight
-        for term, w in lex_set.pos_terms.items():
-            merged_pos[term] = merged_pos.get(term, 0) + w * weight
-        for term, w in lex_set.neg_terms.items():
-            merged_neg[term] = merged_neg.get(term, 0) + w * weight
+    combined_rows: list[tuple[int, float, float, float, float]] = []
+    raw_densities: list[float] = []
 
-    merged_pos_int = {k: int(round(v)) for k, v in merged_pos.items()}
-    merged_neg_int = {k: int(round(v)) for k, v in merged_neg.items()}
+    # 中文注释：这里必须先按 genre 各自完成词表命中，再在 chunk 结果层做加权。
+    # 否则像 0.25 这类低权重词条在总词表阶段就会被压成 0，命中了也不再贡献任何情绪值。
+    for chunk_index, (chunk_id, _text) in enumerate(chunk_texts):
+        pos_density = 0.0
+        neg_density = 0.0
+        net_density = 0.0
+        for genre_weight, raw_rows in per_genre_rows:
+            _row_chunk_id, pos_d, neg_d, net_d = raw_rows[chunk_index]
+            pos_density += pos_d * genre_weight
+            neg_density += neg_d * genre_weight
+            net_density += net_d * genre_weight
+        combined_rows.append((chunk_id, pos_density, neg_density, net_density, 0.0))
+        raw_densities.append(net_density)
 
-    return compute_emotion_curve(chunk_texts, merged_pos_int, merged_neg_int)
+    smoothed = fourier_smooth(raw_densities, keep_ratio=settings.metrics.fourier_smooth_keep_ratio)
+    for idx, (chunk_id, pos_d, neg_d, net_d, _) in enumerate(combined_rows):
+        combined_rows[idx] = (chunk_id, pos_d, neg_d, net_d, smoothed[idx])
+
+    return combined_rows, raw_densities
 
 
 def compute_tension_signals(
     chunk_texts: list[tuple[int, str]],
-    fight_terms: dict[str, int],
+    fight_terms: dict[str, float],
     style_map: dict,
     annotation_map: dict,
     raw_densities: list[float],
@@ -195,7 +243,7 @@ def compute_tension_signals(
 
 def compute_rhythm_curve(
     chunk_texts: list[tuple[int, str]],
-    fight_terms: dict[str, int],
+    fight_terms: dict[str, float],
     tension_composite_values: list[float],
 ) -> list[tuple[int, float, float]]:
     """

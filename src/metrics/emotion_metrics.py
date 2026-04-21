@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from .lexicon_metrics import count_mixed_hits, count_weighted_hits, get_emotion_spans
@@ -137,8 +138,8 @@ def count_negations_before(text: str, emotion_pos: int, negation_words: set[str]
 
 def lexical_sentiment_density(
     text: str,
-    pos_terms: dict[str, int],
-    neg_terms: dict[str, int],
+    pos_terms: Mapping[str, float],
+    neg_terms: Mapping[str, float],
     negation_words: set[str] | None = None,
     enable_negation: bool = True,
 ) -> dict[str, float]:
@@ -180,6 +181,11 @@ def lexical_sentiment_density(
     修改者: GLM-5
     任务: 清理向后兼容代码
     修改内容: 参数类型改为 dict[str, int]，移除 Iterable[str] 支持
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fix-emotion-curve-weighting
+    修改内容: 允许浮点权重参与密度计算，避免多 genre 加权后被整型截断
     """
     if not text:
         return {"pos_density": 0.0, "neg_density": 0.0, "net_density": 0.0}

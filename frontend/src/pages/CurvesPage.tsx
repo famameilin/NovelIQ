@@ -4,7 +4,7 @@
  * 创建时间: 2026-04-04
  * 创建者: AI Assistant
  * 任务: Phase 1-D 情绪/节奏曲线
- * 说明: 展示情绪密度曲线和节奏张力曲线，支持 X 轴缩放同步
+ * 说明: 展示词汇情绪密度曲线和节奏张力曲线，支持 X 轴缩放同步
  * 
  * 修改时间: 2026-04-04
  * 修改者: AI Assistant
@@ -235,7 +235,7 @@ export function CurvesPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-semibold text-text">
-                  情绪密度曲线
+                  词汇情绪密度曲线
                 </CardTitle>
                 <CurveToolbar
                   onZoomIn={handleZoomIn}
