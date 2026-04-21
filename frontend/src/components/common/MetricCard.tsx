@@ -7,6 +7,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  METRIC_ACCENT_BAR_CLASS_MAP,
+  METRIC_ACCENT_CARD_CLASS_MAP,
+  getMetricAccentColor,
+  type MetricAccent,
+} from "@/components/common/DashboardCardShell";
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
@@ -15,13 +21,7 @@ import { cn } from "@/lib/cn";
 
 export type MetricFormat = "number" | "percent" | "score" | "raw";
 
-export type MetricAccent =
-  | "primary"
-  | "chart-1"
-  | "chart-2"
-  | "chart-3"
-  | "chart-4"
-  | "chart-5";
+export type { MetricAccent } from "@/components/common/DashboardCardShell";
 
 export interface MetricCardProps {
   label: string;
@@ -43,46 +43,24 @@ export interface MetricCardProps {
 /*  Accent → static Tailwind classes                                   */
 /* ------------------------------------------------------------------ */
 
-const ACCENT_MAP: Record<
-  MetricAccent,
-  { card: string; bar: string }
-> = {
-  primary: {
-    card: "bg-gradient-to-br from-surface via-surface to-primary/15 hover:border-primary/30",
-    bar: "bg-primary",
-  },
-  "chart-1": {
-    card: "bg-gradient-to-br from-surface via-surface to-chart-1/15 hover:border-chart-1/30",
-    bar: "bg-chart-1",
-  },
-  "chart-2": {
-    card: "bg-gradient-to-br from-surface via-surface to-chart-2/15 hover:border-chart-2/30",
-    bar: "bg-chart-2",
-  },
-  "chart-3": {
-    card: "bg-gradient-to-br from-surface via-surface to-chart-3/15 hover:border-chart-3/30",
-    bar: "bg-chart-3",
-  },
-  "chart-4": {
-    card: "bg-gradient-to-br from-surface via-surface to-chart-4/15 hover:border-chart-4/30",
-    bar: "bg-chart-4",
-  },
-  "chart-5": {
-    card: "bg-gradient-to-br from-surface via-surface to-chart-5/15 hover:border-chart-5/30",
-    bar: "bg-chart-5",
-  },
-};
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：保留原有数值进度逻辑，同时复用共享卡片壳使用的比例计算方式。
+ */
 function barWidth(format: MetricFormat, value: number, maxScore: number): number {
   if (format === "score") return Math.min(value / maxScore, 1) * 100;
   if (format === "percent") return Math.min(value, 1) * 100;
   return 0;
 }
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：统一 MetricCard 和业务卡片的数字格式化逻辑，避免视觉重构时数值展示回归。
+ */
 function formatValue(raw: number, format: MetricFormat, decimals: number, maxScore: number): string {
   switch (format) {
     case "percent":
@@ -101,6 +79,10 @@ function formatValue(raw: number, format: MetricFormat, decimals: number, maxSco
 /*  Animated Number (RAF-based, no IntersectionObserver)              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：保留 MetricCard 数字滚动能力，作为共享视觉原语的一部分继续复用。
+ */
 function AnimatedNumber({
   raw,
   format,
@@ -159,6 +141,10 @@ function AnimatedNumber({
 /*  Animated Bar (Framer Motion)                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：继续复用 MetricCard 的进度条动画，同时接入共享 accent 色板。
+ */
 function AnimatedBar({
   fillPct,
   barGradient,
@@ -185,6 +171,10 @@ function AnimatedBar({
 /*  Component                                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：改为复用共享 accent 原语，确保 MetricCard 与仪表盘业务卡片保持同一套视觉基线。
+ */
 export function MetricCard({
   label,
   value,
@@ -203,7 +193,8 @@ export function MetricCard({
   const autoBar = format === "score" || format === "percent";
   const showBar = autoBar || forceBar;
   const fillPct = autoBar ? barWidth(format, value, maxScore) : Math.min(value, 100);
-  const { card: accentCard, bar: barGradient } = ACCENT_MAP[accent];
+  const accentCard = METRIC_ACCENT_CARD_CLASS_MAP[accent];
+  const barGradient = METRIC_ACCENT_BAR_CLASS_MAP[accent];
 
   const content = (
     <Card
@@ -216,7 +207,7 @@ export function MetricCard({
             "pointer-events-none absolute h-24 w-24 rounded-full blur-2xl",
             accent === "primary" ? "-right-4 -top-4" : "-bottom-6 -right-6 h-20 w-20",
           )}
-          style={{ backgroundColor: `hsl(var(--${accent}) / 0.05)` }}
+          style={{ backgroundColor: getMetricAccentColor(accent, 0.05) }}
         />
       )}
 
@@ -226,8 +217,8 @@ export function MetricCard({
             <div
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
               style={{
-                backgroundColor: `hsl(var(--${accent}) / 0.1)`,
-                color: `hsl(var(--${accent}))`,
+                backgroundColor: getMetricAccentColor(accent, 0.1),
+                color: getMetricAccentColor(accent),
               }}
             >
               {icon}
@@ -250,8 +241,8 @@ export function MetricCard({
           <div
             className="flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium"
             style={{
-              backgroundColor: `hsl(var(--${accent}) / 0.1)`,
-              color: `hsl(var(--${accent}))`,
+              backgroundColor: getMetricAccentColor(accent, 0.1),
+              color: getMetricAccentColor(accent),
             }}
           >
             {trend}

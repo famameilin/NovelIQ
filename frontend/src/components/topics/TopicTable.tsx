@@ -8,6 +8,7 @@
  */
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
+import { Table2 } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -16,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card, CardContent } from "@/components/ui/card";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { TopicKeywords } from "./TopicKeywords";
 import { cn } from "@/lib/cn";
 import type { Topic } from "@/api/types";
@@ -65,66 +66,67 @@ export function TopicTable({ topics, className }: TopicTableProps) {
   const hasData = topics.length > 0;
 
   return (
-    <Card variant="elevated" className={cn("rounded-xl overflow-hidden h-full flex flex-col", className)}>
-      <CardContent className="p-0 flex flex-col min-h-0">
-        <div className="p-4 border-b border-border">
-          <h4 className="text-sm font-semibold text-text">主题详情</h4>
-        </div>
-
-        <div className="h-full overflow-auto">
-          {hasData ? (
-            <Table>
-              <TableHeader className="sticky top-0 bg-surface z-10">
-                <TableRow>
-                  <TableHead
-                    className="cursor-pointer select-none hover:bg-surface-hover"
-                    onClick={() => handleSort("topic_id")}
-                    aria-sort={sortKey === "topic_id" ? (sortOrder === "asc" ? "ascending" : "descending") : undefined}
-                  >
-                    主题 {renderSortIcon("topic_id")}
-                  </TableHead>
-                  <TableHead>关键词</TableHead>
-                  <TableHead
-                    className="cursor-pointer select-none hover:bg-surface-hover text-right"
-                    onClick={() => handleSort("weight")}
-                    aria-sort={sortKey === "weight" ? (sortOrder === "asc" ? "ascending" : "descending") : undefined}
-                  >
-                    权重 {renderSortIcon("weight")}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedTopics.map((topic, index) => (
-                  <motion.tr
-                    key={topic.topic_id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{
-                      delay: Math.min(index * 0.03, 0.4), // 限制最大延迟 400ms
-                      duration: 0.25,
-                    }}
-                    className="border-b border-border transition-colors hover:bg-primary-subtle/30"
-                  >
-                    <TableCell className="font-medium">
-                      {topic.label || `主题 ${topic.topic_id + 1}`}
-                    </TableCell>
-                    <TableCell>
-                      <TopicKeywords words={topic.words} maxVisible={5} />
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {(topic.weight * 100).toFixed(1)}%
-                    </TableCell>
-                  </motion.tr>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="flex h-[200px] items-center justify-center text-sm text-text-muted">
-              暂无主题数据
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <DashboardCardShell
+      title="主题详情"
+      icon={<Table2 className="h-4 w-4" />}
+      accent="chart-4"
+      className={cn("h-full", className)}
+      contentClassName="flex h-full flex-col"
+      bodyClassName="flex-1 min-h-0"
+    >
+      <div className="h-full overflow-auto rounded-2xl border border-border/70 bg-surface/70">
+        {hasData ? (
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-surface">
+              <TableRow>
+                <TableHead
+                  className="cursor-pointer select-none hover:bg-surface-hover"
+                  onClick={() => handleSort("topic_id")}
+                  aria-sort={sortKey === "topic_id" ? (sortOrder === "asc" ? "ascending" : "descending") : undefined}
+                >
+                  主题 {renderSortIcon("topic_id")}
+                </TableHead>
+                <TableHead>关键词</TableHead>
+                <TableHead
+                  className="cursor-pointer select-none text-right hover:bg-surface-hover"
+                  onClick={() => handleSort("weight")}
+                  aria-sort={sortKey === "weight" ? (sortOrder === "asc" ? "ascending" : "descending") : undefined}
+                >
+                  权重 {renderSortIcon("weight")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortedTopics.map((topic, index) => (
+                <motion.tr
+                  key={topic.topic_id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{
+                    delay: Math.min(index * 0.03, 0.4),
+                    duration: 0.25,
+                  }}
+                  className="border-b border-border transition-colors hover:bg-primary-subtle/30"
+                >
+                  <TableCell className="font-medium">
+                    {topic.label || `主题 ${topic.topic_id + 1}`}
+                  </TableCell>
+                  <TableCell>
+                    <TopicKeywords words={topic.words} maxVisible={5} />
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {(topic.weight * 100).toFixed(1)}%
+                  </TableCell>
+                </motion.tr>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <div className="flex h-[200px] items-center justify-center text-sm text-text-muted">
+            暂无主题数据
+          </div>
+        )}
+      </div>
+    </DashboardCardShell>
   );
 }

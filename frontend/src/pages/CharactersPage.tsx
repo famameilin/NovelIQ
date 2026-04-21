@@ -6,12 +6,14 @@ import { getCharacters, getDiagnosis } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { CharacterRankingBar } from "@/components/charts/CharacterRankingBar";
 import { RoleFunctionPie } from "@/components/charts/RoleFunctionPie";
 import { CharacterTable } from "@/components/characters/CharacterTable";
 import { ProtagonistCard } from "@/components/characters/ProtagonistCard";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { AlertCircle, Users } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -129,9 +131,15 @@ export function CharactersPage() {
 
       {/* No task selected prompt */}
       {!currentTaskId && (
-        <div className="flex h-64 flex-col items-center justify-center gap-3">
-          <p className="text-sm text-text-muted">请先选择一个分析任务</p>
-        </div>
+        <DashboardCardShell
+          title="角色分析"
+          icon={<Users className="h-4 w-4" />}
+          accent="chart-2"
+          className="min-h-[240px]"
+          bodyClassName="items-center justify-center gap-3 text-center"
+        >
+          <p className="text-sm text-text-muted">请先选择一个分析任务。</p>
+        </DashboardCardShell>
       )}
 
       {/* Loading skeleton */}
@@ -139,19 +147,31 @@ export function CharactersPage() {
 
       {/* Error state */}
       {isError && !isLoading && (
-        <div className="flex h-64 flex-col items-center justify-center gap-3">
-          <p className="text-sm text-text-muted">数据加载失败</p>
-          <Button variant="ghost" size="sm" onClick={retry}>
+        <DashboardCardShell
+          title="角色数据加载失败"
+          icon={<AlertCircle className="h-4 w-4" />}
+          accent="chart-5"
+          className="min-h-[240px]"
+          bodyClassName="items-center justify-center gap-3 text-center"
+        >
+          <p className="text-sm text-text-muted">角色列表或诊断画像加载失败。</p>
+          <Button variant="outline" size="sm" onClick={retry}>
             重试
           </Button>
-        </div>
+        </DashboardCardShell>
       )}
 
       {/* Empty data state */}
       {characters && characters.length === 0 && !isLoading && !isError && (
-        <div className="flex h-64 flex-col items-center justify-center gap-3">
-          <p className="text-sm text-text-muted">暂无角色数据</p>
-        </div>
+        <DashboardCardShell
+          title="暂无角色数据"
+          icon={<Users className="h-4 w-4" />}
+          accent="chart-4"
+          className="min-h-[240px]"
+          bodyClassName="items-center justify-center gap-3 text-center"
+        >
+          <p className="text-sm text-text-muted">当前任务尚未生成角色分析结果。</p>
+        </DashboardCardShell>
       )}
 
       {/* Main content */}

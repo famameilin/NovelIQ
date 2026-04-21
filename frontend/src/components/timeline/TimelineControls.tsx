@@ -8,7 +8,7 @@
  */
 
 import { cn } from "@/lib/cn";
-import { Card, CardContent } from "@/components/ui/card";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
 import { Eye, EyeOff, Filter } from "lucide-react";
 
@@ -49,10 +49,16 @@ export function TimelineControls({
   className,
 }: TimelineControlsProps) {
   return (
-    <Card variant="elevated" className={cn("rounded-xl", className)}>
-      <CardContent className="flex flex-wrap items-center justify-between gap-4 py-3">
+    <DashboardCardShell
+      title="时间轴控制"
+      icon={<Filter className="h-4 w-4" />}
+      accent="chart-2"
+      className={cn(className)}
+      contentClassName="gap-2.5 p-4"
+      bodyClassName="gap-4"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/60 bg-surface/70 px-4 py-3">
         <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-text-muted" />
           <span className="text-sm font-medium text-text">节点筛选</span>
           <div className="flex gap-1">
             {([1, 2, 3] as const).map((level) => {
@@ -101,7 +107,7 @@ export function TimelineControls({
             )}
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </DashboardCardShell>
   );
 }

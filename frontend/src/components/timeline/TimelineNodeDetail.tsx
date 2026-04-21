@@ -23,7 +23,7 @@ import {
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DashboardCardShell, type MetricAccent } from "@/components/common/DashboardCardShell";
 import type { TimelineNode as TimelineNodeType } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -32,23 +32,26 @@ import type { TimelineNode as TimelineNodeType } from "@/api/types";
 
 const NODE_TYPE_CONFIG: Record<
   string,
-  { icon: typeof Zap; colorClass: string; label: string }
+  { icon: typeof Zap; colorClass: string; label: string; accent: MetricAccent }
 > = {
-  plot: { icon: Zap, colorClass: "text-primary", label: "情节节点" },
+  plot: { icon: Zap, colorClass: "text-primary", label: "情节节点", accent: "primary" },
   character_entry: {
     icon: User,
     colorClass: "text-chart-positive",
     label: "角色登场",
+    accent: "chart-3",
   },
   character_exit: {
     icon: UserMinus,
     colorClass: "text-chart-negative",
     label: "角色退场",
+    accent: "chart-5",
   },
   relation_change: {
     icon: Link2,
     colorClass: "text-chart-2",
     label: "关系变化",
+    accent: "chart-2",
   },
 };
 
@@ -126,29 +129,25 @@ export function TimelineNodeDetail({
           transition={{ duration: 0.3, ease: "easeOut" }}
           className={cn("overflow-hidden", className)}
         >
-          <Card variant="elevated" className="rounded-xl">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Icon className={cn("h-5 w-5", config.colorClass)} />
-                  <CardTitle className="text-base font-semibold text-text">
-                    {config.label}
-                  </CardTitle>
-                </div>
-                {onClose && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onClose}
-                    className="h-8 w-8 p-0"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
+          <DashboardCardShell
+            title={config.label}
+            icon={<Icon className={cn("h-4 w-4", config.colorClass)} />}
+            accent={config.accent}
+            showOrb
+            headerRight={
+              onClose ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onClose}
+                  className="h-8 w-8 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              ) : undefined
+            }
+            bodyClassName="gap-4"
+          >
               <div>
                 <p className="text-sm text-text">{node.event}</p>
                 <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
@@ -301,8 +300,7 @@ export function TimelineNodeDetail({
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+          </DashboardCardShell>
         </motion.div>
       )}
     </AnimatePresence>

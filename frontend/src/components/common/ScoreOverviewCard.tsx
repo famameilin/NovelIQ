@@ -1,9 +1,14 @@
 import { useRef, useId } from "react";
 import { motion, useInView } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { ArrowRight, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DashboardCardShell,
+  getMetricAccentColor,
+  getMetricAccentHoverTextClass,
+  type MetricAccent,
+} from "@/components/common/DashboardCardShell";
 import { cn } from "@/lib/cn";
 
 export interface ScoreOverviewCardProps {
@@ -15,12 +20,18 @@ export interface ScoreOverviewCardProps {
   className?: string;
 }
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：让评分速览的环形进度随共享 accent 系统切换，而不是固定只吃 primary。
+ */
 function MiniProgressRing({
   progress,
+  accent,
   size = 48,
   strokeWidth = 4,
 }: {
   progress: number;
+  accent: MetricAccent;
   size?: number;
   strokeWidth?: number;
 }) {
@@ -52,8 +63,8 @@ function MiniProgressRing({
       >
         <defs>
           <linearGradient id={gradientId} gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="hsl(var(--primary))" />
-            <stop offset="100%" stopColor="hsl(var(--primary-hover))" />
+            <stop offset="0%" stopColor={getMetricAccentColor(accent)} />
+            <stop offset="100%" stopColor={getMetricAccentColor(accent, 0.72)} />
           </linearGradient>
         </defs>
         <circle
@@ -89,11 +100,17 @@ function MiniProgressRing({
   );
 }
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：让评分圆点与卡片壳使用同一套 accent 色，避免局部控件仍停留在旧视觉语言里。
+ */
 function DotRating({
   score,
+  accent,
   maxScore = 5,
 }: {
   score: number;
+  accent: MetricAccent;
   maxScore?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -116,7 +133,7 @@ function DotRating({
             cx={4}
             cy={4}
             r={3.5}
-            className={i < score ? "fill-primary" : "fill-border"}
+            fill={i < score ? getMetricAccentColor(accent) : "hsl(var(--border))"}
           />
         </motion.svg>
       ))}
@@ -124,13 +141,19 @@ function DotRating({
   );
 }
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：统一评分行的布局与强调色传递，支撑新的仪表盘卡片壳。
+ */
 function ScoreRow({
   label,
   score,
+  accent,
   maxScore = 5,
 }: {
   label: string;
   score?: number | null;
+  accent: MetricAccent;
   maxScore?: number;
 }) {
   if (score == null) {
@@ -148,7 +171,7 @@ function ScoreRow({
     <div className="flex items-center justify-between">
       <span className="text-xs text-text-muted">{label}</span>
       <div className="flex items-center gap-2">
-        <DotRating score={clampedScore} maxScore={maxScore} />
+        <DotRating score={clampedScore} accent={accent} maxScore={maxScore} />
         <span className="text-xs font-medium tabular-nums text-text">
           {clampedScore}/{maxScore}
         </span>
@@ -157,6 +180,10 @@ function ScoreRow({
   );
 }
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：让评分速览卡复用共享卡片壳，和展示页中的强调色、图标色块、hover 反馈保持一致。
+ */
 export function ScoreOverviewCard({
   foreshadowRate,
   powerStance,
@@ -166,55 +193,72 @@ export function ScoreOverviewCard({
   className,
 }: ScoreOverviewCardProps) {
   const navigate = useNavigate();
+  const accent: MetricAccent = "chart-2";
 
   const foreshadowPct =
     foreshadowRate != null ? Math.round(foreshadowRate * 100) : null;
 
   return (
-    <Card variant="elevated" className={cn("rounded-xl", className)}>
-      <CardContent className="flex flex-col gap-4 p-5">
-        <h3 className="text-xl font-semibold text-text">评分速览</h3>
-
-        <div className="flex items-center gap-3">
+    <DashboardCardShell
+      title="评分速览"
+      icon={<BarChart3 className="h-5 w-5" />}
+      accent={accent}
+      showOrb
+      className={cn(className)}
+      bodyClassName="gap-3"
+      footer={
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate(`/novels/${novelId}/diagnosis`)}
+          className={cn(
+            "group flex items-center gap-1 px-0 text-xs text-text-muted transition-colors",
+            getMetricAccentHoverTextClass(accent)
+          )}
+        >
+          查看完整诊断报告
+          <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+        </Button>
+      }
+    >
+        <div className="rounded-2xl border border-chart-2/15 bg-surface/75 p-3.5 shadow-sm">
+          <div className="flex items-center gap-3">
           {foreshadowPct != null ? (
             <>
-              <MiniProgressRing progress={foreshadowPct} />
+              <MiniProgressRing progress={foreshadowPct} accent={accent} />
               <div>
-                <p className="text-xs text-text-muted">伏笔兑现率</p>
-                <p className="text-sm font-medium text-text">{foreshadowPct}%</p>
+                <p className="text-xs uppercase tracking-wide text-text-muted">伏笔兑现率</p>
+                <p className="text-lg font-semibold tabular-nums text-text">{foreshadowPct}%</p>
               </div>
             </>
           ) : (
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-hover">
+              <div
+                className="flex h-12 w-12 items-center justify-center rounded-full border"
+                style={{
+                  backgroundColor: getMetricAccentColor(accent, 0.08),
+                  borderColor: getMetricAccentColor(accent, 0.18),
+                }}
+              >
                 <span className="text-xs text-text-muted">—</span>
               </div>
               <div>
-                <p className="text-xs text-text-muted">伏笔兑现率</p>
+                <p className="text-xs uppercase tracking-wide text-text-muted">伏笔兑现率</p>
                 <p className="text-sm text-text-muted">暂无数据</p>
               </div>
             </div>
           )}
         </div>
-
-        <div className="flex flex-col gap-2">
-          <ScoreRow label="权力立场" score={powerStance} />
-          <ScoreRow label="平民尊严" score={civilianDignity} />
-          <ScoreRow label="文化深度" score={culturalDepth} />
         </div>
 
-        <div className="mt-auto pt-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate(`/novels/${novelId}/diagnosis`)}
-            className="group flex items-center gap-1 text-xs text-text-muted transition-colors hover:text-primary"
-          >
-            查看完整诊断报告
-            <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-          </Button>
+        <div className="rounded-2xl border border-border/70 bg-surface/70 p-3.5">
+          <div className="mb-2 text-xs uppercase tracking-wide text-text-muted">核心评分</div>
+          <div className="flex flex-col gap-2.5">
+            <ScoreRow label="权力立场" score={powerStance} accent={accent} />
+            <ScoreRow label="平民尊严" score={civilianDignity} accent={accent} />
+            <ScoreRow label="文化深度" score={culturalDepth} accent={accent} />
+          </div>
         </div>
-      </CardContent>
-    </Card>
+    </DashboardCardShell>
   );
 }

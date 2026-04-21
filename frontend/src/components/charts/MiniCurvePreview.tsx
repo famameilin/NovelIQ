@@ -136,7 +136,7 @@ export function MiniCurvePreview({
       )}
       onClick={() => navigate(`/novels/${novelId}/curves`)}
     >
-      <div className="px-5 pt-4 pb-2">
+      <div className="px-4 pt-3 pb-1.5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-text">情绪趋势</h3>
           <span className="text-xs text-text-muted opacity-0 transition-opacity group-hover:opacity-100">
@@ -144,7 +144,7 @@ export function MiniCurvePreview({
           </span>
         </div>
       </div>
-      <div className="h-[150px] w-full">
+      <div className="h-[132px] w-full">
         {data.length > 0 ? (
           <ReactEChartsCore
             key={themeSignature}

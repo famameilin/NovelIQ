@@ -1,7 +1,11 @@
 import { useRef } from "react";
 import { motion, useInView } from "framer-motion";
 import { Link } from "react-router-dom";
-import { Card } from "@/components/ui/card";
+import {
+  DashboardCardShell,
+  getMetricAccentHoverTextClass,
+  type MetricAccent,
+} from "@/components/common/DashboardCardShell";
 import { cn } from "@/lib/cn";
 
 /* ------------------------------------------------------------------ */
@@ -38,7 +42,7 @@ const DIMENSION_CONFIG: Record<
   DimensionType,
   {
     label: string;
-    accent: string;
+    accent: MetricAccent;
     gradientEnd: string;
     hoverBorder: string;
   }
@@ -389,6 +393,10 @@ function EmptyState() {
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-21，任务：仪表盘组件视觉重构
+ * 修改原因：让五维速览卡片直接复用共享卡片壳，和 MetricCard 保持统一的外观反馈。
+ */
 export function DimensionMiniCard({
   dimension,
   data,
@@ -483,22 +491,27 @@ export function DimensionMiniCard({
   };
 
   const content = (
-    <Card
-      variant="elevated"
-      className={cn(
-        "relative rounded-xl p-4 transition-all duration-300",
-        "bg-gradient-to-br from-surface via-surface",
-        config.gradientEnd,
-        config.hoverBorder,
-        "hover:-translate-y-1 hover:shadow-lg",
-        className
-      )}
+    <DashboardCardShell
+      title={config.label}
+      accent={config.accent}
+      className={cn("h-full", className)}
+      contentClassName="gap-2.5 p-3.5"
+      bodyClassName="gap-2.5"
+      titleClassName="text-xs font-medium uppercase tracking-wide text-text-muted"
+      footer={
+        linkTo ? (
+          <Link
+            to={linkTo}
+            className={cn(
+              "inline-flex items-center gap-0.5 text-xs text-text-muted transition-colors",
+              getMetricAccentHoverTextClass(config.accent)
+            )}
+          >
+            {renderLinkText()}
+          </Link>
+        ) : undefined
+      }
     >
-      <div className="space-y-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
-          {config.label}
-        </p>
-
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-2xl font-bold tabular-nums text-text">
@@ -506,21 +519,11 @@ export function DimensionMiniCard({
             </p>
             <p className="mt-0.5 text-[10px] text-text-muted">{renderValueLabel()}</p>
           </div>
-          <div className="flex h-14 w-20 flex-shrink-0 items-center justify-center">
+          <div className="flex h-12 w-[72px] flex-shrink-0 items-center justify-center">
             {renderVisualization()}
           </div>
         </div>
-
-        {linkTo && (
-          <Link
-            to={linkTo}
-            className="inline-flex items-center gap-0.5 text-xs text-text-muted transition-colors hover:text-primary"
-          >
-            {renderLinkText()}
-          </Link>
-        )}
-      </div>
-    </Card>
+    </DashboardCardShell>
   );
 
   return content;
