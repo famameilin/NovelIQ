@@ -138,3 +138,34 @@ def test_render_active_entities_from_authority_renders_without_temporary_bundle(
     assert rendered.startswith("【近期活跃角色】")
     assert "白芷" in rendered
     assert "[chunk=12]" in rendered
+
+
+def test_render_shared_evidence_sections_can_render_emotion_exemplars_separately() -> None:
+    bundle = EvidenceBundle(
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="她面无表情地收剑入鞘。",
+                metadata={"chunk_id": 2, "text": "她面无表情地收剑入鞘。", "similarity": 0.87},
+            ),
+            EvidenceItem(
+                evidence_type="emotion_exemplar",
+                source="chunk_embeddings",
+                content="她面带笑意，眸色却冷。",
+                metadata={
+                    "chunk_id": 9,
+                    "text": "她面带笑意，眸色却冷。",
+                    "similarity": 0.92,
+                    "emotional_valence": "mild_negative",
+                },
+            ),
+        ]
+    )
+
+    sections = render_shared_evidence_sections(bundle)
+
+    assert sections.vector_evidence is not None
+    assert sections.emotion_exemplars is not None
+    assert "<Emotion_Exemplars>" in sections.emotion_exemplars
+    assert "[Chunk 9]" in sections.emotion_exemplars
