@@ -351,14 +351,42 @@ def _select_semantic_items(
     return filtered_items if max_items is None else filtered_items[:max_items]
 
 
-def render_vector_evidence(bundle: EvidenceBundle, max_chunks: int = 3, max_text_len: int = 200) -> str | None:
+def _collect_semantic_chunk_ids(
+    bundle: EvidenceBundle,
+    *,
+    evidence_types: set[str],
+) -> set[int]:
+    """
+    创建时间: 2026-04-21
+    修改时间: 2026-04-21
+    任务: dedupe-phase1-emotion-exemplar
+    新建原因: Phase1 会同时消费 emotion exemplar 和 vector evidence，需要按
+    chunk_id 去重，避免同一条 Level3 命中在 prompt 里重复出现。
+    """
+    chunk_ids: set[int] = set()
+    for item in bundle.semantic_evidence:
+        if item.evidence_type not in evidence_types or item.chunk_id is None:
+            continue
+        chunk_ids.add(item.chunk_id)
+    return chunk_ids
+
+
+def render_vector_evidence(
+    bundle: EvidenceBundle,
+    max_chunks: int = 3,
+    max_text_len: int = 200,
+    exclude_chunk_ids: set[int] | None = None,
+) -> str | None:
     # 中文注释：这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
+    # 若 Phase1 已单独渲染 emotion exemplar，则再按 chunk_id 排除重复项，避免同一条历史片段占掉两类证据预算。
     vector_parts: list[str] = []
     for item in _select_semantic_items(
         bundle,
         evidence_types={"semantic_recall", "vector_evidence"},
         max_items=max_chunks,
     ):
+        if exclude_chunk_ids is not None and item.chunk_id is not None and item.chunk_id in exclude_chunk_ids:
+            continue
         chunk_id = item.chunk_id if item.chunk_id is not None else item.metadata.get("chunk_id", "?")
         score = item.score if item.score is not None else item.metadata.get("similarity", 0.0)
         text = str(item.metadata.get("text", item.content))
@@ -427,11 +455,20 @@ def render_shared_evidence_sections(
     max_vector_chunks: int = 3,
     max_vector_text_len: int = 200,
     priority_candidate_names: Iterable[str] | None = None,
+    exclude_vector_chunks_with_emotion_exemplars: bool = False,
 ) -> SharedEvidenceSections:
     if bundle is None:
         return SharedEvidenceSections()
 
     active_entity_items = [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
+    emotion_exemplar_chunk_ids = (
+        _collect_semantic_chunk_ids(
+            bundle,
+            evidence_types={"emotion_exemplar"},
+        )
+        if exclude_vector_chunks_with_emotion_exemplars
+        else set()
+    )
     return SharedEvidenceSections(
         structured_evidence=render_structured_evidence(bundle),
         level1_facts=render_level1_facts(
@@ -461,6 +498,7 @@ def render_shared_evidence_sections(
             bundle,
             max_chunks=max_vector_chunks,
             max_text_len=max_vector_text_len,
+            exclude_chunk_ids=emotion_exemplar_chunk_ids if emotion_exemplar_chunk_ids else None,
         ),
     )
 
