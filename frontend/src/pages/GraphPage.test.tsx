@@ -421,7 +421,7 @@ describe("GraphPage pagination", () => {
 
     renderPage();
 
-    await screen.findByText(/该任务尚未产生图谱 authority 输出/);
+    await screen.findByText(/该任务暂时没有可展示的关系图谱/);
   });
 
   it("shows the graph contract issue state when required page fields are missing", async () => {
@@ -430,7 +430,7 @@ describe("GraphPage pagination", () => {
 
     renderPage();
 
-    await screen.findByText(/\/graph authority contract 不完整/);
+    await screen.findByText(/图谱数据暂不完整/);
     expect(consoleErrorSpy).toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
@@ -489,8 +489,8 @@ describe("GraphPage pagination", () => {
 
     await screen.findByText("task-b Hero");
     expect(screen.getByText("1 / 2")).toBeInTheDocument();
-    expect(screen.getByText("401")).toBeInTheDocument();
-    expect(screen.queryByText("暂无 relation events 历史。")).not.toBeInTheDocument();
+    expect(screen.getByText(/task-b Hero -> task-b Ally/)).toBeInTheDocument();
+    expect(screen.queryByText("暂无关系变化记录。")).not.toBeInTheDocument();
     expect(getGraphMock).not.toHaveBeenCalled();
   });
 
@@ -666,8 +666,8 @@ describe("GraphPage pagination", () => {
 
     renderPage();
 
-    expect(await screen.findByText("事件 ID")).toBeInTheDocument();
-    expect(screen.getByText("102")).toBeInTheDocument();
+    expect(await screen.findByText("变化类型")).toBeInTheDocument();
+    expect(screen.getByText(/task-a Older -> task-a Ally/)).toBeInTheDocument();
   });
 
   it("uses the resolved fallback event when jumping back to timeline after a graph deep-link miss", async () => {
@@ -686,7 +686,7 @@ describe("GraphPage pagination", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText("102");
+    await screen.findByText(/task-a Older -> task-a Ally/);
     await user.click(screen.getByRole("button", { name: "去时间轴联动查看" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
@@ -720,7 +720,7 @@ describe("GraphPage pagination", () => {
         screen.queryByText("未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。")
       ).not.toBeInTheDocument();
     });
-    expect(screen.getByText("101")).toBeInTheDocument();
+    expect(screen.getByText(/task-a Hero -> task-a Ally/)).toBeInTheDocument();
     expect(navigateMock).toHaveBeenCalledWith(
       "/novels/novel-1/graph?task_id=task-a&selected_chunk=50&relation_event_id=101",
       { replace: true }
@@ -741,7 +741,7 @@ describe("GraphPage pagination", () => {
 
     await screen.findByText("task-a Hero");
     await waitFor(() => {
-      expect(screen.queryByText("事件 ID")).not.toBeInTheDocument();
+      expect(screen.queryByText("变化类型")).not.toBeInTheDocument();
     });
     expect(screen.getByText(/这里会显示详细上下文/)).toBeInTheDocument();
   });
@@ -850,7 +850,7 @@ describe("GraphPage pagination", () => {
 
     await screen.findByText(/未在当前事件窗口定位到指定关系事件/);
     await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
-    expect(screen.getByText("102")).toBeInTheDocument();
+    expect(screen.getByText(/task-a Older -> task-a Ally/)).toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: "加载更多" }));
     expect(await screen.findByText("旧任务分页失败")).toBeInTheDocument();
@@ -866,8 +866,8 @@ describe("GraphPage pagination", () => {
     expect(screen.queryByText("旧任务分页失败")).not.toBeInTheDocument();
     expect(screen.queryByText(/未在当前事件窗口定位到指定关系事件/)).not.toBeInTheDocument();
     expect(screen.getByText("selected-node:none")).toBeInTheDocument();
-    expect(screen.queryByText("102")).not.toBeInTheDocument();
-    expect(screen.getByText("301")).toBeInTheDocument();
+    expect(screen.queryByText(/task-a Older -> task-a Ally/)).not.toBeInTheDocument();
+    expect(screen.getByText(/task-b Hero -> task-b Ally/)).toBeInTheDocument();
   });
 
   it("clears toolbar search and relation filters after switching tasks", async () => {
@@ -938,13 +938,13 @@ describe("GraphPage pagination", () => {
     expect(targetEventButton).not.toBeNull();
     fireEvent.click(targetEventButton!);
     expect(screen.getByText("selected-node:task-a Hero")).toBeInTheDocument();
-    expect(screen.getByText("102")).toBeInTheDocument();
+    expect(screen.getByText(/task-a Older -> task-a Ally/)).toBeInTheDocument();
 
     view.queryClient.setQueryData(["graph", "novel-1", "task-a"], refreshedGraph);
 
     await waitFor(() => {
       expect(screen.getByText("selected-node:task-a Hero")).toBeInTheDocument();
-      expect(screen.getByText("102")).toBeInTheDocument();
+      expect(screen.getByText(/task-a Older -> task-a Ally/)).toBeInTheDocument();
       expect(screen.getByText("2 / 4")).toBeInTheDocument();
     });
   });
