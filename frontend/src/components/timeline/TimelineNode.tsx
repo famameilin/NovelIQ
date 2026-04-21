@@ -5,47 +5,19 @@
  * 创建者: GLM-5
  * 任务: Phase 2-B 叙事时间轴
  * 说明: 时间轴上的单个节点，根据属性映射大小/颜色/图标
+ *
+ * 修改时间: 2026-04-21
+ * 任务: 修复叙事时间轴页面布局与节点语义表达
+ * 修改内容:
+ *   - 节点改为显式对齐轨道基线，避免出现节点与时间轴横线错位
+ *   - 统一复用节点视觉语义配置，保证图例、节点、详情表达一致
+ *   - 增强选中/高亮态，让节点在复杂时间轴中更容易被识别
  */
 
 import { motion } from "framer-motion";
-import {
-  Zap,
-  User,
-  UserMinus,
-  Link2,
-  type LucideIcon,
-} from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { TimelineNode as TimelineNodeType } from "@/api/types";
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
-
-const NODE_TYPE_CONFIG: Record<
-  string,
-  { icon: LucideIcon; bgClass: string; textClass: string; label: string }
-> = {
-  plot: { icon: Zap, bgClass: "bg-primary", textClass: "text-primary", label: "情节" },
-  character_entry: {
-    icon: User,
-    bgClass: "bg-chart-positive",
-    textClass: "text-chart-positive",
-    label: "角色登场",
-  },
-  character_exit: {
-    icon: UserMinus,
-    bgClass: "bg-chart-negative",
-    textClass: "text-chart-negative",
-    label: "角色退场",
-  },
-  relation_change: {
-    icon: Link2,
-    bgClass: "bg-chart-2",
-    textClass: "text-chart-2",
-    label: "关系变化",
-  },
-};
+import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
 const NODE_SIZE_MIN = 12;
 const NODE_SIZE_MAX = 28;
@@ -63,6 +35,8 @@ export interface TimelineNodeProps {
   isHighlighted?: boolean;
   onClick?: () => void;
   showLabel?: boolean;
+  baselineY?: number;
+  position?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,9 +49,11 @@ export function TimelineNode({
   isHighlighted,
   onClick,
   showLabel = false,
+  baselineY = 72,
+  position,
 }: TimelineNodeProps) {
-  const config = NODE_TYPE_CONFIG[node.node_type] || NODE_TYPE_CONFIG.plot;
-  const Icon = config.icon;
+  const presentation = getTimelineNodePresentation(node.node_type);
+  const Icon = presentation.icon;
 
   const size = calculateNodeSize(node.importance_score);
   const verticalOffset = calculateVerticalOffset(node.tension_percentile);
@@ -85,14 +61,16 @@ export function TimelineNode({
   return (
     <motion.button
       className={cn(
-        "absolute flex items-center justify-center rounded-full",
-        "transition-all duration-200 cursor-pointer",
+        "absolute z-10 flex items-center justify-center rounded-full border border-border/50 bg-background/85 shadow-sm backdrop-blur-sm",
+        "cursor-pointer transition-all duration-200",
         "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-        isSelected && "ring-2 ring-primary ring-offset-2"
+        isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-surface",
+        isHighlighted && !isSelected && "ring-2 ring-chart-4/70 ring-offset-2 ring-offset-surface"
       )}
       style={{
-        left: `${node.progress * 100}%`,
-        transform: `translateX(-50%) translateY(${verticalOffset}px)`,
+        top: baselineY,
+        left: position ?? `${node.progress * 100}%`,
+        transform: `translateX(-50%) translateY(-50%) translateY(${verticalOffset}px)`,
         width: size,
         height: size,
       }}
@@ -102,18 +80,17 @@ export function TimelineNode({
       whileHover={{ scale: 1.2 }}
       onClick={onClick}
       title={node.event}
+      aria-label={`${presentation.label}: ${node.event}`}
     >
       <div
         className={cn(
-          "flex items-center justify-center rounded-full",
-          "bg-opacity-20",
-          config.bgClass,
-          isHighlighted && "ring-2 ring-offset-1 ring-chart-4"
+          "flex items-center justify-center rounded-full border",
+          presentation.dotClassName
         )}
         style={{ width: size, height: size }}
       >
         <Icon
-          className={cn(config.textClass)}
+          className={cn(presentation.iconClassName)}
           style={{
             width: size * 0.5,
             height: size * 0.5,

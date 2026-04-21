@@ -16,6 +16,9 @@ export type { TimelineNodeProps } from "./TimelineNode";
 export { TimelineTrack } from "./TimelineTrack";
 export type { TimelineTrackProps } from "./TimelineTrack";
 
+export { TimelineLegend } from "./TimelineLegend";
+export type { TimelineLegendProps } from "./TimelineLegend";
+
 export { TensionOverlay } from "./TensionOverlay";
 export type { TensionOverlayProps } from "./TensionOverlay";
 
