@@ -23,7 +23,7 @@ from .matching import count_token_hits_enhanced
 from .text_utils import dialogue_length, split_sentences, tokenize_words
 
 
-def tension_proxy(text: str, fight_terms: dict[str, int]) -> dict[str, float]:
+def tension_proxy(text: str, fight_terms: dict[str, float]) -> dict[str, float]:
     """
     计算张力代理指标。
 
@@ -42,6 +42,11 @@ def tension_proxy(text: str, fight_terms: dict[str, int]) -> dict[str, float]:
     修改者: GLM-5
     任务: 清理向后兼容代码
     修改内容: fight_terms 参数类型改为 dict[str, int]
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fix-emotion-curve-weighting
+    修改内容: 允许浮点权重字典透传，保持和加权词表集合的类型一致
     """
     if not text:
         return {
