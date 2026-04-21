@@ -22,7 +22,12 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.models.local.evidence_renderer_shared import render_disambig_candidates, render_vector_evidence
+from src.config import settings
+from src.models.local.evidence_renderer_shared import (
+    render_disambig_candidates,
+    render_emotion_exemplars,
+    render_vector_evidence,
+)
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.rag.retriever import DisambigContextProvider, Level3NotReadyError, Level3VectorEvidence
 
@@ -85,12 +90,12 @@ class TestLevel3VectorEvidenceAsync:
     async def test_search_similar_chunks_success(self, mock_search: MagicMock) -> None:
         """成功检索相似 chunk"""
         mock_client = MagicMock()
-        mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
-        mock_client.get_embedding = AsyncMock(return_value=[0.1] * 1536)
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_client.get_embedding = AsyncMock(return_value=[0.1] * settings.models.semantic_chunking.embedding_dim)
         mock_session = MagicMock()
 
         mock_search.return_value = [
-            {"chunk_id": 1, "text": "相似文本", "similarity": 0.9},
+            {"chunk_id": 1, "text": "相似文本", "similarity": 0.9, "emotional_valence": "mild_negative"},
         ]
 
         with (
@@ -106,13 +111,14 @@ class TestLevel3VectorEvidenceAsync:
 
         assert len(results) == 1
         assert results[0]["chunk_id"] == 1
+        assert results[0]["emotional_valence"] == "mild_negative"
 
     @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     async def test_search_similar_chunks_empty_query(self, mock_has: MagicMock) -> None:
         """空查询返回空列表"""
         mock_client = MagicMock()
-        mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
         mock_session = MagicMock()
 
         with patch("src.storage.vector_schema.validate_chunk_embeddings_schema"):
@@ -128,7 +134,9 @@ class TestLevel3VectorEvidenceAsync:
     @pytest.mark.asyncio
     async def test_ensure_level3_ready_fails_on_dimension_mismatch(self) -> None:
         mock_client = MagicMock()
-        mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
+        mock_client.detect_embedding_dimension = AsyncMock(
+            return_value=settings.models.semantic_chunking.embedding_dim + 1
+        )
         mock_session = MagicMock()
         level3 = Level3VectorEvidence(
             session=mock_session,
@@ -143,7 +151,7 @@ class TestLevel3VectorEvidenceAsync:
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=False)
     async def test_ensure_level3_ready_fails_when_embeddings_missing(self, mock_has: MagicMock) -> None:
         mock_client = MagicMock()
-        mock_client.detect_embedding_dimension = AsyncMock(return_value=1536)
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
         mock_session = MagicMock()
         level3 = Level3VectorEvidence(
             session=mock_session,
@@ -277,7 +285,6 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         )
         self.assertIsNone(render_disambig_candidates(bundle))
 
-
 class TestSharedEvidenceRenderer(unittest.TestCase):
     def test_render_vector_evidence_empty_bundle_returns_none(self) -> None:
         rendered = render_vector_evidence(EvidenceBundle())
@@ -330,6 +337,50 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
         assert rendered is not None
         self.assertIn("...", rendered)
 
+    def test_render_vector_evidence_ignores_emotion_exemplar_rows(self) -> None:
+        bundle = EvidenceBundle(
+            semantic_evidence=[
+                EvidenceItem(
+                    evidence_type="emotion_exemplar",
+                    source="chunk_embeddings",
+                    content="她笑着收回刀，眸光却冷得发紧。",
+                    metadata={
+                        "chunk_id": 3,
+                        "text": "她笑着收回刀，眸光却冷得发紧。",
+                        "similarity": 0.91,
+                        "emotional_valence": "mild_negative",
+                    },
+                )
+            ]
+        )
+
+        assert render_vector_evidence(bundle) is None
+
+    def test_render_emotion_exemplars_formats_emotion_specific_rows(self) -> None:
+        bundle = EvidenceBundle(
+            semantic_evidence=[
+                EvidenceItem(
+                    evidence_type="emotion_exemplar",
+                    source="chunk_embeddings",
+                    content="她笑着收回刀，眸光却冷得发紧。",
+                    metadata={
+                        "chunk_id": 3,
+                        "text": "她笑着收回刀，眸光却冷得发紧。",
+                        "similarity": 0.91,
+                        "emotional_valence": "mild_negative",
+                    },
+                )
+            ]
+        )
+
+        rendered = render_emotion_exemplars(bundle)
+
+        self.assertIsNotNone(rendered)
+        assert rendered is not None
+        self.assertIn("<Emotion_Exemplars>", rendered)
+        self.assertIn("mild_negative", rendered)
+        self.assertIn("[Chunk 3]", rendered)
+
     def test_provider_and_bundle_no_longer_expose_renderer_methods(self) -> None:
         self.assertFalse(hasattr(EvidenceBundle, "render_disambig_candidates"))
         self.assertFalse(hasattr(EvidenceBundle, "render_vector_evidence"))
@@ -340,6 +391,41 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
         self.assertNotIn("<Disambig_Candidates>", provider_source)
         self.assertNotIn("<Vector_Evidence>", provider_source)
         self.assertNotIn("<Vector_Evidence>", level3_source)
+
+
+class TestDisambigContextProviderLevel3Async:
+    @pytest.mark.asyncio
+    async def test_collect_evidence_with_level3_adds_emotion_exemplar_items(self) -> None:
+        provider = DisambigContextProvider(level3_enabled=True)
+        provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.search_similar_chunks = AsyncMock(
+            return_value=[
+                {
+                    "chunk_id": 8,
+                    "text": "她说话时指尖微颤，眼底发冷。",
+                    "similarity": 0.93,
+                    "emotional_valence": "mild_negative",
+                },
+                {
+                    "chunk_id": 12,
+                    "text": "他只是点了点头。",
+                    "similarity": 0.81,
+                    "emotional_valence": "neutral",
+                },
+            ]
+        )
+
+        bundle = await provider.collect_evidence_with_level3(
+            context_text="她抿唇不语，袖口却攥得发白。",
+            exclude_chunk_ids=[15],
+        )
+
+        semantic_types = [item.evidence_type for item in bundle.semantic_evidence]
+        assert semantic_types.count("semantic_recall") == 2
+        assert semantic_types.count("emotion_exemplar") == 1
+        exemplar = next(item for item in bundle.semantic_evidence if item.evidence_type == "emotion_exemplar")
+        assert exemplar.metadata["emotional_valence"] == "mild_negative"
+        assert exemplar.metadata["evidence_purpose"] == "emotion"
 
 
 if __name__ == "__main__":

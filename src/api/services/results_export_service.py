@@ -19,12 +19,12 @@ from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
-    _fetch_chunk_curves,
     _fetch_chunk_styles,
     _fetch_diagnosis,
     _fetch_global_stats,
     _fetch_hierarchical_relations,
     _fetch_novel_name,
+    _fetch_raw_chunk_curves,
     _fetch_token_usage_stats,
     _fetch_topics,
 )
@@ -52,6 +52,8 @@ from src.storage.repositories import (
 def load_core_results(
     run_id: str,
     stats_repo: StatsRepository,
+    annotation_repo: AnnotationRepository,
+    chunk_repo: ChunkRepository,
 ) -> tuple[list, list[str]]:
     """
     加载核心结果数据：chunk_curves、缺失字段
@@ -63,10 +65,17 @@ def load_core_results(
 
     Returns:
         (chunk_curves, missing_fields)
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: split-raw-vs-display-chunk-curves
+    修改内容: 导出恢复为原始落库 chunk_curves；展示层融合曲线继续只由 /chunk-curves 路由消费
     """
     missing_fields: list[str] = []
 
-    chunk_curves = _fetch_chunk_curves(run_id, stats_repo)
+    # 中文注释：results export 是复盘/比对用 payload，这里必须返回数据库中持久化的
+    # chunk_curves 原值，不能复用展示层融合后的单曲线，否则字段名不变但语义会被静默替换。
+    chunk_curves = _fetch_raw_chunk_curves(run_id, stats_repo)
     if not chunk_curves:
         missing_fields.append("chunk_curves")
 
@@ -363,7 +372,7 @@ def fetch_all_results_data(
     export_graph_view = graph_authority_service.build_export_view(run_id)
     graph_report = graph_authority_service.build_graph_report(run_id)
 
-    chunk_curves, missing_fields = load_core_results(run_id, stats_repo)
+    chunk_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
         run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view

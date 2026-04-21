@@ -21,6 +21,7 @@ from src.api.routes.results_fetchers.fetchers import (
     _fetch_hierarchical_relations,
     _fetch_known_characters,
     _fetch_novel_name,
+    _fetch_raw_chunk_curves,
     _fetch_token_usage_stats,
     _fetch_topics,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "_normalize_name_list",
     "_normalize_text_by_alias_map",
     "_fetch_chunk_curves",
+    "_fetch_raw_chunk_curves",
     "_fetch_characters",
     "_calculate_protagonist_scores",
     "_fetch_topics",

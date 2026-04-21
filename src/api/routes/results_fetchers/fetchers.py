@@ -13,6 +13,7 @@ import binascii
 import json
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -262,21 +263,13 @@ def _build_graph_events_page_info(
     }
 
 
-def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
+def _build_chunk_curve_points(rows: Sequence[Any]) -> list[ChunkCurvePoint]:
     """
-    获取分块曲线数据（情绪 + 节奏）
-
-    修改时间: 2026-03-30
-    修改者: CodeBuddy
-    任务: db-schema-cleanup
-    修改内容: 合并 _fetch_emotion_curve + _fetch_rhythm_curve 为统一接口
-
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: refactor-hardcoded-index-access
-    修改内容: 使用字段名访问替代硬编码索引
+    创建时间: 2026-04-21
+    修改时间: 2026-04-21
+    任务: split-raw-vs-display-chunk-curves
+    新建原因: chunk_curves 现在同时服务原始导出与展示层曲线，统一在这里做 DTO 映射，避免两条路径再次悄悄串语义。
     """
-    rows = stats_repo.fetch_chunk_curves_full(run_id)
     return [
         ChunkCurvePoint(
             chunk_id=row.chunk_id,
@@ -289,6 +282,55 @@ def _fetch_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list:
         )
         for row in rows
     ]
+
+
+def _fetch_raw_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list[ChunkCurvePoint]:
+    """
+    获取数据库中持久化的原始 chunk_curves。
+
+    创建时间: 2026-04-21
+    修改时间: 2026-04-21
+    任务: split-raw-vs-display-chunk-curves
+    新建原因: 导出接口需要稳定复用落库后的 lexical density，不能误吃展示层融合后的单曲线结果。
+    """
+    rows = stats_repo.fetch_chunk_curves_full(run_id)
+    return _build_chunk_curve_points(rows)
+
+
+def _fetch_chunk_curves(
+    run_id: str,
+    stats_repo: StatsRepository,
+    annotation_repo: AnnotationRepository,
+    chunk_repo: ChunkRepository,
+) -> list:
+    """
+    获取分块曲线数据（情绪 + 节奏）
+
+    修改时间: 2026-03-30
+    修改者: CodeBuddy
+    任务: db-schema-cleanup
+    修改内容: 合并 _fetch_emotion_curve + _fetch_rhythm_curve 为统一接口
+
+    修改时间: 2026-03-31
+    修改者: TraeAI
+    任务: refactor-hardcoded-index-access
+    修改内容: 使用字段名访问替代硬编码索引
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fuse-display-emotion-curve
+    修改内容: 读取 annotation/style/dialogue 辅助信号，返回 AI 主导的展示层情绪曲线
+    """
+    from src.metrics.emotion_curve_fusion import build_display_emotion_curve
+
+    rows = stats_repo.fetch_chunk_curves_full(run_id)
+    fused_rows = build_display_emotion_curve(
+        curve_rows=rows,
+        annotation_rows=annotation_repo.fetch_chunk_annotations_full(run_id),
+        style_rows=chunk_repo.fetch_chunk_styles_full(run_id),
+        dialogue_rows=annotation_repo.fetch_chunk_dialogues_full(run_id),
+    )
+    return _build_chunk_curve_points(fused_rows)
 
 
 def _fetch_characters(

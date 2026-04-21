@@ -32,6 +32,11 @@
 任务: split-provider-renderer-tail
 修改内容: 删除 provider 内残留的 Level3 prompt 格式化逻辑，彻底收回为纯取证层
 
+修改时间: 2026-04-21
+修改者: Codex
+任务: emotion-rag-evidence-provider
+修改内容: 在统一 semantic_evidence 主路径内补充 emotion exemplar 证据，供 Phase1 情绪判断复用
+
 说明: 本模块提供证据收集功能（Provider 层），支持三级证据：
 - Level1: 别名表精确匹配
 - Level2: 活跃实体候选
@@ -41,7 +46,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -472,6 +477,46 @@ class DisambigContextProvider:
 
         return bundle
 
+    def _build_semantic_recall_items(self, level3_results: list[dict[str, Any]]) -> list[EvidenceItem]:
+        """
+        修改时间: 2026-04-21
+        任务: emotion-rag-evidence-provider
+        新建原因: 保持 Level3 的通用语义召回证据继续稳定输出，不让情绪扩展改写旧消费者的输入语义。
+        """
+        return [
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="chunk_embeddings",
+                content=str(result.get("text", "")),
+                metadata=dict(result),
+            )
+            for result in level3_results
+        ]
+
+    def _build_emotion_exemplar_items(self, level3_results: list[dict[str, Any]]) -> list[EvidenceItem]:
+        """
+        修改时间: 2026-04-21
+        任务: emotion-rag-evidence-provider
+        新建原因: 在不扩 EvidenceBundle 结构的前提下，把可用于情绪判断的相似片段标记为专用 evidence_type。
+        """
+        exemplar_items: list[EvidenceItem] = []
+        for result in level3_results:
+            emotional_valence = result.get("emotional_valence")
+            if emotional_valence in (None, "", "neutral"):
+                continue
+
+            metadata = dict(result)
+            metadata["evidence_purpose"] = "emotion"
+            exemplar_items.append(
+                EvidenceItem(
+                    evidence_type="emotion_exemplar",
+                    source="chunk_embeddings",
+                    content=str(result.get("text", "")),
+                    metadata=metadata,
+                )
+            )
+        return exemplar_items
+
     async def collect_evidence_with_level3(
         self,
         names_in_chunk: list[str] | None = None,
@@ -486,15 +531,8 @@ class DisambigContextProvider:
                 context_text,
                 exclude_chunk_ids=exclude_chunk_ids,
             )
-            bundle.semantic_evidence.extend(
-                EvidenceItem(
-                    evidence_type="semantic_recall",
-                    source="chunk_embeddings",
-                    content=str(result.get("text", "")),
-                    metadata=dict(result),
-                )
-                for result in level3_results
-            )
+            bundle.semantic_evidence.extend(self._build_semantic_recall_items(level3_results))
+            bundle.semantic_evidence.extend(self._build_emotion_exemplar_items(level3_results))
 
         return bundle
 

@@ -1,10 +1,10 @@
 /**
- * EmotionCurveChart - 情绪密度曲线图表组件
+ * EmotionCurveChart - 情绪趋势曲线图表组件
  * 
  * 创建时间: 2026-04-04
  * 创建者: AI Assistant
  * 任务: Phase 1-D 情绪/节奏曲线
- * 说明: 展示正面/负面/净/平滑密度四条曲线，支持系列切换和缩放同步
+ * 说明: 展示基于词表命中的正面/负面/净/平滑密度四条曲线，支持系列切换和缩放同步
  * 
  * 修改时间: 2026-04-04
  * 修改者: AI Assistant
@@ -104,7 +104,9 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
-        const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? 0);
+    // 中文注释：情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
+        // 避免把“没算出来”和“真实为 0”混成同一条贴地折线。
+        const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
         const isActive = activeSeries.has(config.key);
 
         return {
@@ -143,13 +145,13 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           backgroundColor: "hsl(var(--surface))",
           borderColor: "hsl(var(--border))",
           textStyle: { color: "hsl(var(--text))", fontSize: 12 },
-          formatter: (params: Array<{ seriesName: string; value: number; marker: string; axisValue?: string }>) => {
+          formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; axisValue?: string }>) => {
             if (!Array.isArray(params) || params.length === 0) return "";
             const chunkId = params[0]?.axisValue ?? "";
             let html = `<div class="font-medium mb-1">分块 ${chunkId}</div>`;
-            const activeParams = params.filter((p) => p.value !== undefined && p.value !== 0);
+            const activeParams = params.filter((p) => p.value !== undefined && p.value !== null);
             html += activeParams
-              .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${p.value?.toFixed(4) ?? "-"}</span></div>`)
+              .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${typeof p.value === "number" ? p.value.toFixed(4) : "-"}</span></div>`)
               .join("");
             return html;
           },
