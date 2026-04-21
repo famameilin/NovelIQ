@@ -11,6 +11,13 @@
  * 修改内容: 
  *   - 添加 dataZoom 支持，用于 Brush 缩放同步
  *   - 添加 chartRef 转发，支持外部访问 ECharts 实例
+ *
+ * 修改时间: 2026-04-21
+ * 修改者: Codex
+ * 任务: 修复情绪趋势曲线图例颜色错位
+ * 修改内容:
+ *   - 将 series 主色显式绑定到 CSS 变量
+ *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
  *   - 删除未使用的 hslToHsla 导入
  */
 import { useMemo, forwardRef } from "react";
@@ -112,9 +119,11 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         return {
           name: config.name,
           type: "line" as const,
+          color,
           data: isActive ? values : [],
           smooth: true,
           showSymbol: false,
+          itemStyle: { color },
           lineStyle: { width: 2, color },
           emphasis: {
             focus: "series" as const,

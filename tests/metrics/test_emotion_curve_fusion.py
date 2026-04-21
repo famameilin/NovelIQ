@@ -91,3 +91,18 @@ def test_build_display_emotion_curve_keeps_conflict_signal_without_reversing_ai_
     assert result[0].pos_density > 0
     assert result[0].neg_density > 0
     assert result[0].net_density > 0
+
+
+def test_build_display_emotion_curve_carries_surface_tension_field() -> None:
+    curve_rows = [_curve_row(1, tension_proxy=0.2, tension_composite=0.5)]
+
+    result = build_display_emotion_curve(
+        curve_rows=curve_rows,
+        annotation_rows=[],
+        style_rows=[],
+        dialogue_rows=[],
+        surface_tension_by_chunk={1: 0.73},
+    )
+
+    assert len(result) == 1
+    assert result[0].surface_tension == 0.73
