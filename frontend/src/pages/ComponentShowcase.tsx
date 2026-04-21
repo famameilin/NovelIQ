@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { toast } from "sonner";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Button } from "@/components/ui/button";
@@ -126,8 +126,16 @@ function LiveCSSMonitor() {
 }
 
 export function ComponentShowcase() {
-  const { seedColor, setSeedColor } = useThemeStore();
+  const { seedColor, setSeedColor, setAutoSyncEnabled } = useThemeStore();
   const [progress, setProgress] = useState(66);
+
+  // 中文注释：组件展示页允许手动试色，挂载期间临时关闭“按任务自动回填主题色”。
+  useEffect(() => {
+    setAutoSyncEnabled(false);
+    return () => {
+      setAutoSyncEnabled(true);
+    };
+  }, [setAutoSyncEnabled]);
 
   const presetColors = [
     { label: "默认 Indigo", hex: "#6366F1" },

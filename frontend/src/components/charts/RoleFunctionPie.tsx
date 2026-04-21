@@ -10,6 +10,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCSSColorVar } from "@/lib/theme";
 import { cn } from "@/lib/cn";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { Character } from "@/api/types";
 
 echarts.use([TooltipComponent, LegendComponent, PieChart, CanvasRenderer]);
@@ -41,6 +42,7 @@ export interface RoleFunctionPieProps {
  * 角色功能分布饼图 - Greimas 六元素模型
  */
 export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps) {
+  const themeSignature = useChartThemeSignature();
   // 统计各功能角色数量
   const functionData = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -74,7 +76,7 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
         value: counts[f.key],
         itemStyle: { color: getCSSColorVar(f.colorVar) },
       }));
-  }, [characters]);
+  }, [characters, themeSignature]);
 
   const option = useMemo(() => {
     if (functionData.length === 0) return {};
@@ -142,6 +144,7 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
         <div className="h-[300px] w-full">
           {hasData ? (
             <ReactEChartsCore
+              key={themeSignature}
               echarts={echarts}
               option={option}
               style={{ height: "100%", width: "100%" }}

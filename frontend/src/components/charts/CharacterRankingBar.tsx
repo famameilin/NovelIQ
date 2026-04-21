@@ -10,6 +10,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { Character } from "@/api/types";
 
 echarts.use([GridComponent, TooltipComponent, BarChart, CanvasRenderer]);
@@ -33,6 +34,7 @@ export function CharacterRankingBar({
   limit = 15,
   className,
 }: CharacterRankingBarProps) {
+  const themeSignature = useChartThemeSignature();
   const primaryColor = getCSSColorVar("--primary");
 
   // 按出场次数排序，取前 N 个
@@ -127,6 +129,7 @@ export function CharacterRankingBar({
         <div className="h-[400px] w-full">
           {hasData ? (
             <ReactEChartsCore
+              key={themeSignature}
               echarts={echarts}
               option={option}
               style={{ height: "100%", width: "100%" }}

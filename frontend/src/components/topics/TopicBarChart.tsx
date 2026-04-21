@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getCSSColorVar } from "@/lib/theme";
 import { CHART_COLORS } from "@/lib/chart-colors";
 import { cn } from "@/lib/cn";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import { useInView } from "@/hooks/useInView";
 import type { Topic } from "@/api/types";
 
@@ -30,11 +31,12 @@ export interface TopicBarChartProps {
 }
 
 export function TopicBarChart({ topics, className }: TopicBarChartProps) {
+  const themeSignature = useChartThemeSignature();
   const { ref: containerRef, isVisible } = useInView(0.1);
 
   const chartColors = useMemo(() => {
     return CHART_COLORS.map((c) => getCSSColorVar(c));
-  }, []);
+  }, [themeSignature]);
 
   const sortedTopics = useMemo(() => {
     return [...topics].sort((a, b) => b.weight - a.weight);
@@ -126,6 +128,7 @@ export function TopicBarChart({ topics, className }: TopicBarChartProps) {
         <div ref={containerRef} className="flex-1 min-h-0 w-full">
           {hasData && isVisible ? (
             <ReactEChartsCore
+              key={themeSignature}
               echarts={echarts}
               option={option}
               style={{ height: "100%", width: "100%" }}

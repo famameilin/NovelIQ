@@ -48,6 +48,7 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 import { getCSSColorVar } from "@/lib/theme";
 import { cn } from "@/lib/cn";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { ChunkCurvePoint, NarrativeStructureMetrics } from "@/api/types";
 
 echarts.use([
@@ -99,6 +100,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
     },
     ref
   ) {
+    const themeSignature = useChartThemeSignature();
     const activeSeries = useMemo(
       () => visibleSeries ?? new Set(SERIES_CONFIG.map((s) => s.key)),
       [visibleSeries]
@@ -316,6 +318,7 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
     return (
       <div className={cn("relative", className)}>
         <ReactEChartsCore
+          key={themeSignature}
           ref={ref}
           echarts={echarts}
           option={option}
