@@ -4,6 +4,11 @@
 任务: implement-level3-vector-retrieval
 说明: Chunk 向量嵌入存储与检索操作
 
+修改时间: 2026-04-21
+修改者: Codex
+任务: emotion-rag-evidence-provider
+修改内容: Level3 检索补充 emotional_valence 元数据，供情绪 exemplar evidence 复用
+
 本模块提供 chunk 向量嵌入的存储和检索功能：
 - insert_chunk_embeddings: 批量写入 embedding
 - get_missing_embedding_chunk_ids: 查询缺失 embedding 的 chunk
@@ -19,7 +24,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chunk, ChunkEmbedding
+from src.storage.models import Chunk, ChunkAnnotation, ChunkEmbedding
 
 
 def insert_chunk_embeddings(
@@ -120,6 +125,10 @@ def search_similar_chunks(
     """
     使用 pgvector 进行向量相似度检索
 
+    修改时间: 2026-04-21
+    任务: emotion-rag-evidence-provider
+    修改说明: 额外回传 chunk 的 emotional_valence，避免上层为了情绪 exemplar 再单独查一轮数据库。
+
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
@@ -129,17 +138,22 @@ def search_similar_chunks(
         exclude_chunk_ids: 排除的 chunk ID 列表
 
     Returns:
-        相似 chunk 列表，每个元素包含 chunk_id, similarity, text
+        相似 chunk 列表，每个元素包含 chunk_id, similarity, text, emotional_valence
     """
     run_scoped_chunks = (
         select(
             ChunkEmbedding.chunk_id.label("chunk_id"),
             Chunk.text.label("text"),
             ChunkEmbedding.embedding_vector.label("embedding_vector"),
+            ChunkAnnotation.emotional_valence.label("emotional_valence"),
         )
         .join(
             Chunk,
             (ChunkEmbedding.chunk_id == Chunk.chunk_id) & (ChunkEmbedding.run_id == Chunk.run_id),
+        )
+        .outerjoin(
+            ChunkAnnotation,
+            (ChunkAnnotation.chunk_id == Chunk.chunk_id) & (ChunkAnnotation.run_id == Chunk.run_id),
         )
         .where(
             ChunkEmbedding.run_id == run_id,
@@ -157,6 +171,7 @@ def search_similar_chunks(
         select(
             run_scoped_chunks_subquery.c.chunk_id,
             run_scoped_chunks_subquery.c.text,
+            run_scoped_chunks_subquery.c.emotional_valence,
             similarity,
         )
         .where(similarity >= similarity_threshold)
@@ -164,14 +179,14 @@ def search_similar_chunks(
         .limit(top_k)
     )
 
-    result = session.execute(stmt)
-    rows = result.fetchall()
+    rows = session.execute(stmt).mappings().all()
 
     return [
         {
-            "chunk_id": row[0],
-            "text": row[1],
-            "similarity": float(row[2]),
+            "chunk_id": int(row["chunk_id"]),
+            "text": str(row["text"]),
+            "emotional_valence": str(row["emotional_valence"]) if row["emotional_valence"] is not None else None,
+            "similarity": float(row["similarity"]),
         }
         for row in rows
     ]

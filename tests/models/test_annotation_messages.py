@@ -1,6 +1,8 @@
 from src.models.local.annotation.evidence_renderer import (
     render_annotation_evidence_blocks,
     render_annotation_prompt_blocks,
+    render_dialogue_attribution_evidence_sections,
+    render_relation_extraction_evidence_sections,
 )
 from src.models.local.annotation.messages import (
     _build_annotation_messages_v2,
@@ -393,3 +395,40 @@ def test_build_foreshadowing_messages_with_empty_bundle_sections_keeps_prompt_cl
     assert "<Disambig_Candidates>" not in user_content
     assert "<Vector_Evidence>" not in user_content
     assert "【近期活跃角色】" not in user_content
+
+
+def test_render_annotation_prompt_blocks_includes_emotion_exemplars_only_for_phase1() -> None:
+    bundle = EvidenceBundle(
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="她抬眼时神色冷得惊人。",
+                metadata={
+                    "chunk_id": 4,
+                    "similarity": 0.89,
+                    "text": "她抬眼时神色冷得惊人。",
+                },
+            ),
+            EvidenceItem(
+                evidence_type="emotion_exemplar",
+                source="chunk_embeddings",
+                content="她唇角含笑，眼底却没有温度。",
+                metadata={
+                    "chunk_id": 6,
+                    "similarity": 0.91,
+                    "text": "她唇角含笑，眼底却没有温度。",
+                    "emotional_valence": "mild_negative",
+                },
+            ),
+        ]
+    )
+
+    phase1_blocks = render_annotation_prompt_blocks(bundle)
+    phase3_sections = render_dialogue_attribution_evidence_sections(bundle)
+    phase4_sections = render_relation_extraction_evidence_sections(bundle)
+
+    assert phase1_blocks.disambig_context is not None
+    assert "<Emotion_Exemplars>" in phase1_blocks.disambig_context
+    assert all("<Emotion_Exemplars>" not in section for section in phase3_sections)
+    assert all("<Emotion_Exemplars>" not in section for section in phase4_sections)

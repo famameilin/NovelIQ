@@ -15,6 +15,7 @@ class SharedEvidenceSections:
     level1_facts: str | None = None
     active_entities: str | None = None
     disambig_candidates: str | None = None
+    emotion_exemplars: str | None = None
     vector_evidence: str | None = None
 
 
@@ -335,10 +336,29 @@ def render_disambig_candidates(
     return "<Disambig_Candidates>\n" + "\n".join(candidate_lines) + "\n</Disambig_Candidates>"
 
 
+def _select_semantic_items(
+    bundle: EvidenceBundle,
+    *,
+    evidence_types: set[str],
+    max_items: int | None,
+) -> list[EvidenceItem]:
+    """
+    修改时间: 2026-04-21
+    任务: emotion-rag-evidence-provider
+    新建原因: semantic_evidence 现在承载多种用途，需要在 renderer 层按 evidence_type 分流，避免不同消费者互相污染。
+    """
+    filtered_items = [item for item in bundle.semantic_evidence if item.evidence_type in evidence_types]
+    return filtered_items if max_items is None else filtered_items[:max_items]
+
+
 def render_vector_evidence(bundle: EvidenceBundle, max_chunks: int = 3, max_text_len: int = 200) -> str | None:
-    # 中文注释：Level 3 的展示文案统一留在 renderer 层，provider 只负责产出 semantic_evidence。
+    # 中文注释：这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
     vector_parts: list[str] = []
-    for item in bundle.semantic_evidence[:max_chunks]:
+    for item in _select_semantic_items(
+        bundle,
+        evidence_types={"semantic_recall", "vector_evidence"},
+        max_items=max_chunks,
+    ):
         chunk_id = item.chunk_id if item.chunk_id is not None else item.metadata.get("chunk_id", "?")
         score = item.score if item.score is not None else item.metadata.get("similarity", 0.0)
         text = str(item.metadata.get("text", item.content))
@@ -352,6 +372,35 @@ def render_vector_evidence(bundle: EvidenceBundle, max_chunks: int = 3, max_text
         "以下是与当前上下文语义相似的历史片段，可能存在身份关联：\n"
         + "\n\n".join(vector_parts)
         + "\n</Vector_Evidence>"
+    )
+
+
+def render_emotion_exemplars(bundle: EvidenceBundle, max_chunks: int = 2, max_text_len: int = 160) -> str | None:
+    """
+    修改时间: 2026-04-21
+    任务: emotion-rag-evidence-provider
+    新建原因: 为 Phase1 提供相似情绪案例证据，但仍然复用统一的 semantic_evidence 主路径。
+    """
+    exemplar_parts: list[str] = []
+    for item in _select_semantic_items(
+        bundle,
+        evidence_types={"emotion_exemplar"},
+        max_items=max_chunks,
+    ):
+        chunk_id = item.chunk_id if item.chunk_id is not None else item.metadata.get("chunk_id", "?")
+        score = item.score if item.score is not None else item.metadata.get("similarity", 0.0)
+        text = str(item.metadata.get("text", item.content))
+        emotional_valence = str(item.metadata.get("emotional_valence", "unknown"))
+        preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
+        exemplar_parts.append(f"[Chunk {chunk_id}] (相似度: {float(score):.2f}, 情绪: {emotional_valence})\n{preview}")
+
+    if not exemplar_parts:
+        return None
+    return (
+        "<Emotion_Exemplars>\n"
+        "以下是与当前片段情绪表达相近的历史片段，可作为整体情绪判断的辅助案例：\n"
+        + "\n\n".join(exemplar_parts)
+        + "\n</Emotion_Exemplars>"
     )
 
 
@@ -373,6 +422,8 @@ def render_shared_evidence_sections(
     max_level1_relation_lines: int | None = None,
     max_active_entities: int | None = None,
     max_disambig_candidates: int | None = None,
+    max_emotion_exemplars: int | None = None,
+    max_emotion_text_len: int = 160,
     max_vector_chunks: int = 3,
     max_vector_text_len: int = 200,
     priority_candidate_names: Iterable[str] | None = None,
@@ -400,6 +451,11 @@ def render_shared_evidence_sections(
             fallback_requested_names=fallback_requested_names,
             max_candidates=max_disambig_candidates,
             priority_names=priority_candidate_names,
+        ),
+        emotion_exemplars=render_emotion_exemplars(
+            bundle,
+            max_chunks=max_emotion_exemplars if max_emotion_exemplars is not None else 2,
+            max_text_len=max_emotion_text_len,
         ),
         vector_evidence=render_vector_evidence(
             bundle,
