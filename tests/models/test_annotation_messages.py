@@ -405,7 +405,7 @@ def test_render_annotation_prompt_blocks_includes_emotion_exemplars_only_for_pha
                 source="level3",
                 content="她抬眼时神色冷得惊人。",
                 metadata={
-                    "chunk_id": 4,
+                    "chunk_id": 6,
                     "similarity": 0.89,
                     "text": "她抬眼时神色冷得惊人。",
                 },
@@ -430,5 +430,9 @@ def test_render_annotation_prompt_blocks_includes_emotion_exemplars_only_for_pha
 
     assert phase1_blocks.disambig_context is not None
     assert "<Emotion_Exemplars>" in phase1_blocks.disambig_context
+    assert phase1_blocks.vector_evidence is None
+    assert "<Vector_Evidence>" not in phase1_blocks.disambig_context
     assert all("<Emotion_Exemplars>" not in section for section in phase3_sections)
     assert all("<Emotion_Exemplars>" not in section for section in phase4_sections)
+    assert any("<Vector_Evidence>" in section and "[Chunk 6]" in section for section in phase3_sections)
+    assert any("<Vector_Evidence>" in section and "[Chunk 6]" in section for section in phase4_sections)

@@ -10,6 +10,7 @@ from src.api.services.results_export_service import (
     build_export_payload,
     load_aggregate_metrics_bundle,
     load_character_bundle,
+    load_core_results,
     load_export_relation_bundle,
     load_graph_signal_bundle,
 )
@@ -226,6 +227,44 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
     )
 
     assert valid_character_names == {"沈砚"}
+
+
+def test_load_core_results_keeps_export_on_raw_chunk_curves(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_curve = SimpleNamespace(
+        chunk_id=7,
+        pos_density=0.12,
+        neg_density=0.03,
+        net_density=0.09,
+        smoothed_density=0.08,
+        tension_proxy=0.41,
+        tension_composite=0.39,
+    )
+
+    def _raise_if_display_curve_is_used(*_args, **_kwargs):
+        raise AssertionError("load_core_results should not reuse display-layer fused chunk curves")
+
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_raw_chunk_curves",
+        lambda *_args, **_kwargs: [raw_curve],
+    )
+    monkeypatch.setattr(
+        "src.api.routes.results_fetchers.fetchers._fetch_chunk_curves",
+        _raise_if_display_curve_is_used,
+    )
+
+    chunk_curves, missing_fields = load_core_results(
+        run_id="run-export-curves",
+        stats_repo=MagicMock(),
+        annotation_repo=MagicMock(),
+        chunk_repo=MagicMock(),
+    )
+
+    assert missing_fields == []
+    assert len(chunk_curves) == 1
+    assert chunk_curves[0].chunk_id == 7
+    assert chunk_curves[0].pos_density == pytest.approx(0.12)
+    assert chunk_curves[0].net_density == pytest.approx(0.09)
+    assert chunk_curves[0].smoothed_density == pytest.approx(0.08)
 
 
 def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypatch: pytest.MonkeyPatch) -> None:

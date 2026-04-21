@@ -116,6 +116,7 @@ def _render_task_scoped_shared_sections(
     include_level1_alias_mappings: bool = True,
     policy: TaskEvidenceRenderPolicy,
     priority_candidate_names: list[str] | None = None,
+    exclude_vector_chunks_with_emotion_exemplars: bool = False,
 ):
     # 中文注释：task renderer 只在这里声明“每个任务最多吃多少共享证据”，
     # 具体 evidence 语义仍由 shared renderer 统一维护，避免 phase 代码各自长出一套裁剪规则。
@@ -133,6 +134,7 @@ def _render_task_scoped_shared_sections(
         max_vector_chunks=policy.max_vector_chunks,
         max_vector_text_len=policy.max_vector_text_len,
         priority_candidate_names=priority_candidate_names,
+        exclude_vector_chunks_with_emotion_exemplars=exclude_vector_chunks_with_emotion_exemplars,
     )
 
 
@@ -145,6 +147,7 @@ def render_annotation_prompt_blocks(
         bundle,
         include_level1_alias_mappings=include_level1_alias_mappings,
         policy=_PHASE1_EVIDENCE_POLICY,
+        exclude_vector_chunks_with_emotion_exemplars=True,
     )
     prompt_sections = select_shared_evidence_sections(
         shared_sections,
