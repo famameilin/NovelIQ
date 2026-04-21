@@ -279,6 +279,7 @@ def _build_chunk_curve_points(rows: Sequence[Any]) -> list[ChunkCurvePoint]:
             smoothed_density=row.smoothed_density,
             tension_proxy=row.tension_proxy,
             tension_composite=row.tension_composite,
+            surface_tension=getattr(row, "surface_tension", None),
         )
         for row in rows
     ]
@@ -320,15 +321,24 @@ def _fetch_chunk_curves(
     修改者: Codex
     任务: fuse-display-emotion-curve
     修改内容: 读取 annotation/style/dialogue 辅助信号，返回 AI 主导的展示层情绪曲线
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: display-surface-tension
+    修改内容: 为展示层补充表层张力字段，避免前端继续直接消费 raw tension_proxy
     """
     from src.metrics.emotion_curve_fusion import build_display_emotion_curve
+    from src.metrics.rhythm_curve_fusion import build_display_surface_tension
 
     rows = stats_repo.fetch_chunk_curves_full(run_id)
+    style_rows = chunk_repo.fetch_chunk_styles_full(run_id)
+    surface_tension_by_chunk = build_display_surface_tension(rows, style_rows)
     fused_rows = build_display_emotion_curve(
         curve_rows=rows,
         annotation_rows=annotation_repo.fetch_chunk_annotations_full(run_id),
-        style_rows=chunk_repo.fetch_chunk_styles_full(run_id),
+        style_rows=style_rows,
         dialogue_rows=annotation_repo.fetch_chunk_dialogues_full(run_id),
+        surface_tension_by_chunk=surface_tension_by_chunk,
     )
     return _build_chunk_curve_points(fused_rows)
 
