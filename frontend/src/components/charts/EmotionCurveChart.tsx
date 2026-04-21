@@ -4,7 +4,7 @@
  * 创建时间: 2026-04-04
  * 创建者: AI Assistant
  * 任务: Phase 1-D 情绪/节奏曲线
- * 说明: 展示基于词表命中的正面/负面/净/平滑密度四条曲线，支持系列切换和缩放同步
+ * 说明: 展示情绪趋势主线与正负/原始趋势辅助线，支持系列切换和缩放同步
  * 
  * 修改时间: 2026-04-04
  * 修改者: AI Assistant
@@ -32,7 +32,7 @@ import {
   DataZoomComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import { getCSSColorVar } from "@/lib/theme";
+import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import type { ChunkCurvePoint } from "@/api/types";
 
@@ -61,10 +61,10 @@ export interface EmotionCurveChartProps {
 }
 
 const SERIES_CONFIG = [
-  { key: "pos_density", name: "正面密度", colorVar: "--chart-positive" },
-  { key: "neg_density", name: "负面密度", colorVar: "--chart-negative" },
-  { key: "net_density", name: "净密度", colorVar: "--chart-1" },
-  { key: "smoothed_density", name: "平滑密度", colorVar: "--primary" },
+  { key: "pos_density", name: "正向强度", colorVar: "--chart-positive", role: "aux" },
+  { key: "neg_density", name: "负向强度", colorVar: "--chart-negative", role: "aux" },
+  { key: "net_density", name: "原始趋势", colorVar: "--chart-1", role: "support" },
+  { key: "smoothed_density", name: "平滑趋势", colorVar: "--primary", role: "main" },
 ] as const;
 
 /* ------------------------------------------------------------------ */
@@ -111,7 +111,13 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
-    // 中文注释：情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
+        const isMainSeries = config.role === "main";
+        const isSupportSeries = config.role === "support";
+        const lineOpacity = isMainSeries ? 1 : isSupportSeries ? 0.55 : 0.35;
+        const lineWidth = isMainSeries ? 3 : isSupportSeries ? 2 : 1.5;
+        const lineType = isSupportSeries ? "dashed" : "solid";
+        const areaOpacity = isMainSeries ? 0.12 : 0;
+        // 中文注释：情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
         // 避免把“没算出来”和“真实为 0”混成同一条贴地折线。
         const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
         const isActive = activeSeries.has(config.key);
@@ -123,8 +129,21 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
           data: isActive ? values : [],
           smooth: true,
           showSymbol: false,
-          itemStyle: { color },
-          lineStyle: { width: 2, color },
+          z: isMainSeries ? 4 : isSupportSeries ? 3 : 2,
+          itemStyle: { color, opacity: lineOpacity },
+          lineStyle: {
+            width: lineWidth,
+            color: hslToHsla(color, lineOpacity),
+            type: lineType,
+          },
+          areaStyle: isMainSeries
+            ? {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: hslToHsla(color, areaOpacity) },
+                  { offset: 1, color: hslToHsla(color, 0.01) },
+                ]),
+              }
+            : undefined,
           emphasis: {
             focus: "series" as const,
           },
@@ -160,7 +179,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
             let html = `<div class="font-medium mb-1">分块 ${chunkId}</div>`;
             const activeParams = params.filter((p) => p.value !== undefined && p.value !== null);
             html += activeParams
-              .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${typeof p.value === "number" ? p.value.toFixed(4) : "-"}</span></div>`)
+              .map((p) => `<div class="flex items-center gap-1">${p.marker} ${p.seriesName}: <span class="font-mono">${typeof p.value === "number" ? p.value.toFixed(3) : "-"}</span></div>`)
               .join("");
             return html;
           },
@@ -204,7 +223,9 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         },
         yAxis: {
           type: "value" as const,
-          name: "密度",
+          name: "情绪分数",
+          min: -1,
+          max: 1,
           nameTextStyle: { color: "hsl(var(--text-muted))", fontSize: 12 },
           axisLine: { show: false },
           axisTick: { show: false },

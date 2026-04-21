@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -25,11 +26,11 @@ from src.config.constants.annotation import EMOTION_SCORE_MAPPING
 from src.metrics.fourier_filter import fourier_smooth
 
 _ANNOTATION_SIGNAL_MAP: dict[str, float] = {
-    "strong_positive": 1.0,
-    "mild_positive": 0.55,
+    "strong_positive": 0.78,
+    "mild_positive": 0.36,
     "neutral": 0.0,
-    "mild_negative": -0.55,
-    "strong_negative": -1.0,
+    "mild_negative": -0.36,
+    "strong_negative": -0.78,
 }
 
 _TONE_SIGNAL_MAP: dict[str, float] = {
@@ -85,6 +86,26 @@ def _normalize_lexical_density(value: float | None) -> float:
     if raw_value <= 0:
         return 0.0
     return raw_value / (raw_value + _LEXICAL_DENSITY_SCALE)
+
+
+def _soft_positive(value: float, scale: float = 1.2) -> float:
+    """
+    创建时间: 2026-04-21
+    修改时间: 2026-04-21
+    任务: soften-display-emotion-curve
+    新建原因: 展示层曲线需要保留强弱差异，但不能因为单个强标签长期贴住 1.0。
+    """
+    return 1.0 - math.exp(-max(value, 0.0) * scale)
+
+
+def _soft_signed(value: float, scale: float = 1.35) -> float:
+    """
+    创建时间: 2026-04-21
+    修改时间: 2026-04-21
+    任务: soften-display-emotion-curve
+    新建原因: 对最终趋势做软饱和压缩，让强情绪仍然明显，但不再出现大片平顶/平底。
+    """
+    return math.tanh(value * scale)
 
 
 def _tone_signal(tones: Sequence[str]) -> tuple[float, float]:
@@ -147,6 +168,7 @@ def build_display_emotion_curve(
     - AI 标注 emotional_valence 决定主方向
     - lexical pos/neg 提供显式词汇支撑与冲突信号
     - dialogue tone 与 style intensity 只做辅助，不推翻 AI 主判
+    - 通过软饱和压缩减少 1/-1 平台，让曲线更接近连续趋势而不是分档状态
     - neutral 且缺少词汇信号时允许回到 0，保持真正平缓段落的留白
     """
     if not curve_rows:
@@ -172,41 +194,56 @@ def build_display_emotion_curve(
         lexical_pos = _normalize_lexical_density(getattr(row, "pos_density", None))
         lexical_neg = _normalize_lexical_density(getattr(row, "neg_density", None))
         lexical_strength = max(lexical_pos, lexical_neg)
+        lexical_balance = lexical_pos - lexical_neg
 
         annotation_row = annotation_map.get(chunk_id)
         ai_signal = _annotation_signal(getattr(annotation_row, "emotional_valence", None) if annotation_row else None)
 
         tone_direction, tone_intensity = _tone_signal(dialogue_tone_map.get(chunk_id, []))
         style_intensity = _style_intensity(style_map.get(chunk_id))
-        support_intensity = _clamp(max(lexical_strength, tone_intensity * 0.7, style_intensity))
+        support_intensity = _clamp(
+            lexical_strength * 0.55 + tone_intensity * 0.2 + style_intensity * 0.25,
+            high=0.75,
+        )
+        support_direction = lexical_balance * 0.6 + tone_direction * 0.25
 
         pos_value = 0.0
         neg_value = 0.0
         if ai_signal > 0:
             dominant_intensity = abs(ai_signal)
-            final_intensity = _clamp(max(dominant_intensity, dominant_intensity * 0.8 + support_intensity * 0.2))
-            conflict_signal = _clamp(
-                lexical_neg * 0.45 + max(-tone_direction, 0.0) * 0.35,
-                high=final_intensity * 0.7,
+            positive_raw = (
+                dominant_intensity * 0.72
+                + support_intensity * 0.28
+                + lexical_pos * 0.16
+                + max(tone_direction, 0.0) * 0.08
             )
-            pos_value = _clamp(final_intensity + lexical_pos * 0.15 + max(tone_direction, 0.0) * 0.1)
-            neg_value = conflict_signal
+            negative_raw = lexical_neg * 0.42 + max(-tone_direction, 0.0) * 0.18 + style_intensity * 0.08
+            pos_value = _soft_positive(positive_raw)
+            neg_value = _soft_positive(negative_raw)
         elif ai_signal < 0:
             dominant_intensity = abs(ai_signal)
-            final_intensity = _clamp(max(dominant_intensity, dominant_intensity * 0.8 + support_intensity * 0.2))
-            conflict_signal = _clamp(
-                lexical_pos * 0.45 + max(tone_direction, 0.0) * 0.35,
-                high=final_intensity * 0.7,
+            negative_raw = (
+                dominant_intensity * 0.72
+                + support_intensity * 0.28
+                + lexical_neg * 0.16
+                + max(-tone_direction, 0.0) * 0.08
             )
-            neg_value = _clamp(final_intensity + lexical_neg * 0.15 + max(-tone_direction, 0.0) * 0.1)
-            pos_value = conflict_signal
+            positive_raw = lexical_pos * 0.42 + max(tone_direction, 0.0) * 0.18 + style_intensity * 0.08
+            neg_value = _soft_positive(negative_raw)
+            pos_value = _soft_positive(positive_raw)
         else:
             # 中文注释：当 AI 判中性时，不强行制造方向；只让显式词汇和语气提供弱偏向，
             # 这样真正平稳段落仍能保持接近 0，而隐性情绪不至于全部消失。
-            pos_value = _clamp(lexical_pos * 0.75 + max(tone_direction, 0.0) * 0.35)
-            neg_value = _clamp(lexical_neg * 0.75 + max(-tone_direction, 0.0) * 0.35)
+            positive_raw = lexical_pos * 0.68 + max(tone_direction, 0.0) * 0.24 + style_intensity * 0.1
+            negative_raw = lexical_neg * 0.68 + max(-tone_direction, 0.0) * 0.24 + style_intensity * 0.1
+            pos_value = _soft_positive(positive_raw)
+            neg_value = _soft_positive(negative_raw)
 
-        net_value = pos_value - neg_value
+        raw_trend = ai_signal * 0.72 + support_direction * 0.28
+        if ai_signal == 0.0:
+            raw_trend += lexical_balance * 0.18
+        raw_trend += (pos_value - neg_value) * 0.12
+        net_value = _soft_signed(raw_trend)
         fused_net_values.append(net_value)
         fused_rows.append(
             DisplayEmotionCurvePoint(
