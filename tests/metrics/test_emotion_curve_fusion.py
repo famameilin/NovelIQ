@@ -40,6 +40,7 @@ def test_build_display_emotion_curve_keeps_ai_negative_when_lexical_is_zero() ->
     assert len(result) == 1
     assert result[0].net_density < 0
     assert result[0].neg_density > 0
+    assert result[0].neg_density < 0.8
 
 
 def test_build_display_emotion_curve_uses_lexical_signal_when_ai_is_neutral() -> None:
@@ -106,3 +107,19 @@ def test_build_display_emotion_curve_carries_surface_tension_field() -> None:
 
     assert len(result) == 1
     assert result[0].surface_tension == 0.73
+
+
+def test_build_display_emotion_curve_softens_strong_positive_plateau() -> None:
+    curve_rows = [_curve_row(1, pos_density=0.01, neg_density=0.0, net_density=0.01)]
+    annotation_rows = [SimpleNamespace(chunk_id=1, emotional_valence="strong_positive")]
+
+    result = build_display_emotion_curve(
+        curve_rows=curve_rows,
+        annotation_rows=annotation_rows,
+        style_rows=[],
+        dialogue_rows=[],
+    )
+
+    assert len(result) == 1
+    assert 0.4 < result[0].pos_density < 0.8
+    assert 0.3 < result[0].net_density < 0.9

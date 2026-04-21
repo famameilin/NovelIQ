@@ -43,6 +43,8 @@ export function MiniCurvePreview({
 
   const positiveColor = getCSSColorVar("--chart-positive");
   const negativeColor = getCSSColorVar("--chart-negative");
+  const neutralColor = getCSSColorVar("--chart-1");
+  const primaryColor = getCSSColorVar("--primary");
 
   const option = useMemo(() => {
     if (!data.length) return {};
@@ -50,6 +52,8 @@ export function MiniCurvePreview({
     const xData = data.map((d) => d.chunk_id);
     const posData = data.map((d) => d.pos_density ?? null);
     const negData = data.map((d) => d.neg_density ?? null);
+    const netData = data.map((d) => d.net_density ?? null);
+    const smoothedData = data.map((d) => d.smoothed_density ?? null);
 
     return {
       grid: { top: 10, right: 10, bottom: 10, left: 10, containLabel: false },
@@ -71,42 +75,56 @@ export function MiniCurvePreview({
         show: false,
         boundaryGap: false,
       },
-      yAxis: { type: "value", show: false },
+      yAxis: { type: "value", show: false, min: -1, max: 1 },
       series: [
         {
-          name: "正面密度",
+          name: "正向强度",
           type: "line",
           data: posData,
           smooth: true,
           showSymbol: false,
-          lineStyle: { width: 1.5, color: positiveColor },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: hslToHsla(positiveColor, 0.15) },
-              { offset: 1, color: hslToHsla(positiveColor, 0.01) },
-            ]),
-          },
+          lineStyle: { width: 1.2, color: hslToHsla(positiveColor, 0.28) },
           animationDuration: 800,
         },
         {
-          name: "负面密度",
+          name: "负向强度",
           type: "line",
           data: negData,
           smooth: true,
           showSymbol: false,
-          lineStyle: { width: 1.5, color: negativeColor },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: hslToHsla(negativeColor, 0.15) },
-              { offset: 1, color: hslToHsla(negativeColor, 0.01) },
-            ]),
-          },
+          lineStyle: { width: 1.2, color: hslToHsla(negativeColor, 0.28) },
           animationDuration: 800,
           animationDelay: 100,
         },
+        {
+          name: "原始趋势",
+          type: "line",
+          data: netData,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 1.4, color: hslToHsla(neutralColor, 0.5), type: "dashed" },
+          animationDuration: 800,
+          animationDelay: 140,
+        },
+        {
+          name: "平滑趋势",
+          type: "line",
+          data: smoothedData,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { width: 2.4, color: primaryColor },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: hslToHsla(primaryColor, 0.12) },
+              { offset: 1, color: hslToHsla(primaryColor, 0.01) },
+            ]),
+          },
+          animationDuration: 800,
+          animationDelay: 180,
+        },
       ],
     };
-  }, [data, positiveColor, negativeColor]);
+  }, [data, negativeColor, neutralColor, positiveColor, primaryColor]);
 
   return (
     <Card
@@ -118,7 +136,7 @@ export function MiniCurvePreview({
     >
       <div className="px-5 pt-4 pb-2">
         <div className="flex items-center justify-between">
-      <h3 className="text-sm font-semibold text-text">情绪曲线</h3>
+          <h3 className="text-sm font-semibold text-text">情绪趋势</h3>
           <span className="text-xs text-text-muted opacity-0 transition-opacity group-hover:opacity-100">
             查看完整曲线 →
           </span>
