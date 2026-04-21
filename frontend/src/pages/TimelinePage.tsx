@@ -5,6 +5,13 @@
  * 创建者: GLM-5
  * 任务: Phase 2-B 叙事时间轴
  * 说明: 完整叙事时间轴页面，展示四阶段划分、关键事件节点、张力曲线叠加
+ *
+ * 修改时间: 2026-04-21
+ * 任务: 修复叙事时间轴页面布局与节点语义表达
+ * 修改内容:
+ *   - 重组时间轴主体布局，将轨道、图例、张力区收敛到同一信息区
+ *   - 将节点详情移到桌面端右侧，避免点击后还要滚到张力曲线下方阅读
+ *   - 为未选中节点的状态补充明确引导，减少页面空白感
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -21,6 +28,7 @@ import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
 import {
   PhaseBar,
+  TimelineLegend,
   TimelineTrack,
   TensionOverlay,
   TimelineNodeDetail,
@@ -100,7 +108,10 @@ export function TimelinePage() {
     if (novelId) {
       setNovel(novelId);
       if (urlTaskId) {
-        if (storeTaskId !== urlTaskId) {
+        const currentStoreState = useNovelStore.getState();
+        const currentStoreTaskId =
+          currentStoreState.currentNovelId === novelId ? currentStoreState.currentTaskId : null;
+        if (currentStoreTaskId !== urlTaskId) {
           urlTaskSyncRef.current = urlTaskId;
         }
         setTask(urlTaskId);
@@ -351,77 +362,112 @@ export function TimelinePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.2 }}
         >
-          <DashboardCardShell title="叙事时间轴" accent="primary" showOrb bodyClassName="gap-3">
-            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-              {isLoading ? (
-                <div className="h-24 w-full animate-pulse rounded bg-surface-hover" />
-              ) : isError ? (
-                <div className="flex h-24 flex-col items-center justify-center gap-3 text-sm text-text-muted">
-                  <span>加载失败</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleRetry}
-                    className="gap-2"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    重试
-                  </Button>
-                </div>
-              ) : nodes.length === 0 ? (
-                <div className="flex h-24 items-center justify-center text-sm text-text-muted">
-                  暂无时间轴节点
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+            <DashboardCardShell title="叙事时间轴" accent="primary" showOrb bodyClassName="gap-4">
+              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
+                <p className="text-sm text-text-muted">
+                  先看图例，再顺着时间轴阅读节点，点击任一节点即可在右侧查看完整事件细节。
+                </p>
+              </div>
+
+              <TimelineLegend />
+
+              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
+                {isLoading ? (
+                  <div className="h-40 w-full animate-pulse rounded bg-surface-hover" />
+                ) : isError ? (
+                  <div className="flex h-40 flex-col items-center justify-center gap-3 text-sm text-text-muted">
+                    <span>加载失败</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRetry}
+                      className="gap-2"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      重试
+                    </Button>
+                  </div>
+                ) : nodes.length === 0 ? (
+                  <div className="flex h-40 items-center justify-center text-sm text-text-muted">
+                    暂无时间轴节点
+                  </div>
+                ) : (
+                  <TimelineTrack
+                    nodes={nodes}
+                    phases={phases}
+                    activePhase={activePhase}
+                    selectedNodeId={selectedNode?.chunk_id}
+                    onNodeClick={handleNodeClick}
+                  />
+                )}
+              </div>
+
+              {showTension && tensionCurve && tensionCurve.length > 0 ? (
+                <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-text">张力走势</p>
+                      <p className="text-xs text-text-muted">
+                        下方曲线帮助判断节点为何会在轨道上方或下方起伏。
+                      </p>
+                    </div>
+                  </div>
+                  <TensionOverlay
+                    tensionCurve={tensionCurve}
+                    totalChunks={totalChunks}
+                    height={160}
+                  />
                 </div>
               ) : (
-                <TimelineTrack
-                  nodes={nodes}
-                  phases={phases}
-                  activePhase={activePhase}
-                  selectedNodeId={selectedNode?.chunk_id}
-                  onNodeClick={handleNodeClick}
-                />
+                <div className="rounded-2xl border border-dashed border-border/60 bg-surface/40 p-4 text-sm text-text-muted">
+                  当前已隐藏张力曲线。若需要把节点高低与节奏走势一起看，可以在上方控制区重新开启。
+                </div>
               )}
-            </div>
-          </DashboardCardShell>
-        </motion.div>
-
-        {showTension && tensionCurve && tensionCurve.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.3 }}
-          >
-            <DashboardCardShell title="张力曲线" accent="chart-3" bodyClassName="gap-3">
-              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-                <TensionOverlay
-                  tensionCurve={tensionCurve}
-                  totalChunks={totalChunks}
-                  height={120}
-                />
-              </div>
             </DashboardCardShell>
-          </motion.div>
-        )}
 
-        {novelId && (
-          <TimelineNodeDetail
-            node={selectedNode}
-            novelId={novelId}
-            taskId={taskScopeId}
-            selectedRelationEventId={resolvedRelationEventId}
-            onClose={() => {
-              navigate(
-                buildTimelinePageUrl(novelId, taskScopeId, {
-                  maxLevel,
-                  showTension,
-                  selectedChunk: null,
-                  relationEventId: null,
-                }),
-                { replace: true }
-              );
-            }}
-          />
-        )}
+            {novelId && (
+              selectedNode ? (
+                <TimelineNodeDetail
+                  className="xl:sticky xl:top-6"
+                  node={selectedNode}
+                  novelId={novelId}
+                  taskId={taskScopeId}
+                  selectedRelationEventId={resolvedRelationEventId}
+                  onClose={() => {
+                    navigate(
+                      buildTimelinePageUrl(novelId, taskScopeId, {
+                        maxLevel,
+                        showTension,
+                        selectedChunk: null,
+                        relationEventId: null,
+                      }),
+                      { replace: true }
+                    );
+                  }}
+                />
+              ) : (
+                <DashboardCardShell
+                  title="节点详情"
+                  accent="chart-2"
+                  className="xl:sticky xl:top-6"
+                  bodyClassName="gap-4"
+                >
+                  <div className="rounded-2xl border border-dashed border-border/60 bg-surface/50 p-5">
+                    <p className="text-sm font-medium text-text">点击任意节点查看详情</p>
+                    <p className="mt-2 text-sm leading-6 text-text-muted">
+                      右侧会展示事件描述、涉及角色、关系变化以及回跳到图谱的入口。
+                      如果你正在排查某个关系事件，优先点亮蓝色“关系变化”节点会更直接。
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-surface/60 p-4 text-sm text-text-muted">
+                    当前没有选中节点，因此这里只显示阅读提示，不再把详情卡片挤到张力曲线下方。
+                  </div>
+                </DashboardCardShell>
+              )
+            )}
+          </div>
+        </motion.div>
       </div>
     </PageContainer>
   );
