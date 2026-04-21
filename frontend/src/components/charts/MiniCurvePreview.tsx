@@ -11,6 +11,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { Card } from "@/components/ui/card";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { ChunkCurvePoint } from "@/api/types";
 
 echarts.use([
@@ -40,6 +41,7 @@ export function MiniCurvePreview({
   className,
 }: MiniCurvePreviewProps) {
   const navigate = useNavigate();
+  const themeSignature = useChartThemeSignature();
 
   const positiveColor = getCSSColorVar("--chart-positive");
   const negativeColor = getCSSColorVar("--chart-negative");
@@ -145,6 +147,7 @@ export function MiniCurvePreview({
       <div className="h-[150px] w-full">
         {data.length > 0 ? (
           <ReactEChartsCore
+            key={themeSignature}
             echarts={echarts}
             option={option}
             style={{ height: "100%", width: "100%" }}
