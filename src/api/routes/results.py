@@ -208,9 +208,18 @@ async def get_chunk_curves(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list:
-    """获取分块曲线数据（情绪 + 节奏）"""
+    """
+    获取分块曲线数据（情绪 + 节奏）
+
+    修改时间: 2026-04-21
+    修改者: Codex
+    任务: fuse-display-emotion-curve
+    修改内容: 返回展示层融合后的单曲线结果，保持前端仍只消费一个 chunk_curves 接口
+    """
     stats_repo = StatsRepository(session)
-    return _fetch_chunk_curves(run_id, stats_repo)
+    annotation_repo = AnnotationRepository(session)
+    chunk_repo = ChunkRepository(session)
+    return _fetch_chunk_curves(run_id, stats_repo, annotation_repo, chunk_repo)
 
 
 @router.get("/{novel_id}/characters")

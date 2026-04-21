@@ -118,7 +118,7 @@ export function MiniCurvePreview({
     >
       <div className="px-5 pt-4 pb-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text">词汇情绪曲线</h3>
+      <h3 className="text-sm font-semibold text-text">情绪曲线</h3>
           <span className="text-xs text-text-muted opacity-0 transition-opacity group-hover:opacity-100">
             查看完整曲线 →
           </span>
