@@ -34,6 +34,7 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 import type { ChunkCurvePoint } from "@/api/types";
 
 echarts.use([
@@ -84,6 +85,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
     },
     ref
   ) {
+    const themeSignature = useChartThemeSignature();
     const activeSeries = useMemo(
       () => visibleSeries ?? new Set(SERIES_CONFIG.map((s) => s.key)),
       [visibleSeries]
@@ -269,6 +271,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
     return (
       <div className={cn("relative", className)}>
         <ReactEChartsCore
+          key={themeSignature}
           ref={ref}
           echarts={echarts}
           option={option}

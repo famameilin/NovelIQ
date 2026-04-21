@@ -11,6 +11,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 
 echarts.use([GridComponent, TooltipComponent, LegendComponent, BarChart, CanvasRenderer]);
 
@@ -24,6 +25,7 @@ export interface ArcScoresChartProps {
  * 角色弧线得分柱状图
  */
 export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
+  const themeSignature = useChartThemeSignature();
   const primaryColor = getCSSColorVar("--primary");
 
   const option = useMemo(() => {
@@ -104,6 +106,7 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
         <div className="h-[300px] w-full">
           {hasData ? (
             <ReactEChartsCore
+              key={themeSignature}
               echarts={echarts}
               option={option}
               style={{ height: "100%", width: "100%" }}

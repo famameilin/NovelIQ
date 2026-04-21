@@ -16,7 +16,6 @@ import {
 import { getNovel } from "@/api/novels";
 import { createAnalysisTask, resumeAnalysisTask, batchDeleteTasks, cancelAnalysisTask } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
-import { useThemeStore } from "@/store/themeStore";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
@@ -28,7 +27,6 @@ import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
 import { AnalysisProgressPanel } from "@/components/analysis/AnalysisProgressPanel";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DEFAULT_SEED, HEX_COLOR_RE } from "@/store/themeStore";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -131,7 +129,6 @@ export function NovelDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentTaskId, setNovel, setTask } = useNovelStore();
-  const { seedColor: currentSeed, setSeedColor } = useThemeStore();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // 使用 useAnalysisStatus hook 进行轮询并同步进度到 store
@@ -310,19 +307,6 @@ export function NovelDetailPage() {
     enabled,
     staleTime: STALE_TIME,
   });
-
-  // Apply theme_color from diagnosis when available (declared after diagnosisQuery)
-  useEffect(() => {
-    if (diagnosisQuery.data?.theme_color && HEX_COLOR_RE.test(diagnosisQuery.data.theme_color)) {
-      setSeedColor(diagnosisQuery.data.theme_color);
-    } else if (
-      !diagnosisQuery.isLoading &&
-      !diagnosisQuery.data &&
-      currentSeed !== DEFAULT_SEED
-    ) {
-      setSeedColor(DEFAULT_SEED);
-    }
-  }, [diagnosisQuery.data, diagnosisQuery.isLoading, currentSeed, setSeedColor]);
 
   const allMetricsLoaded =
     narrativeQuery.data &&

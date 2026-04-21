@@ -12,6 +12,7 @@ import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts";
 import { cn } from "@/lib/cn";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
+import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -34,6 +35,7 @@ export function TensionOverlay({
   height = 120,
   className,
 }: TensionOverlayProps) {
+  const themeSignature = useChartThemeSignature();
   const chartRef = useRef<ReactEChartsCore>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -116,6 +118,7 @@ export function TensionOverlay({
         张力曲线
       </div>
       <ReactEChartsCore
+        key={themeSignature}
         ref={chartRef}
         echarts={echarts}
         option={option}
