@@ -48,8 +48,8 @@ export function MiniCurvePreview({
     if (!data.length) return {};
 
     const xData = data.map((d) => d.chunk_id);
-    const posData = data.map((d) => d.pos_density ?? 0);
-    const negData = data.map((d) => d.neg_density ?? 0);
+    const posData = data.map((d) => d.pos_density ?? null);
+    const negData = data.map((d) => d.neg_density ?? null);
 
     return {
       grid: { top: 10, right: 10, bottom: 10, left: 10, containLabel: false },
@@ -59,10 +59,10 @@ export function MiniCurvePreview({
         backgroundColor: "hsl(var(--surface))",
         borderColor: "hsl(var(--border))",
         textStyle: { color: "hsl(var(--text))", fontSize: 11 },
-        formatter: (params: Array<{ seriesName: string; value: number; marker: string; axisValue?: string }>) => {
+        formatter: (params: Array<{ seriesName: string; value: number | null; marker: string; axisValue?: string }>) => {
           if (!Array.isArray(params)) return "";
           return `分块 ${params[0]?.axisValue ?? ""}<br/>`
-            + params.map((p) => `${p.marker} ${p.seriesName}: ${p.value.toFixed(4)}`).join("<br/>");
+            + params.map((p) => `${p.marker} ${p.seriesName}: ${typeof p.value === "number" ? p.value.toFixed(4) : "-"}`).join("<br/>");
         },
       },
       xAxis: {
@@ -118,7 +118,7 @@ export function MiniCurvePreview({
     >
       <div className="px-5 pt-4 pb-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text">情绪曲线</h3>
+      <h3 className="text-sm font-semibold text-text">情绪曲线</h3>
           <span className="text-xs text-text-muted opacity-0 transition-opacity group-hover:opacity-100">
             查看完整曲线 →
           </span>

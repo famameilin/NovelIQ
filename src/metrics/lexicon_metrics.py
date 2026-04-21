@@ -45,7 +45,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 
@@ -264,8 +264,8 @@ def load_weighted_lexicon(filepath: str, default_weight: int = 1) -> dict[str, i
 
 
 def term_weighted_counts(
-    text: str, tokens: Sequence[str], weighted_terms: dict[str, int]
-) -> dict[str, tuple[int, int]]:
+    text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]
+) -> dict[str, tuple[int, float]]:
     """
     返回词条级别的计数和权重。
 
@@ -288,7 +288,7 @@ def term_weighted_counts(
     text_value = text or ""
     counts = _count_non_overlapping_spans(text_value, weighted_terms.keys(), tokens)
 
-    result: dict[str, tuple[int, int]] = {}
+    result: dict[str, tuple[int, float]] = {}
     for term, count in counts.items():
         weight = weighted_terms.get(term, 1)
         result[term] = (count, weight)
@@ -296,7 +296,7 @@ def term_weighted_counts(
     return result
 
 
-def count_weighted_hits(text: str, tokens: Sequence[str], weighted_terms: dict[str, int]) -> int:
+def count_weighted_hits(text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]) -> float:
     """
     计算加权命中次数。
 

@@ -3,9 +3,11 @@ from unittest.mock import MagicMock
 from pgvector.sqlalchemy import Vector
 
 from src.storage.models import ChunkEmbedding
-from src.storage.repositories.chunk.embedding_ops import get_chunk_embedding
-from src.storage.repositories.chunk.embedding_ops import insert_chunk_embeddings
-from src.storage.repositories.chunk.embedding_ops import search_similar_chunks
+from src.storage.repositories.chunk.embedding_ops import (
+    get_chunk_embedding,
+    insert_chunk_embeddings,
+    search_similar_chunks,
+)
 
 
 def test_chunk_embedding_uses_pgvector_column_type() -> None:
@@ -37,9 +39,9 @@ def test_get_chunk_embedding_returns_python_list() -> None:
 
 def test_search_similar_chunks_pushes_exclusions_into_sql() -> None:
     session = MagicMock()
-    session.execute.return_value.fetchall.return_value = [
-        (2, "chunk-2", 0.91),
-        (3, "chunk-3", 0.88),
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {"chunk_id": 2, "text": "chunk-2", "emotional_valence": "mild_negative", "similarity": 0.91},
+        {"chunk_id": 3, "text": "chunk-3", "emotional_valence": None, "similarity": 0.88},
     ]
 
     results = search_similar_chunks(
@@ -54,12 +56,13 @@ def test_search_similar_chunks_pushes_exclusions_into_sql() -> None:
     statement = session.execute.call_args.args[0]
     assert "NOT IN" in str(statement)
     assert [row["chunk_id"] for row in results] == [2, 3]
+    assert results[0]["emotional_valence"] == "mild_negative"
 
 
 def test_search_similar_chunks_without_exclusions_keeps_sql_simple() -> None:
     session = MagicMock()
-    session.execute.return_value.fetchall.return_value = [
-        (1, "chunk-1", 0.95),
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {"chunk_id": 1, "text": "chunk-1", "emotional_valence": "neutral", "similarity": 0.95},
     ]
 
     results = search_similar_chunks(
@@ -70,4 +73,4 @@ def test_search_similar_chunks_without_exclusions_keeps_sql_simple() -> None:
 
     statement = session.execute.call_args.args[0]
     assert "NOT IN" not in str(statement)
-    assert results == [{"chunk_id": 1, "text": "chunk-1", "similarity": 0.95}]
+    assert results == [{"chunk_id": 1, "text": "chunk-1", "emotional_valence": "neutral", "similarity": 0.95}]
