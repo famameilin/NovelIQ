@@ -26,12 +26,12 @@ import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
 import { CurveToolbar } from "@/components/charts/CurveToolbar";
 import { EmotionCurveChart } from "@/components/charts/EmotionCurveChart";
 import { RhythmCurveChart } from "@/components/charts/RhythmCurveChart";
-import { RefreshCw } from "lucide-react";
+import { Activity, RefreshCw } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -231,22 +231,23 @@ export function CurvesPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-semibold text-text">
-              情绪趋势曲线
-                </CardTitle>
-                <CurveToolbar
-                  onZoomIn={handleZoomIn}
-                  onZoomOut={handleZoomOut}
-                  onReset={handleReset}
-                  onFullscreen={() => handleFullscreen("emotion")}
-                  disabled={isLoading || isError || curvesData.length === 0}
-                />
-              </div>
-            </CardHeader>
-            <CardContent>
+          <DashboardCardShell
+            title="情绪趋势曲线"
+            icon={<Activity className="h-4 w-4" />}
+            accent="primary"
+            showOrb
+            headerRight={
+              <CurveToolbar
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                onReset={handleReset}
+                onFullscreen={() => handleFullscreen("emotion")}
+                disabled={isLoading || isError || curvesData.length === 0}
+              />
+            }
+            bodyClassName="gap-3"
+          >
+            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-[350px] w-full animate-pulse rounded bg-surface-hover" />
               ) : isError ? (
@@ -277,8 +278,8 @@ export function CurvesPage() {
                   height={350}
                 />
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </DashboardCardShell>
         </motion.div>
 
         <motion.div
@@ -286,22 +287,22 @@ export function CurvesPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
         >
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-semibold text-text">
-                  节奏张力曲线
-                </CardTitle>
-                <CurveToolbar
-                  onZoomIn={handleZoomIn}
-                  onZoomOut={handleZoomOut}
-                  onReset={handleReset}
-                  onFullscreen={() => handleFullscreen("rhythm")}
-                  disabled={isLoading || isError || curvesData.length === 0}
-                />
-              </div>
-            </CardHeader>
-            <CardContent>
+          <DashboardCardShell
+            title="节奏张力曲线"
+            icon={<Activity className="h-4 w-4" />}
+            accent="chart-3"
+            headerRight={
+              <CurveToolbar
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                onReset={handleReset}
+                onFullscreen={() => handleFullscreen("rhythm")}
+                disabled={isLoading || isError || curvesData.length === 0}
+              />
+            }
+            bodyClassName="gap-3"
+          >
+            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-[350px] w-full animate-pulse rounded bg-surface-hover" />
               ) : isError ? (
@@ -333,8 +334,8 @@ export function CurvesPage() {
                   height={350}
                 />
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </DashboardCardShell>
         </motion.div>
       </div>
     </PageContainer>

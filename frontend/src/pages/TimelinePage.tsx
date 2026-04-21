@@ -17,7 +17,7 @@ import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
 import {
   PhaseBar,
@@ -295,12 +295,17 @@ export function TimelinePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.05 }}
           >
-            <Card variant="elevated" className="rounded-xl border-chart-negative/20">
-              <CardContent className="flex items-start gap-3 p-4">
+            <DashboardCardShell
+              title="定位提示"
+              icon={<AlertTriangle className="h-4 w-4" />}
+              accent="chart-5"
+              bodyClassName="gap-3"
+            >
+              <div className="flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
                 <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
                 <p className="text-sm text-text-muted">{selectionHint}</p>
-              </CardContent>
-            </Card>
+              </div>
+            </DashboardCardShell>
           </motion.div>
         )}
 
@@ -309,13 +314,8 @@ export function TimelinePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
         >
-          <Card variant="elevated" className="rounded-xl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold text-text">
-                叙事结构 · 四阶段
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+          <DashboardCardShell title="叙事结构 · 四阶段" accent="chart-1" bodyClassName="gap-3">
+            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-16 w-full animate-pulse rounded bg-surface-hover" />
               ) : isError ? (
@@ -342,8 +342,8 @@ export function TimelinePage() {
                   onPhaseClick={handlePhaseClick}
                 />
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </DashboardCardShell>
         </motion.div>
 
         <motion.div
@@ -351,13 +351,8 @@ export function TimelinePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.2 }}
         >
-          <Card variant="elevated" className="rounded-xl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold text-text">
-                叙事时间轴
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+          <DashboardCardShell title="叙事时间轴" accent="primary" showOrb bodyClassName="gap-3">
+            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
                 <div className="h-24 w-full animate-pulse rounded bg-surface-hover" />
               ) : isError ? (
@@ -386,8 +381,8 @@ export function TimelinePage() {
                   onNodeClick={handleNodeClick}
                 />
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </DashboardCardShell>
         </motion.div>
 
         {showTension && tensionCurve && tensionCurve.length > 0 && (
@@ -396,20 +391,15 @@ export function TimelinePage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.3 }}
           >
-            <Card variant="elevated" className="rounded-xl">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base font-semibold text-text">
-                  张力曲线
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+            <DashboardCardShell title="张力曲线" accent="chart-3" bodyClassName="gap-3">
+              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
                 <TensionOverlay
                   tensionCurve={tensionCurve}
                   totalChunks={totalChunks}
                   height={120}
                 />
-              </CardContent>
-            </Card>
+              </div>
+            </DashboardCardShell>
           </motion.div>
         )}
 

@@ -8,7 +8,8 @@ import {
   LegendComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import { Card, CardContent } from "@/components/ui/card";
+import { GitBranch } from "lucide-react";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { getCSSColorVar, hslToHsla } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { useChartThemeSignature } from "@/hooks/useChartThemeSignature";
@@ -22,7 +23,8 @@ export interface ArcScoresChartProps {
 }
 
 /**
- * 角色弧线得分柱状图
+ * 2026-04-21，任务：多页面卡片风格统一
+ * 修改原因：把诊断页弧线图也接入共享卡片壳，避免图表页和信息卡页出现两套容器体系。
  */
 export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
   const themeSignature = useChartThemeSignature();
@@ -99,27 +101,29 @@ export function ArcScoresChart({ arcScores, className }: ArcScoresChartProps) {
   const hasData = arcScores && Object.keys(arcScores).length > 0;
 
   return (
-    <Card variant="elevated" className={cn("rounded-xl overflow-hidden", className)}>
-      <CardContent className="flex flex-col gap-3 p-5">
-        <h4 className="text-sm font-semibold text-text">角色弧线得分</h4>
-
-        <div className="h-[300px] w-full">
-          {hasData ? (
-            <ReactEChartsCore
-              key={themeSignature}
-              echarts={echarts}
-              option={option}
-              style={{ height: "100%", width: "100%" }}
-              notMerge
-              lazyUpdate
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-text-muted">
-              暂无弧线数据
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <DashboardCardShell
+      title="角色弧线得分"
+      icon={<GitBranch className="h-4 w-4" />}
+      accent="chart-3"
+      className={cn(className)}
+      bodyClassName="gap-3"
+    >
+      <div className="h-[300px] w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+        {hasData ? (
+          <ReactEChartsCore
+            key={themeSignature}
+            echarts={echarts}
+            option={option}
+            style={{ height: "100%", width: "100%" }}
+            notMerge
+            lazyUpdate
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-text-muted">
+            暂无弧线数据
+          </div>
+        )}
+      </div>
+    </DashboardCardShell>
   );
 }

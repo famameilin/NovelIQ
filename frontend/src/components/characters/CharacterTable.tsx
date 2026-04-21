@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ChevronUp, ChevronDown, User } from "lucide-react";
@@ -35,7 +35,8 @@ function SortIcon({
 }
 
 /**
- * 角色表格 - 可排序的角色列表
+ * 2026-04-21，任务：多页面卡片风格统一
+ * 修改原因：统一人物页表格容器样式，减少页面上普通 Card 与新卡片壳并存的割裂感。
  */
 export function CharacterTable({
   characters,
@@ -95,115 +96,117 @@ export function CharacterTable({
   };
 
   return (
-    <Card variant="elevated" className={cn("rounded-xl overflow-hidden", className)}>
-      <CardContent className="flex flex-col gap-3 p-5">
-        <h4 className="text-sm font-semibold text-text">角色完整列表</h4>
-
-        <div className="max-h-[400px] overflow-auto rounded-md border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-surface-hover">
-                <TableHead className="w-[150px] cursor-pointer" onClick={() => handleSort("name")}>
-                  <div className="flex items-center gap-1">
-                    名称
-                    <SortIcon column="name" sortKey={sortKey} sortDirection={sortDirection} />
-                  </div>
-                </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("appearance_count")}>
-                  <div className="flex items-center gap-1">
-                    出场次数
-                    <SortIcon column="appearance_count" sortKey={sortKey} sortDirection={sortDirection} />
-                  </div>
-                </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("dominant_role_function")}>
-                  <div className="flex items-center gap-1">
-                    主导功能
-                    <SortIcon column="dominant_role_function" sortKey={sortKey} sortDirection={sortDirection} />
-                  </div>
-                </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("protagonist_score")}>
-                  <div className="flex items-center gap-1">
-                    主角分
-                    <SortIcon column="protagonist_score" sortKey={sortKey} sortDirection={sortDirection} />
-                  </div>
-                </TableHead>
-                <TableHead className="cursor-pointer" onClick={() => handleSort("avg_emotion_score")}>
-                  <div className="flex items-center gap-1">
-                    情绪均值
-                    <SortIcon column="avg_emotion_score" sortKey={sortKey} sortDirection={sortDirection} />
-                  </div>
-                </TableHead>
+    <DashboardCardShell
+      title="角色完整列表"
+      icon={<User className="h-4 w-4" />}
+      accent="chart-4"
+      className={cn(className)}
+      bodyClassName="gap-3"
+    >
+      <div className="max-h-[400px] overflow-auto rounded-xl border border-border/70 bg-surface/70">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-surface-hover">
+              <TableHead className="w-[150px] cursor-pointer" onClick={() => handleSort("name")}>
+                <div className="flex items-center gap-1">
+                  名称
+                  <SortIcon column="name" sortKey={sortKey} sortDirection={sortDirection} />
+                </div>
+              </TableHead>
+              <TableHead className="cursor-pointer" onClick={() => handleSort("appearance_count")}>
+                <div className="flex items-center gap-1">
+                  出场次数
+                  <SortIcon column="appearance_count" sortKey={sortKey} sortDirection={sortDirection} />
+                </div>
+              </TableHead>
+              <TableHead className="cursor-pointer" onClick={() => handleSort("dominant_role_function")}>
+                <div className="flex items-center gap-1">
+                  主导功能
+                  <SortIcon column="dominant_role_function" sortKey={sortKey} sortDirection={sortDirection} />
+                </div>
+              </TableHead>
+              <TableHead className="cursor-pointer" onClick={() => handleSort("protagonist_score")}>
+                <div className="flex items-center gap-1">
+                  主角分
+                  <SortIcon column="protagonist_score" sortKey={sortKey} sortDirection={sortDirection} />
+                </div>
+              </TableHead>
+              <TableHead className="cursor-pointer" onClick={() => handleSort("avg_emotion_score")}>
+                <div className="flex items-center gap-1">
+                  情绪均值
+                  <SortIcon column="avg_emotion_score" sortKey={sortKey} sortDirection={sortDirection} />
+                </div>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedCharacters.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="h-32 text-center text-sm text-text-muted">
+                  暂无角色数据
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedCharacters.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-sm text-text-muted">
-                    暂无角色数据
+            ) : (
+              sortedCharacters.map((char) => (
+                <TableRow
+                  key={char.name}
+                  className={cn(
+                    "cursor-pointer transition-colors hover:bg-surface-hover",
+                    char.name === protagonist && "bg-primary/5"
+                  )}
+                >
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2">
+                      {char.name === protagonist && (
+                        <User className="h-3 w-3 text-primary" />
+                      )}
+                      <span className={char.name === protagonist ? "text-primary font-semibold" : ""}>
+                        {char.name}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{char.appearance_count}</TableCell>
+                  <TableCell>
+                    {char.dominant_role_function ? (
+                      <Badge variant="secondary" className="text-[10px]">
+                        {char.dominant_role_function}
+                      </Badge>
+                    ) : (
+                      <span className="text-text-muted">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {char.protagonist_score != null ? (
+                      <span className="tabular-nums">{char.protagonist_score.toFixed(1)}</span>
+                    ) : (
+                      <span className="text-text-muted">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {char.avg_emotion_score != null ? (
+                      <span
+                        className={cn(
+                          "tabular-nums",
+                          char.avg_emotion_score > 0.1
+                            ? "text-chart-positive"
+                            : char.avg_emotion_score < -0.1
+                            ? "text-chart-negative"
+                            : "text-text-muted"
+                        )}
+                      >
+                        {char.avg_emotion_score > 0 ? "+" : ""}
+                        {char.avg_emotion_score.toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="text-text-muted">—</span>
+                    )}
                   </TableCell>
                 </TableRow>
-              ) : (
-                sortedCharacters.map((char) => (
-                  <TableRow
-                    key={char.name}
-                    className={cn(
-                      "cursor-pointer transition-colors hover:bg-surface-hover",
-                      char.name === protagonist && "bg-primary/5"
-                    )}
-                  >
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        {char.name === protagonist && (
-                          <User className="h-3 w-3 text-primary" />
-                        )}
-                        <span className={char.name === protagonist ? "text-primary font-semibold" : ""}>
-                          {char.name}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{char.appearance_count}</TableCell>
-                    <TableCell>
-                      {char.dominant_role_function ? (
-                        <Badge variant="secondary" className="text-[10px]">
-                          {char.dominant_role_function}
-                        </Badge>
-                      ) : (
-                        <span className="text-text-muted">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {char.protagonist_score != null ? (
-                        <span className="tabular-nums">{char.protagonist_score.toFixed(1)}</span>
-                      ) : (
-                        <span className="text-text-muted">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {char.avg_emotion_score != null ? (
-                        <span
-                          className={cn(
-                            "tabular-nums",
-                            char.avg_emotion_score > 0.1
-                              ? "text-chart-positive"
-                              : char.avg_emotion_score < -0.1
-                              ? "text-chart-negative"
-                              : "text-text-muted"
-                          )}
-                        >
-                          {char.avg_emotion_score > 0 ? "+" : ""}
-                          {char.avg_emotion_score.toFixed(2)}
-                        </span>
-                      ) : (
-                        <span className="text-text-muted">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </DashboardCardShell>
   );
 }
