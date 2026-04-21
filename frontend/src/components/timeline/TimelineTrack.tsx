@@ -189,7 +189,7 @@ export function TimelineTrack({
           <div className="text-xs text-text-muted">点击节点可在下方查看完整叙事细节</div>
         </div>
 
-        <div className="mt-3 overflow-x-auto overflow-y-hidden px-2 pb-3">
+        <div className="overflow-x-auto overflow-y-hidden px-2 pb-3">
           <div className="w-max min-w-full">
             <div
               className="relative overflow-hidden rounded-[24px] border border-white/60 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.7),rgba(247,240,236,0.4))]"
