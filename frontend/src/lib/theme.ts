@@ -46,21 +46,25 @@ export interface ThemePalette {
  */
 export function generateThemePalette(seedHex: string): ThemePalette {
   const { h, s } = hexToHSL(seedHex);
+  const softSurfaceS = Math.max(Math.min(s - 18, 52), 28);
+  const softBorderS = Math.max(Math.min(s - 28, 36), 18);
+  const textS = Math.max(Math.min(s - 42, 22), 10);
 
   return {
     light: {
       "--primary": `${h} ${s}% 50%`,
       "--primary-hover": `${h} ${s}% 43%`,
       "--primary-active": `${h} ${s}% 37%`,
-      "--primary-subtle": `${h} ${Math.max(s - 20, 10)}% 95%`,
-      "--background": `${h} 25% 97%`,
-      "--surface": `${h} 20% 99%`,
-      "--surface-hover": `${h} 25% 95%`,
-      "--border": `${h} 20% 88%`,
-      "--border-subtle": `${h} 15% 93%`,
-      "--text": `${h} 15% 12%`,
-      "--text-secondary": `${h} 10% 40%`,
-      "--text-muted": `${h} 8% 55%`,
+      // 中文注释：浅色主题不再把背景压到接近纯白，确保主题色能在页面底色上肉眼可见。
+      "--primary-subtle": `${h} ${Math.max(s - 14, 24)}% 90%`,
+      "--background": `${h} ${softSurfaceS}% 94%`,
+      "--surface": `${h} ${Math.max(softSurfaceS - 6, 22)}% 97%`,
+      "--surface-hover": `${h} ${Math.max(softSurfaceS - 2, 24)}% 92%`,
+      "--border": `${h} ${softBorderS}% 80%`,
+      "--border-subtle": `${h} ${Math.max(softBorderS - 4, 14)}% 87%`,
+      "--text": `${h} ${textS}% 14%`,
+      "--text-secondary": `${h} ${Math.max(textS - 4, 8)}% 34%`,
+      "--text-muted": `${h} ${Math.max(textS - 6, 6)}% 46%`,
       "--text-on-primary": `0 0% 100%`,
       "--chart-1": `${h} ${s}% 55%`,
       "--chart-2": `${(h + 40) % 360} ${Math.max(s - 10, 15)}% 55%`,
