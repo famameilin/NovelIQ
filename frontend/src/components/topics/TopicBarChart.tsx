@@ -15,7 +15,8 @@ import {
   TooltipComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
-import { Card, CardContent } from "@/components/ui/card";
+import { BarChart3 } from "lucide-react";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { getCSSColorVar } from "@/lib/theme";
 import { CHART_COLORS } from "@/lib/chart-colors";
 import { cn } from "@/lib/cn";
@@ -121,27 +122,30 @@ export function TopicBarChart({ topics, className }: TopicBarChartProps) {
   const hasData = sortedTopics.length > 0;
 
   return (
-    <Card variant="elevated" className={cn("rounded-xl overflow-hidden h-full flex flex-col", className)}>
-      <CardContent className="flex flex-col gap-3 p-5 flex-1 min-h-0">
-        <h4 className="text-sm font-semibold text-text">主题权重分布</h4>
-
-        <div ref={containerRef} className="flex-1 min-h-0 w-full">
-          {hasData && isVisible ? (
-            <ReactEChartsCore
-              key={themeSignature}
-              echarts={echarts}
-              option={option}
-              style={{ height: "100%", width: "100%" }}
-              notMerge
-              lazyUpdate
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-text-muted">
-              {hasData ? "加载中..." : "暂无主题数据"}
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <DashboardCardShell
+      title="主题权重分布"
+      icon={<BarChart3 className="h-4 w-4" />}
+      accent="chart-2"
+      className={cn("h-full", className)}
+      contentClassName="flex h-full flex-col"
+      bodyClassName="flex-1 min-h-0 gap-3"
+    >
+      <div ref={containerRef} className="flex-1 min-h-0 w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+        {hasData && isVisible ? (
+          <ReactEChartsCore
+            key={themeSignature}
+            echarts={echarts}
+            option={option}
+            style={{ height: "100%", width: "100%" }}
+            notMerge
+            lazyUpdate
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-text-muted">
+            {hasData ? "加载中..." : "暂无主题数据"}
+          </div>
+        )}
+      </div>
+    </DashboardCardShell>
   );
 }

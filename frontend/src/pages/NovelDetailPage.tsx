@@ -348,7 +348,7 @@ export function NovelDetailPage() {
   // ---------- Render ----------
 
   return (
-    <PageContainer>
+    <PageContainer className="px-5 py-4">
       {/* Header */}
       <NovelHeader
         title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
@@ -357,7 +357,7 @@ export function NovelDetailPage() {
         onResumeTask={handleResumeTask}
         onDeleteCurrentTask={currentTaskId ? handleDeleteTask : undefined}
         isResuming={isAnalyzing}
-        className="mb-4"
+        className="mb-3"
       />
 
       {/* No task selected — offer start analysis */}
@@ -390,13 +390,13 @@ export function NovelDetailPage() {
 
       {/* Main content - only when not analyzing */}
       {!isAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Row 1: 诊断画像 + 评分速览 */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.15 }}
-            className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
           >
             {diagnosisQuery.data ? (
               <DiagnosisSummaryCard
@@ -425,7 +425,7 @@ export function NovelDetailPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.15, delay: 0.1 }}
-            className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5"
+            className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5"
           >
             <DimensionMiniCard
               dimension="narrative"
@@ -473,7 +473,7 @@ export function NovelDetailPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.15, delay: 0.2 }}
-            className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
           >
             <NarrativeStructureBar
               act1Ratio={narrativeQuery.data?.act1_ratio}

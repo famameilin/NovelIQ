@@ -6,14 +6,17 @@ import { getDiagnosis } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { ScoreCard } from "@/components/common/ScoreCard";
 import { DiagnosisHeader } from "@/components/diagnosis/DiagnosisHeader";
+import { DiagnosisText } from "@/components/diagnosis/DiagnosisText";
 import { ValueLogicCard } from "@/components/diagnosis/ValueLogicCard";
 import { TopicLabels } from "@/components/diagnosis/TopicLabels";
 import { CharacterCastCard } from "@/components/diagnosis/CharacterCastCard";
 import { ArcScoresChart } from "@/components/charts/ArcScoresChart";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { AlertCircle, Tags } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -128,12 +131,18 @@ export function DiagnosisPage() {
 
       {/* Error state */}
       {isError && !isLoading && (
-        <div className="flex h-64 flex-col items-center justify-center gap-3">
-          <p className="text-sm text-text-muted">数据加载失败</p>
-          <Button variant="ghost" size="sm" onClick={retry}>
+        <DashboardCardShell
+          title="诊断报告加载失败"
+          icon={<AlertCircle className="h-4 w-4" />}
+          accent="chart-5"
+          className="min-h-[240px]"
+          bodyClassName="items-center justify-center gap-3 text-center"
+        >
+          <p className="text-sm text-text-muted">当前任务的诊断数据暂时无法读取。</p>
+          <Button variant="outline" size="sm" onClick={retry}>
             重试
           </Button>
-        </div>
+        </DashboardCardShell>
       )}
 
       {/* Main content */}
@@ -179,16 +188,7 @@ export function DiagnosisPage() {
           </div>
 
           {/* 预留诊断文本区域 */}
-          {diagnosis.diagnosis && (
-            <Card variant="elevated" className="rounded-xl overflow-hidden">
-              <CardContent className="p-5">
-                <h4 className="text-sm font-semibold text-text mb-3">综合诊断</h4>
-                <p className="text-sm text-text-secondary whitespace-pre-wrap">
-                  {diagnosis.diagnosis}
-                </p>
-              </CardContent>
-            </Card>
-          )}
+          {diagnosis.diagnosis && <DiagnosisText diagnosisText={diagnosis.diagnosis} />}
 
           {/* ArcScoresChart */}
           {diagnosis.arc_scores && Object.keys(diagnosis.arc_scores).length > 0 && (
@@ -210,12 +210,16 @@ export function DiagnosisPage() {
 
           {/* Topic Labels */}
           {diagnosis.topic_labels && diagnosis.topic_labels.length > 0 && (
-            <Card variant="elevated" className="rounded-xl overflow-hidden">
-              <CardContent className="flex flex-col gap-3 p-5">
-                <h4 className="text-sm font-semibold text-text">主题标签</h4>
+            <DashboardCardShell
+              title="主题标签"
+              icon={<Tags className="h-4 w-4" />}
+              accent="chart-4"
+              bodyClassName="gap-3"
+            >
+              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
                 <TopicLabels labels={diagnosis.topic_labels} />
-              </CardContent>
-            </Card>
+              </div>
+            </DashboardCardShell>
           )}
         </motion.div>
       )}

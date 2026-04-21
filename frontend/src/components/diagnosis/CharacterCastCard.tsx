@@ -1,4 +1,4 @@
-import { Card, CardContent } from "@/components/ui/card";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { cn } from "@/lib/cn";
 import { Users } from "lucide-react";
 
@@ -13,7 +13,8 @@ export interface CharacterCastCardProps {
 }
 
 /**
- * 角色阵容卡片 - 展示主角、核心角色、主要角色
+ * 2026-04-21，任务：多页面卡片风格统一
+ * 修改原因：统一诊断页角色阵容卡的容器和标签层次，让它与仪表盘卡片保持一致。
  */
 export function CharacterCastCard({
   protagonist,
@@ -24,60 +25,60 @@ export function CharacterCastCard({
   const hasData = protagonist || (coreCast && coreCast.length > 0) || (majorCast && majorCast.length > 0);
 
   return (
-    <Card variant="elevated" className={cn("rounded-xl overflow-hidden", className)}>
-      <CardContent className="flex flex-col gap-4 p-5">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-text-muted" />
-          <h4 className="text-sm font-semibold text-text">角色阵容</h4>
+    <DashboardCardShell
+      title="角色阵容"
+      icon={<Users className="h-4 w-4" />}
+      accent="chart-1"
+      showOrb
+      className={cn(className)}
+      bodyClassName="gap-3"
+    >
+      {hasData ? (
+        <div className="flex flex-col gap-3">
+          {protagonist && (
+            <div className="rounded-2xl border border-border/60 bg-surface/70 px-4 py-3">
+              <span className="text-xs text-text-muted">主角</span>
+              <div className="mt-2 inline-flex w-fit items-center rounded-full bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
+                {protagonist}
+              </div>
+            </div>
+          )}
+
+          {coreCast && coreCast.length > 0 && (
+            <div className="rounded-2xl border border-border/60 bg-surface/70 px-4 py-3">
+              <span className="text-xs text-text-muted">核心角色</span>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {coreCast.map((char, index) => (
+                  <span
+                    key={index}
+                    className="rounded-md bg-chart-1/12 px-2 py-1 text-xs text-chart-1"
+                  >
+                    {char}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {majorCast && majorCast.length > 0 && (
+            <div className="rounded-2xl border border-border/60 bg-surface/70 px-4 py-3">
+              <span className="text-xs text-text-muted">主要角色</span>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {majorCast.map((char, index) => (
+                  <span
+                    key={index}
+                    className="rounded-md bg-chart-2/12 px-2 py-1 text-xs text-chart-2"
+                  >
+                    {char}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-
-        {hasData ? (
-          <div className="flex flex-col gap-4">
-            {protagonist && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-text-muted">主角</span>
-                <div className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary w-fit">
-                  {protagonist}
-                </div>
-              </div>
-            )}
-
-            {coreCast && coreCast.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-text-muted">核心角色</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {coreCast.map((char, index) => (
-                    <span
-                      key={index}
-                      className="rounded-md bg-chart-1/10 px-2 py-1 text-xs text-chart-1"
-                    >
-                      {char}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {majorCast && majorCast.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-text-muted">主要角色</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {majorCast.map((char, index) => (
-                    <span
-                      key={index}
-                      className="rounded-md bg-chart-2/10 px-2 py-1 text-xs text-chart-2"
-                    >
-                      {char}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-text-muted">暂无角色数据</p>
-        )}
-      </CardContent>
-    </Card>
+      ) : (
+        <p className="text-sm text-text-muted">暂无角色数据</p>
+      )}
+    </DashboardCardShell>
   );
 }

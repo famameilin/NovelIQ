@@ -15,7 +15,7 @@ import type { Topic } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
-import { Card, CardContent } from "@/components/ui/card";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
 import {
   TopicWordCloud,
@@ -112,15 +112,16 @@ export function TopicsPage() {
     if (!currentTaskId) {
       return (
         <motion.div variants={itemVariants}>
-          <Card variant="elevated" className="rounded-xl">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <AlertCircle className="h-12 w-12 text-text-muted mb-4" />
-              <p className="text-lg font-medium text-text">请先选择分析任务</p>
-              <p className="text-sm text-text-muted mt-2">
-                在页面顶部选择一个任务后查看主题分布
-              </p>
-            </CardContent>
-          </Card>
+          <DashboardCardShell
+            title="请先选择分析任务"
+            icon={<AlertCircle className="h-4 w-4" />}
+            accent="chart-2"
+            className="min-h-[240px]"
+            bodyClassName="items-center justify-center gap-2 text-center"
+          >
+            <AlertCircle className="h-12 w-12 text-text-muted" />
+            <p className="text-sm text-text-muted">在页面顶部选择一个任务后查看主题分布。</p>
+          </DashboardCardShell>
         </motion.div>
       );
     }
@@ -134,29 +135,29 @@ export function TopicsPage() {
           animate="visible"
         >
           <motion.div variants={itemVariants}>
-            <Card variant="elevated" className="rounded-xl">
-              <CardContent className="p-5">
+            <DashboardCardShell title="主题词云加载中" accent="chart-3">
+              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
                 <div className="h-6 w-24 bg-surface-hover rounded animate-pulse mb-4" />
                 <div className="h-[300px] w-full bg-surface-hover rounded animate-pulse" />
-              </CardContent>
-            </Card>
+              </div>
+            </DashboardCardShell>
           </motion.div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <motion.div variants={itemVariants}>
-              <Card variant="elevated" className="rounded-xl">
-                <CardContent className="p-5">
+              <DashboardCardShell title="主题权重加载中" accent="chart-2">
+                <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
                   <div className="h-6 w-24 bg-surface-hover rounded animate-pulse mb-4" />
                   <div className="h-[300px] w-full bg-surface-hover rounded animate-pulse" />
-                </CardContent>
-              </Card>
+                </div>
+              </DashboardCardShell>
             </motion.div>
             <motion.div variants={itemVariants}>
-              <Card variant="elevated" className="rounded-xl">
-                <CardContent className="p-5">
+              <DashboardCardShell title="主题表格加载中" accent="chart-4">
+                <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
                   <div className="h-6 w-24 bg-surface-hover rounded animate-pulse mb-4" />
                   <div className="h-[300px] w-full bg-surface-hover rounded animate-pulse" />
-                </CardContent>
-              </Card>
+                </div>
+              </DashboardCardShell>
             </motion.div>
           </div>
         </motion.div>
@@ -166,24 +167,27 @@ export function TopicsPage() {
     if (isError) {
       return (
         <motion.div variants={itemVariants}>
-          <Card variant="elevated" className="rounded-xl">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <AlertCircle className="h-12 w-12 text-chart-negative mb-4" />
-              <p className="text-lg font-medium text-text">加载失败</p>
-              <p className="text-sm text-text-muted mt-2 mb-4">
-                {error instanceof Error ? error.message : "未知错误"}
-                {errors.length > 1 && (
-                  <span className="block text-xs mt-1 text-text-muted">
-                    还有 {errors.length - 1} 个请求也失败了
-                  </span>
-                )}
-              </p>
-              <Button onClick={handleRetry} variant="outline">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                重试
-              </Button>
-            </CardContent>
-          </Card>
+          <DashboardCardShell
+            title="主题分析加载失败"
+            icon={<AlertCircle className="h-4 w-4" />}
+            accent="chart-5"
+            className="min-h-[240px]"
+            bodyClassName="items-center justify-center gap-3 text-center"
+          >
+            <AlertCircle className="h-12 w-12 text-chart-negative" />
+            <p className="text-sm text-text-muted">
+              {error instanceof Error ? error.message : "未知错误"}
+              {errors.length > 1 && (
+                <span className="mt-1 block text-xs text-text-muted">
+                  还有 {errors.length - 1} 个请求也失败了
+                </span>
+              )}
+            </p>
+            <Button onClick={handleRetry} variant="outline">
+              <RefreshCw className="mr-2 h-4 w-4" />
+              重试
+            </Button>
+          </DashboardCardShell>
         </motion.div>
       );
     }
@@ -191,15 +195,16 @@ export function TopicsPage() {
     if (topics.length === 0) {
       return (
         <motion.div variants={itemVariants}>
-          <Card variant="elevated" className="rounded-xl">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <AlertCircle className="h-12 w-12 text-text-muted mb-4" />
-              <p className="text-lg font-medium text-text">暂无主题数据</p>
-              <p className="text-sm text-text-muted mt-2">
-                当前任务尚未生成主题分析结果
-              </p>
-            </CardContent>
-          </Card>
+          <DashboardCardShell
+            title="暂无主题数据"
+            icon={<AlertCircle className="h-4 w-4" />}
+            accent="chart-4"
+            className="min-h-[240px]"
+            bodyClassName="items-center justify-center gap-2 text-center"
+          >
+            <AlertCircle className="h-12 w-12 text-text-muted" />
+            <p className="text-sm text-text-muted">当前任务尚未生成主题分析结果。</p>
+          </DashboardCardShell>
         </motion.div>
       );
     }

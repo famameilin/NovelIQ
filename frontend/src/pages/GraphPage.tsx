@@ -24,6 +24,7 @@ import { useNovelStore } from "@/store/novelStore";
 import { cn } from "@/lib/cn";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { MetricCard } from "@/components/common/MetricCard";
 import { ForceGraph } from "@/components/charts/ForceGraph";
 import { GraphToolbar } from "@/components/charts/GraphToolbar";
@@ -751,15 +752,15 @@ export function GraphPage() {
         transition={{ duration: 0.28, delay: 0.1 }}
         className="grid gap-4 xl:grid-cols-3"
       >
-        <Card variant="elevated" className="rounded-2xl">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-4 w-4 text-primary" />
-              核心网络
-            </CardTitle>
-            <CardDescription>summary 里当前最值得先读的核心角色集合。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <DashboardCardShell
+          title="核心网络"
+          icon={<Users className="h-4 w-4" />}
+          accent="primary"
+          showOrb
+          bodyClassName="gap-4"
+        >
+          <p className="text-sm text-text-muted">summary 里当前最值得先读的核心角色集合。</p>
+          <div className="space-y-4 rounded-2xl border border-border/60 bg-surface/70 p-4">
             <div className="flex flex-wrap gap-2">
               {graphSummary?.core_characters.map((name) => (
                 <Badge key={name} variant="secondary" className="px-3 py-1 text-sm">
@@ -771,18 +772,17 @@ export function GraphPage() {
               当前活跃关系 {activeRelationCount} 条
               {inactiveRelationCount > 0 ? `，另有 ${inactiveRelationCount} 条关系处于非活跃状态。` : "。"}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </DashboardCardShell>
 
-        <Card variant="elevated" className="rounded-2xl">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="h-4 w-4 text-primary" />
-              关键关系
-            </CardTitle>
-            <CardDescription>按 summary.support_count 排序，优先看最能代表主干结构的关系。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <DashboardCardShell
+          title="关键关系"
+          icon={<Sparkles className="h-4 w-4" />}
+          accent="chart-2"
+          bodyClassName="gap-3"
+        >
+          <p className="text-sm text-text-muted">按 summary.support_count 排序，优先看最能代表主干结构的关系。</p>
+          <div className="space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4">
             {graphSummary?.key_relations.length ? (
               graphSummary.key_relations.map((relation) => (
                 <div
@@ -807,18 +807,17 @@ export function GraphPage() {
                 暂无关键关系摘要。
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </DashboardCardShell>
 
-        <Card variant="elevated" className="rounded-2xl">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="h-4 w-4 text-chart-negative" />
-              弱连接候选
-            </CardTitle>
-            <CardDescription>基于当前边权重和变化次数，优先暴露需要二次确认的边缘连接。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <DashboardCardShell
+          title="弱连接候选"
+          icon={<AlertTriangle className="h-4 w-4 text-chart-negative" />}
+          accent="chart-5"
+          bodyClassName="gap-3"
+        >
+          <p className="text-sm text-text-muted">基于当前边权重和变化次数，优先暴露需要二次确认的边缘连接。</p>
+          <div className="space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4">
             {weakRelations.length ? (
               weakRelations.map((relation) => (
                 <div
@@ -846,8 +845,8 @@ export function GraphPage() {
                 当前没有足够的边数据来识别弱连接。
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </DashboardCardShell>
       </motion.section>
 
       <motion.section
@@ -1023,30 +1022,28 @@ export function GraphPage() {
         </Card>
 
         <div className="space-y-4 xl:sticky xl:top-6 xl:self-start">
-          <Card variant="elevated" className="rounded-2xl">
-            <CardHeader className="gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <History className="h-4 w-4 text-primary" />
-                    历史变化入口
-                  </CardTitle>
-                  <CardDescription className="mt-1">
-                    events 侧栏直接承接 relation history，不再只靠时间轴页兜底。
-                    {hasMoreEvents ? " 当前只首屏加载样本，可继续增量展开更长历史。" : ""}
-                  </CardDescription>
-                </div>
-                <Badge variant="outline">
-                  {loadedEventCount < totalEventCount ? `${loadedEventCount} / ${totalEventCount}` : totalEventCount}
-                </Badge>
-              </div>
+          <DashboardCardShell
+            title="历史变化入口"
+            icon={<History className="h-4 w-4" />}
+            accent="chart-4"
+            headerRight={
+              <Badge variant="outline">
+                {loadedEventCount < totalEventCount ? `${loadedEventCount} / ${totalEventCount}` : totalEventCount}
+              </Badge>
+            }
+            footer={
               <Button variant="outline" size="sm" onClick={handleGoTimeline} disabled={!timelineUrl}>
                 去时间轴联动查看
                 <ArrowRight className="h-4 w-4" />
               </Button>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
+            }
+            bodyClassName="gap-3"
+          >
+            <p className="text-sm text-text-muted">
+              events 侧栏直接承接 relation history，不再只靠时间轴页兜底。
+              {hasMoreEvents ? " 当前只首屏加载样本，可继续增量展开更长历史。" : ""}
+            </p>
+            <div className="space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {graphSelectionHint ? (
                 <div className="rounded-xl border border-chart-negative/20 bg-chart-negative/5 p-3 text-xs leading-5 text-text-muted">
                   {graphSelectionHint}
@@ -1115,17 +1112,19 @@ export function GraphPage() {
                   暂无 relation events 历史。
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </DashboardCardShell>
 
           {selectedNode?.entity_type === "character" &&
           (selectedNode.first_seen_chunk != null || selectedNode.last_seen_chunk != null) ? (
-            <Card variant="elevated" className="rounded-2xl">
-              <CardHeader>
-                <CardTitle className="text-base">角色生命周期联动</CardTitle>
-                <CardDescription>从稳定 lifecycle chunk 直接跳到时间轴查看首次登场与最后活跃。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <DashboardCardShell
+              title="角色生命周期联动"
+              icon={<Users className="h-4 w-4" />}
+              accent="chart-3"
+              bodyClassName="gap-4"
+            >
+              <p className="text-sm text-text-muted">从稳定 lifecycle chunk 直接跳到时间轴查看首次登场与最后活跃。</p>
+              <div className="space-y-4 rounded-2xl border border-border/60 bg-surface/70 p-4">
                 <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
                   当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
                   {selectedNode.first_seen_chunk != null && selectedNode.last_seen_chunk != null
@@ -1152,16 +1151,18 @@ export function GraphPage() {
                     <ArrowRight className="h-4 w-4" />
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </DashboardCardShell>
           ) : null}
 
-          <Card variant="elevated" className="rounded-2xl">
-            <CardHeader>
-              <CardTitle className="text-base">事件详情</CardTitle>
-              <CardDescription>查看选中历史变化的证据、方向和质量信息。</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <DashboardCardShell
+            title="事件详情"
+            icon={<Link2 className="h-4 w-4" />}
+            accent="chart-2"
+            bodyClassName="gap-3"
+          >
+            <p className="text-sm text-text-muted">查看选中历史变化的证据、方向和质量信息。</p>
+            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
               {selectedEvent ? (
                 <div className="space-y-4">
                   <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4">
@@ -1203,8 +1204,8 @@ export function GraphPage() {
                   选择一条历史事件后，这里会显示详细上下文。
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </DashboardCardShell>
         </div>
       </motion.section>
     </>

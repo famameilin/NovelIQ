@@ -10,7 +10,8 @@ import { useMemo } from "react";
 import ReactEChartsCore from "echarts-for-react";
 import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { Card, CardContent } from "@/components/ui/card";
+import { Tags } from "lucide-react";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { getCSSColorVar } from "@/lib/theme";
 import { CHART_COLORS } from "@/lib/chart-colors";
 import { cn } from "@/lib/cn";
@@ -147,27 +148,30 @@ export function TopicWordCloud({
   const hasData = wordData.length > 0;
 
   return (
-    <Card variant="elevated" className={cn("rounded-xl overflow-hidden", className)}>
-      <CardContent className="flex flex-col gap-3 p-5">
-        <h4 className="text-sm font-semibold text-text">关键词词云</h4>
-
-        <div ref={containerRef} className="h-[300px] w-full">
-          {hasData && isVisible ? (
-            <ReactEChartsCore
-              key={themeSignature}
-              echarts={echarts}
-              option={option}
-              style={{ height: "100%", width: "100%" }}
-              notMerge
-              lazyUpdate
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-text-muted">
-              {hasData ? "加载中..." : "暂无关键词数据"}
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <DashboardCardShell
+      title="关键词词云"
+      icon={<Tags className="h-4 w-4" />}
+      accent="chart-3"
+      showOrb
+      className={cn(className)}
+      bodyClassName="gap-3"
+    >
+      <div ref={containerRef} className="h-[300px] w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+        {hasData && isVisible ? (
+          <ReactEChartsCore
+            key={themeSignature}
+            echarts={echarts}
+            option={option}
+            style={{ height: "100%", width: "100%" }}
+            notMerge
+            lazyUpdate
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-text-muted">
+            {hasData ? "加载中..." : "暂无关键词数据"}
+          </div>
+        )}
+      </div>
+    </DashboardCardShell>
   );
 }

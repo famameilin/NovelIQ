@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import { useInView, motion } from "framer-motion";
 import { useId } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/cn";
+import { Activity } from "lucide-react";
+import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 
 export interface ScoreCardProps {
   title: string;
@@ -20,7 +20,8 @@ export interface ScoreCardProps {
 }
 
 /**
- * 评分卡片 - 支持环形进度图和圆点评分条两种模式
+ * 2026-04-21，任务：多页面卡片风格统一
+ * 修改原因：将诊断页评分卡接入共享卡片壳，统一视觉层级、hover 反馈和主题 accent 表达。
  */
 export function ScoreCard({
   title,
@@ -36,36 +37,36 @@ export function ScoreCard({
   const isValid = displayValue != null && !isNaN(displayValue as number);
 
   return (
-    <Card
-      variant="elevated"
-      className={cn("rounded-xl overflow-hidden", className)}
+    <DashboardCardShell
+      title={title}
+      icon={<Activity className="h-4 w-4" />}
+      accent={isPercent ? "primary" : "chart-2"}
+      showOrb
+      className={className}
+      bodyClassName="gap-3"
     >
-      <CardContent className="flex flex-col gap-3 p-5">
-        <h4 className="text-sm font-semibold text-text">{title}</h4>
-
-        <div className="flex items-center gap-4">
-          {isPercent ? (
-            <ProgressRing value={value} size={56} />
-          ) : (
-            <ScoreBar score={score} maxScore={maxScore} />
-          )}
-
-          <div className="flex-1 min-w-0">
-            {isValid ? (
-              <p className="text-2xl font-bold text-text tabular-nums">
-                {isPercent ? `${Math.round(displayValue as number)}%` : `${displayValue}/${maxScore}`}
-              </p>
-            ) : (
-              <p className="text-lg text-text-muted">暂无数据</p>
-            )}
-          </div>
-        </div>
-
-        {reason && (
-          <p className="text-xs text-text-muted line-clamp-2">{reason}</p>
+      <div className="flex items-center gap-4 rounded-2xl border border-border/60 bg-surface/70 p-3.5">
+        {isPercent ? (
+          <ProgressRing value={value} size={56} />
+        ) : (
+          <ScoreBar score={score} maxScore={maxScore} />
         )}
-      </CardContent>
-    </Card>
+
+        <div className="min-w-0 flex-1">
+          {isValid ? (
+            <p className="text-2xl font-bold text-text tabular-nums">
+              {isPercent ? `${Math.round(displayValue as number)}%` : `${displayValue}/${maxScore}`}
+            </p>
+          ) : (
+            <p className="text-lg text-text-muted">暂无数据</p>
+          )}
+        </div>
+      </div>
+
+      {reason && (
+        <p className="text-xs leading-5 text-text-muted line-clamp-2">{reason}</p>
+      )}
+    </DashboardCardShell>
   );
 }
 
