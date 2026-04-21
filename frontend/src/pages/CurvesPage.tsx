@@ -208,7 +208,7 @@ export function CurvesPage() {
   if (!currentTaskId) {
     return (
       <PageContainer>
-        <NovelHeader title={novelTitle} />
+        <NovelHeader title={novelTitle} className="mb-6" />
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">请先选择分析任务</h3>
@@ -223,7 +223,7 @@ export function CurvesPage() {
 
   return (
     <PageContainer>
-      <NovelHeader title={novelTitle} />
+      <NovelHeader title={novelTitle} className="mb-6" />
 
       <div className="space-y-6">
         <motion.div
