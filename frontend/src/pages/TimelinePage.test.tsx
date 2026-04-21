@@ -40,6 +40,7 @@ function motionElement(tagName: string) {
     delete sanitizedProps.initial;
     delete sanitizedProps.animate;
     delete sanitizedProps.exit;
+    delete sanitizedProps.whileTap;
     return createElement(tagName, sanitizedProps, props.children);
   };
   Component.displayName = `motion-${tagName}`;
@@ -69,28 +70,50 @@ vi.mock("@/components/common/NovelHeader", () => ({
   NovelHeader: ({ title }: { title: string }) => <div>{title}</div>,
 }));
 
+vi.mock("@/components/common/MetricCard", () => ({
+  MetricCard: ({
+    label,
+    value,
+    footer,
+  }: {
+    label: string;
+    value: number;
+    footer?: ReactNode;
+  }) => (
+    <div data-testid={`metric-card-${label.toLowerCase()}`}>
+      <span>{label}</span>
+      <span>{value}</span>
+      {footer}
+    </div>
+  ),
+}));
+
 vi.mock("@/components/timeline", () => ({
   TimelineControls: ({
     onMaxLevelChange,
-    onShowTensionChange,
   }: {
     onMaxLevelChange: (level: 1 | 2 | 3) => void;
-    onShowTensionChange: (show: boolean) => void;
   }) => (
     <div data-testid="timeline-controls">
       <button type="button" onClick={() => onMaxLevelChange(1)}>
         切到重要
-      </button>
-      <button type="button" onClick={() => onShowTensionChange(false)}>
-        隐藏张力
       </button>
     </div>
   ),
   PhaseBar: passthroughComponent("phase-bar"),
   TimelineLegend: passthroughComponent("timeline-legend"),
   TensionOverlay: passthroughComponent("tension-overlay"),
-  TimelineTrack: ({ nodes, onNodeClick }: { nodes: TimelineResponse["nodes"]; onNodeClick: (node: TimelineResponse["nodes"][number]) => void }) => (
+  TimelineTrack: ({
+    nodes,
+    onNodeClick,
+    showTension,
+  }: {
+    nodes: TimelineResponse["nodes"];
+    onNodeClick: (node: TimelineResponse["nodes"][number]) => void;
+    showTension?: boolean;
+  }) => (
     <div data-testid="timeline-track">
+      <span>{showTension ? "tension-on" : "tension-off"}</span>
       {nodes.map((node) => (
         <button key={node.chunk_id} type="button" onClick={() => onNodeClick(node)}>
           节点 {node.chunk_id}
@@ -284,7 +307,7 @@ describe("TimelinePage deep links", () => {
       maxLevel: 3,
     });
     expect(navigateMock).not.toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-b&max_level=3&show_tension=true",
+      "/novels/novel-1/timeline?task_id=task-b&max_level=3",
       { replace: true }
     );
   });
@@ -312,7 +335,8 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    expect(await screen.findByText("点击任意节点查看详情")).toBeInTheDocument();
+    await screen.findByTestId("timeline-track");
+    expect(screen.queryByTestId("timeline-node-detail")).not.toBeInTheDocument();
     expect(screen.getByText("未定位到对应事件。")).toBeInTheDocument();
   });
 
@@ -330,7 +354,7 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    expect(await screen.findAllByText("加载失败")).toHaveLength(2);
+    expect(await screen.findByText("加载失败")).toBeInTheDocument();
     const retryButtons = await screen.findAllByRole("button", { name: /重试/ });
     retryButtons[0]?.click();
 
@@ -347,11 +371,11 @@ describe("TimelinePage deep links", () => {
     await screen.findByText("selected-12");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&show_tension=true&selected_chunk=12&relation_event_id=9002",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&selected_chunk=12&relation_event_id=9002",
       { replace: true }
     );
 
-    currentTimelineSearchParams = "task_id=task-a&max_level=1&show_tension=true&selected_chunk=12&relation_event_id=9002";
+    currentTimelineSearchParams = "task_id=task-a&max_level=1&selected_chunk=12&relation_event_id=9002";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <TimelinePage />
@@ -370,7 +394,7 @@ describe("TimelinePage deep links", () => {
     await user.click(screen.getByRole("button", { name: "切到重要" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&show_tension=true&selected_chunk=12",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&selected_chunk=12",
       { replace: true }
     );
   });
@@ -384,7 +408,7 @@ describe("TimelinePage deep links", () => {
     await user.click(screen.getByRole("button", { name: "节点 8" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=8",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&selected_chunk=8",
       { replace: true }
     );
   });
@@ -398,7 +422,7 @@ describe("TimelinePage deep links", () => {
     await user.click(screen.getByRole("button", { name: "关闭详情" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3",
       { replace: true }
     );
   });
@@ -415,7 +439,7 @@ describe("TimelinePage deep links", () => {
 
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith(
-        "/novels/novel-1/timeline?task_id=task-b&max_level=3&show_tension=true",
+        "/novels/novel-1/timeline?task_id=task-b&max_level=3",
         { replace: true }
       );
     });
@@ -425,9 +449,9 @@ describe("TimelinePage deep links", () => {
     const view = renderPage();
 
     expect(await screen.findByText("selected-12")).toBeInTheDocument();
-    expect(screen.getByTestId("tension-overlay")).toBeInTheDocument();
+    expect(screen.getByText("tension-on")).toBeInTheDocument();
 
-    currentTimelineSearchParams = "task_id=task-a&max_level=1&show_tension=false&selected_chunk=8";
+    currentTimelineSearchParams = "task_id=task-a&max_level=1&selected_chunk=8";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <TimelinePage />
@@ -441,6 +465,6 @@ describe("TimelinePage deep links", () => {
       });
     });
     expect(await screen.findByText("selected-8")).toBeInTheDocument();
-    expect(screen.queryByTestId("tension-overlay")).not.toBeInTheDocument();
+    expect(screen.getByText("tension-on")).toBeInTheDocument();
   });
 });

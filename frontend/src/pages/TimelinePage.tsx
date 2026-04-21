@@ -12,25 +12,30 @@
  *   - 重组时间轴主体布局，将轨道、图例、张力区收敛到同一信息区
  *   - 将节点详情移到桌面端右侧，避免点击后还要滚到张力曲线下方阅读
  *   - 为未选中节点的状态补充明确引导，减少页面空白感
+ *
+ * 修改时间: 2026-04-21
+ * 任务: 对齐时间轴页与主题页的头部表现
+ * 修改内容:
+ *   - 统一使用 NovelHeader 承担页面标题，避免重复标题层级
+ *   - 移除页面内额外说明文案，使时间轴页与主题页保持一致的头部结构
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, GitBranch, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
+import { MetricCard } from "@/components/common/MetricCard";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
-import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  PhaseBar,
   TimelineLegend,
   TimelineTrack,
-  TensionOverlay,
   TimelineNodeDetail,
   TimelineControls,
 } from "@/components/timeline";
@@ -47,7 +52,6 @@ function buildTimelinePageUrl(
   taskId: string,
   options: {
     maxLevel: 1 | 2 | 3;
-    showTension: boolean;
     selectedChunk?: number | null;
     relationEventId?: number | null;
   }
@@ -55,7 +59,6 @@ function buildTimelinePageUrl(
   const params = new URLSearchParams({
     task_id: taskId,
     max_level: String(options.maxLevel),
-    show_tension: String(options.showTension),
   });
   if (options.selectedChunk != null) {
     params.set("selected_chunk", String(options.selectedChunk));
@@ -78,7 +81,6 @@ export function TimelinePage() {
 
   const urlTaskId = searchParams.get("task_id");
   const urlMaxLevel = searchParams.get("max_level");
-  const urlShowTension = searchParams.get("show_tension");
   const urlSelectedChunk = searchParams.get("selected_chunk");
   const urlRelationEventId = searchParams.get("relation_event_id");
   const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
@@ -87,7 +89,7 @@ export function TimelinePage() {
     const level = urlMaxLevel ? parseInt(urlMaxLevel, 10) : 3;
     return [1, 2, 3].includes(level) ? (level as 1 | 2 | 3) : 3;
   }, [urlMaxLevel]);
-  const showTension = useMemo(() => urlShowTension !== "false", [urlShowTension]);
+  const showTension = true;
   const [activePhase, setActivePhase] = useState<string | undefined>();
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
   const taskScopeId = urlTaskId ?? storeTaskId;
@@ -135,13 +137,12 @@ export function TimelinePage() {
 
     navigate(buildTimelinePageUrl(novelId, storeTaskId, {
         maxLevel,
-        showTension,
         // 中文注释：时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
         // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮。
         selectedChunk: null,
         relationEventId: null,
       }), { replace: true });
-  }, [maxLevel, navigate, novelId, showTension, storeTaskId, urlTaskId]);
+  }, [maxLevel, navigate, novelId, storeTaskId, urlTaskId]);
 
   const enabled = !!novelId && !!taskScopeId;
 
@@ -162,8 +163,6 @@ export function TimelinePage() {
     enabled: !!novelId,
     staleTime: STALE_TIME,
   });
-
-  const novelTitle = novelQuery.data?.title ?? "小说详情";
 
   const timelineData = timelineQuery.data;
   const phases = timelineData?.phases ?? [];
@@ -189,6 +188,11 @@ export function TimelinePage() {
     return null;
   }, [matchedRelationEventNode, nodes, selectedChunkFromUrl]);
   const resolvedRelationEventId = matchedRelationEventNode ? relationEventIdFromUrl : null;
+  const pivotCount = useMemo(() => nodes.filter((node) => node.is_pivot).length, [nodes]);
+  const relationChangeCount = useMemo(
+    () => nodes.filter((node) => node.node_type === "relation_change").length,
+    [nodes]
+  );
   const selectionHint = useMemo(() => {
     if (relationEventIdFromUrl == null) return null;
     if (matchedRelationEventNode) return null;
@@ -203,27 +207,13 @@ export function TimelinePage() {
       if (!novelId || !taskScopeId) return;
       navigate(buildTimelinePageUrl(novelId, taskScopeId, {
         maxLevel: level,
-        showTension,
         selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
         // 中文注释：控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link。
         // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择。
         relationEventId: resolvedRelationEventId,
       }), { replace: true });
     },
-    [novelId, taskScopeId, showTension, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
-  );
-
-  const handleShowTensionChange = useCallback(
-    (show: boolean) => {
-      if (!novelId || !taskScopeId) return;
-      navigate(buildTimelinePageUrl(novelId, taskScopeId, {
-        maxLevel,
-        showTension: show,
-        selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
-        relationEventId: resolvedRelationEventId,
-      }), { replace: true });
-    },
-    [novelId, taskScopeId, maxLevel, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
+    [novelId, taskScopeId, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
   );
 
   const handleNodeClick = useCallback((node: TimelineNode) => {
@@ -232,13 +222,12 @@ export function TimelinePage() {
     navigate(
       buildTimelinePageUrl(novelId, taskScopeId, {
         maxLevel,
-        showTension,
         selectedChunk: nextSelectedChunk,
         relationEventId: null,
       }),
       { replace: true }
     );
-  }, [taskScopeId, maxLevel, navigate, novelId, selectedNode, showTension]);
+  }, [taskScopeId, maxLevel, navigate, novelId, selectedNode]);
 
   const handlePhaseClick = useCallback((phase: TimelinePhase) => {
     setActivePhase((prev) => (prev === phase.name ? undefined : phase.name));
@@ -269,7 +258,7 @@ export function TimelinePage() {
   if (!taskScopeId) {
     return (
       <PageContainer>
-        <NovelHeader title={novelTitle} />
+        <NovelHeader title="叙事时间轴" />
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">请先选择分析任务</h3>
@@ -284,39 +273,19 @@ export function TimelinePage() {
 
   return (
     <PageContainer>
-      <NovelHeader title={novelTitle} />
+      <NovelHeader title="叙事时间轴" />
 
-      <div className="space-y-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          <TimelineControls
-            maxLevel={maxLevel}
-            showTension={showTension}
-            onMaxLevelChange={handleMaxLevelChange}
-            onShowTensionChange={handleShowTensionChange}
-          />
-        </motion.div>
-
+      <div className="mt-4 space-y-6">
         {selectionHint && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.05 }}
           >
-            <DashboardCardShell
-              title="定位提示"
-              icon={<AlertTriangle className="h-4 w-4" />}
-              accent="chart-5"
-              bodyClassName="gap-3"
-            >
-              <div className="flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
-                <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
-                <p className="text-sm text-text-muted">{selectionHint}</p>
-              </div>
-            </DashboardCardShell>
+            <div className="flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
+              <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
+              <p className="text-sm text-text-muted">{selectionHint}</p>
+            </div>
           </motion.div>
         )}
 
@@ -325,12 +294,50 @@ export function TimelinePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
         >
-          <DashboardCardShell title="叙事结构 · 四阶段" accent="chart-1" bodyClassName="gap-3">
-            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
+          <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <MetricCard
+                  label="Overview"
+                  value={nodes.length}
+                  format="raw"
+                  accent="chart-1"
+                  icon={<TrendingUp className="h-5 w-5" />}
+                  description="当前筛选层级下保留下来的关键叙事节点数量。"
+                  footer={<p className="mt-3 text-sm text-text-muted">当前筛选下的关键叙事节点</p>}
+                  showOrb
+                />
+                <MetricCard
+                  label="Pivot"
+                  value={pivotCount}
+                  format="raw"
+                  accent="chart-5"
+                  icon={<Sparkles className="h-5 w-5" />}
+                  description="被标记为转折点的节点数量，适合优先阅读。"
+                  footer={<p className="mt-3 text-sm text-text-muted">转折点，适合优先阅读</p>}
+                  showOrb
+                />
+                <MetricCard
+                  label="Relation"
+                  value={relationChangeCount}
+                  format="raw"
+                  accent="chart-2"
+                  icon={<GitBranch className="h-5 w-5" />}
+                  description="关系变化节点数量，通常最适合联动图谱排查。"
+                  footer={<p className="mt-3 text-sm text-text-muted">关系变化节点，最适合联动图谱排查</p>}
+                  showOrb
+                />
+              </div>
+
+              {!isLoading && !isError && phases.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border/60 bg-surface/50 px-4 py-3 text-sm text-text-muted">
+                  暂无阶段数据
+                </div>
+              ) : null}
+
               {isLoading ? (
-                <div className="h-16 w-full animate-pulse rounded bg-surface-hover" />
+                <div className="h-[360px] w-full animate-pulse rounded-[28px] border border-border/60 bg-surface-hover" />
               ) : isError ? (
-                <div className="flex h-16 flex-col items-center justify-center gap-3 text-sm text-text-muted">
+                <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
                   <span>加载失败</span>
                   <Button
                     variant="outline"
@@ -342,130 +349,91 @@ export function TimelinePage() {
                     重试
                   </Button>
                 </div>
-              ) : phases.length === 0 ? (
-                <div className="flex h-16 items-center justify-center text-sm text-text-muted">
-                  暂无阶段数据
+              ) : nodes.length === 0 ? (
+                <div className="flex h-[360px] items-center justify-center rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
+                  暂无时间轴节点
                 </div>
               ) : (
-                <PhaseBar
-                  phases={phases}
-                  activePhase={activePhase}
-                  onPhaseClick={handlePhaseClick}
-                />
-              )}
-            </div>
-          </DashboardCardShell>
-        </motion.div>
+                <div className="space-y-4 pb-4">
+                  <div className="rounded-[28px] border border-border/60 bg-surface/75 p-4">
+                    <TimelineControls
+                      variant="inline"
+                      maxLevel={maxLevel}
+                      onMaxLevelChange={handleMaxLevelChange}
+                    />
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.2 }}
-        >
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-            <DashboardCardShell title="叙事时间轴" accent="primary" showOrb bodyClassName="gap-4">
-              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-                <p className="text-sm text-text-muted">
-                  先看图例，再顺着时间轴阅读节点，点击任一节点即可在右侧查看完整事件细节。
-                </p>
-              </div>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-text">阅读顺序</p>
+                        <p className="mt-1 text-sm text-text-muted">
+                          先看阶段，再沿着轨道阅读标签；选中节点完整语义会放到时间轴下方。
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="border-border/60 text-text-muted">
+                        张力曲线常显
+                      </Badge>
+                    </div>
 
-              <TimelineLegend />
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {phases.length === 0 ? (
+                        <p className="text-sm text-text-muted">暂无阶段数据</p>
+                      ) : (
+                        phases.map((phase) => {
+                          const isActive = activePhase === phase.name;
+                          return (
+                            <button
+                              key={phase.name}
+                              type="button"
+                              onClick={() => handlePhaseClick(phase)}
+                              className={[
+                                "rounded-full border px-3 py-2 text-left transition-all",
+                                isActive
+                                  ? "border-primary/35 bg-primary/10 text-text shadow-sm"
+                                  : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
+                              ].join(" ")}
+                            >
+                              <span className="text-sm font-medium">{phase.name}</span>
+                              <span className="ml-2 text-xs">{phase.start}-{phase.end}</span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
 
-              <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-                {isLoading ? (
-                  <div className="h-40 w-full animate-pulse rounded bg-surface-hover" />
-                ) : isError ? (
-                  <div className="flex h-40 flex-col items-center justify-center gap-3 text-sm text-text-muted">
-                    <span>加载失败</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleRetry}
-                      className="gap-2"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                      重试
-                    </Button>
+                    <TimelineLegend className="mt-4" />
                   </div>
-                ) : nodes.length === 0 ? (
-                  <div className="flex h-40 items-center justify-center text-sm text-text-muted">
-                    暂无时间轴节点
-                  </div>
-                ) : (
+
                   <TimelineTrack
                     nodes={nodes}
                     phases={phases}
                     activePhase={activePhase}
                     selectedNodeId={selectedNode?.chunk_id}
                     onNodeClick={handleNodeClick}
-                  />
-                )}
-              </div>
-
-              {showTension && tensionCurve && tensionCurve.length > 0 ? (
-                <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-text">张力走势</p>
-                      <p className="text-xs text-text-muted">
-                        下方曲线帮助判断节点为何会在轨道上方或下方起伏。
-                      </p>
-                    </div>
-                  </div>
-                  <TensionOverlay
                     tensionCurve={tensionCurve}
                     totalChunks={totalChunks}
-                    height={160}
+                    showTension={showTension}
                   />
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-border/60 bg-surface/40 p-4 text-sm text-text-muted">
-                  当前已隐藏张力曲线。若需要把节点高低与节奏走势一起看，可以在上方控制区重新开启。
+
+                  {selectedNode ? (
+                    <TimelineNodeDetail
+                      node={selectedNode}
+                      novelId={novelId}
+                      taskId={taskScopeId}
+                      selectedRelationEventId={resolvedRelationEventId}
+                      onClose={() => {
+                        navigate(
+                          buildTimelinePageUrl(novelId, taskScopeId, {
+                            maxLevel,
+                            selectedChunk: null,
+                            relationEventId: null,
+                          }),
+                          { replace: true }
+                        );
+                      }}
+                    />
+                  ) : null}
                 </div>
               )}
-            </DashboardCardShell>
-
-            {novelId && (
-              selectedNode ? (
-                <TimelineNodeDetail
-                  className="xl:sticky xl:top-6"
-                  node={selectedNode}
-                  novelId={novelId}
-                  taskId={taskScopeId}
-                  selectedRelationEventId={resolvedRelationEventId}
-                  onClose={() => {
-                    navigate(
-                      buildTimelinePageUrl(novelId, taskScopeId, {
-                        maxLevel,
-                        showTension,
-                        selectedChunk: null,
-                        relationEventId: null,
-                      }),
-                      { replace: true }
-                    );
-                  }}
-                />
-              ) : (
-                <DashboardCardShell
-                  title="节点详情"
-                  accent="chart-2"
-                  className="xl:sticky xl:top-6"
-                  bodyClassName="gap-4"
-                >
-                  <div className="rounded-2xl border border-dashed border-border/60 bg-surface/50 p-5">
-                    <p className="text-sm font-medium text-text">点击任意节点查看详情</p>
-                    <p className="mt-2 text-sm leading-6 text-text-muted">
-                      右侧会展示事件描述、涉及角色、关系变化以及回跳到图谱的入口。
-                      如果你正在排查某个关系事件，优先点亮蓝色“关系变化”节点会更直接。
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-border/60 bg-surface/60 p-4 text-sm text-text-muted">
-                    当前没有选中节点，因此这里只显示阅读提示，不再把详情卡片挤到张力曲线下方。
-                  </div>
-                </DashboardCardShell>
-              )
-            )}
           </div>
         </motion.div>
       </div>
