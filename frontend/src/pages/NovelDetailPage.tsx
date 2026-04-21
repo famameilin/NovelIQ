@@ -495,6 +495,7 @@ export function NovelDetailPage() {
               act1Ratio={narrativeQuery.data?.act1_ratio}
               act2Ratio={narrativeQuery.data?.act2_ratio}
               act3Ratio={narrativeQuery.data?.act3_ratio}
+              eventDensity={narrativeQuery.data?.event_density}
               novelId={novelId!}
             />
             <MiniCurvePreview

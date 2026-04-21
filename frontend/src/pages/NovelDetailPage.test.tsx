@@ -145,7 +145,13 @@ vi.mock("@/components/common/DimensionMiniCard", () => ({
 }));
 
 vi.mock("@/components/common/NarrativeStructureBar", () => ({
-  NarrativeStructureBar: passthroughComponent("narrative-structure-bar"),
+  NarrativeStructureBar: (props: {
+    eventDensity?: Record<string, number> | null;
+  }) => (
+    <div data-testid="narrative-structure-bar">
+      {props.eventDensity ? JSON.stringify(props.eventDensity) : "no-event-density"}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/charts/MiniCurvePreview", () => ({
@@ -319,5 +325,32 @@ describe("NovelDetailPage", () => {
     });
     expect(useNovelStore.getState().currentTaskId).toBe("task-old");
     expect(navigateMock).not.toHaveBeenCalledWith("/novels/novel-1", { replace: true });
+  });
+
+  it("详情页应将事件密度传给叙事结构卡片", async () => {
+    currentSearchParams = "task_id=task-ready";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getNarrativeStructureMock.mockResolvedValue({
+      act1_ratio: 0.1,
+      act2_ratio: 0.6,
+      act3_ratio: 0.3,
+      event_density: {
+        冲突: 0.5,
+        铺垫: 0.3,
+        转折: 0.2,
+      },
+    });
+
+    renderNovelDetailPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("narrative-structure-bar")).toHaveTextContent(
+        JSON.stringify({
+          冲突: 0.5,
+          铺垫: 0.3,
+          转折: 0.2,
+        }),
+      );
+    });
   });
 });
