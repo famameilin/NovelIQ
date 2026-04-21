@@ -13,8 +13,6 @@ import {
   Link2,
   Network,
   RefreshCw,
-  ShieldAlert,
-  ShieldCheck,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -36,8 +34,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import type { ForceGraphHandle, GraphEdge, GraphEvent, GraphEventsPageInfo, GraphNode, GraphNodeObject } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
-const LOW_CONFIDENCE_THRESHOLD = 0.6;
-
 const pageSectionVariants = {
   hidden: { opacity: 0, y: 16 },
   visible: { opacity: 1, y: 0 },
@@ -84,25 +80,9 @@ function buildTimelineSelectionUrl(baseUrl: string, options?: { chunkId?: number
   return `${baseUrl}&${params.join("&")}`;
 }
 
-function formatDensity(value: number | undefined): string {
-  if (value == null || Number.isNaN(value)) return "--";
-  return value.toFixed(4);
-}
-
-function formatConfidence(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "待确认";
-  return `${Math.round(value * 100)}%`;
-}
-
 function getChangeTypeLabel(changeType?: string | null): string {
   if (!changeType) return "变化";
   return changeTypeLabels[changeType] ?? changeType;
-}
-
-function getEventConfidenceVariant(confidence: number | null | undefined): "outline" | "success" | "destructive" {
-  if (confidence == null) return "outline";
-  if (confidence < LOW_CONFIDENCE_THRESHOLD) return "destructive";
-  return "success";
 }
 
 function getEdgeDisplayNames(edge: GraphEdge, nodeNameMap: Map<string, string>): { from: string; to: string } {
@@ -310,7 +290,6 @@ export function GraphPage() {
   // /graph 返回的是 product-layer summary/quality，而不是 authority 原始事实；
   // 页面可以自由调整展示摘要，但不应反向定义 authority 语义。
   const graphSummary = graphData?.summary ?? null;
-  const graphQuality = graphData?.quality ?? null;
 
   const sortedEvents = useMemo(() => {
     return [...loadedEvents].sort((left, right) => {
@@ -515,31 +494,6 @@ export function GraphPage() {
     [graphData]
   );
 
-  const qualityTone = useMemo(() => {
-    if (!graphQuality) {
-      return {
-        icon: ShieldCheck,
-        badgeVariant: "outline" as const,
-        badgeLabel: "待评估",
-        summary: "等待 authority 质量报告。",
-      };
-    }
-    if (graphQuality.conflict_count === 0 && graphQuality.low_confidence_count === 0) {
-      return {
-        icon: ShieldCheck,
-        badgeVariant: "success" as const,
-        badgeLabel: "稳定",
-        summary: "当前 authority 输出没有显著冲突，可直接支撑更高层分析。",
-      };
-    }
-    return {
-      icon: ShieldAlert,
-      badgeVariant: "destructive" as const,
-      badgeLabel: "需关注",
-      summary: "建议先处理冲突关系与低置信事件，再继续做诊断或聚合分析。",
-    };
-  }, [graphQuality]);
-
   const timelineUrl = novelId && taskScopeId ? buildTimelineUrl(novelId, taskScopeId) : null;
   const isLoading = graphQuery.isLoading;
   const isError = graphQuery.isError;
@@ -604,7 +558,7 @@ export function GraphPage() {
       if (eventsRequestVersionRef.current !== requestVersion || currentTaskScopeIdRef.current !== requestTaskId) {
         return;
       }
-      const message = error instanceof Error ? error.message : "加载更多 relation events 失败";
+      const message = error instanceof Error ? error.message : "加载更多关系变化失败";
       setEventsLoadError(message);
     } finally {
       if (eventsRequestVersionRef.current === requestVersion && currentTaskScopeIdRef.current === requestTaskId) {
@@ -655,11 +609,6 @@ export function GraphPage() {
     [navigate, timelineUrl]
   );
 
-  const handleScrollToGraph = useCallback(() => {
-    const graphSection = document.getElementById("graph-workspace");
-    graphSection?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-
   const renderContractIssue = () => (
     <motion.section
       variants={pageSectionVariants}
@@ -672,10 +621,9 @@ export function GraphPage() {
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-6 w-6 text-chart-negative" />
             <div className="space-y-2">
-              <p className="text-base font-semibold text-text">/graph authority contract 不完整</p>
+              <p className="text-base font-semibold text-text">图谱数据暂不完整</p>
               <p className="text-sm leading-6 text-text-muted">
-                当前任务返回了图数据，但缺少 `summary`、`quality` 或 `events_page`。图谱分析入口不会在前端补造
-                authority 语义，请先修复后端 contract 再继续使用该页面。
+                当前任务返回了部分图谱数据，但关系概览或变化记录还不完整，请稍后重试。
               </p>
             </div>
           </div>
@@ -709,37 +657,37 @@ export function GraphPage() {
           format="raw"
           decimals={0}
           icon={<Network className="h-5 w-5" />}
-          description="authority 当前稳定实体数"
+          description="当前识别到的人物、组织与群体"
           accent="primary"
         />
         <MetricCard
-          label="确认关系"
+          label="关系连线"
           value={graphSummary?.edge_count ?? 0}
           format="raw"
           decimals={0}
           icon={<Link2 className="h-5 w-5" />}
-          description="当前确认后的关系边数"
+          description="当前关系网络中的主要连接"
           accent="chart-2"
         />
         <MetricCard
-          label="网络密度"
+          label="网络紧密度"
           value={graphSummary?.density ?? 0}
           format="raw"
           decimals={4}
           icon={<Activity className="h-5 w-5" />}
-          description="关系连接紧密度"
+          description="角色之间连接的紧密程度"
           accent="chart-4"
         />
         <MetricCard
-          label="历史事件"
+          label="关系变化"
           value={totalEventCount}
           format="raw"
           decimals={0}
           icon={<History className="h-5 w-5" />}
           description={
             totalEventCount > loadedEventCount
-              ? `已加载 ${loadedEventCount} / ${totalEventCount} 条 history`
-              : "relation events 历史条目"
+              ? `已加载 ${loadedEventCount} / ${totalEventCount} 条变化记录`
+              : "已记录的关系变化"
           }
           accent="chart-5"
         />
@@ -759,7 +707,7 @@ export function GraphPage() {
           showOrb
           bodyClassName="gap-4"
         >
-          <p className="text-sm text-text-muted">summary 里当前最值得先读的核心角色集合。</p>
+          <p className="text-sm text-text-muted">这一组角色处在当前关系网络的中心位置，适合作为阅读入口。</p>
           <div className="space-y-4 rounded-2xl border border-border/60 bg-surface/70 p-4">
             <div className="flex flex-wrap gap-2">
               {graphSummary?.core_characters.map((name) => (
@@ -781,7 +729,7 @@ export function GraphPage() {
           accent="chart-2"
           bodyClassName="gap-3"
         >
-          <p className="text-sm text-text-muted">按 summary.support_count 排序，优先看最能代表主干结构的关系。</p>
+          <p className="text-sm text-text-muted">这里展示当前最重要、最能代表人物网络主干的关系。</p>
           <div className="space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4">
             {graphSummary?.key_relations.length ? (
               graphSummary.key_relations.map((relation) => (
@@ -798,7 +746,7 @@ export function GraphPage() {
                         {relation.type ?? "未标注关系类型"}
                       </p>
                     </div>
-                    <Badge variant="outline">支撑 {relation.support_count}</Badge>
+                    <Badge variant="outline">出现 {relation.support_count} 次</Badge>
                   </div>
                 </div>
               ))
@@ -811,12 +759,12 @@ export function GraphPage() {
         </DashboardCardShell>
 
         <DashboardCardShell
-          title="弱连接候选"
+          title="边缘关系"
           icon={<AlertTriangle className="h-4 w-4 text-chart-negative" />}
           accent="chart-5"
           bodyClassName="gap-3"
         >
-          <p className="text-sm text-text-muted">基于当前边权重和变化次数，优先暴露需要二次确认的边缘连接。</p>
+          <p className="text-sm text-text-muted">这些关系连接较弱或变化较少，更像是支线关系的补充信息。</p>
           <div className="space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4">
             {weakRelations.length ? (
               weakRelations.map((relation) => (
@@ -834,15 +782,15 @@ export function GraphPage() {
                       </p>
                     </div>
                     <div className="text-right text-xs text-text-muted">
-                      <div>权重 {relation.weight ?? 1}</div>
-                      <div>变更 {relation.change_count ?? 0}</div>
+                      <div>连接强度 {relation.weight ?? 1}</div>
+                      <div>变化 {relation.change_count ?? 0} 次</div>
                     </div>
                   </div>
                 </div>
               ))
             ) : (
               <div className="rounded-xl border border-dashed border-border p-4 text-sm text-text-muted">
-                当前没有足够的边数据来识别弱连接。
+                当前没有明显的边缘关系。
               </div>
             )}
           </div>
@@ -854,122 +802,6 @@ export function GraphPage() {
         initial="hidden"
         animate="visible"
         transition={{ duration: 0.28, delay: 0.15 }}
-      >
-        <Card variant="elevated" className="rounded-2xl">
-          <CardHeader className="gap-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <qualityTone.icon className="h-4 w-4 text-primary" />
-                  Authority 质量诊断
-                </CardTitle>
-                <CardDescription className="mt-1">
-                  quality 只反映 authority 输出稳定性，不直接等于诊断页的高层结论。
-                </CardDescription>
-              </div>
-              <Badge variant={qualityTone.badgeVariant}>{qualityTone.badgeLabel}</Badge>
-            </div>
-            <p className="text-sm text-text-muted">{qualityTone.summary}</p>
-          </CardHeader>
-
-          <CardContent className="grid gap-4 xl:grid-cols-[280px,minmax(0,1fr),minmax(0,1fr)]">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-              <MetricCard
-                label="冲突关系"
-                value={graphQuality?.conflict_count ?? 0}
-                format="raw"
-                decimals={0}
-                icon={<ShieldAlert className="h-5 w-5" />}
-                description="同一实体对出现多个关系类型"
-                accent="chart-3"
-              />
-              <MetricCard
-                label="低置信事件"
-                value={graphQuality?.low_confidence_count ?? 0}
-                format="raw"
-                decimals={0}
-                icon={<AlertTriangle className="h-5 w-5" />}
-                description={`置信度低于 ${Math.round(LOW_CONFIDENCE_THRESHOLD * 100)}% 的历史变化`}
-                accent="chart-5"
-              />
-            </div>
-
-            <div className="rounded-2xl border border-border/70 bg-surface-hover/35 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-text">冲突样本</h3>
-                <Badge variant="outline">{graphQuality?.conflicts.length ?? 0} 条样本</Badge>
-              </div>
-              <div className="space-y-3">
-                {graphQuality?.conflicts.length ? (
-                  graphQuality.conflicts.map((conflict) => (
-                    <div
-                      key={`${conflict.entity_names.join("-")}-${conflict.relation_types.join("-")}`}
-                      className="rounded-xl border border-border bg-surface p-4"
-                    >
-                      <p className="text-sm font-medium text-text">{conflict.entity_names.join(" · ")}</p>
-                      <p className="mt-1 text-xs leading-5 text-text-muted">
-                        关系类型: {conflict.relation_types.join(" / ")}
-                      </p>
-                      <p className="mt-1 text-xs text-text-muted">
-                        冲突关系数 {conflict.relation_count}，最近事件 ID: {conflict.latest_event_ids.join(", ") || "无"}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-surface p-4 text-center">
-                    <ShieldCheck className="h-8 w-8 text-chart-positive" />
-                    <p className="text-sm font-medium text-text">当前没有冲突关系</p>
-                    <p className="text-xs text-text-muted">实体对之间的关系类型保持一致。</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-border/70 bg-surface-hover/35 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-text">低置信事件</h3>
-                <Badge variant="outline">{graphQuality?.low_confidence_samples.length ?? 0} 条样本</Badge>
-              </div>
-              <div className="space-y-3">
-                {graphQuality?.low_confidence_samples.length ? (
-                  graphQuality.low_confidence_samples.map((event) => (
-                    <div
-                      key={event.relation_event_id}
-                      className="rounded-xl border border-border bg-surface p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-text">
-                            第 {event.chunk_id} 段 · {event.from_name} → {event.to_name}
-                          </p>
-                          <p className="mt-1 text-xs leading-5 text-text-muted">
-                            {event.relation_type ?? "未标注关系"} · {getChangeTypeLabel(event.change_type)}
-                          </p>
-                        </div>
-                        <Badge variant={getEventConfidenceVariant(event.confidence)}>
-                          {formatConfidence(event.confidence)}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-surface p-4 text-center">
-                    <ShieldCheck className="h-8 w-8 text-chart-positive" />
-                    <p className="text-sm font-medium text-text">没有低置信事件</p>
-                    <p className="text-xs text-text-muted">历史关系变化的可信度目前处于健康区间。</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.section>
-
-      <motion.section
-        variants={pageSectionVariants}
-        initial="hidden"
-        animate="visible"
-        transition={{ duration: 0.28, delay: 0.2 }}
         className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr),380px]"
       >
         <Card id="graph-workspace" variant="elevated" className="rounded-2xl">
@@ -978,7 +810,7 @@ export function GraphPage() {
               <div className="space-y-1">
                 <CardTitle className="text-base">关系工作区</CardTitle>
                 <CardDescription>
-                  关系图仍然保留，但它现在服务于 summary / quality / events 的分析流程。
+                  在这里可以缩放、筛选和定位人物之间的关系连接。
                 </CardDescription>
               </div>
               <div className="overflow-x-auto pb-1">
@@ -1000,7 +832,7 @@ export function GraphPage() {
 
           <CardContent className="space-y-4">
             <div className="rounded-xl border border-border/70 bg-surface-hover/35 px-4 py-3 text-sm text-text-muted">
-              先用上方 summary 和 quality 缩小问题范围，再在关系图里放大、筛选和定位具体节点。
+              可以先从上方的关系概览进入，再在这里放大、筛选并查看具体角色节点。
             </div>
 
             <div className="relative min-h-[620px] overflow-hidden rounded-xl border border-border bg-surface lg:min-h-[720px]">
@@ -1023,7 +855,7 @@ export function GraphPage() {
 
         <div className="space-y-4 xl:sticky xl:top-6 xl:self-start">
           <DashboardCardShell
-            title="历史变化入口"
+            title="关系变化记录"
             icon={<History className="h-4 w-4" />}
             accent="chart-4"
             headerRight={
@@ -1040,8 +872,8 @@ export function GraphPage() {
             bodyClassName="gap-3"
           >
             <p className="text-sm text-text-muted">
-              events 侧栏直接承接 relation history，不再只靠时间轴页兜底。
-              {hasMoreEvents ? " 当前只首屏加载样本，可继续增量展开更长历史。" : ""}
+              按剧情推进查看关系的建立、强化、弱化和断裂。
+              {hasMoreEvents ? " 当前先展示一部分记录，可继续展开查看更多变化。" : ""}
             </p>
             <div className="space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {graphSelectionHint ? (
@@ -1075,9 +907,6 @@ export function GraphPage() {
                                 {event.relation_type ?? "未标注关系"} · {getChangeTypeLabel(event.change_type)}
                               </p>
                             </div>
-                            <Badge variant={getEventConfidenceVariant(event.confidence)}>
-                              {formatConfidence(event.confidence)}
-                            </Badge>
                           </div>
                         </button>
                       );
@@ -1089,8 +918,8 @@ export function GraphPage() {
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <p className="text-xs leading-5 text-text-muted">
                           {hasMoreEvents
-                            ? `已加载 ${loadedEventCount} 条，仍有 ${Math.max(totalEventCount - loadedEventCount, 0)} 条历史可继续查看。`
-                            : "历史样本已全部加载。"}
+                            ? `已加载 ${loadedEventCount} 条，仍有 ${Math.max(totalEventCount - loadedEventCount, 0)} 条变化可继续查看。`
+                            : "变化记录已全部加载。"}
                         </p>
                         <Button
                           variant="outline"
@@ -1109,7 +938,7 @@ export function GraphPage() {
                 </>
               ) : (
                 <div className="rounded-xl border border-dashed border-border p-4 text-sm text-text-muted">
-                  暂无 relation events 历史。
+                  暂无关系变化记录。
                 </div>
               )}
             </div>
@@ -1122,8 +951,8 @@ export function GraphPage() {
               icon={<Users className="h-4 w-4" />}
               accent="chart-3"
               bodyClassName="gap-4"
-            >
-              <p className="text-sm text-text-muted">从稳定 lifecycle chunk 直接跳到时间轴查看首次登场与最后活跃。</p>
+          >
+            <p className="text-sm text-text-muted">从这里可以继续查看角色在故事中的首次登场和最后活跃位置。</p>
               <div className="space-y-4 rounded-2xl border border-border/60 bg-surface/70 p-4">
                 <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
                   当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
@@ -1156,12 +985,12 @@ export function GraphPage() {
           ) : null}
 
           <DashboardCardShell
-            title="事件详情"
+            title="关系变化详情"
             icon={<Link2 className="h-4 w-4" />}
             accent="chart-2"
             bodyClassName="gap-3"
           >
-            <p className="text-sm text-text-muted">查看选中历史变化的证据、方向和质量信息。</p>
+            <p className="text-sm text-text-muted">查看当前选中关系变化的上下文说明和原文摘录。</p>
             <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
               {selectedEvent ? (
                 <div className="space-y-4">
@@ -1175,20 +1004,17 @@ export function GraphPage() {
                           {selectedEvent.relation_type ?? "未标注关系"} · {getChangeTypeLabel(selectedEvent.change_type)}
                         </p>
                       </div>
-                      <Badge variant={getEventConfidenceVariant(selectedEvent.confidence)}>
-                        {formatConfidence(selectedEvent.confidence)}
-                      </Badge>
                     </div>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl border border-border bg-surface p-4">
-                      <p className="text-xs uppercase tracking-wide text-text-muted">方向性</p>
-                      <p className="mt-2 text-sm font-medium text-text">{selectedEvent.directionality ?? "未声明"}</p>
+                      <p className="text-xs uppercase tracking-wide text-text-muted">变化类型</p>
+                      <p className="mt-2 text-sm font-medium text-text">{getChangeTypeLabel(selectedEvent.change_type)}</p>
                     </div>
                     <div className="rounded-xl border border-border bg-surface p-4">
-                      <p className="text-xs uppercase tracking-wide text-text-muted">事件 ID</p>
-                      <p className="mt-2 text-sm font-medium text-text">{selectedEvent.relation_event_id}</p>
+                      <p className="text-xs uppercase tracking-wide text-text-muted">关系方向</p>
+                      <p className="mt-2 text-sm font-medium text-text">{selectedEvent.directionality ?? "未声明"}</p>
                     </div>
                   </div>
 
@@ -1201,7 +1027,7 @@ export function GraphPage() {
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-text-muted">
-                  选择一条历史事件后，这里会显示详细上下文。
+                  选择一条关系变化后，这里会显示详细上下文。
                 </div>
               )}
             </div>
@@ -1249,60 +1075,6 @@ export function GraphPage() {
       <NovelHeader title={novelTitle} />
 
       <div className="mt-4 space-y-6">
-        <motion.section
-          variants={pageSectionVariants}
-          initial="hidden"
-          animate="visible"
-          transition={{ duration: 0.28 }}
-        >
-          <Card
-            variant="elevated"
-            className="overflow-hidden rounded-2xl border-border bg-gradient-to-br from-surface via-surface to-primary/10"
-          >
-            <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl space-y-4">
-                <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Graph Product Surface · 第一轮迁移
-                </div>
-
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-semibold tracking-tight text-text">
-                    先读图谱 summary，再检查 quality，最后沿着 events 进入历史变化
-                  </h2>
-                  <p className="max-w-2xl text-sm leading-6 text-text-muted">
-                    这页现在不只展示关系图，而是把 authority 层已经产出的 summary、quality 和 relation
-                    events 直接变成产品入口，帮助我们更快判断核心网络、风险点与关系演化路径。
-                  </p>
-                </div>
-
-                {!isLoading && !isError && !isEmpty && graphSummary && (
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="secondary">{graphSummary.node_count} 个实体</Badge>
-                    <Badge variant="secondary">{graphSummary.edge_count} 条关系</Badge>
-                    <Badge variant="outline">密度 {formatDensity(graphSummary.density)}</Badge>
-                    <Badge variant={qualityTone.badgeVariant}>{qualityTone.badgeLabel}</Badge>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={handleGoTimeline} disabled={!timelineUrl}>
-                  查看历史时间轴
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleScrollToGraph}
-                  disabled={isLoading || isError || isEmpty}
-                >
-                  进入关系工作区
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.section>
-
         {isLoading ? (
           <motion.section
             variants={pageSectionVariants}
@@ -1315,8 +1087,8 @@ export function GraphPage() {
                 <div className="flex items-center gap-3">
                   <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                   <div>
-                    <p className="text-sm font-medium text-text">正在加载图谱 authority 输出</p>
-                    <p className="text-sm text-text-muted">页面会按 summary → quality → events 的顺序展开。</p>
+                    <p className="text-sm font-medium text-text">正在加载人物关系图谱</p>
+                    <p className="text-sm text-text-muted">准备关系概览和变化记录。</p>
                   </div>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1362,8 +1134,8 @@ export function GraphPage() {
               <CardContent className="flex flex-col items-center gap-4 p-10 text-center">
                 <Network className="h-10 w-10 text-text-muted" />
                 <div className="space-y-1">
-                  <p className="text-base font-semibold text-text">该任务尚未产生图谱 authority 输出</p>
-                  <p className="text-sm text-text-muted">完成图谱投影后，这里会自动显示 summary、quality 与事件历史。</p>
+                  <p className="text-base font-semibold text-text">该任务暂时没有可展示的关系图谱</p>
+                  <p className="text-sm text-text-muted">完成图谱分析后，这里会自动显示关系概览和变化记录。</p>
                 </div>
               </CardContent>
             </Card>
