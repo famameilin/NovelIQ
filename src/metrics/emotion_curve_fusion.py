@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -61,6 +61,7 @@ class DisplayEmotionCurvePoint:
     smoothed_density: float
     tension_proxy: float | None
     tension_composite: float | None
+    surface_tension: float | None = None
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -134,6 +135,7 @@ def build_display_emotion_curve(
     annotation_rows: Sequence[Any],
     style_rows: Sequence[Any],
     dialogue_rows: Sequence[Any],
+    surface_tension_by_chunk: Mapping[int, float] | None = None,
 ) -> list[DisplayEmotionCurvePoint]:
     """
     创建时间: 2026-04-21
@@ -150,6 +152,7 @@ def build_display_emotion_curve(
     if not curve_rows:
         return []
 
+    surface_tension_by_chunk = surface_tension_by_chunk or {}
     annotation_map = {row.chunk_id: row for row in annotation_rows}
     style_map = {row.chunk_id: row for row in style_rows}
 
@@ -214,6 +217,7 @@ def build_display_emotion_curve(
                 0.0,
                 getattr(row, "tension_proxy", None),
                 getattr(row, "tension_composite", None),
+                surface_tension_by_chunk.get(chunk_id),
             )
         )
 
@@ -231,6 +235,7 @@ def build_display_emotion_curve(
             smoothed_density=smoothed_values[index],
             tension_proxy=row.tension_proxy,
             tension_composite=row.tension_composite,
+            surface_tension=row.surface_tension,
         )
         for index, row in enumerate(fused_rows)
     ]

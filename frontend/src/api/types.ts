@@ -100,6 +100,7 @@ export interface ChunkCurvePoint {
   smoothed_density: number | null;
   tension_proxy: number | null;
   tension_composite?: number | null;
+  surface_tension?: number | null;
 }
 
 // ============================================================
