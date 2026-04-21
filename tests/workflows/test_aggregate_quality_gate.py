@@ -1,5 +1,5 @@
 from src.metrics.aggregate import AggregateResult
-from src.workflows.aggregate import _build_quality_gate_report
+from src.workflows.aggregate import _build_lexical_curve_quality_report, _build_quality_gate_report
 
 
 class _StubChunkRepo:
@@ -58,3 +58,20 @@ def test_build_quality_gate_report_handles_missing_fields() -> None:
     assert report["imagery_density_non_null_rate"] == 0.0
     assert report["imagery_lexicon_null_chunk_ratio"] == 0.0
     assert report["imagery_lexicon_null_chunk_ids"] == []
+
+
+def test_build_lexical_curve_quality_report_tracks_late_zero_chunks() -> None:
+    report = _build_lexical_curve_quality_report(
+        [
+            (0, 0.1, 0.0, 0.1, 0.1, 0.2, 0.3),
+            (1, 0.0, 0.0, 0.0, 0.0, 0.2, 0.3),
+            (2, 0.0, 0.0, 0.0, 0.0, 0.2, 0.3),
+            (3, 0.0, 0.0, 0.0, 0.0, 0.2, 0.3),
+        ]
+    )
+
+    assert report["lexical_curve_zero_chunk_ratio"] == 0.75
+    assert report["lexical_curve_zero_chunk_ids"] == [1, 2, 3]
+    assert report["lexical_curve_late_start_index"] == 2
+    assert report["lexical_curve_late_zero_chunk_ratio"] == 1.0
+    assert report["lexical_curve_late_zero_chunk_ids"] == [2, 3]

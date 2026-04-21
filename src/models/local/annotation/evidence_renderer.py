@@ -18,6 +18,7 @@ class AnnotationPromptBlocks:
     level1_facts: str | None = None
     active_entities: str | None = None
     disambig_context: str | None = None
+    emotion_exemplars: str | None = None
     vector_evidence: str | None = None
 
 
@@ -29,6 +30,8 @@ class TaskEvidenceRenderPolicy:
     max_level1_relation_lines: int | None = None
     max_active_entities: int | None = None
     max_disambig_candidates: int | None = None
+    max_emotion_exemplars: int | None = None
+    max_emotion_text_len: int = 160
     max_vector_chunks: int = 3
     max_vector_text_len: int = 200
 
@@ -51,6 +54,8 @@ _PHASE1_EVIDENCE_POLICY = TaskEvidenceRenderPolicy(
     max_level1_relation_lines=3,
     max_active_entities=4,
     max_disambig_candidates=3,
+    max_emotion_exemplars=2,
+    max_emotion_text_len=160,
     max_vector_chunks=2,
     max_vector_text_len=140,
 )
@@ -111,6 +116,7 @@ def _render_task_scoped_shared_sections(
     include_level1_alias_mappings: bool = True,
     policy: TaskEvidenceRenderPolicy,
     priority_candidate_names: list[str] | None = None,
+    exclude_vector_chunks_with_emotion_exemplars: bool = False,
 ):
     # 中文注释：task renderer 只在这里声明“每个任务最多吃多少共享证据”，
     # 具体 evidence 语义仍由 shared renderer 统一维护，避免 phase 代码各自长出一套裁剪规则。
@@ -123,9 +129,12 @@ def _render_task_scoped_shared_sections(
         max_level1_relation_lines=policy.max_level1_relation_lines,
         max_active_entities=policy.max_active_entities,
         max_disambig_candidates=policy.max_disambig_candidates,
+        max_emotion_exemplars=policy.max_emotion_exemplars,
+        max_emotion_text_len=policy.max_emotion_text_len,
         max_vector_chunks=policy.max_vector_chunks,
         max_vector_text_len=policy.max_vector_text_len,
         priority_candidate_names=priority_candidate_names,
+        exclude_vector_chunks_with_emotion_exemplars=exclude_vector_chunks_with_emotion_exemplars,
     )
 
 
@@ -138,19 +147,22 @@ def render_annotation_prompt_blocks(
         bundle,
         include_level1_alias_mappings=include_level1_alias_mappings,
         policy=_PHASE1_EVIDENCE_POLICY,
+        exclude_vector_chunks_with_emotion_exemplars=True,
     )
     prompt_sections = select_shared_evidence_sections(
         shared_sections,
-        ("level1_facts", "disambig_candidates", "vector_evidence"),
+        ("level1_facts", "disambig_candidates", "emotion_exemplars", "vector_evidence"),
     )
     # 中文注释：annotation 主 prompt 当前只接收 active_entities + disambig_context 两个入口，
-    # 因此这里显式把 Level 1 结构化事实并入 disambig_context，保证稳定事实真正进入主链路。
+    # 因此这里显式把 Level 1 结构化事实、情绪 exemplar 和通用向量证据一并并入 disambig_context，
+    # 保证 Phase1 在统一 evidence path 内同时看到身份线索与情绪案例。
     combined_disambig = "\n\n".join(prompt_sections) if prompt_sections else None
 
     return AnnotationPromptBlocks(
         level1_facts=shared_sections.level1_facts,
         active_entities=shared_sections.active_entities,
         disambig_context=combined_disambig,
+        emotion_exemplars=shared_sections.emotion_exemplars,
         vector_evidence=shared_sections.vector_evidence,
     )
 
