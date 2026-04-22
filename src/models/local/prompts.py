@@ -24,6 +24,7 @@ FORESHADOWING_USER_TEMPLATE = settings.prompts.phase2.user_template
 FORESHADOWING_EXAMPLES = settings.prompts.phase2.examples
 
 DISAMBIGUATE_SYSTEM_PROMPT = settings.prompts.disambiguate
+CANONICAL_RESELECT_SYSTEM_PROMPT = settings.prompts.reselect_canonical
 ANONYMOUS_DISAMBIG_SYSTEM_PROMPT = settings.prompts.anonymous_disambig
 
 STAGE_SUMMARY_SYSTEM_PROMPT = """你是一个小说分析助手。请根据以下分块摘要，生成一个100字以内的阶段性摘要。
