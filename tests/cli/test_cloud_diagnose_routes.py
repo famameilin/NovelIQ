@@ -67,11 +67,39 @@ from src.storage.repositories import (
 from src.workflows.diagnose import run_diagnose
 
 
+def _insert_test_novel(session, novel_id: str) -> None:
+    """
+    为云端诊断测试补小说主表记录。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-analysis-related-foreign-keys
+    说明: diagnosis 测试直接造 run 时，必须先满足 analysis_runs 的 novel 外键。
+    """
+    session.execute(
+        text(
+            """
+            INSERT INTO novels (novel_id, title, filename, file_path)
+            VALUES (:novel_id, :title, :filename, :file_path)
+            ON CONFLICT (novel_id) DO NOTHING
+            """
+        ),
+        {
+            "novel_id": novel_id,
+            "title": novel_id,
+            "filename": f"{novel_id}.txt",
+            "file_path": f"data/uploads/{novel_id}.txt",
+        },
+    )
+    session.commit()
+
+
 class TestCloudDiagnose:
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
         self.db_session = db_session
-        self.novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        self.novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, self.novel_id)
 
         run_repo = RunRepository(db_session)
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
@@ -306,10 +334,17 @@ class TestCloudDiagnose:
             {"run_id": self.run_id},
         ).fetchall()
         assert len(rows) > 0
+        assert rows[0][0] == self.novel_id
         assert rows[0][3] == "白手起家"
         assert rows[0][4] == "角色0"
         assert "角色0" in rows[0][5]
         assert "角色1" in rows[0][6]
+
+        token_rows = self.db_session.execute(
+            text("SELECT novel_id FROM token_usage WHERE run_id = :run_id"),
+            {"run_id": self.run_id},
+        ).scalars().all()
+        assert all(novel_id == self.novel_id for novel_id in token_rows)
 
         stats_repo = StatsRepository(self.db_session)
         fetched = stats_repo.fetch_cloud_analysis(self.novel_id, self.run_id)

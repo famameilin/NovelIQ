@@ -36,12 +36,21 @@ class CloudAnalysis(Base):
     修改时间: 2026-03-27
     修改者: TraeAI
     修改内容: 新增 protagonist, main_characters, core_cast 三个字段用于存储角色信息
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-analysis-related-foreign-keys
+    修改内容: 为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表。
     """
 
     __tablename__ = "cloud_analysis"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    novel_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    novel_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("novels.novel_id", ondelete="RESTRICT", name="cloud_analysis_novel_id_fkey"),
+        nullable=True,
+    )
     foreshadow_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     arc_scores: Mapped[str | None] = mapped_column(Text, nullable=True)
     narrative_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -147,11 +156,20 @@ class GlobalContext(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储小说的全局上下文信息
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-analysis-related-foreign-keys
+    修改内容: 为 novel_id 补充到 novels 表的外键约束，确保全局上下文不会脱离小说主表。
     """
 
     __tablename__ = "global_context"
 
-    novel_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    novel_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("novels.novel_id", ondelete="RESTRICT", name="global_context_novel_id_fkey"),
+        primary_key=True,
+    )
     novel_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     core_characters: Mapped[str | None] = mapped_column(Text, nullable=True)
     world_setting: Mapped[str | None] = mapped_column(Text, nullable=True)
