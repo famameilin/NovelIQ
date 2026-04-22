@@ -56,7 +56,37 @@ class _NoopDisambiguationClient:
     ) -> ExtendedDisambigResult:
         return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 
+    async def reselect_canonicals(
+        self,
+        candidates: list[NameCountCandidate],
+        clusters: list[list[str]],
+        context_sentences: dict[str, str] | None = None,
+        review_states: dict[str, Any] | None = None,
+    ) -> ExtendedDisambigResult:
+        """
+        为 lightweight stub 提供空实现的最终代表名重选接口。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: final-canonical-reselect
+        说明: DisambiguationLike 协议新增该方法后，no-op fallback 也必须同步补齐，
+              否则 runtime protocol check 会把 fallback client 判成不兼容。
+        """
+        return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
+
     def is_cloud_api(self) -> bool:
+        return False
+
+    def supports_canonical_reselect(self) -> bool:
+        """
+        声明 lightweight fallback 不支持额外模型代表名重选。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: final-canonical-reselect-review-fix
+        说明: 终消歧后的额外重选依赖真实模型输出；no-op fallback 只能提供空实现，
+              因此这里显式暴露能力标记，供主流程安全回退到本地 heuristic。
+        """
         return False
 
     async def generate_summary(self, messages: list[dict[str, str]], max_tokens: int = 150) -> str:

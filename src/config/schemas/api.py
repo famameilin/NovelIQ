@@ -240,6 +240,11 @@ class PromptSettings:
     修改者: TraeAI
     任务: refactor-phase4-relation-extraction
     修改内容: 添加 phase4 字段
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: final-canonical-reselect
+    修改内容: 添加最终代表名重选 prompt 配置
     """
 
     phase1: Phase1Prompts = field(default_factory=Phase1Prompts)
@@ -247,6 +252,7 @@ class PromptSettings:
     phase3: Phase3Prompts = field(default_factory=Phase3Prompts)
     phase4: Phase4Prompts = field(default_factory=Phase4Prompts)
     disambiguate: str = ""
+    reselect_canonical: str = ""
     anonymous_disambig: str = ""
     diagnose: str = ""
 
@@ -394,6 +400,11 @@ def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
     修改者: TraeAI
     任务: refactor-phase4-relation-extraction
     修改内容: 添加 phase4 prompt 加载
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: final-canonical-reselect
+    修改内容: 新增最终代表名重选 prompt 加载
     """
     return PromptSettings(
         phase1=_load_phase1_prompts(),
@@ -401,6 +412,7 @@ def _parse_prompt_settings(data: dict[str, Any] | None) -> PromptSettings:
         phase3=_load_phase3_prompts(),
         phase4=_load_phase4_prompts(),
         disambiguate=load_prompt_from_file("disambiguate"),
+        reselect_canonical=load_prompt_from_file("reselect_canonical"),
         anonymous_disambig=load_prompt_from_file("anonymous_disambig"),
         diagnose=load_prompt_from_file("diagnose"),
     )

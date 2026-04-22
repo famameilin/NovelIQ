@@ -31,6 +31,7 @@ from src.models.local.disambiguation import (
     DisambiguationState,
     ExtendedDisambigResult,
     NameReviewState,
+    build_canonical_reselect_messages,
     build_disambiguate_messages,
     build_disambiguation_prompt_context,
     render_disambig_prompt_context,
@@ -45,6 +46,7 @@ from ..sentence import build_context_sentences
 from .candidate_filter import CandidateClassification
 from .candidates import (
     _build_candidate_payload_by_names,
+    _build_name_count_lookup,
     _build_existing_character_hint_from_db,
     _collect_final_disambiguation_candidates,
     _ensure_state_snapshot_has_known_names,
@@ -61,7 +63,9 @@ from .relations import (
 from .state_logic import (
     DISAMBIG_STATE_RESOLVED,
     DISAMBIG_STATE_UNRESOLVED,
+    _collect_alias_clusters,
     apply_disambiguation_decisions,
+    apply_model_reselected_canonicals,
     reselect_cluster_canonicals,
     validate_confidence_with_evidence,
 )
@@ -70,6 +74,41 @@ if TYPE_CHECKING:
     from src.rag import DisambigContextProvider
 
 DisambigStateSnapshot = dict[str, dict[str, str]]
+
+
+def _get_client_model_name(client: DisambiguationLike) -> str:
+    """
+    安全获取客户端模型名。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect-review-fix
+    说明: 轻量 fallback client 的 `_config` 可能只是占位对象，不能假定一定有 `model`
+          属性；这里统一做兜底，避免模型交互日志阶段反向把主流程打挂。
+    """
+    config = getattr(client, "_config", None)
+    model_name = getattr(config, "model", None)
+    if isinstance(model_name, str) and model_name.strip():
+        return model_name
+    return "unknown"
+
+
+def _supports_canonical_reselect(client: DisambiguationLike) -> bool:
+    """
+    判断客户端是否支持额外的模型代表名重选。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect-review-fix
+    说明: 正式模型客户端默认支持；像 `_NoopDisambiguationClient` 这样的轻量 fallback
+          会显式声明不支持，此时主流程必须回退到已有 heuristic，而不是继续发起空调用。
+    """
+    checker = getattr(client, "supports_canonical_reselect", None)
+    if callable(checker):
+        result = checker()
+        if isinstance(result, bool):
+            return result
+    return True
 
 
 def _fetch_current_relations(conn: Session, run_id: str) -> list[dict]:
@@ -461,9 +500,15 @@ async def _retry_disambig(
     修改者: TraeAI
     任务: 创建统一的模型交互记录接口
     修改内容: 使用 record_model_interaction 替代 _save_disambiguation_interaction
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: final-canonical-reselect-review-fix
+    修改内容: 模型名改为安全读取，避免轻量 fallback client 在交互日志阶段报错
     """
     max_retries = settings.runtime.disambiguation.max_retries
     last_exception = None
+    model_name = _get_client_model_name(client)
 
     for attempt in range(1, max_retries + 1):
         start_time = time.time()
@@ -495,7 +540,7 @@ async def _retry_disambig(
                 response_text=response_text,
                 thinking_content=thinking_content,
                 duration_ms=duration_ms,
-                model_name=client._config.model,
+                model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",
                 session=None,
             )
@@ -522,7 +567,7 @@ async def _retry_disambig(
                 response_text=json.dumps({"error": str(e)}, ensure_ascii=False),
                 thinking_content=None,
                 duration_ms=duration_ms,
-                model_name=client._config.model,
+                model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",
                 session=None,
             )
@@ -533,6 +578,164 @@ async def _retry_disambig(
             else:
                 logger.error(f"{stage_name} failed after {max_retries} attempts: {e}")
                 raise last_exception from None
+
+
+async def _retry_canonical_reselect(
+    client: DisambiguationLike,
+    candidates: list[NameCountCandidate],
+    clusters: list[list[str]],
+    context_sentences: dict[str, str],
+    review_states: dict[str, NameReviewState],
+    stage_name: str,
+    run_id: str | None = None,
+) -> Any:
+    """
+    带重试的最终代表名重选调用。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect
+    说明: 终消歧后的额外重选必须继续走模型，而不是回退到本地 heuristic；
+          这里复用统一的交互记录，但消息体按“已确认 cluster 的代表名选择”单独构造。
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: final-canonical-reselect-review-fix
+    修改内容: 交互日志改为安全读取模型名，避免 lightweight fallback client 直接崩溃
+    """
+    max_retries = settings.runtime.disambiguation.max_retries
+    last_exception = None
+    model_name = _get_client_model_name(client)
+
+    for attempt in range(1, max_retries + 1):
+        start_time = time.time()
+        try:
+            result = await client.reselect_canonicals(
+                candidates=candidates,
+                clusters=clusters,
+                context_sentences=context_sentences,
+                review_states=review_states,
+            )
+            duration_ms = int((time.time() - start_time) * 1000)
+            messages = build_canonical_reselect_messages(
+                candidates,
+                clusters,
+                context_sentences=context_sentences,
+                review_states=review_states,
+            )
+            response_text = _build_disambig_response_text(result)
+            thinking_content = getattr(result, "_thinking_content", None)
+
+            record_model_interaction(
+                run_id=run_id,
+                chunk_id=None,
+                interaction_type="disambiguate",
+                phase=stage_name.replace(" ", "_"),
+                attempt_number=attempt,
+                messages=messages,
+                response_text=response_text,
+                thinking_content=thinking_content,
+                duration_ms=duration_ms,
+                model_name=model_name,
+                model_provider="cloud" if client.is_cloud_api() else "local",
+                session=None,
+            )
+
+            return result
+        except Exception as e:
+            last_exception = e
+            duration_ms = int((time.time() - start_time) * 1000)
+            messages = build_canonical_reselect_messages(
+                candidates,
+                clusters,
+                context_sentences=context_sentences,
+                review_states=review_states,
+            )
+            record_model_interaction(
+                run_id=run_id,
+                chunk_id=None,
+                interaction_type="disambiguate",
+                phase=stage_name.replace(" ", "_"),
+                attempt_number=attempt,
+                messages=messages,
+                response_text=json.dumps({"error": str(e)}, ensure_ascii=False),
+                thinking_content=None,
+                duration_ms=duration_ms,
+                model_name=model_name,
+                model_provider="cloud" if client.is_cloud_api() else "local",
+                session=None,
+            )
+
+            if attempt < max_retries:
+                logger.warning(f"{stage_name} failed (attempt {attempt}), retrying: {e}")
+                time.sleep(1)
+            else:
+                logger.error(f"{stage_name} failed after {max_retries} attempts: {e}")
+                raise last_exception from None
+
+
+async def _run_final_canonical_reselect(
+    conn: Session,
+    state: DisambiguationState,
+    full_disambig_client: DisambiguationLike,
+    all_names: list[NameCountCandidate],
+    alias_keywords: list[str],
+    run_id: str,
+) -> DisambiguationState:
+    """
+    在最终消歧后追加一次模型代表名重选。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect
+    说明: 第一轮终消歧继续允许“高频常用名做 canonical”来简化配对；
+          但真正落库前，必须再让模型基于已确认 cluster 选择最终代表名，
+          避免本地 heuristic 代替模型做这一步。
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: final-canonical-reselect-review-fix
+    修改内容: 对不支持额外重选的 fallback client 回退到本地 heuristic，
+              并为异常空输出保留显式降级路径
+    """
+    alias_clusters = _collect_alias_clusters(state.get_alias_merges_dict())
+    if not alias_clusters:
+        return state
+
+    name_counts = _build_name_count_lookup(all_names)
+    if not _supports_canonical_reselect(full_disambig_client):
+        logger.warning("final canonical reselect skipped: client does not support model reselect, falling back")
+        return reselect_cluster_canonicals(state, name_counts=name_counts)
+
+    cluster_names = sorted({name for cluster in alias_clusters for name in cluster})
+    candidate_payload = _build_candidate_payload_by_names(all_names, cluster_names)
+    if not candidate_payload:
+        logger.warning("final canonical reselect skipped: no candidate payload for alias clusters, falling back")
+        return reselect_cluster_canonicals(state, name_counts=name_counts)
+
+    context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
+    review_states = state.get_review_status_dict()
+    cluster_list = [sorted(cluster) for cluster in alias_clusters]
+    reselect_result = await _retry_canonical_reselect(
+        full_disambig_client,
+        candidate_payload,
+        cluster_list,
+        context_sentences,
+        review_states,
+        stage_name="final canonical reselect",
+        run_id=run_id,
+    )
+    if not reselect_result.canonical_decisions:
+        logger.warning("final canonical reselect returned empty decisions, falling back to heuristic reselect")
+        return reselect_cluster_canonicals(state, name_counts=name_counts)
+
+    # 中文注释：这里显式要求模型输出覆盖 cluster 内的所有名字；
+    # 若缺项或跨组指向，直接抛错，避免静默退回 heuristic 后再次把最终图谱写偏。
+    return apply_model_reselected_canonicals(
+        state,
+        reselect_result.canonical_decisions,
+        clusters=alias_clusters,
+    )
 
 
 async def _run_incremental_disambiguation_with_state(
@@ -730,7 +933,7 @@ async def _run_final_disambiguation_with_state(
     2. 用 review_status 决定复审候选
     3. 调模型
     4. state = apply_disambiguation_decisions(state, result)
-    5. 全量重选 alias cluster canonical，确保最终图谱不被中途频次翻转污染
+    5. 对已确认 alias cluster 追加一次模型代表名重选，确定最终落库 canonical
     6. 落库：
        - 用 known_canonical_names 建实体
        - 用 alias_merges 执行名字修正
@@ -758,8 +961,7 @@ async def _run_final_disambiguation_with_state(
         except (TypeError, ValueError):
             count = 0
         all_names.append({"name": name, "count": count})
-    final_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in all_names}
-
+    final_global_freq = _build_name_count_lookup(all_names)
     review_status_dict = state.get_review_status_dict()
     alias_map_dict = state.get_alias_merges_dict()
     state_snapshot_for_candidates: DisambigStateSnapshot = {
@@ -837,7 +1039,19 @@ async def _run_final_disambiguation_with_state(
     if result.canonical_decisions:
         new_state = apply_disambiguation_decisions(state, result)
     if new_state.alias_merges:
-        new_state = reselect_cluster_canonicals(new_state, name_counts=final_global_freq)
+        # 中文注释：只有“本轮 final 确实拿到了新的模型 alias 决策”时，才追加一次模型代表名重选；
+        # 如果这轮没有新决策，就沿用既有 state + 全量频次做本地纠偏，避免无意义查库和额外模型调用。
+        if result.canonical_decisions:
+            new_state = await _run_final_canonical_reselect(
+                conn,
+                new_state,
+                full_disambig_client,
+                all_names,
+                alias_keywords,
+                run_id,
+            )
+        else:
+            new_state = reselect_cluster_canonicals(new_state, name_counts=final_global_freq)
 
     # Merge final disambig entity_types into accumulated state
     if result.entity_types:
