@@ -76,6 +76,8 @@ async def _do_phase2(
     )
 
     duration_ms = int((time.time() - start_time) * 1000)
+    extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
+    reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
 
     record_model_interaction(
         run_id=run_id,
@@ -86,6 +88,8 @@ async def _do_phase2(
         messages=messages,
         response_text=content_clean,
         thinking_content=thinking_content,
+        reasoning_tokens=reasoning_tokens,
+        requested_thinking=enable_thinking,
         duration_ms=duration_ms,
         model_name=client._config.model if hasattr(client._config, "model") else None,
         model_provider="cloud" if is_cloud else "local",

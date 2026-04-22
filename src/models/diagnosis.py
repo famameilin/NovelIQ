@@ -189,6 +189,8 @@ class DiagnosisClient(BaseModelClient):
         if run_id and response:
             message = response.choices[0].message
             content_clean, thinking_content = self._extract_response_content(message)
+            extract_reasoning_tokens = getattr(self, "_extract_reasoning_tokens", None)
+            reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
 
             record_model_interaction(
                 run_id=run_id,
@@ -199,6 +201,8 @@ class DiagnosisClient(BaseModelClient):
                 messages=messages,
                 response_text=content_clean,
                 thinking_content=thinking_content,
+                reasoning_tokens=reasoning_tokens,
+                requested_thinking=self._config.thinking_enabled,
                 duration_ms=duration_ms,
                 model_name=self._config.model,
                 model_provider="cloud" if self.is_cloud_api() else "local",

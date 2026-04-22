@@ -28,7 +28,7 @@ def _candidates(*names: str) -> list[dict[str, int | str]]:
 
 class _FakeDisambigClient:
     def __init__(self) -> None:
-        self._config = SimpleNamespace(model="test-model")
+        self._config = SimpleNamespace(model="test-model", thinking_enabled=True)
         self.received_existing_names: list[str] | None = None
         self.received_prompt_context: DisambiguationPromptContext | None = None
         self.received_reselect_clusters: list[list[str]] | None = None
@@ -44,7 +44,12 @@ class _FakeDisambigClient:
     ):
         self.received_existing_names = existing_names
         self.received_prompt_context = prompt_context
-        return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
+        return ExtendedDisambigResult(
+            canonical_decisions={},
+            entity_types={},
+            entity_relations=[],
+            _reasoning_tokens=17,
+        )
 
     async def reselect_canonicals(
         self,
@@ -234,6 +239,8 @@ async def test_record_model_interaction_with_disambiguation() -> None:
     call_kwargs = mock_record.call_args.kwargs
     assert call_kwargs["model_name"] == "test-model"
     assert call_kwargs["interaction_type"] == "disambiguate"
+    assert call_kwargs["reasoning_tokens"] == 17
+    assert call_kwargs["requested_thinking"] is True
 
 
 @pytest.mark.asyncio
