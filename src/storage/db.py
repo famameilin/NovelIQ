@@ -29,7 +29,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 from loguru import logger
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
@@ -190,6 +190,216 @@ def get_session_factory() -> sessionmaker:
 SessionLocal = get_session_factory
 
 
+def _constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
+    """
+    检查当前 schema 下是否已存在指定约束。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-analysis-related-foreign-keys
+    说明: 运行时补约束前必须先做显式存在性检查，
+          避免旧库增量迁移与新库 create_all 在启动时互相撞重复 DDL。
+    """
+    return bool(
+        connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.table_constraints
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name
+                  AND constraint_name = :constraint_name
+                LIMIT 1
+                """
+            ),
+            {"table_name": table_name, "constraint_name": constraint_name},
+        ).scalar_one_or_none()
+    )
+
+
+def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> None:
+    """
+    在补外键前校验目标子表没有孤儿数据。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-analysis-related-foreign-keys
+    说明: 当前仓库不接受“发现脏数据但继续跳过”的静默策略；
+          若仍有孤儿行，直接抛错阻止把不一致状态带入更深处。
+    """
+    orphan_count = int(connection.execute(text(sql)).scalar_one())
+    if orphan_count > 0:
+        raise RuntimeError(f"Cannot add foreign key for {context}: found {orphan_count} orphan row(s)")
+
+
+def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
+    """
+    基于 analysis_runs 回填历史表里漂移的 novel_id。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-analysis-related-foreign-keys
+    说明: `cloud_analysis` / `token_usage` / `chunk_locations` 的 novel_id
+          实际是 run 侧信息的冗余镜像；补外键前先对齐到 analysis_runs，
+          可以安全修复历史 `unknown` 或旧值漂移，而不需要删数据。
+    """
+    statements = [
+        """
+        UPDATE cloud_analysis AS child
+        SET novel_id = parent.novel_id
+        FROM analysis_runs AS parent
+        WHERE child.run_id = parent.run_id
+          AND child.novel_id IS DISTINCT FROM parent.novel_id
+        """,
+        """
+        UPDATE token_usage AS child
+        SET novel_id = parent.novel_id
+        FROM analysis_runs AS parent
+        WHERE child.run_id = parent.run_id
+          AND child.novel_id IS DISTINCT FROM parent.novel_id
+        """,
+        """
+        UPDATE chunk_locations AS child
+        SET novel_id = parent.novel_id
+        FROM analysis_runs AS parent
+        WHERE child.run_id = parent.run_id
+          AND child.novel_id IS DISTINCT FROM parent.novel_id
+        """,
+    ]
+
+    for statement in statements:
+        connection.execute(text(statement))
+
+
+def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
+    """
+    为历史 PostgreSQL 表补齐分析链路缺失的外键约束。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-analysis-related-foreign-keys
+    说明: 这批约束都属于“旧库缺失、新库 ORM 已声明”的收口项。
+          先做可安全回填的 novel_id 对齐，再显式校验孤儿数据，最后补约束。
+    """
+    _normalize_analysis_related_novel_ids(connection)
+
+    constraint_specs = [
+        {
+            "table": "disambig_checkpoint",
+            "name": "disambig_checkpoint_run_id_fkey",
+            "ddl": (
+                "ALTER TABLE disambig_checkpoint "
+                "ADD CONSTRAINT disambig_checkpoint_run_id_fkey "
+                "FOREIGN KEY (run_id) REFERENCES analysis_runs(run_id) ON DELETE CASCADE"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM disambig_checkpoint child "
+                "LEFT JOIN analysis_runs parent ON parent.run_id = child.run_id "
+                "WHERE parent.run_id IS NULL"
+            ),
+            "context": "disambig_checkpoint.run_id -> analysis_runs.run_id",
+        },
+        {
+            "table": "chunk_locations",
+            "name": "chunk_locations_chunk_id_run_id_fkey",
+            "ddl": (
+                "ALTER TABLE chunk_locations "
+                "ADD CONSTRAINT chunk_locations_chunk_id_run_id_fkey "
+                "FOREIGN KEY (chunk_id, run_id) REFERENCES chunks(chunk_id, run_id) ON DELETE CASCADE"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM chunk_locations child "
+                "LEFT JOIN chunks parent "
+                "ON parent.chunk_id = child.chunk_id AND parent.run_id = child.run_id "
+                "WHERE parent.run_id IS NULL"
+            ),
+            "context": "chunk_locations.(chunk_id, run_id) -> chunks.(chunk_id, run_id)",
+        },
+        {
+            "table": "chunk_locations",
+            "name": "chunk_locations_novel_id_fkey",
+            "ddl": (
+                "ALTER TABLE chunk_locations "
+                "ADD CONSTRAINT chunk_locations_novel_id_fkey "
+                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM chunk_locations child "
+                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
+                "WHERE parent.novel_id IS NULL"
+            ),
+            "context": "chunk_locations.novel_id -> novels.novel_id",
+        },
+        {
+            "table": "cloud_analysis",
+            "name": "cloud_analysis_novel_id_fkey",
+            "ddl": (
+                "ALTER TABLE cloud_analysis "
+                "ADD CONSTRAINT cloud_analysis_novel_id_fkey "
+                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM cloud_analysis child "
+                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
+                "WHERE child.novel_id IS NOT NULL AND parent.novel_id IS NULL"
+            ),
+            "context": "cloud_analysis.novel_id -> novels.novel_id",
+        },
+        {
+            "table": "global_context",
+            "name": "global_context_novel_id_fkey",
+            "ddl": (
+                "ALTER TABLE global_context "
+                "ADD CONSTRAINT global_context_novel_id_fkey "
+                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM global_context child "
+                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
+                "WHERE parent.novel_id IS NULL"
+            ),
+            "context": "global_context.novel_id -> novels.novel_id",
+        },
+        {
+            "table": "graph_relation_events",
+            "name": "graph_relation_events_chunk_id_run_id_fkey",
+            "ddl": (
+                "ALTER TABLE graph_relation_events "
+                "ADD CONSTRAINT graph_relation_events_chunk_id_run_id_fkey "
+                "FOREIGN KEY (chunk_id, run_id) REFERENCES chunks(chunk_id, run_id) ON DELETE CASCADE"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM graph_relation_events child "
+                "LEFT JOIN chunks parent "
+                "ON parent.chunk_id = child.chunk_id AND parent.run_id = child.run_id "
+                "WHERE parent.run_id IS NULL"
+            ),
+            "context": "graph_relation_events.(chunk_id, run_id) -> chunks.(chunk_id, run_id)",
+        },
+        {
+            "table": "token_usage",
+            "name": "token_usage_novel_id_fkey",
+            "ddl": (
+                "ALTER TABLE token_usage "
+                "ADD CONSTRAINT token_usage_novel_id_fkey "
+                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM token_usage child "
+                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
+                "WHERE parent.novel_id IS NULL"
+            ),
+            "context": "token_usage.novel_id -> novels.novel_id",
+        },
+    ]
+
+    for spec in constraint_specs:
+        if _constraint_exists(connection, spec["table"], spec["name"]):
+            continue
+        _assert_no_orphans(connection, spec["orphan_check"], context=spec["context"])
+        connection.execute(text(spec["ddl"]))
+
+
 def _ensure_runtime_schema(engine: Engine) -> None:
     """
     为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema。
@@ -199,6 +409,11 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     任务: distinguish-thinking-visibility
     说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进。
           这里仅做“补列 / 补索引”这类非破坏性修复，不在应用启动时静默删除列或重建约束。
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-analysis-related-foreign-keys
+    修改内容: 在启动期补齐分析链路缺失外键，并修复可安全回填的历史 novel_id 漂移值。
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -214,6 +429,7 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     with engine.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))
+        _ensure_analysis_related_foreign_keys(conn)
 
 
 @contextmanager
