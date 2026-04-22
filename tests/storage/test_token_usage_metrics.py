@@ -164,3 +164,33 @@ def test_fetch_token_usage_stats_can_merge_fallback_task_bucket() -> None:
     assert stats["annotation"]["call_count"] == 3
     assert stats["annotation"]["total_tokens"] == 150
     assert "annotation_fallback" not in stats
+
+
+def test_fetch_model_interaction_call_counts_ignores_error_placeholders() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-status
+    说明: coverage 分母只能统计成功拿到响应的交互，重试错误占位记录必须忽略。
+    """
+    session = MagicMock()
+    execute_result = MagicMock()
+    execute_result.fetchall.return_value = [
+        MagicMock(
+            interaction_type="disambiguate",
+            phase="incremental_disambiguation",
+            status="success",
+            call_count=2,
+        ),
+        MagicMock(
+            interaction_type="disambiguate",
+            phase="incremental_disambiguation",
+            status="error",
+            call_count=3,
+        ),
+    ]
+    session.execute.return_value = execute_result
+
+    counts = metrics._fetch_model_interaction_call_counts(session, "run-1")
+
+    assert counts["incremental_disambig.disambiguate_characters"] == 2
