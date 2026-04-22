@@ -64,6 +64,8 @@ class ModelInteraction(Base):
     response_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     thinking_chars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     has_thinking: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)  # 0=False, 1=True
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thinking_state: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
 
     # 状态信息
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="success")  # success / error

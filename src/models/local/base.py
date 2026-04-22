@@ -294,6 +294,35 @@ class BaseModelClient:
                 chunk_id,
             )
 
+    def _extract_reasoning_tokens(self, response: Any) -> int | None:
+        """
+        从响应对象中提取 reasoning token 数。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: distinguish-thinking-visibility
+        说明: 优先读取 usage.completion_tokens_details.reasoning_tokens。
+              对非标准对象和 dict 结构都做兼容，拿不到时返回 None。
+        """
+
+        def _read_attr_or_key(obj: Any, name: str) -> Any:
+            if obj is None:
+                return None
+            if isinstance(obj, dict):
+                return obj.get(name)
+            return getattr(obj, name, None)
+
+        usage = _read_attr_or_key(response, "usage")
+        completion_details = _read_attr_or_key(usage, "completion_tokens_details")
+        reasoning_tokens = _read_attr_or_key(completion_details, "reasoning_tokens")
+        if reasoning_tokens is None:
+            return None
+        try:
+            normalized = int(reasoning_tokens)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized >= 0 else None
+
     def _record_token_usage_estimated(
         self,
         prompt_tokens: int,
@@ -440,6 +469,7 @@ class BaseModelClient:
         content_chunks: list[str] = []
         reasoning_chunks: list[str] = []
         chunk_count = 0
+        usage = None
 
         last_output_broadcast_time = 0.0
         output_buffer = ""
@@ -455,6 +485,9 @@ class BaseModelClient:
         stream = await self._client.chat.completions.create(**request_params)
         async for chunk in stream:
             chunk_count += 1
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                usage = chunk_usage
             if chunk.choices:
                 delta = chunk.choices[0].delta
                 if delta.content:
@@ -504,9 +537,9 @@ class BaseModelClient:
             full_content = full_reasoning
             full_reasoning = None
 
-        return self._build_stream_response(full_content, full_reasoning)
+        return self._build_stream_response(full_content, full_reasoning, usage=usage)
 
-    def _build_stream_response(self, content: str, reasoning_content: str | None) -> Any:
+    def _build_stream_response(self, content: str, reasoning_content: str | None, usage: Any = None) -> Any:
         """
         构建流式响应的模拟响应对象
 
@@ -530,6 +563,7 @@ class BaseModelClient:
         response = SimpleNamespace(
             choices=[choice],
             model=self._config.model,
+            usage=usage,
         )
         return response
 

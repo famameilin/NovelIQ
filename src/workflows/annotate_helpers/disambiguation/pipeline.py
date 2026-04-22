@@ -46,8 +46,8 @@ from ..sentence import build_context_sentences
 from .candidate_filter import CandidateClassification
 from .candidates import (
     _build_candidate_payload_by_names,
-    _build_name_count_lookup,
     _build_existing_character_hint_from_db,
+    _build_name_count_lookup,
     _collect_final_disambiguation_candidates,
     _ensure_state_snapshot_has_known_names,
     extract_new_names_from_db,
@@ -180,6 +180,7 @@ async def _generate_and_save_stage_summary(
             messages=messages,
             response_text=stage_summary,
             thinking_content=None,
+            requested_thinking=False,
             duration_ms=duration_ms,
             model_name=client._config.model,
             model_provider="cloud" if client.is_cloud_api() else "local",
@@ -529,6 +530,8 @@ async def _retry_disambig(
             )
             response_text = _build_disambig_response_text(result)
             thinking_content = getattr(result, "_thinking_content", None)
+            reasoning_tokens = getattr(result, "_reasoning_tokens", None)
+            requested_thinking = getattr(getattr(client, "_config", None), "thinking_enabled", None)
 
             record_model_interaction(
                 run_id=run_id,
@@ -539,6 +542,8 @@ async def _retry_disambig(
                 messages=messages,
                 response_text=response_text,
                 thinking_content=thinking_content,
+                reasoning_tokens=reasoning_tokens,
+                requested_thinking=requested_thinking,
                 duration_ms=duration_ms,
                 model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",
@@ -566,6 +571,7 @@ async def _retry_disambig(
                 messages=messages,
                 response_text=json.dumps({"error": str(e)}, ensure_ascii=False),
                 thinking_content=None,
+                requested_thinking=getattr(getattr(client, "_config", None), "thinking_enabled", None),
                 duration_ms=duration_ms,
                 model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",
@@ -625,6 +631,8 @@ async def _retry_canonical_reselect(
             )
             response_text = _build_disambig_response_text(result)
             thinking_content = getattr(result, "_thinking_content", None)
+            reasoning_tokens = getattr(result, "_reasoning_tokens", None)
+            requested_thinking = getattr(getattr(client, "_config", None), "thinking_enabled", None)
 
             record_model_interaction(
                 run_id=run_id,
@@ -635,6 +643,8 @@ async def _retry_canonical_reselect(
                 messages=messages,
                 response_text=response_text,
                 thinking_content=thinking_content,
+                reasoning_tokens=reasoning_tokens,
+                requested_thinking=requested_thinking,
                 duration_ms=duration_ms,
                 model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",
@@ -660,6 +670,7 @@ async def _retry_canonical_reselect(
                 messages=messages,
                 response_text=json.dumps({"error": str(e)}, ensure_ascii=False),
                 thinking_content=None,
+                requested_thinking=getattr(getattr(client, "_config", None), "thinking_enabled", None),
                 duration_ms=duration_ms,
                 model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",

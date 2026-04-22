@@ -38,6 +38,8 @@ class ModelInteractionRepository(BaseRepository):
         response_chars: int | None = None,
         thinking_chars: int | None = None,
         has_thinking: bool = False,
+        reasoning_tokens: int | None = None,
+        thinking_state: str = "unknown",
         status: str = "success",
         error_message: str | None = None,
         duration_ms: int | None = None,
@@ -59,6 +61,8 @@ class ModelInteractionRepository(BaseRepository):
             response_chars: 响应字符数
             thinking_chars: 思考字符数
             has_thinking: 是否有思考内容
+            reasoning_tokens: reasoning token 数，可为 None
+            thinking_state: thinking 可见性状态（text/tokens_only/none/unknown）
             status: 状态（success/error）
             error_message: 错误信息
             duration_ms: 调用耗时（毫秒）
@@ -80,6 +84,8 @@ class ModelInteractionRepository(BaseRepository):
             response_chars=response_chars or len(response),
             thinking_chars=thinking_chars or (len(thinking) if thinking else 0),
             has_thinking=1 if has_thinking else 0,
+            reasoning_tokens=reasoning_tokens,
+            thinking_state=thinking_state,
             status=status,
             error_message=error_message,
             duration_ms=duration_ms,

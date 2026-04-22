@@ -66,6 +66,7 @@ class ExtendedDisambigResult:
     alias_confidence: dict[str, str] = field(default_factory=dict)
     evidence_profiles: dict[str, EvidenceProfile] = field(default_factory=dict)
     _thinking_content: str | None = None
+    _reasoning_tokens: int | None = None
 
 
 def _candidate_names(candidates: list[NameCountCandidate] | list[str]) -> list[str]:
@@ -95,6 +96,11 @@ def normalize_disambiguate_response(
         "thinking_content",
         None,
     )
+    reasoning_tokens = getattr(cloud_response, "_reasoning_tokens", None) or getattr(
+        cloud_response,
+        "reasoning_tokens",
+        None,
+    )
 
     canonical_decisions: dict[str, str] = {}
     for decision_record in cloud_response.canonical_decisions:
@@ -118,6 +124,7 @@ def normalize_disambiguate_response(
         entity_types=entity_types,
         entity_relations=list(cloud_response.entity_relations),
         _thinking_content=thinking_content,
+        _reasoning_tokens=reasoning_tokens,
         evidence_sources=evidence_sources,
     )
 
@@ -222,6 +229,9 @@ def build_extended_result_from_response(
     thinking_content = getattr(normalized_response, "_thinking_content", None) or getattr(
         normalized_response, "thinking_content", None
     )
+    reasoning_tokens = getattr(normalized_response, "_reasoning_tokens", None) or getattr(
+        normalized_response, "reasoning_tokens", None
+    )
     return ExtendedDisambigResult(
         canonical_decisions=canonical_decisions,
         entity_types=entity_types,
@@ -229,6 +239,7 @@ def build_extended_result_from_response(
         alias_confidence=alias_confidence,
         evidence_profiles=evidence_profiles,
         _thinking_content=thinking_content,
+        _reasoning_tokens=reasoning_tokens,
     )
 
 
