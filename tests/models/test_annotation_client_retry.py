@@ -220,7 +220,24 @@ class MockAnnotationClient:
     def _record_estimated_token_usage_from_messages(self, messages, response_text, call_type, chunk_id, **kwargs):
         self.recorded_token_usage.append(
             {
+                "method": "messages",
                 "messages": messages,
+                "response_text": response_text,
+                "call_type": call_type,
+                "chunk_id": chunk_id,
+                "kwargs": kwargs,
+            }
+        )
+
+    def _record_estimated_token_usage_from_response(self, messages, response, call_type, chunk_id, **kwargs):
+        response_text = ""
+        if getattr(response, "choices", None):
+            response_text = getattr(response.choices[0].message, "content", "") or ""
+        self.recorded_token_usage.append(
+            {
+                "method": "response",
+                "messages": messages,
+                "response": response,
                 "response_text": response_text,
                 "call_type": call_type,
                 "chunk_id": chunk_id,
@@ -396,6 +413,33 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(validation_call_count[0], 2)
         self.assertEqual(len(client.recorded_token_usage), 2)
         self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase1")
+        self.assertEqual(client.recorded_token_usage[1]["call_type"], "phase1")
+
+    async def test_phase1_response_processing_failure_still_records_failed_attempt_tokens(self):
+        """Phase1 响应清洗失败时，也应按已返回响应补记 token。"""
+        client = MockAnnotationClient()
+        process_call_count = [0]
+
+        def fail_once_then_succeed(response, is_cloud, chunk_id=None, phase=""):
+            process_call_count[0] += 1
+            if process_call_count[0] == 1:
+                raise ValueError("repetitive output detected")
+            return ("{}", None, None)
+
+        client._process_annotation_response = fail_once_then_succeed
+
+        result = await annotate_chunk_phase1(
+            client=client,
+            text="测试文本",
+            chunk_id=1,
+        )
+
+        self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(process_call_count[0], 2)
+        self.assertEqual(len(client.recorded_token_usage), 2)
+        self.assertEqual(client.recorded_token_usage[0]["method"], "response")
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase1")
+        self.assertEqual(client.recorded_token_usage[1]["method"], "messages")
         self.assertEqual(client.recorded_token_usage[1]["call_type"], "phase1")
 
 
