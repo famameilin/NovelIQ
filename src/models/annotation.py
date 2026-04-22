@@ -189,7 +189,16 @@ class AnnotationClient(BaseModelClient):
                 # 中文注释：结构化解析失败时，说明模型响应已经返回，只是后处理没能吃下；
                 # 这类尝试同样消耗了 token，不能因为 raise 就直接漏账。
                 if call_type:
-                    self._record_estimated_token_usage_from_response(messages, response, call_type, chunk_id)
+                    # 中文注释：annotation_fallback 只是执行通道，parse-failure 这条公共兜底
+                    # 也必须继续回写 annotation 主业务桶，避免原始 token_usage 被写脏。
+                    token_task_type = "annotation" if self._task_type == "annotation_fallback" else None
+                    self._record_estimated_token_usage_from_response(
+                        messages,
+                        response,
+                        call_type,
+                        chunk_id,
+                        task_type=token_task_type,
+                    )
                 raise
             return parsed_result, response
 

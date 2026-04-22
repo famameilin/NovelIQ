@@ -14,11 +14,17 @@
 修改者: AI Assistant
 任务: fix-backend-stability
 修改内容: 添加数据库连接超时和 SQL 执行超时配置，添加连接池监控事件
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-test-db-concurrency
+修改内容: 支持通过 DATABASE_SCHEMA 注入运行时 search_path，给并发测试提供 schema 级隔离
 """
 
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -52,6 +58,27 @@ def get_database_url() -> str:
     return database_url
 
 
+def get_database_schema() -> str | None:
+    """
+    获取数据库 schema 名称。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-test-db-concurrency
+    说明: 运行时默认不指定 schema；
+          测试环境可通过 DATABASE_SCHEMA 把所有未限定表名收敛到独立 schema。
+    """
+    schema = os.environ.get("DATABASE_SCHEMA")
+    if not schema:
+        return None
+    normalized = schema.strip()
+    if not normalized:
+        return None
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", normalized):
+        raise RuntimeError(f"Invalid DATABASE_SCHEMA: {schema}")
+    return normalized
+
+
 def get_engine():
     """
     获取 SQLAlchemy 引擎（单例模式）
@@ -78,10 +105,15 @@ def get_engine():
     connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "5"))
     statement_timeout = int(os.environ.get("DB_STATEMENT_TIMEOUT", "30000"))
     echo = os.environ.get("DB_ECHO", "false").lower() == "true"
+    database_schema = get_database_schema()
+
+    option_parts = [f"-c statement_timeout={statement_timeout}"]
+    if database_schema:
+        option_parts.append(f"-c search_path={database_schema},public")
 
     connect_args = {
         "connect_timeout": connect_timeout,
-        "options": f"-c statement_timeout={statement_timeout}",
+        "options": " ".join(option_parts),
     }
 
     _engine = create_engine(
@@ -102,6 +134,10 @@ def get_engine():
         def set_postgresql_settings(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
             cursor.execute("SET TIME ZONE 'UTC'")
+            if database_schema:
+                # 中文注释：连接池里的连接被复用时，仍要确保 search_path 固定在当前运行时 schema，
+                # 避免测试并发时把 ORM/原生 SQL 混写回 public 或其他进程的隔离空间。
+                cursor.execute(f"SET search_path TO {database_schema}, public")
             cursor.close()
 
     @event.listens_for(_engine, "checkout")

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
+from src.config import TaskModelConfig
+from src.models.annotation import AnnotationClient
 from src.models.local.base import BaseModelClient
+from src.models.local.schema import ForeshadowingResult
 
 
 class _DummyClient:
@@ -132,3 +136,68 @@ def test_estimated_token_accounting_allows_business_task_override() -> None:
     assert usage["task_type"] == "annotation"
     assert usage["call_type"] == "phase1"
     assert usage["chunk_id"] == 9
+
+
+def test_annotation_fallback_parse_failure_still_records_annotation_bucket() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    说明: fallback annotation client 在结构化解析失败时，原始 token_usage
+          也必须直接写回 annotation 主业务桶，不能留下 annotation_fallback 脏数据。
+    """
+    recorded_calls: list[dict[str, object]] = []
+
+    def token_usage_callback(
+        novel_id: str,
+        task_type: str,
+        call_type: str,
+        model: str,
+        prompt_tokens: int,
+        total_tokens: int,
+        completion_tokens: int | None,
+        chunk_id: int | None,
+    ) -> None:
+        recorded_calls.append(
+            {
+                "novel_id": novel_id,
+                "task_type": task_type,
+                "call_type": call_type,
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "total_tokens": total_tokens,
+                "completion_tokens": completion_tokens,
+                "chunk_id": chunk_id,
+            }
+        )
+
+    client = AnnotationClient(
+        task_type="annotation_fallback",
+        config=TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k"),
+        client=MagicMock(),
+        token_usage_callback=token_usage_callback,
+        novel_id="novel-1",
+    )
+    invalid_response = MagicMock()
+    invalid_response.choices = [MagicMock(message=MagicMock(content="not-json"))]
+    client._call_api_stream = AsyncMock(return_value=invalid_response)
+
+    try:
+        import asyncio
+
+        asyncio.run(
+            client._call_annotation_api(
+                messages=[{"role": "user", "content": "请输出 JSON"}],
+                enable_thinking=False,
+                chunk_id=7,
+                response_model=ForeshadowingResult,
+                call_type="phase2",
+            )
+        )
+    except ValueError:
+        pass
+
+    assert len(recorded_calls) == 1
+    assert recorded_calls[0]["task_type"] == "annotation"
+    assert recorded_calls[0]["call_type"] == "phase2"
+    assert recorded_calls[0]["chunk_id"] == 7

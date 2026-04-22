@@ -5,6 +5,11 @@
 创建者: TraeAI
 任务: 创建统一的模型交互记录接口
 说明: 提供统一的 record_model_interaction 函数，替代各处重复的 _save_interaction 实现
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-token-coverage-status
+修改内容: 允许调用方显式写入 error 状态与错误信息，避免 coverage 把无响应失败误当成成功交互
 """
 
 from __future__ import annotations
@@ -74,6 +79,8 @@ def record_model_interaction(
     duration_ms: int,
     model_name: str | None,
     model_provider: str,
+    status: str = "success",
+    error_message: str | None = None,
     session: Session | None = None,
 ) -> None:
     """
@@ -98,6 +105,8 @@ def record_model_interaction(
         duration_ms: 耗时（毫秒）
         model_name: 模型名称，可为 None
         model_provider: 模型提供者（local/cloud）
+        status: 交互状态（success/error）
+        error_message: 错误信息，可为 None
         session: 可选的数据库 session，如果提供则使用，否则创建新 session
     """
     if not run_id:
@@ -132,7 +141,8 @@ def record_model_interaction(
                 has_thinking=bool(thinking_content and thinking_content.strip()),
                 reasoning_tokens=normalized_reasoning_tokens,
                 thinking_state=thinking_state,
-                status="success",
+                status=status,
+                error_message=error_message,
                 duration_ms=duration_ms,
             )
         else:
@@ -158,7 +168,8 @@ def record_model_interaction(
                     has_thinking=bool(thinking_content and thinking_content.strip()),
                     reasoning_tokens=normalized_reasoning_tokens,
                     thinking_state=thinking_state,
-                    status="success",
+                    status=status,
+                    error_message=error_message,
                     duration_ms=duration_ms,
                 )
             finally:
