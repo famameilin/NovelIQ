@@ -251,41 +251,52 @@ async def attribute_dialogues_with_llm(
             enable_thinking=enable_thinking,
             chunk_id=chunk_id,
             response_model=DialogueAttributionResult,
+            call_type="phase3",
         )
 
-        duration_ms = int((time.time() - start_time) * 1000)
-        content_clean = str(parsed.model_dump())
-        thinking_content = getattr(response, "thinking_content", None)
-        extract_reasoning_tokens = getattr(current_client, "_extract_reasoning_tokens", None)
-        reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
-        process_response = getattr(current_client, "_process_annotation_response", None)
-        if callable(process_response) and hasattr(response, "choices"):
-            content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase3")
+        try:
+            duration_ms = int((time.time() - start_time) * 1000)
+            content_clean = str(parsed.model_dump())
+            thinking_content = getattr(response, "thinking_content", None)
+            extract_reasoning_tokens = getattr(current_client, "_extract_reasoning_tokens", None)
+            reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
+            process_response = getattr(current_client, "_process_annotation_response", None)
+            if callable(process_response) and hasattr(response, "choices"):
+                content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase3")
 
-        record_model_interaction(
-            run_id=run_id,
-            chunk_id=chunk_id,
-            interaction_type="dialogue_attribution",
-            phase="phase3",
-            attempt_number=batch_idx + 1,
-            messages=messages,
-            response_text=content_clean,
-            thinking_content=thinking_content,
-            reasoning_tokens=reasoning_tokens,
-            requested_thinking=enable_thinking,
-            duration_ms=duration_ms,
-            model_name=current_client._config.model,
-            model_provider="cloud" if is_cloud else "local",
-            session=current_client._session,
-        )
-        # 中文注释：Phase3 的 fallback 只影响执行模型，不应额外生出 annotation_fallback.phase3 桶。
-        current_client._record_estimated_token_usage_from_messages(
-            messages,
-            content_clean,
-            "phase3",
-            chunk_id,
-            task_type="annotation",
-        )
+            record_model_interaction(
+                run_id=run_id,
+                chunk_id=chunk_id,
+                interaction_type="dialogue_attribution",
+                phase="phase3",
+                attempt_number=batch_idx + 1,
+                messages=messages,
+                response_text=content_clean,
+                thinking_content=thinking_content,
+                reasoning_tokens=reasoning_tokens,
+                requested_thinking=enable_thinking,
+                duration_ms=duration_ms,
+                model_name=current_client._config.model,
+                model_provider="cloud" if is_cloud else "local",
+                session=current_client._session,
+            )
+            # 中文注释：Phase3 的 fallback 只影响执行模型，不应额外生出 annotation_fallback.phase3 桶。
+            current_client._record_estimated_token_usage_from_messages(
+                messages,
+                content_clean,
+                "phase3",
+                chunk_id,
+                task_type="annotation",
+            )
+        except Exception:
+            current_client._record_estimated_token_usage_from_response(
+                messages,
+                response,
+                "phase3",
+                chunk_id,
+                task_type="annotation",
+            )
+            raise
 
         logger.info(
             f"dialogue_attribution batch: "

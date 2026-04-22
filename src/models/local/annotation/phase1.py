@@ -116,16 +116,28 @@ async def execute_phase1_call(
 
     client._log_prompt_response(chunk_id, content_clean, thinking_content, extraction, current_messages, text, None)
 
-    result = client._parse_annotation(content_clean)
+    try:
+        result = client._parse_annotation(content_clean)
 
-    sources = {
-        "text": text,
-        "active_entities": parse_active_entities(active_entities),
-        "alias_map": alias_map or {},
-        "evidence_bundle": evidence_bundle,
-    }
+        sources = {
+            "text": text,
+            "active_entities": parse_active_entities(active_entities),
+            "alias_map": alias_map or {},
+            "evidence_bundle": evidence_bundle,
+        }
 
-    result = client._validate_annotation(result, sources, chunk_id, content_clean)
+        result = client._validate_annotation(result, sources, chunk_id, content_clean)
+    except Exception:
+        # 中文注释：phase1 的失败经常发生在 JSON 解析或业务校验阶段，
+        # 但此时模型响应已经拿到了，仍需要把本次尝试的 token 成本记下来。
+        client._record_estimated_token_usage_from_messages(
+            current_messages,
+            content_clean,
+            "phase1",
+            chunk_id,
+            task_type="annotation",
+        )
+        raise
 
     # 中文注释：fallback client 只是执行通道切换，不应把业务口径拆成 annotation_fallback.phase1。
     client._record_estimated_token_usage_from_messages(
