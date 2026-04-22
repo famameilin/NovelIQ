@@ -54,7 +54,7 @@ def _normalize_feature_series(values: Mapping[int, float]) -> dict[int, float]:
     max_value = max(values.values())
     denom = max_value - min_value
     if denom <= 0:
-        return {chunk_id: 0.0 for chunk_id in values}
+        return dict.fromkeys(values, 0.0)
     return {
         chunk_id: (value - min_value) / denom
         for chunk_id, value in values.items()

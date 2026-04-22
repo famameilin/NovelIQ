@@ -22,11 +22,58 @@ def _resolve_runtime_schema(session: Session) -> str:
     return schema
 
 
+def _resolve_visible_table_schema(session: Session, table_name: str) -> str:
+    """
+    解析当前连接可见的目标表实际所在 schema。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-preprocess-vector-schema-parent-resolution
+    说明: `chunk_embeddings` 可能按当前运行时 schema 创建，
+          但它依赖的 `chunks` / `analysis_runs` 在某些环境里未必和当前 schema 完全一致。
+          这里按当前 search_path 实际能解析到的表，反查其真实 schema，避免手写 DDL 把父表误绑到错误空间。
+    """
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
+        raise ValueError(f"invalid table name: {table_name}")
+
+    resolved_schema = session.execute(
+        text(
+            """
+            SELECT n.nspname
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.oid = to_regclass(:table_name)
+            """
+        ),
+        {"table_name": table_name},
+    ).scalar_one_or_none()
+    if resolved_schema is None:
+        raise ValueError(f"required table does not exist in current search_path: {table_name}")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", resolved_schema):
+        raise ValueError(f"invalid schema name: {resolved_schema}")
+    return resolved_schema
+
+
 def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None:
+    """
+    确保 `chunk_embeddings` 表在当前运行时 schema 下可用。
+
+    创建时间: 2026-04-10
+    创建者: TraeAI
+    任务: implement-level3-vector-retrieval
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-preprocess-vector-schema-parent-resolution
+    修改内容: 创建表时不再假设 `chunks` / `analysis_runs` 一定与当前 schema 同名同空间，
+    而是按当前 search_path 解析父表真实 schema，避免预处理在隔离 schema 下创建外键时报 UndefinedTable。
+    """
     if embedding_dim <= 0:
         raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
 
     runtime_schema = _resolve_runtime_schema(session)
+    chunks_schema = _resolve_visible_table_schema(session, "chunks")
+    analysis_runs_schema = _resolve_visible_table_schema(session, "analysis_runs")
     session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
     table_regclass = f"{runtime_schema}.chunk_embeddings"
@@ -43,8 +90,9 @@ def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None
                     created_at VARCHAR(50),
                     PRIMARY KEY (chunk_id, run_id),
                     FOREIGN KEY (chunk_id, run_id)
-                        REFERENCES {runtime_schema}.chunks(chunk_id, run_id) ON DELETE CASCADE,
-                    FOREIGN KEY (run_id) REFERENCES {runtime_schema}.analysis_runs(run_id) ON DELETE CASCADE
+                        REFERENCES {chunks_schema}.chunks(chunk_id, run_id) ON DELETE CASCADE,
+                    FOREIGN KEY (run_id)
+                        REFERENCES {analysis_runs_schema}.analysis_runs(run_id) ON DELETE CASCADE
                 )
                 """
             )
