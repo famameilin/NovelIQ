@@ -73,6 +73,12 @@ async def execute_phase1_call(
     修改者: Codex
     任务: unify-estimated-token-accounting
     修改内容: Phase1 token_usage 改为基于 messages/response 的统一估算口径，不再依赖 provider usage
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    修改内容: 即使当前执行客户端切到 annotation_fallback，token_usage 仍统一记回 annotation 主业务桶，
+              避免 coverage 比较把 fallback 调用误判为未记账
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -121,7 +127,14 @@ async def execute_phase1_call(
 
     result = client._validate_annotation(result, sources, chunk_id, content_clean)
 
-    client._record_estimated_token_usage_from_messages(current_messages, content_clean, "phase1", chunk_id)
+    # 中文注释：fallback client 只是执行通道切换，不应把业务口径拆成 annotation_fallback.phase1。
+    client._record_estimated_token_usage_from_messages(
+        current_messages,
+        content_clean,
+        "phase1",
+        chunk_id,
+        task_type="annotation",
+    )
 
     return result, content_clean
 

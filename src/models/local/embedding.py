@@ -183,6 +183,11 @@ class EmbeddingClient:
         修改者: TraeAI
         任务: 重构 EmbeddingClient 使用 AsyncOpenAI
         修改内容: 将 get_embedding 改为异步方法，使用 await 调用 embeddings.create
+
+        修改时间: 2026-04-22
+        修改者: Codex
+        任务: clarify-token-accounting-semantics
+        修改内容: 补充 token 口径注释，说明 embedding 在 provider 可稳定返回 usage 时优先记录实报值
         """
         if not self._model:
             raise ValueError("embedding model is required")
@@ -209,6 +214,9 @@ class EmbeddingClient:
             self._validate_embedding_dimension(embedding)
 
             if self._token_usage_callback and response.usage:
+                # 中文注释：embedding 接口通常能稳定返回 provider usage，
+                # 这里优先保留实报值；汇总层对外仍标 estimated，是因为整条分析链路整体只承诺近似统计，
+                # 而不是要求每一笔都必须退化成本地估算。
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",
@@ -303,6 +311,11 @@ class EmbeddingClient:
         任务: batch-embedding-requests
         修改内容: 改为按配置批量请求 embedding API，默认每批 8 条，减少语义分块时的连续单条请求开销
 
+        修改时间: 2026-04-22
+        修改者: Codex
+        任务: clarify-token-accounting-semantics
+        修改内容: 补充批量 embedding 记账注释，明确 provider usage 仍可直接复用
+
         Args:
             texts: 文本列表
 
@@ -386,6 +399,8 @@ class EmbeddingClient:
                 embeddings[original_idx] = embedding
 
             if self._token_usage_callback and response.usage:
+                # 中文注释：批量 embedding 与单条 embedding 口径一致，
+                # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平。
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",

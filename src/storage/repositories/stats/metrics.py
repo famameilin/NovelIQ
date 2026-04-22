@@ -161,6 +161,9 @@ def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dic
     by_call_type = _fetch_usage_by_call_type(session, run_id, novel_id)
     by_model = _fetch_usage_by_model(session, run_id, novel_id)
     coverage_gaps = _detect_token_coverage_gaps(session, run_id, by_call_type)
+    # 中文注释：这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
+    # 并不强制每一条记录都来自本地估算；像 embedding 这类 provider 能稳定返回 usage 的链路，
+    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息。
     summary["accounting_method"] = "estimated"
     summary["coverage_status"] = "partial" if coverage_gaps else "complete"
     return {
@@ -215,12 +218,33 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     )
 
     result = session.execute(stmt).fetchall()
-    return {row.task_type: {"call_count": row.count, "total_tokens": row.total} for row in result}
+    aggregated: dict[str, dict[str, int]] = {}
+    for row in result:
+        normalized_task_type = _normalize_token_usage_task_type(row.task_type)
+        bucket = aggregated.setdefault(normalized_task_type, {"call_count": 0, "total_tokens": 0})
+        bucket["call_count"] += int(row.count or 0)
+        bucket["total_tokens"] += int(row.total or 0)
+    return aggregated
 
 
 def _build_call_type_key(task_type: str, call_type: str) -> str:
     """构建对外统一的调用桶 key。"""
     return f"{task_type}.{call_type}"
+
+
+def _normalize_token_usage_task_type(task_type: str) -> str:
+    """
+    归一 token_usage 里的任务类型桶。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    说明: annotation_fallback 只是执行通道，不是新的业务任务类型；
+          对外统计与 coverage 比较都应把它并回 annotation 主桶。
+    """
+    if task_type == "annotation_fallback":
+        return "annotation"
+    return task_type
 
 
 def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
@@ -240,13 +264,14 @@ def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> d
     )
 
     result = session.execute(stmt).fetchall()
-    return {
-        _build_call_type_key(row.task_type, row.call_type): {
-            "call_count": row.count,
-            "total_tokens": row.total,
-        }
-        for row in result
-    }
+    aggregated: dict[str, dict[str, int]] = {}
+    for row in result:
+        normalized_task_type = _normalize_token_usage_task_type(row.task_type)
+        key = _build_call_type_key(normalized_task_type, row.call_type)
+        bucket = aggregated.setdefault(key, {"call_count": 0, "total_tokens": 0})
+        bucket["call_count"] += int(row.count or 0)
+        bucket["total_tokens"] += int(row.total or 0)
+    return aggregated
 
 
 def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:

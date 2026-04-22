@@ -182,6 +182,12 @@ async def execute_phase4_call(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    修改内容: Phase4 经 annotation_fallback 执行时仍统一归入 annotation 主业务桶，
+              避免 coverage 统计把 fallback 调用误报为缺口
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -221,7 +227,14 @@ async def execute_phase4_call(
         model_provider="cloud" if is_cloud else "local",
         session=client._session,
     )
-    client._record_estimated_token_usage_from_messages(messages, content_clean, "phase4", chunk_id)
+    # 中文注释：Phase4 的业务归属始终是 annotation，fallback 只是底层执行策略。
+    client._record_estimated_token_usage_from_messages(
+        messages,
+        content_clean,
+        "phase4",
+        chunk_id,
+        task_type="annotation",
+    )
 
     logger.info(
         "phase4_relation_extraction: chunk_id={} text_len={} relations_count={}",

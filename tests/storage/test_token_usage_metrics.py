@@ -131,3 +131,36 @@ def test_normalize_model_interaction_call_key_maps_mainline_calls() -> None:
         metrics._normalize_model_interaction_call_key("disambiguate", "final_disambiguation")
         == "full_disambig.disambiguate_characters"
     )
+
+
+def test_normalize_token_usage_task_type_maps_annotation_fallback_back_to_mainline() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    说明: fallback 标注客户端只是执行通道，不应在 coverage 统计里形成新的业务桶。
+    """
+    assert metrics._normalize_token_usage_task_type("annotation_fallback") == "annotation"
+    assert metrics._normalize_token_usage_task_type("diagnosis") == "diagnosis"
+
+
+def test_fetch_token_usage_stats_can_merge_fallback_task_bucket() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    说明: 即使旧 token_usage 里残留 annotation_fallback，汇总后的业务 task 桶也应合并回 annotation。
+    """
+    session = MagicMock()
+    execute_result = MagicMock()
+    execute_result.fetchall.return_value = [
+        MagicMock(task_type="annotation", count=2, total=120),
+        MagicMock(task_type="annotation_fallback", count=1, total=30),
+    ]
+    session.execute.return_value = execute_result
+
+    stats = metrics._fetch_usage_by_task(session, "run-1", "novel-1")
+
+    assert stats["annotation"]["call_count"] == 3
+    assert stats["annotation"]["total_tokens"] == 150
+    assert "annotation_fallback" not in stats

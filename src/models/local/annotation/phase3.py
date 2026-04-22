@@ -41,6 +41,11 @@
 修改者: Codex
 任务: unify-estimated-token-accounting
 修改内容: Phase3 在持久化 model_interactions 后同步写入统一估算 token_usage
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-token-coverage-fallback-bucket
+修改内容: 即使重试器把 Phase3 切到 annotation_fallback 执行，也仍按 annotation 主业务桶记账
 """
 
 from __future__ import annotations
@@ -273,7 +278,14 @@ async def attribute_dialogues_with_llm(
             model_provider="cloud" if is_cloud else "local",
             session=current_client._session,
         )
-        current_client._record_estimated_token_usage_from_messages(messages, content_clean, "phase3", chunk_id)
+        # 中文注释：Phase3 的 fallback 只影响执行模型，不应额外生出 annotation_fallback.phase3 桶。
+        current_client._record_estimated_token_usage_from_messages(
+            messages,
+            content_clean,
+            "phase3",
+            chunk_id,
+            task_type="annotation",
+        )
 
         logger.info(
             f"dialogue_attribution batch: "
