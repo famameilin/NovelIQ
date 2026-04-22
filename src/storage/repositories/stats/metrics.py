@@ -11,6 +11,16 @@
 任务: code-quality-refactor - 补充遗漏方法
 修改内容: 添加 insert_cloud_analysis, insert_global_context,
     fetch_global_context, update_global_context, fetch_novel_title
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-token-usage-metrics-typecheck
+修改内容: 避免 SQL 聚合列与 Python `count()` 方法重名，修复 token metrics 聚合的类型检查报错
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-token-coverage-status
+修改内容: coverage 只统计真正成功的模型响应，避免重试错误占位记录把结果页误报为 partial
 """
 
 from __future__ import annotations
@@ -24,7 +34,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, TokenUsage
+from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, ModelInteraction, TokenUsage
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -158,11 +168,20 @@ def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dic
     """
     summary = _fetch_usage_summary(session, run_id, novel_id)
     by_task = _fetch_usage_by_task(session, run_id, novel_id)
+    by_call_type = _fetch_usage_by_call_type(session, run_id, novel_id)
     by_model = _fetch_usage_by_model(session, run_id, novel_id)
+    coverage_gaps = _detect_token_coverage_gaps(session, run_id, by_call_type)
+    # 中文注释：这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
+    # 并不强制每一条记录都来自本地估算；像 embedding 这类 provider 能稳定返回 usage 的链路，
+    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息。
+    summary["accounting_method"] = "estimated"
+    summary["coverage_status"] = "partial" if coverage_gaps else "complete"
     return {
         "summary": summary,
         "by_task": by_task,
+        "by_call_type": by_call_type,
         "by_model": by_model,
+        "coverage_gaps": coverage_gaps,
     }
 
 
@@ -198,8 +217,8 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     stmt = (
         select(
             TokenUsage.task_type,
-            func.count().label("count"),
-            func.sum(TokenUsage.total_tokens).label("total"),
+            func.count().label("call_count"),
+            func.sum(TokenUsage.total_tokens).label("total_tokens"),
         )
         .where(
             TokenUsage.novel_id == novel_id,
@@ -209,7 +228,61 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     )
 
     result = session.execute(stmt).fetchall()
-    return {row.task_type: {"call_count": row.count, "total_tokens": row.total} for row in result}
+    aggregated: dict[str, dict[str, int]] = {}
+    for row in result:
+        normalized_task_type = _normalize_token_usage_task_type(row.task_type)
+        bucket = aggregated.setdefault(normalized_task_type, {"call_count": 0, "total_tokens": 0})
+        # 中文注释：不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列。
+        bucket["call_count"] += int(row.call_count or 0)
+        bucket["total_tokens"] += int(row.total_tokens or 0)
+    return aggregated
+
+
+def _build_call_type_key(task_type: str, call_type: str) -> str:
+    """构建对外统一的调用桶 key。"""
+    return f"{task_type}.{call_type}"
+
+
+def _normalize_token_usage_task_type(task_type: str) -> str:
+    """
+    归一 token_usage 里的任务类型桶。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    说明: annotation_fallback 只是执行通道，不是新的业务任务类型；
+          对外统计与 coverage 比较都应把它并回 annotation 主桶。
+    """
+    if task_type == "annotation_fallback":
+        return "annotation"
+    return task_type
+
+
+def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
+    """按 task_type + call_type 获取使用量。"""
+    stmt = (
+        select(
+            TokenUsage.task_type,
+            TokenUsage.call_type,
+            func.count().label("call_count"),
+            func.sum(TokenUsage.total_tokens).label("total_tokens"),
+        )
+        .where(
+            TokenUsage.novel_id == novel_id,
+            TokenUsage.run_id == run_id,
+        )
+        .group_by(TokenUsage.task_type, TokenUsage.call_type)
+    )
+
+    result = session.execute(stmt).fetchall()
+    aggregated: dict[str, dict[str, int]] = {}
+    for row in result:
+        normalized_task_type = _normalize_token_usage_task_type(row.task_type)
+        key = _build_call_type_key(normalized_task_type, row.call_type)
+        bucket = aggregated.setdefault(key, {"call_count": 0, "total_tokens": 0})
+        bucket["call_count"] += int(row.call_count or 0)
+        bucket["total_tokens"] += int(row.total_tokens or 0)
+    return aggregated
 
 
 def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
@@ -217,8 +290,8 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
     stmt = (
         select(
             TokenUsage.model,
-            func.count().label("count"),
-            func.sum(TokenUsage.total_tokens).label("total"),
+            func.count().label("call_count"),
+            func.sum(TokenUsage.total_tokens).label("total_tokens"),
         )
         .where(
             TokenUsage.novel_id == novel_id,
@@ -228,7 +301,88 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
     )
 
     result = session.execute(stmt).fetchall()
-    return {row.model: {"call_count": row.count, "total_tokens": row.total} for row in result}
+    return {
+        row.model: {
+            "call_count": int(row.call_count or 0),
+            "total_tokens": int(row.total_tokens or 0),
+        }
+        for row in result
+    }
+
+
+def _normalize_model_interaction_call_key(interaction_type: str, phase: str | None) -> str:
+    """
+    将 model_interactions 里的类型归一到 token_usage 的调用桶 key。
+
+    中文注释：旧 run 没有完整 token_usage 时，只能依赖 model_interactions 判断
+    “哪些调用真实发生过”。这里必须把两张表映射到同一组 key，才能做覆盖度比较。
+    """
+    normalized_phase = phase or "unknown"
+    if interaction_type == "annotate":
+        return _build_call_type_key("annotation", normalized_phase)
+    if interaction_type == "dialogue_attribution":
+        return _build_call_type_key("annotation", "phase3")
+    if interaction_type == "relation_extraction":
+        return _build_call_type_key("annotation", "phase4")
+    if interaction_type == "diagnose":
+        return _build_call_type_key("diagnosis", "diagnosis")
+    if interaction_type == "stage_summary":
+        return _build_call_type_key("incremental_disambig", "stage_summary")
+    if interaction_type == "disambiguate":
+        if normalized_phase in {"incremental_disambiguation", "incremental"}:
+            return _build_call_type_key("incremental_disambig", "disambiguate_characters")
+        if normalized_phase in {"final_disambiguation", "full_disambiguation"}:
+            return _build_call_type_key("full_disambig", "disambiguate_characters")
+        if normalized_phase in {"reselect_canonicals", "final_canonical_reselect", "canonical_reselect"}:
+            return _build_call_type_key("full_disambig", "reselect_canonicals")
+        return _build_call_type_key("unknown_disambiguate", normalized_phase)
+    return _build_call_type_key(f"unknown_{interaction_type}", normalized_phase)
+
+
+def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[str, int]:
+    """
+    按归一后的调用桶统计真实发生过的成功模型调用次数。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-status
+    说明: coverage 要比较的是“拿到有效响应的调用”与“已落 token_usage 的调用”。
+          对重试里的无响应 error 占位记录，不能再算进应记账分母。
+    """
+    stmt = (
+        select(
+            ModelInteraction.interaction_type,
+            ModelInteraction.phase,
+            ModelInteraction.status,
+            func.count().label("call_count"),
+        )
+        .where(ModelInteraction.run_id == run_id)
+        .group_by(ModelInteraction.interaction_type, ModelInteraction.phase, ModelInteraction.status)
+    )
+    result = session.execute(stmt).fetchall()
+    aggregated: dict[str, int] = {}
+    for row in result:
+        if row.status != "success":
+            continue
+        key = _normalize_model_interaction_call_key(row.interaction_type, row.phase)
+        aggregated[key] = aggregated.get(key, 0) + int(row.call_count or 0)
+    return aggregated
+
+
+def _detect_token_coverage_gaps(
+    session: Session,
+    run_id: str,
+    by_call_type: dict[str, Any],
+) -> list[str]:
+    """比较真实调用与已记账调用，找出 token 覆盖缺口。"""
+    interaction_counts = _fetch_model_interaction_call_counts(session, run_id)
+    gaps: list[str] = []
+    for call_key in sorted(interaction_counts.keys()):
+        interaction_call_count = int(interaction_counts.get(call_key, 0) or 0)
+        token_call_count = int(by_call_type.get(call_key, {}).get("call_count", 0) or 0)
+        if token_call_count < interaction_call_count:
+            gaps.append(call_key)
+    return gaps
 
 
 def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:

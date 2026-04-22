@@ -18,12 +18,15 @@
 修改时间: 2026-04-20
 修改者: Codex (GPT-5)
 任务: fix-test-db-isolation
-修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE_URL，并在每个测试前后重置 SQLAlchemy 单例，防止直接调用 get_session_factory() 时污染开发库
+修改内容: 将后端测试默认数据库强制切换到 TEST_DATABASE_URL，
+    并在每个测试前后重置 SQLAlchemy 单例，防止直接调用 get_session_factory() 时污染开发库
 """
 
 from __future__ import annotations
 
 import os
+import re
+import uuid
 from collections.abc import Generator
 
 import pytest
@@ -37,6 +40,54 @@ from src.storage.models import Base
 load_dotenv()
 
 _test_engine = None
+
+
+def _build_test_schema_name() -> str:
+    """
+    构造当前 pytest 进程专用的测试 schema 名称。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-test-db-concurrency
+    说明: 不能再让多个 pytest 进程共享 public schema；
+          这里按 worker + pid + 随机后缀生成独立 schema，避免并发 create_all 冲突。
+    """
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "single")
+    safe_worker = re.sub(r"[^A-Za-z0-9_]", "_", worker_id)
+    return f"test_{safe_worker}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+
+
+def _validate_schema_name(schema_name: str) -> str:
+    """
+    校验 schema 名称是否可安全用于 SQL 标识符。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-test-db-concurrency
+    说明: 测试会把 schema 名称插入 DDL，必须先限制成 PostgreSQL 安全标识符。
+    """
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema_name):
+        raise ValueError(f"Invalid test schema name: {schema_name}")
+    return schema_name
+
+
+def _build_test_engine(database_url: str, schema_name: str):
+    """
+    创建绑定到指定测试 schema 的 SQLAlchemy Engine。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-test-db-concurrency
+    说明: 所有测试连接都应带固定 search_path，确保 ORM 与原生 SQL 落在同一隔离 schema。
+    """
+    safe_schema = _validate_schema_name(schema_name)
+    return create_engine(
+        database_url,
+        echo=False,
+        connect_args={
+            "options": f"-c search_path={safe_schema},public",
+        },
+    )
 
 
 def get_test_database_url() -> str:
@@ -71,74 +122,60 @@ def test_database_url() -> str:
 
 
 @pytest.fixture(scope="session")
-def setup_test_database(test_database_url: str) -> Generator[None, None, None]:
+def test_database_schema() -> str:
+    """
+    当前 pytest 会话使用的独立 schema。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-test-db-concurrency
+    说明: schema 隔离要在整个测试会话内保持稳定，避免不同 fixture 指到不同空间。
+    """
+    return _build_test_schema_name()
+
+
+@pytest.fixture(scope="session")
+def setup_test_database(test_database_url: str, test_database_schema: str) -> Generator[None, None, None]:
     """
     会话级别的测试数据库设置
 
     在测试会话开始时：
     1. 安装 pgvector 扩展
-    2. 删除所有旧表
-    3. 创建所有表
+    2. 创建当前 pytest 进程独立 schema
+    3. 在该 schema 下创建所有表
 
-    注意：使用全局 engine 避免并发创建表
+    注意：这里不再复用 public，而是让每个 pytest 进程独占一个 schema，
+    从根上消除并发 create_all 互相踩表/复合类型的竞争。
     """
     global _test_engine
 
-    _test_engine = create_engine(test_database_url, echo=False)
+    safe_schema = _validate_schema_name(test_database_schema)
+    _test_engine = _build_test_engine(test_database_url, safe_schema)
 
     with _test_engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
-
-    tables = [
-        "emotion_curve",
-        "rhythm_curve",
-        "global_stats",
-        "cloud_analysis",
-        "chunk_dialogues",
-        "chunk_characters",
-        "chunk_relations",
-        "character_appearances",
-        "chunk_style",
-        "chunk_topics",
-        "chunk_summaries",
-        "chunk_culture",
-        "chunk_embeddings",
-        "chunk_annotation",
-        "chunks",
-        "analysis_runs",
-        "global_context",
-        "token_usage",
-        "graph_relations_current",
-        "graph_relation_events",
-        "graph_entity_aliases",
-        "graph_entities",
-        "novels",
-        "entity_knowledge_graph",
-        "entity_aliases",
-        "entity_relations",
-        "entity_snapshots",
-        "diagnosis_results",
-        "topic_model_results",
-        "preprocess_results",
-        "disambig_checkpoint",
-        "chunk_locations",
-    ]
-    with _test_engine.connect() as conn:
-        for table in tables:
-            conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+        conn.execute(text(f"DROP SCHEMA IF EXISTS {safe_schema} CASCADE"))
+        conn.execute(text(f"CREATE SCHEMA {safe_schema}"))
         conn.commit()
 
     Base.metadata.create_all(bind=_test_engine)
 
     yield
 
+    with _test_engine.connect() as conn:
+        conn.execute(text(f"DROP SCHEMA IF EXISTS {safe_schema} CASCADE"))
+        conn.commit()
+
     _test_engine.dispose()
     _test_engine = None
 
 
 @pytest.fixture(scope="session", autouse=True)
-def force_test_database_url(setup_test_database: None, test_database_url: str) -> Generator[None, None, None]:
+def force_test_database_url(
+    setup_test_database: None,
+    test_database_url: str,
+    test_database_schema: str,
+) -> Generator[None, None, None]:
     """
     为整个后端测试会话强制注入测试数据库 URL。
 
@@ -147,11 +184,14 @@ def force_test_database_url(setup_test_database: None, test_database_url: str) -
     任务: fix-test-db-isolation
     说明:
     - 把 DATABASE_URL 固定指向 TEST_DATABASE_URL
+    - 把 DATABASE_SCHEMA 固定指向当前 pytest 进程独立 schema
     - 覆盖所有直接调用 get_session_factory()() / get_engine() 的路径
     - 会话结束后恢复原始环境变量，避免影响开发命令
     """
     original_url = os.environ.get("DATABASE_URL")
+    original_schema = os.environ.get("DATABASE_SCHEMA")
     os.environ["DATABASE_URL"] = test_database_url
+    os.environ["DATABASE_SCHEMA"] = test_database_schema
     _reset_backend_db_singletons()
 
     try:
@@ -161,6 +201,11 @@ def force_test_database_url(setup_test_database: None, test_database_url: str) -
             os.environ["DATABASE_URL"] = original_url
         elif "DATABASE_URL" in os.environ:
             del os.environ["DATABASE_URL"]
+
+        if original_schema is not None:
+            os.environ["DATABASE_SCHEMA"] = original_schema
+        elif "DATABASE_SCHEMA" in os.environ:
+            del os.environ["DATABASE_SCHEMA"]
 
         _reset_backend_db_singletons()
 
@@ -192,7 +237,9 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
     global _test_engine
 
     if _test_engine is None:
-        _test_engine = create_engine(get_test_database_url(), echo=False)
+        database_url = get_test_database_url()
+        schema_name = _validate_schema_name(os.environ["DATABASE_SCHEMA"])
+        _test_engine = _build_test_engine(database_url, schema_name)
         Base.metadata.create_all(bind=_test_engine)
 
     SessionLocal = sessionmaker(bind=_test_engine)

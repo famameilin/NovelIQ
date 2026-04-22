@@ -37,6 +37,11 @@
 任务: code-review-fix
 修改内容: 移除 _call_api_stream 中发送剩余 buffer 时的冗余条件判断
 
+修改时间: 2026-04-22
+修改者: Codex
+任务: count-failed-llm-calls
+修改内容: 新增从响应对象提取文本并补记失败态 token 的通用 helper，覆盖“请求已发出但后处理失败”的场景
+
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
@@ -54,6 +59,7 @@ from pydantic import BaseModel
 from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.parser.thinking import extract_thinking_unified
+from src.utils.token_counter import count_messages_tokens, count_tokens
 
 if TYPE_CHECKING:
     from src.api.models.events import StreamEvent
@@ -154,13 +160,14 @@ class TokenUsage(NamedTuple):
     novel_id: str
     task_type: str
     call_type: str
+    model: str
     prompt_tokens: int
     total_tokens: int
     completion_tokens: int | None
     chunk_id: int | None
 
 
-TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
+TokenUsageCallback = Callable[[str, str, str, str, int, int, int | None, int | None], None]
 
 
 class BaseModelClient:
@@ -288,6 +295,7 @@ class BaseModelClient:
                 self._novel_id or "unknown",
                 self._task_type,
                 call_type,
+                self._config.model or "unknown",
                 response.usage.prompt_tokens,
                 response.usage.total_tokens,
                 response.usage.completion_tokens,
@@ -344,11 +352,111 @@ class BaseModelClient:
                 self._novel_id or "unknown",
                 self._task_type,
                 call_type,
+                self._config.model or "unknown",
                 prompt_tokens,
                 total_tokens,
                 completion_tokens,
                 chunk_id,
             )
+
+    def _record_estimated_token_usage_from_messages(
+        self,
+        messages: list[dict[str, Any]],
+        response_text: str,
+        call_type: str,
+        chunk_id: int | None = None,
+        *,
+        task_type: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        """
+        基于 prompt/response 文本统一记录估算 token。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: unify-estimated-token-accounting
+        说明: token_usage 对外统一收敛为“估算消耗”口径。
+              各条调用链都应走这一入口，避免 provider 实报、局部估算、
+              以及漏记混成多套账本。
+        """
+        if not self._token_usage_callback:
+            return
+
+        resolved_model = model_name or self._config.model
+        if not resolved_model:
+            logger.warning(
+                "skip estimated token usage because model name is missing: task_type={} call_type={}",
+                task_type,
+                call_type,
+            )
+            return
+
+        prompt_tokens = count_messages_tokens(messages, resolved_model)
+        completion_tokens = count_tokens(response_text or "", resolved_model)
+        total_tokens = prompt_tokens + completion_tokens
+
+        # 中文注释：这里显式传 model/task_type，避免共享 callback 再偷用 annotation client
+        # 的模型名，把 disambiguation / fallback / embedding 的账混写到同一个 model 维度。
+        self._token_usage_callback(
+            self._novel_id or "unknown",
+            task_type or self._task_type,
+            call_type,
+            resolved_model,
+            prompt_tokens,
+            total_tokens,
+            completion_tokens,
+            chunk_id,
+        )
+
+    def _extract_response_text_for_token_usage(self, response: Any) -> str:
+        """
+        从响应对象中提取可用于 token 估算的文本。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: count-failed-llm-calls
+        说明: 当请求已经返回，但后续结构化解析或业务校验失败时，
+              仍应尽量按真实响应文本补记 token；若提取失败则保守回退为空字符串。
+        """
+        if response is None or not hasattr(response, "choices") or not response.choices:
+            return ""
+
+        message = response.choices[0].message
+        try:
+            content_clean, _thinking_content = self._extract_response_content(message)
+            return content_clean or ""
+        except Exception:
+            raw_content = getattr(message, "content", None)
+            return raw_content if isinstance(raw_content, str) else ""
+
+    def _record_estimated_token_usage_from_response(
+        self,
+        messages: list[dict[str, Any]],
+        response: Any,
+        call_type: str,
+        chunk_id: int | None = None,
+        *,
+        task_type: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        """
+        基于响应对象补记统一估算 token。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: count-failed-llm-calls
+        说明: 主要用于“模型调用已完成，但解析/校验失败”的路径；
+              此时至少应把 prompt 算上，若还能提取出响应文本，则连 completion 一并估算。
+        """
+        response_text = self._extract_response_text_for_token_usage(response)
+        self._record_estimated_token_usage_from_messages(
+            messages,
+            response_text,
+            call_type,
+            chunk_id,
+            task_type=task_type,
+            model_name=model_name,
+        )
 
     def _build_json_schema(self, response_model: type[T]) -> dict[str, Any]:
         """

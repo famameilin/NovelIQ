@@ -57,6 +57,17 @@ async def _do_phase2(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: unify-estimated-token-accounting
+    修改内容: Phase2 token_usage 改为统一估算口径，不再依赖 provider usage
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    修改内容: fallback 标注客户端执行 Phase2 时，token_usage 仍归入 annotation 主业务桶，
+              避免 coverage 把已入账调用误判成缺口
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -69,38 +80,56 @@ async def _do_phase2(
         enable_thinking=enable_thinking,
         chunk_id=chunk_id,
         response_model=ForeshadowingResult,
+        call_type="phase2",
     )
 
-    content_clean, thinking_content, extraction = client._process_annotation_response(
-        response, is_cloud, chunk_id, "phase2"
-    )
+    try:
+        content_clean, thinking_content, extraction = client._process_annotation_response(
+            response, is_cloud, chunk_id, "phase2"
+        )
 
-    duration_ms = int((time.time() - start_time) * 1000)
-    extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
-    reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
+        duration_ms = int((time.time() - start_time) * 1000)
+        extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
+        reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
 
-    record_model_interaction(
-        run_id=run_id,
-        chunk_id=chunk_id,
-        interaction_type="annotate",
-        phase="phase2",
-        attempt_number=attempt_number,
-        messages=messages,
-        response_text=content_clean,
-        thinking_content=thinking_content,
-        reasoning_tokens=reasoning_tokens,
-        requested_thinking=enable_thinking,
-        duration_ms=duration_ms,
-        model_name=client._config.model if hasattr(client._config, "model") else None,
-        model_provider="cloud" if is_cloud else "local",
-        session=client._session if hasattr(client, "_session") else None,
-    )
+        record_model_interaction(
+            run_id=run_id,
+            chunk_id=chunk_id,
+            interaction_type="annotate",
+            phase="phase2",
+            attempt_number=attempt_number,
+            messages=messages,
+            response_text=content_clean,
+            thinking_content=thinking_content,
+            reasoning_tokens=reasoning_tokens,
+            requested_thinking=enable_thinking,
+            duration_ms=duration_ms,
+            model_name=client._config.model if hasattr(client._config, "model") else None,
+            model_provider="cloud" if is_cloud else "local",
+            session=client._session if hasattr(client, "_session") else None,
+        )
 
-    client._log_prompt_response(
-        chunk_id, content_clean, thinking_content, extraction, messages, text, prev_chunk_summary
-    )
+        client._log_prompt_response(
+            chunk_id, content_clean, thinking_content, extraction, messages, text, prev_chunk_summary
+        )
 
-    client._record_token_usage(response, "phase2", chunk_id)
+        # 中文注释：这里按 annotation 主业务桶落账，避免 fallback 通道把 coverage 桶名拆散。
+        client._record_estimated_token_usage_from_messages(
+            messages,
+            content_clean,
+            "phase2",
+            chunk_id,
+            task_type="annotation",
+        )
+    except Exception:
+        client._record_estimated_token_usage_from_response(
+            messages,
+            response,
+            "phase2",
+            chunk_id,
+            task_type="annotation",
+        )
+        raise
 
     return result
 

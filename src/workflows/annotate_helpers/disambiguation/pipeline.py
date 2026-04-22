@@ -575,6 +575,8 @@ async def _retry_disambig(
                 duration_ms=duration_ms,
                 model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",
+                status="error",
+                error_message=str(e),
                 session=None,
             )
 
@@ -674,6 +676,8 @@ async def _retry_canonical_reselect(
                 duration_ms=duration_ms,
                 model_name=model_name,
                 model_provider="cloud" if client.is_cloud_api() else "local",
+                status="error",
+                error_message=str(e),
                 session=None,
             )
 

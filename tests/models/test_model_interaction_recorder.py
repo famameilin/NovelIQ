@@ -89,3 +89,42 @@ def test_record_model_interaction_marks_none_when_thinking_disabled() -> None:
     kwargs = mock_repo.save_interaction.call_args.kwargs
     assert kwargs["reasoning_tokens"] is None
     assert kwargs["thinking_state"] == "none"
+
+
+def test_record_model_interaction_preserves_error_status() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-status
+    说明: 重试链路写入的 error 占位记录必须保留 error 状态，
+          后续 coverage 才能排除这些并未拿到真实响应的调用。
+    """
+    mock_repo = MagicMock()
+    mock_repo.save_interaction = MagicMock()
+
+    with patch(
+        "src.storage.repositories.model_interaction_repository.ModelInteractionRepository",
+        return_value=mock_repo,
+    ):
+        record_model_interaction(
+            run_id="run-1",
+            chunk_id=None,
+            interaction_type="disambiguate",
+            phase="incremental_disambiguation",
+            attempt_number=2,
+            messages=_build_messages(),
+            response_text='{"error":"timeout"}',
+            thinking_content=None,
+            reasoning_tokens=None,
+            requested_thinking=True,
+            duration_ms=1200,
+            model_name="test-model",
+            model_provider="local",
+            status="error",
+            error_message="timeout",
+            session=object(),
+        )
+
+    kwargs = mock_repo.save_interaction.call_args.kwargs
+    assert kwargs["status"] == "error"
+    assert kwargs["error_message"] == "timeout"
