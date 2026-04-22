@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from src.api.models.events import StreamEvent
-from src.utils.token_counter import count_messages_tokens, count_tokens
 
 from ..schema import CloudDisambiguateResponseModel, DisambiguateResponseModel
 from .result_builder import normalize_disambiguate_response
@@ -98,9 +97,6 @@ async def call_disambiguate_api(
     response_model = CloudDisambiguateResponseModel if client.is_cloud_api() else DisambiguateResponseModel
     request_params["response_format"] = client._build_json_schema(response_model)
 
-    model_for_token_count = config.model
-    prompt_tokens = count_messages_tokens(messages, model_for_token_count)
-
     response = await client._call_api_stream(
         request_params,
         is_cloud=client.is_cloud_api(),
@@ -125,14 +121,6 @@ async def call_disambiguate_api(
         normalized_response = normalized_response.model_copy(update={"reasoning_tokens": reasoning_tokens})
 
     response_content = response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
-    completion_tokens = count_tokens(response_content, model_for_token_count)
-    total_tokens = prompt_tokens + completion_tokens
-
-    client._record_token_usage_estimated(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        call_type=log_type,
-    )
+    client._record_estimated_token_usage_from_messages(messages, response_content, log_type)
 
     return normalized_response

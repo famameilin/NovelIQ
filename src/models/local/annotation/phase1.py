@@ -68,6 +68,11 @@ async def execute_phase1_call(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: unify-estimated-token-accounting
+    修改内容: Phase1 token_usage 改为基于 messages/response 的统一估算口径，不再依赖 provider usage
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -116,7 +121,7 @@ async def execute_phase1_call(
 
     result = client._validate_annotation(result, sources, chunk_id, content_clean)
 
-    client._record_token_usage(response, "phase1", chunk_id)
+    client._record_estimated_token_usage_from_messages(current_messages, content_clean, "phase1", chunk_id)
 
     return result, content_clean
 

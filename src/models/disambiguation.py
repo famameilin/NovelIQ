@@ -15,6 +15,11 @@ DisambiguationClient 模块
 任务: disambiguation-state-three-layer
 修改内容: 将 alias_map 改为 canonical_decisions
 
+修改时间: 2026-04-22
+修改者: Codex
+任务: unify-estimated-token-accounting
+修改内容: stage_summary token_usage 统一改为基于 messages/summary 文本的估算口径
+
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
 - 核心逻辑委托给 src.models.local.disambiguation 子模块
@@ -288,7 +293,7 @@ class DisambiguationClient(BaseModelClient):
 
         summary = response.choices[0].message.content.strip()
 
-        self._record_token_usage(response, "stage_summary")
+        self._record_estimated_token_usage_from_messages(messages, summary, "stage_summary")
 
         from loguru import logger
 

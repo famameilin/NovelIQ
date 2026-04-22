@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -458,6 +458,8 @@ class TokenUsageSummary(BaseModel):
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     total_tokens: int = 0
+    accounting_method: Literal["estimated"] = "estimated"
+    coverage_status: Literal["complete", "partial"] = "complete"
 
 
 class TokenUsageByTask(BaseModel):
@@ -471,6 +473,8 @@ class TokenUsageByModel(BaseModel):
 
 
 class TokenUsageStats(BaseModel):
-    summary: TokenUsageSummary = TokenUsageSummary()
-    by_task: dict[str, TokenUsageByTask] = {}
-    by_model: dict[str, TokenUsageByModel] = {}
+    summary: TokenUsageSummary = Field(default_factory=TokenUsageSummary)
+    by_task: dict[str, TokenUsageByTask] = Field(default_factory=dict)
+    by_call_type: dict[str, TokenUsageByTask] = Field(default_factory=dict)
+    by_model: dict[str, TokenUsageByModel] = Field(default_factory=dict)
+    coverage_gaps: list[str] = Field(default_factory=list)

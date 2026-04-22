@@ -24,7 +24,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.models.cloud.schema import CloudAnalysis as CloudAnalysisSchema
-from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, TokenUsage
+from src.storage.models import CloudAnalysis, GlobalContext, GlobalStats, ModelInteraction, TokenUsage
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -158,11 +158,17 @@ def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dic
     """
     summary = _fetch_usage_summary(session, run_id, novel_id)
     by_task = _fetch_usage_by_task(session, run_id, novel_id)
+    by_call_type = _fetch_usage_by_call_type(session, run_id, novel_id)
     by_model = _fetch_usage_by_model(session, run_id, novel_id)
+    coverage_gaps = _detect_token_coverage_gaps(session, run_id, by_call_type)
+    summary["accounting_method"] = "estimated"
+    summary["coverage_status"] = "partial" if coverage_gaps else "complete"
     return {
         "summary": summary,
         "by_task": by_task,
+        "by_call_type": by_call_type,
         "by_model": by_model,
+        "coverage_gaps": coverage_gaps,
     }
 
 
@@ -212,6 +218,37 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     return {row.task_type: {"call_count": row.count, "total_tokens": row.total} for row in result}
 
 
+def _build_call_type_key(task_type: str, call_type: str) -> str:
+    """构建对外统一的调用桶 key。"""
+    return f"{task_type}.{call_type}"
+
+
+def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
+    """按 task_type + call_type 获取使用量。"""
+    stmt = (
+        select(
+            TokenUsage.task_type,
+            TokenUsage.call_type,
+            func.count().label("count"),
+            func.sum(TokenUsage.total_tokens).label("total"),
+        )
+        .where(
+            TokenUsage.novel_id == novel_id,
+            TokenUsage.run_id == run_id,
+        )
+        .group_by(TokenUsage.task_type, TokenUsage.call_type)
+    )
+
+    result = session.execute(stmt).fetchall()
+    return {
+        _build_call_type_key(row.task_type, row.call_type): {
+            "call_count": row.count,
+            "total_tokens": row.total,
+        }
+        for row in result
+    }
+
+
 def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
     """按模型获取使用量"""
     stmt = (
@@ -229,6 +266,70 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
 
     result = session.execute(stmt).fetchall()
     return {row.model: {"call_count": row.count, "total_tokens": row.total} for row in result}
+
+
+def _normalize_model_interaction_call_key(interaction_type: str, phase: str | None) -> str:
+    """
+    将 model_interactions 里的类型归一到 token_usage 的调用桶 key。
+
+    中文注释：旧 run 没有完整 token_usage 时，只能依赖 model_interactions 判断
+    “哪些调用真实发生过”。这里必须把两张表映射到同一组 key，才能做覆盖度比较。
+    """
+    normalized_phase = phase or "unknown"
+    if interaction_type == "annotate":
+        return _build_call_type_key("annotation", normalized_phase)
+    if interaction_type == "dialogue_attribution":
+        return _build_call_type_key("annotation", "phase3")
+    if interaction_type == "relation_extraction":
+        return _build_call_type_key("annotation", "phase4")
+    if interaction_type == "diagnose":
+        return _build_call_type_key("diagnosis", "diagnosis")
+    if interaction_type == "stage_summary":
+        return _build_call_type_key("incremental_disambig", "stage_summary")
+    if interaction_type == "disambiguate":
+        if normalized_phase in {"incremental_disambiguation", "incremental"}:
+            return _build_call_type_key("incremental_disambig", "disambiguate_characters")
+        if normalized_phase in {"final_disambiguation", "full_disambiguation"}:
+            return _build_call_type_key("full_disambig", "disambiguate_characters")
+        if normalized_phase in {"reselect_canonicals", "final_canonical_reselect", "canonical_reselect"}:
+            return _build_call_type_key("full_disambig", "reselect_canonicals")
+        return _build_call_type_key("unknown_disambiguate", normalized_phase)
+    return _build_call_type_key(f"unknown_{interaction_type}", normalized_phase)
+
+
+def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[str, int]:
+    """按归一后的调用桶统计真实发生过的模型调用次数。"""
+    stmt = (
+        select(
+            ModelInteraction.interaction_type,
+            ModelInteraction.phase,
+            func.count().label("count"),
+        )
+        .where(ModelInteraction.run_id == run_id)
+        .group_by(ModelInteraction.interaction_type, ModelInteraction.phase)
+    )
+    result = session.execute(stmt).fetchall()
+    aggregated: dict[str, int] = {}
+    for row in result:
+        key = _normalize_model_interaction_call_key(row.interaction_type, row.phase)
+        aggregated[key] = aggregated.get(key, 0) + (row.count or 0)
+    return aggregated
+
+
+def _detect_token_coverage_gaps(
+    session: Session,
+    run_id: str,
+    by_call_type: dict[str, Any],
+) -> list[str]:
+    """比较真实调用与已记账调用，找出 token 覆盖缺口。"""
+    interaction_counts = _fetch_model_interaction_call_counts(session, run_id)
+    gaps: list[str] = []
+    for call_key in sorted(interaction_counts.keys()):
+        interaction_call_count = int(interaction_counts.get(call_key, 0) or 0)
+        token_call_count = int(by_call_type.get(call_key, {}).get("call_count", 0) or 0)
+        if token_call_count < interaction_call_count:
+            gaps.append(call_key)
+    return gaps
 
 
 def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:

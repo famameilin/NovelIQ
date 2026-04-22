@@ -162,6 +162,11 @@ class MockAnnotationClient:
     修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 简化Mock类，移除已弃用方法
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: unify-estimated-token-accounting
+    修改内容: 补充统一估算 token helper stub，覆盖 Phase1/Phase2 新记账路径
     """
 
     def __init__(self, mock_content="{}", should_fail=False):
@@ -181,11 +186,12 @@ class MockAnnotationClient:
         self._token_usage_callback = None
         self._instructor_client = None
         self._client = None
-        self._task_type = "annotate"
+        self._task_type = "annotation"
         self._novel_id = "test-novel"
         self.mock_content = mock_content
         self.should_fail = should_fail
         self.call_count = 0
+        self.recorded_token_usage: list[dict[str, object]] = []
 
     def _is_cloud_api(self) -> bool:
         return False
@@ -211,8 +217,16 @@ class MockAnnotationClient:
     def _validate_and_retry_annotation(self, result, prompt, content, sources, chunk_id):
         return result
 
-    def _record_token_usage(self, response, phase, chunk_id):
-        pass
+    def _record_estimated_token_usage_from_messages(self, messages, response_text, call_type, chunk_id, **kwargs):
+        self.recorded_token_usage.append(
+            {
+                "messages": messages,
+                "response_text": response_text,
+                "call_type": call_type,
+                "chunk_id": chunk_id,
+                "kwargs": kwargs,
+            }
+        )
 
     def _log_prompt_response(self, chunk_id, content_clean, thinking_content, extraction, messages, text, prev_summary):
         pass
@@ -283,6 +297,8 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(call_count[0], 1)
         self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase1")
+        self.assertEqual(client.recorded_token_usage[0]["chunk_id"], 1)
 
     async def test_phase1_retry_on_connection_error(self):
         """Phase1 连接错误时重试"""
@@ -381,6 +397,8 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsInstance(result, ForeshadowingResult)
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase2")
+        self.assertEqual(client.recorded_token_usage[0]["chunk_id"], 1)
 
     @patch("src.models.local.annotation.phase2.record_model_interaction")
     async def test_phase2_persists_thinking_content(self, mock_record_model_interaction: MagicMock):
