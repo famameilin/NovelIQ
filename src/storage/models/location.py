@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Index, Integer, String
+from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -23,6 +23,11 @@ class ChunkLocation(Base):
     创建者: TraeAI
     任务: implement-location-entity-type
     说明: 存储每个 chunk 中出现的地点
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-analysis-related-foreign-keys
+    修改内容: 为 novel_id 与 (chunk_id, run_id) 补充外键约束，避免地点记录脱离小说和 chunk 主表。
     """
 
     __tablename__ = "chunk_locations"
@@ -37,6 +42,18 @@ class ChunkLocation(Base):
     novel_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["chunk_id", "run_id"],
+            ["chunks.chunk_id", "chunks.run_id"],
+            ondelete="CASCADE",
+            name="chunk_locations_chunk_id_run_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["novel_id"],
+            ["novels.novel_id"],
+            ondelete="RESTRICT",
+            name="chunk_locations_novel_id_fkey",
+        ),
         Index("idx_chunk_locations_chunk_id", "chunk_id"),
         Index("idx_chunk_locations_run_id", "run_id"),
         Index("idx_chunk_locations_novel_id", "novel_id"),

@@ -220,10 +220,11 @@ def _setup_token_usage_callback(
         chunk_id: int | None,
     ) -> None:
         try:
+            resolved_novel_id = cb_novel_id if cb_novel_id and cb_novel_id != "unknown" else novel_id
             stats_repo = StatsRepository(conn)
             stats_repo.insert_token_usage(
                 run_id,
-                cb_novel_id,
+                resolved_novel_id,
                 task_type,
                 call_type,
                 model,

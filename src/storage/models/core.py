@@ -25,7 +25,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -52,12 +52,21 @@ class AnalysisRun(Base):
     修改者: TraeAI
     任务: task-system-db-driven-refactor
     修改内容: 添加 started_at 字段，记录任务实际开始执行时间，完善运行态时间戳体系。
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-analysis-related-foreign-keys
+    修改内容: 为 novel_id 补充到 novels 表的外键约束，阻止 task 再次脱离小说主表。
     """
 
     __tablename__ = "analysis_runs"
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    novel_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    novel_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("novels.novel_id", ondelete="RESTRICT", name="analysis_runs_novel_id_fkey"),
+        nullable=False,
+    )
     source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -100,11 +109,20 @@ class DisambigCheckpoint(Base):
 
     仅存储 DisambiguationState 的 JSON 快照，用于断点续传。
     图投影进度通过 ChunkRelation.projection_status 查询，不在此表中记录。
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-analysis-related-foreign-keys
+    修改内容: 为 run_id 补充到 analysis_runs 的外键约束，确保检查点生命周期与任务一致。
     """
 
     __tablename__ = "disambig_checkpoint"
 
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("analysis_runs.run_id", ondelete="CASCADE", name="disambig_checkpoint_run_id_fkey"),
+        primary_key=True,
+    )
     state_json: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
