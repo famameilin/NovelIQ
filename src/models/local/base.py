@@ -54,6 +54,7 @@ from pydantic import BaseModel
 from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.parser.thinking import extract_thinking_unified
+from src.utils.token_counter import count_messages_tokens, count_tokens
 
 if TYPE_CHECKING:
     from src.api.models.events import StreamEvent
@@ -154,13 +155,14 @@ class TokenUsage(NamedTuple):
     novel_id: str
     task_type: str
     call_type: str
+    model: str
     prompt_tokens: int
     total_tokens: int
     completion_tokens: int | None
     chunk_id: int | None
 
 
-TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
+TokenUsageCallback = Callable[[str, str, str, str, int, int, int | None, int | None], None]
 
 
 class BaseModelClient:
@@ -288,6 +290,7 @@ class BaseModelClient:
                 self._novel_id or "unknown",
                 self._task_type,
                 call_type,
+                self._config.model or "unknown",
                 response.usage.prompt_tokens,
                 response.usage.total_tokens,
                 response.usage.completion_tokens,
@@ -344,11 +347,61 @@ class BaseModelClient:
                 self._novel_id or "unknown",
                 self._task_type,
                 call_type,
+                self._config.model or "unknown",
                 prompt_tokens,
                 total_tokens,
                 completion_tokens,
                 chunk_id,
             )
+
+    def _record_estimated_token_usage_from_messages(
+        self,
+        messages: list[dict[str, Any]],
+        response_text: str,
+        call_type: str,
+        chunk_id: int | None = None,
+        *,
+        task_type: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        """
+        基于 prompt/response 文本统一记录估算 token。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: unify-estimated-token-accounting
+        说明: token_usage 对外统一收敛为“估算消耗”口径。
+              各条调用链都应走这一入口，避免 provider 实报、局部估算、
+              以及漏记混成多套账本。
+        """
+        if not self._token_usage_callback:
+            return
+
+        resolved_model = model_name or self._config.model
+        if not resolved_model:
+            logger.warning(
+                "skip estimated token usage because model name is missing: task_type={} call_type={}",
+                task_type,
+                call_type,
+            )
+            return
+
+        prompt_tokens = count_messages_tokens(messages, resolved_model)
+        completion_tokens = count_tokens(response_text or "", resolved_model)
+        total_tokens = prompt_tokens + completion_tokens
+
+        # 中文注释：这里显式传 model/task_type，避免共享 callback 再偷用 annotation client
+        # 的模型名，把 disambiguation / fallback / embedding 的账混写到同一个 model 维度。
+        self._token_usage_callback(
+            self._novel_id or "unknown",
+            task_type or self._task_type,
+            call_type,
+            resolved_model,
+            prompt_tokens,
+            total_tokens,
+            completion_tokens,
+            chunk_id,
+        )
 
     def _build_json_schema(self, response_model: type[T]) -> dict[str, Any]:
         """

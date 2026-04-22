@@ -46,7 +46,7 @@ from src.models.local.disambiguation import DisambiguationPromptContext
 
 from .schema import CloudAnalysis
 
-TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
+TokenUsageCallback = Callable[[str, str, str, str, int, int, int | None, int | None], None]
 
 
 class CloudModelClient:
