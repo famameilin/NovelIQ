@@ -234,7 +234,7 @@ class MockAnnotationClient:
     def _get_instructor_client(self):
         return None
 
-    async def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None):
+    async def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None, call_type=None):
         self._call_count += 1
         if self.should_fail:
             raise ConnectionError("Connection failed")
@@ -283,7 +283,7 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        async def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id, **kwargs):
             call_count[0] += 1
             return MagicMock()
 
@@ -305,7 +305,7 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        async def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id, **kwargs):
             call_count[0] += 1
             if call_count[0] < 3:
                 raise ConnectionError("Connection failed")
@@ -331,11 +331,11 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         local_call_count = [0]
         fallback_call_count = [0]
 
-        async def local_call_api(messages, enable_thinking, chunk_id):
+        async def local_call_api(messages, enable_thinking, chunk_id, **kwargs):
             local_call_count[0] += 1
             raise ConnectionError("Local connection failed")
 
-        async def fallback_call_api(messages, enable_thinking, chunk_id):
+        async def fallback_call_api(messages, enable_thinking, chunk_id, **kwargs):
             fallback_call_count[0] += 1
             return MagicMock()
 
@@ -359,7 +359,7 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         local_client = MockAnnotationClient()
         fallback_client = MockAnnotationClient()
 
-        async def always_fail(messages, enable_thinking, chunk_id):
+        async def always_fail(messages, enable_thinking, chunk_id, **kwargs):
             raise ConnectionError("Connection failed")
 
         local_client._call_annotation_api = always_fail
@@ -372,6 +372,31 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
                 chunk_id=1,
                 fallback_client=fallback_client,
             )
+
+    async def test_phase1_validation_failure_still_records_failed_attempt_tokens(self):
+        """Phase1 响应已返回但校验失败时，也应记录失败尝试的 token。"""
+        client = MockAnnotationClient()
+        validation_call_count = [0]
+
+        def validate_once_then_succeed(result, sources, chunk_id, content_clean=""):
+            validation_call_count[0] += 1
+            if validation_call_count[0] == 1:
+                raise ValueError("validation failed")
+            return result
+
+        client._validate_annotation = validate_once_then_succeed
+
+        result = await annotate_chunk_phase1(
+            client=client,
+            text="测试文本",
+            chunk_id=1,
+        )
+
+        self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(validation_call_count[0], 2)
+        self.assertEqual(len(client.recorded_token_usage), 2)
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase1")
+        self.assertEqual(client.recorded_token_usage[1]["call_type"], "phase1")
 
 
 class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):

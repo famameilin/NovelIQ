@@ -37,6 +37,11 @@
 任务: code-review-fix
 修改内容: 移除 _call_api_stream 中发送剩余 buffer 时的冗余条件判断
 
+修改时间: 2026-04-22
+修改者: Codex
+任务: count-failed-llm-calls
+修改内容: 新增从响应对象提取文本并补记失败态 token 的通用 helper，覆盖“请求已发出但后处理失败”的场景
+
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
@@ -401,6 +406,56 @@ class BaseModelClient:
             total_tokens,
             completion_tokens,
             chunk_id,
+        )
+
+    def _extract_response_text_for_token_usage(self, response: Any) -> str:
+        """
+        从响应对象中提取可用于 token 估算的文本。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: count-failed-llm-calls
+        说明: 当请求已经返回，但后续结构化解析或业务校验失败时，
+              仍应尽量按真实响应文本补记 token；若提取失败则保守回退为空字符串。
+        """
+        if response is None or not hasattr(response, "choices") or not response.choices:
+            return ""
+
+        message = response.choices[0].message
+        try:
+            content_clean, _thinking_content = self._extract_response_content(message)
+            return content_clean or ""
+        except Exception:
+            raw_content = getattr(message, "content", None)
+            return raw_content if isinstance(raw_content, str) else ""
+
+    def _record_estimated_token_usage_from_response(
+        self,
+        messages: list[dict[str, Any]],
+        response: Any,
+        call_type: str,
+        chunk_id: int | None = None,
+        *,
+        task_type: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        """
+        基于响应对象补记统一估算 token。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: count-failed-llm-calls
+        说明: 主要用于“模型调用已完成，但解析/校验失败”的路径；
+              此时至少应把 prompt 算上，若还能提取出响应文本，则连 completion 一并估算。
+        """
+        response_text = self._extract_response_text_for_token_usage(response)
+        self._record_estimated_token_usage_from_messages(
+            messages,
+            response_text,
+            call_type,
+            chunk_id,
+            task_type=task_type,
+            model_name=model_name,
         )
 
     def _build_json_schema(self, response_model: type[T]) -> dict[str, Any]:

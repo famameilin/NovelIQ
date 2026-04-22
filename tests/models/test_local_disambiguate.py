@@ -2,7 +2,7 @@ import asyncio
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -120,6 +120,57 @@ class TestLocalDisambiguate(unittest.TestCase):
             client.disambiguate_characters(_candidates("zhang_san"), existing_names=["li_si", "wang_wu"])
         )
         self.assertIsInstance(result, ExtendedDisambigResult)
+
+    def test_disambiguate_failed_parse_still_records_token_usage(self) -> None:
+        """消歧响应已返回但结构化解析失败时，仍应记录 token。"""
+        config = TaskModelConfig(
+            base_url="http://127.0.0.1:8000/v1",
+            model="test-model",
+            api_key="test-key",
+        )
+        recorded_calls: list[dict[str, object]] = []
+
+        def token_usage_callback(
+            novel_id: str,
+            task_type: str,
+            call_type: str,
+            model: str,
+            prompt_tokens: int,
+            total_tokens: int,
+            completion_tokens: int | None,
+            chunk_id: int | None,
+        ) -> None:
+            recorded_calls.append(
+                {
+                    "novel_id": novel_id,
+                    "task_type": task_type,
+                    "call_type": call_type,
+                    "model": model,
+                    "prompt_tokens": prompt_tokens,
+                    "total_tokens": total_tokens,
+                    "completion_tokens": completion_tokens,
+                    "chunk_id": chunk_id,
+                }
+            )
+
+        client = DisambiguationClient(
+            task_type="incremental_disambig",
+            config=config,
+            client=MagicMock(),
+            token_usage_callback=token_usage_callback,
+            novel_id="novel-1",
+        )
+        invalid_response = MagicMock()
+        invalid_response.choices = [MagicMock(message=MagicMock(content="not-json"))]
+        client._call_api_stream = AsyncMock(return_value=invalid_response)
+
+        with self.assertRaises(Exception):
+            asyncio.run(client.disambiguate_characters(_candidates("zhang_san")))
+
+        self.assertEqual(len(recorded_calls), 1)
+        self.assertEqual(recorded_calls[0]["task_type"], "incremental_disambig")
+        self.assertEqual(recorded_calls[0]["call_type"], "disambiguate_characters")
+        self.assertGreater(recorded_calls[0]["prompt_tokens"], 0)
 
 
 if __name__ == "__main__":
