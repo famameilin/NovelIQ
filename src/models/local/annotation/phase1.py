@@ -89,9 +89,21 @@ async def execute_phase1_call(
     enable_thinking = client._config.thinking_enabled
     response = await client._call_annotation_api(current_messages, enable_thinking, chunk_id)
 
-    content_clean, thinking_content, extraction = client._process_annotation_response(
-        response, is_cloud, chunk_id, "phase1"
-    )
+    try:
+        content_clean, thinking_content, extraction = client._process_annotation_response(
+            response, is_cloud, chunk_id, "phase1"
+        )
+    except Exception:
+        # 中文注释：这里的异常说明模型响应已经返回，但响应清洗/重复输出检测失败；
+        # 这种场景同样已经真实消耗了 token，需要按响应对象补记成本。
+        client._record_estimated_token_usage_from_response(
+            current_messages,
+            response,
+            "phase1",
+            chunk_id,
+            task_type="annotation",
+        )
+        raise
 
     duration_ms = int((time.time() - start_time) * 1000)
     extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
