@@ -41,6 +41,59 @@ export interface ThemePalette {
 }
 
 /**
+ * 创建时间: 2026-04-22
+ * 任务: 首页白底主题预览
+ * 说明: 首页需要纯白底，但 Hero 与按钮区仍应保持原本的 Indigo 强调色，
+ * 因此单独提供一套首页变量：背景保持纯白，交互色回到默认主题的紫蓝体系。
+ */
+export function generateHomeThemePalette(): ThemePalette {
+  return {
+    light: {
+      "--primary": "239 84% 50%",
+      "--primary-hover": "239 84% 43%",
+      "--primary-active": "239 84% 37%",
+      "--primary-subtle": "239 70% 90%",
+      "--background": "0 0% 100%",
+      "--surface": "0 0% 100%",
+      "--surface-hover": "0 0% 98%",
+      "--border": "239 18% 90%",
+      "--border-subtle": "239 16% 94%",
+      "--text": "0 0% 8%",
+      "--text-secondary": "0 0% 28%",
+      "--text-muted": "0 0% 44%",
+      "--text-on-primary": "0 0% 100%",
+      "--chart-1": "239 84% 55%",
+      "--chart-2": "279 74% 55%",
+      "--chart-3": "199 74% 55%",
+      "--chart-4": "319 69% 55%",
+      "--chart-5": "159 69% 55%",
+      "--chart-neutral": "0 0% 60%",
+    },
+    dark: {
+      "--primary": "239 82% 74%",
+      "--primary-hover": "239 86% 80%",
+      "--primary-active": "239 76% 68%",
+      "--primary-subtle": "239 28% 18%",
+      "--background": "0 0% 6%",
+      "--surface": "0 0% 9%",
+      "--surface-hover": "0 0% 12%",
+      "--border": "239 12% 22%",
+      "--border-subtle": "239 10% 16%",
+      "--text": "0 0% 94%",
+      "--text-secondary": "0 0% 70%",
+      "--text-muted": "0 0% 52%",
+      "--text-on-primary": "0 0% 10%",
+      "--chart-1": "239 76% 72%",
+      "--chart-2": "279 60% 68%",
+      "--chart-3": "199 62% 68%",
+      "--chart-4": "319 58% 68%",
+      "--chart-5": "159 54% 66%",
+      "--chart-neutral": "0 0% 50%",
+    },
+  };
+}
+
+/**
  * Generate a complete theme palette from a seed hex color.
  * Derives all CSS variable values for light and dark modes.
  */
