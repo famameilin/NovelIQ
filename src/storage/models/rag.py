@@ -29,7 +29,7 @@ class TokenUsage(Base):
     __tablename__ = "token_usage"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    novel_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    novel_id: Mapped[str] = mapped_column(String(255), nullable=False)
     chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     call_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -39,7 +39,7 @@ class TokenUsage(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[str] = mapped_column(String(50), nullable=False)
     run_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True
     )
 
     __table_args__ = (
