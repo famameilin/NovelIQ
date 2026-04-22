@@ -101,4 +101,30 @@ describe("useNovelTheme", () => {
       expect(getDiagnosisMock).not.toHaveBeenCalled();
     });
   });
+
+  it("没有当前小说和任务时应恢复默认主题色", async () => {
+    useNovelStore.setState({
+      currentNovelId: null,
+      currentTaskId: null,
+      novelsCache: [],
+    });
+    useThemeStore.setState({
+      seedColor: "#123456",
+      isDark: false,
+      autoSyncEnabled: true,
+    });
+
+    const queryClient = createQueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ThemeHarness />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(useThemeStore.getState().seedColor).toBe(DEFAULT_SEED);
+      expect(getDiagnosisMock).not.toHaveBeenCalled();
+    });
+  });
 });

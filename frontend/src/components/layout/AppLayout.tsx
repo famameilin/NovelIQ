@@ -1,9 +1,10 @@
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { TopBar } from "./TopBar";
 import { SideNav } from "./SideNav";
 import { HeroPanel } from "./HeroPanel";
 import type { LayoutMode } from "./types";
+import { useNovelStore } from "@/store/novelStore";
 
 interface AppLayoutProps {
   mode?: LayoutMode;
@@ -39,6 +40,28 @@ export function AppLayout({ mode = "default" }: AppLayoutProps) {
 
   const openUploadDialog = useCallback(() => setUploadDialogOpen(true), []);
   const closeUploadDialog = useCallback(() => setUploadDialogOpen(false), []);
+
+  /**
+   * 修改时间: 2026-04-22
+   * 任务: 修复首页误继承任务主题色
+   * 修改原因: 首页不对应具体小说任务；进入首页布局时需要清空当前小说/任务选择，
+   * 避免全局主题 hook 继续沿用上一次任务的 diagnosis 主题色。
+   */
+  useEffect(() => {
+    if (mode !== "with-hero-panel") {
+      return;
+    }
+
+    const { currentNovelId, currentTaskId } = useNovelStore.getState();
+    if (!currentNovelId && !currentTaskId) {
+      return;
+    }
+
+    useNovelStore.setState({
+      currentNovelId: null,
+      currentTaskId: null,
+    });
+  }, [mode]);
 
   const homeContextValue: HomeContextValue = {
     total,
