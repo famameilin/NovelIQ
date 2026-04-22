@@ -38,7 +38,7 @@ describe("themeStore 持久化配置", () => {
       seedColor: "#123456",
       isDark: true,
       autoSyncEnabled: true,
-    });
+    }, 1);
 
     expect(migrated).toEqual({
       isDark: true,
@@ -52,7 +52,7 @@ describe("themeStore 持久化配置", () => {
       seedColor: "#123456",
       isDark: false,
       autoSyncEnabled: false,
-    });
+    }, 1);
 
     expect(migrated).toEqual({
       seedColor: "#123456",

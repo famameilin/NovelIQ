@@ -7,9 +7,9 @@ import { useNovelTheme } from "@/hooks/useNovelTheme";
 import { useNovelStore } from "@/store/novelStore";
 import { DEFAULT_SEED, useThemeStore } from "@/store/themeStore";
 import { getDiagnosis } from "@/api/results";
+import { generateThemePalette } from "@/lib/theme";
 
 const getDiagnosisMock = vi.fn();
-const HOME_ROUTE_SEED = "#FFFFFF";
 
 vi.mock("@/api/results", () => ({
   getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
@@ -152,7 +152,6 @@ describe("useNovelTheme", () => {
     renderThemeHarness(queryClient, "/");
 
     await waitFor(() => {
-      expect(useThemeStore.getState().seedColor).toBe(HOME_ROUTE_SEED);
       expect(getDiagnosisMock).not.toHaveBeenCalled();
       expect(document.documentElement.style.getPropertyValue("--background")).toBe("0 0% 100%");
       expect(document.documentElement.style.getPropertyValue("--primary")).toBe("239 84% 50%");
@@ -176,7 +175,6 @@ describe("useNovelTheme", () => {
     renderThemeHarness(queryClient, "/");
 
     await waitFor(() => {
-      expect(useThemeStore.getState().seedColor).toBe(HOME_ROUTE_SEED);
       expect(getDiagnosisMock).not.toHaveBeenCalled();
       expect(document.documentElement.style.getPropertyValue("--surface")).toBe("0 0% 100%");
       expect(document.documentElement.style.getPropertyValue("--text-on-primary")).toBe("0 0% 100%");
@@ -201,10 +199,72 @@ describe("useNovelTheme", () => {
     renderThemeHarness(queryClient, "/novels/novel-1");
 
     await waitFor(() => {
-      expect(useThemeStore.getState().seedColor).toBe(HOME_ROUTE_SEED);
       expect(getDiagnosisMock).not.toHaveBeenCalled();
       expect(document.documentElement.style.getPropertyValue("--background")).toBe("0 0% 100%");
       expect(document.documentElement.style.getPropertyValue("--primary")).toBe("239 84% 50%");
+    });
+  });
+
+  it("新任务主题未返回前应先回退到默认主题，而不是复用旧 seed", async () => {
+    let resolveDiagnosis!: (value: { theme_color: string }) => void;
+    getDiagnosisMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDiagnosis = resolve;
+        }),
+    );
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-2",
+      novelsCache: [],
+    });
+    useThemeStore.setState({
+      seedColor: "#FFFFFF",
+      isDark: false,
+      autoSyncEnabled: true,
+    });
+
+    const queryClient = createQueryClient();
+
+    renderThemeHarness(queryClient, "/novels/novel-1?task_id=task-2");
+
+    await waitFor(() => {
+      expect(getDiagnosisMock).toHaveBeenCalledTimes(1);
+    });
+
+    const defaultPalette = generateThemePalette(DEFAULT_SEED);
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(defaultPalette.light["--primary"]);
+    expect(document.documentElement.style.getPropertyValue("--background")).toBe(
+      defaultPalette.light["--background"],
+    );
+
+    resolveDiagnosis({ theme_color: "#123456" });
+
+    await waitFor(() => {
+      expect(useThemeStore.getState().seedColor).toBe("#123456");
+      expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
+        generateThemePalette("#123456").light["--primary"],
+      );
+    });
+  });
+
+  it("组件展示页首屏不应发起任务主题同步或覆盖手动试色", async () => {
+    useThemeStore.setState({
+      seedColor: "#E84393",
+      isDark: false,
+      autoSyncEnabled: true,
+    });
+
+    const queryClient = createQueryClient();
+
+    renderThemeHarness(queryClient, "/dev/components");
+
+    await waitFor(() => {
+      expect(getDiagnosisMock).not.toHaveBeenCalled();
+      expect(useThemeStore.getState().seedColor).toBe("#E84393");
+      expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
+        generateThemePalette("#E84393").light["--primary"],
+      );
     });
   });
 });
