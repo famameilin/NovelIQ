@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from src.api.exceptions import NovelNotFoundError
 from src.api.models.events import AnalysisEventBus, StreamEvent
@@ -974,6 +975,72 @@ class TestDeleteAnalysis:
         data = delete_response.json()
         assert "删除成功" in data["message"] or "任务删除成功" in data["message"]
         assert data["task_id"] == task_id
+
+    def test_delete_task_cleans_db_rows_and_artifacts_for_full_run_id(self, api_client: TestClient):
+        """测试删除 task 会清理 full run_id 日志目录、导出文件与关键从表"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("delete_artifacts_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+        run_id = "12345678-1234-1234-1234-123456789abc"
+        task_id = run_id[:8]
+
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.create_run(novel_id=novel_id, run_id=run_id)
+            run_repo.update_run_task_fields(run_id, status="completed")
+            session.execute(
+                text("INSERT INTO chunks (chunk_id, text, run_id) VALUES (:chunk_id, :text, :run_id)"),
+                {"chunk_id": 0, "text": "待删除分块", "run_id": run_id},
+            )
+            session.execute(
+                text(
+                    """
+                    INSERT INTO global_context (novel_id, novel_title, run_id)
+                    VALUES (:novel_id, :novel_title, :run_id)
+                    ON CONFLICT (novel_id) DO UPDATE
+                    SET novel_title = EXCLUDED.novel_title, run_id = EXCLUDED.run_id
+                    """
+                ),
+                {"novel_id": novel_id, "novel_title": "待删除小说", "run_id": run_id},
+            )
+            session.commit()
+
+        log_dir = Path("logs") / run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "analysis.log").write_text("test log", encoding="utf-8")
+        output_file = Path("outputs") / f"{task_id}.json"
+        output_file.write_text("{}", encoding="utf-8")
+
+        delete_response = api_client.delete(f"/api/novels/{novel_id}/tasks/{task_id}")
+        assert delete_response.status_code == 200
+
+        with get_session_factory()() as session:
+            remaining_run = session.execute(
+                text("SELECT COUNT(*) FROM analysis_runs WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            ).scalar_one()
+            remaining_chunks = session.execute(
+                text("SELECT COUNT(*) FROM chunks WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            ).scalar_one()
+            remaining_context = session.execute(
+                text("SELECT COUNT(*) FROM global_context WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            ).scalar_one()
+
+        assert remaining_run == 0
+        assert remaining_chunks == 0
+        assert remaining_context == 0
+        assert not log_dir.exists()
+        assert not output_file.exists()
 
 
 class TestRunRepository:
