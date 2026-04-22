@@ -9,7 +9,11 @@ from src.config import settings
 from src.config.constants import VALID_ENTITY_TYPES
 from src.models.disambiguation_types import NameCountCandidate
 
-from ..prompts import ANONYMOUS_DISAMBIG_SYSTEM_PROMPT, DISAMBIGUATE_SYSTEM_PROMPT
+from ..prompts import (
+    ANONYMOUS_DISAMBIG_SYSTEM_PROMPT,
+    CANONICAL_RESELECT_SYSTEM_PROMPT,
+    DISAMBIGUATE_SYSTEM_PROMPT,
+)
 from .constants import PROTECTED_CATEGORY_LABEL
 from .evidence import build_evidence_profile, format_evidence_profile
 from .evidence_renderer import DisambiguationPromptContext, render_disambiguation_prompt_context_sections
@@ -18,6 +22,7 @@ if TYPE_CHECKING:
     from src.workflows.annotate_helpers.disambiguation.candidate_filter import CandidateClassification
 
     from .evidence import EvidenceProfile
+    from .state import NameReviewState
 
 _EVIDENCE_MARKERS = {
     "前文总结": "前文摘要-弱证据",
@@ -200,6 +205,28 @@ def _build_dynamic_system_prompt() -> str:
     return base_prompt
 
 
+def _format_reselect_review_summary(review: NameReviewState | None) -> list[str]:
+    """
+    格式化最终代表名重选阶段的复审摘要。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect
+    说明: 终消歧后的额外重选不再判断“是不是同一人”，而是只在已确认 cluster 内
+          选择代表名；这里把当前状态机里已有的复审审计字段整理成稳定提示，供模型参考。
+    """
+    if review is None:
+        return ["  当前复审：无"]
+
+    evidence_types = "、".join(review.decision_evidence_types) if review.decision_evidence_types else "无"
+    return [
+        f"  当前复审：{review.status} / {review.confidence}",
+        f"  当前锚点：{review.proposed_canonical or '无'}",
+        f"  证据强度：{review.evidence_strength or '无'}",
+        f"  审计证据：{evidence_types}",
+    ]
+
+
 def build_disambiguate_messages(
     candidates: list[NameCountCandidate],
     context_sentences: dict[str, str] | None = None,
@@ -256,6 +283,46 @@ def build_disambiguate_messages(
 
     return [
         {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def build_canonical_reselect_messages(
+    candidates: list[NameCountCandidate],
+    clusters: list[list[str]],
+    context_sentences: dict[str, str] | None = None,
+    review_states: dict[str, NameReviewState] | None = None,
+) -> list[dict[str, str]]:
+    """
+    构建最终代表名重选消息。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect
+    说明: 该阶段只负责“在已确认同一人的 cluster 内选最终代表名”，
+          因此 prompt 明确按组组织输入，禁止模型重新拆组或跨组合并。
+    """
+    counts_by_name = {str(candidate["name"]): int(candidate.get("count", 0)) for candidate in candidates}
+    cluster_blocks: list[str] = []
+
+    for cluster_index, cluster in enumerate(clusters, start=1):
+        cluster_lines = [f"【角色组{cluster_index}】", "已确认同一人： " + " / ".join(cluster)]
+        for name in cluster:
+            cluster_lines.append(f"- 名字：{name}")
+            cluster_lines.append(f"  次数：{counts_by_name.get(name, 0)}")
+            cluster_lines.extend(_format_reselect_review_summary((review_states or {}).get(name)))
+            context = (context_sentences or {}).get(name, "").strip()
+            if context:
+                cluster_lines.append(f"  参考上下文：{context}")
+        cluster_blocks.append("\n".join(cluster_lines))
+
+    user_content = (
+        "以下每组名字都已经确认是同一人物，请只在组内选择最终代表名。\n\n"
+        + "\n\n".join(cluster_blocks)
+    )
+
+    return [
+        {"role": "system", "content": CANONICAL_RESELECT_SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
 

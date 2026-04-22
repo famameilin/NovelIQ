@@ -78,6 +78,14 @@ class DisambiguationLike(Protocol):
         prompt_context: DisambiguationPromptContext | None = None,
     ) -> ExtendedDisambigResult: ...
 
+    async def reselect_canonicals(
+        self,
+        candidates: list[NameCountCandidate],
+        clusters: list[list[str]],
+        context_sentences: dict[str, str] | None = None,
+        review_states: dict[str, Any] | None = None,
+    ) -> ExtendedDisambigResult: ...
+
     def is_cloud_api(self) -> bool: ...
 
     async def generate_summary(self, messages: list[dict[str, str]], max_tokens: int = 150) -> str: ...
