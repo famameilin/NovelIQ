@@ -5,6 +5,7 @@ import { SideNav } from "./SideNav";
 import { HeroPanel } from "./HeroPanel";
 import type { LayoutMode } from "./types";
 import { useNovelStore } from "@/store/novelStore";
+import { useNovelTheme } from "@/hooks/useNovelTheme";
 
 interface AppLayoutProps {
   mode?: LayoutMode;
@@ -32,6 +33,8 @@ export function useHomeContext() {
 }
 
 export function AppLayout({ mode = "default" }: AppLayoutProps) {
+  useNovelTheme();
+
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [page, setPage] = useState(1);
