@@ -32,7 +32,7 @@ from collections.abc import Generator
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.storage.models import Base
@@ -81,13 +81,23 @@ def _build_test_engine(database_url: str, schema_name: str):
     说明: 所有测试连接都应带固定 search_path，确保 ORM 与原生 SQL 落在同一隔离 schema。
     """
     safe_schema = _validate_schema_name(schema_name)
-    return create_engine(
+    engine = create_engine(
         database_url,
         echo=False,
         connect_args={
             "options": f"-c search_path={safe_schema},public",
         },
     )
+
+    @event.listens_for(engine, "connect")
+    def _set_test_search_path(dbapi_connection, connection_record) -> None:
+        # 中文注释：仅靠 connect_args 在某些建表/复用连接路径上不够稳定，
+        # 这里对每条测试连接再次显式固定 search_path，避免表意外落回 public 导致用例互相串数据。
+        cursor = dbapi_connection.cursor()
+        cursor.execute(f"SET search_path TO {safe_schema}, public")
+        cursor.close()
+
+    return engine
 
 
 def get_test_database_url() -> str:
@@ -158,6 +168,10 @@ def setup_test_database(test_database_url: str, test_database_schema: str) -> Ge
         conn.execute(text(f"CREATE SCHEMA {safe_schema}"))
         conn.commit()
 
+    # 中文注释：当前 ORM 元数据仍未声明显式 schema，PostgreSQL dialect 的默认建表目标仍是 public。
+    # 因此测试会话启动时需要把 public 里的 ORM 表整体重建一次，清掉上次运行残留的固定 run_id/task_id 数据，
+    # 否则即便 search_path 指向隔离 schema，未限定表名仍会回落到 public 并撞上旧主键。
+    Base.metadata.drop_all(bind=_test_engine)
     Base.metadata.create_all(bind=_test_engine)
 
     yield
@@ -244,6 +258,8 @@ def db_session(setup_test_database: None) -> Generator[Session, None, None]:
 
     SessionLocal = sessionmaker(bind=_test_engine)
     session = SessionLocal()
+    schema_name = _validate_schema_name(os.environ["DATABASE_SCHEMA"])
+    session.execute(text(f"SET search_path TO {schema_name}, public"))
 
     try:
         yield session
