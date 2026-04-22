@@ -16,6 +16,11 @@
 修改者: Codex
 任务: fix-token-usage-metrics-typecheck
 修改内容: 避免 SQL 聚合列与 Python `count()` 方法重名，修复 token metrics 聚合的类型检查报错
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-token-coverage-status
+修改内容: coverage 只统计真正成功的模型响应，避免重试错误占位记录把结果页误报为 partial
 """
 
 from __future__ import annotations
@@ -297,7 +302,11 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
 
     result = session.execute(stmt).fetchall()
     return {
-        row.model: {"call_count": int(row.call_count or 0), "total_tokens": int(row.total_tokens or 0)} for row in result
+        row.model: {
+            "call_count": int(row.call_count or 0),
+            "total_tokens": int(row.total_tokens or 0),
+        }
+        for row in result
     }
 
 
@@ -331,19 +340,30 @@ def _normalize_model_interaction_call_key(interaction_type: str, phase: str | No
 
 
 def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[str, int]:
-    """按归一后的调用桶统计真实发生过的模型调用次数。"""
+    """
+    按归一后的调用桶统计真实发生过的成功模型调用次数。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-status
+    说明: coverage 要比较的是“拿到有效响应的调用”与“已落 token_usage 的调用”。
+          对重试里的无响应 error 占位记录，不能再算进应记账分母。
+    """
     stmt = (
         select(
             ModelInteraction.interaction_type,
             ModelInteraction.phase,
+            ModelInteraction.status,
             func.count().label("call_count"),
         )
         .where(ModelInteraction.run_id == run_id)
-        .group_by(ModelInteraction.interaction_type, ModelInteraction.phase)
+        .group_by(ModelInteraction.interaction_type, ModelInteraction.phase, ModelInteraction.status)
     )
     result = session.execute(stmt).fetchall()
     aggregated: dict[str, int] = {}
     for row in result:
+        if row.status != "success":
+            continue
         key = _normalize_model_interaction_call_key(row.interaction_type, row.phase)
         aggregated[key] = aggregated.get(key, 0) + int(row.call_count or 0)
     return aggregated
