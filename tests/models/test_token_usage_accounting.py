@@ -106,3 +106,29 @@ def test_estimated_token_accounting_handles_empty_response_text() -> None:
     assert usage["chunk_id"] == 3
     assert usage["completion_tokens"] == 0
     assert usage["total_tokens"] == usage["prompt_tokens"]
+
+
+def test_estimated_token_accounting_allows_business_task_override() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    说明: fallback 执行客户端可以保留自己的内部 task_type，
+          但 token_usage 应允许显式覆盖回 annotation 主业务桶。
+    """
+    client = _DummyClient(task_type="annotation_fallback")
+    messages = [{"role": "user", "content": "请输出一个测试响应"}]
+
+    BaseModelClient._record_estimated_token_usage_from_messages(
+        client,
+        messages,
+        '{"ok": true}',
+        "phase1",
+        9,
+        task_type="annotation",
+    )
+
+    usage = client.recorded_calls[0]
+    assert usage["task_type"] == "annotation"
+    assert usage["call_type"] == "phase1"
+    assert usage["chunk_id"] == 9

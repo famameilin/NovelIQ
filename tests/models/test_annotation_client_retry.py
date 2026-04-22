@@ -326,6 +326,7 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         """Phase1 主客户端失败后兜底客户端成功"""
         local_client = MockAnnotationClient()
         fallback_client = MockAnnotationClient()
+        fallback_client._task_type = "annotation_fallback"
 
         local_call_count = [0]
         fallback_call_count = [0]
@@ -351,6 +352,7 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_call_count[0], settings.runtime.annotation.phase_max_retries)
         self.assertEqual(fallback_call_count[0], 1)
         self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(fallback_client.recorded_token_usage[0]["kwargs"]["task_type"], "annotation")
 
     async def test_phase1_all_retries_exhausted(self):
         """Phase1 主客户端和兜底客户端都失败"""
@@ -448,6 +450,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         """Phase2 主客户端失败后兜底客户端成功"""
         local_client = MockAnnotationClient()
         fallback_client = MockAnnotationClient()
+        fallback_client._task_type = "annotation_fallback"
 
         local_call_count = [0]
         fallback_call_count = [0]
@@ -476,6 +479,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_call_count[0], settings.runtime.annotation.phase_max_retries)
         self.assertEqual(fallback_call_count[0], 1)
         self.assertIsInstance(result, ForeshadowingResult)
+        self.assertEqual(fallback_client.recorded_token_usage[0]["kwargs"]["task_type"], "annotation")
 
     async def test_phase2_all_retries_exhausted(self):
         """Phase2 主客户端和兜底客户端都失败"""
