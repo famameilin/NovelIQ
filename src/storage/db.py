@@ -154,15 +154,15 @@ def get_session_factory() -> sessionmaker:
 SessionLocal = get_session_factory
 
 
-def _ensure_runtime_columns(engine: Engine) -> None:
+def _ensure_runtime_schema(engine: Engine) -> None:
     """
-    为历史表补齐运行时新增列。
+    为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema。
 
     创建时间: 2026-04-22
     创建者: Codex
     任务: distinguish-thinking-visibility
-    说明: 当前项目仍以 create_all 为主，线上旧表不会自动补列。
-          这里仅做向后兼容的追加列，不做任何破坏性变更。
+    说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进。
+          这里仅做“补列 / 补索引”这类非破坏性修复，不在应用启动时静默删除列或重建约束。
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -171,6 +171,8 @@ def _ensure_runtime_columns(engine: Engine) -> None:
     statements = [
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
+        "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)",
     ]
 
     with engine.begin() as conn:
@@ -236,7 +238,7 @@ def init_db(include_level3_tables: bool = False) -> None:
     if not include_level3_tables:
         tables = [table for table in tables if table.name != "chunk_embeddings"]
     Base.metadata.create_all(bind=engine, tables=tables)
-    _ensure_runtime_columns(engine)
+    _ensure_runtime_schema(engine)
     logger.info("Database tables created successfully")
 
 

@@ -57,11 +57,11 @@ class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    novel_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    novel_id: Mapped[str] = mapped_column(String(255), nullable=False)
     source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending", index=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     stage: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
