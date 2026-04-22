@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from src.models.local.base import BaseModelClient
+
+
+class _DummyClient:
+    """
+    轻量 stub，用于验证统一估算 token helper。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: unify-estimated-token-accounting
+    说明: 直接复用 BaseModelClient 的实例方法，不依赖真实网络客户端。
+    """
+
+    def __init__(self, *, task_type: str, model: str = "test-model", novel_id: str = "novel-1") -> None:
+        self._task_type = task_type
+        self._config = SimpleNamespace(model=model)
+        self._novel_id = novel_id
+        self.recorded_calls: list[dict[str, object]] = []
+        self._token_usage_callback = self._capture_usage
+
+    def _capture_usage(
+        self,
+        novel_id: str,
+        task_type: str,
+        call_type: str,
+        model: str,
+        prompt_tokens: int,
+        total_tokens: int,
+        completion_tokens: int | None,
+        chunk_id: int | None,
+    ) -> None:
+        self.recorded_calls.append(
+            {
+                "novel_id": novel_id,
+                "task_type": task_type,
+                "call_type": call_type,
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "total_tokens": total_tokens,
+                "completion_tokens": completion_tokens,
+                "chunk_id": chunk_id,
+            }
+        )
+
+
+def test_estimated_token_accounting_is_consistent_across_task_types() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: unify-estimated-token-accounting
+    说明: 同一组 prompt/response 在不同任务类型下，估算 token 数应一致，
+          只允许 task_type / call_type 元数据不同。
+    """
+    messages = [
+        {"role": "system", "content": "你是一个测试助手。"},
+        {"role": "user", "content": "请输出一个很短的 JSON。"},
+    ]
+    response_text = '{"ok": true}'
+
+    annotation_client = _DummyClient(task_type="annotation")
+    diagnosis_client = _DummyClient(task_type="diagnosis")
+
+    BaseModelClient._record_estimated_token_usage_from_messages(
+        annotation_client,
+        messages,
+        response_text,
+        "phase1",
+        7,
+    )
+    BaseModelClient._record_estimated_token_usage_from_messages(
+        diagnosis_client,
+        messages,
+        response_text,
+        "diagnosis",
+        None,
+    )
+
+    annotation_usage = annotation_client.recorded_calls[0]
+    diagnosis_usage = diagnosis_client.recorded_calls[0]
+
+    assert annotation_usage["prompt_tokens"] == diagnosis_usage["prompt_tokens"]
+    assert annotation_usage["completion_tokens"] == diagnosis_usage["completion_tokens"]
+    assert annotation_usage["total_tokens"] == diagnosis_usage["total_tokens"]
+    assert annotation_usage["task_type"] == "annotation"
+    assert diagnosis_usage["task_type"] == "diagnosis"
+
+
+def test_estimated_token_accounting_handles_empty_response_text() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: unify-estimated-token-accounting
+    说明: 空 completion 也应正常落账，并且 completion_tokens 至少保持为 0。
+    """
+    client = _DummyClient(task_type="annotation")
+    messages = [{"role": "user", "content": "只返回空字符串"}]
+
+    BaseModelClient._record_estimated_token_usage_from_messages(client, messages, "", "phase2", 3)
+
+    usage = client.recorded_calls[0]
+    assert usage["call_type"] == "phase2"
+    assert usage["chunk_id"] == 3
+    assert usage["completion_tokens"] == 0
+    assert usage["total_tokens"] == usage["prompt_tokens"]

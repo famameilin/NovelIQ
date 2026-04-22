@@ -556,6 +556,7 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         mock_client._config.thinking_enabled = True
         mock_client._is_cloud_api.return_value = False
         mock_client._extract_reasoning_tokens.return_value = 31
+        mock_client._record_estimated_token_usage_from_messages = MagicMock()
         mock_client._process_annotation_response.return_value = (
             '{"relations": []}',
             "phase4 thinking",
@@ -596,6 +597,8 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_record_model_interaction.call_args.kwargs["thinking_content"], "phase4 thinking")
         self.assertEqual(mock_record_model_interaction.call_args.kwargs["reasoning_tokens"], 31)
         self.assertTrue(mock_record_model_interaction.call_args.kwargs["requested_thinking"])
+        mock_client._record_estimated_token_usage_from_messages.assert_called_once()
+        assert mock_client._record_estimated_token_usage_from_messages.call_args.args[2] == "phase4"
         call_messages = mock_client._call_annotation_api.await_args.kwargs["messages"]
         self.assertIn("张三、李四", call_messages[1]["content"])
         self.assertIn("<Narrative_Evidence_Level1>", call_messages[1]["content"])

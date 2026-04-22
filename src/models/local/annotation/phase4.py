@@ -10,6 +10,11 @@ Phase4: 关系抽取（LLM调用）
 修改者: TraeAI
 任务: refactor-phase4-relation-extraction
 修改内容: 从启发式规则改为LLM调用，统一处理静态关系和关系变化
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: unify-estimated-token-accounting
+修改内容: Phase4 在交互日志之外补记统一估算 token_usage
 """
 
 from __future__ import annotations
@@ -216,6 +221,7 @@ async def execute_phase4_call(
         model_provider="cloud" if is_cloud else "local",
         session=client._session,
     )
+    client._record_estimated_token_usage_from_messages(messages, content_clean, "phase4", chunk_id)
 
     logger.info(
         "phase4_relation_extraction: chunk_id={} text_len={} relations_count={}",

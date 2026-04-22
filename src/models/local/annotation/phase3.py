@@ -36,6 +36,11 @@
 修改者: TraeAI
 任务: fix-phase3-alias-priority-conflict
 修改内容: Phase3 evidence sections 改由 renderer helper 产出，复用 Phase1 别名优先级规则
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: unify-estimated-token-accounting
+修改内容: Phase3 在持久化 model_interactions 后同步写入统一估算 token_usage
 """
 
 from __future__ import annotations
@@ -268,6 +273,7 @@ async def attribute_dialogues_with_llm(
             model_provider="cloud" if is_cloud else "local",
             session=current_client._session,
         )
+        current_client._record_estimated_token_usage_from_messages(messages, content_clean, "phase3", chunk_id)
 
         logger.info(
             f"dialogue_attribution batch: "

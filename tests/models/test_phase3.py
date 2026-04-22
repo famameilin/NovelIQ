@@ -159,6 +159,7 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         mock_annotation_client._config.thinking_enabled = True
         mock_annotation_client._is_cloud_api.return_value = False
         mock_annotation_client._extract_reasoning_tokens.return_value = 23
+        mock_annotation_client._record_estimated_token_usage_from_messages = MagicMock()
         mock_annotation_client._process_annotation_response.return_value = (
             '{"dialogues": []}',
             "phase3 thinking",
@@ -181,6 +182,8 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_record_model_interaction.call_args.kwargs["thinking_content"], "phase3 thinking")
         self.assertEqual(mock_record_model_interaction.call_args.kwargs["reasoning_tokens"], 23)
         self.assertTrue(mock_record_model_interaction.call_args.kwargs["requested_thinking"])
+        mock_annotation_client._record_estimated_token_usage_from_messages.assert_called_once()
+        assert mock_annotation_client._record_estimated_token_usage_from_messages.call_args.args[2] == "phase3"
 
     @patch("src.models.local.annotation.phase3.settings")
     async def test_alias_speaker_normalized_before_known_filter(self, mock_settings: MagicMock) -> None:

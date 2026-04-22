@@ -924,6 +924,8 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
             total_prompt_tokens=stats["summary"]["total_prompt_tokens"],
             total_completion_tokens=stats["summary"]["total_completion_tokens"],
             total_tokens=stats["summary"]["total_tokens"],
+            accounting_method=stats["summary"].get("accounting_method", "estimated"),
+            coverage_status=stats["summary"].get("coverage_status", "complete"),
         )
         by_task = {
             task: TokenUsageByTask(
@@ -931,6 +933,13 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
                 total_tokens=data["total_tokens"],
             )
             for task, data in stats["by_task"].items()
+        }
+        by_call_type = {
+            call_type: TokenUsageByTask(
+                call_count=data["call_count"],
+                total_tokens=data["total_tokens"],
+            )
+            for call_type, data in stats.get("by_call_type", {}).items()
         }
         by_model = {
             model: TokenUsageByModel(
@@ -942,7 +951,9 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
         return TokenUsageStats(
             summary=summary,
             by_task=by_task,
+            by_call_type=by_call_type,
             by_model=by_model,
+            coverage_gaps=list(stats.get("coverage_gaps", [])),
         )
     except Exception as e:
         logger.warning(f"Failed to fetch token usage stats: {e}")
