@@ -10,6 +10,11 @@ Phase4: 关系抽取（LLM调用）
 修改者: TraeAI
 任务: refactor-phase4-relation-extraction
 修改内容: 从启发式规则改为LLM调用，统一处理静态关系和关系变化
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: unify-estimated-token-accounting
+修改内容: Phase4 在交互日志之外补记统一估算 token_usage
 """
 
 from __future__ import annotations
@@ -177,6 +182,12 @@ async def execute_phase4_call(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    修改内容: Phase4 经 annotation_fallback 执行时仍统一归入 annotation 主业务桶，
+              避免 coverage 统计把 fallback 调用误报为缺口
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -189,33 +200,52 @@ async def execute_phase4_call(
         enable_thinking=enable_thinking,
         chunk_id=chunk_id,
         response_model=RelationExtractionResult,
+        call_type="phase4",
     )
 
-    duration_ms = int((time.time() - start_time) * 1000)
-    content_clean = str(parsed.model_dump())
-    thinking_content = getattr(response, "thinking_content", None)
-    extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
-    reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
-    process_response = getattr(client, "_process_annotation_response", None)
-    if callable(process_response) and hasattr(response, "choices"):
-        content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase4")
+    try:
+        duration_ms = int((time.time() - start_time) * 1000)
+        content_clean = str(parsed.model_dump())
+        thinking_content = getattr(response, "thinking_content", None)
+        extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
+        reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
+        process_response = getattr(client, "_process_annotation_response", None)
+        if callable(process_response) and hasattr(response, "choices"):
+            content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase4")
 
-    record_model_interaction(
-        run_id=run_id,
-        chunk_id=chunk_id,
-        interaction_type="relation_extraction",
-        phase="phase4",
-        attempt_number=attempt_number,
-        messages=messages,
-        response_text=content_clean,
-        thinking_content=thinking_content,
-        reasoning_tokens=reasoning_tokens,
-        requested_thinking=enable_thinking,
-        duration_ms=duration_ms,
-        model_name=config.model,
-        model_provider="cloud" if is_cloud else "local",
-        session=client._session,
-    )
+        record_model_interaction(
+            run_id=run_id,
+            chunk_id=chunk_id,
+            interaction_type="relation_extraction",
+            phase="phase4",
+            attempt_number=attempt_number,
+            messages=messages,
+            response_text=content_clean,
+            thinking_content=thinking_content,
+            reasoning_tokens=reasoning_tokens,
+            requested_thinking=enable_thinking,
+            duration_ms=duration_ms,
+            model_name=config.model,
+            model_provider="cloud" if is_cloud else "local",
+            session=client._session,
+        )
+        # 中文注释：Phase4 的业务归属始终是 annotation，fallback 只是底层执行策略。
+        client._record_estimated_token_usage_from_messages(
+            messages,
+            content_clean,
+            "phase4",
+            chunk_id,
+            task_type="annotation",
+        )
+    except Exception:
+        client._record_estimated_token_usage_from_response(
+            messages,
+            response,
+            "phase4",
+            chunk_id,
+            task_type="annotation",
+        )
+        raise
 
     logger.info(
         "phase4_relation_extraction: chunk_id={} text_len={} relations_count={}",

@@ -24,6 +24,16 @@
 修改者: Codex
 任务: runtime-behavior-settings
 修改内容: 诊断重试次数改由 settings.runtime.diagnosis 驱动，移除类级硬编码常量
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: unify-estimated-token-accounting
+修改内容: diagnosis token_usage 统一改为基于 messages/response_text 的估算口径
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: count-failed-llm-calls
+修改内容: 诊断响应已返回但 JSON 解析失败时，仍补记本次请求的 token 成本
 """
 
 from __future__ import annotations
@@ -182,13 +192,22 @@ class DiagnosisClient(BaseModelClient):
             raise ValueError("client is required")
 
         response = await self._call_api_with_request_params(request_params, is_cloud=self.is_cloud_api())
-        result = self._parse_structured_response(response, CloudAnalysis)
+        content_clean = ""
+        thinking_content = None
+        if response:
+            message = response.choices[0].message
+            content_clean, thinking_content = self._extract_response_content(message)
+
+        try:
+            result = self._parse_structured_response(response, CloudAnalysis)
+        except Exception:
+            if response:
+                self._record_estimated_token_usage_from_messages(messages, content_clean, "diagnosis", chunk_id=None)
+            raise
 
         duration_ms = int((time.time() - start_time) * 1000)
 
         if run_id and response:
-            message = response.choices[0].message
-            content_clean, thinking_content = self._extract_response_content(message)
             extract_reasoning_tokens = getattr(self, "_extract_reasoning_tokens", None)
             reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
 
@@ -211,7 +230,6 @@ class DiagnosisClient(BaseModelClient):
 
         if self._analysis_logger and response:
             message = response.choices[0].message
-            content_clean, thinking_content = self._extract_response_content(message)
 
             has_thinking = bool(thinking_content and thinking_content.strip())
             has_response = bool(content_clean and content_clean.strip())
@@ -251,7 +269,7 @@ class DiagnosisClient(BaseModelClient):
         final_result = self._finalize_result(result, novel_id)
 
         if response:
-            self._record_token_usage(response, "diagnosis", chunk_id=None)
+            self._record_estimated_token_usage_from_messages(messages, content_clean, "diagnosis", chunk_id=None)
 
         if self._analysis_logger:
             self._analysis_logger.write_summary(
