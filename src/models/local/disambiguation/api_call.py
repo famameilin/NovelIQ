@@ -108,6 +108,8 @@ async def call_disambiguate_api(
     )
 
     thinking_content = None
+    extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
+    reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
     if hasattr(response, "choices") and response.choices:
         message = response.choices[0].message
         thinking_content = getattr(message, "reasoning_content", None)
@@ -119,6 +121,8 @@ async def call_disambiguate_api(
 
     if thinking_content:
         normalized_response = normalized_response.model_copy(update={"thinking_content": thinking_content})
+    if reasoning_tokens is not None:
+        normalized_response = normalized_response.model_copy(update={"reasoning_tokens": reasoning_tokens})
 
     response_content = response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
     completion_tokens = count_tokens(response_content, model_for_token_count)

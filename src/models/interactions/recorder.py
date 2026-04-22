@@ -17,6 +17,48 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
+def _normalize_reasoning_tokens(reasoning_tokens: int | None) -> int | None:
+    """
+    归一化 reasoning token 计数。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: distinguish-thinking-visibility
+    说明: 统一处理 None / 非法值 / 负数，避免把坏值直接写进数据库。
+    """
+    if reasoning_tokens is None:
+        return None
+    try:
+        normalized = int(reasoning_tokens)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized >= 0 else None
+
+
+def _derive_thinking_state(
+    *,
+    thinking_content: str | None,
+    reasoning_tokens: int | None,
+    requested_thinking: bool | None,
+) -> str:
+    """
+    计算 thinking 可见性状态。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: distinguish-thinking-visibility
+    说明: 区分“有文本 think”“只有 reasoning token”“明确没有 think”
+          与“当前链路拿不到足够证据”的 unknown，避免把未知静默记成 none。
+    """
+    if thinking_content and thinking_content.strip():
+        return "text"
+    if reasoning_tokens is not None and reasoning_tokens > 0:
+        return "tokens_only"
+    if reasoning_tokens == 0 or requested_thinking is False:
+        return "none"
+    return "unknown"
+
+
 def record_model_interaction(
     *,
     run_id: str | None,
@@ -27,6 +69,8 @@ def record_model_interaction(
     messages: list[dict],
     response_text: str,
     thinking_content: str | None,
+    reasoning_tokens: int | None = None,
+    requested_thinking: bool | None = None,
     duration_ms: int,
     model_name: str | None,
     model_provider: str,
@@ -49,6 +93,8 @@ def record_model_interaction(
         messages: 消息列表
         response_text: 响应文本
         thinking_content: 思考内容，可为 None
+        reasoning_tokens: reasoning token 数，可为 None
+        requested_thinking: 本次调用是否显式请求 think，可为 None
         duration_ms: 耗时（毫秒）
         model_name: 模型名称，可为 None
         model_provider: 模型提供者（local/cloud）
@@ -61,6 +107,12 @@ def record_model_interaction(
         from src.storage.repositories.model_interaction_repository import ModelInteractionRepository
 
         prompt_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        normalized_reasoning_tokens = _normalize_reasoning_tokens(reasoning_tokens)
+        thinking_state = _derive_thinking_state(
+            thinking_content=thinking_content,
+            reasoning_tokens=normalized_reasoning_tokens,
+            requested_thinking=requested_thinking,
+        )
 
         if session is not None:
             repo = ModelInteractionRepository(session)
@@ -78,6 +130,8 @@ def record_model_interaction(
                 response_chars=len(response_text),
                 thinking_chars=len(thinking_content) if thinking_content else 0,
                 has_thinking=bool(thinking_content and thinking_content.strip()),
+                reasoning_tokens=normalized_reasoning_tokens,
+                thinking_state=thinking_state,
                 status="success",
                 duration_ms=duration_ms,
             )
@@ -102,6 +156,8 @@ def record_model_interaction(
                     response_chars=len(response_text),
                     thinking_chars=len(thinking_content) if thinking_content else 0,
                     has_thinking=bool(thinking_content and thinking_content.strip()),
+                    reasoning_tokens=normalized_reasoning_tokens,
+                    thinking_state=thinking_state,
                     status="success",
                     duration_ms=duration_ms,
                 )

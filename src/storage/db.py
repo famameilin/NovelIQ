@@ -23,7 +23,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 from loguru import logger
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
@@ -154,6 +154,30 @@ def get_session_factory() -> sessionmaker:
 SessionLocal = get_session_factory
 
 
+def _ensure_runtime_columns(engine: Engine) -> None:
+    """
+    为历史表补齐运行时新增列。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: distinguish-thinking-visibility
+    说明: 当前项目仍以 create_all 为主，线上旧表不会自动补列。
+          这里仅做向后兼容的追加列，不做任何破坏性变更。
+    """
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    statements = [
+        "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
+        "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
+    ]
+
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
+
+
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
     """
@@ -212,6 +236,7 @@ def init_db(include_level3_tables: bool = False) -> None:
     if not include_level3_tables:
         tables = [table for table in tables if table.name != "chunk_embeddings"]
     Base.metadata.create_all(bind=engine, tables=tables)
+    _ensure_runtime_columns(engine)
     logger.info("Database tables created successfully")
 
 

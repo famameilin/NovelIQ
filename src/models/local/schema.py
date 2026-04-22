@@ -442,6 +442,11 @@ class DisambiguateResponseModel(BaseModel):
         description="模型的 thinking 内容（内部使用，不写入数据库）",
         alias="_thinking_content",
     )
+    reasoning_tokens: int | None = Field(
+        default=None,
+        description="模型的 reasoning token 数（内部使用，不写入数据库）",
+        alias="_reasoning_tokens",
+    )
     evidence_sources: dict[str, list[str]] = Field(
         default_factory=dict,
         description="每个候选名的证据来源列表，如 ['原文例句', '身份线索', '前文摘要-弱证据']",
