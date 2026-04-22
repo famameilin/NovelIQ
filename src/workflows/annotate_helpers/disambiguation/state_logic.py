@@ -456,6 +456,119 @@ def reselect_cluster_canonicals(
     return new_state
 
 
+def apply_model_reselected_canonicals(
+    state: DisambiguationState,
+    canonical_decisions: dict[str, str],
+    *,
+    clusters: list[set[str]],
+) -> DisambiguationState:
+    """
+    将模型输出的最终代表名重选结果应用到既有 alias cluster。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect
+    说明: 这一步只允许“在已确认 cluster 内重选代表名”，不允许模型新增/删除成员、
+          拆组，或跨 cluster 指向。若输出不合法，直接抛错，避免静默污染最终图谱。
+    """
+    if not clusters:
+        return state
+
+    expected_names = {name for cluster in clusters for name in cluster}
+    missing_names = expected_names - set(canonical_decisions)
+    if missing_names:
+        raise ValueError(f"Missing canonical reselect decisions for names: {sorted(missing_names)}")
+
+    alias_merges_dict = state.get_alias_merges_dict()
+    review_status = state.get_review_status_dict()
+    cluster_lookup = {name: cluster for cluster in clusters for name in cluster}
+
+    # 中文注释：先把待重选 cluster 之外的 alias 保留下来，确保这次额外调用只影响
+    # 最终代表名选择，不会顺手改动无关 cluster 的既有合并结果。
+    new_alias_merges = {
+        alias: canonical
+        for alias, canonical in alias_merges_dict.items()
+        if alias not in expected_names
+    }
+    for alias, canonical in alias_merges_dict.items():
+        if alias not in expected_names and canonical in expected_names:
+            raise ValueError(f"Unexpected cross-cluster alias edge: {alias} -> {canonical}")
+
+    new_known_canonical = set(state.known_canonical_names)
+    new_review_status = dict(review_status)
+    rewired_clusters: list[tuple[list[str], str]] = []
+
+    for cluster in clusters:
+        cluster_decisions = {name: canonical_decisions[name] for name in cluster}
+        invalid_targets = {
+            name: target for name, target in cluster_decisions.items() if target not in cluster_lookup.get(name, set())
+        }
+        if invalid_targets:
+            raise ValueError(f"Invalid canonical reselect targets: {invalid_targets}")
+
+        selected_targets = set(cluster_decisions.values())
+        if len(selected_targets) != 1:
+            raise ValueError(
+                f"Canonical reselect must converge to exactly one target per cluster: "
+                f"{sorted(cluster)} -> {sorted(selected_targets)}"
+            )
+
+        selected_canonical = next(iter(selected_targets))
+        cluster_changed = False
+        for name in cluster:
+            if name == selected_canonical:
+                review = new_review_status.get(name)
+                if review is not None:
+                    updated_review = replace(
+                        review,
+                        status=review.status if review.status != DISAMBIG_STATE_UNRESOLVED else DISAMBIG_STATE_REVIEW,
+                        proposed_canonical=name,
+                    )
+                    if updated_review != review:
+                        new_review_status[name] = updated_review
+                        cluster_changed = True
+                continue
+
+            previous_target = new_alias_merges.get(name)
+            if previous_target != selected_canonical:
+                new_alias_merges[name] = selected_canonical
+                cluster_changed = True
+
+            review = new_review_status.get(name)
+            if review is not None:
+                updated_review = replace(
+                    review,
+                    status=review.status if review.status != DISAMBIG_STATE_UNRESOLVED else DISAMBIG_STATE_REVIEW,
+                    proposed_canonical=selected_canonical,
+                )
+                if updated_review != review:
+                    new_review_status[name] = updated_review
+                    cluster_changed = True
+
+        new_known_canonical.difference_update(cluster)
+        new_known_canonical.add(selected_canonical)
+        if cluster_changed:
+            rewired_clusters.append((sorted(cluster), selected_canonical))
+
+    new_state = state.with_updates(
+        known_canonical_names=frozenset(new_known_canonical),
+        alias_merges=frozenset(
+            (alias, canonical) for alias, canonical in new_alias_merges.items() if alias != canonical
+        ),
+        review_status=tuple(new_review_status.items()),
+    )
+    validate_state_invariants(new_state)
+
+    if rewired_clusters:
+        logger.info(
+            "Applied model-selected canonicals for {} alias clusters: {}",
+            len(rewired_clusters),
+            rewired_clusters,
+        )
+
+    return new_state
+
+
 def _has_protected_merge_evidence(profile: EvidenceProfile | None) -> bool:
     """
     判断受保护候选是否具备允许合并的强证据。

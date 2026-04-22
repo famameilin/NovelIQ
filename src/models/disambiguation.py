@@ -33,6 +33,7 @@ from .local.disambiguation import (
     DisambiguationPromptContext,
     ExtendedDisambigResult,
     build_anonymous_disambig_messages,
+    build_canonical_reselect_messages,
     build_disambiguate_messages,
     build_extended_result_from_response,
     build_result_from_response,
@@ -130,6 +131,73 @@ class DisambiguationClient(BaseModelClient):
             from loguru import logger
 
             logger.error("disambiguate_characters unexpected error: {}", str(e))
+            raise
+
+    async def reselect_canonicals(
+        self,
+        candidates: list[NameCountCandidate],
+        clusters: list[list[str]],
+        context_sentences: dict[str, str] | None = None,
+        review_states: dict[str, Any] | None = None,
+    ) -> ExtendedDisambigResult:
+        """
+        在已确认 alias cluster 内重选最终代表名。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: final-canonical-reselect
+        说明: 该调用不再判断“是不是同一人”，只负责在终消歧后为每个 cluster
+              选择最终代表名，避免由本地 heuristic 代替模型完成这一步。
+        """
+        if not candidates:
+            return ExtendedDisambigResult(
+                canonical_decisions={},
+                entity_types={},
+                entity_relations=[],
+                alias_confidence={},
+            )
+        is_cloud = self._is_cloud_api()
+        log_disambiguate_start(
+            "reselect_canonicals",
+            len(candidates),
+            is_cloud,
+            self._novel_id,
+            self._task_type,
+            self._config.model,
+            self._config.thinking_enabled,
+        )
+        messages = build_canonical_reselect_messages(
+            candidates,
+            clusters,
+            context_sentences=context_sentences,
+            review_states=review_states,
+        )
+        try:
+            response = await call_disambiguate_api(
+                client=self,
+                config=self._config,
+                messages=messages,
+                log_type="reselect_canonicals",
+            )
+            log_disambiguate_response(
+                "reselect_canonicals",
+                len(response.canonical_decisions),
+                is_cloud,
+                self._novel_id,
+            )
+            metadata = {
+                "model": self._config.model,
+                "task_type": self._task_type,
+                "candidates_count": len(candidates),
+                "cluster_count": len(clusters),
+                "type": "reselect_canonicals",
+            }
+            log_disambiguate_result(self._analysis_logger, messages, response, metadata)
+            return build_extended_result_from_response(response, candidates, context_sentences)
+        except Exception as e:
+            from loguru import logger
+
+            logger.error("reselect_canonicals unexpected error: {}", str(e))
             raise
 
     async def disambiguate_anonymous(

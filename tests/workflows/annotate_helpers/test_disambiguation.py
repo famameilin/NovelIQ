@@ -14,8 +14,12 @@ from src.models.local.disambiguation import (
 )
 from src.rag import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
+from src.workflows.annotate_helpers.client_init import _NoopDisambiguationClient
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
-from src.workflows.annotate_helpers.disambiguation.state_logic import reselect_cluster_canonicals
+from src.workflows.annotate_helpers.disambiguation.state_logic import (
+    apply_model_reselected_canonicals,
+    reselect_cluster_canonicals,
+)
 
 
 def _candidates(*names: str) -> list[dict[str, int | str]]:
@@ -27,6 +31,9 @@ class _FakeDisambigClient:
         self._config = SimpleNamespace(model="test-model")
         self.received_existing_names: list[str] | None = None
         self.received_prompt_context: DisambiguationPromptContext | None = None
+        self.received_reselect_clusters: list[list[str]] | None = None
+        self.received_reselect_review_states: dict[str, NameReviewState] | None = None
+        self.reselect_result = ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 
     async def disambiguate_characters(
         self,
@@ -38,6 +45,17 @@ class _FakeDisambigClient:
         self.received_existing_names = existing_names
         self.received_prompt_context = prompt_context
         return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
+
+    async def reselect_canonicals(
+        self,
+        candidates,
+        clusters,
+        context_sentences=None,
+        review_states=None,
+    ):
+        self.received_reselect_clusters = [list(cluster) for cluster in clusters]
+        self.received_reselect_review_states = dict(review_states or {})
+        return self.reselect_result
 
     def is_cloud_api(self) -> bool:
         return False
@@ -216,6 +234,104 @@ async def test_record_model_interaction_with_disambiguation() -> None:
     call_kwargs = mock_record.call_args.kwargs
     assert call_kwargs["model_name"] == "test-model"
     assert call_kwargs["interaction_type"] == "disambiguate"
+
+
+@pytest.mark.asyncio
+async def test_retry_canonical_reselect_records_unknown_model_name_for_configless_client() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect-review-fix
+    说明: 额外 canonical 重选的交互日志不能假定 `_config.model` 一定存在；
+          轻量 fallback / 自定义 stub 至少应记录为 unknown，而不是在日志阶段直接报错。
+    """
+
+    class _ConfiglessReselectClient:
+        def __init__(self) -> None:
+            self._config = object()
+
+        async def reselect_canonicals(
+            self,
+            candidates,
+            clusters,
+            context_sentences=None,
+            review_states=None,
+        ):
+            return ExtendedDisambigResult(
+                canonical_decisions={"灰衣人": "白芷", "白芷": "白芷"},
+                entity_types={},
+                entity_relations=[],
+                alias_confidence={"灰衣人": "high", "白芷": "high"},
+            )
+
+        def is_cloud_api(self) -> bool:
+            return False
+
+    with patch("src.workflows.annotate_helpers.disambiguation.pipeline.record_model_interaction") as mock_record:
+        result = await pipeline_mod._retry_canonical_reselect(
+            client=_ConfiglessReselectClient(),
+            candidates=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
+            clusters=[["灰衣人", "白芷"]],
+            context_sentences={"灰衣人": "她自称白芷", "白芷": "白芷"},
+            review_states={},
+            stage_name="final canonical reselect",
+            run_id="run-1",
+        )
+
+    assert result.canonical_decisions == {"灰衣人": "白芷", "白芷": "白芷"}
+    assert mock_record.call_args.kwargs["model_name"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_run_final_canonical_reselect_falls_back_for_noop_client() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect-review-fix
+    说明: 当 full disambig client 是 lightweight no-op fallback 时，终消歧后的额外
+          代表名重选必须回退到既有 heuristic，不能因为不支持模型调用而把主流程打挂。
+    """
+    state = DisambiguationState(
+        discovered_names=frozenset({"灰衣人", "白芷"}),
+        known_canonical_names=frozenset({"灰衣人"}),
+        alias_merges=frozenset({("白芷", "灰衣人")}),
+        review_status=(
+            (
+                "灰衣人",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="灰衣人",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("identity_reveal",),
+                ),
+            ),
+            (
+                "白芷",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="灰衣人",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("naming_scene",),
+                ),
+            ),
+        ),
+    )
+
+    new_state = await pipeline_mod._run_final_canonical_reselect(
+        conn=object(),
+        state=state,
+        full_disambig_client=_NoopDisambiguationClient(config=object()),
+        all_names=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
+        alias_keywords=["号"],
+        run_id="run-1",
+    )
+
+    assert new_state.known_canonical_names == frozenset({"白芷"})
+    assert new_state.get_alias_merges_dict() == {"灰衣人": "白芷"}
 
 
 @pytest.mark.asyncio
@@ -605,6 +721,84 @@ def test_reselect_cluster_canonicals_prefers_real_name_over_descriptor_alias() -
     assert corrected_review["白芷"].proposed_canonical == "白芷"
 
 
+def test_apply_model_reselected_canonicals_rewrites_cluster_to_model_selected_name() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect
+    说明: 最终额外调用给出新的代表名后，状态机应严格按 cluster 内模型结果重写
+          alias_merges / known_canonical_names / proposed_canonical。
+    """
+    state = DisambiguationState(
+        discovered_names=frozenset({"铁爷", "贺铮"}),
+        known_canonical_names=frozenset({"铁爷"}),
+        alias_merges=frozenset({("贺铮", "铁爷")}),
+        review_status=(
+            (
+                "铁爷",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="铁爷",
+                    evidence_strength="strong",
+                    decision_evidence_count=2,
+                    decision_evidence_types=("stable_title_or_rank", "original_sentence"),
+                ),
+            ),
+            (
+                "贺铮",
+                NameReviewState(
+                    status="resolved",
+                    confidence="high",
+                    proposed_canonical="铁爷",
+                    evidence_strength="mixed",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("original_sentence",),
+                ),
+            ),
+        ),
+    )
+
+    new_state = apply_model_reselected_canonicals(
+        state,
+        {"铁爷": "贺铮", "贺铮": "贺铮"},
+        clusters=[{"铁爷", "贺铮"}],
+    )
+
+    assert new_state.known_canonical_names == frozenset({"贺铮"})
+    assert new_state.get_alias_merges_dict() == {"铁爷": "贺铮"}
+    review_dict = new_state.get_review_status_dict()
+    assert review_dict["铁爷"].proposed_canonical == "贺铮"
+    assert review_dict["贺铮"].proposed_canonical == "贺铮"
+
+
+def test_apply_model_reselected_canonicals_rejects_cross_cluster_target() -> None:
+    """
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: final-canonical-reselect
+    说明: 额外重选调用只能在既有 cluster 内选代表名；跨 cluster 指向必须直接报错，
+          不能静默回退到旧 heuristic。
+    """
+    state = DisambiguationState(
+        discovered_names=frozenset({"铁爷", "贺铮", "算盘", "林立果"}),
+        known_canonical_names=frozenset({"铁爷", "算盘"}),
+        alias_merges=frozenset({("贺铮", "铁爷"), ("林立果", "算盘")}),
+    )
+
+    with pytest.raises(ValueError, match="Invalid canonical reselect targets"):
+        apply_model_reselected_canonicals(
+            state,
+            {
+                "铁爷": "贺铮",
+                "贺铮": "林立果",
+                "算盘": "算盘",
+                "林立果": "算盘",
+            },
+            clusters=[{"铁爷", "贺铮"}, {"算盘", "林立果"}],
+        )
+
+
 @pytest.mark.asyncio
 async def test_incremental_pipeline_preserves_deferred_low_frequency_names() -> None:
     """
@@ -718,7 +912,7 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
     创建者: Codex
     任务: reselect-disambig-cluster-canonical
     说明: 终消歧阶段即便这轮模型没有重新输出 `灰衣人/白芷`，也要能基于已有 cluster
-          和全量频次把被旧逻辑翻反的 canonical 纠正回来。
+          和全量频次把被旧逻辑翻反的 canonical 纠正回来，且不应额外查库/调模型。
     """
 
     class _DummyAnnRepo:
@@ -734,6 +928,14 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
     class _DummyConn:
         def commit(self):
             pass
+
+    client = _FakeDisambigClient()
+    client.reselect_result = ExtendedDisambigResult(
+        canonical_decisions={"灰衣人": "白芷", "白芷": "白芷"},
+        entity_types={},
+        entity_relations=[],
+        alias_confidence={"灰衣人": "high", "白芷": "high"},
+    )
 
     polluted_state = DisambiguationState(
         discovered_names=frozenset({"灰衣人", "白芷"}),
@@ -773,13 +975,15 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
             return_value=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
         ),
         patch.object(pipeline_mod, "_collect_final_disambiguation_candidates", return_value=[]),
+        patch.object(pipeline_mod, "build_context_sentences") as build_context_sentences_mock,
+        patch.object(pipeline_mod, "_retry_canonical_reselect") as retry_reselect_mock,
         patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
         patch.object(pipeline_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
             state=polluted_state,
-            full_disambig_client=MagicMock(),
+            full_disambig_client=client,
             alias_keywords=["号"],
             novel_id="novel-1",
             run_id="run-1",
@@ -787,4 +991,7 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
 
     assert new_state.known_canonical_names == frozenset({"白芷"})
     assert new_state.get_alias_merges_dict() == {"灰衣人": "白芷"}
+    assert client.received_reselect_clusters is None
+    build_context_sentences_mock.assert_not_called()
+    retry_reselect_mock.assert_not_called()
     save_checkpoint_mock.assert_called_once()

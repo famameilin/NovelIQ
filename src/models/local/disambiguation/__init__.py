@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     )
     from .messages import (
         build_anonymous_disambig_messages,
+        build_canonical_reselect_messages,
         build_disambiguate_messages,
         build_existing_character_hint,
     )
@@ -74,6 +75,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "log_disambiguate_result": (".logging", "log_disambiguate_result"),
     "log_disambiguate_start": (".logging", "log_disambiguate_start"),
     "build_anonymous_disambig_messages": (".messages", "build_anonymous_disambig_messages"),
+    "build_canonical_reselect_messages": (".messages", "build_canonical_reselect_messages"),
     "build_disambiguate_messages": (".messages", "build_disambiguate_messages"),
     "build_existing_character_hint": (".messages", "build_existing_character_hint"),
     "ExtendedDisambigResult": (".result_builder", "ExtendedDisambigResult"),
