@@ -162,6 +162,11 @@ class MockAnnotationClient:
     修改者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 简化Mock类，移除已弃用方法
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: unify-estimated-token-accounting
+    修改内容: 补充统一估算 token helper stub，覆盖 Phase1/Phase2 新记账路径
     """
 
     def __init__(self, mock_content="{}", should_fail=False):
@@ -181,11 +186,12 @@ class MockAnnotationClient:
         self._token_usage_callback = None
         self._instructor_client = None
         self._client = None
-        self._task_type = "annotate"
+        self._task_type = "annotation"
         self._novel_id = "test-novel"
         self.mock_content = mock_content
         self.should_fail = should_fail
         self.call_count = 0
+        self.recorded_token_usage: list[dict[str, object]] = []
 
     def _is_cloud_api(self) -> bool:
         return False
@@ -211,8 +217,33 @@ class MockAnnotationClient:
     def _validate_and_retry_annotation(self, result, prompt, content, sources, chunk_id):
         return result
 
-    def _record_token_usage(self, response, phase, chunk_id):
-        pass
+    def _record_estimated_token_usage_from_messages(self, messages, response_text, call_type, chunk_id, **kwargs):
+        self.recorded_token_usage.append(
+            {
+                "method": "messages",
+                "messages": messages,
+                "response_text": response_text,
+                "call_type": call_type,
+                "chunk_id": chunk_id,
+                "kwargs": kwargs,
+            }
+        )
+
+    def _record_estimated_token_usage_from_response(self, messages, response, call_type, chunk_id, **kwargs):
+        response_text = ""
+        if getattr(response, "choices", None):
+            response_text = getattr(response.choices[0].message, "content", "") or ""
+        self.recorded_token_usage.append(
+            {
+                "method": "response",
+                "messages": messages,
+                "response": response,
+                "response_text": response_text,
+                "call_type": call_type,
+                "chunk_id": chunk_id,
+                "kwargs": kwargs,
+            }
+        )
 
     def _log_prompt_response(self, chunk_id, content_clean, thinking_content, extraction, messages, text, prev_summary):
         pass
@@ -220,7 +251,7 @@ class MockAnnotationClient:
     def _get_instructor_client(self):
         return None
 
-    async def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None):
+    async def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None, call_type=None):
         self._call_count += 1
         if self.should_fail:
             raise ConnectionError("Connection failed")
@@ -269,7 +300,7 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         client = MockAnnotationClient()
         call_count = [0]
 
-        async def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id, **kwargs):
             call_count[0] += 1
             return MagicMock()
 
@@ -283,13 +314,15 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(call_count[0], 1)
         self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase1")
+        self.assertEqual(client.recorded_token_usage[0]["chunk_id"], 1)
 
     async def test_phase1_retry_on_connection_error(self):
         """Phase1 连接错误时重试"""
         client = MockAnnotationClient()
         call_count = [0]
 
-        async def mock_call_api(messages, enable_thinking, chunk_id):
+        async def mock_call_api(messages, enable_thinking, chunk_id, **kwargs):
             call_count[0] += 1
             if call_count[0] < 3:
                 raise ConnectionError("Connection failed")
@@ -310,15 +343,16 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         """Phase1 主客户端失败后兜底客户端成功"""
         local_client = MockAnnotationClient()
         fallback_client = MockAnnotationClient()
+        fallback_client._task_type = "annotation_fallback"
 
         local_call_count = [0]
         fallback_call_count = [0]
 
-        async def local_call_api(messages, enable_thinking, chunk_id):
+        async def local_call_api(messages, enable_thinking, chunk_id, **kwargs):
             local_call_count[0] += 1
             raise ConnectionError("Local connection failed")
 
-        async def fallback_call_api(messages, enable_thinking, chunk_id):
+        async def fallback_call_api(messages, enable_thinking, chunk_id, **kwargs):
             fallback_call_count[0] += 1
             return MagicMock()
 
@@ -335,13 +369,14 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_call_count[0], settings.runtime.annotation.phase_max_retries)
         self.assertEqual(fallback_call_count[0], 1)
         self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(fallback_client.recorded_token_usage[0]["kwargs"]["task_type"], "annotation")
 
     async def test_phase1_all_retries_exhausted(self):
         """Phase1 主客户端和兜底客户端都失败"""
         local_client = MockAnnotationClient()
         fallback_client = MockAnnotationClient()
 
-        async def always_fail(messages, enable_thinking, chunk_id):
+        async def always_fail(messages, enable_thinking, chunk_id, **kwargs):
             raise ConnectionError("Connection failed")
 
         local_client._call_annotation_api = always_fail
@@ -354,6 +389,58 @@ class TestPhase1Retry(unittest.IsolatedAsyncioTestCase):
                 chunk_id=1,
                 fallback_client=fallback_client,
             )
+
+    async def test_phase1_validation_failure_still_records_failed_attempt_tokens(self):
+        """Phase1 响应已返回但校验失败时，也应记录失败尝试的 token。"""
+        client = MockAnnotationClient()
+        validation_call_count = [0]
+
+        def validate_once_then_succeed(result, sources, chunk_id, content_clean=""):
+            validation_call_count[0] += 1
+            if validation_call_count[0] == 1:
+                raise ValueError("validation failed")
+            return result
+
+        client._validate_annotation = validate_once_then_succeed
+
+        result = await annotate_chunk_phase1(
+            client=client,
+            text="测试文本",
+            chunk_id=1,
+        )
+
+        self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(validation_call_count[0], 2)
+        self.assertEqual(len(client.recorded_token_usage), 2)
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase1")
+        self.assertEqual(client.recorded_token_usage[1]["call_type"], "phase1")
+
+    async def test_phase1_response_processing_failure_still_records_failed_attempt_tokens(self):
+        """Phase1 响应清洗失败时，也应按已返回响应补记 token。"""
+        client = MockAnnotationClient()
+        process_call_count = [0]
+
+        def fail_once_then_succeed(response, is_cloud, chunk_id=None, phase=""):
+            process_call_count[0] += 1
+            if process_call_count[0] == 1:
+                raise ValueError("repetitive output detected")
+            return ("{}", None, None)
+
+        client._process_annotation_response = fail_once_then_succeed
+
+        result = await annotate_chunk_phase1(
+            client=client,
+            text="测试文本",
+            chunk_id=1,
+        )
+
+        self.assertIsInstance(result, ChunkAnnotation)
+        self.assertEqual(process_call_count[0], 2)
+        self.assertEqual(len(client.recorded_token_usage), 2)
+        self.assertEqual(client.recorded_token_usage[0]["method"], "response")
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase1")
+        self.assertEqual(client.recorded_token_usage[1]["method"], "messages")
+        self.assertEqual(client.recorded_token_usage[1]["call_type"], "phase1")
 
 
 class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
@@ -381,6 +468,8 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsInstance(result, ForeshadowingResult)
+        self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase2")
+        self.assertEqual(client.recorded_token_usage[0]["chunk_id"], 1)
 
     @patch("src.models.local.annotation.phase2.record_model_interaction")
     async def test_phase2_persists_thinking_content(self, mock_record_model_interaction: MagicMock):
@@ -430,6 +519,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         """Phase2 主客户端失败后兜底客户端成功"""
         local_client = MockAnnotationClient()
         fallback_client = MockAnnotationClient()
+        fallback_client._task_type = "annotation_fallback"
 
         local_call_count = [0]
         fallback_call_count = [0]
@@ -458,6 +548,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_call_count[0], settings.runtime.annotation.phase_max_retries)
         self.assertEqual(fallback_call_count[0], 1)
         self.assertIsInstance(result, ForeshadowingResult)
+        self.assertEqual(fallback_client.recorded_token_usage[0]["kwargs"]["task_type"], "annotation")
 
     async def test_phase2_all_retries_exhausted(self):
         """Phase2 主客户端和兜底客户端都失败"""

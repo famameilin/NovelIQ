@@ -68,6 +68,17 @@ async def execute_phase1_call(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: unify-estimated-token-accounting
+    修改内容: Phase1 token_usage 改为基于 messages/response 的统一估算口径，不再依赖 provider usage
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-token-coverage-fallback-bucket
+    修改内容: 即使当前执行客户端切到 annotation_fallback，token_usage 仍统一记回 annotation 主业务桶，
+              避免 coverage 比较把 fallback 调用误判为未记账
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -78,9 +89,21 @@ async def execute_phase1_call(
     enable_thinking = client._config.thinking_enabled
     response = await client._call_annotation_api(current_messages, enable_thinking, chunk_id)
 
-    content_clean, thinking_content, extraction = client._process_annotation_response(
-        response, is_cloud, chunk_id, "phase1"
-    )
+    try:
+        content_clean, thinking_content, extraction = client._process_annotation_response(
+            response, is_cloud, chunk_id, "phase1"
+        )
+    except Exception:
+        # 中文注释：这里的异常说明模型响应已经返回，但响应清洗/重复输出检测失败；
+        # 这种场景同样已经真实消耗了 token，需要按响应对象补记成本。
+        client._record_estimated_token_usage_from_response(
+            current_messages,
+            response,
+            "phase1",
+            chunk_id,
+            task_type="annotation",
+        )
+        raise
 
     duration_ms = int((time.time() - start_time) * 1000)
     extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
@@ -105,18 +128,37 @@ async def execute_phase1_call(
 
     client._log_prompt_response(chunk_id, content_clean, thinking_content, extraction, current_messages, text, None)
 
-    result = client._parse_annotation(content_clean)
+    try:
+        result = client._parse_annotation(content_clean)
 
-    sources = {
-        "text": text,
-        "active_entities": parse_active_entities(active_entities),
-        "alias_map": alias_map or {},
-        "evidence_bundle": evidence_bundle,
-    }
+        sources = {
+            "text": text,
+            "active_entities": parse_active_entities(active_entities),
+            "alias_map": alias_map or {},
+            "evidence_bundle": evidence_bundle,
+        }
 
-    result = client._validate_annotation(result, sources, chunk_id, content_clean)
+        result = client._validate_annotation(result, sources, chunk_id, content_clean)
+    except Exception:
+        # 中文注释：phase1 的失败经常发生在 JSON 解析或业务校验阶段，
+        # 但此时模型响应已经拿到了，仍需要把本次尝试的 token 成本记下来。
+        client._record_estimated_token_usage_from_messages(
+            current_messages,
+            content_clean,
+            "phase1",
+            chunk_id,
+            task_type="annotation",
+        )
+        raise
 
-    client._record_token_usage(response, "phase1", chunk_id)
+    # 中文注释：fallback client 只是执行通道切换，不应把业务口径拆成 annotation_fallback.phase1。
+    client._record_estimated_token_usage_from_messages(
+        current_messages,
+        content_clean,
+        "phase1",
+        chunk_id,
+        task_type="annotation",
+    )
 
     return result, content_clean
 
