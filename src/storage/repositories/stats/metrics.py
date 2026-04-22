@@ -11,6 +11,11 @@
 任务: code-quality-refactor - 补充遗漏方法
 修改内容: 添加 insert_cloud_analysis, insert_global_context,
     fetch_global_context, update_global_context, fetch_novel_title
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-token-usage-metrics-typecheck
+修改内容: 避免 SQL 聚合列与 Python `count()` 方法重名，修复 token metrics 聚合的类型检查报错
 """
 
 from __future__ import annotations
@@ -207,8 +212,8 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     stmt = (
         select(
             TokenUsage.task_type,
-            func.count().label("count"),
-            func.sum(TokenUsage.total_tokens).label("total"),
+            func.count().label("call_count"),
+            func.sum(TokenUsage.total_tokens).label("total_tokens"),
         )
         .where(
             TokenUsage.novel_id == novel_id,
@@ -222,8 +227,9 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     for row in result:
         normalized_task_type = _normalize_token_usage_task_type(row.task_type)
         bucket = aggregated.setdefault(normalized_task_type, {"call_count": 0, "total_tokens": 0})
-        bucket["call_count"] += int(row.count or 0)
-        bucket["total_tokens"] += int(row.total or 0)
+        # 中文注释：不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列。
+        bucket["call_count"] += int(row.call_count or 0)
+        bucket["total_tokens"] += int(row.total_tokens or 0)
     return aggregated
 
 
@@ -253,8 +259,8 @@ def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> d
         select(
             TokenUsage.task_type,
             TokenUsage.call_type,
-            func.count().label("count"),
-            func.sum(TokenUsage.total_tokens).label("total"),
+            func.count().label("call_count"),
+            func.sum(TokenUsage.total_tokens).label("total_tokens"),
         )
         .where(
             TokenUsage.novel_id == novel_id,
@@ -269,8 +275,8 @@ def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> d
         normalized_task_type = _normalize_token_usage_task_type(row.task_type)
         key = _build_call_type_key(normalized_task_type, row.call_type)
         bucket = aggregated.setdefault(key, {"call_count": 0, "total_tokens": 0})
-        bucket["call_count"] += int(row.count or 0)
-        bucket["total_tokens"] += int(row.total or 0)
+        bucket["call_count"] += int(row.call_count or 0)
+        bucket["total_tokens"] += int(row.total_tokens or 0)
     return aggregated
 
 
@@ -279,8 +285,8 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
     stmt = (
         select(
             TokenUsage.model,
-            func.count().label("count"),
-            func.sum(TokenUsage.total_tokens).label("total"),
+            func.count().label("call_count"),
+            func.sum(TokenUsage.total_tokens).label("total_tokens"),
         )
         .where(
             TokenUsage.novel_id == novel_id,
@@ -290,7 +296,9 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
     )
 
     result = session.execute(stmt).fetchall()
-    return {row.model: {"call_count": row.count, "total_tokens": row.total} for row in result}
+    return {
+        row.model: {"call_count": int(row.call_count or 0), "total_tokens": int(row.total_tokens or 0)} for row in result
+    }
 
 
 def _normalize_model_interaction_call_key(interaction_type: str, phase: str | None) -> str:
@@ -328,7 +336,7 @@ def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[
         select(
             ModelInteraction.interaction_type,
             ModelInteraction.phase,
-            func.count().label("count"),
+            func.count().label("call_count"),
         )
         .where(ModelInteraction.run_id == run_id)
         .group_by(ModelInteraction.interaction_type, ModelInteraction.phase)
@@ -337,7 +345,7 @@ def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[
     aggregated: dict[str, int] = {}
     for row in result:
         key = _normalize_model_interaction_call_key(row.interaction_type, row.phase)
-        aggregated[key] = aggregated.get(key, 0) + (row.count or 0)
+        aggregated[key] = aggregated.get(key, 0) + int(row.call_count or 0)
     return aggregated
 
 

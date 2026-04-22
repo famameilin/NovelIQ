@@ -36,6 +36,11 @@
 修改者: Codex (GPT-5)
 任务: batch-embedding-requests
 修改内容: 将语义分块 embedding 从逐条请求改为批量请求，降低本地 embedding 服务的请求往返开销
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: fix-embedding-token-callback-signature
+修改内容: 将 EmbeddingClient 的 token callback 签名对齐到统一契约，补上 model 参数
 """
 
 from __future__ import annotations
@@ -49,7 +54,7 @@ from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestE
 
 from src.config import settings
 
-TokenUsageCallback = Callable[[str, str, str, int, int, int | None, int | None], None]
+TokenUsageCallback = Callable[[str, str, str, str, int, int, int | None, int | None], None]
 
 
 class EmbeddingClient:

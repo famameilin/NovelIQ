@@ -154,8 +154,8 @@ def test_fetch_token_usage_stats_can_merge_fallback_task_bucket() -> None:
     session = MagicMock()
     execute_result = MagicMock()
     execute_result.fetchall.return_value = [
-        MagicMock(task_type="annotation", count=2, total=120),
-        MagicMock(task_type="annotation_fallback", count=1, total=30),
+        MagicMock(task_type="annotation", call_count=2, total_tokens=120),
+        MagicMock(task_type="annotation_fallback", call_count=1, total_tokens=30),
     ]
     session.execute.return_value = execute_result
 
