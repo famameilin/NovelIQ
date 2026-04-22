@@ -200,41 +200,52 @@ async def execute_phase4_call(
         enable_thinking=enable_thinking,
         chunk_id=chunk_id,
         response_model=RelationExtractionResult,
+        call_type="phase4",
     )
 
-    duration_ms = int((time.time() - start_time) * 1000)
-    content_clean = str(parsed.model_dump())
-    thinking_content = getattr(response, "thinking_content", None)
-    extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
-    reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
-    process_response = getattr(client, "_process_annotation_response", None)
-    if callable(process_response) and hasattr(response, "choices"):
-        content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase4")
+    try:
+        duration_ms = int((time.time() - start_time) * 1000)
+        content_clean = str(parsed.model_dump())
+        thinking_content = getattr(response, "thinking_content", None)
+        extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
+        reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
+        process_response = getattr(client, "_process_annotation_response", None)
+        if callable(process_response) and hasattr(response, "choices"):
+            content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase4")
 
-    record_model_interaction(
-        run_id=run_id,
-        chunk_id=chunk_id,
-        interaction_type="relation_extraction",
-        phase="phase4",
-        attempt_number=attempt_number,
-        messages=messages,
-        response_text=content_clean,
-        thinking_content=thinking_content,
-        reasoning_tokens=reasoning_tokens,
-        requested_thinking=enable_thinking,
-        duration_ms=duration_ms,
-        model_name=config.model,
-        model_provider="cloud" if is_cloud else "local",
-        session=client._session,
-    )
-    # 中文注释：Phase4 的业务归属始终是 annotation，fallback 只是底层执行策略。
-    client._record_estimated_token_usage_from_messages(
-        messages,
-        content_clean,
-        "phase4",
-        chunk_id,
-        task_type="annotation",
-    )
+        record_model_interaction(
+            run_id=run_id,
+            chunk_id=chunk_id,
+            interaction_type="relation_extraction",
+            phase="phase4",
+            attempt_number=attempt_number,
+            messages=messages,
+            response_text=content_clean,
+            thinking_content=thinking_content,
+            reasoning_tokens=reasoning_tokens,
+            requested_thinking=enable_thinking,
+            duration_ms=duration_ms,
+            model_name=config.model,
+            model_provider="cloud" if is_cloud else "local",
+            session=client._session,
+        )
+        # 中文注释：Phase4 的业务归属始终是 annotation，fallback 只是底层执行策略。
+        client._record_estimated_token_usage_from_messages(
+            messages,
+            content_clean,
+            "phase4",
+            chunk_id,
+            task_type="annotation",
+        )
+    except Exception:
+        client._record_estimated_token_usage_from_response(
+            messages,
+            response,
+            "phase4",
+            chunk_id,
+            task_type="annotation",
+        )
+        raise
 
     logger.info(
         "phase4_relation_extraction: chunk_id={} text_len={} relations_count={}",

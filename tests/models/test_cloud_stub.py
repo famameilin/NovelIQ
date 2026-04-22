@@ -13,6 +13,7 @@ from src.models.diagnosis import DiagnosisClient
 from src.models.disambiguation import DisambiguationClient
 from src.models.local.disambiguation import DisambiguationPromptContext
 from src.models.local.schema import DisambiguateResponseModel
+from src.workflows.retry_utils import MaxRetriesExceededError
 
 
 def _candidates(*names: str) -> list[dict[str, int | str]]:
@@ -68,6 +69,63 @@ class TestCloudStub(unittest.TestCase):
         self.assertEqual(analysis.novel_id, "n1")
         self.assertEqual(analysis.foreshadow_rate, 0.5)
         self.assertEqual(analysis.topic_labels, ["growth"])
+
+    def test_diagnosis_failed_parse_still_records_token_usage(self) -> None:
+        """诊断响应已返回但 JSON 解析失败时，仍应记录 token。"""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="not-json"))]
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        recorded_calls: list[dict[str, object]] = []
+
+        def token_usage_callback(
+            novel_id: str,
+            task_type: str,
+            call_type: str,
+            model: str,
+            prompt_tokens: int,
+            total_tokens: int,
+            completion_tokens: int | None,
+            chunk_id: int | None,
+        ) -> None:
+            recorded_calls.append(
+                {
+                    "novel_id": novel_id,
+                    "task_type": task_type,
+                    "call_type": call_type,
+                    "model": model,
+                    "prompt_tokens": prompt_tokens,
+                    "total_tokens": total_tokens,
+                    "completion_tokens": completion_tokens,
+                    "chunk_id": chunk_id,
+                }
+            )
+
+        config = TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k")
+        client = DiagnosisClient(
+            config,
+            client=mock_client,
+            token_usage_callback=token_usage_callback,
+            novel_id="n1",
+        )
+
+        with patch("src.models.diagnosis.settings") as mock_settings:
+            mock_settings.runtime.diagnosis.max_retries = 1
+            with self.assertRaises(MaxRetriesExceededError):
+                asyncio.run(
+                    client.diagnose(
+                        {
+                            "novel_id": "n1",
+                            "messages": [{"role": "user", "content": "请输出 JSON"}],
+                        }
+                    )
+                )
+
+        self.assertEqual(len(recorded_calls), 1)
+        self.assertEqual(recorded_calls[0]["task_type"], "diagnosis")
+        self.assertEqual(recorded_calls[0]["call_type"], "diagnosis")
+        self.assertGreater(recorded_calls[0]["prompt_tokens"], 0)
 
     def test_disambiguation_client_disambiguate_delegates(self) -> None:
         mock_client = MagicMock()

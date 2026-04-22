@@ -79,10 +79,15 @@ async def call_disambiguate_api(
     任务: fix/disambig-thinking-save
     修改内容: 添加 reasoning_effort 参数，移除 is_cloud 参数（本地和云端统一使用 reasoning_effort）
 
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构为 async def（适配 AsyncOpenAI）
-    """
+修改时间: 2026-04-09
+修改者: TraeAI
+任务: 重构为 async def（适配 AsyncOpenAI）
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: count-failed-llm-calls
+修改内容: 结构化解析失败时仍补记 token，避免请求已完成却被遗漏
+"""
     if not config.model:
         raise ValueError("model is required")
 
@@ -112,15 +117,19 @@ async def call_disambiguate_api(
         if thinking_content:
             logger.debug(f"Extracted thinking_content: {len(thinking_content)} chars")
 
-    parsed_response = client._parse_structured_response(response, response_model)
-    normalized_response = normalize_disambiguate_response(parsed_response)
+    response_content = client._extract_response_text_for_token_usage(response)
+    try:
+        parsed_response = client._parse_structured_response(response, response_model)
+        normalized_response = normalize_disambiguate_response(parsed_response)
+    except Exception:
+        client._record_estimated_token_usage_from_messages(messages, response_content, log_type)
+        raise
 
     if thinking_content:
         normalized_response = normalized_response.model_copy(update={"thinking_content": thinking_content})
     if reasoning_tokens is not None:
         normalized_response = normalized_response.model_copy(update={"reasoning_tokens": reasoning_tokens})
 
-    response_content = response.choices[0].message.content if hasattr(response, "choices") and response.choices else ""
     client._record_estimated_token_usage_from_messages(messages, response_content, log_type)
 
     return normalized_response

@@ -20,6 +20,11 @@ DisambiguationClient 模块
 任务: unify-estimated-token-accounting
 修改内容: stage_summary token_usage 统一改为基于 messages/summary 文本的估算口径
 
+修改时间: 2026-04-22
+修改者: Codex
+任务: count-failed-llm-calls
+修改内容: stage_summary 响应为空或后处理失败时，仍补记已发出请求的 token 成本
+
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
 - 核心逻辑委托给 src.models.local.disambiguation 子模块
@@ -291,7 +296,12 @@ class DisambiguationClient(BaseModelClient):
         )
         duration_ms = int((time.time() - start_time) * 1000)
 
-        summary = response.choices[0].message.content.strip()
+        response_text = self._extract_response_text_for_token_usage(response)
+        if not response_text.strip():
+            self._record_estimated_token_usage_from_messages(messages, response_text, "stage_summary")
+            raise ValueError("stage_summary response is empty")
+
+        summary = response_text.strip()
 
         self._record_estimated_token_usage_from_messages(messages, summary, "stage_summary")
 

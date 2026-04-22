@@ -17,6 +17,11 @@ AnnotationClient 模块
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
 - 核心逻辑已移至 src.models.local.annotation 子包
+
+修改时间: 2026-04-22
+修改者: Codex
+任务: count-failed-llm-calls
+修改内容: 对 phase2/3/4 的结构化响应解析失败路径补记 token，避免请求已返回时漏记成本
 """
 
 from __future__ import annotations
@@ -147,6 +152,7 @@ class AnnotationClient(BaseModelClient):
         chunk_id: int | None,
         response_model: type[T] | None = None,
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+        call_type: str | None = None,
     ) -> Any:
         if not self._config.model:
             raise ValueError("model is required")
@@ -177,7 +183,14 @@ class AnnotationClient(BaseModelClient):
         response = await self._call_api_stream(request_params, is_cloud=is_cloud, emitter=active_emitter)
 
         if response_model is not None:
-            parsed_result = self._parse_structured_response(response, response_model)
+            try:
+                parsed_result = self._parse_structured_response(response, response_model)
+            except Exception:
+                # 中文注释：结构化解析失败时，说明模型响应已经返回，只是后处理没能吃下；
+                # 这类尝试同样消耗了 token，不能因为 raise 就直接漏账。
+                if call_type:
+                    self._record_estimated_token_usage_from_response(messages, response, call_type, chunk_id)
+                raise
             return parsed_result, response
 
         return response
