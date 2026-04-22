@@ -37,7 +37,7 @@ class ChunkEmbedding(Base):
     __tablename__ = "chunk_embeddings"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

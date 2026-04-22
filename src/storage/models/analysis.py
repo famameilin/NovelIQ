@@ -41,7 +41,7 @@ class CloudAnalysis(Base):
     __tablename__ = "cloud_analysis"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    novel_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    novel_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     foreshadow_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     arc_scores: Mapped[str | None] = mapped_column(Text, nullable=True)
     narrative_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -61,7 +61,7 @@ class CloudAnalysis(Base):
     core_cast: Mapped[str | None] = mapped_column(Text, nullable=True)
     theme_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     run_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True
     )
 
     __table_args__ = (
@@ -86,7 +86,7 @@ class ChunkCurve(Base):
     __tablename__ = "chunk_curves"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     pos_density: Mapped[float | None] = mapped_column(Float, nullable=True)
     neg_density: Mapped[float | None] = mapped_column(Float, nullable=True)
     net_density: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -157,7 +157,7 @@ class GlobalContext(Base):
     world_setting: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
     run_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True, index=True
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=True
     )
 
     __table_args__ = (Index("idx_global_context_run_id", "run_id"),)
@@ -183,7 +183,7 @@ class ChunkSummary(Base):
     __tablename__ = "chunk_summaries"
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
@@ -223,7 +223,7 @@ class StageSummary(Base):
 
     stage_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False
     )
     start_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)
     end_chunk_id: Mapped[int] = mapped_column(Integer, nullable=False)

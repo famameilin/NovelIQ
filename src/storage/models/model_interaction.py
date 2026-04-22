@@ -40,10 +40,10 @@ class ModelInteraction(Base):
 
     # 关联信息
     chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
     # 交互类型：annotate / diagnose / disambiguate 等
-    interaction_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    interaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # 阶段信息：phase1 / phase2 / cloud_fallback 等
     phase: Mapped[str | None] = mapped_column(String(50), nullable=True)
