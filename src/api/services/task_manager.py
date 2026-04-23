@@ -37,9 +37,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from src.api.models.responses import TaskStatus
-from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
-from src.storage.repositories import RunRepository
+from src.api.services.task_runtime_persistence_service import TaskRuntimePersistenceService
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -118,13 +116,20 @@ class TaskManager:
         """
         self._tasks: dict[str, TaskInfo] = {}
         self._progress_callback = progress_callback
-        self._db_session_factory: Callable[[], Session] | None = None
         self._worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self._heartbeat_interval_seconds = heartbeat_interval_seconds
+        self._runtime_persistence = TaskRuntimePersistenceService(self._worker_id)
 
     def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
-        """设置数据库会话工厂"""
-        self._db_session_factory = factory
+        """
+        设置数据库会话工厂。
+
+        修改时间: 2026-04-23
+        修改者: Codex
+        任务: p2-task-runtime-persistence
+        修改内容: 改为把 session factory 配置给独立的运行态持久化服务，TaskManager 本身不再持有 DB 写回细节。
+        """
+        self._runtime_persistence.set_session_factory(factory)
 
     def get_worker_id(self) -> str:
         """
@@ -152,62 +157,13 @@ class TaskManager:
                   与 DB 字段类型一致。调用方混用枚举和字符串时，此处统一处理。
 
         说明: 移除静默失败，确保状态变更可靠持久化。DB 为唯一业务真相。
+
+        修改时间: 2026-04-23
+        修改者: Codex
+        任务: p2-task-runtime-persistence
+        修改内容: 改为委托 TaskRuntimePersistenceService；TaskManager 仅保留兼容入口。
         """
-        if self._db_session_factory is None:
-            logger.warning(f"DB session factory not set, skipping DB update for task {task_id}")
-            return
-
-        # 构建更新参数字典
-        update_params: dict[str, Any] = {}
-        if "status" in kwargs:
-            status = kwargs["status"]
-            update_params["status"] = status.value if isinstance(status, TaskStatus) else status
-        if "progress" in kwargs:
-            update_params["progress"] = kwargs["progress"]
-        if "stage" in kwargs:
-            update_params["stage"] = kwargs["stage"]
-        if "sub_stage" in kwargs:
-            update_params["sub_stage"] = kwargs["sub_stage"]
-        if "current" in kwargs:
-            update_params["current"] = kwargs["current"]
-        if "total" in kwargs:
-            update_params["total"] = kwargs["total"]
-        if "message" in kwargs:
-            update_params["message"] = kwargs["message"]
-        if "error" in kwargs:
-            update_params["error"] = kwargs["error"]
-        if "cancel_requested" in kwargs:
-            update_params["cancel_requested"] = kwargs["cancel_requested"]
-        if "completed_at" in kwargs:
-            update_params["completed_at"] = kwargs["completed_at"]
-        if "worker_id" in kwargs:
-            update_params["worker_id"] = kwargs["worker_id"]
-        if "heartbeat_at" in kwargs:
-            update_params["heartbeat_at"] = kwargs["heartbeat_at"]
-
-        if self._should_refresh_worker_heartbeat(update_params):
-            # 中文注释：只要任务仍由本进程活跃推进，就持续刷新 worker 归属和心跳，
-            # 这样启动恢复才能准确识别“这个进程留下来的孤儿任务”。
-            update_params.setdefault("worker_id", self._worker_id)
-            update_params["heartbeat_at"] = datetime.now(UTC)
-
-        if not update_params:
-            return
-
-        # 可靠写入，失败时向上抛出异常
-        session = self._db_session_factory()
-        try:
-            run_repo = RunRepository(session)
-            run_id = self._resolve_run_id_for_db_write(task_id, session)
-            if run_repo.get_run(run_id) is None:
-                raise RuntimeError(f"Run not found for DB update: task_id={task_id}, run_id={run_id}")
-            run_repo.update_run_task_fields(run_id, **update_params)
-            logger.debug(f"Task DB updated: task_id={task_id}, run_id={run_id} - {update_params}")
-        except Exception as e:
-            logger.error(f"Failed to update task DB (task_id={task_id}): {e}")
-            raise
-        finally:
-            session.close()
+        self._runtime_persistence.update_task_runtime(task_id, **kwargs)
 
     def _should_refresh_worker_heartbeat(self, update_params: dict[str, Any]) -> bool:
         """
@@ -218,18 +174,7 @@ class TaskManager:
         任务: fix-task-system-review-findings
         修改内容: 仅在活跃运行态写回时注入 worker_id/heartbeat_at，避免终态字段误刷新心跳。
         """
-        active_statuses = {
-            TaskStatus.PENDING.value,
-            TaskStatus.RUNNING.value,
-            TaskStatus.CANCELLING.value,
-        }
-        tracked_runtime_fields = {"progress", "stage", "sub_stage", "current", "total", "message"}
-
-        status = update_params.get("status")
-        if status in active_statuses:
-            return True
-
-        return any(field in update_params for field in tracked_runtime_fields)
+        return self._runtime_persistence._should_refresh_worker_heartbeat(update_params)
 
     def _resolve_run_id_for_db_write(self, task_id: str, session: Session) -> str:
         """
@@ -244,14 +189,7 @@ class TaskManager:
         任务: 修复 task_id/run_id 混写
         修改内容: 对 8 位 task_id 先查映射，再按完整 run_id 落库，避免历史 full run_id 任务静默不更新。
         """
-        # 历史数据里 run_id 可能是完整 UUID，当前 API 层仍主要传 8 位 task_id。
-        # 这里统一先解析成真实 run_id，再进行精确更新，避免 DB-only 状态查询读到旧值。
-        if len(task_id) == 8:
-            try:
-                return task_id_to_run_id(task_id, session)
-            except (TaskIDNotFoundError, ValueError) as exc:
-                raise RuntimeError(f"Cannot resolve run_id from task_id={task_id}") from exc
-        return task_id
+        return self._runtime_persistence._resolve_run_id_for_db_write(task_id, session)
 
     def create_task(self, task_id: str, novel_id: str) -> TaskInfo:
         """创建任务的内存执行缓存。
