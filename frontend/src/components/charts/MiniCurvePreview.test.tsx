@@ -19,6 +19,8 @@ vi.mock("echarts-for-react", async () => {
     _props: Record<string, unknown>,
     _ref: React.ForwardedRef<unknown>,
   ) {
+    void _props;
+    void _ref;
     React.useEffect(() => {
       chartMountCount += 1;
       return () => {
