@@ -42,8 +42,27 @@ from src.models.disambiguation import DisambiguationClient
 from src.models.local.annotation import MultiPhaseAnnotationResult
 from src.models.local.disambiguation import ExtendedDisambigResult
 from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, DialogueSnapshot
+from src.storage.models import Novel
 from src.storage.repositories import ChunkRepository, RunRepository
 from src.workflows.annotate import run_annotate
+
+
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """
+    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
+
+    创建时间: 2026-04-23
+    任务: 修复 pytest ForeignKeyViolation
+    """
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
 
 
 def create_mock_annotation() -> MultiPhaseAnnotationResult:
@@ -101,7 +120,8 @@ class TestAnnotate:
     @pytest.fixture(autouse=True)
     def setup(self, db_session):
         self.db_session = db_session
-        self.novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        self.novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, self.novel_id)
 
         run_repo = RunRepository(db_session)
         self.run_id = run_repo.create_run(novel_id=self.novel_id, source_path="test", title="Test Novel")
@@ -139,6 +159,7 @@ class TestAnnotate:
             run_id=self.run_id,
             session=self.db_session,
             resume=False,
+            novel_id=self.novel_id,
         )
         assert success == 3
         assert errors == 0
@@ -185,6 +206,7 @@ class TestAnnotate:
             run_id=self.run_id,
             session=self.db_session,
             resume=False,
+            novel_id=self.novel_id,
         )
         assert success1 == 5
 
@@ -206,6 +228,7 @@ class TestAnnotate:
             run_id=self.run_id,
             session=self.db_session,
             resume=True,
+            novel_id=self.novel_id,
         )
         assert success2 == 1
         assert errors2 == 0
@@ -241,6 +264,7 @@ class TestAnnotate:
             run_id=self.run_id,
             session=self.db_session,
             resume=False,
+            novel_id=self.novel_id,
         )
         assert success == 2
 
@@ -256,6 +280,7 @@ class TestAnnotate:
             run_id=self.run_id,
             session=self.db_session,
             resume=True,
+            novel_id=self.novel_id,
         )
 
         names = [
