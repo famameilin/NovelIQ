@@ -39,6 +39,14 @@ ACTION_CUES = (
     "开口",
     "低声",
 )
+LOCATION_CUES = (
+    "门口",
+    "窗边",
+    "屋内",
+    "台上",
+    "身旁",
+    "院中",
+)
 ROLE_WORDS = (
     "女子",
     "少女",
@@ -67,9 +75,12 @@ _ROLE_PATTERN = "|".join(sorted((re.escape(role) for role in ROLE_WORDS), key=le
 _FEATURE_PATTERN = "|".join(sorted((re.escape(cue) for cue in APPEARANCE_CUES + ACTION_CUES), key=len, reverse=True))
 _DEMONSTRATIVE_PATTERN = r"(?:那个|那名|那位|这名|这位|那|这)"
 _MENTION_PATTERNS = (
-    re.compile(rf"{_DEMONSTRATIVE_PATTERN}?(?P<raw>(?:(?:穿着|穿|身着|披着)?(?:{_FEATURE_PATTERN})的?)+(?P<role>{_ROLE_PATTERN}))"),
-    re.compile(rf"{_DEMONSTRATIVE_PATTERN}(?P<raw>(?P<role>{_ROLE_PATTERN}))"),
-    re.compile(rf"(?P<raw>(?:门口|窗边|屋内|台上|身旁|院中)的(?P<role>{_ROLE_PATTERN}))"),
+    re.compile(
+        rf"{_DEMONSTRATIVE_PATTERN}?"
+        rf"(?P<raw>(?:(?:穿着|穿|身着|披着)?(?:{_FEATURE_PATTERN})的?)+(?P<role>{_ROLE_PATTERN}))"
+    ),
+    re.compile(rf"(?P<raw>{_DEMONSTRATIVE_PATTERN}(?P<role>{_ROLE_PATTERN}))"),
+    re.compile(rf"(?P<raw>(?:{'|'.join(LOCATION_CUES)})的(?P<role>{_ROLE_PATTERN}))"),
     re.compile(r"(?P<raw>掌柜的)"),
 )
 
@@ -88,17 +99,30 @@ class PersonMention:
     cues: dict[str, str | list[str]]
 
 
-def _classify_mention(raw_text: str, appearance: list[str], actions: list[str]) -> str:
+def _classify_mention(
+    raw_text: str,
+    appearance: list[str],
+    actions: list[str],
+    locations: list[str],
+) -> str:
     """
     创建时间: 2026-04-23
     任务: level3-mention-retrieval
     说明: 根据抽到的线索给 mention 分桶，便于后续 rerank 和离线评测观察。
+
+    修改时间: 2026-04-23
+    任务: level3-mention-review-fix
+    修改说明: 补充纯指代角色词与位置角色词分桶，避免“那个少女”一类泛 query 被误当成可用特征。
     """
     if actions and appearance:
         return "feature_action"
     if any(cue in raw_text for cue in APPEARANCE_CUES):
         return "appearance_based"
-    if raw_text in {"那个少女", "那名女子", "那汉子", "这名男子"}:
+    if locations:
+        return "location_role"
+    if actions:
+        return "action_role"
+    if raw_text.startswith(("那个", "那名", "那位", "这名", "这位", "那", "这")):
         return "pronoun_role"
     return "role_based"
 
@@ -108,17 +132,23 @@ def _build_mention(raw_text: str, role_word: str, sentence_text: str) -> PersonM
     创建时间: 2026-04-23
     任务: level3-mention-retrieval
     说明: 将正则命中的原文片段转换为 PersonMention，并抽取外貌/动作线索。
+
+    修改时间: 2026-04-23
+    任务: level3-mention-review-fix
+    修改说明: 增补位置线索，并让纯指代角色词保留指示词以便正确分桶。
     """
     appearance = [cue for cue in APPEARANCE_CUES if cue in raw_text or cue in sentence_text]
     actions = [cue for cue in ACTION_CUES if cue in raw_text or cue in sentence_text]
+    locations = [cue for cue in LOCATION_CUES if cue in raw_text]
     cues: dict[str, str | list[str]] = {
         "role_word": role_word,
         "appearance": appearance,
         "action": actions,
+        "location": locations,
     }
     return PersonMention(
         raw_text=raw_text,
-        mention_type=_classify_mention(raw_text, appearance, actions),
+        mention_type=_classify_mention(raw_text, appearance, actions, locations),
         sentence_text=sentence_text,
         cues=cues,
     )

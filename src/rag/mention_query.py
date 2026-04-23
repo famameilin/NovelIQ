@@ -47,6 +47,10 @@ def build_mention_evidence_queries(mentions: list[PersonMention]) -> list[Mentio
     创建时间: 2026-04-23
     任务: level3-mention-retrieval
     说明: 为每个 mention 构造“原文片段”和“线索词组合”两类 query，初版保持保守且可回归。
+
+    修改时间: 2026-04-23
+    任务: level3-mention-review-fix
+    修改说明: 跳过缺少外貌/动作/位置线索的纯指代角色词，避免生成“少女/女子”等过宽 query。
     """
     queries: list[MentionEvidenceQuery] = []
     seen_query_texts: set[str] = set()
@@ -54,8 +58,12 @@ def build_mention_evidence_queries(mentions: list[PersonMention]) -> list[Mentio
     for mention in mentions:
         appearance = _as_string_list(mention.cues.get("appearance"))
         actions = _as_string_list(mention.cues.get("action"))
+        locations = _as_string_list(mention.cues.get("location"))
         role_words = _as_string_list(mention.cues.get("role_word"))
-        matched_features = tuple(dict.fromkeys(appearance + role_words + actions))
+        if mention.mention_type == "pronoun_role" and not (appearance or actions or locations):
+            continue
+
+        matched_features = tuple(dict.fromkeys(appearance + locations + role_words + actions))
 
         variants = [mention.raw_text]
         compact_features = " ".join(matched_features)
