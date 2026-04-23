@@ -29,22 +29,26 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
-from src.chunking.chunker import chunk_documents
+from src.chunking.chunker import Chunk, chunk_documents
 from src.config import settings
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import ChunkRepository, ChunkStyleData
-from src.storage.vector_schema import ensure_chunk_embeddings_schema
+from src.storage.vector_schema import (
+    ensure_chunk_embeddings_schema,
+    ensure_paragraph_embeddings_schema,
+)
 
 
 async def run_preprocess(
@@ -191,7 +195,7 @@ def _commit_preprocess_writes(session: Session, *, step: str) -> None:
 async def _generate_chunk_embeddings(
     session: Session,
     run_id: str,
-    all_chunks: list,
+    all_chunks: list[Chunk],
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> int:
     """
@@ -207,6 +211,10 @@ async def _generate_chunk_embeddings(
     任务: fix-preprocess-transaction-boundary
     修改内容: 在 schema 准备后和 embedding 落库后及时提交，避免 embedding 长阶段阻塞 analysis_runs 状态写回
 
+    修改时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    修改内容: 同步生成 paragraph_embeddings，供 Level3 在 chunk 粗召回结果内做局部 evidence rerank
+
     Args:
         session: 数据库连接
         run_id: 运行ID
@@ -217,7 +225,11 @@ async def _generate_chunk_embeddings(
         生成的 embedding 数量
     """
     from src.models.local.embedding import EmbeddingClient
-    from src.storage.repositories.chunk import insert_chunk_embeddings
+    from src.storage.repositories.chunk import (
+        ParagraphEmbeddingRow,
+        insert_chunk_embeddings,
+        insert_paragraph_embeddings,
+    )
 
     try:
         embedding_client = EmbeddingClient()
@@ -231,7 +243,8 @@ async def _generate_chunk_embeddings(
         raise ValueError(f"Level 3 embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}")
 
     ensure_chunk_embeddings_schema(session, expected_dim)
-    _commit_preprocess_writes(session, step="ensure_chunk_embeddings_schema")
+    ensure_paragraph_embeddings_schema(session, expected_dim)
+    _commit_preprocess_writes(session, step="ensure_embedding_schemas")
 
     total_chunks = len(all_chunks)
     if emitter:
@@ -270,8 +283,24 @@ async def _generate_chunk_embeddings(
 
     if embeddings:
         insert_chunk_embeddings(session, run_id, embeddings)
-        _commit_preprocess_writes(session, step="insert_chunk_embeddings")
-        logger.info(f"inserted {len(embeddings)} chunk embeddings into db (run_id={run_id})")
+
+    paragraph_rows = await _generate_paragraph_embedding_rows(
+        embedding_client,
+        run_id,
+        all_chunks,
+        ParagraphEmbeddingRow,
+    )
+    if paragraph_rows:
+        insert_paragraph_embeddings(session, run_id, paragraph_rows)
+
+    if embeddings or paragraph_rows:
+        _commit_preprocess_writes(session, step="insert_embedding_rows")
+        logger.info(
+            "inserted {} chunk embeddings and {} paragraph embeddings into db (run_id={})",
+            len(embeddings),
+            len(paragraph_rows),
+            run_id,
+        )
 
     if emitter:
         await emitter(
@@ -284,3 +313,96 @@ async def _generate_chunk_embeddings(
         )
 
     return len(embeddings)
+
+
+def _split_chunk_paragraphs(chunk: Chunk) -> list[tuple[int, int, str]]:
+    """
+    将 chunk 文本拆成 chunk 内 paragraph，并保留 chunk 内字符范围。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: 当前 chunks 表未持久化全文 char_offset，因此这里的 start/end 明确定义为 chunk 内 offset；
+          后续若补齐全文 offset，可在不改变 paragraph_index 主键的前提下增加全局范围字段。
+    """
+    if not chunk.text.strip():
+        return []
+
+    paragraphs: list[tuple[int, int, str]] = []
+    start = 0
+    for match in re.finditer(r"\n+", chunk.text):
+        end = match.start()
+        raw_text = chunk.text[start:end]
+        stripped_text = raw_text.strip()
+        if stripped_text:
+            leading_ws = len(raw_text) - len(raw_text.lstrip())
+            trailing_ws = len(raw_text.rstrip())
+            paragraphs.append((start + leading_ws, start + trailing_ws, stripped_text))
+        start = match.end()
+
+    if start < len(chunk.text):
+        raw_text = chunk.text[start:]
+        stripped_text = raw_text.strip()
+        if stripped_text:
+            leading_ws = len(raw_text) - len(raw_text.lstrip())
+            trailing_ws = len(raw_text.rstrip())
+            paragraphs.append((start + leading_ws, start + trailing_ws, stripped_text))
+
+    if paragraphs:
+        return paragraphs
+    return [(0, len(chunk.text), chunk.text.strip())]
+
+
+async def _generate_paragraph_embedding_rows(
+    embedding_client: Any,
+    run_id: str,
+    all_chunks: list[Chunk],
+    row_factory: Any,
+) -> list[Any]:
+    """
+    生成 paragraph embedding 写入 DTO。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: 复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求。
+    """
+    paragraph_refs: list[tuple[int, int, int, int, str]] = []
+    for chunk in all_chunks:
+        for paragraph_index, (start_char, end_char, paragraph_text) in enumerate(_split_chunk_paragraphs(chunk)):
+            paragraph_refs.append((chunk.index, paragraph_index, start_char, end_char, paragraph_text))
+
+    if not paragraph_refs:
+        return []
+
+    paragraph_texts = [paragraph_text for _, _, _, _, paragraph_text in paragraph_refs]
+    paragraph_embeddings = await embedding_client.embed_texts(paragraph_texts)
+    if len(paragraph_embeddings) != len(paragraph_refs):
+        raise RuntimeError(
+            "paragraph embedding result count mismatch: "
+            f"expected {len(paragraph_refs)}, got {len(paragraph_embeddings)}"
+        )
+
+    rows = []
+    for (chunk_id, paragraph_index, start_char, end_char, paragraph_text), embedding in zip(
+        paragraph_refs,
+        paragraph_embeddings,
+        strict=True,
+    ):
+        if not embedding:
+            logger.warning(
+                "empty paragraph embedding skipped: run_id={} chunk_id={} paragraph_index={}",
+                run_id,
+                chunk_id,
+                paragraph_index,
+            )
+            continue
+        rows.append(
+            row_factory(
+                chunk_id=chunk_id,
+                paragraph_index=paragraph_index,
+                paragraph_text=paragraph_text,
+                start_char=start_char,
+                end_char=end_char,
+                embedding_vector=embedding,
+            )
+        )
+    return rows
