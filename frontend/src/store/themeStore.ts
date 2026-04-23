@@ -53,6 +53,7 @@ export const useThemeStore = create<ThemeState>()(
         }
 
         const { seedColor: _seedColor, ...restState } = persistedThemeState;
+        void _seedColor;
         return restState;
       },
     }
