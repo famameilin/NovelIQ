@@ -162,6 +162,10 @@ class EvidenceBundleBuilder:
         修改时间: 2026-04-23
         任务: level3-mention-retrieval
         修改说明: mention query 产物额外写入 metadata，不改变 EvidenceBundle 主结构。
+
+        修改时间: 2026-04-24
+        任务: level3-paragraph-rerank
+        修改说明: 将 paragraph rerank 的局部 preview 与分数写入 metadata，供 renderer 优先展示局部 evidence。
         """
         items: list[EvidenceItem] = []
         for result in level3_results:
@@ -171,6 +175,17 @@ class EvidenceBundleBuilder:
                 "similarity": result.similarity,
                 "emotional_valence": result.emotional_valence,
             }
+            if result.local_preview:
+                metadata.update(
+                    {
+                        "local_preview": result.local_preview,
+                        "paragraph_index": result.paragraph_index,
+                        "paragraph_similarity": result.paragraph_similarity,
+                        "paragraph_start_char": result.paragraph_start_char,
+                        "paragraph_end_char": result.paragraph_end_char,
+                        "chunk_similarity": result.chunk_similarity,
+                    }
+                )
             if result.query_kind == "mention":
                 metadata.update(
                     {

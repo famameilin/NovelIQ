@@ -31,7 +31,7 @@ from src.models.local.evidence_renderer_shared import (
 )
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.rag.retriever import DisambigContextProvider, Level3NotReadyError, Level3VectorEvidence
-from src.storage.repositories.chunk import SimilarChunkRow
+from src.storage.repositories.chunk import SimilarChunkRow, SimilarParagraphRow
 
 
 class TestLevel3VectorEvidence(unittest.TestCase):
@@ -115,6 +115,68 @@ class TestLevel3VectorEvidenceAsync:
         assert results[0].chunk_id == 1
         assert results[0].emotional_valence == "mild_negative"
         assert mock_search.call_args.kwargs["max_chunk_id"] == 7
+
+    @pytest.mark.asyncio
+    @patch("src.storage.repositories.chunk.search_similar_paragraphs_within_chunks")
+    @patch("src.storage.repositories.chunk.search_similar_chunks")
+    async def test_search_similar_chunks_reranks_with_candidate_chunk_paragraphs(
+        self,
+        mock_search_chunks: MagicMock,
+        mock_search_paragraphs: MagicMock,
+    ) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: level3-paragraph-rerank
+        说明: Level3 应先粗召回 chunk，再仅在命中 chunk_ids 内使用 paragraph embedding 回填局部 evidence。
+        """
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_client.get_embedding = AsyncMock(return_value=[0.1] * settings.models.semantic_chunking.embedding_dim)
+        mock_session = MagicMock()
+
+        mock_search_chunks.return_value = [
+            SimilarChunkRow(chunk_id=1, text="chunk-1 full text", similarity=0.82),
+            SimilarChunkRow(chunk_id=2, text="chunk-2 full text", similarity=0.81),
+        ]
+        mock_search_paragraphs.return_value = [
+            SimilarParagraphRow(
+                chunk_id=2,
+                paragraph_index=1,
+                paragraph_text="灰衣人站在门外。",
+                start_char=5,
+                end_char=13,
+                similarity=0.96,
+            ),
+            SimilarParagraphRow(
+                chunk_id=1,
+                paragraph_index=0,
+                paragraph_text="普通场景。",
+                start_char=0,
+                end_char=5,
+                similarity=0.90,
+            ),
+        ]
+
+        with (
+            patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            level3 = Level3VectorEvidence(
+                session=mock_session,
+                run_id="test-run-id",
+                embedding_client=mock_client,
+                top_k=2,
+            )
+            results = await level3.search_similar_chunks("灰衣人是谁")
+
+        assert [row.chunk_id for row in results] == [2, 1]
+        assert results[0].local_preview == "灰衣人站在门外。"
+        assert results[0].paragraph_index == 1
+        assert results[0].chunk_similarity == 0.81
+        assert results[0].similarity == 0.96
+        assert mock_search_paragraphs.call_args.kwargs["chunk_ids"] == [1, 2]
 
     @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
@@ -356,6 +418,37 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
         self.assertIsNotNone(rendered)
         assert rendered is not None
         self.assertIn("...", rendered)
+
+    def test_render_vector_evidence_prefers_local_preview(self) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: level3-paragraph-rerank
+        说明: paragraph rerank 命中时，Vector_Evidence 应优先展示局部 preview，而不是整段 chunk 文本。
+        """
+        bundle = EvidenceBundle(
+            semantic_evidence=[
+                EvidenceItem(
+                    evidence_type="semantic_recall",
+                    source="chunk_embeddings",
+                    content="完整 chunk 文本",
+                    metadata={
+                        "chunk_id": 2,
+                        "text": "完整 chunk 文本",
+                        "local_preview": "灰衣人站在门外。",
+                        "paragraph_index": 1,
+                        "similarity": 0.96,
+                    },
+                ),
+            ]
+        )
+
+        rendered = render_vector_evidence(bundle)
+
+        self.assertIsNotNone(rendered)
+        assert rendered is not None
+        self.assertIn("[Chunk 2] [Paragraph 1]", rendered)
+        self.assertIn("灰衣人站在门外。", rendered)
+        self.assertNotIn("完整 chunk 文本", rendered)
 
     def test_render_vector_evidence_ignores_emotion_exemplar_rows(self) -> None:
         bundle = EvidenceBundle(

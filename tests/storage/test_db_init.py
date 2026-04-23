@@ -2,8 +2,7 @@ from unittest.mock import patch
 
 from sqlalchemy import text
 
-from src.storage.db import init_db
-from src.storage.db import get_session_factory
+from src.storage.db import get_session_factory, init_db
 
 
 def test_init_db_excludes_level3_tables_by_default() -> None:
@@ -16,6 +15,7 @@ def test_init_db_excludes_level3_tables_by_default() -> None:
 
     table_names = [table.name for table in mock_create_all.call_args.kwargs["tables"]]
     assert "chunk_embeddings" not in table_names
+    assert "paragraph_embeddings" not in table_names
     mock_ensure_runtime_schema.assert_called_once()
 
 
@@ -29,6 +29,7 @@ def test_init_db_can_include_level3_tables() -> None:
 
     table_names = [table.name for table in mock_create_all.call_args.kwargs["tables"]]
     assert "chunk_embeddings" in table_names
+    assert "paragraph_embeddings" in table_names
     mock_ensure_runtime_schema.assert_called_once()
 
 
