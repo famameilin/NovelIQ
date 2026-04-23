@@ -21,17 +21,52 @@ from src.knowledge.authority import (
     RelationEvent,
     StableState,
 )
+from src.storage.models import Chunk as ChunkModel
+from src.storage.models import Novel
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
 
 
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """为 graph snapshot contract 测试补齐 novels 主表记录。"""
+    if len(novel_id) > 8:
+        raise ValueError(f"graph snapshot test novel_id must be 8 chars or fewer, got: {novel_id}")
+
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
+
+
+def _insert_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
+    """为 graph relation event 测试补齐 chunks 外键依赖。"""
+    db_session.add_all(
+        [
+            ChunkModel(
+                chunk_id=chunk_id,
+                run_id=run_id,
+                text=f"chunk-{chunk_id}",
+            )
+            for chunk_id in chunk_ids
+        ]
+    )
+    db_session.commit()
+
+
 def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    _insert_test_novel(db_session, novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
         title="Graph Snapshot Contract",
     )
+    _insert_test_chunks(db_session, run_id, range(1, 9))
 
     graph_repo = GraphRepository(db_session)
     bo_an = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=6)
@@ -92,7 +127,8 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
 
 
 def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    _insert_test_novel(db_session, novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
@@ -136,12 +172,14 @@ def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_
 
 
 def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    _insert_test_novel(db_session, novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
         title="Graph Snapshot Summary Contract",
     )
+    _insert_test_chunks(db_session, run_id, range(1, 9))
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=8)
