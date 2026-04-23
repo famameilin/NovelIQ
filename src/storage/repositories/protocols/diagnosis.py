@@ -3,11 +3,25 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分protocols.py
 说明: 诊断数据协议接口
+
+修改时间: 2026-04-23
+任务: P2-基础设施解耦
+修改内容: 用语义 DTO 替代动态字典与裸结构返回值。
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
+
+from .types import (
+    CharacterDisambigData,
+    ForeshadowingChunk,
+    HighTensionChunk,
+    PivotBlock,
+    PivotMoment,
+    RelationChangeRow,
+    RepositoryRecord,
+)
 
 
 @runtime_checkable
@@ -18,7 +32,7 @@ class DiagnosisRepositoryProtocol(Protocol):
     管理小说诊断数据的存储和检索。
     """
 
-    def get_diagnosis(self, novel_id: str) -> dict[str, Any]:
+    def get_diagnosis(self, novel_id: str) -> RepositoryRecord:
         """
         获取诊断数据
 
@@ -30,7 +44,7 @@ class DiagnosisRepositoryProtocol(Protocol):
         """
         ...
 
-    def save_diagnosis(self, novel_id: str, diagnosis: dict[str, Any]) -> None:
+    def save_diagnosis(self, novel_id: str, diagnosis: RepositoryRecord) -> None:
         """
         保存诊断数据
 
@@ -40,7 +54,7 @@ class DiagnosisRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_diagnosis_history(self, novel_id: str) -> list[dict[str, Any]]:
+    def get_diagnosis_history(self, novel_id: str) -> list[RepositoryRecord]:
         """
         获取诊断历史
 
@@ -50,4 +64,36 @@ class DiagnosisRepositoryProtocol(Protocol):
         Returns:
             诊断历史列表
         """
+        ...
+
+    def fetch_pivot_blocks(self, run_id: str, limit: int | None = None) -> list[PivotBlock]:
+        """获取转折点分块"""
+        ...
+
+    def fetch_high_tension_chunks(self, run_id: str, limit: int | None = None) -> list[HighTensionChunk]:
+        """获取高张力分块"""
+        ...
+
+    def fetch_relation_changes(self, run_id: str, limit: int | None = None) -> list[RelationChangeRow]:
+        """获取关系变更记录"""
+        ...
+
+    def fetch_foreshadowing_chunks(self, run_id: str, limit: int | None = None) -> list[ForeshadowingChunk]:
+        """获取伏笔分块"""
+        ...
+
+    def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[PivotMoment]:
+        """获取高潮时刻"""
+        ...
+
+    def fetch_topic_words(self, run_id: str, top_n: int | None = None) -> list[RepositoryRecord]:
+        """获取主题词"""
+        ...
+
+    def fetch_character_disambig_data(self, run_id: str) -> CharacterDisambigData:
+        """获取角色消歧数据"""
+        ...
+
+    def fetch_stage_summaries(self, run_id: str) -> list[RepositoryRecord]:
+        """获取阶段性摘要"""
         ...
