@@ -18,6 +18,7 @@ from .candidates import (
     EXTENSION_REVIEW_MIN_GAP,
     EXTENSION_REVIEW_MIN_RATIO,
     DisambigStateSnapshot,
+    DisambigStateSnapshotEntry,
     _collect_final_disambiguation_candidates,
     extract_new_names_from_db,
 )
@@ -74,4 +75,5 @@ __all__ = [
     "_save_disambig_checkpoint",
     "_load_disambig_checkpoint",
     "DisambigStateSnapshot",
+    "DisambigStateSnapshotEntry",
 ]

@@ -225,10 +225,14 @@ def validate_aggregate_metrics_contract(aggregate_metrics: dict[str, Any]) -> No
         raise ValueError("aggregate_metrics contract mismatch: " + "; ".join(detail_parts))
 
 
-def build_aggregate_metrics_contract(result: AggregateResult) -> dict[str, Any]:
-    """Build the stable non-graph aggregate metrics bundle used by export surfaces."""
+def build_aggregate_metrics_contract_from_models(
+    narrative_structure: NarrativeStructureStats | None,
+    emotion_stats: EmotionStats | None,
+    character_stats: CharacterStatsAggregate | None,
+    style_stats: StyleStats | None,
+) -> dict[str, Any]:
+    """从已转换的响应模型构建稳定的 aggregate contract。"""
 
-    narrative_structure, emotion_stats, character_stats, style_stats = _convert_aggregate_result(result)
     aggregate_metrics = {
         "narrative_structure": narrative_structure.model_dump() if narrative_structure else None,
         "emotion_stats": emotion_stats.model_dump() if emotion_stats else None,
@@ -239,11 +243,24 @@ def build_aggregate_metrics_contract(result: AggregateResult) -> dict[str, Any]:
     return aggregate_metrics
 
 
+def build_aggregate_metrics_contract(result: AggregateResult) -> dict[str, Any]:
+    """Build the stable non-graph aggregate metrics bundle used by export surfaces."""
+
+    narrative_structure, emotion_stats, character_stats, style_stats = _convert_aggregate_result(result)
+    return build_aggregate_metrics_contract_from_models(
+        narrative_structure,
+        emotion_stats,
+        character_stats,
+        style_stats,
+    )
+
+
 __all__ = [
     "AGGREGATE_METRIC_CONTRACT_FIELDS",
     "AGGREGATE_GRAPH_FORBIDDEN_FIELDS",
     "_convert_aggregate_result",
     "_convert_style_stats",
     "build_aggregate_metrics_contract",
+    "build_aggregate_metrics_contract_from_models",
     "validate_aggregate_metrics_contract",
 ]
