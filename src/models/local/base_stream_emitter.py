@@ -12,9 +12,10 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.api.models.events import StreamEvent
+if TYPE_CHECKING:
+    from src.api.models.events import StreamEvent
 
 
 @dataclass
@@ -65,6 +66,8 @@ async def emit_stream_delta(
         current_time = time.time()
         should_broadcast = current_time - state.last_output_broadcast_time >= 0.1 or state.output_char_count >= 50
         if emitter and should_broadcast:
+            from src.api.models.events import StreamEvent
+
             await emitter(StreamEvent(action="output", content=state.output_buffer))
             state.output_buffer = ""
             state.output_char_count = 0
@@ -82,6 +85,8 @@ async def emit_stream_delta(
         current_time = time.time()
         should_broadcast = current_time - state.last_thinking_broadcast_time >= 0.1 or state.thinking_char_count >= 50
         if emitter and should_broadcast:
+            from src.api.models.events import StreamEvent
+
             await emitter(StreamEvent(action="thinking", content=state.thinking_buffer))
             state.thinking_buffer = ""
             state.thinking_char_count = 0
@@ -94,8 +99,10 @@ async def flush_stream_buffers(state: StreamAggregationState, emitter: Any) -> N
 
     创建时间: 2026-04-23
     任务: p2-base-model-client-split
-    新建原因: 保证 transport 在循环结束后只关心“收尾”，不重复关心两类 buffer 细节。
+    新建原因: 保证 transport 在循环结束后只关心"收尾"，不重复关心两类 buffer 细节。
     """
+    from src.api.models.events import StreamEvent
+
     if emitter and state.output_buffer:
         await emitter(StreamEvent(action="output", content=state.output_buffer))
     if emitter and state.thinking_buffer:
