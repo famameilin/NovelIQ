@@ -160,6 +160,7 @@ class Level3VectorEvidence:
         query_text: str,
         exclude_chunk_ids: list[int] | None = None,
         max_chunk_id: int | None = None,
+        top_k: int | None = None,
     ) -> list[SimilarChunkRow]:
         """
         检索语义相似的历史 chunk。
@@ -175,6 +176,10 @@ class Level3VectorEvidence:
         修改时间: 2026-04-24
         任务: level3-paragraph-rerank
         修改说明: chunk 粗召回后，在命中 chunk_ids 内执行 paragraph rerank，并回填局部 evidence 预览。
+
+        修改时间: 2026-04-24
+        任务: level3-mention-rerank
+        修改说明: 支持调用方传入 retrieval pool 大小，rerank 后再由 provider 裁剪 prompt 预算。
         """
         await self.ensure_level3_ready()
         if not self.is_available():
@@ -193,16 +198,17 @@ class Level3VectorEvidence:
                 logger.warning("Level3VectorEvidence: failed to get query embedding")
                 return []
 
+            effective_top_k = top_k or self._top_k
             results = search_similar_chunks(
                 self._session,
                 self._run_id,
                 query_embedding,
-                top_k=self._top_k,
+                top_k=effective_top_k,
                 similarity_threshold=self._similarity_threshold,
                 exclude_chunk_ids=exclude_chunk_ids,
                 max_chunk_id=max_chunk_id,
             )
-            results = self._rerank_with_paragraphs(query_embedding, results)
+            results = self._rerank_with_paragraphs(query_embedding, results, top_k=effective_top_k)
             logger.debug(
                 "Level3VectorEvidence: found {} similar chunks for query (len={}) after paragraph rerank",
                 len(results),
@@ -253,6 +259,8 @@ class Level3VectorEvidence:
         self,
         query_embedding: list[float],
         chunk_results: list[SimilarChunkRow],
+        *,
+        top_k: int,
     ) -> list[SimilarChunkRow]:
         """
         使用候选 chunk 内 paragraph 相似度重排 chunk 结果。
@@ -260,6 +268,10 @@ class Level3VectorEvidence:
         创建时间: 2026-04-24
         任务: level3-paragraph-rerank
         说明: 只在 chunk 粗召回结果内查询 paragraph，避免全库 paragraph search 带来的噪声和时间边界风险。
+
+        修改时间: 2026-04-24
+        任务: level3-mention-rerank
+        修改说明: 使用调用方指定的 retrieval pool 大小，而不是固定 prompt top_k。
         """
         if not chunk_results or self._session is None or self._run_id is None:
             return chunk_results
@@ -274,7 +286,7 @@ class Level3VectorEvidence:
             self._run_id,
             query_embedding,
             chunk_ids=chunk_ids,
-            top_k=max(len(chunk_results) * 3, self._top_k),
+            top_k=max(len(chunk_results) * 3, top_k),
             similarity_threshold=self._similarity_threshold,
         )
         if not paragraph_results:
@@ -316,4 +328,4 @@ class Level3VectorEvidence:
             len(paragraph_results),
             matched_count,
         )
-        return sorted(reranked, key=lambda item: item.similarity, reverse=True)[: self._top_k]
+        return sorted(reranked, key=lambda item: item.similarity, reverse=True)[:top_k]
