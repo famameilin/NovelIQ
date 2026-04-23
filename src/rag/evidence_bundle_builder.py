@@ -155,6 +155,53 @@ class EvidenceBundleBuilder:
             for name in candidates
         ]
 
+    def _build_semantic_recall_metadata(self, result: SimilarChunkRow) -> dict[str, object]:
+        """
+        创建时间: 2026-04-24
+        任务: level3-mention-retrieval-closure
+        说明: 冻结 Level3 semantic_recall 的 metadata 合同；即使某些字段当前为空，也保持键名稳定，
+              便于后续日志观察、共享 renderer 和延期评测直接复用。
+        """
+        metadata: dict[str, object] = {
+            "chunk_id": result.chunk_id,
+            "text": result.text,
+            "similarity": result.similarity,
+            "emotional_valence": result.emotional_valence,
+            "evidence_granularity": "chunk",
+            "rerank_method": "chunk_embedding",
+            "chunk_text_len": len(result.text),
+            "query_kind": result.query_kind,
+            "mention_text": result.mention_text,
+            "mention_type": result.mention_type,
+            "matched_features": list(result.matched_features),
+            "rerank_score": result.rerank_score,
+            "semantic_score": result.semantic_score if result.semantic_score is not None else result.similarity,
+            "feature_overlap": list(result.feature_overlap),
+            "active_entity_bonus": result.active_entity_bonus,
+            "identity_clue_bonus": result.identity_clue_bonus,
+            "candidate_related_bonus": result.candidate_related_bonus,
+            "time_decay": result.time_decay,
+            "rerank_penalty": result.rerank_penalty,
+            "penalties": list(result.penalties),
+            "local_preview": result.local_preview,
+            "paragraph_index": result.paragraph_index,
+            "paragraph_similarity": result.paragraph_similarity,
+            "paragraph_start_char": result.paragraph_start_char,
+            "paragraph_end_char": result.paragraph_end_char,
+            "chunk_similarity": result.chunk_similarity,
+        }
+        if result.local_preview:
+            metadata.update(
+                {
+                    "evidence_granularity": "paragraph",
+                    "rerank_method": "chunk_then_paragraph",
+                    "local_preview_len": len(result.local_preview),
+                }
+            )
+        if result.rerank_score is not None:
+            metadata["business_rerank_method"] = "mention_feature_rerank"
+        return metadata
+
     def build_semantic_recall_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
         """
         构建 Level3 通用语义召回证据。
@@ -173,59 +220,15 @@ class EvidenceBundleBuilder:
         """
         items: list[EvidenceItem] = []
         for result in level3_results:
-            metadata = {
-                "chunk_id": result.chunk_id,
-                "text": result.text,
-                "similarity": result.similarity,
-                "emotional_valence": result.emotional_valence,
-                "evidence_granularity": "chunk",
-                "rerank_method": "chunk_embedding",
-                "chunk_text_len": len(result.text),
-            }
-            if result.local_preview:
-                metadata.update(
-                    {
-                        "evidence_granularity": "paragraph",
-                        "rerank_method": "chunk_then_paragraph",
-                        "local_preview": result.local_preview,
-                        "local_preview_len": len(result.local_preview),
-                        "paragraph_index": result.paragraph_index,
-                        "paragraph_similarity": result.paragraph_similarity,
-                        "paragraph_start_char": result.paragraph_start_char,
-                        "paragraph_end_char": result.paragraph_end_char,
-                        "chunk_similarity": result.chunk_similarity,
-                    }
-                )
-            if result.query_kind == "mention":
-                metadata.update(
-                    {
-                        "query_kind": "mention",
-                        "mention_text": result.mention_text,
-                        "mention_type": result.mention_type,
-                        "matched_features": list(result.matched_features),
-                    }
-                )
-            if result.rerank_score is not None:
-                metadata.update(
-                    {
-                        "business_rerank_method": "mention_feature_rerank",
-                        "rerank_score": result.rerank_score,
-                        "semantic_score": result.semantic_score,
-                        "feature_overlap": list(result.feature_overlap),
-                        "active_entity_bonus": result.active_entity_bonus,
-                        "identity_clue_bonus": result.identity_clue_bonus,
-                        "candidate_related_bonus": result.candidate_related_bonus,
-                        "time_decay": result.time_decay,
-                        "rerank_penalty": result.rerank_penalty,
-                        "penalties": list(result.penalties),
-                    }
-                )
+            metadata = self._build_semantic_recall_metadata(result)
             items.append(
                 EvidenceItem(
                     evidence_type="semantic_recall",
                     source="chunk_embeddings",
                     content=result.text,
                     metadata=metadata,
+                    chunk_id=result.chunk_id,
+                    score=result.similarity,
                 )
             )
         return items
@@ -259,6 +262,8 @@ class EvidenceBundleBuilder:
                     source="chunk_embeddings",
                     content=result.text,
                     metadata=metadata,
+                    chunk_id=result.chunk_id,
+                    score=result.similarity,
                 )
             )
         return exemplar_items
