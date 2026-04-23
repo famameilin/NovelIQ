@@ -1,3 +1,3 @@
-from .repository import GraphRepository
+from .repository import ActiveEntityRow, CurrentRelationRow, GraphRepository, RelationEventRow
 
-__all__ = ["GraphRepository"]
+__all__ = ["ActiveEntityRow", "CurrentRelationRow", "GraphRepository", "RelationEventRow"]

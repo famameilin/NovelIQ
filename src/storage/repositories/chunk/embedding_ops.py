@@ -85,7 +85,7 @@ def get_missing_embedding_chunk_ids(
         .where(Chunk.chunk_id.not_in(select(ChunkEmbedding.chunk_id).where(ChunkEmbedding.run_id == run_id)))
     )
     result = session.execute(stmt)
-    return [row[0] for row in result.fetchall()]
+    return [row.chunk_id for row in result.fetchall()]
 
 
 def get_chunk_embedding(

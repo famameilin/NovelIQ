@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -275,7 +275,7 @@ def render_disambig_prompt_context(
 
 def render_disambiguation_graph_hint(
     alias_map: dict[str, str],
-    relations: list[dict],
+    relations: Sequence[object],
     existing_names: list[str],
     *,
     candidate_names: Iterable[str] | None = None,
@@ -289,6 +289,20 @@ def render_disambiguation_graph_hint(
     说明: 将 build_graph_feedback_hint 逻辑从 DisambigContextProvider 迁移至 renderer 层，
           符合 evidence layer 的 provider/renderer 职责分离原则。
     """
+
+    def _relation_field(relation: object, field_name: str) -> object:
+        """
+        读取关系提示字段。
+
+        创建时间: 2026-04-23
+        任务: P0-graph-repository-dto-boundary
+        说明: 正式路径读取 CurrentRelationRow DTO；保留 dict 读取仅用于旧测试 stub。
+        """
+        if isinstance(relation, dict):
+            legacy_name = "type" if field_name == "relation_type" else field_name
+            return relation.get(legacy_name)
+        return getattr(relation, field_name, None)
+
     existing_set = set(existing_names)
     candidate_set = {str(name).strip() for name in candidate_names or [] if str(name).strip()}
     related_name_set = set(candidate_set)
@@ -315,17 +329,22 @@ def render_disambiguation_graph_hint(
     relevant_rels = [
         r
         for r in relations
-        if r.get("is_active") is not False and (r.get("from_name") in existing_set or r.get("to_name") in existing_set)
+        if _relation_field(r, "is_active") is not False
+        and (_relation_field(r, "from_name") in existing_set or _relation_field(r, "to_name") in existing_set)
         and (
             not related_name_set
-            or r.get("from_name") in related_name_set
-            or r.get("to_name") in related_name_set
+            or _relation_field(r, "from_name") in related_name_set
+            or _relation_field(r, "to_name") in related_name_set
         )
     ]
     if relevant_rels:
         rel_lines = ["【图谱已确认的关系】"]
         for relation in relevant_rels:
-            rel_lines.append(f"- {relation.get('from_name')} ←{relation.get('type')}→ {relation.get('to_name')}")
+            rel_lines.append(
+                f"- {_relation_field(relation, 'from_name')} "
+                f"←{_relation_field(relation, 'relation_type')}→ "
+                f"{_relation_field(relation, 'to_name')}"
+            )
         parts.append("\n".join(rel_lines))
 
     if not parts:

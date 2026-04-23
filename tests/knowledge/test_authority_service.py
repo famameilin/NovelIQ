@@ -15,16 +15,46 @@ from src.knowledge.authority import (
     GraphPageSummary,
     KnowledgeGraphAuthorityService,
 )
+from src.storage.models import Chunk as ChunkModel
+from src.storage.models import Novel
 from src.storage.repositories import GraphRepository, RunRepository
 
 
-def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+def _create_run_with_novel(db_session, *, title: str) -> tuple[str, str]:
+    """创建 authority 测试所需的小说和 run 记录。"""
+    novel_id = uuid.uuid4().hex[:8]
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            title=title,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=100,
+        )
+    )
+    db_session.commit()
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
-        title="Timeline Authority View",
+        title=title,
     )
+    db_session.add_all(
+        [
+            ChunkModel(
+                chunk_id=chunk_id,
+                chapter_id=None,
+                text=f"chunk-{chunk_id}",
+                run_id=run_id,
+            )
+            for chunk_id in range(1, 256)
+        ]
+    )
+    db_session.commit()
+    return novel_id, run_id
+
+
+def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Timeline Authority View")
 
     graph_repo = GraphRepository(db_session)
     protagonist = graph_repo.upsert_entity(
@@ -97,12 +127,7 @@ def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db
 
 
 def test_build_graph_view_exposes_stable_states_without_transient_local_context(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph Authority View",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Authority View")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(
@@ -151,12 +176,7 @@ def test_build_graph_view_exposes_stable_states_without_transient_local_context(
 
 
 def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph Authority Report",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Authority Report")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
@@ -209,12 +229,7 @@ def test_graph_authority_report_rejects_graph_page_contracts() -> None:
 
 
 def test_build_export_view_keeps_export_graph_payloads_off_repository_shapes(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Export Graph Authority View",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Export Graph Authority View")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
@@ -249,12 +264,7 @@ def test_build_export_view_keeps_export_graph_payloads_off_repository_shapes(db_
 
 
 def test_build_active_entity_view_normalizes_repository_rows_into_authority_contract(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Active Entity Authority View",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Active Entity Authority View")
 
     graph_repo = GraphRepository(db_session)
     graph_repo.upsert_entity(
@@ -288,12 +298,7 @@ def test_build_active_entity_view_normalizes_repository_rows_into_authority_cont
 
 
 def test_build_level1_snapshot_entities_exclude_transient_prompt_local_state(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Level1 Stable Entity Contract",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Level1 Stable Entity Contract")
 
     graph_repo = GraphRepository(db_session)
     graph_repo.upsert_entity(
@@ -318,12 +323,7 @@ def test_build_level1_snapshot_entities_exclude_transient_prompt_local_state(db_
 
 
 def test_build_level1_snapshot_keeps_inactive_relations_outside_confirmed_relations(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Level1 Snapshot",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Level1 Snapshot")
 
     graph_repo = GraphRepository(db_session)
     han_li = graph_repo.upsert_entity(run_id=run_id, canonical_name="韩立", first_seen_chunk=1, last_seen_chunk=7)
@@ -377,12 +377,7 @@ def test_build_level1_snapshot_keeps_inactive_relations_outside_confirmed_relati
 
 
 def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph View Summary Contract",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph View Summary Contract")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
@@ -445,12 +440,7 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
 
 
 def test_build_graph_view_relation_events_are_full_history_not_page_window(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph View Full History",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph View Full History")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=205)
@@ -481,12 +471,7 @@ def test_build_graph_view_relation_events_are_full_history_not_page_window(db_se
 
 
 def test_build_graph_report_caps_low_confidence_count_to_legacy_summary_limit(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph Report Low Confidence Cap",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Report Low Confidence Cap")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=25)
@@ -518,12 +503,7 @@ def test_build_graph_report_caps_low_confidence_count_to_legacy_summary_limit(db
 
 
 def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph Report Shared Stats",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Report Shared Stats")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
@@ -573,12 +553,7 @@ def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
 
 
 def test_build_graph_view_keeps_history_in_events_while_current_relations_stay_active_only(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph View Current vs History",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph View Current vs History")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
@@ -646,12 +621,7 @@ def test_authority_dependency_matrix_constants_match_consumer_boundaries() -> No
 
 
 def test_authority_views_do_not_expose_other_consumers_shortcuts(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Authority Consumer Boundaries",
-    )
+    novel_id, run_id = _create_run_with_novel(db_session, title="Authority Consumer Boundaries")
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=5)
