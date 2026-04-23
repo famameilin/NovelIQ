@@ -28,13 +28,18 @@
 修改者: TraeAI
 任务: fix-phase3-active-entities-fallback
 修改内容: _run_phase3_if_needed 新增 active_entities 参数，透传上游活跃实体上下文（含 fallback）
+
+修改时间: 2026-04-23
+修改者: Codex
+任务: p2-multi-phase-shared-context
+修改内容: 抽出并行/串行共享的 phase 事件发送与参数透传逻辑，减少两条执行路径重复代码
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
@@ -52,6 +57,8 @@ if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
     from src.rag.evidence_types import EvidenceBundle
+
+PhaseEventAction = Literal["start", "progress", "complete", "output", "thinking"]
 
 
 @dataclass
@@ -88,6 +95,192 @@ class _Phase3Result:
 @dataclass
 class _Phase4Result:
     relations: list[RelationChangeSnapshot] | None = None
+
+
+@dataclass(frozen=True)
+class _MultiPhaseExecutionContext:
+    """
+    多阶段标注共享执行上下文。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 将并行/串行路径重复透传的 phase 参数集中管理，避免两侧调用签名漂移。
+    """
+
+    client: AnnotationClient
+    text: str
+    alias_map: dict[str, str] | None = None
+    chunk_id: int | None = None
+    prev_chunk_text: str | None = None
+    next_chunk_text: str | None = None
+    novel_title: str | None = None
+    main_characters: str | None = None
+    position_pct: float | None = None
+    chapter_id: int | None = None
+    active_entities: str | None = None
+    evidence_bundle: EvidenceBundle | None = None
+    fallback_client: AnnotationClient | None = None
+    run_id: str | None = None
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None
+    disambig_context: str | None = None
+
+
+async def _emit_phase_event(
+    context: _MultiPhaseExecutionContext,
+    *,
+    action: PhaseEventAction,
+    phase_name: str,
+    sub_percent: int,
+    message: str,
+) -> None:
+    """
+    发送统一的 phase 事件。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 将 parallel/serial 中重复的 StreamEvent 构造逻辑收口到单一入口。
+    """
+    if context.emitter is None:
+        return
+    await context.emitter(
+        StreamEvent(
+            action=action,
+            sub_stage=phase_name,
+            chunk_id=context.chunk_id,
+            sub_percent=sub_percent,
+            message=message,
+        )
+    )
+
+
+async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> ChunkAnnotation:
+    """
+    从共享上下文执行 Phase1。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 统一 Phase1 参数透传，避免并行/串行路径分别维护同一套 kwargs。
+    """
+    return await _run_phase1(
+        client=context.client,
+        text=context.text,
+        alias_map=context.alias_map,
+        chunk_id=context.chunk_id,
+        novel_title=context.novel_title,
+        main_characters=context.main_characters,
+        position_pct=context.position_pct,
+        chapter_id=context.chapter_id,
+        active_entities=context.active_entities,
+        evidence_bundle=context.evidence_bundle,
+        fallback_client=context.fallback_client,
+        run_id=context.run_id,
+        disambig_context=context.disambig_context,
+    )
+
+
+async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> ForeshadowingResult | None:
+    """
+    从共享上下文执行 Phase2。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 统一 Phase2 参数透传，避免 chunk 前后文在 parallel/serial 中重复拼接。
+    """
+    return await _run_phase2(
+        client=context.client,
+        text=context.text,
+        chunk_id=context.chunk_id,
+        prev_chunk_text=context.prev_chunk_text,
+        next_chunk_text=context.next_chunk_text,
+        novel_title=context.novel_title,
+        main_characters=context.main_characters,
+        position_pct=context.position_pct,
+        chapter_id=context.chapter_id,
+        evidence_bundle=context.evidence_bundle,
+        fallback_client=context.fallback_client,
+        run_id=context.run_id,
+    )
+
+
+async def _run_phase3_from_context(
+    context: _MultiPhaseExecutionContext,
+    known_characters: list[str] | None,
+) -> _Phase3Result:
+    """
+    从共享上下文执行 Phase3。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 锁定 Phase3 透传字段，避免 active_entities/fallback/evidence_bundle 在两条路径里走偏。
+    """
+    return await _run_phase3_if_needed(
+        client=context.client,
+        text=context.text,
+        alias_map=context.alias_map,
+        evidence_bundle=context.evidence_bundle,
+        chunk_id=context.chunk_id,
+        run_id=context.run_id,
+        known_characters=known_characters,
+        active_entities=context.active_entities,
+        fallback_client=context.fallback_client,
+    )
+
+
+async def _run_phase4_from_context(
+    context: _MultiPhaseExecutionContext,
+    known_characters: list[str] | None,
+) -> _Phase4Result:
+    """
+    从共享上下文执行 Phase4。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 统一 Phase4 的共享 evidence/fallback 透传，减少串并行路径重复实现。
+    """
+    relations = await annotate_chunk_phase4(
+        client=context.client,
+        text=context.text,
+        known_characters=known_characters,
+        # 中文注释：Phase4 统一只消费上游传入的 evidence_bundle，
+        # multi_phase 负责调度，不在这里重建关系抽取上下文。
+        evidence_bundle=context.evidence_bundle,
+        chunk_id=context.chunk_id,
+        run_id=context.run_id,
+        fallback_client=context.fallback_client,
+    )
+    return _Phase4Result(relations=relations)
+
+
+def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:
+    """
+    从 Phase1 结果提取 canonical 角色名列表。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 将串并行公共的 known_characters 派生逻辑收口。
+    """
+    return [character.name for character in annotation.characters] if annotation.characters else None
+
+
+def _normalize_phase_outputs(
+    context: _MultiPhaseExecutionContext,
+    annotation: ChunkAnnotation,
+    foreshadowing: ForeshadowingResult | None,
+) -> tuple[list[str] | None, ForeshadowingResult | None]:
+    """
+    归一化 Phase1/2 的共享派生产物。
+
+    创建时间: 2026-04-23
+    任务: p2-multi-phase-shared-context
+    新建原因: 统一 known_characters 与伏笔校验的派生流程，减少 parallel/serial 的重复收尾代码。
+    """
+    known_characters = _resolve_known_characters(annotation)
+    normalized_foreshadowing = _normalize_foreshadowing_result(
+        foreshadowing=foreshadowing,
+        text=context.text,
+        chunk_id=context.chunk_id,
+    )
+    return known_characters, normalized_foreshadowing
 
 
 async def _run_phase1(
@@ -425,110 +618,51 @@ async def annotate_chunk_parallel(
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def，使用 asyncio.gather 替代 ThreadPoolExecutor
     """
+    logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
     import asyncio
 
-    logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
+    context = _MultiPhaseExecutionContext(
+        client=client,
+        text=text,
+        alias_map=alias_map,
+        chunk_id=chunk_id,
+        prev_chunk_text=prev_chunk_text,
+        next_chunk_text=next_chunk_text,
+        novel_title=novel_title,
+        main_characters=main_characters,
+        position_pct=position_pct,
+        chapter_id=chapter_id,
+        active_entities=active_entities,
+        evidence_bundle=evidence_bundle,
+        fallback_client=fallback_client,
+        run_id=run_id,
+        emitter=emitter,
+        disambig_context=disambig_context,
+    )
 
-    if emitter:
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase1", chunk_id=chunk_id, sub_percent=0, message="开始 phase1")
-        )
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase2", chunk_id=chunk_id, sub_percent=0, message="开始 phase2")
-        )
+    await _emit_phase_event(context, action="start", phase_name="phase1", sub_percent=0, message="开始 phase1")
+    await _emit_phase_event(context, action="start", phase_name="phase2", sub_percent=0, message="开始 phase2")
 
     annotation, foreshadowing = await asyncio.gather(
-        _run_phase1(
-            client=client,
-            text=text,
-            alias_map=alias_map,
-            chunk_id=chunk_id,
-            novel_title=novel_title,
-            main_characters=main_characters,
-            position_pct=position_pct,
-            chapter_id=chapter_id,
-            active_entities=active_entities,
-            evidence_bundle=evidence_bundle,
-            fallback_client=fallback_client,
-            run_id=run_id,
-            disambig_context=disambig_context,
-        ),
-        _run_phase2(
-            client=client,
-            text=text,
-            chunk_id=chunk_id,
-            prev_chunk_text=prev_chunk_text,
-            next_chunk_text=next_chunk_text,
-            novel_title=novel_title,
-            main_characters=main_characters,
-            position_pct=position_pct,
-            chapter_id=chapter_id,
-            evidence_bundle=evidence_bundle,
-            fallback_client=fallback_client,
-            run_id=run_id,
-        ),
+        _run_phase1_from_context(context),
+        _run_phase2_from_context(context),
     )
 
-    if emitter:
-        await emitter(
-            StreamEvent(action="complete", sub_stage="phase1", chunk_id=chunk_id, sub_percent=25, message="phase1 完成")
-        )
-        await emitter(
-            StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id, sub_percent=50, message="phase2 完成")
-        )
+    await _emit_phase_event(context, action="complete", phase_name="phase1", sub_percent=25, message="phase1 完成")
+    await _emit_phase_event(context, action="complete", phase_name="phase2", sub_percent=50, message="phase2 完成")
 
-    known_characters = [c.name for c in annotation.characters] if annotation.characters else None
+    known_characters, normalized_foreshadowing = _normalize_phase_outputs(context, annotation, foreshadowing)
 
-    if emitter:
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase3", chunk_id=chunk_id, sub_percent=50, message="开始 phase3")
-        )
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase4", chunk_id=chunk_id, sub_percent=75, message="开始 phase4")
-        )
+    await _emit_phase_event(context, action="start", phase_name="phase3", sub_percent=50, message="开始 phase3")
+    await _emit_phase_event(context, action="start", phase_name="phase4", sub_percent=75, message="开始 phase4")
 
-    phase3_result, phase4_relations = await asyncio.gather(
-        _run_phase3_if_needed(
-            client=client,
-            text=text,
-            alias_map=alias_map,
-            evidence_bundle=evidence_bundle,
-            chunk_id=chunk_id,
-            run_id=run_id,
-            known_characters=known_characters,
-            active_entities=active_entities,
-            fallback_client=fallback_client,
-        ),
-        annotate_chunk_phase4(
-            client=client,
-            text=text,
-            known_characters=known_characters,
-            # 中文注释：Phase4 和 Phase2/3 一样只复用上游准备好的 evidence_bundle，
-            # multi_phase 只负责透传，不在 workflow 里重建或拼接关系抽取证据文案。
-            evidence_bundle=evidence_bundle,
-            chunk_id=chunk_id,
-            run_id=run_id,
-            fallback_client=fallback_client,
-        ),
+    phase3_result, phase4_result = await asyncio.gather(
+        _run_phase3_from_context(context, known_characters),
+        _run_phase4_from_context(context, known_characters),
     )
 
-    if emitter:
-        await emitter(
-            StreamEvent(action="complete", sub_stage="phase3", chunk_id=chunk_id, sub_percent=75, message="phase3 完成")
-        )
-        await emitter(
-            StreamEvent(
-                action="complete", sub_stage="phase4", chunk_id=chunk_id, sub_percent=100, message="phase4 完成"
-            )
-        )
-
-    phase4_result = _Phase4Result(relations=phase4_relations)
-
-    normalized_foreshadowing = _normalize_foreshadowing_result(
-        foreshadowing=foreshadowing,
-        text=text,
-        chunk_id=chunk_id,
-    )
+    await _emit_phase_event(context, action="complete", phase_name="phase3", sub_percent=75, message="phase3 完成")
+    await _emit_phase_event(context, action="complete", phase_name="phase4", sub_percent=100, message="phase4 完成")
 
     logger.debug("annotate_chunk_parallel complete chunk_id={}", chunk_id)
 
@@ -571,38 +705,10 @@ async def annotate_chunk_serial(
     修改内容: 改为 async def
     """
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
-
-    if emitter:
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase1", chunk_id=chunk_id, sub_percent=0, message="开始 phase1")
-        )
-    annotation = await _run_phase1(
+    context = _MultiPhaseExecutionContext(
         client=client,
         text=text,
         alias_map=alias_map,
-        chunk_id=chunk_id,
-        novel_title=novel_title,
-        main_characters=main_characters,
-        position_pct=position_pct,
-        chapter_id=chapter_id,
-        active_entities=active_entities,
-        evidence_bundle=evidence_bundle,
-        fallback_client=fallback_client,
-        run_id=run_id,
-        disambig_context=disambig_context,
-    )
-    if emitter:
-        await emitter(
-            StreamEvent(action="complete", sub_stage="phase1", chunk_id=chunk_id, sub_percent=25, message="phase1 完成")
-        )
-
-    if emitter:
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase2", chunk_id=chunk_id, sub_percent=25, message="开始 phase2")
-        )
-    foreshadowing = await _run_phase2(
-        client=client,
-        text=text,
         chunk_id=chunk_id,
         prev_chunk_text=prev_chunk_text,
         next_chunk_text=next_chunk_text,
@@ -610,63 +716,31 @@ async def annotate_chunk_serial(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
-        evidence_bundle=evidence_bundle,
-        fallback_client=fallback_client,
-        run_id=run_id,
-    )
-    if emitter:
-        await emitter(
-            StreamEvent(action="complete", sub_stage="phase2", chunk_id=chunk_id, sub_percent=50, message="phase2 完成")
-        )
-
-    normalized_foreshadowing = _normalize_foreshadowing_result(
-        foreshadowing=foreshadowing,
-        text=text,
-        chunk_id=chunk_id,
-    )
-    known_characters = [c.name for c in annotation.characters] if annotation.characters else None
-
-    if emitter:
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase3", chunk_id=chunk_id, sub_percent=50, message="开始 phase3")
-        )
-    phase3_result = await _run_phase3_if_needed(
-        client=client,
-        text=text,
-        alias_map=alias_map,
-        evidence_bundle=evidence_bundle,
-        chunk_id=chunk_id,
-        run_id=run_id,
-        known_characters=known_characters,
         active_entities=active_entities,
-        fallback_client=fallback_client,
-    )
-    if emitter:
-        await emitter(
-            StreamEvent(action="complete", sub_stage="phase3", chunk_id=chunk_id, sub_percent=75, message="phase3 完成")
-        )
-
-    if emitter:
-        await emitter(
-            StreamEvent(action="start", sub_stage="phase4", chunk_id=chunk_id, sub_percent=75, message="开始 phase4")
-        )
-    phase4_relations = await annotate_chunk_phase4(
-        client=client,
-        text=text,
-        known_characters=known_characters,
-        # 中文注释：串行路径也透传同一份 evidence_bundle，锁住 Phase4 的真实共享 evidence 消费链。
         evidence_bundle=evidence_bundle,
-        chunk_id=chunk_id,
-        run_id=run_id,
         fallback_client=fallback_client,
+        run_id=run_id,
+        emitter=emitter,
+        disambig_context=disambig_context,
     )
-    phase4_result = _Phase4Result(relations=phase4_relations)
-    if emitter:
-        await emitter(
-            StreamEvent(
-                action="complete", sub_stage="phase4", chunk_id=chunk_id, sub_percent=100, message="phase4 完成"
-            )
-        )
+
+    await _emit_phase_event(context, action="start", phase_name="phase1", sub_percent=0, message="开始 phase1")
+    annotation = await _run_phase1_from_context(context)
+    await _emit_phase_event(context, action="complete", phase_name="phase1", sub_percent=25, message="phase1 完成")
+
+    await _emit_phase_event(context, action="start", phase_name="phase2", sub_percent=25, message="开始 phase2")
+    foreshadowing = await _run_phase2_from_context(context)
+    await _emit_phase_event(context, action="complete", phase_name="phase2", sub_percent=50, message="phase2 完成")
+
+    known_characters, normalized_foreshadowing = _normalize_phase_outputs(context, annotation, foreshadowing)
+
+    await _emit_phase_event(context, action="start", phase_name="phase3", sub_percent=50, message="开始 phase3")
+    phase3_result = await _run_phase3_from_context(context, known_characters)
+    await _emit_phase_event(context, action="complete", phase_name="phase3", sub_percent=75, message="phase3 完成")
+
+    await _emit_phase_event(context, action="start", phase_name="phase4", sub_percent=75, message="开始 phase4")
+    phase4_result = await _run_phase4_from_context(context, known_characters)
+    await _emit_phase_event(context, action="complete", phase_name="phase4", sub_percent=100, message="phase4 完成")
     logger.info(f"Phase4 completed for chunk_id={chunk_id}")
 
     logger.debug("annotate_chunk_serial complete chunk_id={}", chunk_id)

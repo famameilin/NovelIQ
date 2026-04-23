@@ -28,15 +28,128 @@
 任务: feature/chunk-summary-timeline-only
 修改内容: 恢复 chunk_summary 存储逻辑，仅用于 Timeline 展示，不参与消歧证据链
 
+修改时间: 2026-04-23
+修改者: Codex
+任务: p2-store-annotation-results-split
+修改内容: 拆分伏笔合并、对话快照转换与 repository 写入逻辑，降低存储主函数复杂度
+
 说明: 本模块包含结果存储相关的函数。
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from src.models.local.schema import DialogueSnapshot
+
+
+def _merge_annotation_foreshadowing(annotation, foreshadowing):
+    """
+    将 Phase2 伏笔结果合并回 ChunkAnnotation 视图。
+
+    创建时间: 2026-04-23
+    任务: p2-store-annotation-results-split
+    新建原因: 把伏笔字段拼装从存储主流程拆出，便于单独核对 annotation 结构变换。
+    """
+    if foreshadowing is None:
+        return annotation
+
+    from src.models.local.schema import ChunkAnnotation
+
+    return ChunkAnnotation(
+        emotional_valence=annotation.emotional_valence,
+        event_type=annotation.event_type,
+        pivot_moment=annotation.pivot_moment,
+        cliffhanger=annotation.cliffhanger,
+        chunk_summary=annotation.chunk_summary,
+        has_foreshadowing=foreshadowing.has_foreshadowing,
+        foreshadowing_type=foreshadowing.foreshadowing_type,
+        foreshadowing_desc=(
+            f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}" if foreshadowing.has_foreshadowing else ""
+        ),
+        characters=annotation.characters,
+        dialogues=annotation.dialogues,
+    )
+
+
+def _build_dialogue_snapshots(
+    dialogues: list[tuple[int, str]] | None,
+    dialogue_speakers: dict[int, list[str]] | None = None,
+    dialogue_tones: dict[int, str] | None = None,
+    dialogue_identity_clues: dict[int, str | None] | None = None,
+) -> tuple[list[DialogueSnapshot], list[int]]:
+    """
+    将 Phase3 结果转换为可落库的 DialogueSnapshot 列表。
+
+    创建时间: 2026-04-23
+    任务: p2-store-annotation-results-split
+    新建原因: 把对话快照组装从 repository 写入流程中拆开，避免存储时混入数据转换细节。
+    """
+    from src.models.local.schema import DialogueSnapshot
+
+    if not dialogues:
+        return [], []
+
+    snapshots: list[DialogueSnapshot] = []
+    lengths: list[int] = []
+    for dialogue_idx, content in dialogues:
+        speaker_list = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
+        tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
+        identity_clue = dialogue_identity_clues.get(dialogue_idx) if dialogue_identity_clues else None
+        snapshots.append(
+            DialogueSnapshot(
+                speaker=speaker_list,
+                content=content,
+                tone=tone,
+                identity_clue=identity_clue,
+            )
+        )
+        lengths.append(len(content))
+    return snapshots, lengths
+
+
+def _persist_annotation_repositories(
+    conn,
+    *,
+    run_id: str,
+    chunk_id: int,
+    annotation,
+    foreshadowing=None,
+    dialogue_snapshots: Sequence[DialogueSnapshot] | None = None,
+    dialogue_lengths: list[int] | None = None,
+    relations=None,
+) -> None:
+    """
+    执行 annotation/stats repository 写入。
+
+    创建时间: 2026-04-23
+    任务: p2-store-annotation-results-split
+    新建原因: 将 repository 落库动作与前置数据变换分离，便于后续继续细化存储边界。
+    """
+    from src.storage.repositories import AnnotationRepository
+
+    ann_repo = AnnotationRepository(conn)
+    ann_repo.insert_chunk_annotation(run_id, chunk_id, annotation)
+
+    if annotation.characters:
+        ann_repo.insert_chunk_characters(run_id, chunk_id, annotation.characters)
+
+    if dialogue_snapshots and dialogue_lengths:
+        ann_repo.insert_chunk_dialogues(run_id, chunk_id, dialogue_snapshots, dialogue_lengths)
+
+    if relations:
+        ann_repo.insert_chunk_relations(run_id, chunk_id, relations)
+
+    if annotation.chunk_summary:
+        from src.storage.repositories import StatsRepository
+
+        stats_repo = StatsRepository(conn)
+        stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
+
+    if foreshadowing is not None:
+        ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)
 
 
 def _store_annotation_results(
@@ -104,63 +217,26 @@ def _store_annotation_results(
     修改者: TraeAI
     任务: fix-multi-speaker-support
     修改内容: 删除 dialogue_evidences 参数，speaker 改为 list[str]
+
+    修改时间: 2026-04-23
+    修改者: Codex
+    任务: p2-store-annotation-results-split
+    修改内容: 改为编排 helper，主函数只负责组织伏笔合并、对话快照转换与 repository 写入。
     """
-
-    from src.models.local.schema import DialogueSnapshot
-    from src.storage.repositories import AnnotationRepository
-
-    ann_repo = AnnotationRepository(conn)
-
-    if foreshadowing is not None:
-        from src.models.local.schema import ChunkAnnotation
-
-        annotation = ChunkAnnotation(
-            emotional_valence=annotation.emotional_valence,
-            event_type=annotation.event_type,
-            pivot_moment=annotation.pivot_moment,
-            cliffhanger=annotation.cliffhanger,
-            chunk_summary=annotation.chunk_summary,
-            has_foreshadowing=foreshadowing.has_foreshadowing,
-            foreshadowing_type=foreshadowing.foreshadowing_type,
-            foreshadowing_desc=(
-                f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}"
-                if foreshadowing.has_foreshadowing
-                else ""
-            ),
-            characters=annotation.characters,
-            dialogues=annotation.dialogues,
-        )
-
-    ann_repo.insert_chunk_annotation(run_id, chunk_id, annotation)
-
-    if annotation.characters:
-        ann_repo.insert_chunk_characters(run_id, chunk_id, annotation.characters)
-
-    if dialogues:
-        effective_dialogues = []
-        for dialogue_idx, content in dialogues:
-            speaker_list = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
-            tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
-            identity_clue = dialogue_identity_clues.get(dialogue_idx) if dialogue_identity_clues else None
-            effective_dialogues.append(
-                DialogueSnapshot(
-                    speaker=speaker_list,
-                    content=content,
-                    tone=tone,
-                    identity_clue=identity_clue,
-                )
-            )
-        lengths = [len(content) for _, content in dialogues]
-        ann_repo.insert_chunk_dialogues(run_id, chunk_id, effective_dialogues, lengths)
-
-    if relations:
-        ann_repo.insert_chunk_relations(run_id, chunk_id, relations)
-
-    if annotation.chunk_summary:
-        from src.storage.repositories import StatsRepository
-
-        stats_repo = StatsRepository(conn)
-        stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
-
-    if foreshadowing is not None:
-        ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)
+    merged_annotation = _merge_annotation_foreshadowing(annotation, foreshadowing)
+    dialogue_snapshots, dialogue_lengths = _build_dialogue_snapshots(
+        dialogues,
+        dialogue_speakers=dialogue_speakers,
+        dialogue_tones=dialogue_tones,
+        dialogue_identity_clues=dialogue_identity_clues,
+    )
+    _persist_annotation_repositories(
+        conn,
+        run_id=run_id,
+        chunk_id=chunk_id,
+        annotation=merged_annotation,
+        foreshadowing=foreshadowing,
+        dialogue_snapshots=dialogue_snapshots,
+        dialogue_lengths=dialogue_lengths,
+        relations=relations,
+    )
