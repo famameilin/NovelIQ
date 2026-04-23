@@ -31,7 +31,8 @@ import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeD
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ForceGraphHandle, GraphEdge, GraphEvent, GraphEventsPageInfo, GraphNode, GraphNodeObject } from "@/api/types";
+import type { GraphEdge, GraphEvent, GraphEventsPageInfo, GraphNode } from "@/api/types";
+import type { ForceGraphHandle, GraphNodeObject } from "@/components/charts/forceGraphTypes";
 
 const STALE_TIME = 5 * 60 * 1000;
 const pageSectionVariants = {
