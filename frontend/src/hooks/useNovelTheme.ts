@@ -41,7 +41,9 @@ export function useNovelTheme() {
   const effectiveSeedColor =
     hasValidThemeColor
       ? themeColor
-      : currentTaskThemeKey && resolvedTaskThemeKeyRef.current === currentTaskThemeKey
+      : currentTaskThemeKey &&
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- 渲染时读取 ref 判断主题是否可复用，属有意为之的性能优化
+        resolvedTaskThemeKeyRef.current === currentTaskThemeKey
         ? seedColor
         : DEFAULT_SEED;
 
