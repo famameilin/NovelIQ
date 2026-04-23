@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from src.api.exceptions import NovelNotFoundError
 from src.api.models.events import AnalysisEventBus, StreamEvent
@@ -39,6 +40,43 @@ from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
 from src.storage.id_mapping import TaskIDNotFoundError
 from src.storage.repositories import RunRepository
+
+
+def _insert_test_novel(novel_id: str, *, session=None, title: str | None = None) -> None:
+    """
+    为直接造 run 的测试补一条合法小说主表记录。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-analysis-related-foreign-keys
+    说明: analysis_runs 现在受 novel 外键保护；测试若要直接插 run，
+          必须先补 novels 主表，不能再依赖历史上的无约束脏状态。
+    """
+    if len(novel_id) > 8:
+        raise ValueError(f"test novel_id must be 8 chars or fewer, got: {novel_id}")
+
+    statement = text(
+        """
+        INSERT INTO novels (novel_id, title, filename, file_path)
+        VALUES (:novel_id, :title, :filename, :file_path)
+        ON CONFLICT (novel_id) DO NOTHING
+        """
+    )
+    payload = {
+        "novel_id": novel_id,
+        "title": title or novel_id,
+        "filename": f"{novel_id}.txt",
+        "file_path": f"data/uploads/{novel_id}.txt",
+    }
+
+    if session is not None:
+        session.execute(statement, payload)
+        session.commit()
+        return
+
+    with get_session_factory()() as local_session:
+        local_session.execute(statement, payload)
+        local_session.commit()
 
 
 class TestTestDatabaseIsolation:
@@ -495,10 +533,12 @@ class TestAnalysis:
         stale_heartbeat = datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
 
         # 使用唯一 ID 避免测试间数据污染
-        running_novel_id = f"novel-running-{uuid.uuid4()}"
-        cancelling_novel_id = f"novel-cancelling-{uuid.uuid4()}"
+        running_novel_id = uuid.uuid4().hex[:8]
+        cancelling_novel_id = uuid.uuid4().hex[:8]
 
         with session_factory() as session:
+            _insert_test_novel(running_novel_id, session=session)
+            _insert_test_novel(cancelling_novel_id, session=session)
             run_repo = RunRepository(session)
             running_run_id = run_repo.create_run(novel_id=running_novel_id)
             cancelling_run_id = run_repo.create_run(novel_id=cancelling_novel_id)
@@ -540,11 +580,15 @@ class TestAnalysis:
         from src.api import main as main_mod
 
         session_factory = get_session_factory()
+        running_novel_id = "runno001"
+        cancelling_novel_id = "canno001"
 
         with session_factory() as session:
+            _insert_test_novel(running_novel_id, session=session)
+            _insert_test_novel(cancelling_novel_id, session=session)
             run_repo = RunRepository(session)
-            running_run_id = run_repo.create_run(novel_id="novel-running-no-owner")
-            cancelling_run_id = run_repo.create_run(novel_id="novel-cancelling-no-owner")
+            running_run_id = run_repo.create_run(novel_id=running_novel_id)
+            cancelling_run_id = run_repo.create_run(novel_id=cancelling_novel_id)
             run_repo.update_run_task_fields(running_run_id, status="running")
             run_repo.update_run_task_fields(
                 cancelling_run_id,
@@ -624,21 +668,32 @@ class TestAnalysis:
         service = get_novel_service()
         valid_task_id = service.create_task(novel_id)
 
+        skipped_task_id = "skipme01"
+        _insert_test_novel(skipped_task_id)
         with get_session_factory()() as session:
-            dangling_run_id = RunRepository(session).create_run(novel_id="deleted-novel")
+            RunRepository(session).create_run(novel_id=skipped_task_id, run_id=skipped_task_id)
 
         scheduled_calls: list[tuple[str, str]] = []
+
+        async def _resume_or_skip(self, resume_novel_id: str, scheduled_task_id: str) -> str:
+            if scheduled_task_id == skipped_task_id:
+                raise NovelNotFoundError(message=f"db task missing novel: {scheduled_task_id}")
+            scheduled_calls.append((scheduled_task_id, resume_novel_id))
+            return scheduled_task_id
 
         def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
             scheduled_calls.append((scheduled_task_id, novel["novel_id"]))
 
-        with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule):
+        with (
+            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule),
+            patch.object(analysis_mod.AnalysisService, "resume_task", new=_resume_or_skip),
+        ):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
 
         assert cancelled_count == 0
         assert scheduled_count == len(scheduled_calls)
         assert (valid_task_id, novel_id) in scheduled_calls
-        assert all(task_id != dangling_run_id for task_id, _ in scheduled_calls)
+        assert all(task_id != skipped_task_id for task_id, _ in scheduled_calls)
 
     @pytest.mark.asyncio
     async def test_resume_pending_reanalysis_restores_original_request(self, api_client: TestClient):
@@ -917,9 +972,10 @@ class TestDeleteAnalysis:
 
         # 使用唯一 run_id 避免测试间数据污染（数据库 run_id 字段长度有限制，用短 UUID 前缀）
         run_id = f"cl-{uuid.uuid4().hex[:8]}"
+        _insert_test_novel("novcln01")
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novel-cleanup", run_id=run_id)
+            run_repo.create_run(novel_id="novcln01", run_id=run_id)
             run_repo.update_run_task_fields(
                 run_id,
                 status="completed",
@@ -928,7 +984,7 @@ class TestDeleteAnalysis:
             )
 
         task_manager = TaskManager()
-        task_manager.create_task(run_id, "novel-cleanup")
+        task_manager.create_task(run_id, "novcln01")
         task_manager.set_db_session_factory(lambda: get_session_factory()())
 
         # 注意：TaskInfo 不再存储 status，此处通过设置 cancel_event 模拟运行中状态
@@ -975,14 +1031,81 @@ class TestDeleteAnalysis:
         assert "删除成功" in data["message"] or "任务删除成功" in data["message"]
         assert data["task_id"] == task_id
 
+    def test_delete_task_cleans_db_rows_and_artifacts_for_full_run_id(self, api_client: TestClient):
+        """测试删除 task 会清理 full run_id 日志目录、导出文件与关键从表"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            f.write(b"Test novel content\n" * 100)
+            f.flush()
+
+            with open(f.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload", files={"file": ("delete_artifacts_test.txt", file, "text/plain")}
+                )
+
+        assert upload_response.status_code == 200
+        novel_id = upload_response.json()["novel_id"]
+        run_id = "12345678-1234-1234-1234-123456789abc"
+        task_id = run_id[:8]
+
+        with get_session_factory()() as session:
+            run_repo = RunRepository(session)
+            run_repo.create_run(novel_id=novel_id, run_id=run_id)
+            run_repo.update_run_task_fields(run_id, status="completed")
+            session.execute(
+                text("INSERT INTO chunks (chunk_id, text, run_id) VALUES (:chunk_id, :text, :run_id)"),
+                {"chunk_id": 0, "text": "待删除分块", "run_id": run_id},
+            )
+            session.execute(
+                text(
+                    """
+                    INSERT INTO global_context (novel_id, novel_title, run_id)
+                    VALUES (:novel_id, :novel_title, :run_id)
+                    ON CONFLICT (novel_id) DO UPDATE
+                    SET novel_title = EXCLUDED.novel_title, run_id = EXCLUDED.run_id
+                    """
+                ),
+                {"novel_id": novel_id, "novel_title": "待删除小说", "run_id": run_id},
+            )
+            session.commit()
+
+        log_dir = Path("logs") / run_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "analysis.log").write_text("test log", encoding="utf-8")
+        output_file = Path("outputs") / f"{task_id}.json"
+        output_file.write_text("{}", encoding="utf-8")
+
+        delete_response = api_client.delete(f"/api/novels/{novel_id}/tasks/{task_id}")
+        assert delete_response.status_code == 200
+
+        with get_session_factory()() as session:
+            remaining_run = session.execute(
+                text("SELECT COUNT(*) FROM analysis_runs WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            ).scalar_one()
+            remaining_chunks = session.execute(
+                text("SELECT COUNT(*) FROM chunks WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            ).scalar_one()
+            remaining_context = session.execute(
+                text("SELECT COUNT(*) FROM global_context WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            ).scalar_one()
+
+        assert remaining_run == 0
+        assert remaining_chunks == 0
+        assert remaining_context == 0
+        assert not log_dir.exists()
+        assert not output_file.exists()
+
 
 class TestRunRepository:
     """测试 RunRepository 的任务运行态更新"""
 
     def test_update_run_task_fields_can_clear_nullable_runtime_fields(self, db_session):
         """测试 update_run_task_fields 支持将 nullable 运行态字段清空为 None"""
+        _insert_test_novel("novel001", session=db_session)
         run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(novel_id="novel-1")
+        run_id = run_repo.create_run(novel_id="novel001")
 
         run_repo.update_run_task_fields(
             run_id,
@@ -1015,8 +1138,9 @@ class TestRunRepository:
 
     def test_claim_pending_run_is_atomic(self, db_session):
         """测试 pending 任务只能被一个 worker 原子领取一次"""
+        _insert_test_novel("claim001", session=db_session)
         run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(novel_id="novel-claim")
+        run_id = run_repo.create_run(novel_id="claim001")
 
         first_claim = run_repo.claim_pending_run(run_id, worker_id="worker-a")
         second_claim = run_repo.claim_pending_run(run_id, worker_id="worker-b")
@@ -1065,12 +1189,13 @@ class TestAnalysisErrorHandler:
 
     @pytest.mark.asyncio
     async def test_handle_cancel_clears_cancel_requested_in_db(self, db_session):
+        _insert_test_novel("novel001", session=db_session)
         run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(novel_id="novel-1")
+        run_id = run_repo.create_run(novel_id="novel001")
         run_repo.update_run_task_fields(run_id, status="cancelling", cancel_requested=True)
 
         task_manager = TaskManager()
-        task_manager.create_task(run_id[:8], "novel-1")
+        task_manager.create_task(run_id[:8], "novel001")
         handler = AnalysisErrorHandler(
             novel_service=MagicMock(),
             task_manager=task_manager,
@@ -1078,7 +1203,7 @@ class TestAnalysisErrorHandler:
 
         await handler.handle_cancel(
             task_id=run_id[:8],
-            novel_id="novel-1",
+            novel_id="novel001",
             session=db_session,
             run_id=run_id,
             analysis_logger=None,
@@ -1100,13 +1225,14 @@ class TestTaskManagerDbWrite:
         hex_id = uuid.uuid4().hex
         task_id = hex_id[:8]
         full_run_id = f"{task_id}-{hex_id[8:12]}-{hex_id[12:16]}-{hex_id[16:20]}-{hex_id[20:32]}"
+        _insert_test_novel("novel001")
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novel-1", run_id=full_run_id)
+            run_repo.create_run(novel_id="novel001", run_id=full_run_id)
 
         task_manager = TaskManager()
         task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, "novel-1")
+        task_manager.create_task(task_id, "novel001")
 
         task_manager.update_task(
             task_id,
@@ -1128,14 +1254,15 @@ class TestTaskManagerDbWrite:
         """测试活跃运行态写回会自动带上 worker_id 和 heartbeat_at"""
         run_id = str(uuid.uuid4())
         task_id = run_id[:8]
+        _insert_test_novel("novel001")
 
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novel-1", run_id=run_id)
+            run_repo.create_run(novel_id="novel001", run_id=run_id)
 
         task_manager = TaskManager(worker_id="worker-test")
         task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, "novel-1")
+        task_manager.create_task(task_id, "novel001")
 
         task_manager.update_task(
             task_id,
@@ -1157,14 +1284,15 @@ class TestTaskManagerDbWrite:
         """测试没有进度事件时也会通过独立 heartbeat 持续刷新 heartbeat_at"""
         run_id = str(uuid.uuid4())
         task_id = run_id[:8]
+        _insert_test_novel("novel001")
 
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novel-1", run_id=run_id)
+            run_repo.create_run(novel_id="novel001", run_id=run_id)
 
         task_manager = TaskManager(worker_id="worker-heartbeat", heartbeat_interval_seconds=0.02)
         task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, "novel-1")
+        task_manager.create_task(task_id, "novel001")
 
         async def _silent_long_stage():
             await asyncio.sleep(0.08)

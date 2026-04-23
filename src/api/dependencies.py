@@ -18,11 +18,14 @@ from sqlalchemy.orm import Session
 
 from src.api.exceptions import NovelNotFoundError
 from src.api.services.novel_service import NovelService
+from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
 
 # 模块级别的单例
 _upload_dir = Path("data/uploads")
 _novel_service_instance: NovelService | None = None
+_task_manager = TaskManager()
+_task_manager.set_db_session_factory(lambda: get_session_factory()())
 
 
 def _get_novel_service_instance() -> NovelService:
@@ -41,6 +44,19 @@ def get_novel_service() -> NovelService:
         NovelService 实例
     """
     return _get_novel_service_instance()
+
+
+def get_task_manager() -> TaskManager:
+    """
+    获取任务执行缓存管理器单例。
+
+    创建时间: 2026-04-22
+    创建者: Codex
+    任务: fix-novel-task-delete-consistency
+    说明: TaskManager 仍只负责执行缓存；这里统一暴露依赖入口，
+          避免 novel/task 删除路径各自维护不同的单例来源。
+    """
+    return _task_manager
 
 
 def get_db_session() -> Generator[Session, None, None]:

@@ -36,7 +36,7 @@ from src.models.cloud import build_diagnosis_payload
 from src.models.cloud.schema import CloudAnalysis
 from src.models.diagnosis import DiagnosisClient
 from src.pipeline.pipeline import FileCache, MemoryCache
-from src.storage.repositories import StatsRepository
+from src.storage.repositories import RunRepository, StatsRepository
 
 
 def _setup_diagnose_callback(
@@ -65,10 +65,11 @@ def _setup_diagnose_callback(
         chunk_id,
     ) -> None:
         try:
+            resolved_novel_id = cb_novel_id if cb_novel_id and cb_novel_id != "unknown" else novel_id
             stats_repo = StatsRepository(session)
             stats_repo.insert_token_usage(
                 run_id,
-                cb_novel_id,
+                resolved_novel_id,
                 task_type,
                 call_type,
                 model,
@@ -138,6 +139,11 @@ async def run_diagnose(
     任务: workflows 使用 Repository 模式重构
     修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-token-usage-unknown-novel-id
+    修改内容: 改为从 analysis_runs 获取 novel_id，禁止 diagnosis 链路再把 unknown 传播进 cloud_analysis / token_usage。
+
     Args:
         run_id: 运行ID
         session: 数据库连接
@@ -148,10 +154,13 @@ async def run_diagnose(
     Returns:
         CloudAnalysis: 诊断分析结果
     """
-    stats_repo = StatsRepository(session)
-    cloud_analysis = stats_repo.fetch_cloud_analysis("", run_id)
-    novel_id = cloud_analysis.get("novel_id", "unknown") if cloud_analysis else "unknown"
+    run_repo = RunRepository(session)
+    run = run_repo.get_run(run_id)
+    novel_id = str(run.get("novel_id", "")).strip() if run else ""
+    if not novel_id:
+        raise ValueError(f"run {run_id} is missing novel_id, cannot build diagnosis payload")
 
+    stats_repo = StatsRepository(session)
     payload = build_diagnosis_payload(session, novel_id, run_id)
 
     logger.debug(f"built diagnosis payload with keys={sorted(payload.keys())}")
