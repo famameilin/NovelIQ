@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.api.services.metrics_service import MetricsService
 from src.storage.repositories import RunRepository
 
 if TYPE_CHECKING:
@@ -68,6 +69,13 @@ class AnalysisErrorHandler:
         run_repo = RunRepository(session)
         run_repo.update_run_status(run_id, "completed")
         session.commit()
+
+        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效
+        try:
+            metrics_service = MetricsService()
+            metrics_service.invalidate_cache(run_id)
+        except Exception as e:
+            logger.warning(f"Failed to invalidate metrics cache for {run_id}: {e}")
 
         if bus:
             await bus.emit_task_complete()
