@@ -58,15 +58,39 @@
  * 修改内容:
  *   - 缩小顶部保留区与外层内边距，减少主图上方无效空白
  *   - 轻微压缩主画布高度，让整块时间轴卡片更紧凑
+ *
+ * 修改时间: 2026-04-23
+ * 任务: 复杂度与耦合审查 P1
+ * 修改内容:
+ *   - 拆分布局计算与 SVG path 生成纯函数
+ *   - TimelineTrack 只保留视图编排职责，并补纯函数测试
  */
 
 import { motion } from "framer-motion";
-import { useMemo, useCallback } from "react";
+import { useCallback, useMemo } from "react";
+
+import type { TimelineNode as TimelineNodeType } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
-import type { TimelineNode as TimelineNodeType } from "@/api/types";
+
 import { TimelineNode } from "./TimelineNode";
+import {
+  calculateCanvasMinWidth,
+  calculateNodeAnchorX,
+  calculateNodeAnchorY,
+  createTimelineLayoutNodes,
+  getClampedLabelLeftPx,
+  getLabelTopPx,
+  GUIDE_LINE_OFFSET_X_PX,
+  GUIDE_LINE_OFFSET_Y_PX,
+  LABEL_HEIGHT_PX,
+  NODE_RENDER_OFFSET_X_PX,
+  NODE_RENDER_OFFSET_Y_PX,
+  PHASE_BAND_BOTTOM_PX,
+  PHASE_BAND_TOP_PX,
+} from "./timelineTrackLayout";
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
+import { buildTensionAreaPath, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
 export interface TimelineTrackProps {
   nodes: TimelineNodeType[];
@@ -79,39 +103,6 @@ export interface TimelineTrackProps {
   totalChunks?: number;
   showTension?: boolean;
 }
-
-interface TimelineLayoutNode {
-  node: TimelineNodeType;
-  lane: number;
-  labelWidth: number;
-}
-
-const TRACK_NODE_START_PADDING_PX = 28;
-const TRACK_NODE_END_PADDING_PX = 68;
-const TRACK_CURVE_START_PADDING_PX = 28;
-const TRACK_CURVE_END_PADDING_PX = 68;
-const TRACK_LABEL_START_GAP_PX = 16;
-const TRACK_LABEL_END_GAP_PX = 38;
-const TRACK_HEIGHT_PX = 378;
-const TRACK_BASELINE_Y = 172;
-const TRACK_MIN_WIDTH_PX = 980;
-const TRACK_NODE_SPACING_PX = 136;
-const TRACK_CHUNK_SPACING_PX = 46;
-const LANE_GAP_PX = 48;
-const LABEL_HEIGHT_PX = 72;
-const TOP_LABEL_MARGIN_PX = 12;
-const BOTTOM_LABEL_MARGIN_PX = 44;
-const PHASE_BAND_TOP_PX = 16;
-const PHASE_BAND_BOTTOM_PX = 0;
-const TOP_LABEL_CLEARANCE_PX = 12;
-const BOTTOM_LABEL_CLEARANCE_PX = 10;
-const CURVE_CENTER_Y = 176;
-const CURVE_AMPLITUDE_PX = 52;
-const NODE_RENDER_OFFSET_X_PX = -8;
-const NODE_RENDER_OFFSET_Y_PX = -9;
-const GUIDE_LINE_OFFSET_X_PX = 8;
-const GUIDE_LINE_OFFSET_Y_PX = 2;
-const LANE_ORDER = [-2, -1, 1, 2] as const;
 
 const PHASE_SURFACE_CLASS_MAP: Record<string, string> = {
   引入期: "from-chart-1/12 to-chart-1/4",
@@ -134,7 +125,7 @@ export function TimelineTrack({
   const highlightedRange = useMemo(() => {
     if (!activePhase || !phases) return null;
     const phase = phases.find((item) => item.name === activePhase);
-    return phase ? [phase.start, phase.end] as [number, number] : null;
+    return phase ? ([phase.start, phase.end] as [number, number]) : null;
   }, [activePhase, phases]);
 
   const isNodeInHighlight = useCallback(
@@ -145,22 +136,9 @@ export function TimelineTrack({
     [highlightedRange]
   );
 
-  const sortedNodes = useMemo(
-    () => [...(nodes || [])].sort((a, b) => a.progress - b.progress),
-    [nodes]
-  );
-
-  const canvasMinWidth = useMemo(() => {
-    return Math.max(
-      TRACK_MIN_WIDTH_PX,
-      sortedNodes.length * TRACK_NODE_SPACING_PX,
-      Math.max(totalChunks, 0) * TRACK_CHUNK_SPACING_PX
-    );
-  }, [sortedNodes.length, totalChunks]);
-
-  const layoutNodes = useMemo(() => {
-    return createTimelineLayoutNodes(sortedNodes, canvasMinWidth);
-  }, [canvasMinWidth, sortedNodes]);
+  const sortedNodes = useMemo(() => [...(nodes || [])].sort((a, b) => a.progress - b.progress), [nodes]);
+  const canvasMinWidth = useMemo(() => calculateCanvasMinWidth(sortedNodes.length, totalChunks), [sortedNodes.length, totalChunks]);
+  const layoutNodes = useMemo(() => createTimelineLayoutNodes(sortedNodes, canvasMinWidth), [canvasMinWidth, sortedNodes]);
 
   const tensionPath = useMemo(() => {
     if (!showTension || !tensionCurve || tensionCurve.length === 0) {
@@ -260,16 +238,12 @@ export function TimelineTrack({
               <div className="relative" style={{ height: `${TRACK_HEIGHT_PX}px`, minWidth: `${canvasMinWidth}px` }}>
                 {layoutNodes.map((layoutNode, index) => {
                   const { node, lane, labelWidth } = layoutNode;
-                  const anchorX = getTrackPositionPx(
-                    node.progress,
-                    canvasMinWidth,
-                    TRACK_NODE_START_PADDING_PX,
-                    TRACK_NODE_END_PADDING_PX
-                  );
-                  const anchorY =
-                    showTension && tensionCurve && tensionCurve.length > 0
-                      ? getCurveNodeYPx(node.progress, tensionCurve, totalChunks)
-                      : TRACK_BASELINE_Y + lane * LANE_GAP_PX;
+                  const anchorX = calculateNodeAnchorX(node.progress, canvasMinWidth);
+                  const anchorY = calculateNodeAnchorY(node.progress, lane, {
+                    showTension,
+                    tensionCurve,
+                    totalChunks,
+                  });
                   const calibratedAnchorX = anchorX + NODE_RENDER_OFFSET_X_PX;
                   const calibratedAnchorY = anchorY + NODE_RENDER_OFFSET_Y_PX;
                   const guideLineX = calibratedAnchorX + GUIDE_LINE_OFFSET_X_PX;
@@ -329,9 +303,7 @@ export function TimelineTrack({
                             <span className="text-[11px] font-semibold text-text">{presentation.label}</span>
                             <span className="text-[11px] text-text-muted">Chunk {node.chunk_id}</span>
                           </div>
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-text">
-                            {node.event}
-                          </p>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-text">{node.event}</p>
                         </div>
                       </motion.button>
 
@@ -349,202 +321,13 @@ export function TimelineTrack({
                 })}
 
                 {layoutNodes.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-sm text-text-muted">
-                    暂无时间轴节点
-                  </div>
+                  <div className="flex h-full items-center justify-center text-sm text-text-muted">暂无时间轴节点</div>
                 ) : null}
               </div>
             </div>
-
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-/**
- * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 新建原因：给密集节点分配上下车道，避免标签在同一条线上相互覆盖。
- */
-function createTimelineLayoutNodes(nodes: TimelineNodeType[], canvasWidth: number): TimelineLayoutNode[] {
-  const laneLastEndMap = new Map<number, number>(LANE_ORDER.map((lane) => [lane, -1]));
-
-  return nodes.map((node, index) => {
-    const labelWidth = estimateLabelWidth(node.event);
-    const labelWidthRatio = labelWidth / canvasWidth;
-    const nodeLeft = getNormalizedProgress(node.progress);
-    const labelStart = nodeLeft - labelWidthRatio / 2;
-
-    const preferredLaneOrder = index % 2 === 0 ? [...LANE_ORDER] : [...LANE_ORDER].reverse();
-    const lane =
-      preferredLaneOrder.find((candidateLane) => {
-        const lastEnd = laneLastEndMap.get(candidateLane) ?? -1;
-        return labelStart > lastEnd + 0.018;
-      }) ??
-      preferredLaneOrder.reduce((bestLane, candidateLane) => {
-        const bestEnd = laneLastEndMap.get(bestLane) ?? Number.POSITIVE_INFINITY;
-        const candidateEnd = laneLastEndMap.get(candidateLane) ?? Number.POSITIVE_INFINITY;
-        return candidateEnd < bestEnd ? candidateLane : bestLane;
-      }, preferredLaneOrder[0]);
-
-    const labelEnd = nodeLeft + labelWidthRatio / 2;
-    laneLastEndMap.set(lane, labelEnd);
-
-    return {
-      node,
-      lane,
-      labelWidth,
-    };
-  });
-}
-
-/**
- * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 新建原因：时间轴标签需要稳定宽度估算，以便在纯前端布局阶段做近似避让。
- */
-function estimateLabelWidth(eventText: string): number {
-  const estimated = eventText.trim().length * 11 + 56;
-  return Math.max(120, Math.min(188, estimated));
-}
-
-/**
- * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 新建原因：张力曲线改为时间轴底图后，需要一个轻量 SVG path 而不是单独的图表卡片。
- */
-function buildTensionAreaPath(tensionCurve: number[], totalChunks: number, canvasWidth: number) {
-  const normalizedPoints = tensionCurve.map((value, index) => {
-    const xProgress = totalChunks > 1 ? index / Math.max(totalChunks - 1, 1) : index / Math.max(tensionCurve.length - 1, 1);
-    const clampedValue = Number.isFinite(value) ? value : 0;
-    return {
-      x: getTrackPositionPx(
-        xProgress,
-        canvasWidth,
-        TRACK_CURVE_START_PADDING_PX,
-        TRACK_CURVE_END_PADDING_PX
-      ),
-      y: mapTensionValueToTrackY(clampedValue, tensionCurve),
-    };
-  });
-
-  if (normalizedPoints.length === 0) {
-    return null;
-  }
-
-  const linePath = normalizedPoints
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(" ");
-
-  const areaFloor = TRACK_HEIGHT_PX;
-  const areaPath = `${linePath} L ${normalizedPoints[normalizedPoints.length - 1]?.x.toFixed(2)} ${areaFloor} L ${normalizedPoints[0]?.x.toFixed(2)} ${areaFloor} Z`;
-
-  return { linePath, areaPath };
-}
-
-/**
- * 2026-04-21，任务：第一版节点贴合张力曲线
- * 新建原因：节点需要按 progress 在张力曲线上插值定位，不能直接复用全局 percentile 当作图上坐标。
- */
-function getCurveNodeYPx(progress: number, tensionCurve: number[], totalChunks: number): number {
-  if (tensionCurve.length === 0) {
-    return CURVE_CENTER_Y;
-  }
-
-  const interpolatedValue = interpolateSeriesValueAtProgress(progress, tensionCurve, totalChunks);
-  return mapTensionValueToTrackY(interpolatedValue, tensionCurve);
-}
-
-/**
- * 2026-04-21，任务：拉开下方标签与曲线的距离
- * 新建原因：节点锚点已经贴曲线后，标签垂直位置必须相对曲线计算，不能继续依赖固定基线。
- */
-function getLabelTopPx(anchorY: number, lane: number): number {
-  const laneOffset = lane * LANE_GAP_PX;
-  const rawLabelTop =
-    lane < 0
-      ? anchorY + laneOffset - (LABEL_HEIGHT_PX + TOP_LABEL_MARGIN_PX)
-      : anchorY + laneOffset + BOTTOM_LABEL_MARGIN_PX;
-
-  const minLabelTop = PHASE_BAND_TOP_PX + TOP_LABEL_CLEARANCE_PX;
-  const maxLabelTop =
-    TRACK_HEIGHT_PX - PHASE_BAND_BOTTOM_PX - LABEL_HEIGHT_PX - BOTTOM_LABEL_CLEARANCE_PX;
-  return Math.max(minLabelTop, Math.min(maxLabelTop, rawLabelTop));
-}
-
-/**
- * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 新建原因：不同张力来源数值区间不同，底图需要先归一化后再映射到视图高度。
- */
-function normalizeSeriesValue(value: number, series: number[]): number {
-  const min = Math.min(...series);
-  const max = Math.max(...series);
-  if (max - min < 1e-6) {
-    return 0.5;
-  }
-  return (value - min) / (max - min);
-}
-
-/**
- * 2026-04-21，任务：第二版时间轴主轴视觉收敛
- * 新建原因：张力曲线需要稳定落在画布中段，既承担主轴，又给上下标签保留呼吸空间。
- */
-function mapTensionValueToTrackY(value: number, series: number[]): number {
-  const normalized = normalizeSeriesValue(value, series);
-  return CURVE_CENTER_Y + (0.5 - normalized) * CURVE_AMPLITUDE_PX * 2;
-}
-
-/**
- * 2026-04-21，任务：第一版节点贴合张力曲线
- * 新建原因：节点 progress 往往落在相邻张力采样点之间，需要线性插值才能贴到曲线本身。
- */
-function interpolateSeriesValueAtProgress(progress: number, series: number[], totalChunks: number): number {
-  if (series.length === 0) {
-    return 0;
-  }
-  if (series.length === 1) {
-    return series[0] ?? 0;
-  }
-
-  const normalized = getNormalizedProgress(progress);
-  const maxIndex = totalChunks > 1 ? totalChunks - 1 : series.length - 1;
-  const sampleIndex = normalized * Math.max(maxIndex, 1);
-  const leftIndex = Math.max(0, Math.min(Math.floor(sampleIndex), series.length - 1));
-  const rightIndex = Math.max(0, Math.min(Math.ceil(sampleIndex), series.length - 1));
-
-  if (leftIndex === rightIndex) {
-    return series[leftIndex] ?? 0;
-  }
-
-  const leftValue = series[leftIndex] ?? 0;
-  const rightValue = series[rightIndex] ?? leftValue;
-  const ratio = sampleIndex - leftIndex;
-  return leftValue + (rightValue - leftValue) * ratio;
-}
-
-/**
- * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 新建原因：节点与曲线都需要按可配置的首尾安全边距映射到画布坐标，便于单独加大末尾留白。
- */
-function getTrackPositionPx(
-  progress: number,
-  canvasWidth: number,
-  startPaddingPx: number,
-  endPaddingPx: number
-): number {
-  const normalized = getNormalizedProgress(progress);
-  return startPaddingPx + normalized * Math.max(canvasWidth - startPaddingPx - endPaddingPx, 0);
-}
-
-/**
- * 2026-04-21，任务：修复首尾标签裁切
- * 新建原因：首尾 chunk 的标签不能简单以节点为中心，需要在画布边缘内做钳制。
- */
-function getClampedLabelLeftPx(anchorX: number, labelWidth: number, canvasWidth: number): number {
-  const minLeft = TRACK_LABEL_START_GAP_PX;
-  const maxLeft = Math.max(canvasWidth - labelWidth - TRACK_LABEL_END_GAP_PX, minLeft);
-  return Math.min(Math.max(anchorX - labelWidth / 2, minLeft), maxLeft);
-}
-
-function getNormalizedProgress(progress: number): number {
-  return Math.min(Math.max(progress, 0), 1);
 }
