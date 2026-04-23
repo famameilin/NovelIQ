@@ -4,7 +4,6 @@ import base64
 import json
 import uuid
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,55 +17,30 @@ from src.knowledge.authority import (
     GraphLowConfidenceSample,
     GraphPageQualityDetails,
     GraphPageSummary,
-    RelationEvent,
     StableState,
 )
-from src.storage.models import Chunk as ChunkModel
-from src.storage.models import Novel
 from src.storage.repositories import GraphRepository, RunRepository
+from tests.support.graph_snapshot_helpers import (
+    PaginatedGraphAuthorityService,
+    StaticGraphAuthorityService,
+    create_graph_annotation_repo,
+    insert_graph_test_chunks,
+    insert_graph_test_novel,
+    patch_graph_authority_service,
+    relation_event,
+)
 from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
-
-
-def _insert_test_novel(db_session, novel_id: str) -> None:
-    """为 graph snapshot contract 测试补齐 novels 主表记录。"""
-    if len(novel_id) > 8:
-        raise ValueError(f"graph snapshot test novel_id must be 8 chars or fewer, got: {novel_id}")
-
-    db_session.add(
-        Novel(
-            novel_id=novel_id,
-            filename=f"{novel_id}.txt",
-            file_path=f"data/uploads/{novel_id}.txt",
-            file_size=128,
-        )
-    )
-    db_session.commit()
-
-
-def _insert_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
-    """为 graph relation event 测试补齐 chunks 外键依赖。"""
-    db_session.add_all(
-        [
-            ChunkModel(
-                chunk_id=chunk_id,
-                run_id=run_id,
-                text=f"chunk-{chunk_id}",
-            )
-            for chunk_id in chunk_ids
-        ]
-    )
-    db_session.commit()
 
 
 def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
     novel_id = f"g{uuid.uuid4().hex[:7]}"
-    _insert_test_novel(db_session, novel_id)
+    insert_graph_test_novel(db_session, novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
         title="Graph Snapshot Contract",
     )
-    _insert_test_chunks(db_session, run_id, range(1, 9))
+    insert_graph_test_chunks(db_session, run_id, range(1, 9))
 
     graph_repo = GraphRepository(db_session)
     bo_an = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=6)
@@ -86,9 +60,7 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
     graph_repo.refresh_current_relation(run_id, bo_an.entity_id, liu_wan.entity_id)
     db_session.commit()
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = db_session
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo(db_session)
 
     snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
 
@@ -128,7 +100,7 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
 
 def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_session) -> None:
     novel_id = f"g{uuid.uuid4().hex[:7]}"
-    _insert_test_novel(db_session, novel_id)
+    insert_graph_test_novel(db_session, novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
@@ -140,9 +112,7 @@ def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_
     graph_repo.upsert_entity(run_id=run_id, canonical_name="柳婉儿", first_seen_chunk=1, last_seen_chunk=3)
     db_session.commit()
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = db_session
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo(db_session)
 
     snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
 
@@ -173,13 +143,13 @@ def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_
 
 def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_session) -> None:
     novel_id = f"g{uuid.uuid4().hex[:7]}"
-    _insert_test_novel(db_session, novel_id)
+    insert_graph_test_novel(db_session, novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
         title="Graph Snapshot Summary Contract",
     )
-    _insert_test_chunks(db_session, run_id, range(1, 9))
+    insert_graph_test_chunks(db_session, run_id, range(1, 9))
 
     graph_repo = GraphRepository(db_session)
     hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=8)
@@ -211,9 +181,7 @@ def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_sessio
     graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
     db_session.commit()
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = db_session
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo(db_session)
 
     snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
 
@@ -227,10 +195,12 @@ def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_sessio
 
 
 def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-graph-page"
-            return GraphAuthorityView(
+    patch_graph_authority_service(
+        monkeypatch,
+        StaticGraphAuthorityService(
+            expected_run_id="run-graph-page",
+            forbid_report=True,
+            view=GraphAuthorityView(
                 stable_states=[
                     StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
                     StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
@@ -247,31 +217,18 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
                     )
                 ],
                 relation_events=[
-                    RelationEvent(
-                        relation_event_id=11,
+                    relation_event(
+                        11,
                         chunk_id=6,
-                        from_entity_id=1,
-                        to_entity_id=2,
-                        from_name="沈砚",
-                        to_name="陆明",
-                        relation_type="盟友",
                         change_type="新建",
                         confidence=0.55,
                     )
                 ],
-            )
-
-        def build_graph_report(self, *_args, **_kwargs):
-            raise AssertionError("/graph page should not consume diagnosis/export graph report")
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     snapshot = _fetch_graph_snapshot("run-graph-page", annotation_repo)
 
@@ -295,10 +252,11 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
 
 
 def test_fetch_graph_snapshot_core_characters_excludes_non_character_nodes(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-graph-page-character-only"
-            return GraphAuthorityView(
+    patch_graph_authority_service(
+        monkeypatch,
+        StaticGraphAuthorityService(
+            expected_run_id="run-graph-page-character-only",
+            view=GraphAuthorityView(
                 stable_states=[
                     StableState(entity_id=10, name="天工阁", entity_type="organization", last_seen_chunk=10),
                     StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
@@ -316,16 +274,11 @@ def test_fetch_graph_snapshot_core_characters_excludes_non_character_nodes(monke
                     )
                 ],
                 relation_events=[],
-            )
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     snapshot = _fetch_graph_snapshot("run-graph-page-character-only", annotation_repo)
 
@@ -334,26 +287,22 @@ def test_fetch_graph_snapshot_core_characters_excludes_non_character_nodes(monke
 
 
 def test_fetch_graph_snapshot_core_characters_is_empty_without_character_nodes(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-graph-page-no-character"
-            return GraphAuthorityView(
+    patch_graph_authority_service(
+        monkeypatch,
+        StaticGraphAuthorityService(
+            expected_run_id="run-graph-page-no-character",
+            view=GraphAuthorityView(
                 stable_states=[
                     StableState(entity_id=10, name="天工阁", entity_type="organization", last_seen_chunk=10),
                     StableState(entity_id=11, name="黑水城", entity_type="location", last_seen_chunk=8),
                 ],
                 confirmed_relations=[],
                 relation_events=[],
-            )
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     snapshot = _fetch_graph_snapshot("run-graph-page-no-character", annotation_repo)
 
@@ -362,12 +311,13 @@ def test_fetch_graph_snapshot_core_characters_is_empty_without_character_nodes(m
 
 
 def test_fetch_graph_snapshot_accepts_graph_page_allowlist_without_full_graph_view(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_view(self, run_id: str) -> SimpleNamespace:
-            assert run_id == "run-graph-page-allowlist"
+    patch_graph_authority_service(
+        monkeypatch,
+        StaticGraphAuthorityService(
+            expected_run_id="run-graph-page-allowlist",
             # 中文注释：route assembler 只应该依赖 graph page allowlist；
             # 这里故意不给 canonical_entities，防止测试重新把它当必需依赖。
-            return SimpleNamespace(
+            view=SimpleNamespace(
                 stable_states=[
                     StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
                     StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
@@ -384,28 +334,18 @@ def test_fetch_graph_snapshot_accepts_graph_page_allowlist_without_full_graph_vi
                     )
                 ],
                 relation_events=[
-                    RelationEvent(
-                        relation_event_id=11,
+                    relation_event(
+                        11,
                         chunk_id=6,
-                        from_entity_id=1,
-                        to_entity_id=2,
-                        from_name="沈砚",
-                        to_name="陆明",
-                        relation_type="盟友",
                         change_type="新建",
                         confidence=0.55,
                     )
                 ],
-            )
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     snapshot = _fetch_graph_snapshot("run-graph-page-allowlist", annotation_repo)
 
@@ -500,24 +440,15 @@ def test_graph_page_public_dto_is_owned_by_route_layer() -> None:
 
 
 def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-graph-quality"
-            relation_events = [
-                RelationEvent(
-                    relation_event_id=index + 1,
-                    chunk_id=500 - index,
-                    from_entity_id=1,
-                    to_entity_id=2,
-                    from_name="沈砚",
-                    to_name="陆明",
-                    relation_type="盟友",
-                    change_type="波动",
-                    confidence=0.55,
-                )
-                for index in range(205)
-            ]
-            return GraphAuthorityView(
+    relation_events = [
+        relation_event(index + 1, chunk_id=500 - index, change_type="波动", confidence=0.55) for index in range(205)
+    ]
+    patch_graph_authority_service(
+        monkeypatch,
+        StaticGraphAuthorityService(
+            expected_run_id="run-graph-quality",
+            forbid_report=True,
+            view=GraphAuthorityView(
                 stable_states=[
                     StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=500),
                     StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=499),
@@ -534,19 +465,11 @@ def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(m
                     )
                 ],
                 relation_events=relation_events,
-            )
-
-        def build_graph_report(self, *_args, **_kwargs):
-            raise AssertionError("/graph page should not consume diagnosis/export graph report")
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     snapshot = _fetch_graph_snapshot("run-graph-quality", annotation_repo)
 
@@ -563,53 +486,24 @@ def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(m
 
 
 def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def __init__(self) -> None:
-            self._relation_events = [
-                RelationEvent(
-                    relation_event_id=index + 1,
-                    chunk_id=500 - index,
-                    from_entity_id=1,
-                    to_entity_id=2,
-                    from_name="沈砚",
-                    to_name="陆明",
-                    relation_type="盟友",
-                    change_type="波动",
-                    confidence=0.55,
-                )
-                for index in range(205)
-            ]
-
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-graph-events-page"
-            return GraphAuthorityView(
+    relation_events = [
+        relation_event(index + 1, chunk_id=500 - index, change_type="波动", confidence=0.55) for index in range(205)
+    ]
+    patch_graph_authority_service(
+        monkeypatch,
+        PaginatedGraphAuthorityService(
+            expected_run_id="run-graph-events-page",
+            relation_events=relation_events,
+            forbid_report=True,
+            view=GraphAuthorityView(
                 stable_states=[],
                 confirmed_relations=[],
-                relation_events=self._relation_events,
-            )
-
-        def build_graph_report(self, *_args, **_kwargs):
-            raise AssertionError("graph events pagination should not depend on graph report")
-
-        def build_graph_relation_event_page(
-            self,
-            run_id: str,
-            *,
-            offset: int = 0,
-            limit: int | None = None,
-        ) -> tuple[list[RelationEvent], int]:
-            assert run_id == "run-graph-events-page"
-            end = offset + (limit or len(self._relation_events))
-            return self._relation_events[offset:end], len(self._relation_events)
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+                relation_events=relation_events,
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     snapshot = _fetch_graph_snapshot("run-graph-events-page", annotation_repo)
     next_cursor = snapshot["events_page"]["next_cursor"]
@@ -631,35 +525,21 @@ def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch
 
 
 def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_relation_event_page(
-            self,
-            run_id: str,
-            *,
-            offset: int = 0,
-            limit: int | None = None,
-        ) -> tuple[list[RelationEvent], int]:
-            assert run_id == "run-empty-graph-events-page"
-            assert offset == 0
-            return [], 0
-
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-empty-graph-events-page"
-            return GraphAuthorityView(
+    patch_graph_authority_service(
+        monkeypatch,
+        PaginatedGraphAuthorityService(
+            expected_run_id="run-empty-graph-events-page",
+            relation_events=[],
+            view=GraphAuthorityView(
                 canonical_entities=[],
                 stable_states=[],
                 confirmed_relations=[],
                 relation_events=[],
-            )
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     page = _fetch_graph_events_page(
         "run-empty-graph-events-page",
@@ -688,57 +568,21 @@ def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> Non
     ],
 )
 def test_fetch_graph_events_page_rejects_invalid_cursor_payloads(monkeypatch, cursor: str) -> None:
-    class FakeAuthorityService:
-        def build_graph_relation_event_page(
-            self,
-            run_id: str,
-            *,
-            offset: int = 0,
-            limit: int | None = None,
-        ) -> tuple[list[RelationEvent], int]:
-            assert run_id == "run-invalid-graph-cursor"
-            return [
-                RelationEvent(
-                    relation_event_id=1,
-                    chunk_id=3,
-                    from_entity_id=1,
-                    to_entity_id=2,
-                    from_name="沈砚",
-                    to_name="陆明",
-                    relation_type="盟友",
-                    change_type="新建",
-                    confidence=0.8,
-                )
-            ], 1
-
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-invalid-graph-cursor"
-            return GraphAuthorityView(
+    events = [relation_event(1, chunk_id=3, change_type="新建", confidence=0.8)]
+    patch_graph_authority_service(
+        monkeypatch,
+        PaginatedGraphAuthorityService(
+            expected_run_id="run-invalid-graph-cursor",
+            relation_events=events,
+            view=GraphAuthorityView(
                 stable_states=[],
                 confirmed_relations=[],
-                relation_events=[
-                    RelationEvent(
-                        relation_event_id=1,
-                        chunk_id=3,
-                        from_entity_id=1,
-                        to_entity_id=2,
-                        from_name="沈砚",
-                        to_name="陆明",
-                        relation_type="盟友",
-                        change_type="新建",
-                        confidence=0.8,
-                    )
-                ],
-            )
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+                relation_events=events,
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     with pytest.raises(ValueError, match="invalid graph events cursor"):
         _fetch_graph_events_page(
@@ -749,53 +593,23 @@ def test_fetch_graph_events_page_rejects_invalid_cursor_payloads(monkeypatch, cu
 
 
 def test_fetch_graph_events_page_uses_incremental_authority_page_builder(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_view(self, *_args, **_kwargs):
-            raise AssertionError("graph events pagination should not rebuild the full graph view")
-
-        def build_graph_relation_event_page(
-            self,
-            run_id: str,
-            *,
-            offset: int = 0,
-            limit: int | None = None,
-        ) -> tuple[list[RelationEvent], int]:
-            assert run_id == "run-incremental-graph-events"
-            assert offset == 1
-            assert limit == 2
-            return [
-                RelationEvent(
-                    relation_event_id=12,
-                    chunk_id=8,
-                    from_entity_id=1,
-                    to_entity_id=2,
-                    from_name="沈砚",
-                    to_name="陆明",
-                    relation_type="盟友",
-                    change_type="强化",
-                    confidence=0.77,
-                ),
-                RelationEvent(
-                    relation_event_id=13,
-                    chunk_id=7,
-                    from_entity_id=1,
-                    to_entity_id=2,
-                    from_name="沈砚",
-                    to_name="陆明",
-                    relation_type="盟友",
-                    change_type="弱化",
-                    confidence=0.73,
-                ),
-            ], 5
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+    events = [
+        relation_event(11, chunk_id=9, change_type="新建", confidence=0.79),
+        relation_event(12, chunk_id=8, change_type="强化", confidence=0.77),
+        relation_event(13, chunk_id=7, change_type="弱化", confidence=0.73),
+        relation_event(14, chunk_id=6, change_type="波动", confidence=0.72),
+        relation_event(15, chunk_id=5, change_type="断裂", confidence=0.71),
+    ]
+    patch_graph_authority_service(
+        monkeypatch,
+        PaginatedGraphAuthorityService(
+            expected_run_id="run-incremental-graph-events",
+            relation_events=events,
+            forbid_view=True,
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     cursor = base64.urlsafe_b64encode(json.dumps({"offset": 1}).encode("utf-8")).decode("ascii").rstrip("=")
     page = _fetch_graph_events_page(
@@ -879,10 +693,11 @@ def test_get_graph_events_pagination_contract_is_continuous(api_client, db_sessi
 
 
 def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monkeypatch) -> None:
-    class FakeAuthorityService:
-        def build_graph_view(self, run_id: str) -> GraphAuthorityView:
-            assert run_id == "run-graph-shared-counts"
-            return GraphAuthorityView(
+    patch_graph_authority_service(
+        monkeypatch,
+        StaticGraphAuthorityService(
+            expected_run_id="run-graph-shared-counts",
+            view=GraphAuthorityView(
                 stable_states=[
                     StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=9),
                     StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=8),
@@ -911,19 +726,14 @@ def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monk
                     ),
                 ],
                 relation_events=[
-                    RelationEvent(
-                        relation_event_id=31,
+                    relation_event(
+                        31,
                         chunk_id=8,
-                        from_entity_id=1,
-                        to_entity_id=2,
-                        from_name="沈砚",
-                        to_name="陆明",
-                        relation_type="盟友",
                         change_type="新建",
                         confidence=0.82,
                     ),
-                    RelationEvent(
-                        relation_event_id=32,
+                    relation_event(
+                        32,
                         chunk_id=7,
                         from_entity_id=2,
                         to_entity_id=3,
@@ -934,16 +744,11 @@ def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monk
                         confidence=0.51,
                     ),
                 ],
-            )
-
-    monkeypatch.setattr(
-        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
-        lambda *_args, **_kwargs: FakeAuthorityService(),
+            ),
+        ),
     )
 
-    annotation_repo = MagicMock()
-    annotation_repo.session = object()
-    annotation_repo.fetch_pending_chunk_relations.return_value = []
+    annotation_repo = create_graph_annotation_repo()
 
     snapshot = _fetch_graph_snapshot("run-graph-shared-counts", annotation_repo)
 
