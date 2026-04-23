@@ -54,7 +54,7 @@ from src.lexicons.genre_detector_weighted import (
     get_weighted_lexicon_config as get_weighted_lexicon_config_impl,
 )
 from src.lexicons.registry import LexiconRegistry
-from src.metrics.text_utils import tokenize_words
+from src.utils.text_utils import tokenize_words
 
 if TYPE_CHECKING:
     from pathlib import Path

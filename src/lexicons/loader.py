@@ -3,35 +3,37 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
+from src.utils.lexicon_parser import load_lexicon_terms, parse_lexicon_term
+
 
 def _default_lexicon_dir() -> Path:
     return Path("data/lexicons")
 
 
 def _clean_line(line: str) -> str:
-    cleaned = line.strip()
-    if not cleaned:
-        return ""
-    if cleaned.startswith("#"):
-        return ""
-    return cleaned
+    """
+    清理词表行。
+
+    修改时间: 2026-04-23
+    任务: P2-基础设施解耦
+    修改内容: 复用公共词表解析器，统一注释行、空行和加权词表行处理规则。
+    """
+    return parse_lexicon_term(line)
 
 
 def load_lexicon(name: str, base_dir: Path | None = None) -> list[str]:
+    """
+    加载指定名称的词表。
+
+    修改时间: 2026-04-23
+    任务: P2-基础设施解耦
+    修改内容: 使用 src.utils.lexicon_parser.load_lexicon_terms，避免 loader 与 registry 重复解析格式。
+    """
     lexicon_dir = base_dir or _default_lexicon_dir()
     path = lexicon_dir / f"{name}.txt"
     if not path.exists():
         raise FileNotFoundError(f"lexicon not found: {path}")
-    items: list[str] = []
-    seen: set[str] = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        item = _clean_line(line)
-        if not item:
-            continue
-        if item not in seen:
-            seen.add(item)
-            items.append(item)
-    return items
+    return load_lexicon_terms(path)
 
 
 def load_all_lexicons(
