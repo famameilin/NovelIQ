@@ -12,4 +12,3 @@ from __future__ import annotations
 
 PROTECTED_CATEGORY_LABEL = "受保护-默认不合并"
 PROTECTED_CONTEXT_PREFIX = f"【{PROTECTED_CATEGORY_LABEL}】"
-

@@ -395,9 +395,7 @@ def reselect_cluster_canonicals(
                 review = new_review_status.get(name)
                 if review is not None:
                     normalized_status = (
-                        review.status
-                        if review.status != DISAMBIG_STATE_UNRESOLVED
-                        else DISAMBIG_STATE_REVIEW
+                        review.status if review.status != DISAMBIG_STATE_UNRESOLVED else DISAMBIG_STATE_REVIEW
                     )
                     updated_review = replace(
                         review,
@@ -417,9 +415,7 @@ def reselect_cluster_canonicals(
             review = new_review_status.get(name)
             if review is not None:
                 normalized_status = (
-                    review.status
-                    if review.status != DISAMBIG_STATE_UNRESOLVED
-                    else DISAMBIG_STATE_REVIEW
+                    review.status if review.status != DISAMBIG_STATE_UNRESOLVED else DISAMBIG_STATE_REVIEW
                 )
                 updated_review = replace(
                     review,
@@ -438,9 +434,7 @@ def reselect_cluster_canonicals(
     new_state = state.with_updates(
         known_canonical_names=frozenset(new_known_canonical),
         alias_merges=frozenset(
-            (alias, canonical)
-            for alias, canonical in new_alias_merges.items()
-            if alias != canonical
+            (alias, canonical) for alias, canonical in new_alias_merges.items() if alias != canonical
         ),
         review_status=tuple(new_review_status.items()),
     )
@@ -486,9 +480,7 @@ def apply_model_reselected_canonicals(
     # 中文注释：先把待重选 cluster 之外的 alias 保留下来，确保这次额外调用只影响
     # 最终代表名选择，不会顺手改动无关 cluster 的既有合并结果。
     new_alias_merges = {
-        alias: canonical
-        for alias, canonical in alias_merges_dict.items()
-        if alias not in expected_names
+        alias: canonical for alias, canonical in alias_merges_dict.items() if alias not in expected_names
     }
     for alias, canonical in alias_merges_dict.items():
         if alias not in expected_names and canonical in expected_names:

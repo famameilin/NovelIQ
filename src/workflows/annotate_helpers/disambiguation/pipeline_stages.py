@@ -442,9 +442,7 @@ async def plan_incremental_disambiguation(
         chunk_end_id=batch_end_chunk_id,
     )
     new_candidate_names = {
-        str(item.get("name", "")).strip()
-        for item in truly_new_names
-        if str(item.get("name", "")).strip()
+        str(item.get("name", "")).strip() for item in truly_new_names if str(item.get("name", "")).strip()
     }
     active_entity_fallback_names = {
         str(item.get("name", "")).strip()

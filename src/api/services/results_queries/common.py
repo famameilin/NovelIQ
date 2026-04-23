@@ -25,7 +25,7 @@ def _parse_json_field(value: Any) -> Any:
     """解析 JSON 字段，处理可能的异常。"""
     if value is None:
         return None
-    if isinstance(value, (dict, list)):
+    if isinstance(value, dict | list):
         return value
     if isinstance(value, str):
         try:

@@ -472,9 +472,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         events = self.fetch_relation_events(run_id)
-        low_confidence = [
-            event for event in events if event.confidence is None or float(event.confidence) < threshold
-        ]
+        low_confidence = [event for event in events if event.confidence is None or float(event.confidence) < threshold]
         selected_events = low_confidence[:limit] if limit > 0 else low_confidence
         return [
             {
