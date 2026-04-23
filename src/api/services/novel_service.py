@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -30,6 +28,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.exceptions import FileStorageError, InvalidFileError, NovelNotFoundError
+from src.api.services.artifact_gc_service import ArtifactGcService
 from src.storage.db import get_session
 from src.storage.id_mapping import generate_task_id, run_id_to_task_id
 from src.storage.models import Novel
@@ -50,6 +49,7 @@ class NovelService:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir = Path("logs")
         self.outputs_dir = Path("outputs")
+        self._artifact_gc_service = ArtifactGcService(self.logs_dir, self.outputs_dir)
 
     def _scan_existing_novels(self) -> None:
         """从数据库加载小说列表（保留用于初始化）"""
@@ -331,12 +331,7 @@ class NovelService:
         说明: 仅在文件真实存在时删除，缺失文件不报错；
               若遇到真实 IO 异常则继续上抛，避免把磁盘问题静默吞掉。
         """
-        if not file_path:
-            return
-
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            logger.info(f"Novel source file deleted: {file_path}")
+        self._artifact_gc_service.delete_novel_source_file(file_path)
 
     def _delete_task_artifacts(self, task_id: str, run_id: str) -> None:
         """
@@ -348,19 +343,7 @@ class NovelService:
         说明: 输出文件按 task_id 命名，日志目录按 run_id 命名；
               为兼容历史短 run_id 目录，run_id != task_id 时会额外检查短目录。
         """
-        output_file = self.outputs_dir / f"{task_id}.json"
-        if output_file.exists():
-            output_file.unlink()
-            logger.info(f"Deleted task output file: {output_file}")
-
-        candidate_log_dirs = [self.logs_dir / run_id]
-        if run_id != task_id:
-            candidate_log_dirs.append(self.logs_dir / task_id)
-
-        for log_dir in candidate_log_dirs:
-            if log_dir.exists():
-                shutil.rmtree(log_dir)
-                logger.info(f"Deleted task log directory: {log_dir}")
+        self._artifact_gc_service.delete_task_artifacts(task_id, run_id)
 
     def _collect_novel_delete_context(
         self,
