@@ -22,6 +22,7 @@ from src.api.models.responses import (
 )
 from src.api.services.analysis_service import AnalysisService
 from src.api.services.novel_service import NovelService
+from src.api.services.task_application_service import TaskApplicationService
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
 from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
@@ -324,11 +325,8 @@ async def resume_task(
     创建者: Codex (GPT-5)
     任务: task-api-decouple
     """
-    analysis_service = AnalysisService(novel_service, task_manager)
-    try:
-        resumed_task_id = await analysis_service.resume_task(novel_id, task_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    task_application_service = TaskApplicationService(novel_service, task_manager)
+    resumed_task_id = await task_application_service.resume_task(novel_id, task_id)
     return ResumeTaskResponse(novel_id=novel_id, task_id=resumed_task_id)
 
 
@@ -404,19 +402,8 @@ async def delete_task(
         3. 删除 DB 记录
         4. 删除内存缓存
     """
-    task = _resolve_task_for_novel(novel_service, novel_id, task_id)
-    task_status = task.get("status", "")
-
-    running_statuses = ("pending", "running", "cancelling")
-    if task_status in running_statuses:
-        raise HTTPException(
-            status_code=400,
-            detail=f"任务正在{task_status}中，请先取消任务后再删除",
-        )
-
-    await _cleanup_task_runtime_before_delete(task_id, task_manager)
-    novel_service.delete_task(task_id, task_manager=task_manager)
-    return {"message": "任务删除成功", "novel_id": novel_id, "task_id": task_id}
+    task_application_service = TaskApplicationService(novel_service, task_manager)
+    return await task_application_service.delete_task(novel_id, task_id)
 
 
 @router.get("/{novel_id}/tasks/{task_id}/status", response_model=StatusResponse)
@@ -462,54 +449,8 @@ async def cancel_task(
     任务: task-5-db-driven-cancel
     修改内容: DB 优先取消机制，先写入 DB cancel_requested，再设置内存 cancel_event
     """
-    task = _resolve_task_for_novel(novel_service, novel_id, task_id)
-    task_status = task.get("status", "")
-    _raise_cancel_not_allowed(task_status)
-
-    task_info = task_manager.get_task(task_id)
-    if task_status == "pending" and task_info is None:
-        cancelled = _cancel_unclaimed_pending_task(task_id)
-        if cancelled:
-            logger.info(f"Task {task_id} cancelled immediately before any worker claim")
-            return {"task_id": task_id, "status": "cancelled", "message": "任务尚未启动，已直接取消"}
-
-        # 中文注释：原子终结失败意味着另一个执行方已经先一步把 pending 任务领取走了，
-        # 这里必须回退到常规 cancelling 语义，而不能继续假设它仍是“未启动任务”。
-        task = _resolve_task_for_novel(novel_service, novel_id, task_id)
-        task_status = task.get("status", "")
-        _raise_cancel_not_allowed(task_status)
-
-    # 先持久化 DB 真相，再设置本进程内存 cancel_event 做加速响应。
-    #
-    # 修改时间: 2026-04-20
-    # 修改者: Codex (GPT-5)
-    # 任务: fix-pending-cancel-race
-    # 修改内容: 即使当前实例没有运行态缓存，也不能把 pending 任务直接终结为 cancelled。
-    # 原因: 真实执行协程可能已经在别的实例或事件循环里排队启动；若这里提前写终态，
-    # 后续 worker 仍可能把状态改回 running，形成“接口已返回取消、任务却继续执行”的竞态。
-    latest_status = _persist_task_cancellation_request(task_id)
-    if latest_status != "cancelling":
-        # 中文注释：这里说明 DB 真相在最后一次持久化前又被其他执行方推进了，
-        # 当前请求必须尊重赢家状态，不能再把终态或失败态误报成 cancelling。
-        _raise_cancel_not_allowed(latest_status)
-        raise HTTPException(status_code=400, detail=f"任务状态为 {latest_status}，无法取消")
-
-    cancelled = task_manager.cancel_task(task_id)
-
-    if cancelled:
-        return {"task_id": task_id, "status": "cancelling", "message": "任务将在当前处理单元完成后停止"}
-
-    # 任务不在内存中（如服务重启后），DB 真相已更新为 cancelling，
-    # 后续由实际执行方或恢复流程在安全点完成最终 cancelled 收尾。
-    if task_status in ("pending", "running"):
-        logger.info(
-            "Task {} cancellation requested (not in memory), "
-            "DB cancel_requested=true and status=cancelling",
-            task_id,
-        )
-        return {"task_id": task_id, "status": "cancelling", "message": "任务已标记为取消中，等待执行方收尾"}
-
-    raise HTTPException(status_code=400, detail=f"任务状态为 {task_status}，无法取消")
+    task_application_service = TaskApplicationService(novel_service, task_manager)
+    return await task_application_service.cancel_task(novel_id, task_id)
 
 
 @router.post("/{novel_id}/tasks/batch-delete", response_model=BatchDeleteTasksResponse)
@@ -536,21 +477,10 @@ async def batch_delete_tasks(
     deleted_ids: list[str] = []
     failed_ids: list[dict[str, str]] = []
 
-    running_statuses = ("pending", "running", "cancelling")
-
     for task_id in request.task_ids:
         try:
-            task = _resolve_task_for_novel(novel_service, novel_id, task_id)
-            task_status = task.get("status", "")
-
-            if task_status in running_statuses:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"任务正在{task_status}中，请先取消任务后再删除",
-                )
-
-            await _cleanup_task_runtime_before_delete(task_id, task_manager)
-            novel_service.delete_task(task_id, task_manager=task_manager)
+            task_application_service = TaskApplicationService(novel_service, task_manager)
+            await task_application_service.delete_task(novel_id, task_id)
             deleted_ids.append(task_id)
             logger.info(f"Batch delete: task {task_id} deleted successfully")
         except HTTPException as exc:
