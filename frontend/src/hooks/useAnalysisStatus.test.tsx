@@ -1,10 +1,18 @@
-import { render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
+import type { SSEEventType } from "@/api/streamTypes";
 
 const getTaskStatusMock = vi.fn();
 const disconnectMock = vi.fn();
+let mockedIsConnected = false;
+let latestSSEHandlers:
+  | {
+      onEvent?: (eventType: SSEEventType | "message", data: unknown) => void;
+      onError?: () => void;
+    }
+  | null = null;
 
 const streamStoreState = {
   setConnected: vi.fn(),
@@ -21,10 +29,13 @@ vi.mock("@/api/analysis", () => ({
 }));
 
 vi.mock("@/hooks/useEventSource", () => ({
-  useSSEListener: () => ({
-    isConnected: false,
-    disconnect: disconnectMock,
-  }),
+  useSSEListener: (_url: string | null, options?: typeof latestSSEHandlers) => {
+    latestSSEHandlers = options ?? null;
+    return {
+      isConnected: mockedIsConnected,
+      disconnect: disconnectMock,
+    };
+  },
 }));
 
 vi.mock("@/store/streamStore", () => ({
@@ -39,17 +50,58 @@ function HookHarness(props: {
   onCancelled?: () => void;
   onFailed?: (error: string) => void;
 }) {
-  useAnalysisStatus(props.novelId, props.taskId, {
+  const status = useAnalysisStatus(props.novelId, props.taskId, {
     onRunning: props.onRunning,
     onCompleted: props.onCompleted,
     onCancelled: props.onCancelled,
     onFailed: props.onFailed,
   });
-  return null;
+  return (
+    <div
+      data-testid="analysis-status"
+      data-connected={String(status.isConnected)}
+      data-stable={String(status.wsStable)}
+    />
+  );
+}
+
+function createRunningStatus(taskId: string) {
+  return {
+    novel_id: "novel-1",
+    task_id: taskId,
+    status: "running" as const,
+    progress: 12,
+    current_step: "annotate",
+    stage: "annotate",
+    sub_stage: "phase1",
+    current: 1,
+    total: 10,
+    message: "任务执行中",
+  };
+}
+
+function emitSSEEvent(eventType: SSEEventType | "message", data: unknown): void {
+  if (!latestSSEHandlers?.onEvent) {
+    throw new Error("SSE handler not registered");
+  }
+  act(() => {
+    latestSSEHandlers?.onEvent?.(eventType, data);
+  });
+}
+
+function emitSSEError(): void {
+  if (!latestSSEHandlers?.onError) {
+    throw new Error("SSE error handler not registered");
+  }
+  act(() => {
+    latestSSEHandlers?.onError?.();
+  });
 }
 
 describe("useAnalysisStatus", () => {
   beforeEach(() => {
+    mockedIsConnected = false;
+    latestSSEHandlers = null;
     getTaskStatusMock.mockReset();
     disconnectMock.mockReset();
     streamStoreState.setConnected.mockReset();
@@ -165,5 +217,97 @@ describe("useAnalysisStatus", () => {
     });
 
     warnSpy.mockRestore();
+  });
+
+  it("接收 task_complete 事件时会更新完成态并触发 onCompleted", async () => {
+    const onCompleted = vi.fn();
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-complete"));
+
+    render(<HookHarness novelId="novel-1" taskId="task-complete" onCompleted={onCompleted} />);
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-complete");
+    });
+
+    streamStoreState.updateProgress.mockClear();
+    onCompleted.mockClear();
+
+    emitSSEEvent("task_complete", {});
+
+    await waitFor(() => {
+      expect(streamStoreState.updateProgress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "complete",
+          stage: "completed",
+          percent: 100,
+          message: "分析完成",
+        }),
+      );
+      expect(onCompleted).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("接收 task_cancelled 事件时会更新取消态并触发 onCancelled", async () => {
+    const onCancelled = vi.fn();
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-cancelled"));
+
+    render(<HookHarness novelId="novel-1" taskId="task-cancelled" onCancelled={onCancelled} />);
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-cancelled");
+    });
+
+    streamStoreState.updateProgress.mockClear();
+    streamStoreState.setError.mockClear();
+    onCancelled.mockClear();
+
+    emitSSEEvent("task_cancelled", {});
+
+    await waitFor(() => {
+      expect(streamStoreState.updateProgress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "complete",
+          stage: "cancelled",
+          percent: 0,
+          message: "任务已取消",
+        }),
+      );
+      expect(streamStoreState.setError).toHaveBeenCalledWith(null);
+      expect(onCancelled).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("SSE 断开后会重置稳定态并显式标记连接中断", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-disconnect"));
+
+    render(<HookHarness novelId="novel-1" taskId="task-disconnect" />);
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-disconnect");
+    });
+
+    emitSSEEvent("stage_progress", {
+      action: "progress",
+      stage: "annotate",
+      sub_stage: "phase1",
+      chunk_id: 2,
+      current: 2,
+      total: 10,
+      percent: 20,
+      sub_percent: 50,
+      content: "",
+      message: "phase1 进行中",
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("analysis-status")).toHaveAttribute("data-stable", "true");
+    });
+
+    emitSSEError();
+
+    await waitFor(() => {
+      expect(streamStoreState.setConnected).toHaveBeenCalledWith(false);
+      expect(screen.getByTestId("analysis-status")).toHaveAttribute("data-stable", "false");
+    });
   });
 });
