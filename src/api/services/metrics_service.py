@@ -15,7 +15,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.routes.results_converters import _convert_aggregate_result
+from src.api.services.results_contracts import _convert_aggregate_result
 from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 
