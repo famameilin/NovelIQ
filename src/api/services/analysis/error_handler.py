@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.services.metrics_service import MetricsService
 from src.storage.repositories import RunRepository
 
 if TYPE_CHECKING:
@@ -70,9 +69,13 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "completed")
         session.commit()
 
-        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效
+        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效。
+        # 中文注释：这里必须命中 api.dependencies 中维护的同一 MetricsService 单例，
+        # 否则只会失效一个临时新实例上的空缓存，路由真实读取的缓存仍然保留旧值。
         try:
-            metrics_service = MetricsService()
+            from src.api.dependencies import get_metrics_service
+
+            metrics_service = get_metrics_service()
             metrics_service.invalidate_cache(run_id)
         except Exception as e:
             logger.warning(f"Failed to invalidate metrics cache for {run_id}: {e}")

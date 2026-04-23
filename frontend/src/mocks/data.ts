@@ -20,7 +20,6 @@ import type {
   EmotionStatsMetrics,
   CharacterStatsMetrics,
   StyleStatsMetrics,
-  CultureStatsMetrics,
 } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
@@ -462,14 +461,5 @@ export function createStyleStats(): StyleStatsMetrics {
     vocab_breadth: 0.72,
     avg_sent_len: 18.5,
     dialogue_ratio: 0.45,
-  };
-}
-
-export function createCultureStats(): CultureStatsMetrics {
-  return {
-    idiom_density: 0.0032,
-    imagery_density: 0.0058,
-    classical_sentence_ratio: 0.012,
-    allusion_density: 0.0019,
   };
 }

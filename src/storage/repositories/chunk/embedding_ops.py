@@ -17,14 +17,28 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections.abc import Iterable, Sequence
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from src.storage.models import Chunk, ChunkAnnotation, ChunkEmbedding
+
+
+@dataclass(frozen=True)
+class SimilarChunkRow:
+    """
+    创建时间: 2026-04-23
+    任务: fix-coupling-review-findings
+    说明: 收口 Level3 检索边界，避免向上游暴露匿名 dict，并统一使用具名字段访问。
+    """
+
+    chunk_id: int
+    text: str
+    similarity: float
+    emotional_valence: str | None = None
 
 
 def insert_chunk_embeddings(
@@ -121,7 +135,7 @@ def search_similar_chunks(
     top_k: int = 5,
     similarity_threshold: float = 0.7,
     exclude_chunk_ids: Sequence[int] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[SimilarChunkRow]:
     """
     使用 pgvector 进行向量相似度检索
 
@@ -138,7 +152,7 @@ def search_similar_chunks(
         exclude_chunk_ids: 排除的 chunk ID 列表
 
     Returns:
-        相似 chunk 列表，每个元素包含 chunk_id, similarity, text, emotional_valence
+        相似 chunk DTO 列表，每个元素包含 chunk_id, similarity, text, emotional_valence
     """
     run_scoped_chunks = (
         select(
@@ -181,15 +195,17 @@ def search_similar_chunks(
 
     rows = session.execute(stmt).mappings().all()
 
-    return [
-        {
-            "chunk_id": int(row["chunk_id"]),
-            "text": str(row["text"]),
-            "emotional_valence": str(row["emotional_valence"]) if row["emotional_valence"] is not None else None,
-            "similarity": float(row["similarity"]),
-        }
-        for row in rows
-    ]
+    similar_chunks: list[SimilarChunkRow] = []
+    for row in rows:
+        similar_chunks.append(
+            SimilarChunkRow(
+                chunk_id=int(row["chunk_id"]),
+                text=str(row["text"]),
+                emotional_valence=str(row["emotional_valence"]) if row["emotional_valence"] is not None else None,
+                similarity=float(row["similarity"]),
+            )
+        )
+    return similar_chunks
 
 
 def has_embeddings(session: Session, run_id: str) -> bool:
