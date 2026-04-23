@@ -30,18 +30,18 @@ class Level1AuthorityProvider:
         ]
         confirmed_relations = [
             ConfirmedRelation(
-                from_name=str(relation["from_name"]),
-                to_name=str(relation["to_name"]),
-                relation_type=str(relation["type"]),
-                is_active=bool(relation["is_active"]),
-                first_seen_chunk=relation.get("first_seen_chunk"),
-                last_seen_chunk=relation.get("last_seen_chunk"),
-                support_count=relation.get("support_count"),
-                latest_event_id=relation.get("latest_event_id"),
+                from_name=str(relation.from_name),
+                to_name=str(relation.to_name),
+                relation_type=str(relation.relation_type),
+                is_active=bool(relation.is_active),
+                first_seen_chunk=relation.first_seen_chunk,
+                last_seen_chunk=relation.last_seen_chunk,
+                support_count=relation.support_count,
+                latest_event_id=relation.latest_event_id,
             )
             for relation in sorted(
                 relations,
-                key=lambda row: (str(row["from_name"]), str(row["to_name"]), str(row["type"])),
+                key=lambda row: (str(row.from_name), str(row.to_name), str(row.relation_type)),
             )
         ]
         entity_types = [

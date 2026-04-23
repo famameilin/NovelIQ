@@ -20,6 +20,7 @@ from src.models.local.disambiguation.evidence_renderer import (
     render_disambiguation_graph_hint,
     render_existing_character_hint,
 )
+from src.storage.repositories.graph import CurrentRelationRow
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
@@ -179,7 +180,7 @@ def _collect_final_disambiguation_candidates(
 def _augment_prompt_context_with_graph(
     prompt_context: DisambiguationPromptContext | None,
     alias_map: dict[str, str],
-    relations: list[dict],
+    relations: Sequence[CurrentRelationRow],
     existing_names: list[str],
     candidate_names: list[str],
 ) -> DisambiguationPromptContext | None:
@@ -208,7 +209,7 @@ def _build_existing_character_hint_from_db(
     alias_keywords: list[str],
     run_id: str,
     alias_map: dict[str, str],
-    relations: list[dict],
+    relations: Sequence[CurrentRelationRow],
     current_chunk_id: int | None = None,
     chunk_start_id: int | None = None,
     chunk_end_id: int | None = None,

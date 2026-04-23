@@ -72,6 +72,7 @@ from .state_logic import (
 
 if TYPE_CHECKING:
     from src.rag import DisambigContextProvider
+    from src.storage.repositories.graph import CurrentRelationRow
 
 DisambigStateSnapshot = dict[str, dict[str, str]]
 
@@ -111,8 +112,14 @@ def _supports_canonical_reselect(client: DisambiguationLike) -> bool:
     return True
 
 
-def _fetch_current_relations(conn: Session, run_id: str) -> list[dict]:
-    """从 graph_repo 获取当前活跃关系。"""
+def _fetch_current_relations(conn: Session, run_id: str) -> list[CurrentRelationRow]:
+    """
+    从 graph_repo 获取当前活跃关系。
+
+    修改时间: 2026-04-23
+    任务: P0-graph-repository-dto-boundary
+    修改内容: 返回 CurrentRelationRow DTO，避免把 repository raw dict 形状泄漏到消歧流程。
+    """
     from src.storage.repositories import GraphRepository
 
     graph_repo = GraphRepository(conn)

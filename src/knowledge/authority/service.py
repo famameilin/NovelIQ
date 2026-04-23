@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from src.storage.repositories import GraphRepository
+from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, RelationEventRow
 
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
 from .types import (
@@ -179,71 +180,69 @@ class KnowledgeGraphAuthorityService:
             )
         return canonical_entities
 
-    def _build_confirmed_relations(self, relations: Iterable[dict[str, Any]]) -> list[ConfirmedRelation]:
+    def _build_confirmed_relations(self, relations: Iterable[CurrentRelationRow]) -> list[ConfirmedRelation]:
         confirmed_relations: list[ConfirmedRelation] = []
         for relation in sorted(
             relations,
-            key=lambda row: (str(row["from_name"]), str(row["to_name"]), str(row["type"])),
+            key=lambda row: (str(row.from_name), str(row.to_name), str(row.relation_type)),
         ):
             confirmed_relations.append(
                 ConfirmedRelation(
-                    from_name=str(relation["from_name"]),
-                    to_name=str(relation["to_name"]),
-                    relation_type=str(relation["type"]),
-                    from_entity_id=relation.get("from_entity_id"),
-                    to_entity_id=relation.get("to_entity_id"),
-                    is_active=bool(relation["is_active"]),
-                    first_seen_chunk=relation.get("first_seen_chunk"),
-                    last_seen_chunk=relation.get("last_seen_chunk"),
-                    change_count=relation.get("change_count"),
-                    support_count=relation.get("support_count"),
-                    latest_event_id=relation.get("latest_event_id"),
-                    tension_index=relation.get("tension_index"),
+                    from_name=str(relation.from_name),
+                    to_name=str(relation.to_name),
+                    relation_type=str(relation.relation_type),
+                    from_entity_id=relation.from_entity_id,
+                    to_entity_id=relation.to_entity_id,
+                    is_active=bool(relation.is_active),
+                    first_seen_chunk=relation.first_seen_chunk,
+                    last_seen_chunk=relation.last_seen_chunk,
+                    change_count=relation.change_count,
+                    support_count=relation.support_count,
+                    latest_event_id=relation.latest_event_id,
+                    tension_index=relation.tension_index,
                 )
             )
         return confirmed_relations
 
-    def _build_export_relation_snapshots(self, relations: Iterable[dict[str, Any]]) -> list[ExportRelationSnapshot]:
+    def _build_export_relation_snapshots(self, relations: Iterable[CurrentRelationRow]) -> list[ExportRelationSnapshot]:
         export_relations: list[ExportRelationSnapshot] = []
         for relation in sorted(
             relations,
-            key=lambda row: (str(row["from_name"]), str(row["to_name"]), str(row["type"])),
+            key=lambda row: (str(row.from_name), str(row.to_name), str(row.relation_type)),
         ):
             export_relations.append(
                 ExportRelationSnapshot(
-                    relation_id=relation.get("relation_id"),
-                    from_name=str(relation["from_name"]),
-                    to_name=str(relation["to_name"]),
-                    relation_type=str(relation["type"]),
-                    first_seen_chunk=relation.get("first_seen_chunk"),
-                    last_seen_chunk=relation.get("last_seen_chunk"),
-                    latest_event_id=relation.get("latest_event_id"),
-                    is_active=bool(relation["is_active"]),
+                    relation_id=relation.relation_id,
+                    from_name=str(relation.from_name),
+                    to_name=str(relation.to_name),
+                    relation_type=str(relation.relation_type),
+                    first_seen_chunk=relation.first_seen_chunk,
+                    last_seen_chunk=relation.last_seen_chunk,
+                    latest_event_id=relation.latest_event_id,
+                    is_active=bool(relation.is_active),
                 )
             )
         return export_relations
 
-    def _build_relation_events(self, events: Iterable[dict[str, Any]]) -> list[RelationEvent]:
+    def _build_relation_events(self, events: Iterable[RelationEventRow]) -> list[RelationEvent]:
         relation_events: list[RelationEvent] = []
         for event in events:
             relation_events.append(
                 RelationEvent(
-                    relation_event_id=int(event["relation_event_id"]),
-                    chunk_id=int(event["chunk_id"]),
-                    from_entity_id=int(event["from_entity_id"]),
-                    to_entity_id=int(event["to_entity_id"]),
-                    from_name=str(event["from_name"]),
-                    to_name=str(event["to_name"]),
-                    relation_type=str(event["relation_type"]),
-                    change_type=str(event["change_type"]),
-                    evidence=str(event["evidence"]) if event.get("evidence") is not None else None,
-                    confidence=float(event["confidence"]) if event.get("confidence") is not None else None,
-                    directionality=str(event["directionality"]) if event.get("directionality") is not None else None,
-                    source_relation_row_id=(
-                        int(event["source_relation_row_id"])
-                        if event.get("source_relation_row_id") is not None
-                        else None
-                    ),
+                    relation_event_id=int(event.relation_event_id),
+                    chunk_id=int(event.chunk_id),
+                    from_entity_id=int(event.from_entity_id),
+                    to_entity_id=int(event.to_entity_id),
+                    from_name=str(event.from_name),
+                    to_name=str(event.to_name),
+                    relation_type=str(event.relation_type),
+                    change_type=str(event.change_type),
+                    evidence=str(event.evidence) if event.evidence is not None else None,
+                    confidence=float(event.confidence) if event.confidence is not None else None,
+                    directionality=str(event.directionality) if event.directionality is not None else None,
+                    source_relation_row_id=int(event.source_relation_row_id)
+                    if event.source_relation_row_id is not None
+                    else None,
                 )
             )
         return relation_events
@@ -271,21 +270,21 @@ class KnowledgeGraphAuthorityService:
             )
         return lifecycles
 
-    def _build_active_entity_contexts(self, rows: Iterable[dict[str, Any]]) -> list[ActiveEntityContext]:
+    def _build_active_entity_contexts(self, rows: Iterable[ActiveEntityRow]) -> list[ActiveEntityContext]:
         active_entities: list[ActiveEntityContext] = []
         for row in rows:
             # Normalize repository row keys into an authority-owned Level 2 contract.
             active_entities.append(
                 ActiveEntityContext(
-                    name=str(row.get("name", "")),
-                    entity_id=int(row["entity_id"]) if row.get("entity_id") is not None else None,
-                    role=str(row.get("role")) if row.get("role") is not None else None,
+                    name=str(row.name),
+                    entity_id=int(row.entity_id) if row.entity_id is not None else None,
+                    role=str(row.role) if row.role is not None else None,
                     # Preserve repository-backed authority fields when present.
-                    entity_type=str(row["entity_type"]) if row.get("entity_type") is not None else "character",
-                    status=str(row["status"]) if row.get("status") is not None else "active",
-                    last_seen_chunk=int(row["chunk_id"]) if row.get("chunk_id") is not None else None,
-                    recent_action=str(row.get("last_action")) if row.get("last_action") else None,
-                    recent_emotion=str(row.get("last_emotion")) if row.get("last_emotion") else None,
+                    entity_type=str(row.entity_type) if row.entity_type is not None else "character",
+                    status=str(row.status) if row.status is not None else "active",
+                    last_seen_chunk=int(row.chunk_id) if row.chunk_id is not None else None,
+                    recent_action=str(row.last_action) if row.last_action else None,
+                    recent_emotion=str(row.last_emotion) if row.last_emotion else None,
                 )
             )
         return active_entities
