@@ -278,10 +278,10 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
         lambda *_args, **_kwargs: object(),
     )
 
-    import src.api.routes.results_converters as results_converters
+    import src.api.services.results_contracts as results_contracts
 
     monkeypatch.setattr(
-        results_converters,
+        results_contracts,
         "_convert_aggregate_result",
         lambda *_args, **_kwargs: (None, None, None, None, None),
     )
@@ -384,10 +384,10 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
         lambda *_args, **_kwargs: object(),
     )
 
-    import src.api.routes.results_converters as results_converters
+    import src.api.services.results_contracts as results_contracts
 
     monkeypatch.setattr(
-        results_converters,
+        results_contracts,
         "_convert_aggregate_result",
         lambda *_args, **_kwargs: (None, None, None, None, None),
     )
