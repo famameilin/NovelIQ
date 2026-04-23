@@ -41,15 +41,15 @@ def build_networkx_from_graph_tables(
 
     for edge in edges:
         graph.add_edge(
-            edge["from_entity_id"],
-            edge["to_entity_id"],
-            relation_type=edge["type"],
-            is_active=edge["is_active"],
-            support_count=edge["support_count"],
-            change_count=edge["change_count"],
-            first_seen_chunk=edge["first_seen_chunk"],
-            last_seen_chunk=edge["last_seen_chunk"],
-            tension_index=edge["tension_index"],
+            edge.from_entity_id,
+            edge.to_entity_id,
+            relation_type=edge.relation_type,
+            is_active=edge.is_active,
+            support_count=edge.support_count,
+            change_count=edge.change_count,
+            first_seen_chunk=edge.first_seen_chunk,
+            last_seen_chunk=edge.last_seen_chunk,
+            tension_index=edge.tension_index,
         )
 
     return graph

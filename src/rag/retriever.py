@@ -112,10 +112,17 @@ class ActiveEntityLookup:
         current_chunk: int,
         lookback: int = 10,
     ) -> list[str]:
+        """
+        获取近期活跃实体名称候选。
+
+        修改时间: 2026-04-23
+        任务: P0-graph-repository-dto-boundary
+        修改内容: 读取 ActiveEntityRow.name，避免依赖 repository raw dict。
+        """
         if self._graph_repo is None or self._run_id is None:
             return []
         rows = self._graph_repo.fetch_active_entities(current_chunk, lookback, self._run_id)
-        return [str(row["name"]) for row in rows]
+        return [str(row.get("name", "")) if isinstance(row, dict) else str(row.name) for row in rows]
 
 
 class Level3VectorEvidence:
