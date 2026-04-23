@@ -379,9 +379,7 @@ class NovelService:
             status = str(run.get("status", ""))
             if status in TASK_DELETE_BLOCKING_STATUSES:
                 task_id = run_id_to_task_id(str(run["run_id"]))
-                raise ValueError(
-                    f"小说 {novel_id} 下的任务 {task_id} 正在{status}中，请先取消任务后再删除小说"
-                )
+                raise ValueError(f"小说 {novel_id} 下的任务 {task_id} 正在{status}中，请先取消任务后再删除小说")
 
     def _delete_run_data(self, run_id: str, session: Session | None = None) -> None:
         """

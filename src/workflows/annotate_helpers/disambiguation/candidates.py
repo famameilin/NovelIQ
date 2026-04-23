@@ -20,8 +20,8 @@ from src.models.local.disambiguation.evidence_renderer import (
     render_disambiguation_graph_hint,
     render_existing_character_hint,
 )
-from src.storage.repositories.graph import CurrentRelationRow
 from src.storage.repositories.annotation.characters import fetch_all_character_names
+from src.storage.repositories.graph import CurrentRelationRow
 
 from ..sentence import build_context_sentences
 from .candidate_filter import CandidateClassification, CandidateFilter

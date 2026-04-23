@@ -368,6 +368,7 @@ def get_dynamic_lexicons_for_chunk(
 
     return lexicons, result.genre
 
+
 def detect_genre_weighted(
     chunk_texts: list[tuple[int, str]],
     sample_ratio: float = 0.1,

@@ -155,10 +155,7 @@ def _init_annotation_clients(
         try:
             fallback_client = AnnotationClient(task_type="annotation_fallback", analysis_logger=analysis_logger)
             annotation_fallback_client = cast(AnnotationLike, fallback_client)
-            logger.info(
-                "annotation fallback client initialized "
-                f"(thinking={fallback_client._config.thinking_enabled})"
-            )
+            logger.info(f"annotation fallback client initialized (thinking={fallback_client._config.thinking_enabled})")
         except Exception as e:
             logger.warning(f"annotation fallback client initialization failed, fallback disabled: {e}")
     else:

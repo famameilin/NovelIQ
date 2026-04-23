@@ -169,7 +169,7 @@ def load_system_merges(
 
     if state:
         for merge in state.get("alias_merges", []):
-            if not isinstance(merge, (list, tuple)) or len(merge) != 2:
+            if not isinstance(merge, list | tuple) or len(merge) != 2:
                 continue
             alias, canonical = str(merge[0]), str(merge[1])
             if alias == canonical:

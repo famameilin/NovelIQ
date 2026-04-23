@@ -204,7 +204,7 @@ class DisambiguationState:
             alias_merges=frozenset(
                 tuple(item)
                 for item in data.get("alias_merges", [])
-                if isinstance(item, (list, tuple)) and len(item) == 2
+                if isinstance(item, list | tuple) and len(item) == 2
             ),
             review_status=review_status,
             pending_relations=tuple(data.get("pending_relations", [])),

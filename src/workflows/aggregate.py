@@ -441,12 +441,10 @@ async def run_aggregate(
     chunk_styles = chunk_repo.fetch_chunk_styles(run_id)
 
     annotation_map = {
-        row.chunk_id: {"event_type": row.event_type, "cliffhanger": row.cliffhanger}
-        for row in chunk_annotations
+        row.chunk_id: {"event_type": row.event_type, "cliffhanger": row.cliffhanger} for row in chunk_annotations
     }
     style_map = {
-        row.chunk_id: {"dialogue_ratio": row.dialogue_ratio, "sent_len_std": row.sent_len_std}
-        for row in chunk_styles
+        row.chunk_id: {"dialogue_ratio": row.dialogue_ratio, "sent_len_std": row.sent_len_std} for row in chunk_styles
     }
 
     tension_signals = compute_tension_signals(chunk_texts, all_fight_terms, style_map, annotation_map, raw_densities)
@@ -455,22 +453,10 @@ async def run_aggregate(
 
     chunk_curves = list(
         zip(
-            [
-                chunk_id
-                for chunk_id, _pos_density, _neg_density, _net_density, _smoothed_density in emotion_rows
-            ],
-            [
-                pos_density
-                for _chunk_id, pos_density, _neg_density, _net_density, _smoothed_density in emotion_rows
-            ],
-            [
-                neg_density
-                for _chunk_id, _pos_density, neg_density, _net_density, _smoothed_density in emotion_rows
-            ],
-            [
-                net_density
-                for _chunk_id, _pos_density, _neg_density, net_density, _smoothed_density in emotion_rows
-            ],
+            [chunk_id for chunk_id, _pos_density, _neg_density, _net_density, _smoothed_density in emotion_rows],
+            [pos_density for _chunk_id, pos_density, _neg_density, _net_density, _smoothed_density in emotion_rows],
+            [neg_density for _chunk_id, _pos_density, neg_density, _net_density, _smoothed_density in emotion_rows],
+            [net_density for _chunk_id, _pos_density, _neg_density, net_density, _smoothed_density in emotion_rows],
             [
                 smoothed_density
                 for _chunk_id, _pos_density, _neg_density, _net_density, smoothed_density in emotion_rows

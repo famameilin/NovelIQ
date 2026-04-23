@@ -177,7 +177,7 @@ def convert_response_run_ids_to_task_ids(data: dict | list | Any) -> dict | list
             if key == "run_id" and isinstance(value, str) and len(value) == 36:
                 # 将run_id键名改为task_id，值转换为8位
                 result["task_id"] = run_id_to_task_id(value)
-            elif isinstance(value, (dict, list)):
+            elif isinstance(value, dict | list):
                 # 递归处理嵌套结构
                 result[key] = convert_response_run_ids_to_task_ids(value)
             else:

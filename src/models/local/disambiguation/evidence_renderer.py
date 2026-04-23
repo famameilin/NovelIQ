@@ -316,9 +316,7 @@ def render_disambiguation_graph_hint(
     graph_aliases = {
         a: c
         for a, c in alias_map.items()
-        if a != c
-        and c in existing_set
-        and (not related_name_set or a in related_name_set or c in related_name_set)
+        if a != c and c in existing_set and (not related_name_set or a in related_name_set or c in related_name_set)
     }
     if graph_aliases:
         alias_lines = ["【图谱已裁决的别名映射】"]

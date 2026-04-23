@@ -468,8 +468,7 @@ class AnalysisService:
                     # 避免卡在无 owner 的 cancelling 历史脏状态。
                     if refreshed_worker_id := run.get("worker_id"):
                         logger.info(
-                            "Task {} is cancelling under worker {}, "
-                            "current worker skips execution claim",
+                            "Task {} is cancelling under worker {}, current worker skips execution claim",
                             task_id,
                             refreshed_worker_id,
                         )

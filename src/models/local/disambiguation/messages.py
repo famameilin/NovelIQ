@@ -316,10 +316,7 @@ def build_canonical_reselect_messages(
                 cluster_lines.append(f"  参考上下文：{context}")
         cluster_blocks.append("\n".join(cluster_lines))
 
-    user_content = (
-        "以下每组名字都已经确认是同一人物，请只在组内选择最终代表名。\n\n"
-        + "\n\n".join(cluster_blocks)
-    )
+    user_content = "以下每组名字都已经确认是同一人物，请只在组内选择最终代表名。\n\n" + "\n\n".join(cluster_blocks)
 
     return [
         {"role": "system", "content": CANONICAL_RESELECT_SYSTEM_PROMPT},
