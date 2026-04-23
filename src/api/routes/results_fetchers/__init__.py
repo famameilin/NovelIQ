@@ -7,7 +7,8 @@
 说明: 从 results_fetchers.py 拆分，提供统一的数据获取接口
 """
 
-from src.api.routes.results_fetchers.fetchers import (
+from src.api.services.results_queries import (
+    _calculate_protagonist_scores,
     _fetch_alias_merges_only,
     _fetch_character_relations,
     _fetch_characters,
@@ -24,19 +25,12 @@ from src.api.routes.results_fetchers.fetchers import (
     _fetch_raw_chunk_curves,
     _fetch_token_usage_stats,
     _fetch_topics,
-)
-from src.api.routes.results_fetchers.normalizers import (
+    _normalize_arc_scores,
     _normalize_name,
     _normalize_name_list,
     _normalize_text_by_alias_map,
-)
-from src.api.routes.results_fetchers.parsers import (
     _parse_int_field,
     _parse_json_field,
-)
-from src.api.routes.results_fetchers.scoring import (
-    _calculate_protagonist_scores,
-    _normalize_arc_scores,
 )
 
 __all__ = [
