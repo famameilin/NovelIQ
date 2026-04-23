@@ -32,6 +32,7 @@ from src.knowledge.authority import (
     ExportGraphAuthorityView,
     GraphAuthorityReport,
     KnowledgeGraphAuthorityService,
+    TimelineAuthorityView,
     serialize_graph_report_signals,
 )
 from src.metrics.aggregate import aggregate_all_metrics
@@ -254,6 +255,7 @@ def _fetch_timeline_data(
     chunk_repo: ChunkRepository,
     annotation_repo: AnnotationRepository,
     stats_repo: StatsRepository,
+    timeline_view: TimelineAuthorityView,
 ) -> dict[str, Any] | None:
     """
     获取时间轴数据用于导出
@@ -267,15 +269,13 @@ def _fetch_timeline_data(
         lifecycles and character-character relation history.
     """
     try:
-        (
-            candidates,
-            tension_scores,
-            chunk_ids,
-            total_chunks,
-            timeline_phases,
-            major_character_entries,
-            relation_break_events,
-        ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
+        timeline_build = build_timeline_candidates(
+            run_id,
+            chunk_repo,
+            annotation_repo,
+            stats_repo,
+            timeline_view,
+        )
     except TimelineDataUnavailableError as e:
         logger.warning(f"No chunk data for run {run_id}: {e}")
         return None
@@ -287,11 +287,11 @@ def _fetch_timeline_data(
         return None
 
     selected_nodes = select_timeline_nodes(
-        candidates=candidates,
-        chunk_ids=chunk_ids,
-        tension_scores=tension_scores,
-        major_character_entries=major_character_entries,
-        relation_break_events=relation_break_events,
+        candidates=timeline_build.candidates,
+        chunk_ids=timeline_build.selection_inputs.chunk_ids,
+        tension_scores=timeline_build.selection_inputs.tension_scores,
+        major_character_entries=timeline_build.selection_inputs.major_character_entries,
+        relation_break_events=timeline_build.selection_inputs.relation_break_events,
         min_nodes=10,
         max_nodes=20,
     )
@@ -301,10 +301,10 @@ def _fetch_timeline_data(
     timeline_nodes = convert_to_timeline_nodes(selected_nodes)
 
     return {
-        "phases": [asdict(p) for p in timeline_phases],
+        "phases": [asdict(p) for p in timeline_build.phases],
         "nodes": [asdict(n) for n in timeline_nodes],
-        "tension_curve": tension_scores,
-        "total_chunks": total_chunks,
+        "tension_curve": timeline_build.selection_inputs.tension_scores,
+        "total_chunks": timeline_build.total_chunks,
     }
 
 
@@ -371,6 +371,7 @@ def fetch_all_results_data(
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
     export_graph_view = graph_authority_service.build_export_view(run_id)
     graph_report = graph_authority_service.build_graph_report(run_id)
+    timeline_view = graph_authority_service.build_timeline_view(run_id)
 
     chunk_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
 
@@ -421,6 +422,7 @@ def fetch_all_results_data(
         chunk_repo=chunk_repo,
         annotation_repo=annotation_repo,
         stats_repo=stats_repo,
+        timeline_view=timeline_view,
     )
     if not timeline_data:
         missing_fields.append("timeline")
