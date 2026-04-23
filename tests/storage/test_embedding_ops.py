@@ -55,8 +55,8 @@ def test_search_similar_chunks_pushes_exclusions_into_sql() -> None:
 
     statement = session.execute.call_args.args[0]
     assert "NOT IN" in str(statement)
-    assert [row["chunk_id"] for row in results] == [2, 3]
-    assert results[0]["emotional_valence"] == "mild_negative"
+    assert [row.chunk_id for row in results] == [2, 3]
+    assert results[0].emotional_valence == "mild_negative"
 
 
 def test_search_similar_chunks_without_exclusions_keeps_sql_simple() -> None:
@@ -73,4 +73,8 @@ def test_search_similar_chunks_without_exclusions_keeps_sql_simple() -> None:
 
     statement = session.execute.call_args.args[0]
     assert "NOT IN" not in str(statement)
-    assert results == [{"chunk_id": 1, "text": "chunk-1", "emotional_valence": "neutral", "similarity": 0.95}]
+    assert len(results) == 1
+    assert results[0].chunk_id == 1
+    assert results[0].text == "chunk-1"
+    assert results[0].emotional_valence == "neutral"
+    assert results[0].similarity == 0.95

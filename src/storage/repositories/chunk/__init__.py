@@ -11,6 +11,7 @@
 """
 
 from .embedding_ops import (
+    SimilarChunkRow,
     get_chunk_embedding,
     get_missing_embedding_chunk_ids,
     has_embeddings,
@@ -40,4 +41,5 @@ __all__ = [
     "get_chunk_embedding",
     "search_similar_chunks",
     "has_embeddings",
+    "SimilarChunkRow",
 ]

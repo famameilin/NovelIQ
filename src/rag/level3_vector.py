@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from src.models.local.embedding import EmbeddingClient
+    from src.storage.repositories.chunk import SimilarChunkRow
 
 
 class Level3NotReadyError(RuntimeError):
@@ -113,7 +114,7 @@ class Level3VectorEvidence:
         self,
         query_text: str,
         exclude_chunk_ids: list[int] | None = None,
-    ) -> list[dict]:
+    ) -> list[SimilarChunkRow]:
         """
         检索语义相似的历史 chunk。
 

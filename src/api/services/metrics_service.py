@@ -68,7 +68,7 @@ class MetricsService:
         self,
         run_id: str,
         session: Session,
-    ) -> tuple[Any, Any, Any, Any, Any]:
+    ) -> tuple[Any, Any, Any, Any]:
         """
         获取聚合结果（带缓存）
 
@@ -77,7 +77,7 @@ class MetricsService:
             session: 数据库会话
 
         Returns:
-            (narrative_structure, emotion_stats, character_stats, style_stats, culture_stats)
+            (narrative_structure, emotion_stats, character_stats, style_stats)
         """
         # 尝试从缓存获取
         cached_result = self._get_from_cache(run_id)
@@ -100,25 +100,20 @@ class MetricsService:
 
     def get_narrative_structure(self, run_id: str, session: Session) -> Any:
         """获取叙事结构指标"""
-        narrative_structure, _, _, _, _ = self.get_aggregate_result(run_id, session)
+        narrative_structure, _, _, _ = self.get_aggregate_result(run_id, session)
         return narrative_structure
 
     def get_emotion_stats(self, run_id: str, session: Session) -> Any:
         """获取情感统计指标"""
-        _, emotion_stats, _, _, _ = self.get_aggregate_result(run_id, session)
+        _, emotion_stats, _, _ = self.get_aggregate_result(run_id, session)
         return emotion_stats
 
     def get_character_stats(self, run_id: str, session: Session) -> Any:
         """获取角色统计指标"""
-        _, _, character_stats, _, _ = self.get_aggregate_result(run_id, session)
+        _, _, character_stats, _ = self.get_aggregate_result(run_id, session)
         return character_stats
 
     def get_style_stats(self, run_id: str, session: Session) -> Any:
         """获取风格统计指标"""
-        _, _, _, style_stats, _ = self.get_aggregate_result(run_id, session)
+        _, _, _, style_stats = self.get_aggregate_result(run_id, session)
         return style_stats
-
-    def get_culture_stats(self, run_id: str, session: Session) -> Any:
-        """获取文化元素统计指标"""
-        _, _, _, _, culture_stats = self.get_aggregate_result(run_id, session)
-        return culture_stats

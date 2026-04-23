@@ -159,22 +159,20 @@ class DisambigContextProvider:
         收集 Level1/Level2 证据。
 
         修改时间: 2026-04-23
-        任务: p1-rag-retriever-split
-        修改内容: 若 authority service 暂时拿到旧式 dict 行，则回退到 level2 fallback，避免 provider 直接报错。
+        任务: fix-coupling-review-findings
+        修改内容: authority Level2 合同已落地后，不再吞掉 AttributeError；
+                  若 authority 构建异常，直接暴露给调用方，避免静默降级掩盖真实问题。
         """
         bundle = self._build_structured_evidence(names_in_chunk=names_in_chunk)
 
         if self._level2_enabled and current_chunk is not None:
             candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
             if self._graph_authority_service is not None and self._run_id is not None:
-                try:
-                    active_entities = self._graph_authority_service.build_active_entity_view(
-                        self._run_id,
-                        current_chunk=current_chunk,
-                        lookback=self._lookback_chunks,
-                    )
-                except AttributeError:
-                    active_entities = []
+                active_entities = self._graph_authority_service.build_active_entity_view(
+                    self._run_id,
+                    current_chunk=current_chunk,
+                    lookback=self._lookback_chunks,
+                )
             else:
                 active_entities = []
 

@@ -118,7 +118,6 @@ def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() 
             "emotion_stats": None,
             "character_stats": None,
             "style_stats": None,
-            "culture_stats": None,
         },
         token_usage_stats=token_usage_stats,
         graph_summary={"node_count": 3, "edge_count": 1, "density": 0.5},
@@ -287,7 +286,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
     monkeypatch.setattr(
         results_contracts,
         "_convert_aggregate_result",
-        lambda *_args, **_kwargs: (None, None, None, None, None),
+        lambda *_args, **_kwargs: (None, None, None, None),
     )
 
     export_graph_view = ExportGraphAuthorityView(
@@ -393,7 +392,7 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
     monkeypatch.setattr(
         results_contracts,
         "_convert_aggregate_result",
-        lambda *_args, **_kwargs: (None, None, None, None, None),
+        lambda *_args, **_kwargs: (None, None, None, None),
     )
 
     _global_stats, _token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
@@ -409,7 +408,6 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
         "emotion_stats",
         "character_stats",
         "style_stats",
-        "culture_stats",
     }
     assert "graph_summary" not in aggregate_metrics
     assert "graph_quality_report" not in aggregate_metrics
@@ -438,7 +436,6 @@ def test_build_export_payload_rejects_graph_fields_inside_aggregate_metrics() ->
                 "emotion_stats": None,
                 "character_stats": None,
                 "style_stats": None,
-                "culture_stats": None,
                 "graph_summary": {},
             },
             token_usage_stats=token_usage_stats,

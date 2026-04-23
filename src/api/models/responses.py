@@ -275,12 +275,6 @@ class StyleStats(BaseModel):
     category_density: dict[str, float] | None = None
 
 
-class CultureStats(BaseModel):
-    idiom_density: float | None = None
-    classical_sentence_ratio: float | None = None
-    imagery_density: float | None = None
-
-
 class TopicInfo(BaseModel):
     topic_id: int
     words: list[str]
@@ -331,7 +325,6 @@ class NovelResultsResponse(BaseModel):
     emotion_stats: EmotionStats | None = None
     character_stats: CharacterStatsAggregate | None = None
     style_stats: StyleStats | None = None
-    culture_stats: CultureStats | None = None
 
 
 class ErrorResponse(BaseModel):

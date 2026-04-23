@@ -14,7 +14,6 @@ import {
   createEmotionStats,
   createCharacterStats,
   createStyleStats,
-  createCultureStats,
   taskDb,
 } from "../data";
 
@@ -205,20 +204,5 @@ export const styleStatsHandler = http.get(
 
     await delay(200);
     return HttpResponse.json(createStyleStats());
-  }
-);
-
-// GET /api/novels/:novelId/metrics/culture-stats
-export const cultureStatsHandler = http.get(
-  `${BASE}/api/novels/:novelId/metrics/culture-stats`,
-  async ({ request, params }) => {
-    const { novelId } = params;
-    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
-
-    const err = await checkTaskReady(novelId as string, taskId);
-    if (err) return err;
-
-    await delay(200);
-    return HttpResponse.json(createCultureStats());
   }
 );

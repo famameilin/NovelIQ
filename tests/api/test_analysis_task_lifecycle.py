@@ -336,6 +336,37 @@ class TestAnalysisErrorHandler:
         assert refreshed_run["cancel_requested"] is False
         assert refreshed_run["completed_at"] is not None
 
+    @pytest.mark.asyncio
+    async def test_handle_success_invalidates_shared_metrics_service_cache(self, db_session):
+        """测试成功收口会失效依赖注入单例上的聚合缓存，而不是新建临时实例。"""
+        _insert_test_novel("novel001", session=db_session)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(novel_id="novel001")
+
+        task_manager = TaskManager()
+        task_manager.create_task(run_id[:8], "novel001")
+        handler = AnalysisErrorHandler(
+            novel_service=MagicMock(),
+            task_manager=task_manager,
+        )
+
+        from src.api.dependencies import get_metrics_service
+
+        metrics_service = get_metrics_service()
+        metrics_service._cache[metrics_service._get_cache_key(run_id)] = (("cached",), 9999999999.0)
+
+        await handler.handle_success(
+            task_id=run_id[:8],
+            novel_id="novel001",
+            elapsed=1.2,
+            analysis_logger=None,
+            session=db_session,
+            run_id=run_id,
+            bus=None,
+        )
+
+        assert metrics_service._get_from_cache(run_id) is None
+
 
 class TestTaskManagerDbWrite:
     """测试 TaskManager 的 DB 写回使用真实 run_id"""

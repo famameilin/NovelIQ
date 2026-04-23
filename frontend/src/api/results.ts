@@ -11,7 +11,6 @@ import type {
   EmotionStatsMetrics,
   CharacterStatsMetrics,
   StyleStatsMetrics,
-  CultureStatsMetrics,
 } from "./types";
 
 // ---- Characters ----
@@ -182,17 +181,6 @@ export async function getStyleStats(
 ): Promise<StyleStatsMetrics> {
   const { data } = await apiClient.get<StyleStatsMetrics>(
     `/api/novels/${novelId}/metrics/style-stats`,
-    { params: { task_id: taskId } }
-  );
-  return data;
-}
-
-export async function getCultureStats(
-  novelId: string,
-  taskId: string
-): Promise<CultureStatsMetrics> {
-  const { data } = await apiClient.get<CultureStatsMetrics>(
-    `/api/novels/${novelId}/metrics/culture-stats`,
     { params: { task_id: taskId } }
   );
   return data;

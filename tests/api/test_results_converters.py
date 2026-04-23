@@ -68,7 +68,6 @@ def test_validate_aggregate_metrics_contract_rejects_graph_fields() -> None:
                 "emotion_stats": None,
                 "character_stats": None,
                 "style_stats": None,
-                "culture_stats": None,
                 "graph_summary": {},
             }
         )
