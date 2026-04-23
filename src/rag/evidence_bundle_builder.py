@@ -156,21 +156,39 @@ class EvidenceBundleBuilder:
         ]
 
     def build_semantic_recall_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
-        """构建 Level3 通用语义召回证据。"""
-        return [
-            EvidenceItem(
-                evidence_type="semantic_recall",
-                source="chunk_embeddings",
-                content=result.text,
-                metadata={
-                    "chunk_id": result.chunk_id,
-                    "text": result.text,
-                    "similarity": result.similarity,
-                    "emotional_valence": result.emotional_valence,
-                },
+        """
+        构建 Level3 通用语义召回证据。
+
+        修改时间: 2026-04-23
+        任务: level3-mention-retrieval
+        修改说明: mention query 产物额外写入 metadata，不改变 EvidenceBundle 主结构。
+        """
+        items: list[EvidenceItem] = []
+        for result in level3_results:
+            metadata = {
+                "chunk_id": result.chunk_id,
+                "text": result.text,
+                "similarity": result.similarity,
+                "emotional_valence": result.emotional_valence,
+            }
+            if result.query_kind == "mention":
+                metadata.update(
+                    {
+                        "query_kind": "mention",
+                        "mention_text": result.mention_text,
+                        "mention_type": result.mention_type,
+                        "matched_features": list(result.matched_features),
+                    }
+                )
+            items.append(
+                EvidenceItem(
+                    evidence_type="semantic_recall",
+                    source="chunk_embeddings",
+                    content=result.text,
+                    metadata=metadata,
+                )
             )
-            for result in level3_results
-        ]
+        return items
 
     def build_emotion_exemplar_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
         """构建用于情绪判断的 Level3 专用证据。"""

@@ -236,6 +236,10 @@ async def _prepare_chunk_context_with_level3(
     创建者: TraeAI
     任务: implement-level3-vector-retrieval
     说明: 异步版本，支持 Level 3 向量检索
+
+    修改时间: 2026-04-23
+    任务: level3-history-cutoff
+    修改说明: annotation 阶段的 Level3 检索只允许查看当前 chunk 之前的历史。
     """
     from src.storage.repositories import ChunkRepository
 
@@ -265,6 +269,11 @@ async def _prepare_chunk_context_with_level3(
 
     if disambig_provider:
         names_in_chunk = _extract_names_from_text(chunk_text)
+        from src.rag.mention_extraction import extract_person_mentions
+        from src.rag.mention_query import build_mention_evidence_queries
+
+        # 中文注释：mention query 只增强 Level3 上游检索，不改变 annotation prompt 的渲染合同。
+        mention_queries = build_mention_evidence_queries(extract_person_mentions(chunk_text))
         if disambig_provider.requires_level3():
             if not disambig_provider.is_level3_available():
                 raise RuntimeError("Level 3 vector retrieval is required but not available")
@@ -273,6 +282,8 @@ async def _prepare_chunk_context_with_level3(
                 current_chunk=chunk_id,
                 context_text=chunk_text,
                 exclude_chunk_ids=[chunk_id],
+                max_chunk_id=chunk_id - 1,
+                mention_queries=mention_queries,
             )
         elif disambig_provider.is_level3_available():
             context.evidence_bundle = await disambig_provider.collect_evidence_with_level3(
@@ -280,6 +291,8 @@ async def _prepare_chunk_context_with_level3(
                 current_chunk=chunk_id,
                 context_text=chunk_text,
                 exclude_chunk_ids=[chunk_id],
+                max_chunk_id=chunk_id - 1,
+                mention_queries=mention_queries,
             )
         else:
             context.evidence_bundle = disambig_provider.collect_evidence(

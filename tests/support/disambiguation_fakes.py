@@ -106,7 +106,18 @@ class FakeRagRetriever:
         current_chunk=None,
         context_text=None,
         exclude_chunk_ids=None,
+        max_chunk_id=None,
+        mention_queries=None,
     ):
+        """
+        修改时间: 2026-04-23
+        任务: level3-history-cutoff
+        修改说明: 测试假实现记录 max_chunk_id，便于断言共享证据链的历史边界。
+
+        修改时间: 2026-04-23
+        任务: level3-mention-retrieval
+        修改说明: 记录 mention_queries，便于测试确认 mention 检索链路已接入。
+        """
         self.calls.append(
             {
                 "method": "collect_evidence_with_level3",
@@ -114,6 +125,8 @@ class FakeRagRetriever:
                 "current_chunk": current_chunk,
                 "context_text": context_text,
                 "exclude_chunk_ids": list(exclude_chunk_ids or []),
+                "max_chunk_id": max_chunk_id,
+                "mention_queries": list(mention_queries or []),
             }
         )
         return self.bundle

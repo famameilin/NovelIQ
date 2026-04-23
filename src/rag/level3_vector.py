@@ -114,6 +114,7 @@ class Level3VectorEvidence:
         self,
         query_text: str,
         exclude_chunk_ids: list[int] | None = None,
+        max_chunk_id: int | None = None,
     ) -> list[SimilarChunkRow]:
         """
         检索语义相似的历史 chunk。
@@ -121,6 +122,10 @@ class Level3VectorEvidence:
         创建时间: 2026-04-23
         任务: p1-rag-retriever-split
         说明: 保留原检索行为，但让 provider 不再直接处理向量层细节。
+
+        修改时间: 2026-04-23
+        任务: level3-history-cutoff
+        修改说明: 透传 max_chunk_id 到 repository 层，统一约束 Level3 历史边界。
         """
         await self.ensure_level3_ready()
         if not self.is_available():
@@ -146,6 +151,7 @@ class Level3VectorEvidence:
                 top_k=self._top_k,
                 similarity_threshold=self._similarity_threshold,
                 exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
             )
             logger.debug(
                 "Level3VectorEvidence: found {} similar chunks for query (len={})",

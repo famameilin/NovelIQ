@@ -339,6 +339,7 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
     assert evidence_provider.calls[0]["current_chunk"] == 12
     assert evidence_provider.calls[0]["exclude_chunk_ids"] == [12]
+    assert evidence_provider.calls[0]["max_chunk_id"] == 12
     assert mock_build_context_sentences.call_count == 2
     for call in mock_build_context_sentences.call_args_list:
         assert call.kwargs["max_chunk_id"] == 12
@@ -434,6 +435,7 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
     assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
     assert evidence_provider.calls[0]["current_chunk"] is None
+    assert evidence_provider.calls[0]["max_chunk_id"] is None
     build_hint_call = mock_build_existing_hint.call_args
     assert build_hint_call.kwargs["current_chunk_id"] is None
     user_content = mock_record.call_args.kwargs["messages"][-1]["content"]

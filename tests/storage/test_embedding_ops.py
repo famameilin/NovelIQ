@@ -59,6 +59,29 @@ def test_search_similar_chunks_pushes_exclusions_into_sql() -> None:
     assert results[0].emotional_valence == "mild_negative"
 
 
+def test_search_similar_chunks_pushes_history_cutoff_into_sql() -> None:
+    """
+    创建时间: 2026-04-23
+    任务: level3-history-cutoff
+    说明: Level3 检索必须在 SQL 层应用 max_chunk_id，防止增量路径召回未来 chunk。
+    """
+    session = MagicMock()
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {"chunk_id": 3, "text": "chunk-3", "emotional_valence": None, "similarity": 0.88},
+    ]
+
+    results = search_similar_chunks(
+        session,
+        run_id="run-1",
+        query_embedding=[0.1, 0.2],
+        max_chunk_id=3,
+    )
+
+    statement = session.execute.call_args.args[0]
+    assert "chunk_id <= :chunk_id_1" in str(statement)
+    assert [row.chunk_id for row in results] == [3]
+
+
 def test_search_similar_chunks_without_exclusions_keeps_sql_simple() -> None:
     session = MagicMock()
     session.execute.return_value.mappings.return_value.all.return_value = [
