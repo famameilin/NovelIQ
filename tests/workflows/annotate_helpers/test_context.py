@@ -510,6 +510,8 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         current_chunk=21,
         context_text="程霜翻阅旧案卷",
         exclude_chunk_ids=[21],
+        max_chunk_id=20,
+        mention_queries=[],
     )
     assert expected_active_entities is not None
     assert context.prompt_active_entities == expected_active_entities

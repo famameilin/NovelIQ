@@ -315,6 +315,11 @@ async def build_prompt_context_with_shared_evidence(
     修改时间: 2026-04-23
     任务: p1-disambiguation-pipeline-split
     修改内容: 从主流程中抽离，作为 prompt 组装阶段的统一步骤。
+
+    修改时间: 2026-04-23
+    任务: level3-history-cutoff
+    修改内容: shared Level3 取证显式传入 max_chunk_id；增量阶段截止到当前批次结束 chunk，
+              final 阶段用 None 表示允许全量历史。
     """
     if evidence_provider is None or not candidates:
         return prompt_context
@@ -324,6 +329,11 @@ async def build_prompt_context_with_shared_evidence(
         return prompt_context
 
     query_text = build_shared_evidence_query_text(candidates, context_sentences)
+    from src.rag.mention_extraction import extract_person_mentions
+    from src.rag.mention_query import build_mention_evidence_queries
+
+    # 中文注释：消歧共享 evidence 可从候选例句中抽 mention，但仍只影响 Level3 retrieval 上游。
+    mention_queries = build_mention_evidence_queries(extract_person_mentions(query_text or ""))
     if evidence_provider.requires_level3():
         if not evidence_provider.is_level3_available():
             logger.warning(
@@ -339,6 +349,8 @@ async def build_prompt_context_with_shared_evidence(
                 current_chunk=current_chunk,
                 context_text=query_text,
                 exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
+                max_chunk_id=current_chunk,
+                mention_queries=mention_queries,
             )
     elif evidence_provider.is_level3_available():
         evidence_bundle = await evidence_provider.collect_evidence_with_level3(
@@ -346,6 +358,8 @@ async def build_prompt_context_with_shared_evidence(
             current_chunk=current_chunk,
             context_text=query_text,
             exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
+            max_chunk_id=current_chunk,
+            mention_queries=mention_queries,
         )
     else:
         evidence_bundle = evidence_provider.collect_evidence(
