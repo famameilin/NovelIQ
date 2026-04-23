@@ -3,11 +3,18 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分protocols.py
 说明: 标注数据协议接口
+
+修改时间: 2026-04-23
+任务: P2-基础设施解耦
+修改内容: 使用 AnnotationRecord 替代动态字典，收窄协议边界。
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
+
+from .types import AnnotationRecord
 
 
 @runtime_checkable
@@ -18,7 +25,7 @@ class AnnotationRepositoryProtocol(Protocol):
     管理小说标注数据的存储和检索。
     """
 
-    def get_annotations(self, novel_id: str) -> list[dict[str, Any]]:
+    def get_annotations(self, novel_id: str) -> list[AnnotationRecord]:
         """
         获取所有标注
 
@@ -30,7 +37,7 @@ class AnnotationRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_annotation_by_chunk(self, novel_id: str, chunk_id: int) -> dict[str, Any] | None:
+    def get_annotation_by_chunk(self, novel_id: str, chunk_id: int) -> AnnotationRecord | None:
         """
         按分块获取标注
 
@@ -43,7 +50,7 @@ class AnnotationRepositoryProtocol(Protocol):
         """
         ...
 
-    def insert_annotations(self, novel_id: str, annotations: list[dict[str, Any]]) -> None:
+    def insert_annotations(self, novel_id: str, annotations: Sequence[AnnotationRecord]) -> None:
         """
         批量插入标注
 
