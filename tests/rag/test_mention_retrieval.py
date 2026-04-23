@@ -13,6 +13,7 @@ import pytest
 from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.mention_extraction import extract_person_mentions
 from src.rag.mention_query import build_mention_evidence_queries
+from src.rag.mention_rerank import rerank_mention_level3_results
 from src.rag.retriever import DisambigContextProvider
 from src.storage.repositories.chunk import SimilarChunkRow
 
@@ -140,6 +141,46 @@ def test_build_emotion_exemplar_items_ignores_mention_rows() -> None:
     assert items[0].metadata["chunk_id"] == 3
 
 
+def test_mention_rerank_promotes_feature_consistent_history() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: level3-mention-rerank
+    说明: 低一点的向量分若有更多 mention 特征、候选名和身份线索，应能排到纯相似场景前面。
+    """
+    reranked = rerank_mention_level3_results(
+        [
+            SimilarChunkRow(
+                chunk_id=18,
+                text="厅中有人争执，气氛同样紧张。",
+                similarity=0.90,
+                query_kind="mention",
+                mention_text="穿红衣的女子",
+                mention_type="feature_action",
+                matched_features=("红衣", "女子", "出手"),
+            ),
+            SimilarChunkRow(
+                chunk_id=12,
+                text="白芷正是那名红衣女子，曾在门前突然出手。",
+                similarity=0.82,
+                query_kind="mention",
+                mention_text="穿红衣的女子",
+                mention_type="feature_action",
+                matched_features=("红衣", "女子", "出手"),
+            ),
+        ],
+        active_entity_names={"白芷"},
+        candidate_names={"白芷"},
+        current_chunk=20,
+    )
+
+    assert [row.chunk_id for row in reranked] == [12, 18]
+    assert reranked[0].rerank_score is not None
+    assert reranked[0].semantic_score == 0.82
+    assert reranked[0].feature_overlap == ("红衣", "女子", "出手")
+    assert reranked[0].active_entity_bonus > 0
+    assert reranked[0].identity_clue_bonus > 0
+
+
 @pytest.mark.asyncio
 async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     """
@@ -168,4 +209,46 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     assert [item.metadata["chunk_id"] for item in semantic_items] == [5, 6]
     assert semantic_items[0].metadata["query_kind"] == "mention"
     assert semantic_items[0].metadata["mention_text"] == "穿红衣的女子"
+    assert semantic_items[0].metadata["business_rerank_method"] == "mention_feature_rerank"
+    assert semantic_items[0].metadata["rerank_score"] >= semantic_items[0].metadata["semantic_score"]
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["max_chunk_id"] == 9
+    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
+
+
+@pytest.mark.asyncio
+async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: level3-mention-rerank
+    说明: provider 应先扩大召回池并 rerank，再裁剪回 prompt top_k，避免只按向量分保留相似场景。
+    """
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=1)
+    provider._level3.is_available = MagicMock(return_value=True)
+    provider._level3.search_similar_chunks = AsyncMock(
+        side_effect=[
+            [
+                SimilarChunkRow(
+                    chunk_id=4,
+                    text="白芷正是那名红衣女子，她随后突然出手。",
+                    similarity=0.82,
+                ),
+                SimilarChunkRow(chunk_id=5, text="众人同时看向门外，场景相似。", similarity=0.91),
+            ],
+            [],
+        ]
+    )
+
+    mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:1]
+    bundle = await provider.collect_evidence_with_level3(
+        names_in_chunk=["白芷"],
+        current_chunk=6,
+        context_text="那个穿红衣的女子突然出手。",
+        max_chunk_id=5,
+        mention_queries=mention_queries,
+    )
+
+    semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
+    assert [item.metadata["chunk_id"] for item in semantic_items] == [4]
+    assert semantic_items[0].metadata["semantic_score"] == 0.82
+    assert semantic_items[0].metadata["feature_overlap"] == ["红衣", "女子", "出手"]
+    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20

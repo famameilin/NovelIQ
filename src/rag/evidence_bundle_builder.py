@@ -166,6 +166,10 @@ class EvidenceBundleBuilder:
         修改时间: 2026-04-24
         任务: level3-paragraph-rerank
         修改说明: 将 paragraph rerank 的局部 preview 与分数写入 metadata，供 renderer 优先展示局部 evidence。
+
+        修改时间: 2026-04-24
+        任务: level3-mention-rerank
+        修改说明: 写入 mention-aware rerank 分数与加权原因，便于后续评测和日志核对。
         """
         items: list[EvidenceItem] = []
         for result in level3_results:
@@ -199,6 +203,21 @@ class EvidenceBundleBuilder:
                         "mention_text": result.mention_text,
                         "mention_type": result.mention_type,
                         "matched_features": list(result.matched_features),
+                    }
+                )
+            if result.rerank_score is not None:
+                metadata.update(
+                    {
+                        "business_rerank_method": "mention_feature_rerank",
+                        "rerank_score": result.rerank_score,
+                        "semantic_score": result.semantic_score,
+                        "feature_overlap": list(result.feature_overlap),
+                        "active_entity_bonus": result.active_entity_bonus,
+                        "identity_clue_bonus": result.identity_clue_bonus,
+                        "candidate_related_bonus": result.candidate_related_bonus,
+                        "time_decay": result.time_decay,
+                        "rerank_penalty": result.rerank_penalty,
+                        "penalties": list(result.penalties),
                     }
                 )
             items.append(

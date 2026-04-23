@@ -40,6 +40,10 @@ class SimilarChunkRow:
     修改时间: 2026-04-23
     任务: level3-mention-retrieval
     修改说明: 增补 query_kind 与 mention 元数据字段，供上层标记 mention 级召回来源。
+
+    修改时间: 2026-04-24
+    任务: level3-mention-rerank
+    修改说明: 增补确定性 mention rerank 的可解释字段，保留原始语义分并记录加权原因。
     """
 
     chunk_id: int
@@ -56,6 +60,15 @@ class SimilarChunkRow:
     paragraph_start_char: int | None = None
     paragraph_end_char: int | None = None
     chunk_similarity: float | None = None
+    semantic_score: float | None = None
+    rerank_score: float | None = None
+    feature_overlap: tuple[str, ...] = ()
+    active_entity_bonus: float = 0.0
+    identity_clue_bonus: float = 0.0
+    candidate_related_bonus: float = 0.0
+    time_decay: float = 0.0
+    rerank_penalty: float = 0.0
+    penalties: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
