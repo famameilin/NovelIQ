@@ -46,6 +46,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from src.config import settings
@@ -61,7 +62,9 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from src.models.local.embedding import EmbeddingClient
+    from src.rag.mention_query import MentionEvidenceQuery
     from src.storage.repositories import GraphRepository
+    from src.storage.repositories.chunk import SimilarChunkRow
 
 __all__ = [
     "AliasLookup",
@@ -123,6 +126,7 @@ class DisambigContextProvider:
         self._level1_enabled = level1_enabled
         self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
+        self._level3_top_k = level3_top_k
         self._bundle_builder = EvidenceBundleBuilder()
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
@@ -189,18 +193,96 @@ class DisambigContextProvider:
         current_chunk: int | None = None,
         context_text: str | None = None,
         exclude_chunk_ids: list[int] | None = None,
+        max_chunk_id: int | None = None,
+        mention_queries: list[MentionEvidenceQuery] | None = None,
     ) -> EvidenceBundle:
+        """
+        收集 Level1/2/3 证据。
+
+        修改时间: 2026-04-23
+        任务: level3-history-cutoff
+        修改说明: 增加 max_chunk_id 透传，调用方可显式声明 Level3 历史截止边界。
+
+        修改时间: 2026-04-23
+        任务: level3-mention-retrieval
+        修改说明: 支持 mention_queries；mention 召回结果仅通过 metadata 标记来源，不扩张 prompt contract。
+        """
         bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
 
-        if self._level3_enabled and context_text and self.is_level3_available():
-            level3_results = await self._level3.search_similar_chunks(
-                context_text,
+        if self._level3_enabled and self.is_level3_available():
+            level3_results = await self._collect_level3_results(
+                context_text=context_text,
                 exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+                mention_queries=mention_queries,
             )
             bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
             bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
 
         return bundle
+
+    async def _collect_level3_results(
+        self,
+        *,
+        context_text: str | None,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        mention_queries: list[MentionEvidenceQuery] | None,
+    ) -> list[SimilarChunkRow]:
+        """
+        创建时间: 2026-04-23
+        任务: level3-mention-retrieval
+        说明: 统一执行 chunk query 与 mention query，并按 chunk_id 去重后限制证据预算。
+        """
+        collected: list[SimilarChunkRow] = []
+
+        for mention_query in mention_queries or []:
+            results = await self._level3.search_similar_chunks(
+                mention_query.query_text,
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+            )
+            collected.extend(
+                replace(
+                    result,
+                    query_kind="mention",
+                    mention_text=mention_query.mention_text,
+                    mention_type=mention_query.mention_type,
+                    matched_features=mention_query.matched_features,
+                )
+                for result in results
+            )
+
+        if context_text:
+            collected.extend(
+                await self._level3.search_similar_chunks(
+                    context_text,
+                    exclude_chunk_ids=exclude_chunk_ids,
+                    max_chunk_id=max_chunk_id,
+                )
+            )
+
+        return self._dedupe_level3_results(collected)
+
+    def _dedupe_level3_results(self, results: list[SimilarChunkRow]) -> list[SimilarChunkRow]:
+        """
+        创建时间: 2026-04-23
+        任务: level3-mention-retrieval
+        说明: 对多 query 的 Level3 结果按 chunk_id 去重；同分时优先保留 mention 来源，方便后续观察。
+        """
+        by_chunk_id: dict[int, SimilarChunkRow] = {}
+        for result in results:
+            existing = by_chunk_id.get(result.chunk_id)
+            if existing is None:
+                by_chunk_id[result.chunk_id] = result
+                continue
+            if result.similarity > existing.similarity:
+                by_chunk_id[result.chunk_id] = result
+            elif result.similarity == existing.similarity and existing.query_kind != "mention":
+                by_chunk_id[result.chunk_id] = result
+
+        ordered = sorted(by_chunk_id.values(), key=lambda item: item.similarity, reverse=True)
+        return ordered[: self._level3_top_k]
 
     def is_level3_available(self) -> bool:
         """检查 Level 3 是否可用"""

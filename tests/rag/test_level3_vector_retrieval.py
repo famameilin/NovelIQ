@@ -109,11 +109,12 @@ class TestLevel3VectorEvidenceAsync:
                 run_id="test-run-id",
                 embedding_client=mock_client,
             )
-            results = await level3.search_similar_chunks("查询文本")
+            results = await level3.search_similar_chunks("查询文本", max_chunk_id=7)
 
         assert len(results) == 1
         assert results[0].chunk_id == 1
         assert results[0].emotional_valence == "mild_negative"
+        assert mock_search.call_args.kwargs["max_chunk_id"] == 7
 
     @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
@@ -415,6 +416,11 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
 class TestDisambigContextProviderLevel3Async:
     @pytest.mark.asyncio
     async def test_collect_evidence_with_level3_adds_emotion_exemplar_items(self) -> None:
+        """
+        修改时间: 2026-04-23
+        任务: level3-history-cutoff
+        修改说明: provider 层应把 max_chunk_id 原样透传给 Level3 vector 边界。
+        """
         provider = DisambigContextProvider(level3_enabled=True)
         provider._level3.is_available = MagicMock(return_value=True)
         provider._level3.search_similar_chunks = AsyncMock(
@@ -437,8 +443,14 @@ class TestDisambigContextProviderLevel3Async:
         bundle = await provider.collect_evidence_with_level3(
             context_text="她抿唇不语，袖口却攥得发白。",
             exclude_chunk_ids=[15],
+            max_chunk_id=14,
         )
 
+        provider._level3.search_similar_chunks.assert_awaited_once_with(
+            "她抿唇不语，袖口却攥得发白。",
+            exclude_chunk_ids=[15],
+            max_chunk_id=14,
+        )
         semantic_types = [item.evidence_type for item in bundle.semantic_evidence]
         assert semantic_types.count("semantic_recall") == 2
         assert semantic_types.count("emotion_exemplar") == 1

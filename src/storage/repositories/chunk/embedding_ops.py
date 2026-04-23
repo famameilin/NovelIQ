@@ -17,8 +17,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import delete, select
@@ -33,12 +33,20 @@ class SimilarChunkRow:
     创建时间: 2026-04-23
     任务: fix-coupling-review-findings
     说明: 收口 Level3 检索边界，避免向上游暴露匿名 dict，并统一使用具名字段访问。
+
+    修改时间: 2026-04-23
+    任务: level3-mention-retrieval
+    修改说明: 增补 query_kind 与 mention 元数据字段，供上层标记 mention 级召回来源。
     """
 
     chunk_id: int
     text: str
     similarity: float
     emotional_valence: str | None = None
+    query_kind: str = "chunk"
+    mention_text: str | None = None
+    mention_type: str | None = None
+    matched_features: tuple[str, ...] = ()
 
 
 def insert_chunk_embeddings(
@@ -135,6 +143,7 @@ def search_similar_chunks(
     top_k: int = 5,
     similarity_threshold: float = 0.7,
     exclude_chunk_ids: Sequence[int] | None = None,
+    max_chunk_id: int | None = None,
 ) -> list[SimilarChunkRow]:
     """
     使用 pgvector 进行向量相似度检索
@@ -143,6 +152,10 @@ def search_similar_chunks(
     任务: emotion-rag-evidence-provider
     修改说明: 额外回传 chunk 的 emotional_valence，避免上层为了情绪 exemplar 再单独查一轮数据库。
 
+    修改时间: 2026-04-23
+    任务: level3-history-cutoff
+    修改说明: 增加 max_chunk_id 历史截止边界，确保增量取证不会召回未来 chunk。
+
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
@@ -150,6 +163,7 @@ def search_similar_chunks(
         top_k: 返回的最大结果数
         similarity_threshold: 相似度阈值
         exclude_chunk_ids: 排除的 chunk ID 列表
+        max_chunk_id: 允许召回的最大 chunk_id，None 表示不限制
 
     Returns:
         相似 chunk DTO 列表，每个元素包含 chunk_id, similarity, text, emotional_valence
@@ -176,6 +190,9 @@ def search_similar_chunks(
     )
     if exclude_chunk_ids:
         run_scoped_chunks = run_scoped_chunks.where(ChunkEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
+    if max_chunk_id is not None:
+        # 中文注释：历史截止必须下沉到 SQL 层，避免上游新增 query 形态时绕过时间边界。
+        run_scoped_chunks = run_scoped_chunks.where(ChunkEmbedding.chunk_id <= max_chunk_id)
 
     run_scoped_chunks_subquery = run_scoped_chunks.subquery()
     similarity = (1 - run_scoped_chunks_subquery.c.embedding_vector.cosine_distance(query_embedding)).label(
