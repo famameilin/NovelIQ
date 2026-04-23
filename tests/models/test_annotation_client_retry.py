@@ -471,7 +471,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.recorded_token_usage[0]["call_type"], "phase2")
         self.assertEqual(client.recorded_token_usage[0]["chunk_id"], 1)
 
-    @patch("src.models.local.annotation.phase2.record_model_interaction")
+    @patch("src.models.local.annotation.runtime.record_model_interaction")
     async def test_phase2_persists_thinking_content(self, mock_record_model_interaction: MagicMock):
         """Phase2 会持久化 _process_annotation_response 提取出的 thinking_content。"""
         client = MockAnnotationClient()
