@@ -1,83 +1,39 @@
 """
 API 分析端点测试
-
 修改时间: 2026-04-05
 修改者: AI Assistant
 任务: fix-test-data-pollution
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
-
 修改时间: 2026-04-19
 修改者: Codex (GPT-5)
 任务: fix-task-system-review-findings
 修改内容: 补充 DB-first 任务系统回归测试，覆盖创建失败、进程外取消、resume 清脏字段、message 持久化
-
 修改时间: 2026-04-20
 修改者: Codex (GPT-5)
 任务: fix-test-db-isolation
 修改内容: 补充直接调用 get_session_factory()() 仍绑定测试库的回归测试，防止测试污染开发库
 """
 
-import asyncio
 import os
 import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
 from src.api.exceptions import NovelNotFoundError
-from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.models.requests import ReanalyzeRequest
 from src.api.routes import analysis as analysis_mod
 from src.api.services import task_application_service as task_application_mod
-from src.api.services.analysis.error_handler import AnalysisErrorHandler
-from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
 from src.storage.id_mapping import TaskIDNotFoundError
 from src.storage.repositories import RunRepository
-
-
-def _insert_test_novel(novel_id: str, *, session=None, title: str | None = None) -> None:
-    """
-    为直接造 run 的测试补一条合法小说主表记录。
-
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-analysis-related-foreign-keys
-    说明: analysis_runs 现在受 novel 外键保护；测试若要直接插 run，
-          必须先补 novels 主表，不能再依赖历史上的无约束脏状态。
-    """
-    if len(novel_id) > 8:
-        raise ValueError(f"test novel_id must be 8 chars or fewer, got: {novel_id}")
-
-    statement = text(
-        """
-        INSERT INTO novels (novel_id, title, filename, file_path)
-        VALUES (:novel_id, :title, :filename, :file_path)
-        ON CONFLICT (novel_id) DO NOTHING
-        """
-    )
-    payload = {
-        "novel_id": novel_id,
-        "title": title or novel_id,
-        "filename": f"{novel_id}.txt",
-        "file_path": f"data/uploads/{novel_id}.txt",
-    }
-
-    if session is not None:
-        session.execute(statement, payload)
-        session.commit()
-        return
-
-    with get_session_factory()() as local_session:
-        local_session.execute(statement, payload)
-        local_session.commit()
+from tests.support.analysis_factories import insert_test_novel as _insert_test_novel
 
 
 class TestTestDatabaseIsolation:
@@ -86,17 +42,14 @@ class TestTestDatabaseIsolation:
     def test_get_session_factory_uses_test_database_url(self):
         """
         验证直接调用 get_session_factory()() 也会绑定测试数据库。
-
         创建时间: 2026-04-20
         创建者: Codex (GPT-5)
         任务: fix-test-db-isolation
         说明: 这是此前污染开发库的直接入口，必须有回归测试锁住。
         """
         expected_url = os.environ["TEST_DATABASE_URL"]
-
         with get_session_factory()() as session:
             actual_url = session.get_bind().engine.url.render_as_string(hide_password=False)
-
         assert actual_url == expected_url
 
 
@@ -130,19 +83,15 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("status_task_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         create_response = api_client.post(f"/api/novels/{novel_id}/tasks")
         assert create_response.status_code == 200
         task_id = create_response.json()["task_id"]
-
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
         assert status_response.status_code == 200
         data = status_response.json()
@@ -154,19 +103,15 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("task_list_created_at_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         create_response = api_client.post(f"/api/novels/{novel_id}/tasks")
         assert create_response.status_code == 200
         task_id = create_response.json()["task_id"]
-
         list_response = api_client.get(f"/api/novels/{novel_id}/tasks")
         assert list_response.status_code == 200
         tasks = list_response.json()["tasks"]
@@ -185,7 +130,6 @@ class TestAnalysis:
             response = api_client.get("/api/novels/novel-1/tasks/memory123/status")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
-
         assert response.status_code == 404
 
     def test_get_task_status_returns_500_when_db_query_fails(self, api_client: TestClient):
@@ -201,7 +145,6 @@ class TestAnalysis:
             response = client.get("/api/novels/novel-1/tasks/broken123/status")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
-
         assert response.status_code == 500
 
     def test_list_tasks_returns_500_when_db_query_fails(self, api_client: TestClient):
@@ -217,7 +160,6 @@ class TestAnalysis:
             response = client.get("/api/novels/novel-1/tasks")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
-
         assert response.status_code == 500
 
     def test_resume_pending_task_success(self, api_client: TestClient):
@@ -225,21 +167,17 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("resume_task_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         # 直接创建 pending 任务，不触发自动分析，确保 resume 语义稳定可测。
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-
         resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
         assert resume_response.status_code == 200
         data = resume_response.json()
@@ -251,16 +189,13 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("create_task_failure_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
         service = NovelService(upload_dir=Path("data/uploads"))
-
         with patch(
             "src.api.services.novel_service.RunRepository.create_run",
             side_effect=RuntimeError("db unavailable"),
@@ -273,33 +208,26 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("cancel_out_of_process_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "cancelled"
-
         with get_session_factory()() as session:
             run = RunRepository(session).get_run(task_id)
-
         assert run is not None
         assert run["status"] == "cancelled"
         assert run["cancel_requested"] is False
         assert run["completed_at"] is not None
-
         delete_response = api_client.post(f"/api/novels/{novel_id}/tasks/batch-delete", json={"task_ids": [task_id]})
         assert delete_response.status_code == 200
         delete_data = delete_response.json()
@@ -311,20 +239,16 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("cancel_running_out_of_process_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
             run_repo.update_run_task_fields(
@@ -333,15 +257,12 @@ class TestAnalysis:
                 worker_id="worker-running",
                 heartbeat_at=datetime.now(),
             )
-
         response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "cancelling"
-
         with get_session_factory()() as session:
             run = RunRepository(session).get_run(task_id)
-
         assert run is not None
         assert run["status"] == "cancelling"
         assert run["cancel_requested"] is True
@@ -351,20 +272,16 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("cancel_db_failure_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-
         task_manager = TaskManager()
         task_manager.create_task(task_id, novel_id)
         api_client.app.dependency_overrides[analysis_mod.get_task_manager] = lambda: task_manager
@@ -377,7 +294,6 @@ class TestAnalysis:
                 response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_task_manager, None)
-
         assert response.status_code == 500
         assert response.json()["detail"] == "任务取消持久化失败，请稍后重试"
         task_info = task_manager.get_task(task_id)
@@ -391,15 +307,12 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("cancel_race_terminal_winner_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
@@ -421,13 +334,10 @@ class TestAnalysis:
             side_effect=_simulate_other_worker_finished,
         ):
             response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
-
         assert response.status_code == 400
         assert "completed" in response.json()["detail"]
-
         with get_session_factory()() as session:
             run = RunRepository(session).get_run(task_id)
-
         assert run is not None
         assert run["status"] == "completed"
         assert run["cancel_requested"] is False
@@ -437,20 +347,16 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("resume_clear_state_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-
         with get_session_factory()() as session:
             run_repo = RunRepository(session)
             run_repo.update_run_task_fields(
@@ -466,12 +372,9 @@ class TestAnalysis:
                 cancel_requested=True,
                 completed_at=datetime.now(),
             )
-
         with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", return_value=None):
             resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
-
         assert resume_response.status_code == 200
-
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
         assert status_response.status_code == 200
         data = status_response.json()
@@ -481,10 +384,8 @@ class TestAnalysis:
         assert data["sub_stage"] is None
         assert data["message"] is None
         assert data["error"] is None
-
         with get_session_factory()() as session:
             run = RunRepository(session).get_run(task_id)
-
         assert run is not None
         assert run["cancel_requested"] is False
         assert run["completed_at"] is None
@@ -499,20 +400,16 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("status_message_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-
         task_manager = TaskManager()
         task_manager.set_db_session_factory(lambda: get_session_factory()())
         task_manager.create_task(task_id, novel_id)
@@ -523,7 +420,6 @@ class TestAnalysis:
             stage="annotate",
             message="正在分析第 42 个分块",
         )
-
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
         assert status_response.status_code == 200
         data = status_response.json()
@@ -536,11 +432,9 @@ class TestAnalysis:
 
         session_factory = get_session_factory()
         stale_heartbeat = datetime.now(UTC) - main_mod.ORPHAN_TASK_HEARTBEAT_TIMEOUT - timedelta(minutes=1)
-
         # 使用唯一 ID 避免测试间数据污染
         running_novel_id = uuid.uuid4().hex[:8]
         cancelling_novel_id = uuid.uuid4().hex[:8]
-
         with session_factory() as session:
             _insert_test_novel(running_novel_id, session=session)
             _insert_test_novel(cancelling_novel_id, session=session)
@@ -560,22 +454,18 @@ class TestAnalysis:
                 worker_id="worker-a",
                 heartbeat_at=stale_heartbeat,
             )
-
         failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
-
         # 验证我们创建的任务被正确处理
         with session_factory() as session:
             run_repo = RunRepository(session)
             running_run = run_repo.get_run(running_run_id)
             cancelling_run = run_repo.get_run(cancelling_run_id)
-
         assert running_run is not None
         assert running_run["status"] == "failed"
         assert cancelling_run is not None
         assert cancelling_run["status"] == "cancelled"
         assert cancelling_run["cancel_requested"] is False
         assert cancelling_run["completed_at"] is not None
-
         # 验证至少各有一个任务被收口（不排除其他测试残留任务也被一并处理）
         assert failed_count >= 1
         assert cancelled_count >= 1
@@ -587,7 +477,6 @@ class TestAnalysis:
         session_factory = get_session_factory()
         running_novel_id = "runno001"
         cancelling_novel_id = "canno001"
-
         with session_factory() as session:
             _insert_test_novel(running_novel_id, session=session)
             _insert_test_novel(cancelling_novel_id, session=session)
@@ -600,17 +489,13 @@ class TestAnalysis:
                 status="cancelling",
                 cancel_requested=True,
             )
-
         failed_count, cancelled_count = main_mod._recover_orphaned_tasks()
-
         assert failed_count == 0
         assert cancelled_count == 1
-
         with session_factory() as session:
             run_repo = RunRepository(session)
             running_run = run_repo.get_run(running_run_id)
             cancelling_run = run_repo.get_run(cancelling_run_id)
-
         assert running_run is not None
         assert running_run["status"] == "running"
         assert cancelling_run is not None
@@ -625,20 +510,16 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("startup_pending_resume_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-
         scheduled_calls: list[tuple[str, str]] = []
 
         def _record_schedule(self, scheduled_task_id: str, novel: dict, request=None) -> None:
@@ -646,7 +527,6 @@ class TestAnalysis:
 
         with patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_schedule):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
-
         assert scheduled_count == len(scheduled_calls)
         assert cancelled_count == 0
         assert (task_id, novel_id) in scheduled_calls
@@ -659,25 +539,20 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("startup_pending_skip_dangling_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
         valid_task_id = service.create_task(novel_id)
-
         skipped_task_id = "skipme01"
         _insert_test_novel(skipped_task_id)
         with get_session_factory()() as session:
             RunRepository(session).create_run(novel_id=skipped_task_id, run_id=skipped_task_id)
-
         scheduled_calls: list[tuple[str, str]] = []
 
         async def _resume_or_skip(self, resume_novel_id: str, scheduled_task_id: str) -> str:
@@ -694,7 +569,6 @@ class TestAnalysis:
             patch.object(analysis_mod.AnalysisService, "resume_task", new=_resume_or_skip),
         ):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
-
         assert cancelled_count == 0
         assert scheduled_count == len(scheduled_calls)
         assert (valid_task_id, novel_id) in scheduled_calls
@@ -708,15 +582,12 @@ class TestAnalysis:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"Test novel content\n" * 100)
             f.flush()
-
             with open(f.name, "rb") as file:
                 upload_response = api_client.post(
                     "/api/novels/upload", files={"file": ("startup_pending_reanalyze_test.txt", file, "text/plain")}
                 )
-
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-
         from src.api.dependencies import get_novel_service
 
         service = get_novel_service()
@@ -726,7 +597,6 @@ class TestAnalysis:
             task_kind="reanalysis",
             request_payload=expected_request.model_dump(mode="json", exclude_none=True),
         )
-
         reanalysis_calls: list[tuple[str, str, ReanalyzeRequest | None]] = []
         analysis_calls: list[str] = []
 
@@ -746,7 +616,6 @@ class TestAnalysis:
             patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_record_analysis),
         ):
             scheduled_count, cancelled_count = await main_mod._resume_pending_tasks()
-
         target_calls = [call for call in reanalysis_calls if call[0] == task_id]
         assert target_calls
         assert cancelled_count == 0
@@ -763,586 +632,9 @@ class TestAnalysis:
         mock_session.__enter__.return_value = mock_session
         mock_session.__exit__.return_value = None
         mock_session.connection.return_value = MagicMock()
-
         with (
             patch.object(analysis_mod, "get_session_factory", return_value=lambda: mock_session),
             patch.object(analysis_mod, "task_id_to_run_id", side_effect=TaskIDNotFoundError("not found")),
         ):
             result = analysis_mod._get_task_detail_from_db("deadbeef")
-
         assert result is None
-
-
-class TestReanalysis:
-    """测试重新分析"""
-
-    def test_reanalyze_not_found(self, api_client: TestClient):
-        """测试重新分析不存在的小说"""
-        response = api_client.post("/api/novels/nonexistent/reanalyze", json={"label": "test"})
-        assert response.status_code == 404
-
-    def test_reanalyze_creates_new_version(self, api_client: TestClient):
-        """测试重新分析创建新版本"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("reanalyze_test.txt", file, "text/plain")}
-                )
-
-        assert upload_response.status_code == 200
-        novel_id = upload_response.json()["novel_id"]
-
-        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "v2"})
-        assert reanalyze_response.status_code == 200
-        data = reanalyze_response.json()
-        assert data["novel_id"] == novel_id
-        assert "task_id" in data
-        assert data["status"] == "pending"
-
-    def test_reanalyze_persists_request_payload_for_resume(self, api_client: TestClient):
-        """测试 reanalyze 会持久化原始请求参数，供后续 resume/recovery 恢复语义"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("reanalyze_payload_test.txt", file, "text/plain")}
-                )
-
-        assert upload_response.status_code == 200
-        novel_id = upload_response.json()["novel_id"]
-
-        request_payload = {
-            "force_preprocess": True,
-            "force_topic_model": True,
-            "num_topics": 12,
-            "label": "rerun-v2",
-        }
-        expected_payload = ReanalyzeRequest(**request_payload).model_dump(mode="json", exclude_none=True)
-
-        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
-            reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json=request_payload)
-
-        assert reanalyze_response.status_code == 200
-        task_id = reanalyze_response.json()["task_id"]
-
-        with get_session_factory()() as session:
-            run = RunRepository(session).get_run(task_id)
-
-        assert run is not None
-        assert run["task_kind"] == "reanalysis"
-        assert run["request_payload"] == expected_payload
-
-    def test_reanalyze_auto_label(self, api_client: TestClient):
-        """测试重新分析自动生成标签"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("auto_label_test.txt", file, "text/plain")}
-                )
-
-        novel_id = upload_response.json()["novel_id"]
-
-        response = api_client.post(f"/api/novels/{novel_id}/reanalyze")
-        assert response.status_code == 200
-        data = response.json()
-        assert "task_id" in data
-        assert data["status"] == "pending"
-
-    def test_resume_failed_reanalysis_restores_original_request(self, api_client: TestClient):
-        """测试 failed 的重分析任务 resume 时会恢复原始 force 参数与主题数"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("resume_reanalyze_test.txt", file, "text/plain")}
-                )
-
-        assert upload_response.status_code == 200
-        novel_id = upload_response.json()["novel_id"]
-
-        from src.api.dependencies import get_novel_service
-
-        service = get_novel_service()
-        expected_request = ReanalyzeRequest(force_preprocess=True, force_diagnose=True, num_topics=9, label="retry-v3")
-        task_id = service.create_task(
-            novel_id,
-            task_kind="reanalysis",
-            request_payload=expected_request.model_dump(mode="json", exclude_none=True),
-        )
-
-        with get_session_factory()() as session:
-            RunRepository(session).update_run_task_fields(task_id, status="failed")
-
-        scheduled: dict[str, object] = {}
-
-        def _record_reanalysis(
-            self,
-            scheduled_task_id: str,
-            novel: dict,
-            request: ReanalyzeRequest | None = None,
-        ) -> None:
-            scheduled["task_id"] = scheduled_task_id
-            scheduled["novel_id"] = novel["novel_id"]
-            scheduled["request"] = request
-
-        def _unexpected_analysis(self, scheduled_task_id: str, novel: dict, request=None) -> None:
-            raise AssertionError(f"resume 错误走到了 analysis 调度: {scheduled_task_id}")
-
-        with (
-            patch.object(analysis_mod.AnalysisService, "_schedule_reanalysis_task", new=_record_reanalysis),
-            patch.object(analysis_mod.AnalysisService, "_schedule_analysis_task", new=_unexpected_analysis),
-        ):
-            resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
-
-        assert resume_response.status_code == 200
-        assert scheduled["task_id"] == task_id
-        assert scheduled["novel_id"] == novel_id
-        assert isinstance(scheduled["request"], ReanalyzeRequest)
-        restored_request = scheduled["request"]
-        assert restored_request == expected_request
-
-
-class TestAnalysesList:
-    """测试分析列表"""
-
-    def test_list_analyses_not_found(self, api_client: TestClient):
-        """测试查询不存在小说的分析版本列表"""
-        response = api_client.get("/api/novels/nonexistent/tasks")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["novel_id"] == "nonexistent"
-        assert data["tasks"] == []
-
-    def test_list_analyses_after_reanalyze(self, api_client: TestClient):
-        """测试重新分析后查看版本列表"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("list_test.txt", file, "text/plain")}
-                )
-
-        novel_id = upload_response.json()["novel_id"]
-
-        api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "version1"})
-        api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "version2"})
-
-        response = api_client.get(f"/api/novels/{novel_id}/tasks")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["novel_id"] == novel_id
-        assert len(data["tasks"]) >= 2
-
-
-class TestDeleteAnalysis:
-    """测试删除分析"""
-
-    @pytest.mark.asyncio
-    async def test_cleanup_task_runtime_before_delete_cancels_active_asyncio_task(self):
-        """测试删除前会先取消并等待活跃后台协程结束"""
-
-        async def _never_finish():
-            await asyncio.sleep(60)
-
-        task_manager = TaskManager()
-        task_manager.create_task("task-running", "novel-1")
-        task_manager.update_task("task-running", status=analysis_mod.TaskStatus.RUNNING)
-
-        background_task = asyncio.create_task(_never_finish())
-        task_manager.store_asyncio_task("task-running", background_task)
-
-        await analysis_mod._cleanup_task_runtime_before_delete("task-running", task_manager)
-
-        assert background_task.done()
-        assert background_task.cancelled()
-
-    @pytest.mark.asyncio
-    async def test_cleanup_task_runtime_before_delete_does_not_rewrite_terminal_db_status(self):
-        """测试删除前清理遇到内存脏状态时，不会把 DB 终态误写回 cancelling"""
-
-        async def _never_finish():
-            await asyncio.sleep(60)
-
-        # 使用唯一 run_id 避免测试间数据污染（数据库 run_id 字段长度有限制，用短 UUID 前缀）
-        run_id = f"cl-{uuid.uuid4().hex[:8]}"
-        _insert_test_novel("novcln01")
-        with get_session_factory()() as session:
-            run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novcln01", run_id=run_id)
-            run_repo.update_run_task_fields(
-                run_id,
-                status="completed",
-                completed_at=datetime.now(),
-                message="任务已在 DB 中完成",
-            )
-
-        task_manager = TaskManager()
-        task_manager.create_task(run_id, "novcln01")
-        task_manager.set_db_session_factory(lambda: get_session_factory()())
-
-        # 注意：TaskInfo 不再存储 status，此处通过设置 cancel_event 模拟运行中状态
-        # 实际业务状态以 DB 为准，内存仅为执行缓存
-        background_task = asyncio.create_task(_never_finish())
-        task_manager.store_asyncio_task(run_id, background_task)
-
-        await analysis_mod._cleanup_task_runtime_before_delete(run_id, task_manager)
-
-        assert background_task.done()
-        assert background_task.cancelled()
-
-        with get_session_factory()() as session:
-            refreshed_run = RunRepository(session).get_run(run_id)
-
-        assert refreshed_run is not None
-        assert refreshed_run["status"] == "completed"
-        assert refreshed_run["cancel_requested"] is False
-
-    def test_delete_analysis_not_found(self, api_client: TestClient):
-        """测试删除不存在的分析版本"""
-        response = api_client.delete("/api/novels/nonexistent/analyses/nonexistent_analysis")
-        assert response.status_code == 404
-
-    def test_delete_analysis_success(self, api_client: TestClient):
-        """测试删除分析版本成功"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("delete_test.txt", file, "text/plain")}
-                )
-
-        novel_id = upload_response.json()["novel_id"]
-
-        reanalyze_response = api_client.post(f"/api/novels/{novel_id}/reanalyze", json={"label": "to_delete"})
-        task_id = reanalyze_response.json()["task_id"]
-
-        delete_response = api_client.delete(f"/api/novels/{novel_id}/tasks/{task_id}")
-        assert delete_response.status_code == 200
-        data = delete_response.json()
-        assert "删除成功" in data["message"] or "任务删除成功" in data["message"]
-        assert data["task_id"] == task_id
-
-    def test_delete_task_cleans_db_rows_and_artifacts_for_full_run_id(self, api_client: TestClient):
-        """测试删除 task 会清理 full run_id 日志目录、导出文件与关键从表"""
-        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-            f.write(b"Test novel content\n" * 100)
-            f.flush()
-
-            with open(f.name, "rb") as file:
-                upload_response = api_client.post(
-                    "/api/novels/upload", files={"file": ("delete_artifacts_test.txt", file, "text/plain")}
-                )
-
-        assert upload_response.status_code == 200
-        novel_id = upload_response.json()["novel_id"]
-        run_id = "12345678-1234-1234-1234-123456789abc"
-        task_id = run_id[:8]
-
-        with get_session_factory()() as session:
-            run_repo = RunRepository(session)
-            run_repo.create_run(novel_id=novel_id, run_id=run_id)
-            run_repo.update_run_task_fields(run_id, status="completed")
-            session.execute(
-                text("INSERT INTO chunks (chunk_id, text, run_id) VALUES (:chunk_id, :text, :run_id)"),
-                {"chunk_id": 0, "text": "待删除分块", "run_id": run_id},
-            )
-            session.execute(
-                text(
-                    """
-                    INSERT INTO global_context (novel_id, novel_title, run_id)
-                    VALUES (:novel_id, :novel_title, :run_id)
-                    ON CONFLICT (novel_id) DO UPDATE
-                    SET novel_title = EXCLUDED.novel_title, run_id = EXCLUDED.run_id
-                    """
-                ),
-                {"novel_id": novel_id, "novel_title": "待删除小说", "run_id": run_id},
-            )
-            session.commit()
-
-        log_dir = Path("logs") / run_id
-        log_dir.mkdir(parents=True, exist_ok=True)
-        (log_dir / "analysis.log").write_text("test log", encoding="utf-8")
-        output_file = Path("outputs") / f"{task_id}.json"
-        output_file.write_text("{}", encoding="utf-8")
-
-        delete_response = api_client.delete(f"/api/novels/{novel_id}/tasks/{task_id}")
-        assert delete_response.status_code == 200
-
-        with get_session_factory()() as session:
-            remaining_run = session.execute(
-                text("SELECT COUNT(*) FROM analysis_runs WHERE run_id = :run_id"),
-                {"run_id": run_id},
-            ).scalar_one()
-            remaining_chunks = session.execute(
-                text("SELECT COUNT(*) FROM chunks WHERE run_id = :run_id"),
-                {"run_id": run_id},
-            ).scalar_one()
-            remaining_context = session.execute(
-                text("SELECT COUNT(*) FROM global_context WHERE run_id = :run_id"),
-                {"run_id": run_id},
-            ).scalar_one()
-
-        assert remaining_run == 0
-        assert remaining_chunks == 0
-        assert remaining_context == 0
-        assert not log_dir.exists()
-        assert not output_file.exists()
-
-
-class TestRunRepository:
-    """测试 RunRepository 的任务运行态更新"""
-
-    def test_update_run_task_fields_can_clear_nullable_runtime_fields(self, db_session):
-        """测试 update_run_task_fields 支持将 nullable 运行态字段清空为 None"""
-        _insert_test_novel("novel001", session=db_session)
-        run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(novel_id="novel001")
-
-        run_repo.update_run_task_fields(
-            run_id,
-            stage="annotate",
-            sub_stage="phase4",
-            message="旧消息",
-            error="旧错误",
-            completed_at=datetime.now(),
-        )
-
-        run_repo.update_run_task_fields(
-            run_id,
-            status="pending",
-            stage=None,
-            sub_stage=None,
-            message=None,
-            error=None,
-            cancel_requested=False,
-            completed_at=None,
-        )
-
-        run = run_repo.get_run(run_id)
-        assert run is not None
-        assert run["status"] == "pending"
-        assert run["stage"] is None
-        assert run["sub_stage"] is None
-        assert run["message"] is None
-        assert run["error"] is None
-        assert run["completed_at"] is None
-
-    def test_claim_pending_run_is_atomic(self, db_session):
-        """测试 pending 任务只能被一个 worker 原子领取一次"""
-        _insert_test_novel("claim001", session=db_session)
-        run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(novel_id="claim001")
-
-        first_claim = run_repo.claim_pending_run(run_id, worker_id="worker-a")
-        second_claim = run_repo.claim_pending_run(run_id, worker_id="worker-b")
-        run = run_repo.get_run(run_id)
-
-        assert first_claim is True
-        assert second_claim is False
-        assert run is not None
-        assert run["status"] == "running"
-        assert run["worker_id"] == "worker-a"
-
-
-class TestCancellationStateCheck:
-    """测试取消状态检查失败时不会静默继续执行"""
-
-    def test_is_cancelled_raises_when_db_check_fails(self):
-        """测试 DB 取消状态检查失败时抛出明确异常，而不是返回 False"""
-
-        class BrokenDbSession:
-            @property
-            def connection(self):
-                raise RuntimeError("db unavailable")
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return None
-
-        class BrokenSessionFactory:
-            def get_session(self):
-                return BrokenDbSession()
-
-        service = AnalysisService(
-            novel_service=MagicMock(),
-            task_manager=TaskManager(),
-            session_factory=BrokenSessionFactory(),
-        )
-
-        with pytest.raises(CancellationStateCheckError, match="取消状态检查失败"):
-            service._is_cancelled("deadbeef")
-
-
-class TestAnalysisErrorHandler:
-    """测试取消收口时会清理 DB 中的 cancel_requested 脏状态"""
-
-    @pytest.mark.asyncio
-    async def test_handle_cancel_clears_cancel_requested_in_db(self, db_session):
-        _insert_test_novel("novel001", session=db_session)
-        run_repo = RunRepository(db_session)
-        run_id = run_repo.create_run(novel_id="novel001")
-        run_repo.update_run_task_fields(run_id, status="cancelling", cancel_requested=True)
-
-        task_manager = TaskManager()
-        task_manager.create_task(run_id[:8], "novel001")
-        handler = AnalysisErrorHandler(
-            novel_service=MagicMock(),
-            task_manager=task_manager,
-        )
-
-        await handler.handle_cancel(
-            task_id=run_id[:8],
-            novel_id="novel001",
-            session=db_session,
-            run_id=run_id,
-            analysis_logger=None,
-            bus=None,
-        )
-
-        refreshed_run = run_repo.get_run(run_id)
-        assert refreshed_run is not None
-        assert refreshed_run["status"] == "cancelled"
-        assert refreshed_run["cancel_requested"] is False
-        assert refreshed_run["completed_at"] is not None
-
-
-class TestTaskManagerDbWrite:
-    """测试 TaskManager 的 DB 写回使用真实 run_id"""
-
-    def test_update_task_resolves_full_run_id_before_writing_db(self):
-        """测试 8 位 task_id 写回时会先解析到完整 run_id，而不是直接精确匹配失败"""
-        hex_id = uuid.uuid4().hex
-        task_id = hex_id[:8]
-        full_run_id = f"{task_id}-{hex_id[8:12]}-{hex_id[12:16]}-{hex_id[16:20]}-{hex_id[20:32]}"
-        _insert_test_novel("novel001")
-        with get_session_factory()() as session:
-            run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novel001", run_id=full_run_id)
-
-        task_manager = TaskManager()
-        task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, "novel001")
-
-        task_manager.update_task(
-            task_id,
-            status=analysis_mod.TaskStatus.RUNNING,
-            progress=12.5,
-            stage="annotate",
-            message="历史任务继续运行中",
-        )
-
-        with get_session_factory()() as session:
-            refreshed_run = RunRepository(session).get_run(full_run_id)
-        assert refreshed_run is not None
-        assert refreshed_run["status"] == "running"
-        assert refreshed_run["progress"] == 12.5
-        assert refreshed_run["stage"] == "annotate"
-        assert refreshed_run["message"] == "历史任务继续运行中"
-
-    def test_update_task_persists_worker_id_and_heartbeat_for_active_task(self):
-        """测试活跃运行态写回会自动带上 worker_id 和 heartbeat_at"""
-        run_id = str(uuid.uuid4())
-        task_id = run_id[:8]
-        _insert_test_novel("novel001")
-
-        with get_session_factory()() as session:
-            run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novel001", run_id=run_id)
-
-        task_manager = TaskManager(worker_id="worker-test")
-        task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, "novel001")
-
-        task_manager.update_task(
-            task_id,
-            status=analysis_mod.TaskStatus.RUNNING,
-            progress=1.0,
-            stage="preprocess",
-            message="开始执行",
-        )
-
-        with get_session_factory()() as session:
-            refreshed_run = RunRepository(session).get_run(run_id)
-
-        assert refreshed_run is not None
-        assert refreshed_run["worker_id"] == "worker-test"
-        assert refreshed_run["heartbeat_at"] is not None
-
-    @pytest.mark.asyncio
-    async def test_store_asyncio_task_starts_independent_runtime_heartbeat(self):
-        """测试没有进度事件时也会通过独立 heartbeat 持续刷新 heartbeat_at"""
-        run_id = str(uuid.uuid4())
-        task_id = run_id[:8]
-        _insert_test_novel("novel001")
-
-        with get_session_factory()() as session:
-            run_repo = RunRepository(session)
-            run_repo.create_run(novel_id="novel001", run_id=run_id)
-
-        task_manager = TaskManager(worker_id="worker-heartbeat", heartbeat_interval_seconds=0.02)
-        task_manager.set_db_session_factory(lambda: get_session_factory()())
-        task_manager.create_task(task_id, "novel001")
-
-        async def _silent_long_stage():
-            await asyncio.sleep(0.08)
-
-        runtime_task = asyncio.create_task(_silent_long_stage())
-        task_manager.store_asyncio_task(task_id, runtime_task)
-
-        await asyncio.sleep(0.035)
-        with get_session_factory()() as session:
-            first_run = RunRepository(session).get_run(run_id)
-
-        await asyncio.sleep(0.035)
-        with get_session_factory()() as session:
-            second_run = RunRepository(session).get_run(run_id)
-
-        assert first_run is not None
-        assert second_run is not None
-        assert first_run["worker_id"] == "worker-heartbeat"
-        assert first_run["heartbeat_at"] is not None
-        assert second_run["heartbeat_at"] is not None
-        assert second_run["heartbeat_at"] >= first_run["heartbeat_at"]
-
-        await runtime_task
-        task_manager.complete_task(task_id, success=True)
-
-
-class TestAnalysisEventBus:
-    """测试 SSE 写回失败时不会静默继续执行"""
-
-    @pytest.mark.asyncio
-    async def test_emit_raises_when_task_status_persistence_fails(self):
-        """测试任务状态写库失败会直接上抛，而不是只打日志继续运行"""
-        task_manager = MagicMock()
-        task_manager.update_task.side_effect = RuntimeError("db write failed")
-        bus = AnalysisEventBus("task-1", task_manager)
-
-        with patch("src.api.services.event_manager.event_manager.send", new=AsyncMock()):
-            with pytest.raises(RuntimeError, match="db write failed"):
-                await bus.emit(
-                    StreamEvent(
-                        action="progress",
-                        stage="annotate",
-                        current=1,
-                        total=10,
-                        percent=10.0,
-                        message="正在写回进度",
-                    )
-                )
