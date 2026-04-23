@@ -130,7 +130,7 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].speaker, ["张三"])
         self.assertEqual(result[1].speaker, ["李四"])
 
-    @patch("src.models.local.annotation.phase3.record_model_interaction")
+    @patch("src.models.local.annotation.runtime.record_model_interaction")
     @patch("src.models.local.annotation.phase3.settings")
     async def test_persists_thinking_from_reasoning_content(
         self,
@@ -266,7 +266,7 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([record.index for record in result], list(range(1, 11)))
         self.assertTrue(all(record.speaker == ["张三"] for record in result))
 
-    @patch("src.models.local.annotation.phase3.record_model_interaction")
+    @patch("src.models.local.annotation.runtime.record_model_interaction")
     @patch("src.models.local.annotation.phase3.settings")
     async def test_fallback_client_used_after_primary_retries(
         self,

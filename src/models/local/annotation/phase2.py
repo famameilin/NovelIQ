@@ -18,20 +18,23 @@
 修改者: TraeAI
 任务: 创建统一的模型交互记录接口
 修改内容: 使用 record_model_interaction 替代本地 _save_interaction 函数
+
+修改时间: 2026-04-23
+任务: annotation-projector-runtime-landing
+修改内容: Phase2 单次结构化调用改为复用薄 phase runtime，避免重复维护交互记录与 token 估算。
 """
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 from src.config import settings
-from src.models.interactions import record_model_interaction
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import ForeshadowingResult
 
 from .context import Phase2MaxRetriesExceededError
 from .messages import _build_foreshadowing_messages
+from .runtime import AnnotationPhaseCallSpec, execute_phase_call
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
@@ -68,70 +71,40 @@ async def _do_phase2(
     任务: fix-token-coverage-fallback-bucket
     修改内容: fallback 标注客户端执行 Phase2 时，token_usage 仍归入 annotation 主业务桶，
               避免 coverage 把已入账调用误判成缺口
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 委托 execute_phase_call 统一 response processing、thinking 持久化与 token usage。
     """
-    start_time = time.time()
     is_cloud = client._is_cloud_api()
     client._log_annotation_start(is_cloud, text, prev_chunk_summary, chunk_id, "phase2")
 
-    enable_thinking = client._config.thinking_enabled
-
-    result, response = await client._call_annotation_api(
-        messages=messages,
-        enable_thinking=enable_thinking,
-        chunk_id=chunk_id,
-        response_model=ForeshadowingResult,
-        call_type="phase2",
+    call_result = await execute_phase_call(
+        client,
+        AnnotationPhaseCallSpec(
+            phase="phase2",
+            interaction_type="annotate",
+            call_type="phase2",
+            messages=messages,
+            response_model=ForeshadowingResult,
+            chunk_id=chunk_id,
+            run_id=run_id,
+            attempt_number=attempt_number,
+        ),
     )
 
-    try:
-        content_clean, thinking_content, extraction = client._process_annotation_response(
-            response, is_cloud, chunk_id, "phase2"
-        )
-
-        duration_ms = int((time.time() - start_time) * 1000)
-        extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
-        reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
-
-        record_model_interaction(
-            run_id=run_id,
-            chunk_id=chunk_id,
-            interaction_type="annotate",
-            phase="phase2",
-            attempt_number=attempt_number,
-            messages=messages,
-            response_text=content_clean,
-            thinking_content=thinking_content,
-            reasoning_tokens=reasoning_tokens,
-            requested_thinking=enable_thinking,
-            duration_ms=duration_ms,
-            model_name=client._config.model if hasattr(client._config, "model") else None,
-            model_provider="cloud" if is_cloud else "local",
-            session=client._session if hasattr(client, "_session") else None,
-        )
-
+    if call_result.extraction is not None:
         client._log_prompt_response(
-            chunk_id, content_clean, thinking_content, extraction, messages, text, prev_chunk_summary
+            chunk_id,
+            call_result.content_clean,
+            call_result.thinking_content,
+            call_result.extraction,
+            messages,
+            text,
+            prev_chunk_summary,
         )
 
-        # 中文注释：这里按 annotation 主业务桶落账，避免 fallback 通道把 coverage 桶名拆散。
-        client._record_estimated_token_usage_from_messages(
-            messages,
-            content_clean,
-            "phase2",
-            chunk_id,
-            task_type="annotation",
-        )
-    except Exception:
-        client._record_estimated_token_usage_from_response(
-            messages,
-            response,
-            "phase2",
-            chunk_id,
-            task_type="annotation",
-        )
-        raise
-
-    return result
+    return call_result.parsed
 
 
 async def annotate_chunk_phase2(
