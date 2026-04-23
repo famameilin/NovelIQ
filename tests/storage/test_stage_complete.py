@@ -35,14 +35,36 @@ def _create_chunks(count: int = 3) -> list[Chunk]:
     return [Chunk(index=i, text=f"测试文本{i}" * 100, start=i * 100, end=(i + 1) * 100) for i in range(count)]
 
 
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """
+    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
+
+    创建时间: 2026-04-23
+    任务: 修复 pytest ForeignKeyViolation
+    """
+    from src.storage.models import Novel
+
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
+
+
 class TestStageCompleteChecks:
     """测试各阶段完整性检查函数"""
 
     def test_is_preprocess_complete_empty_db(self, db_session):
         """空数据库时preprocess未完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -52,8 +74,10 @@ class TestStageCompleteChecks:
     def test_is_preprocess_complete_with_chunks(self, db_session):
         """有chunks时preprocess完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -65,8 +89,10 @@ class TestStageCompleteChecks:
     def test_is_annotate_complete_no_annotations(self, db_session):
         """有chunks但无annotations时annotate未完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -79,8 +105,10 @@ class TestStageCompleteChecks:
     def test_is_annotate_complete_partial_annotations(self, db_session):
         """annotations数量小于chunks数量时annotate未完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -106,8 +134,10 @@ class TestStageCompleteChecks:
     def test_is_annotate_complete_all_annotations(self, db_session):
         """annotations数量等于chunks数量时annotate完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -134,8 +164,10 @@ class TestStageCompleteChecks:
     def test_is_aggregate_complete_no_data(self, db_session):
         """无emotion_curve和rhythm_curve时aggregate未完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -148,8 +180,10 @@ class TestStageCompleteChecks:
     def test_is_aggregate_complete_partial_data(self, db_session):
         """只有部分chunk_curves时aggregate未完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -163,8 +197,10 @@ class TestStageCompleteChecks:
     def test_is_topic_model_complete_no_data(self, db_session):
         """无chunk_topics时topic_model未完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -174,8 +210,10 @@ class TestStageCompleteChecks:
     def test_is_topic_model_complete_with_data(self, db_session):
         """有chunk_topics时topic_model完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -189,8 +227,10 @@ class TestStageCompleteChecks:
     def test_is_diagnose_complete_no_data(self, db_session):
         """无cloud_analysis时diagnose未完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
@@ -200,14 +240,16 @@ class TestStageCompleteChecks:
     def test_is_diagnose_complete_with_data(self, db_session):
         """有cloud_analysis时diagnose完成"""
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
         stats_repo = StatsRepository(db_session)
         analysis = CloudAnalysis(
-            novel_id="test",
+            novel_id=novel_id,
             foreshadow_rate=0.5,
             arc_scores=[0.2, 0.4],
             narrative_type="三幕",

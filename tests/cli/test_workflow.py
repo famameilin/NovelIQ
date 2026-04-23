@@ -18,7 +18,26 @@ from unittest.mock import MagicMock
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
 from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
+from src.storage.models import Novel
 from src.storage.repositories import AnnotationRepository, ChunkRepository, RunRepository, StatsRepository
+
+
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """
+    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
+
+    创建时间: 2026-04-23
+    任务: 修复 pytest ForeignKeyViolation
+    """
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
 
 
 def _create_mock_clients() -> tuple:
@@ -58,7 +77,8 @@ class TestStageCompletion:
 
     def test_preprocess_complete_with_chunks(self, db_session):
         """有 chunks 时 preprocess 完成"""
-        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
@@ -72,7 +92,8 @@ class TestStageCompletion:
 
     def test_annotate_complete_with_annotations(self, db_session):
         """有 annotations 时 annotate 完成"""
-        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
@@ -100,7 +121,8 @@ class TestStageCompletion:
 
     def test_aggregate_complete_with_data(self, db_session):
         """有聚合数据时 aggregate 完成"""
-        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_repo = RunRepository(db_session)
         run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 

@@ -4,12 +4,34 @@ from __future__ import annotations
 
 import uuid
 
-from src.storage.repositories import GraphRepository, RunRepository
+from src.chunking.chunker import Chunk
+from src.storage.repositories import ChunkRepository, GraphRepository, RunRepository
+
+
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """
+    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
+
+    创建时间: 2026-04-23
+    任务: 修复 pytest ForeignKeyViolation
+    """
+    from src.storage.models import Novel
+
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
 
 
 class TestGraphAliasMap:
     def test_fetch_alias_map_contains_canonical_self_mapping(self, db_session) -> None:
-        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = RunRepository(db_session).create_run(
             novel_id=novel_id,
             source_path="test",
@@ -41,12 +63,18 @@ class TestGraphAliasMap:
 
 class TestGraphQualitySignals:
     def test_detect_relation_conflicts_finds_bidirectional_type_mismatch(self, db_session) -> None:
-        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = RunRepository(db_session).create_run(
             novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
+        chunk_repo = ChunkRepository(db_session)
+        chunk_repo.insert_chunks(run_id, [
+            Chunk(index=10, text="测试10", start=1000, end=1100),
+            Chunk(index=11, text="测试11", start=1100, end=1200),
+        ])
         graph_repo = GraphRepository(db_session)
         a = graph_repo.upsert_entity(run_id=run_id, canonical_name="方源", first_seen_chunk=1, last_seen_chunk=1)
         b = graph_repo.upsert_entity(run_id=run_id, canonical_name="白凝冰", first_seen_chunk=1, last_seen_chunk=1)
@@ -84,12 +112,18 @@ class TestGraphQualitySignals:
         assert conflicts[0]["relation_types"] == ["敌对", "盟友"]
 
     def test_fetch_low_confidence_relation_events_filters_by_threshold(self, db_session) -> None:
-        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = RunRepository(db_session).create_run(
             novel_id=novel_id,
             source_path="test",
             title="Test Novel",
         )
+        chunk_repo = ChunkRepository(db_session)
+        chunk_repo.insert_chunks(run_id, [
+            Chunk(index=8, text="测试8", start=800, end=900),
+            Chunk(index=9, text="测试9", start=900, end=1000),
+        ])
         graph_repo = GraphRepository(db_session)
         a = graph_repo.upsert_entity(run_id=run_id, canonical_name="韩立", first_seen_chunk=1, last_seen_chunk=1)
         b = graph_repo.upsert_entity(run_id=run_id, canonical_name="南宫婉", first_seen_chunk=1, last_seen_chunk=1)
@@ -127,7 +161,8 @@ class TestGraphQualitySignals:
 
 class TestFetchEntitiesWithStatus:
     def test_fetch_entities_filters_by_status_active(self, db_session) -> None:
-        novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = RunRepository(db_session).create_run(
             novel_id=novel_id,
             source_path="test",

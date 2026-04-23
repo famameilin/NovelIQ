@@ -25,8 +25,27 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.storage.models import Novel
 from src.storage.repositories import ChunkRepository, RunRepository
 from src.workflows.preprocess import run_preprocess
+
+
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """
+    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
+
+    创建时间: 2026-04-23
+    任务: 修复 pytest ForeignKeyViolation
+    """
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
 
 
 class MockEmbeddingClient:
@@ -85,8 +104,10 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"test_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path=str(source_path),
             title="Test Novel",
         )
@@ -112,8 +133,10 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), "")
 
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"empty_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path=str(source_path),
             title="Empty Novel",
         )
@@ -134,8 +157,10 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), content)
 
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"chapter_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path=str(source_path),
             title="Chapter Novel",
         )
@@ -154,8 +179,10 @@ class TestPreprocess:
         source_path = self._create_source_file(str(tmp_path), "测试文本内容。" * 100)
 
         run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
         run_id = run_repo.create_run(
-            novel_id=f"resume_novel_{uuid.uuid4().hex[:8]}",
+            novel_id=novel_id,
             source_path=str(source_path),
             title="Resume Novel",
         )

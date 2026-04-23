@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import uuid
 
+from src.chunking.chunker import Chunk
 from src.knowledge import build_networkx_from_graph_tables
-from src.storage.repositories import GraphRepository, RunRepository
+from src.storage.repositories import ChunkRepository, GraphRepository, RunRepository
 
 
-def test_build_networkx_from_graph_tables_builds_graph(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+def test_build_networkx_from_graph_tables_builds_graph(db_session, insert_test_novel) -> None:
+    novel_id = uuid.uuid4().hex[:8]
+    insert_test_novel(novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
         title="Test Novel",
     )
+    chunk_repo = ChunkRepository(db_session)
+    chunk_repo.insert_chunks(run_id, [Chunk(index=10, text="测试", start=0, end=100)])
     graph_repo = GraphRepository(db_session)
     a = graph_repo.upsert_entity(run_id=run_id, canonical_name="方源", first_seen_chunk=1, last_seen_chunk=1)
     b = graph_repo.upsert_entity(run_id=run_id, canonical_name="白凝冰", first_seen_chunk=1, last_seen_chunk=1)
@@ -40,13 +44,19 @@ def test_build_networkx_from_graph_tables_builds_graph(db_session) -> None:
     assert graph.nodes[b.entity_id]["name"] == "白凝冰"
 
 
-def test_build_networkx_from_graph_tables_respects_active_only(db_session) -> None:
-    novel_id = f"test_novel_{uuid.uuid4().hex[:8]}"
+def test_build_networkx_from_graph_tables_respects_active_only(db_session, insert_test_novel) -> None:
+    novel_id = uuid.uuid4().hex[:8]
+    insert_test_novel(novel_id)
     run_id = RunRepository(db_session).create_run(
         novel_id=novel_id,
         source_path="test",
         title="Test Novel",
     )
+    chunk_repo = ChunkRepository(db_session)
+    chunk_repo.insert_chunks(run_id, [
+        Chunk(index=5, text="测试5", start=0, end=100),
+        Chunk(index=6, text="测试6", start=100, end=200),
+    ])
     graph_repo = GraphRepository(db_session)
     a = graph_repo.upsert_entity(run_id=run_id, canonical_name="叶凡", first_seen_chunk=1, last_seen_chunk=1)
     b = graph_repo.upsert_entity(run_id=run_id, canonical_name="姬紫月", first_seen_chunk=1, last_seen_chunk=1)

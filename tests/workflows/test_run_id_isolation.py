@@ -5,6 +5,7 @@ from sqlalchemy import text
 from src.chunking.chunker import Chunk
 from src.config import settings
 from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, DialogueSnapshot
+from src.storage.models import Novel
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -13,6 +14,24 @@ from src.storage.repositories import (
     StatsRepository,
 )
 from src.workflows.annotate_helpers.sentence import build_context_sentences
+
+
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """
+    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
+
+    创建时间: 2026-04-23
+    任务: 修复 pytest ForeignKeyViolation
+    """
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
 
 
 def _candidates(*names: str) -> list[dict[str, int | str]]:
@@ -35,9 +54,10 @@ def _build_annotation(foreshadowing_desc: str) -> ChunkAnnotation:
 
 
 def test_build_context_sentences_respects_run_id(db_session) -> None:
+    _insert_test_novel(db_session, "nctxctx")
     run_repo = RunRepository(db_session)
-    run_1 = run_repo.create_run(novel_id="novel_ctx", source_path="test", title="Run1")
-    run_2 = run_repo.create_run(novel_id="novel_ctx", source_path="test", title="Run2")
+    run_1 = run_repo.create_run(novel_id="nctxctx", source_path="test", title="Run1")
+    run_2 = run_repo.create_run(novel_id="nctxctx", source_path="test", title="Run2")
 
     chunk_repo = ChunkRepository(db_session)
     chunk_repo.insert_chunks(
@@ -102,8 +122,9 @@ def test_build_context_sentences_respects_run_id(db_session) -> None:
 
 
 def test_build_context_sentences_respects_max_chunk_id(db_session) -> None:
+    _insert_test_novel(db_session, "nctxmax")
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="novel_ctx_max_chunk", source_path="test", title="Run")
+    run_id = run_repo.create_run(novel_id="nctxmax", source_path="test", title="Run")
 
     chunk_repo = ChunkRepository(db_session)
     chunk_repo.insert_chunks(
@@ -164,8 +185,9 @@ def test_build_context_sentences_respects_max_chunk_id(db_session) -> None:
 
 
 def test_build_context_sentences_respects_prev_chunks_setting(db_session) -> None:
+    _insert_test_novel(db_session, "nctxprev")
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="novel_ctx_prev_chunks", source_path="test", title="Run")
+    run_id = run_repo.create_run(novel_id="nctxprev", source_path="test", title="Run")
 
     chunk_repo = ChunkRepository(db_session)
     chunk_repo.insert_chunks(
@@ -229,8 +251,9 @@ def test_build_context_sentences_respects_prev_chunks_setting(db_session) -> Non
 
 
 def test_build_context_sentences_explicit_chunk_range_overrides_prev_chunks_setting(db_session) -> None:
+    _insert_test_novel(db_session, "nctxwin")
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id="novel_ctx_explicit_window", source_path="test", title="Run")
+    run_id = run_repo.create_run(novel_id="nctxwin", source_path="test", title="Run")
 
     chunk_repo = ChunkRepository(db_session)
     chunk_repo.insert_chunks(
@@ -281,9 +304,10 @@ def test_build_context_sentences_explicit_chunk_range_overrides_prev_chunks_sett
 
 
 def test_diagnosis_repository_joins_are_run_isolated(db_session) -> None:
+    _insert_test_novel(db_session, "novdiag")
     run_repo = RunRepository(db_session)
-    run_1 = run_repo.create_run(novel_id="novel_diag", source_path="test", title="Run1")
-    run_2 = run_repo.create_run(novel_id="novel_diag", source_path="test", title="Run2")
+    run_1 = run_repo.create_run(novel_id="novdiag", source_path="test", title="Run1")
+    run_2 = run_repo.create_run(novel_id="novdiag", source_path="test", title="Run2")
 
     chunk_repo = ChunkRepository(db_session)
     chunk_repo.insert_chunks(run_1, [Chunk(index=0, start=0, end=10, text="run1-text")])

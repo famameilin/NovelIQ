@@ -6,11 +6,21 @@ from sqlalchemy import text
 
 from src.knowledge.authority import GraphAuthorityReport, GraphAuthorityView, GraphQualitySignals, GraphSharedSummary
 from src.models.cloud import build_diagnosis_payload
+from src.storage.models import Novel
 
 
 def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
-    run_id = "run-payload-state"
-    novel_id = "novel-payload-state"
+    run_id = "runpayl"
+    novel_id = "novpayl"
+    db_session.add(Novel(novel_id=novel_id, filename="test.txt", file_path="data/test.txt", file_size=128))
+    db_session.commit()
+    db_session.execute(
+        text(
+            "INSERT INTO analysis_runs (run_id, novel_id, source_path, title, status, progress, current, total, task_kind, cancel_requested, created_at, updated_at) "
+            "VALUES (:run_id, :novel_id, 'test', 'Test', 'pending', 0, 0, 100, 'analysis', false, NOW(), NOW())"
+        ),
+        {"run_id": run_id, "novel_id": novel_id},
+    )
     state_payload = {
         "discovered_names": ["masked_person", "bai_zhi", "monkey", "hou_fei_bai"],
         "known_canonical_names": ["bai_zhi", "hou_fei_bai"],

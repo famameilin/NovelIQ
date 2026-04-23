@@ -48,6 +48,25 @@ from src.storage.repositories import (
     RunRepository,
     StatsRepository,
 )
+from src.storage.models import Novel
+
+
+def _insert_test_novel(db_session, novel_id: str) -> None:
+    """
+    创建测试用 Novel 记录，避免 create_run 时 ForeignKeyViolation。
+
+    创建时间: 2026-04-23
+    任务: 修复 pytest ForeignKeyViolation
+    """
+    db_session.add(
+        Novel(
+            novel_id=novel_id,
+            filename=f"{novel_id}.txt",
+            file_path=f"data/uploads/{novel_id}.txt",
+            file_size=128,
+        )
+    )
+    db_session.commit()
 
 
 class MockEmbeddingClient:
@@ -74,8 +93,10 @@ def test_create_and_insert(db_session, mock_embedding) -> None:
     text_content = "\n\n".join(["a" * 600] * 2)
     chunks = asyncio.run(chunk_text(text_content, max_chars=1000, split_by_chapter=False))
 
+    novel_id = uuid.uuid4().hex[:8]
+    _insert_test_novel(db_session, novel_id)
     run_repo = RunRepository(db_session)
-    run_id = run_repo.create_run(novel_id=f"test_novel_{uuid.uuid4().hex[:8]}", source_path="test", title="Test Novel")
+    run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
 
     chunk_repo = ChunkRepository(db_session)
     ann_repo = AnnotationRepository(db_session)
@@ -145,7 +166,8 @@ def test_create_and_insert(db_session, mock_embedding) -> None:
 
 
 def test_insert_cloud_analysis(db_session) -> None:
-    novel_id = f"n1_{uuid.uuid4().hex[:8]}"
+    novel_id = uuid.uuid4().hex[:8]
+    _insert_test_novel(db_session, novel_id)
     analysis = CloudAnalysis(
         novel_id=novel_id,
         foreshadow_rate=0.5,
