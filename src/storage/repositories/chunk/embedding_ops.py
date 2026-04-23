@@ -13,6 +13,7 @@
 - insert_chunk_embeddings: 批量写入 embedding
 - insert_paragraph_embeddings: 批量写入 paragraph embedding
 - get_missing_embedding_chunk_ids: 查询缺失 embedding 的 chunk
+- get_incomplete_paragraph_embedding_chunk_ids: 查询 paragraph embedding 不完整的 chunk
 - search_similar_chunks: pgvector 余弦相似度检索
 - search_similar_paragraphs_within_chunks: 在候选 chunk 内检索 paragraph
 """
@@ -23,7 +24,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from src.storage.models import Chunk, ChunkAnnotation, ChunkEmbedding, ParagraphEmbedding
@@ -388,3 +389,38 @@ def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
     stmt = select(ParagraphEmbedding.chunk_id).where(ParagraphEmbedding.run_id == run_id).limit(1)
     result = session.execute(stmt).scalar_one_or_none()
     return result is not None
+
+
+def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) -> list[int]:
+    """
+    查询 paragraph embedding 不完整的 chunk ID。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-readiness
+    说明: readiness 不只检查是否有任意 paragraph row，还要发现：
+          1. 某个 chunk 完全没有 paragraph embedding；
+          2. 某个 chunk 的 paragraph_index 没有从 0 开始连续落库。
+    """
+    paragraph_exists = exists().where(
+        (ParagraphEmbedding.run_id == Chunk.run_id) & (ParagraphEmbedding.chunk_id == Chunk.chunk_id)
+    )
+    missing_stmt = (
+        select(Chunk.chunk_id)
+        .where(Chunk.run_id == run_id)
+        .where(Chunk.text.is_not(None))
+        .where(~paragraph_exists)
+    )
+    missing_chunk_ids = {int(row.chunk_id) for row in session.execute(missing_stmt).all()}
+
+    count_label = func.count(ParagraphEmbedding.paragraph_index)
+    max_index_label = func.max(ParagraphEmbedding.paragraph_index)
+    min_index_label = func.min(ParagraphEmbedding.paragraph_index)
+    gapped_stmt = (
+        select(ParagraphEmbedding.chunk_id)
+        .where(ParagraphEmbedding.run_id == run_id)
+        .group_by(ParagraphEmbedding.chunk_id)
+        .having(or_(min_index_label != 0, count_label != max_index_label + 1))
+    )
+    gapped_chunk_ids = {int(row.chunk_id) for row in session.execute(gapped_stmt).all()}
+
+    return sorted(missing_chunk_ids | gapped_chunk_ids)

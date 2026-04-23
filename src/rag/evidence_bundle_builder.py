@@ -174,11 +174,17 @@ class EvidenceBundleBuilder:
                 "text": result.text,
                 "similarity": result.similarity,
                 "emotional_valence": result.emotional_valence,
+                "evidence_granularity": "chunk",
+                "rerank_method": "chunk_embedding",
+                "chunk_text_len": len(result.text),
             }
             if result.local_preview:
                 metadata.update(
                     {
+                        "evidence_granularity": "paragraph",
+                        "rerank_method": "chunk_then_paragraph",
                         "local_preview": result.local_preview,
+                        "local_preview_len": len(result.local_preview),
                         "paragraph_index": result.paragraph_index,
                         "paragraph_similarity": result.paragraph_similarity,
                         "paragraph_start_char": result.paragraph_start_char,
