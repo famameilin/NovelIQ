@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from src.models.local.disambiguation import (
+    DisambiguationPromptContext,
+    ExtendedDisambigResult,
+    NameReviewState,
+)
+from src.rag import EvidenceBundle
+
+
+def candidates(*names: str) -> list[dict[str, int | str]]:
+    """
+    创建时间: 2026-04-23
+    任务: 复杂度与耦合审查 P2 - 测试工程化
+    说明: 统一生成消歧候选输入，减少拆分后各测试文件重复造 dict。
+    """
+    return [{"name": name, "count": 1} for name in names]
+
+
+class FakeDisambigClient:
+    """
+    创建时间: 2026-04-23
+    任务: 复杂度与耦合审查 P2 - 测试工程化
+    说明: 供消歧 pipeline 测试复用的轻量 client，记录关键入参而不触发模型调用。
+    """
+
+    def __init__(self) -> None:
+        self._config = SimpleNamespace(model="test-model", thinking_enabled=True)
+        self.received_existing_names: list[str] | None = None
+        self.received_prompt_context: DisambiguationPromptContext | None = None
+        self.received_reselect_clusters: list[list[str]] | None = None
+        self.received_reselect_review_states: dict[str, NameReviewState] | None = None
+        self.reselect_result = ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
+
+    async def disambiguate_characters(
+        self,
+        candidates,
+        context_sentences=None,
+        existing_names=None,
+        prompt_context=None,
+    ):
+        self.received_existing_names = existing_names
+        self.received_prompt_context = prompt_context
+        return ExtendedDisambigResult(
+            canonical_decisions={},
+            entity_types={},
+            entity_relations=[],
+            _reasoning_tokens=17,
+        )
+
+    async def reselect_canonicals(
+        self,
+        candidates,
+        clusters,
+        context_sentences=None,
+        review_states=None,
+    ):
+        self.received_reselect_clusters = [list(cluster) for cluster in clusters]
+        self.received_reselect_review_states = dict(review_states or {})
+        return self.reselect_result
+
+    def is_cloud_api(self) -> bool:
+        return False
+
+
+class FakeRagRetriever:
+    """
+    创建时间: 2026-04-23
+    任务: 复杂度与耦合审查 P2 - 测试工程化
+    说明: 复用 RAG evidence provider 假实现，显式记录 level1/2 与 level3 收集参数。
+    """
+
+    def __init__(
+        self,
+        bundle: EvidenceBundle,
+        *,
+        level3_available: bool = True,
+        requires_level3: bool = False,
+    ) -> None:
+        self.bundle = bundle
+        self.level3_available = level3_available
+        self._requires_level3 = requires_level3
+        self.calls: list[dict] = []
+
+    def requires_level3(self) -> bool:
+        return self._requires_level3
+
+    def is_level3_available(self) -> bool:
+        return self.level3_available
+
+    def collect_evidence(self, names_in_chunk=None, current_chunk=None):
+        self.calls.append(
+            {
+                "method": "collect_evidence",
+                "names_in_chunk": list(names_in_chunk or []),
+                "current_chunk": current_chunk,
+            }
+        )
+        return self.bundle
+
+    async def collect_evidence_with_level3(
+        self,
+        names_in_chunk=None,
+        current_chunk=None,
+        context_text=None,
+        exclude_chunk_ids=None,
+    ):
+        self.calls.append(
+            {
+                "method": "collect_evidence_with_level3",
+                "names_in_chunk": list(names_in_chunk or []),
+                "current_chunk": current_chunk,
+                "context_text": context_text,
+                "exclude_chunk_ids": list(exclude_chunk_ids or []),
+            }
+        )
+        return self.bundle
