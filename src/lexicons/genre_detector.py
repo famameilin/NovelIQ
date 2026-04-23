@@ -34,6 +34,25 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from src.lexicons.genre_detector_rules import (
+    DOMAIN_KEYWORDS,
+    INDICATOR_WEIGHT,
+    MIN_CONFIDENCE,
+    get_recommended_lexicons,
+)
+from src.lexicons.genre_detector_sampling import (
+    build_text_segments,
+    read_text_with_fallback,
+)
+from src.lexicons.genre_detector_weighted import (
+    WeightedGenreResult,
+)
+from src.lexicons.genre_detector_weighted import (
+    detect_genre_weighted as detect_genre_weighted_impl,
+)
+from src.lexicons.genre_detector_weighted import (
+    get_weighted_lexicon_config as get_weighted_lexicon_config_impl,
+)
 from src.lexicons.registry import LexiconRegistry
 from src.metrics.text_utils import tokenize_words
 
@@ -72,168 +91,6 @@ class GenreSequenceResult:
     genre_distribution: dict[str, float]
     dominant_genre: str
     genre_transitions: list[tuple[int, str, str]]
-
-
-DOMAIN_KEYWORDS = {
-    "xianxia": {
-        "positive": ["xianxia_positive"],
-        "negative": ["xianxia_negative"],
-        "indicators": [
-            "剑气",
-            "真气",
-            "灵力",
-            "修仙",
-            "境界",
-            "丹药",
-            "法宝",
-            "渡劫",
-            "筑基",
-            "金丹",
-            "元婴",
-            "化神",
-            "飞升",
-            "仙界",
-            "妖兽",
-            "宗门",
-            "弟子",
-            "师尊",
-            "道友",
-        ],
-    },
-    "urban": {
-        "positive": ["urban_positive"],
-        "negative": ["urban_negative"],
-        "indicators": [
-            "表白",
-            "求婚",
-            "分手",
-            "职场",
-            "升职",
-            "创业",
-            "恋爱",
-            "公司",
-            "老板",
-            "同事",
-            "面试",
-            "加班",
-            "工资",
-            "合同",
-            "项目",
-            "客户",
-        ],
-    },
-    "power": {
-        "negative": ["power_struggle"],
-        "indicators": [
-            "权谋",
-            "阴谋",
-            "暗杀",
-            "夺权",
-            "篡位",
-            "朝堂",
-            "皇帝",
-            "大臣",
-            "宫斗",
-            "皇后",
-            "妃子",
-            "太子",
-            "王爷",
-            "将军",
-            "谋反",
-        ],
-    },
-    "shuwen": {
-        "positive": ["shuwen_pattern"],
-        "indicators": [
-            "打脸",
-            "逆袭",
-            "装逼",
-            "爽",
-            "逆袭",
-            "碾压",
-            "震惊",
-            "跪了",
-            "服了",
-            "天才",
-            "废物",
-            "天才变废物",
-            "废物变天才",
-        ],
-    },
-    "scifi": {
-        "indicators": [
-            "星际",
-            "太空",
-            "宇宙",
-            "星系",
-            "飞船",
-            "机甲",
-            "机器人",
-            "人工智能",
-            "AI",
-            "芯片",
-            "量子",
-            "基因",
-            "克隆",
-            "联邦",
-            "帝国",
-            "跃迁",
-            "黑洞",
-            "虫洞",
-        ],
-    },
-    "historical": {
-        "indicators": [
-            "朝代",
-            "皇帝",
-            "陛下",
-            "圣上",
-            "皇后",
-            "妃子",
-            "太子",
-            "王爷",
-            "将军",
-            "宫斗",
-            "后宫",
-            "选秀",
-            "册封",
-            "夺嫡",
-            "篡位",
-            "谋反",
-            "本宫",
-            "本王",
-            "微臣",
-            "臣妾",
-        ],
-    },
-    "mystery": {
-        "indicators": [
-            "案件",
-            "命案",
-            "凶杀案",
-            "谋杀",
-            "凶手",
-            "嫌疑人",
-            "侦探",
-            "刑警",
-            "法医",
-            "证据",
-            "线索",
-            "推理",
-            "破案",
-            "真相",
-            "谜团",
-            "悬疑",
-            "诡异",
-            "神秘",
-            "离奇",
-            "反转",
-        ],
-    },
-}
-
-INDICATOR_WEIGHT = 2.0
-MIN_CONFIDENCE = 0.3
 
 
 def detect_genre(
@@ -328,17 +185,7 @@ def detect_genre_from_file(
     Returns:
         类型检测结果
     """
-    encodings = ["utf-8", "gbk", "gb2312"]
-    content = None
-
-    for encoding in encodings:
-        try:
-            with open(file_path, encoding=encoding) as f:
-                content = f.read(sample_size)
-            break
-        except UnicodeDecodeError:
-            continue
-
+    content = read_text_with_fallback(file_path, limit=sample_size)
     if content is None:
         return GenreDetectionResult(
             genre="general",
@@ -375,14 +222,7 @@ def detect_genre_sequence(
         registry.load()
 
     segments: list[SegmentGenreResult] = []
-    text_len = len(text)
-    start = 0
-    idx = 0
-
-    while start < text_len:
-        end = min(start + segment_size, text_len)
-        segment_text = text[start:end]
-
+    for idx, (start, end, segment_text) in enumerate(build_text_segments(text, segment_size, overlap)):
         result = detect_genre(segment_text, registry)
 
         segments.append(
@@ -396,9 +236,6 @@ def detect_genre_sequence(
                 top_indicators=result.top_indicators,
             )
         )
-
-        start = end - overlap if end < text_len else text_len
-        idx += 1
 
     genre_counts: dict[str, int] = {}
     for seg in segments:
@@ -442,17 +279,7 @@ def detect_genre_sequence_from_file(
     Returns:
         类型序列检测结果
     """
-    encodings = ["utf-8", "gbk", "gb2312"]
-    content = None
-
-    for encoding in encodings:
-        try:
-            with open(file_path, encoding=encoding) as f:
-                content = f.read()
-            break
-        except UnicodeDecodeError:
-            continue
-
+    content = read_text_with_fallback(file_path)
     if content is None:
         return GenreSequenceResult(
             segments=[],
@@ -462,65 +289,6 @@ def detect_genre_sequence_from_file(
         )
 
     return detect_genre_sequence(content, segment_size, overlap, registry)
-
-
-def get_recommended_lexicons(genre: str) -> dict[str, list[str]]:
-    """
-    根据小说类型获取推荐的词表配置。
-
-    Args:
-        genre: 小说类型
-
-    Returns:
-        推荐的词表域名映射
-    """
-    recommendations: dict[str, dict[str, list[str]]] = {
-        "xianxia": {
-            "pos_domains": ["xianxia_positive"],
-            "neg_domains": ["xianxia_negative"],
-            "fight_domains": [],
-        },
-        "urban": {
-            "pos_domains": ["urban_positive"],
-            "neg_domains": ["urban_negative"],
-            "fight_domains": [],
-        },
-        "power": {
-            "pos_domains": [],
-            "neg_domains": ["power_struggle"],
-            "fight_domains": ["power_struggle"],
-        },
-        "shuwen": {
-            "pos_domains": ["shuwen_pattern"],
-            "neg_domains": [],
-            "fight_domains": [],
-        },
-        "scifi": {
-            "pos_domains": [],
-            "neg_domains": [],
-            "fight_domains": [],
-            "domain_lexicons": ["scifi_terms"],
-        },
-        "historical": {
-            "pos_domains": [],
-            "neg_domains": ["power_struggle"],
-            "fight_domains": ["power_struggle"],
-            "domain_lexicons": ["historical_terms"],
-        },
-        "mystery": {
-            "pos_domains": [],
-            "neg_domains": [],
-            "fight_domains": [],
-            "domain_lexicons": ["mystery_terms"],
-        },
-        "general": {
-            "pos_domains": [],
-            "neg_domains": [],
-            "fight_domains": [],
-        },
-    }
-
-    return recommendations.get(genre, recommendations["general"])
 
 
 def get_dynamic_lexicons(
@@ -600,16 +368,6 @@ def get_dynamic_lexicons_for_chunk(
 
     return lexicons, result.genre
 
-
-@dataclass
-class WeightedGenreResult:
-    """多类型加权检测结果"""
-
-    genre_weights: list[tuple[str, float]]
-    sample_count: int
-    raw_scores: dict[str, float]
-
-
 def detect_genre_weighted(
     chunk_texts: list[tuple[int, str]],
     sample_ratio: float = 0.1,
@@ -645,65 +403,11 @@ def detect_genre_weighted(
         registry = LexiconRegistry()
         registry.load()
 
-    total_chunks = len(chunk_texts)
-    if total_chunks == 0:
-        return WeightedGenreResult(
-            genre_weights=[("general", 1.0)],
-            sample_count=0,
-            raw_scores={},
-        )
-
-    target_samples = int(total_chunks * sample_ratio)
-    sample_count = max(min_samples, min(target_samples, total_chunks))
-    step = max(1, total_chunks // sample_count)
-    sample_indices = list(range(0, total_chunks, step))[:sample_count]
-    actual_sample_count = len(sample_indices)
-
-    genre_scores: dict[str, float] = {}
-    for idx in sample_indices:
-        _, text = chunk_texts[idx]
-        result = detect_genre(text, registry)
-        for genre, score in result.scores.items():
-            genre_scores[genre] = genre_scores.get(genre, 0.0) + score
-
-    if not genre_scores:
-        return WeightedGenreResult(
-            genre_weights=[("general", 1.0)],
-            sample_count=actual_sample_count,
-            raw_scores={},
-        )
-
-    total_score = sum(genre_scores.values())
-    if total_score == 0:
-        return WeightedGenreResult(
-            genre_weights=[("general", 1.0)],
-            sample_count=actual_sample_count,
-            raw_scores=genre_scores,
-        )
-
-    normalized_scores = {g: s / total_score for g, s in genre_scores.items()}
-
-    sorted_genres = sorted(normalized_scores.items(), key=lambda x: -x[1])
-
-    genre_weights: list[tuple[str, float]] = []
-    accumulated = 0.0
-    for genre, weight in sorted_genres:
-        if accumulated >= 1.0:
-            break
-        genre_weights.append((genre, weight))
-        accumulated += weight
-
-    if genre_weights:
-        total_weight = sum(w for _, w in genre_weights)
-        genre_weights = [(g, w / total_weight) for g, w in genre_weights]
-
-    if not genre_weights:
-        genre_weights = [("general", 1.0)]
-
-    return WeightedGenreResult(
-        genre_weights=genre_weights,
-        sample_count=actual_sample_count,
-        raw_scores=normalized_scores,
+    return detect_genre_weighted_impl(
+        chunk_texts,
+        detect_genre_fn=lambda text: detect_genre(text, registry),
+        sample_ratio=sample_ratio,
+        min_samples=min_samples,
     )
 
 
@@ -723,11 +427,7 @@ def get_weighted_lexicon_config(
     创建者: GLM-5
     任务: 多类型加权混合词表方案
     """
-    result: list[tuple[str, dict[str, list[str]], float]] = []
-    for genre, weight in genre_weights:
-        config = get_recommended_lexicons(genre)
-        result.append((genre, config, weight))
-    return result
+    return get_weighted_lexicon_config_impl(genre_weights)
 
 
 if __name__ == "__main__":
