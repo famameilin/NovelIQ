@@ -194,6 +194,9 @@ def test_search_similar_paragraphs_limits_sql_to_candidate_chunks() -> None:
 
     statement = session.execute.call_args.args[0]
     assert "chunk_id IN" in str(statement)
+    assert "row_number()" in str(statement)
+    assert "PARTITION BY paragraph_embeddings.chunk_id" in str(statement)
+    assert "paragraph_rank" in str(statement)
     assert [row.chunk_id for row in results] == [2]
     assert results[0].paragraph_index == 1
     assert results[0].paragraph_text == "灰衣人站在门外。"

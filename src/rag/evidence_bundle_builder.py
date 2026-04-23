@@ -240,6 +240,11 @@ class EvidenceBundleBuilder:
         修改时间: 2026-04-23
         任务: level3-mention-review-fix
         修改说明: emotion exemplar 只消费 chunk 级语义召回，避免 mention 身份检索结果污染情绪证据。
+
+        修改时间: 2026-04-24
+        任务: fix-emotion-exemplar-score-contract
+        修改说明: paragraph rerank 仅影响 semantic_recall；emotion exemplar 继续使用 chunk 级分数，
+                  避免局部 paragraph 分数污染整段 chunk 示例排序语义。
         """
         exemplar_items: list[EvidenceItem] = []
         for result in level3_results:
@@ -249,10 +254,11 @@ class EvidenceBundleBuilder:
             if emotional_valence in (None, "", "neutral"):
                 continue
 
+            exemplar_similarity = result.chunk_similarity if result.chunk_similarity is not None else result.similarity
             metadata = {
                 "chunk_id": result.chunk_id,
                 "text": result.text,
-                "similarity": result.similarity,
+                "similarity": exemplar_similarity,
                 "emotional_valence": emotional_valence,
                 "evidence_purpose": "emotion",
             }
@@ -263,7 +269,7 @@ class EvidenceBundleBuilder:
                     content=result.text,
                     metadata=metadata,
                     chunk_id=result.chunk_id,
-                    score=result.similarity,
+                    score=exemplar_similarity,
                 )
             )
-        return exemplar_items
+        return sorted(exemplar_items, key=lambda item: item.score if item.score is not None else 0.0, reverse=True)

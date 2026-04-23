@@ -364,6 +364,11 @@ async def _generate_paragraph_embedding_rows(
     创建时间: 2026-04-24
     任务: level3-paragraph-rerank
     说明: 复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求。
+
+    修改时间: 2026-04-24
+    任务: fix-paragraph-embedding-partial-write
+    修改说明: paragraph embedding 缺失已是 Level3 硬故障，这里改为 fail fast，
+              避免 preprocess 成功但后续 readiness 永远失败。
     """
     paragraph_refs: list[tuple[int, int, int, int, str]] = []
     for chunk in all_chunks:
@@ -382,18 +387,20 @@ async def _generate_paragraph_embedding_rows(
         )
 
     rows = []
+    missing_refs: list[tuple[int, int]] = []
     for (chunk_id, paragraph_index, start_char, end_char, paragraph_text), embedding in zip(
         paragraph_refs,
         paragraph_embeddings,
         strict=True,
     ):
         if not embedding:
-            logger.warning(
-                "empty paragraph embedding skipped: run_id={} chunk_id={} paragraph_index={}",
+            logger.error(
+                "empty paragraph embedding detected: run_id={} chunk_id={} paragraph_index={}",
                 run_id,
                 chunk_id,
                 paragraph_index,
             )
+            missing_refs.append((chunk_id, paragraph_index))
             continue
         rows.append(
             row_factory(
@@ -404,5 +411,11 @@ async def _generate_paragraph_embedding_rows(
                 end_char=end_char,
                 embedding_vector=embedding,
             )
+        )
+    if missing_refs:
+        preview_refs = ", ".join(f"{chunk_id}:{paragraph_index}" for chunk_id, paragraph_index in missing_refs[:10])
+        raise RuntimeError(
+            "paragraph embeddings incomplete during preprocess: "
+            f"run_id={run_id}, missing={preview_refs}, total={len(missing_refs)}"
         )
     return rows
