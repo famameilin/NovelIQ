@@ -335,10 +335,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         if result.rowcount > 0:  # type: ignore[attr-defined]
             return "cancelling"
 
-        refreshed = self.get_run(run_id)
-        if refreshed is None:
-            return None
-        return str(refreshed["status"])
+        status_stmt = select(AnalysisRun.status).where(AnalysisRun.run_id == run_id)
+        refreshed_status = self.session.execute(status_stmt).scalar_one_or_none()
+        return str(refreshed_status) if refreshed_status is not None else None
 
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
         """

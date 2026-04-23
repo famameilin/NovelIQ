@@ -15,7 +15,10 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.services.results_contracts import _convert_aggregate_result
+from src.api.services.results_contracts import (
+    _convert_aggregate_result,
+    build_aggregate_metrics_contract_from_models,
+)
 from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 
@@ -117,3 +120,13 @@ class MetricsService:
         """获取风格统计指标"""
         _, _, _, style_stats = self.get_aggregate_result(run_id, session)
         return style_stats
+
+    def get_aggregate_metrics_contract(self, run_id: str, session: Session) -> dict[str, Any]:
+        """获取稳定的 aggregate metrics contract，并复用聚合缓存。"""
+        narrative_structure, emotion_stats, character_stats, style_stats = self.get_aggregate_result(run_id, session)
+        return build_aggregate_metrics_contract_from_models(
+            narrative_structure,
+            emotion_stats,
+            character_stats,
+            style_stats,
+        )

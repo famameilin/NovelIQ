@@ -276,18 +276,14 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
         "src.api.services.results_export_service._fetch_token_usage_stats",
         lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {}),
     )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.aggregate_all_metrics",
-        lambda *_args, **_kwargs: object(),
-    )
-
-    import src.api.services.results_contracts as results_contracts
-
-    monkeypatch.setattr(
-        results_contracts,
-        "_convert_aggregate_result",
-        lambda *_args, **_kwargs: (None, None, None, None),
-    )
+    metrics_service = MagicMock()
+    metrics_service.get_aggregate_metrics_contract.return_value = {
+        "narrative_structure": None,
+        "emotion_stats": None,
+        "character_stats": None,
+        "style_stats": None,
+    }
+    monkeypatch.setattr("src.api.services.results_export_service.get_metrics_service", lambda: metrics_service)
 
     export_graph_view = ExportGraphAuthorityView(
         current_relations=[
@@ -382,18 +378,14 @@ def test_load_aggregate_metrics_bundle_keeps_graph_inputs_outside_aggregate(monk
         "src.api.services.results_export_service._fetch_token_usage_stats",
         lambda *_args, **_kwargs: SimpleNamespace(model_dump=lambda **_kw: {}),
     )
-    monkeypatch.setattr(
-        "src.api.services.results_export_service.aggregate_all_metrics",
-        lambda *_args, **_kwargs: object(),
-    )
-
-    import src.api.services.results_contracts as results_contracts
-
-    monkeypatch.setattr(
-        results_contracts,
-        "_convert_aggregate_result",
-        lambda *_args, **_kwargs: (None, None, None, None),
-    )
+    metrics_service = MagicMock()
+    metrics_service.get_aggregate_metrics_contract.return_value = {
+        "narrative_structure": None,
+        "emotion_stats": None,
+        "character_stats": None,
+        "style_stats": None,
+    }
+    monkeypatch.setattr("src.api.services.results_export_service.get_metrics_service", lambda: metrics_service)
 
     _global_stats, _token_usage_stats, aggregate_metrics = load_aggregate_metrics_bundle(
         run_id="run-aggregate-only",

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 
 from loguru import logger
 
@@ -33,7 +34,33 @@ from .state_logic import (
 EXTENSION_REVIEW_MIN_GAP = 3
 EXTENSION_REVIEW_MIN_RATIO = 1.5
 
-DisambigStateSnapshot = dict[str, dict[str, str]]
+
+@dataclass(frozen=True)
+class DisambigStateSnapshotEntry:
+    """终消歧候选收集所需的最小 review 快照。"""
+
+    state: str
+    confidence: str
+    canonical: str
+
+
+@dataclass
+class DisambigStateSnapshot:
+    """终消歧候选收集的具名快照容器。"""
+
+    entries: dict[str, DisambigStateSnapshotEntry] = field(default_factory=dict)
+
+    def get(self, name: str) -> DisambigStateSnapshotEntry | None:
+        return self.entries.get(name)
+
+    def setdefault(self, name: str, entry: DisambigStateSnapshotEntry) -> DisambigStateSnapshotEntry:
+        return self.entries.setdefault(name, entry)
+
+    def copy(self) -> DisambigStateSnapshot:
+        return DisambigStateSnapshot(entries=dict(self.entries))
+
+    def __bool__(self) -> bool:
+        return bool(self.entries)
 
 
 def _extract_names_from_candidates(candidates: list[NameCountCandidate]) -> list[str]:
@@ -158,7 +185,8 @@ def _collect_final_disambiguation_candidates(
         needs_review = False
 
         if state_snapshot:
-            state = state_snapshot.get(name, {}).get("state")
+            snapshot_entry = state_snapshot.get(name)
+            state = snapshot_entry.state if snapshot_entry is not None else None
 
             if state != DISAMBIG_STATE_RESOLVED:
                 needs_review = True
@@ -289,32 +317,32 @@ def _ensure_state_snapshot_has_known_names(
     state_snapshot: DisambigStateSnapshot | None,
     known_canonical_names: set[str] | frozenset[str] | None = None,
 ) -> DisambigStateSnapshot:
-    snapshot: DisambigStateSnapshot = dict(state_snapshot or {})
+    snapshot = state_snapshot.copy() if state_snapshot is not None else DisambigStateSnapshot()
     for alias, canonical in alias_map.items():
         snapshot.setdefault(
             alias,
-            {
-                "state": DISAMBIG_STATE_RESOLVED,
-                "confidence": DISAMBIG_CONFIDENCE_HIGH,
-                "canonical": canonical,
-            },
+            DisambigStateSnapshotEntry(
+                state=DISAMBIG_STATE_RESOLVED,
+                confidence=DISAMBIG_CONFIDENCE_HIGH,
+                canonical=canonical,
+            ),
         )
         snapshot.setdefault(
             canonical,
-            {
-                "state": DISAMBIG_STATE_RESOLVED,
-                "confidence": DISAMBIG_CONFIDENCE_HIGH,
-                "canonical": canonical,
-            },
+            DisambigStateSnapshotEntry(
+                state=DISAMBIG_STATE_RESOLVED,
+                confidence=DISAMBIG_CONFIDENCE_HIGH,
+                canonical=canonical,
+            ),
         )
     for canonical in known_canonical_names or set():
         snapshot.setdefault(
             canonical,
-            {
-                "state": DISAMBIG_STATE_RESOLVED,
-                "confidence": DISAMBIG_CONFIDENCE_HIGH,
-                "canonical": canonical,
-            },
+            DisambigStateSnapshotEntry(
+                state=DISAMBIG_STATE_RESOLVED,
+                confidence=DISAMBIG_CONFIDENCE_HIGH,
+                canonical=canonical,
+            ),
         )
     return snapshot
 

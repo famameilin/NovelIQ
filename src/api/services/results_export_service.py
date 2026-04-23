@@ -14,7 +14,8 @@ from typing import Any
 
 from loguru import logger
 
-from src.api.services.results_contracts import build_aggregate_metrics_contract, validate_aggregate_metrics_contract
+from src.api.dependencies import get_metrics_service
+from src.api.services.results_contracts import validate_aggregate_metrics_contract
 from src.api.services.results_queries import (
     _fetch_character_relations,
     _fetch_characters,
@@ -35,7 +36,6 @@ from src.knowledge.authority import (
     TimelineAuthorityView,
     serialize_graph_report_signals,
 )
-from src.metrics.aggregate import aggregate_all_metrics
 from src.metrics.timeline_metrics import (
     TimelineAuthorityContractError,
     TimelineDataUnavailableError,
@@ -179,15 +179,14 @@ def load_aggregate_metrics_bundle(
     """
     加载非 graph 的聚合结论。
 
-    中文注释：aggregate_metrics 继续只由 aggregate_all_metrics() 负责产出，
-    不与 graph authority 信号在同一个 helper 中混算。
+    中文注释：aggregate_metrics 与 /metrics/* 现在统一复用 MetricsService 的缓存入口，
+    避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()。
     """
 
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
     token_usage_stats = _fetch_token_usage_stats(run_id, novel_id, stats_repo)
 
-    result = aggregate_all_metrics(run_id, annotation_repo, chunk_repo, stats_repo)
-    aggregate_metrics = build_aggregate_metrics_contract(result)
+    aggregate_metrics = get_metrics_service().get_aggregate_metrics_contract(run_id, stats_repo.session)
 
     return global_stats, token_usage_stats, aggregate_metrics
 
