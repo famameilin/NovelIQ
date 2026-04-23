@@ -5,7 +5,7 @@ from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 
-from src.metrics.text_utils import tokenize_words
+from src.utils.text_utils import tokenize_words
 
 _STOPWORDS: frozenset[str] = frozenset(
     {

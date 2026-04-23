@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from loguru import logger
 
+from src.utils.lexicon_parser import load_lexicon_terms, load_weighted_lexicon
+
 if TYPE_CHECKING:
     from src.workflows.curve_metrics import WeightedLexiconSet
 
@@ -210,24 +212,17 @@ class LexiconRegistry:
         修改者: GLM-5
         任务: 支持加权词典格式
         修改内容: 处理带权重列的词典文件，只返回词条部分
+
+        修改时间: 2026-04-23
+        任务: P2-基础设施解耦
+        修改内容: 改为调用公共词表解析器，避免 registry 自行维护解析细节。
         """
         path = self._resolve_file_path(key)
         if path is None or not path.exists():
             logger.warning("Lexicon file not found for key='{}': {}", key, path)
             return []
 
-        items: list[str] = []
-        seen: set[str] = set()
-        for line in path.read_text(encoding="utf-8").splitlines():
-            cleaned = line.strip()
-            if not cleaned or cleaned.startswith("#"):
-                continue
-            term = cleaned.split("\t")[0].strip()
-            if term and term not in seen:
-                seen.add(term)
-                items.append(term)
-
-        return items
+        return load_lexicon_terms(path)
 
     def _load_domain_lexicon(self, tag: str) -> list[str]:
         """
@@ -241,6 +236,10 @@ class LexiconRegistry:
         修改者: GLM-5
         任务: 支持加权词典格式
         修改内容: 处理带权重列的词典文件，只返回词条部分
+
+        修改时间: 2026-04-23
+        任务: P2-基础设施解耦
+        修改内容: 改为调用公共词表解析器，避免 domain 加载与普通词表加载规则漂移。
         """
         domain_dir = self._base_dir / _DOMAIN_DIR
         path = domain_dir / f"{tag}.txt"
@@ -248,18 +247,7 @@ class LexiconRegistry:
             logger.debug("Domain lexicon '{}' not found: {}", tag, path)
             return []
 
-        items: list[str] = []
-        seen: set[str] = set()
-        for line in path.read_text(encoding="utf-8").splitlines():
-            cleaned = line.strip()
-            if not cleaned or cleaned.startswith("#"):
-                continue
-            term = cleaned.split("\t")[0].strip()
-            if term and term not in seen:
-                seen.add(term)
-                items.append(term)
-
-        return items
+        return load_lexicon_terms(path)
 
     def _exclude_borrowed(self, primary_key: str, terms: list[str]) -> list[str]:
         """
@@ -324,8 +312,11 @@ def get_weighted_lexicon_set(
     创建者: GLM-5
     任务: 清理向后兼容代码
     说明: 使用 load_weighted_lexicon 加载词典。
+
+    修改时间: 2026-04-23
+    任务: P2-基础设施解耦
+    修改内容: load_weighted_lexicon 改从公共解析层导入，切断 lexicons 对 metrics 的反向依赖。
     """
-    from src.metrics.lexicon_metrics import load_weighted_lexicon
     from src.workflows.curve_metrics import WeightedLexiconSet
 
     pos_terms = load_weighted_lexicon(str(registry.base_dir / "positive.txt"))

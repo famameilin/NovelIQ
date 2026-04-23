@@ -40,13 +40,18 @@
 修改者: GLM-5
 任务: 性能优化
 修改内容: 新增Aho-Corasick算法优化版本，性能提升2-5倍
+
+修改时间: 2026-04-23
+任务: P2-基础设施解耦
+修改内容: load_weighted_lexicon 由公共解析层提供，metrics 仅保留兼容导出。
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
+
+from src.utils.lexicon_parser import load_weighted_lexicon as _load_weighted_lexicon
 
 
 def _is_phrase_term(term: str) -> bool:
@@ -201,66 +206,13 @@ def get_emotion_spans(text: str, tokens: Sequence[str], terms: Iterable[str]) ->
 
 def load_weighted_lexicon(filepath: str, default_weight: int = 1) -> dict[str, int]:
     """
-    加载带权重的词典。
+    兼容导出带权重词典加载器。
 
-    词典格式：
-        - 每行格式：词条\\t权重（如 "心花怒放\\t3"）
-        - 权重为 1-3 的整数
-        - 注释行以 # 开头
-        - 如果词条没有权重列，使用 default_weight
-
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 支持加权计数
-    说明: 加载带权重的词典文件
-
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 清理向后兼容代码
-    修改内容: 要求必须有权重列，不再兼容无权重格式
-
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 修复 combat.txt 加载问题
-    修改内容: 添加 default_weight 参数，支持无权重列的词典文件
-
-    参数：
-        filepath: 词典文件路径
-        default_weight: 默认权重，当词条没有权重列时使用，默认为 1
-
-    返回：
-        {词条: 权重} 字典
+    修改时间: 2026-04-23
+    任务: P2-基础设施解耦
+    修改内容: 实际解析逻辑迁移到 src.utils.lexicon_parser，本函数只保留 metrics 旧导入路径。
     """
-    result: dict[str, int] = {}
-    path = Path(filepath)
-
-    if not path.exists():
-        return result
-
-    content = path.read_text(encoding="utf-8")
-    for _line_num, line in enumerate(content.splitlines(), 1):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-
-        parts = line.split("\t")
-        term = parts[0].strip()
-        if not term:
-            continue
-
-        if len(parts) < 2:
-            result[term] = default_weight
-            continue
-
-        try:
-            weight = int(parts[1].strip())
-        except ValueError:
-            result[term] = default_weight
-            continue
-
-        result[term] = weight
-
-    return result
+    return _load_weighted_lexicon(filepath, default_weight=default_weight)
 
 
 def term_weighted_counts(
