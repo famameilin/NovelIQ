@@ -55,10 +55,7 @@ def _normalize_feature_series(values: Mapping[int, float]) -> dict[int, float]:
     denom = max_value - min_value
     if denom <= 0:
         return dict.fromkeys(values, 0.0)
-    return {
-        chunk_id: (value - min_value) / denom
-        for chunk_id, value in values.items()
-    }
+    return {chunk_id: (value - min_value) / denom for chunk_id, value in values.items()}
 
 
 def build_display_surface_tension(
@@ -84,15 +81,11 @@ def build_display_surface_tension(
     normalized_feature_maps: dict[str, dict[int, float]] = {}
     for feature_name in _SURFACE_TENSION_WEIGHTS:
         feature_values = {
-            chunk_id: float(getattr(row, feature_name, 0.0) or 0.0)
-            for chunk_id, row in style_map.items()
+            chunk_id: float(getattr(row, feature_name, 0.0) or 0.0) for chunk_id, row in style_map.items()
         }
         normalized_feature_maps[feature_name] = _normalize_feature_series(feature_values)
 
-    raw_proxy_values = {
-        int(row.chunk_id): float(getattr(row, "tension_proxy", 0.0) or 0.0)
-        for row in curve_rows
-    }
+    raw_proxy_values = {int(row.chunk_id): float(getattr(row, "tension_proxy", 0.0) or 0.0) for row in curve_rows}
     normalized_raw_proxy = _normalize_feature_series(raw_proxy_values)
 
     chunk_ids: list[int] = []
@@ -121,7 +114,4 @@ def build_display_surface_tension(
         raw_scores,
         keep_ratio=settings.metrics.fourier_smooth_keep_ratio,
     )
-    return {
-        chunk_id: _clamp(smoothed_scores[index])
-        for index, chunk_id in enumerate(chunk_ids)
-    }
+    return {chunk_id: _clamp(smoothed_scores[index]) for index, chunk_id in enumerate(chunk_ids)}

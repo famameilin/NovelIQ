@@ -254,8 +254,7 @@ class TaskApplicationService:
 
         if task_status in ("pending", "running"):
             logger.info(
-                "Task {} cancellation requested (not in memory), "
-                "DB cancel_requested=true and status=cancelling",
+                "Task {} cancellation requested (not in memory), DB cancel_requested=true and status=cancelling",
                 task_id,
             )
             return {"task_id": task_id, "status": "cancelling", "message": "任务已标记为取消中，等待执行方收尾"}

@@ -69,9 +69,7 @@ def _build_aggregate_alias_lookup(
 
     snapshot = authority_service.build_level1_snapshot(run_id)
     return {
-        mapping.alias: mapping.canonical
-        for mapping in snapshot.alias_mappings
-        if mapping.alias and mapping.canonical
+        mapping.alias: mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias and mapping.canonical
     }
 
 
@@ -237,11 +235,7 @@ def fetch_culture_data(
     修改内容: 只返回 imagery_densities
     """
     culture_rows = stats_repo.fetch_chunk_culture(run_id)
-    imagery_densities = [
-        row.imagery_lexicon_density
-        for row in culture_rows
-        if row.imagery_lexicon_density is not None
-    ]
+    imagery_densities = [row.imagery_lexicon_density for row in culture_rows if row.imagery_lexicon_density is not None]
 
     return CultureData(
         imagery_densities=imagery_densities,

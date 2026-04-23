@@ -157,11 +157,7 @@ def _collect_priority_candidate_names(
         return None
 
     batch_text = "\n".join(candidate.content for candidate in batch_candidates if candidate.content)
-    priority_names = [
-        name
-        for name in evidence_bundle.requested_names
-        if name and name in batch_text
-    ]
+    priority_names = [name for name in evidence_bundle.requested_names if name and name in batch_text]
     return priority_names or None
 
 
@@ -210,6 +206,7 @@ async def attribute_dialogues_with_llm(
     is_cloud = client._is_cloud_api()
     enable_thinking = config.thinking_enabled
     batch_size = settings.thinking.phase3_candidates_per_batch
+
     async def _execute_single_batch(
         current_client: AnnotationClient,
         batch_candidates: list[QuoteCandidate],
@@ -459,6 +456,8 @@ def _post_process_validation(
         logger.info(f"phase3_validation summary: unknown_speakers={unknown_count}, chunk_id={chunk_id}")
 
     return valid_records
+
+
 async def compute_dialogue_lengths_with_llm(
     client: AnnotationClient,
     text: str,

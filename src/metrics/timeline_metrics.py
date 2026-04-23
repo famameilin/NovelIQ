@@ -990,9 +990,7 @@ def build_timeline_candidates(
     """
     source_data = _load_timeline_source_data(run_id, chunk_repo, annotation_repo, stats_repo)
     authority_data = _adapt_timeline_authority_view(timeline_view)
-    timeline_phases = convert_to_timeline_phases(
-        compute_four_phases(source_data.tension_scores, source_data.chunk_ids)
-    )
+    timeline_phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chunk_ids))
     selection_inputs = _build_timeline_selection_inputs(source_data, authority_data)
     candidates = _build_timeline_candidates_from_context(source_data, authority_data)
 
