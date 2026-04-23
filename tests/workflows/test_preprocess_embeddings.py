@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.chunking.chunker import Chunk
-from src.workflows.preprocess import _generate_chunk_embeddings, _split_chunk_paragraphs, run_preprocess
+from src.workflows.preprocess import (
+    _generate_chunk_embeddings,
+    _generate_paragraph_embedding_rows,
+    _split_chunk_paragraphs,
+    run_preprocess,
+)
 
 
 @pytest.mark.asyncio
@@ -103,6 +108,25 @@ async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> N
     assert inserted == 2
     assert mock_session.commit.call_count == 2
     assert observed_commit_counts[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_paragraph_embedding_rows_fails_fast_on_empty_embedding() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-paragraph-embedding-partial-write
+    说明: paragraph embedding 缺失会让 Level3 readiness 永远失败，preprocess 应在落库前直接报错。
+    """
+    mock_client = MagicMock()
+    mock_client.embed_texts = AsyncMock(return_value=[[0.5, 0.6], []])
+
+    with pytest.raises(RuntimeError, match="paragraph embeddings incomplete"):
+        await _generate_paragraph_embedding_rows(
+            embedding_client=mock_client,
+            run_id="run-1",
+            all_chunks=[Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11)],
+            row_factory=lambda **kwargs: SimpleNamespace(**kwargs),
+        )
 
 
 def test_split_chunk_paragraphs_returns_chunk_local_offsets() -> None:

@@ -336,28 +336,53 @@ def search_similar_paragraphs_within_chunks(
     创建时间: 2026-04-24
     任务: level3-paragraph-rerank
     说明: paragraph embedding 只允许在 chunk 粗召回结果内使用，避免第一版误开全库 paragraph 检索。
+
+    修改时间: 2026-04-24
+    任务: fix-paragraph-rerank-global-limit
+    修改说明: 先在每个候选 chunk 内选出最佳 paragraph，再做 chunk 级全局排序，
+              避免全局 LIMIT 让部分候选 chunk 完全失去 paragraph rerank 机会。
     """
     scoped_chunk_ids = list(dict.fromkeys(int(chunk_id) for chunk_id in chunk_ids))
     if not scoped_chunk_ids:
         return []
 
-    similarity = (1 - ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)).label("similarity")
-    stmt = (
+    similarity_expr = 1 - ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)
+    ranked_candidates = (
         select(
             ParagraphEmbedding.chunk_id,
             ParagraphEmbedding.paragraph_index,
             ParagraphEmbedding.paragraph_text,
             ParagraphEmbedding.start_char,
             ParagraphEmbedding.end_char,
-            similarity,
+            similarity_expr.label("similarity"),
+            func.row_number()
+            .over(
+                partition_by=ParagraphEmbedding.chunk_id,
+                order_by=(similarity_expr.desc(), ParagraphEmbedding.paragraph_index.asc()),
+            )
+            .label("paragraph_rank"),
         )
         .where(
             ParagraphEmbedding.run_id == run_id,
             ParagraphEmbedding.chunk_id.in_(scoped_chunk_ids),
             ParagraphEmbedding.embedding_vector.is_not(None),
-            similarity >= similarity_threshold,
+            similarity_expr >= similarity_threshold,
         )
-        .order_by(similarity.desc())
+        .subquery()
+    )
+    stmt = (
+        select(
+            ranked_candidates.c.chunk_id,
+            ranked_candidates.c.paragraph_index,
+            ranked_candidates.c.paragraph_text,
+            ranked_candidates.c.start_char,
+            ranked_candidates.c.end_char,
+            ranked_candidates.c.similarity,
+        )
+        # 中文注释：必须先按 chunk_id 选 best paragraph，再截断 top_k，
+        # 否则某个 chunk 的多个高分 paragraph 会挤掉其他候选 chunk。
+        .where(ranked_candidates.c.paragraph_rank == 1)
+        .order_by(ranked_candidates.c.similarity.desc(), ranked_candidates.c.chunk_id.asc())
         .limit(top_k)
     )
 
