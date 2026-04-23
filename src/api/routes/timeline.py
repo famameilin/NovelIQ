@@ -31,7 +31,7 @@ from src.api.models.timeline import (
     TimelineResponse,
 )
 from src.api.services.novel_service import NovelService
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.knowledge.authority import KnowledgeGraphAuthorityService, TimelineAuthorityView
 from src.metrics.timeline_metrics import (
     RelationChangeEventDTO,
     TimelineDataUnavailableError,
@@ -65,7 +65,9 @@ def _relation_change_signature(
     return (from_char, to_char, relation_type, change_type, evidence)
 
 
-def _build_route_owned_relation_fields(session: Session, run_id: str) -> dict[int, list[dict[str, Any]]]:
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 修改原因：改为直接消费调用方传入的 authority view，避免 route 层重复创建 service/view。
+def _build_route_owned_relation_fields(timeline_view: TimelineAuthorityView) -> dict[int, list[dict[str, Any]]]:
     """
     仅在 /timeline route 层装配 relation locator 字段。
 
@@ -74,8 +76,6 @@ def _build_route_owned_relation_fields(session: Session, run_id: str) -> dict[in
     泄漏回共享 contract。
     """
 
-    authority_service = KnowledgeGraphAuthorityService.from_session(session)
-    timeline_view = authority_service.build_timeline_view(run_id)
     _entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
 
     route_fields_by_chunk: dict[int, list[dict[str, Any]]] = {}
@@ -319,15 +319,14 @@ async def get_timeline(
     stats_repo = StatsRepository(session)
 
     try:
-        (
-            candidates,
-            tension_scores,
-            chunk_ids,
-            total_chunks,
-            timeline_phases,
-            major_character_entries,
-            relation_break_events,
-        ) = build_timeline_candidates(run_id, chunk_repo, annotation_repo, stats_repo)
+        timeline_view = KnowledgeGraphAuthorityService.from_session(session).build_timeline_view(run_id)
+        timeline_build = build_timeline_candidates(
+            run_id,
+            chunk_repo,
+            annotation_repo,
+            stats_repo,
+            timeline_view,
+        )
     except TimelineDataUnavailableError:
         logger.warning(f"No chunks found for run {run_id}")
         return TimelineResponse(
@@ -343,11 +342,11 @@ async def get_timeline(
 
     # 5. 筛选节点
     selected_candidates = select_timeline_nodes(
-        candidates=candidates,
-        chunk_ids=chunk_ids,
-        tension_scores=tension_scores,
-        major_character_entries=major_character_entries,
-        relation_break_events=relation_break_events,
+        candidates=timeline_build.candidates,
+        chunk_ids=timeline_build.selection_inputs.chunk_ids,
+        tension_scores=timeline_build.selection_inputs.tension_scores,
+        major_character_entries=timeline_build.selection_inputs.major_character_entries,
+        relation_break_events=timeline_build.selection_inputs.relation_break_events,
         min_nodes=10,
         max_nodes=20,
     )
@@ -359,8 +358,8 @@ async def get_timeline(
     timeline_nodes = convert_to_timeline_nodes(selected_candidates)
     # DTO -> Pydantic 模型转换
     api_nodes = [_dto_to_timeline_node(node) for node in timeline_nodes]
-    _enrich_route_owned_relation_fields(api_nodes, _build_route_owned_relation_fields(session, run_id))
-    api_phases = [_dto_to_timeline_phase(phase) for phase in timeline_phases]
+    _enrich_route_owned_relation_fields(api_nodes, _build_route_owned_relation_fields(timeline_view))
+    api_phases = [_dto_to_timeline_phase(phase) for phase in timeline_build.phases]
 
     logger.info(
         f"Timeline generated for novel {novel_id}, task {task_id}: {len(api_nodes)} nodes, {len(api_phases)} phases"
@@ -370,9 +369,9 @@ async def get_timeline(
         meta=TimelineMeta(
             novel_id=novel_id,
             novel_name=novel_name,
-            total_chunks=total_chunks,
+            total_chunks=timeline_build.total_chunks,
         ),
         phases=api_phases,
         nodes=api_nodes,
-        tension_curve=tension_scores if include_curve else None,
+        tension_curve=timeline_build.selection_inputs.tension_scores if include_curve else None,
     )

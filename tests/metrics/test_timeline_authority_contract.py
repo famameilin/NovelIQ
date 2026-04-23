@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS
+from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS, KnowledgeGraphAuthorityService
 from src.metrics.timeline_metrics import (
     TimelineAuthorityContractError,
     _resolve_timeline_authority_contract,
@@ -26,20 +26,22 @@ def test_build_timeline_candidates_consumes_authority_character_subgraph_only(db
     annotation_repo = AnnotationRepository(db_session)
     stats_repo = StatsRepository(db_session)
 
-    (
-        candidates,
-        tension_scores,
-        chunk_ids,
-        total_chunks,
-        timeline_phases,
-        major_character_entries,
-        relation_break_events,
-    ) = build_timeline_candidates(
+    timeline_view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(scenario.run_id)
+    timeline_build = build_timeline_candidates(
         scenario.run_id,
         chunk_repo,
         annotation_repo,
         stats_repo,
+        timeline_view,
     )
+
+    candidates = timeline_build.candidates
+    tension_scores = timeline_build.selection_inputs.tension_scores
+    chunk_ids = timeline_build.selection_inputs.chunk_ids
+    total_chunks = timeline_build.total_chunks
+    timeline_phases = timeline_build.phases
+    major_character_entries = timeline_build.selection_inputs.major_character_entries
+    relation_break_events = timeline_build.selection_inputs.relation_break_events
 
     candidates_by_chunk = index_by_chunk_id(candidates)
 

@@ -19,7 +19,7 @@ from typing import Any, Literal, cast
 
 from loguru import logger
 
-from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS
+from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS, TimelineAuthorityView
 from src.metrics.narrative_metrics import find_global_peak, find_local_peaks
 
 # Literal 类型定义
@@ -109,6 +109,59 @@ class TimelineCandidate:
     relation_changes: list[RelationChangeEventDTO] | None = None
     character_entries: list[str] | None = None
     character_exits: list[str] | None = None
+
+
+@dataclass(slots=True)
+class TimelineAnnotationSnapshot:
+    """时间轴候选节点使用的轻量标注快照。"""
+
+    chunk_id: int
+    event_type: str
+    cliffhanger: bool
+    pivot_moment: bool
+    emotional_valence: str
+
+
+@dataclass(slots=True)
+class TimelineAuthorityData:
+    """authority contract 校验后的时间轴只读输入。"""
+
+    entity_lifecycles: list[Any]
+    relation_events: list[Any]
+    entity_name_map: dict[int, str]
+
+
+@dataclass(slots=True)
+class TimelineSourceData:
+    """时间轴候选构建所需的数据上下文。"""
+
+    chunk_texts: list[tuple[int, str]]
+    chunk_ids: list[int]
+    chunk_id_to_idx: dict[int, int]
+    total_chunks: int
+    tension_scores: list[float]
+    summary_map: dict[int, str]
+    annotation_map: dict[int, TimelineAnnotationSnapshot]
+
+
+@dataclass(slots=True)
+class TimelineSelectionInputs:
+    """节点选择阶段依赖的独立输入。"""
+
+    chunk_ids: list[int]
+    tension_scores: list[float]
+    major_character_entries: list[tuple[str, int]]
+    relation_break_events: list[tuple[int, RelationChangeEventDTO]]
+
+
+@dataclass(slots=True)
+class TimelineBuildResult:
+    """时间轴候选构建结果，明确区分候选与选择阶段输入。"""
+
+    candidates: list[TimelineCandidate]
+    total_chunks: int
+    phases: list[TimelinePhaseDTO]
+    selection_inputs: TimelineSelectionInputs
 
 
 # ==================== 核心函数 ====================
@@ -658,20 +711,251 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
     return entity_lifecycles, relation_events, {entity_id: entity.name for entity_id, entity in character_map.items()}
 
 
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 新建原因：把 authority contract 校验后的 view 收口成 timeline 指标层专用输入，
+# 避免后续候选构建继续依赖 TimelineAuthorityView 的原始形状。
+def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> TimelineAuthorityData:
+    entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
+    return TimelineAuthorityData(
+        entity_lifecycles=entity_lifecycles,
+        relation_events=relation_events,
+        entity_name_map=entity_name_map,
+    )
+
+
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 新建原因：把张力曲线长度校正逻辑独立出来，避免候选构建阶段混入数据清洗细节。
+def _normalize_tension_scores(
+    chunk_curves: list[Any] | None,
+    total_chunks: int,
+) -> list[float]:
+    if chunk_curves:
+        tension_scores = [
+            row.tension_composite if row and row.tension_composite is not None else 0.5 for row in chunk_curves
+        ]
+    else:
+        tension_scores = [0.5] * total_chunks
+
+    if len(tension_scores) < total_chunks:
+        tension_scores.extend([0.5] * (total_chunks - len(tension_scores)))
+    elif len(tension_scores) > total_chunks:
+        tension_scores = tension_scores[:total_chunks]
+
+    return tension_scores
+
+
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 新建原因：用具名快照替代函数内临时类，明确标注适配层和候选构建层的边界。
+def _build_timeline_annotation_map(raw_annotations: list[Any]) -> dict[int, TimelineAnnotationSnapshot]:
+    if not raw_annotations:
+        return {}
+
+    annotation_map: dict[int, TimelineAnnotationSnapshot] = {}
+    for row in raw_annotations:
+        annotation_map[row.chunk_id] = TimelineAnnotationSnapshot(
+            chunk_id=row.chunk_id,
+            event_type=row.event_type if row.event_type else "",
+            cliffhanger=row.cliffhanger if row.cliffhanger is not None else False,
+            pivot_moment=row.pivot_moment if row.pivot_moment is not None else False,
+            emotional_valence=row.emotional_valence if row.emotional_valence else "",
+        )
+    return annotation_map
+
+
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 新建原因：把 repository 返回值统一适配成候选构建上下文，降低 build_timeline_candidates 的职责密度。
+def _load_timeline_source_data(
+    run_id: str,
+    chunk_repo: Any,
+    annotation_repo: Any,
+    stats_repo: Any,
+) -> TimelineSourceData:
+    chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
+    if not chunk_texts:
+        raise TimelineDataUnavailableError(f"No chunks found for run {run_id}")
+
+    chunk_ids = [cid for cid, _ in chunk_texts]
+    total_chunks = len(chunk_ids)
+    chunk_id_to_idx = {cid: idx for idx, cid in enumerate(chunk_ids)}
+
+    chunk_curves = stats_repo.fetch_chunk_curves_full(run_id)
+    tension_scores = _normalize_tension_scores(chunk_curves, total_chunks)
+    summary_map = {row.chunk_id: row.summary for row in chunk_repo.fetch_chunk_summaries(run_id)}
+    annotation_map = _build_timeline_annotation_map(annotation_repo.fetch_chunk_annotations_full(run_id))
+
+    return TimelineSourceData(
+        chunk_texts=chunk_texts,
+        chunk_ids=chunk_ids,
+        chunk_id_to_idx=chunk_id_to_idx,
+        total_chunks=total_chunks,
+        tension_scores=tension_scores,
+        summary_map=summary_map,
+        annotation_map=annotation_map,
+    )
+
+
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 新建原因：把“候选构建完成后给节点选择阶段的输入”独立成单独步骤，避免调用方继续拆 7 元组。
+def _build_timeline_selection_inputs(
+    source_data: TimelineSourceData,
+    authority_data: TimelineAuthorityData,
+) -> TimelineSelectionInputs:
+    major_characters = get_major_characters_by_span(authority_data.entity_lifecycles, top_n=3)
+    major_character_entries: list[tuple[str, int]] = []
+    for char in major_characters:
+        if char.first_seen_chunk is None:
+            continue
+        idx = source_data.chunk_id_to_idx.get(char.first_seen_chunk)
+        if idx is not None:
+            major_character_entries.append((char.name, idx))
+
+    relation_break_events: list[tuple[int, RelationChangeEventDTO]] = []
+    for rel_event in authority_data.relation_events:
+        if rel_event.change_type != "断裂":
+            continue
+        idx = source_data.chunk_id_to_idx.get(rel_event.chunk_id)
+        if idx is None:
+            continue
+        from_char = authority_data.entity_name_map.get(rel_event.from_entity_id, str(rel_event.from_entity_id))
+        to_char = authority_data.entity_name_map.get(rel_event.to_entity_id, str(rel_event.to_entity_id))
+        relation_break_events.append(
+            (
+                idx,
+                RelationChangeEventDTO(
+                    from_char=from_char,
+                    to_char=to_char,
+                    relation_type=rel_event.relation_type,
+                    change_type=rel_event.change_type,
+                    evidence=rel_event.evidence,
+                ),
+            )
+        )
+
+    return TimelineSelectionInputs(
+        chunk_ids=source_data.chunk_ids,
+        tension_scores=source_data.tension_scores,
+        major_character_entries=major_character_entries,
+        relation_break_events=relation_break_events,
+    )
+
+
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 新建原因：把候选节点构建独立成纯编排函数，明确它只消费已适配的 source/authority 数据。
+def _build_timeline_candidates_from_context(
+    source_data: TimelineSourceData,
+    authority_data: TimelineAuthorityData,
+) -> list[TimelineCandidate]:
+    chunk_relation_events: dict[int, list[Any]] = {}
+    for relation_event in authority_data.relation_events:
+        chunk_relation_events.setdefault(relation_event.chunk_id, []).append(relation_event)
+
+    major_characters = get_major_characters_by_span(authority_data.entity_lifecycles, top_n=3)
+    major_character_names = {character.name for character in major_characters}
+    candidates: list[TimelineCandidate] = []
+
+    for index, (chunk_id, text) in enumerate(source_data.chunk_texts):
+        progress = index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0
+        annotation = source_data.annotation_map.get(chunk_id)
+        pivot_moment = annotation.pivot_moment if annotation else False
+        cliffhanger = annotation.cliffhanger if annotation else False
+        event_type = annotation.event_type if annotation else ""
+        emotional_valence = annotation.emotional_valence if annotation else ""
+
+        event = source_data.summary_map.get(chunk_id, "")
+        if not event:
+            event = text[:30] + "..." if len(text) > 30 else text
+
+        character_entries: list[str] = []
+        character_exits: list[str] = []
+        for lifecycle in authority_data.entity_lifecycles:
+            if lifecycle.first_seen_chunk == chunk_id:
+                character_entries.append(lifecycle.name)
+            if lifecycle.last_seen_chunk == chunk_id:
+                character_exits.append(lifecycle.name)
+
+        relation_changes: list[RelationChangeEventDTO] = []
+        for relation_event in chunk_relation_events.get(chunk_id, []):
+            from_char = authority_data.entity_name_map.get(
+                relation_event.from_entity_id,
+                str(relation_event.from_entity_id),
+            )
+            to_char = authority_data.entity_name_map.get(
+                relation_event.to_entity_id,
+                str(relation_event.to_entity_id),
+            )
+            relation_changes.append(
+                RelationChangeEventDTO(
+                    from_char=from_char,
+                    to_char=to_char,
+                    relation_type=relation_event.relation_type,
+                    change_type=relation_event.change_type,
+                    evidence=relation_event.evidence,
+                )
+            )
+
+        is_major_character = bool((set(character_entries) | set(character_exits)) & major_character_names)
+        importance_score, level = compute_importance_score(
+            pivot_moment=pivot_moment,
+            cliffhanger=cliffhanger,
+            tension_composite=source_data.tension_scores[index],
+            all_tensions=source_data.tension_scores,
+            event_type=event_type,
+            emotional_valence=emotional_valence,
+            has_relation_change=bool(relation_changes),
+            has_character_entry=bool(character_entries),
+            has_character_exit=bool(character_exits),
+            is_major_character=is_major_character,
+        )
+
+        node_type: TimelineNodeType = "plot"
+        if character_entries and is_major_character:
+            node_type = "character_entry"
+        elif character_exits and is_major_character:
+            node_type = "character_exit"
+        elif relation_changes:
+            node_type = "relation_change"
+
+        tension_percentile = calculate_tension_percentile(
+            source_data.tension_scores[index],
+            source_data.tension_scores,
+        )
+        characters = list(set(character_entries + character_exits))
+        if relation_changes:
+            for relation_change in relation_changes:
+                characters.extend([relation_change.from_char, relation_change.to_char])
+        characters = list(set(characters))
+
+        candidates.append(
+            TimelineCandidate(
+                chunk_id=chunk_id,
+                progress=progress,
+                importance_score=importance_score,
+                level=level,
+                event=event,
+                characters=characters,
+                is_pivot=pivot_moment,
+                is_cliffhanger=cliffhanger,
+                tension_percentile=tension_percentile,
+                node_type=node_type,
+                relation_changes=relation_changes if relation_changes else None,
+                character_entries=character_entries if character_entries else None,
+                character_exits=character_exits if character_exits else None,
+            )
+        )
+
+    return candidates
+
+
+# 2026-04-23，任务：复杂度与耦合审查 P1
+# 修改原因：改为由调用方传入 authority view，并把 contract 校验、数据适配、候选构建、
+# 节点选择输入分拆为独立步骤，去掉指标层对 repo.session 的反向依赖。
 def build_timeline_candidates(
     run_id: str,
     chunk_repo: Any,
     annotation_repo: Any,
     stats_repo: Any,
-) -> tuple[
-    list[TimelineCandidate],
-    list[float],
-    list[int],
-    int,
-    list[TimelinePhaseDTO],
-    list[tuple[str, int]],
-    list[tuple[int, RelationChangeEventDTO]],
-]:
+    timeline_view: TimelineAuthorityView,
+) -> TimelineBuildResult:
     """
     构建时间轴候选节点（共享函数）。
 
@@ -695,205 +979,26 @@ def build_timeline_candidates(
         stats_repo: StatsRepository 实例
 
     Returns:
-        (candidates, tension_scores, chunk_ids, total_chunks, phases,
-         major_character_entries, relation_break_events)
-        调用方可据此继续执行 select_timeline_nodes + convert_to_timeline_nodes。
+        TimelineBuildResult:
+        - candidates: 候选节点
+        - total_chunks: chunk 总数
+        - phases: 时间轴阶段 DTO
+        - selection_inputs: 节点选择阶段需要的独立输入
 
     Raises:
         ValueError: 无 chunk 数据时
     """
-    from src.knowledge.authority import KnowledgeGraphAuthorityService
-
-    # 获取 chunk 文本列表
-    chunk_texts = chunk_repo.fetch_chunk_texts(run_id)
-    if not chunk_texts:
-        raise TimelineDataUnavailableError(f"No chunks found for run {run_id}")
-
-    chunk_ids = [cid for cid, _ in chunk_texts]
-    total_chunks = len(chunk_ids)
-
-    # Fix-3: 预构建 chunk_id → index 映射，O(1) 替代 O(N)
-    chunk_id_to_idx: dict[int, int] = {cid: idx for idx, cid in enumerate(chunk_ids)}
-
-    # 获取张力曲线（使用 tension_composite 而非 tension_proxy）
-    # 原因: tension_proxy 是原始指标均值，缺乏归一化，容易呈单调趋势；
-    #        tension_composite 是经 min-max 归一化后的综合分数，波动性更好，
-    #        更适合用于四阶段划分和峰值检测。
-    chunk_curves = stats_repo.fetch_chunk_curves_full(run_id)
-    tension_scores = (
-        [row.tension_composite if row and row.tension_composite is not None else 0.5 for row in chunk_curves]
-        if chunk_curves
-        else [0.5] * total_chunks
+    source_data = _load_timeline_source_data(run_id, chunk_repo, annotation_repo, stats_repo)
+    authority_data = _adapt_timeline_authority_view(timeline_view)
+    timeline_phases = convert_to_timeline_phases(
+        compute_four_phases(source_data.tension_scores, source_data.chunk_ids)
     )
+    selection_inputs = _build_timeline_selection_inputs(source_data, authority_data)
+    candidates = _build_timeline_candidates_from_context(source_data, authority_data)
 
-    # 确保张力数据长度匹配
-    if len(tension_scores) < total_chunks:
-        tension_scores.extend([0.5] * (total_chunks - len(tension_scores)))
-    elif len(tension_scores) > total_chunks:
-        tension_scores = tension_scores[:total_chunks]
-
-    # 获取分块摘要
-    summary_map = {row.chunk_id: row.summary for row in chunk_repo.fetch_chunk_summaries(run_id)}
-
-    # 获取标注数据
-    raw_annotations = annotation_repo.fetch_chunk_annotations_full(run_id)
-
-    class Annotation:
-        __slots__ = ("chunk_id", "event_type", "cliffhanger", "pivot_moment", "emotional_valence")
-
-        def __init__(self, row):
-            self.chunk_id = row.chunk_id
-            self.event_type = row.event_type if row.event_type else ""
-            self.cliffhanger = row.cliffhanger if row.cliffhanger is not None else False
-            self.pivot_moment = row.pivot_moment if row.pivot_moment is not None else False
-            self.emotional_valence = row.emotional_valence if row.emotional_valence else ""
-
-    annotation_map = {ann.chunk_id: ann for ann in [Annotation(r) for r in raw_annotations]} if raw_annotations else {}
-
-    authority_service = KnowledgeGraphAuthorityService.from_session(chunk_repo.session)
-    timeline_view = authority_service.build_timeline_view(run_id)
-    # Timeline is pinned to the authority-owned shared contract instead of raw graph rows.
-    entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
-
-    # 计算四阶段划分
-    phases = compute_four_phases(tension_scores, chunk_ids)
-    timeline_phases = convert_to_timeline_phases(phases)
-
-    # 获取主要角色（基于活跃跨度）
-    major_characters = get_major_characters_by_span(entity_lifecycles, top_n=3)
-    major_character_entries: list[tuple[str, int]] = []
-    for char in major_characters:
-        if char.first_seen_chunk is not None:
-            idx = chunk_id_to_idx.get(char.first_seen_chunk)
-            if idx is not None:
-                major_character_entries.append((char.name, idx))
-
-    # 获取关系断裂事件
-    relation_break_events: list[tuple[int, RelationChangeEventDTO]] = []
-    for rel_event in relation_events:
-        if rel_event.change_type == "断裂":
-            idx = chunk_id_to_idx.get(rel_event.chunk_id)
-            if idx is None:
-                continue
-            from_char = entity_name_map.get(rel_event.from_entity_id, str(rel_event.from_entity_id))
-            to_char = entity_name_map.get(rel_event.to_entity_id, str(rel_event.to_entity_id))
-            relation_break_events.append(
-                (
-                    idx,
-                    RelationChangeEventDTO(
-                        from_char=from_char,
-                        to_char=to_char,
-                        relation_type=rel_event.relation_type,
-                        change_type=rel_event.change_type,
-                        evidence=rel_event.evidence,
-                    ),
-                )
-            )
-
-    # 预构建 chunk_id → relation_events 映射（避免 O(E) 内层循环）
-    chunk_relation_events: dict[int, list[Any]] = {}
-    for event_data in relation_events:
-        chunk_relation_events.setdefault(event_data.chunk_id, []).append(event_data)
-
-    # 创建候选节点
-    candidates: list[TimelineCandidate] = []
-    for i, (chunk_id, text) in enumerate(chunk_texts):
-        progress = i / (total_chunks - 1) if total_chunks > 1 else 0.0
-
-        ann = annotation_map.get(chunk_id)
-        pivot_moment = ann.pivot_moment if ann else False
-        cliffhanger = ann.cliffhanger if ann else False
-        event_type = ann.event_type if ann else ""
-        emotional_valence = ann.emotional_valence if ann else ""
-
-        event = summary_map.get(chunk_id, "")
-        if not event:
-            event = text[:30] + "..." if len(text) > 30 else text
-
-        # 检查是否有角色登场/退场
-        character_entries: list[str] = []
-        character_exits: list[str] = []
-        for char in entity_lifecycles:
-            if char.first_seen_chunk == chunk_id:
-                character_entries.append(char.name)
-            if char.last_seen_chunk == chunk_id:
-                character_exits.append(char.name)
-
-        # 检查是否为关系变化节点
-        relation_changes: list[RelationChangeEventDTO] = []
-        for event_data in chunk_relation_events.get(chunk_id, []):
-            from_char = entity_name_map.get(event_data.from_entity_id, str(event_data.from_entity_id))
-            to_char = entity_name_map.get(event_data.to_entity_id, str(event_data.to_entity_id))
-            relation_changes.append(
-                RelationChangeEventDTO(
-                    from_char=from_char,
-                    to_char=to_char,
-                    relation_type=event_data.relation_type,
-                    change_type=event_data.change_type,
-                    evidence=event_data.evidence,
-                )
-            )
-
-        # 检查是否为主要角色相关
-        is_major_character = bool((set(character_entries) | set(character_exits)) & {c.name for c in major_characters})
-
-        # 计算重要性分数
-        importance_score, level = compute_importance_score(
-            pivot_moment=pivot_moment,
-            cliffhanger=cliffhanger,
-            tension_composite=tension_scores[i],
-            all_tensions=tension_scores,
-            event_type=event_type,
-            emotional_valence=emotional_valence,
-            has_relation_change=bool(relation_changes),
-            has_character_entry=bool(character_entries),
-            has_character_exit=bool(character_exits),
-            is_major_character=is_major_character,
-        )
-
-        # 确定节点类型
-        node_type: TimelineNodeType = "plot"
-        if character_entries and is_major_character:
-            node_type = "character_entry"
-        elif character_exits and is_major_character:
-            node_type = "character_exit"
-        elif relation_changes:
-            node_type = "relation_change"
-
-        # 计算张力百分位
-        tension_percentile = calculate_tension_percentile(tension_scores[i], tension_scores)
-
-        # 获取涉及的角色
-        characters = list(set(character_entries + character_exits))
-        if relation_changes:
-            for rc in relation_changes:
-                characters.extend([rc.from_char, rc.to_char])
-        characters = list(set(characters))
-
-        candidates.append(
-            TimelineCandidate(
-                chunk_id=chunk_id,
-                progress=progress,
-                importance_score=importance_score,
-                level=level,
-                event=event,
-                characters=characters,
-                is_pivot=pivot_moment,
-                is_cliffhanger=cliffhanger,
-                tension_percentile=tension_percentile,
-                node_type=node_type,
-                relation_changes=relation_changes if relation_changes else None,
-                character_entries=character_entries if character_entries else None,
-                character_exits=character_exits if character_exits else None,
-            )
-        )
-
-    return (
-        candidates,
-        tension_scores,
-        chunk_ids,
-        total_chunks,
-        timeline_phases,
-        major_character_entries,
-        relation_break_events,
+    return TimelineBuildResult(
+        candidates=candidates,
+        total_chunks=source_data.total_chunks,
+        phases=timeline_phases,
+        selection_inputs=selection_inputs,
     )

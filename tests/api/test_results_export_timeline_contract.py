@@ -24,6 +24,7 @@ from src.knowledge.authority import (
     GraphPageSummary,
     GraphQualitySignals,
     GraphSharedSummary,
+    KnowledgeGraphAuthorityService,
     RelationEvent,
     serialize_graph_report_signals,
 )
@@ -43,12 +44,14 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     chunk_repo = ChunkRepository(db_session)
     annotation_repo = AnnotationRepository(db_session)
     stats_repo = StatsRepository(db_session)
+    timeline_view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(scenario.run_id)
 
     timeline_data = _fetch_timeline_data(
         run_id=scenario.run_id,
         chunk_repo=chunk_repo,
         annotation_repo=annotation_repo,
         stats_repo=stats_repo,
+        timeline_view=timeline_view,
     )
 
     assert timeline_data is not None
@@ -144,6 +147,7 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
             chunk_repo=chunk_repo,
             annotation_repo=annotation_repo,
             stats_repo=stats_repo,
+            timeline_view=MagicMock(),
         )
 
 
