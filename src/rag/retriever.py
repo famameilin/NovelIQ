@@ -57,6 +57,7 @@ from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
 from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
+from src.rag.mention_rerank import rerank_mention_level3_results
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -215,6 +216,9 @@ class DisambigContextProvider:
                 exclude_chunk_ids=exclude_chunk_ids,
                 max_chunk_id=max_chunk_id,
                 mention_queries=mention_queries,
+                active_entity_names=self._extract_active_entity_names(bundle),
+                candidate_names=set(bundle.requested_names),
+                current_chunk=current_chunk,
             )
             bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
             bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
@@ -228,19 +232,29 @@ class DisambigContextProvider:
         exclude_chunk_ids: list[int] | None,
         max_chunk_id: int | None,
         mention_queries: list[MentionEvidenceQuery] | None,
+        active_entity_names: set[str],
+        candidate_names: set[str],
+        current_chunk: int | None,
     ) -> list[SimilarChunkRow]:
         """
         创建时间: 2026-04-23
         任务: level3-mention-retrieval
         说明: 统一执行 chunk query 与 mention query，并按 chunk_id 去重后限制证据预算。
+
+        修改时间: 2026-04-24
+        任务: level3-mention-rerank
+        修改说明: mention 检索使用更大的召回池，并在去重前应用可解释的确定性 rerank。
         """
         collected: list[SimilarChunkRow] = []
+        has_mention_queries = bool(mention_queries)
+        retrieval_top_k = self._level3_pool_k() if has_mention_queries else None
 
         for mention_query in mention_queries or []:
-            results = await self._level3.search_similar_chunks(
+            results = await self._search_level3_query(
                 mention_query.query_text,
                 exclude_chunk_ids=exclude_chunk_ids,
                 max_chunk_id=max_chunk_id,
+                top_k=retrieval_top_k,
             )
             collected.extend(
                 replace(
@@ -255,20 +269,58 @@ class DisambigContextProvider:
 
         if context_text:
             collected.extend(
-                await self._level3.search_similar_chunks(
+                await self._search_level3_query(
                     context_text,
                     exclude_chunk_ids=exclude_chunk_ids,
                     max_chunk_id=max_chunk_id,
+                    top_k=retrieval_top_k,
                 )
             )
 
+        if has_mention_queries:
+            collected = rerank_mention_level3_results(
+                collected,
+                active_entity_names=active_entity_names,
+                candidate_names=candidate_names,
+                current_chunk=current_chunk,
+            )
         return self._dedupe_level3_results(collected)
+
+    async def _search_level3_query(
+        self,
+        query_text: str,
+        *,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        top_k: int | None,
+    ) -> list[SimilarChunkRow]:
+        """
+        创建时间: 2026-04-24
+        任务: level3-mention-rerank
+        说明: 包装 Level3 query 调用；仅在 mention retrieval 需要扩大召回池时传入 top_k。
+        """
+        if top_k is None:
+            return await self._level3.search_similar_chunks(
+                query_text,
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+            )
+        return await self._level3.search_similar_chunks(
+            query_text,
+            exclude_chunk_ids=exclude_chunk_ids,
+            max_chunk_id=max_chunk_id,
+            top_k=top_k,
+        )
 
     def _dedupe_level3_results(self, results: list[SimilarChunkRow]) -> list[SimilarChunkRow]:
         """
         创建时间: 2026-04-23
         任务: level3-mention-retrieval
         说明: 对多 query 的 Level3 结果按 chunk_id 去重；同分时优先保留 mention 来源，方便后续观察。
+
+        修改时间: 2026-04-24
+        任务: level3-mention-rerank
+        修改说明: 若存在 rerank_score，则按 rerank 后分数去重和排序；否则保持原 similarity 语义。
         """
         by_chunk_id: dict[int, SimilarChunkRow] = {}
         for result in results:
@@ -276,13 +328,48 @@ class DisambigContextProvider:
             if existing is None:
                 by_chunk_id[result.chunk_id] = result
                 continue
-            if result.similarity > existing.similarity:
+            if self._level3_rank_score(result) > self._level3_rank_score(existing):
                 by_chunk_id[result.chunk_id] = result
-            elif result.similarity == existing.similarity and existing.query_kind != "mention":
+            elif (
+                self._level3_rank_score(result) == self._level3_rank_score(existing)
+                and existing.query_kind != "mention"
+            ):
                 by_chunk_id[result.chunk_id] = result
 
-        ordered = sorted(by_chunk_id.values(), key=lambda item: item.similarity, reverse=True)
+        ordered = sorted(by_chunk_id.values(), key=self._level3_rank_score, reverse=True)
         return ordered[: self._level3_top_k]
+
+    def _level3_rank_score(self, result: SimilarChunkRow) -> float:
+        """
+        创建时间: 2026-04-24
+        任务: level3-mention-rerank
+        说明: 统一读取 Level3 排序分，确保 rerank 与旧 similarity 排序路径共用同一比较逻辑。
+        """
+        return result.rerank_score if result.rerank_score is not None else result.similarity
+
+    def _level3_pool_k(self) -> int:
+        """
+        创建时间: 2026-04-24
+        任务: level3-mention-rerank
+        说明: mention rerank 先扩大召回池，再裁剪回 prompt top_k，避免只重排过小候选集。
+        """
+        return max(self._level3_top_k * 4, 20)
+
+    def _extract_active_entity_names(self, bundle: EvidenceBundle) -> set[str]:
+        """
+        创建时间: 2026-04-24
+        任务: level3-mention-rerank
+        说明: 从 Level2 evidence 中提取活跃实体名，作为 rerank 加权输入，不额外查询数据库。
+        """
+        names: set[str] = set()
+        for item in bundle.local_evidence:
+            if item.evidence_type != "active_entity":
+                continue
+            metadata_name = item.metadata.get("name")
+            name = str(metadata_name or item.content).strip()
+            if name:
+                names.add(name)
+        return names
 
     def is_level3_available(self) -> bool:
         """检查 Level 3 是否可用"""
