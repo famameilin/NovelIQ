@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import os
+import shutil
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiofiles
 from loguru import logger
@@ -29,9 +31,15 @@ from sqlalchemy.orm import Session
 
 from src.api.exceptions import FileStorageError, InvalidFileError, NovelNotFoundError
 from src.storage.db import get_session
-from src.storage.id_mapping import generate_task_id
+from src.storage.id_mapping import generate_task_id, run_id_to_task_id
 from src.storage.models import Novel
 from src.storage.repositories import RunRepository
+
+if TYPE_CHECKING:
+    from src.api.services.task_manager import TaskManager
+
+
+TASK_DELETE_BLOCKING_STATUSES = ("pending", "running", "cancelling")
 
 
 class NovelService:
@@ -40,6 +48,8 @@ class NovelService:
     def __init__(self, upload_dir: Path):
         self.upload_dir = upload_dir
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir = Path("logs")
+        self.outputs_dir = Path("outputs")
 
     def _scan_existing_novels(self) -> None:
         """从数据库加载小说列表（保留用于初始化）"""
@@ -311,32 +321,166 @@ class NovelService:
             logger.warning(f"Failed to get novel count from database: {e}")
             return 0
 
-    def delete_novel(self, novel_id: str, session: Session | None = None) -> bool:
+    def _delete_novel_source_file(self, file_path: str | None) -> None:
         """
-        删除小说及其相关数据
+        删除小说源文件。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-novel-task-delete-consistency
+        说明: 仅在文件真实存在时删除，缺失文件不报错；
+              若遇到真实 IO 异常则继续上抛，避免把磁盘问题静默吞掉。
+        """
+        if not file_path:
+            return
+
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Novel source file deleted: {file_path}")
+
+    def _delete_task_artifacts(self, task_id: str, run_id: str) -> None:
+        """
+        删除任务对应的日志与导出文件。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-novel-task-delete-consistency
+        说明: 输出文件按 task_id 命名，日志目录按 run_id 命名；
+              为兼容历史短 run_id 目录，run_id != task_id 时会额外检查短目录。
+        """
+        output_file = self.outputs_dir / f"{task_id}.json"
+        if output_file.exists():
+            output_file.unlink()
+            logger.info(f"Deleted task output file: {output_file}")
+
+        candidate_log_dirs = [self.logs_dir / run_id]
+        if run_id != task_id:
+            candidate_log_dirs.append(self.logs_dir / task_id)
+
+        for log_dir in candidate_log_dirs:
+            if log_dir.exists():
+                shutil.rmtree(log_dir)
+                logger.info(f"Deleted task log directory: {log_dir}")
+
+    def _collect_novel_delete_context(
+        self,
+        novel_id: str,
+        session: Session | None = None,
+    ) -> tuple[Novel, list[dict]]:
+        """
+        收集删除小说前需要的上下文。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-novel-task-delete-consistency
+        说明: 先一次性读出小说记录与其全部任务，后续删除阶段不再靠猜测接口状态。
         """
         with self._get_session(session) as sess:
             novel = sess.get(Novel, novel_id)
             if not novel:
                 raise NovelNotFoundError(f"小说不存在: {novel_id}")
 
-            file_path = novel.file_path
-            if file_path and os.path.exists(file_path):
-                os.remove(file_path)
+            runs = RunRepository(sess).get_runs_by_novel(novel_id)
+            return novel, runs
 
-            sess.delete(novel)
-            logger.info(f"Novel deleted: {novel_id}")
+    def _ensure_novel_tasks_deletable(self, novel_id: str, runs: list[dict]) -> None:
+        """
+        校验小说下的任务是否都允许删除。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-novel-task-delete-consistency
+        说明: novel 级删除沿用 task 删除状态机，不允许绕过 pending/running/cancelling 护栏。
+        """
+        for run in runs:
+            status = str(run.get("status", ""))
+            if status in TASK_DELETE_BLOCKING_STATUSES:
+                task_id = run_id_to_task_id(str(run["run_id"]))
+                raise ValueError(
+                    f"小说 {novel_id} 下的任务 {task_id} 正在{status}中，请先取消任务后再删除小说"
+                )
+
+    def _delete_run_data(self, run_id: str, session: Session | None = None) -> None:
+        """
+        删除单个 run 的数据库数据与文件产物。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-novel-task-delete-consistency
+        说明: DB 删除仍复用 RunRepository.delete_run；文件侧统一删除 outputs/task_id.json
+              与 logs/run_id 目录，兼容历史 full run_id 日志目录。
+        """
+        task_id = run_id_to_task_id(run_id)
+
+        with self._get_session(session) as sess:
+            RunRepository(sess).delete_run(run_id)
+
+        self._delete_task_artifacts(task_id, run_id)
+        logger.info(f"Run deleted from database and artifacts cleaned: run_id={run_id}, task_id={task_id}")
+
+    def delete_novel(
+        self,
+        novel_id: str,
+        session: Session | None = None,
+        task_manager: TaskManager | None = None,
+    ) -> bool:
+        """
+        级联删除小说及其全部任务数据。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-novel-task-delete-consistency
+        修改内容: 删除 novel 时先删除其全部 task 的数据库数据与文件产物，
+                  再删除 novels 记录与源文件，避免继续产生 orphan task。
+        """
+        novel, runs = self._collect_novel_delete_context(novel_id, session)
+        self._ensure_novel_tasks_deletable(novel_id, runs)
+
+        for run in runs:
+            task_id = run_id_to_task_id(str(run["run_id"]))
+            self.delete_task(task_id, task_manager=task_manager)
+
+        self._delete_novel_source_file(novel.file_path)
+
+        with self._get_session(session) as sess:
+            refreshed_novel = sess.get(Novel, novel_id)
+            if not refreshed_novel:
+                raise NovelNotFoundError(f"小说不存在: {novel_id}")
+            sess.delete(refreshed_novel)
+            logger.info(f"Novel deleted with cascaded task cleanup: {novel_id}, deleted_task_count={len(runs)}")
             return True
 
-    def delete_task(self, task_id: str, session: Session | None = None) -> bool:
-        """删除任务"""
+    def delete_task(
+        self,
+        task_id: str,
+        session: Session | None = None,
+        task_manager: TaskManager | None = None,
+    ) -> bool:
+        """
+        删除任务及其数据库/文件产物。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-novel-task-delete-consistency
+        修改内容: 在原有 run 级数据库删除基础上，补齐 logs 与 outputs 文件清理，
+                  并统一从服务层驱动执行缓存移除。
+        """
+        run_id: str | None = None
         with self._get_session(session) as sess:
             run_repo = RunRepository(sess)
             run = run_repo.get_run_by_run_id_prefix(task_id)
-
             if run:
-                run_id = run["run_id"]
-                run_repo.delete_run(run_id)
-                logger.info(f"Run deleted from database: {run_id}")
+                run_id = str(run["run_id"])
+
+        if task_manager is not None:
+            # 中文注释：TaskManager 只负责当前进程的执行缓存，删除 task 时顺手清掉缓存，
+            # 避免 DB 已删除但本进程里还残留已终态任务对象。
+            task_manager.delete_task(task_id)
+
+        if run_id is not None:
+            self._delete_run_data(run_id, session=session)
+        else:
+            self._delete_task_artifacts(task_id, task_id)
+            logger.info(f"Task artifacts cleaned without DB run record: task_id={task_id}")
 
         return True
