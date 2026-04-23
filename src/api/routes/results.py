@@ -34,10 +34,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db_session, get_novel_service, resolve_run_id
+from src.api.dependencies import get_db_session, get_metrics_service, get_novel_service, resolve_run_id
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ResultsWriteResponse
-from src.api.routes.results_converters import _convert_aggregate_result
 from src.api.routes.results_fetchers import (
     _fetch_characters,
     _fetch_chunk_curves,
@@ -46,10 +45,10 @@ from src.api.routes.results_fetchers import (
     _fetch_graph_snapshot,
     _fetch_topics,
 )
+from src.api.services.metrics_service import MetricsService
 from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
 from src.config import settings
-from src.metrics.aggregate import aggregate_all_metrics
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -314,14 +313,10 @@ async def get_narrative_structure(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
+    metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取叙事结构指标"""
-    ann_repo = AnnotationRepository(session)
-    chunk_repo = ChunkRepository(session)
-    stats_repo = StatsRepository(session)
-    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-    narrative_structure, _, _, _, _ = _convert_aggregate_result(result)
-    return narrative_structure
+    return metrics_service.get_narrative_structure(run_id, session)
 
 
 @router.get("/{novel_id}/metrics/emotion-stats")
@@ -329,14 +324,10 @@ async def get_emotion_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
+    metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取情感统计指标"""
-    ann_repo = AnnotationRepository(session)
-    chunk_repo = ChunkRepository(session)
-    stats_repo = StatsRepository(session)
-    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-    _, emotion_stats, _, _, _ = _convert_aggregate_result(result)
-    return emotion_stats
+    return metrics_service.get_emotion_stats(run_id, session)
 
 
 @router.get("/{novel_id}/metrics/character-stats")
@@ -344,14 +335,10 @@ async def get_character_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
+    metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取角色统计指标"""
-    ann_repo = AnnotationRepository(session)
-    chunk_repo = ChunkRepository(session)
-    stats_repo = StatsRepository(session)
-    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-    _, _, character_stats, _, _ = _convert_aggregate_result(result)
-    return character_stats
+    return metrics_service.get_character_stats(run_id, session)
 
 
 @router.get("/{novel_id}/metrics/style-stats")
@@ -359,14 +346,10 @@ async def get_style_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
+    metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取风格统计指标"""
-    ann_repo = AnnotationRepository(session)
-    chunk_repo = ChunkRepository(session)
-    stats_repo = StatsRepository(session)
-    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-    _, _, _, style_stats, _ = _convert_aggregate_result(result)
-    return style_stats
+    return metrics_service.get_style_stats(run_id, session)
 
 
 @router.get("/{novel_id}/metrics/culture-stats")
@@ -374,11 +357,7 @@ async def get_culture_stats(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
+    metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取文化元素统计指标"""
-    ann_repo = AnnotationRepository(session)
-    chunk_repo = ChunkRepository(session)
-    stats_repo = StatsRepository(session)
-    result = aggregate_all_metrics(run_id, ann_repo, chunk_repo, stats_repo)
-    _, _, _, _, culture_stats = _convert_aggregate_result(result)
-    return culture_stats
+    return metrics_service.get_culture_stats(run_id, session)
