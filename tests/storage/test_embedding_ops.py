@@ -7,6 +7,7 @@ from src.storage.models import ChunkEmbedding, ParagraphEmbedding
 from src.storage.repositories.chunk.embedding_ops import (
     ParagraphEmbeddingRow,
     get_chunk_embedding,
+    get_incomplete_paragraph_embedding_chunk_ids,
     insert_chunk_embeddings,
     insert_paragraph_embeddings,
     search_similar_chunks,
@@ -196,3 +197,24 @@ def test_search_similar_paragraphs_limits_sql_to_candidate_chunks() -> None:
     assert [row.chunk_id for row in results] == [2]
     assert results[0].paragraph_index == 1
     assert results[0].paragraph_text == "灰衣人站在门外。"
+
+
+def test_get_incomplete_paragraph_embedding_chunk_ids_combines_missing_and_gapped_rows() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: level3-paragraph-readiness
+    说明: readiness 缺失检测需要同时报告完全缺 paragraph row 与 paragraph_index 不连续的 chunk。
+    """
+    session = MagicMock()
+    session.execute.side_effect = [
+        MagicMock(all=MagicMock(return_value=[SimpleNamespace(chunk_id=2)])),
+        MagicMock(all=MagicMock(return_value=[SimpleNamespace(chunk_id=5)])),
+    ]
+
+    results = get_incomplete_paragraph_embedding_chunk_ids(session, run_id="run-1")
+
+    assert results == [2, 5]
+    missing_statement = session.execute.call_args_list[0].args[0]
+    gapped_statement = session.execute.call_args_list[1].args[0]
+    assert "NOT (EXISTS" in str(missing_statement)
+    assert "HAVING" in str(gapped_statement)

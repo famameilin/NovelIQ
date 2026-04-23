@@ -70,7 +70,13 @@ class Level3VectorEvidence:
         self._setup_checked = False
 
     async def ensure_level3_ready(self) -> None:
-        """执行 Level3 readiness 检查。"""
+        """
+        执行 Level3 readiness 检查。
+
+        修改时间: 2026-04-24
+        任务: level3-paragraph-readiness
+        修改说明: paragraph rerank 已是 Level3 必需能力，启动检查必须同时校验 paragraph schema、数据存在与完整性。
+        """
         if self._setup_checked:
             return
         if self._embedding_client is None or self._session is None or self._run_id is None:
@@ -82,15 +88,32 @@ class Level3VectorEvidence:
                 f"Level 3 embedding dimension mismatch: configured={self._expected_embedding_dim}, actual={actual_dim}"
             )
 
-        from src.storage.repositories.chunk import has_embeddings
-        from src.storage.vector_schema import validate_chunk_embeddings_schema
+        from src.storage.repositories.chunk import (
+            get_incomplete_paragraph_embedding_chunk_ids,
+            has_embeddings,
+            has_paragraph_embeddings,
+        )
+        from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
 
         validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
         if not has_embeddings(self._session, self._run_id):
             raise Level3NotReadyError(f"Level 3 embeddings not found for run_id={self._run_id}")
 
+        validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        if not has_paragraph_embeddings(self._session, self._run_id):
+            raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
+        incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
+        if incomplete_chunk_ids:
+            preview_ids = incomplete_chunk_ids[:10]
+            raise Level3NotReadyError(
+                "Level 3 paragraph embeddings incomplete for "
+                f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(incomplete_chunk_ids)}"
+            )
+
         self._available = True
+        self._paragraph_rerank_available = True
         self._setup_checked = True
+        logger.info("Level3 readiness passed with chunk and paragraph embeddings for run_id={}", self._run_id)
 
     def is_available(self) -> bool:
         """检查 Level3 是否可用。"""
@@ -105,13 +128,31 @@ class Level3VectorEvidence:
             self._available = False
             return False
 
-        from src.storage.repositories.chunk import has_embeddings
+        from src.storage.repositories.chunk import (
+            get_incomplete_paragraph_embedding_chunk_ids,
+            has_embeddings,
+            has_paragraph_embeddings,
+        )
 
-        self._available = has_embeddings(self._session, self._run_id)
+        chunk_ready = has_embeddings(self._session, self._run_id)
+        paragraph_ready = has_paragraph_embeddings(self._session, self._run_id)
+        incomplete_chunk_ids = (
+            get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
+            if chunk_ready and paragraph_ready
+            else []
+        )
+        self._available = chunk_ready and paragraph_ready and not incomplete_chunk_ids
         if self._available:
-            logger.debug("Level3VectorEvidence: available, embeddings found in database")
+            self._paragraph_rerank_available = True
+            logger.debug("Level3VectorEvidence: available, chunk and paragraph embeddings found in database")
         else:
-            logger.debug("Level3VectorEvidence: no embeddings in database")
+            self._paragraph_rerank_available = False
+            logger.debug(
+                "Level3VectorEvidence unavailable: chunk_ready={} paragraph_ready={} incomplete_chunks={}",
+                chunk_ready,
+                paragraph_ready,
+                incomplete_chunk_ids[:10],
+            )
         return self._available
 
     async def search_similar_chunks(
@@ -163,11 +204,13 @@ class Level3VectorEvidence:
             )
             results = self._rerank_with_paragraphs(query_embedding, results)
             logger.debug(
-                "Level3VectorEvidence: found {} similar chunks for query (len={})",
+                "Level3VectorEvidence: found {} similar chunks for query (len={}) after paragraph rerank",
                 len(results),
                 len(query_text),
             )
             return results
+        except Level3NotReadyError:
+            raise
         except Exception as exc:
             logger.error("Level3VectorEvidence: search failed: {}", exc)
             return []
@@ -178,29 +221,32 @@ class Level3VectorEvidence:
 
         创建时间: 2026-04-24
         任务: level3-paragraph-rerank
-        说明: paragraph embeddings 是 chunk 召回后的增强层；缺失时明确记录并回退 chunk 级 evidence。
+        修改时间: 2026-04-24
+        任务: level3-paragraph-readiness
+        修改说明: paragraph rerank 不再是可选增强；缺失时抛出 readiness 错误。
         """
         if self._paragraph_rerank_available is not None:
             return self._paragraph_rerank_available
         if self._session is None or self._run_id is None:
-            self._paragraph_rerank_available = False
-            return False
+            raise Level3NotReadyError("Level 3 paragraph rerank requires session and run_id")
 
-        from src.storage.repositories.chunk import has_paragraph_embeddings
+        from src.storage.repositories.chunk import (
+            get_incomplete_paragraph_embedding_chunk_ids,
+            has_paragraph_embeddings,
+        )
         from src.storage.vector_schema import validate_paragraph_embeddings_schema
 
-        try:
-            validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
-            self._paragraph_rerank_available = has_paragraph_embeddings(self._session, self._run_id)
-        except Exception as exc:
-            logger.warning("Level3 paragraph rerank unavailable, fallback to chunk evidence: {}", exc)
-            self._paragraph_rerank_available = False
-
-        if not self._paragraph_rerank_available:
-            logger.warning(
-                "Level3 paragraph embeddings not found for run_id={}, fallback to chunk evidence",
-                self._run_id,
+        validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        if not has_paragraph_embeddings(self._session, self._run_id):
+            raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
+        incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
+        if incomplete_chunk_ids:
+            raise Level3NotReadyError(
+                "Level 3 paragraph embeddings incomplete for "
+                f"run_id={self._run_id}, chunk_ids={incomplete_chunk_ids[:10]}, total={len(incomplete_chunk_ids)}"
             )
+
+        self._paragraph_rerank_available = True
         return self._paragraph_rerank_available
 
     def _rerank_with_paragraphs(
@@ -232,7 +278,10 @@ class Level3VectorEvidence:
             similarity_threshold=self._similarity_threshold,
         )
         if not paragraph_results:
-            logger.warning("Level3 paragraph rerank found no paragraph matches; keeping chunk order")
+            logger.info(
+                "Level3 paragraph rerank found no paragraph matches; keeping chunk order chunk_candidates={}",
+                len(chunk_results),
+            )
             return chunk_results
 
         best_paragraph_by_chunk: dict[int, SimilarParagraphRow] = {}
@@ -260,4 +309,11 @@ class Level3VectorEvidence:
                 )
             )
 
+        matched_count = sum(1 for result in reranked if result.local_preview)
+        logger.info(
+            "Level3 paragraph rerank applied: chunk_candidates={} paragraph_matches={} reranked_chunks={}",
+            len(chunk_results),
+            len(paragraph_results),
+            matched_count,
+        )
         return sorted(reranked, key=lambda item: item.similarity, reverse=True)[: self._top_k]
