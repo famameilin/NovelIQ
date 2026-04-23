@@ -18,10 +18,12 @@ import { getCSSColorVar } from "@/lib/theme";
 import type {
   GraphNode,
   GraphEdge,
+} from "@/api/types";
+import type {
   GraphNodeObject,
   ForceGraphProps,
   ForceGraphHandle,
-} from "@/api/types";
+} from "./forceGraphTypes";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
