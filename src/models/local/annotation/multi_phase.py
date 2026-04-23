@@ -33,6 +33,10 @@
 修改者: Codex
 任务: p2-multi-phase-shared-context
 修改内容: 抽出并行/串行共享的 phase 事件发送与参数透传逻辑，减少两条执行路径重复代码
+
+修改时间: 2026-04-23
+任务: annotation-projector-runtime-landing
+修改内容: Phase2 伏笔结果归一化委托 foreshadowing projector，调度层不再承担输出投影。
 """
 
 from __future__ import annotations
@@ -45,13 +49,13 @@ from loguru import logger
 
 from src.api.models.events import StreamEvent
 from src.config import settings
-from src.models.local.parser import validate_foreshadowing_result
 
 from .context import MultiPhaseAnnotationResult
 from .phase1 import annotate_chunk_phase1
 from .phase2 import annotate_chunk_phase2
 from .phase3 import compute_dialogue_lengths_with_llm, extract_dialogues_from_text
 from .phase4 import annotate_chunk_phase4
+from .projectors.foreshadowing import normalize_foreshadowing_result as project_foreshadowing_result
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
@@ -460,19 +464,12 @@ def _normalize_foreshadowing_result(
     创建时间: 2026-03-27
     创建者: TraeAI
     任务: refactor-multi-phase-extract-private-functions
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 保留兼容入口，实际校验与归一化委托 foreshadowing projector。
     """
-    if not foreshadowing:
-        return None
-
-    if not validate_foreshadowing_result(foreshadowing, text):
-        return None
-
-    logger.debug(
-        "Foreshadowing found chunk_id={} type={}",
-        chunk_id,
-        foreshadowing.foreshadowing_type,
-    )
-    return foreshadowing
+    return project_foreshadowing_result(foreshadowing, text, chunk_id)
 
 
 def _build_multi_phase_result(
