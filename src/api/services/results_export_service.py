@@ -14,8 +14,8 @@ from typing import Any
 
 from loguru import logger
 
-from src.api.routes.results_converters import build_aggregate_metrics_contract, validate_aggregate_metrics_contract
-from src.api.routes.results_fetchers import (
+from src.api.services.results_contracts import build_aggregate_metrics_contract, validate_aggregate_metrics_contract
+from src.api.services.results_queries import (
     _fetch_character_relations,
     _fetch_characters,
     _fetch_chunk_annotations,
