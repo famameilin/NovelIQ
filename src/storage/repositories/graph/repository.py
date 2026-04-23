@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +14,73 @@ from src.storage.models import (
     GraphRelationEvent,
 )
 from src.storage.repositories.base import BaseRepository
+
+
+@dataclass(frozen=True)
+class ActiveEntityRow:
+    """GraphRepository 活跃实体查询 DTO。
+
+    创建时间: 2026-04-23
+    任务: P0-graph-repository-dto-boundary
+    说明: 替代 raw dict 返回值，让下游通过具名字段消费 graph repository 边界。
+    """
+
+    entity_id: int | None
+    name: str
+    role: str | None
+    entity_type: str
+    status: str
+    last_action: str
+    last_emotion: str
+    emotion_score: str | None
+    chunk_id: int | None
+
+
+@dataclass(frozen=True)
+class CurrentRelationRow:
+    """GraphRepository 当前关系查询 DTO。
+
+    创建时间: 2026-04-23
+    任务: P0-graph-repository-dto-boundary
+    说明: 明确当前关系快照的字段集合，避免下游依赖 dict[str, Any] 形状。
+    """
+
+    relation_id: int | None
+    from_entity_id: int
+    to_entity_id: int
+    from_name: str
+    to_name: str
+    relation_type: str
+    first_seen_chunk: int | None
+    last_seen_chunk: int | None
+    change_count: int
+    support_count: int
+    latest_event_id: int | None
+    tension_index: float | None
+    is_active: bool
+
+
+@dataclass(frozen=True)
+class RelationEventRow:
+    """GraphRepository 关系事件查询 DTO。
+
+    创建时间: 2026-04-23
+    任务: P0-graph-repository-dto-boundary
+    说明: 让关系事件历史以具名字段跨 repository 边界传递。
+    """
+
+    relation_event_id: int
+    chunk_id: int
+    from_entity_id: int
+    to_entity_id: int
+    from_name: str
+    to_name: str
+    relation_type: str
+    change_type: str
+    evidence: str | None
+    confidence: float | None
+    source_relation_row_id: int | None
+    directionality: str | None
 
 
 class GraphRepository(BaseRepository["GraphRepository"]):
@@ -161,9 +229,9 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             .on_conflict_do_nothing(constraint="uq_graph_relation_events_source_row")
             .returning(GraphRelationEvent)
         )
-        row = self.session.execute(stmt).fetchone()
-        if row:
-            return row[0]
+        event = self.session.execute(stmt).scalar_one_or_none()
+        if event:
+            return event
         if source_relation_row_id is None:
             return None
         return self.session.execute(
@@ -241,7 +309,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             .join(GraphEntity, GraphEntityAlias.entity_id == GraphEntity.entity_id)
             .where(GraphEntityAlias.run_id == run_id)
         ).fetchall()
-        alias_pairs: list[tuple[str, str]] = [(row[0], row[1]) for row in rows]
+        alias_pairs: list[tuple[str, str]] = [(row.alias, row.canonical_name) for row in rows]
         alias_map: dict[str, str] = dict(alias_pairs)
         for canonical in list(alias_map.values()):
             alias_map.setdefault(canonical, canonical)
@@ -252,7 +320,14 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         current_chunk_id: int,
         lookback: int = 10,
         run_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ActiveEntityRow]:
+        """
+        查询近期活跃实体。
+
+        修改时间: 2026-04-23
+        任务: P0-graph-repository-dto-boundary
+        修改内容: 返回 ActiveEntityRow DTO，替代 raw dict[str, Any]。
+        """
         if run_id is None:
             return []
         start_chunk = max(0, current_chunk_id - lookback)
@@ -272,17 +347,17 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             .all()
         )
         return [
-            {
-                "entity_id": row.entity_id,
-                "name": row.canonical_name,
-                "role": row.primary_role_function,
-                "entity_type": row.entity_type,
-                "status": row.status,
-                "last_action": row.last_action or "",
-                "last_emotion": row.last_emotion_score or "",
-                "emotion_score": row.last_emotion_score,
-                "chunk_id": row.last_seen_chunk,
-            }
+            ActiveEntityRow(
+                entity_id=row.entity_id,
+                name=row.canonical_name,
+                role=row.primary_role_function,
+                entity_type=row.entity_type,
+                status=row.status,
+                last_action=row.last_action or "",
+                last_emotion=row.last_emotion_score or "",
+                emotion_score=row.last_emotion_score,
+                chunk_id=row.last_seen_chunk,
+            )
             for row in rows
         ]
 
@@ -290,19 +365,18 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         self,
         run_id: str,
         active_only: bool = True,
-    ) -> list[dict[str, Any]]:
-        stmt = (
-            select(
-                GraphRelationCurrent,
-                GraphEntity.canonical_name,
-                GraphEntity.entity_id,
-            )
-            .join(GraphEntity, GraphRelationCurrent.from_entity_id == GraphEntity.entity_id)
-            .where(GraphRelationCurrent.run_id == run_id)
-        )
+    ) -> list[CurrentRelationRow]:
+        """
+        查询当前关系快照。
+
+        修改时间: 2026-04-23
+        任务: P0-graph-repository-dto-boundary
+        修改内容: 返回 CurrentRelationRow DTO，替代 raw dict[str, Any]。
+        """
+        stmt = select(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
         if active_only:
             stmt = stmt.where(GraphRelationCurrent.is_active.is_(True))
-        current_rows = self.session.execute(stmt).fetchall()
+        current_rows = self.session.execute(stmt).scalars().all()
 
         entity_names = {
             row.entity_id: row.canonical_name
@@ -311,24 +385,24 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             ).fetchall()
         }
 
-        result: list[dict[str, Any]] = []
-        for current, _from_name, _entity_id in current_rows:
+        result: list[CurrentRelationRow] = []
+        for current in current_rows:
             result.append(
-                {
-                    "relation_id": current.relation_id,
-                    "from_entity_id": current.from_entity_id,
-                    "to_entity_id": current.to_entity_id,
-                    "from_name": entity_names.get(current.from_entity_id, str(current.from_entity_id)),
-                    "to_name": entity_names.get(current.to_entity_id, str(current.to_entity_id)),
-                    "type": current.current_type,
-                    "first_seen_chunk": current.first_seen_chunk,
-                    "last_seen_chunk": current.last_seen_chunk,
-                    "change_count": current.change_count,
-                    "support_count": current.support_count,
-                    "latest_event_id": current.latest_event_id,
-                    "tension_index": current.tension_index,
-                    "is_active": current.is_active,
-                }
+                CurrentRelationRow(
+                    relation_id=current.relation_id,
+                    from_entity_id=current.from_entity_id,
+                    to_entity_id=current.to_entity_id,
+                    from_name=entity_names.get(current.from_entity_id, str(current.from_entity_id)),
+                    to_name=entity_names.get(current.to_entity_id, str(current.to_entity_id)),
+                    relation_type=current.current_type,
+                    first_seen_chunk=current.first_seen_chunk,
+                    last_seen_chunk=current.last_seen_chunk,
+                    change_count=current.change_count,
+                    support_count=current.support_count,
+                    latest_event_id=current.latest_event_id,
+                    tension_index=current.tension_index,
+                    is_active=current.is_active,
+                )
             )
         return result
 
@@ -346,7 +420,14 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         run_id: str,
         limit: int | None = None,
         offset: int = 0,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RelationEventRow]:
+        """
+        查询关系事件历史。
+
+        修改时间: 2026-04-23
+        任务: P0-graph-repository-dto-boundary
+        修改内容: 返回 RelationEventRow DTO，替代 raw dict[str, Any]。
+        """
         entity_names = {
             row.entity_id: row.canonical_name
             for row in self.session.execute(
@@ -367,20 +448,20 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             stmt = stmt.limit(limit)
         rows = self.session.execute(stmt).scalars().all()
         return [
-            {
-                "relation_event_id": row.relation_event_id,
-                "chunk_id": row.chunk_id,
-                "from_entity_id": row.from_entity_id,
-                "to_entity_id": row.to_entity_id,
-                "from_name": entity_names.get(row.from_entity_id, str(row.from_entity_id)),
-                "to_name": entity_names.get(row.to_entity_id, str(row.to_entity_id)),
-                "relation_type": row.relation_type,
-                "change_type": row.change_type,
-                "evidence": row.evidence,
-                "confidence": row.confidence,
-                "source_relation_row_id": row.source_relation_row_id,
-                "directionality": row.directionality,
-            }
+            RelationEventRow(
+                relation_event_id=row.relation_event_id,
+                chunk_id=row.chunk_id,
+                from_entity_id=row.from_entity_id,
+                to_entity_id=row.to_entity_id,
+                from_name=entity_names.get(row.from_entity_id, str(row.from_entity_id)),
+                to_name=entity_names.get(row.to_entity_id, str(row.to_entity_id)),
+                relation_type=row.relation_type,
+                change_type=row.change_type,
+                evidence=row.evidence,
+                confidence=row.confidence,
+                source_relation_row_id=row.source_relation_row_id,
+                directionality=row.directionality,
+            )
             for row in rows
         ]
 
@@ -392,9 +473,26 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     ) -> list[dict[str, Any]]:
         events = self.fetch_relation_events(run_id)
         low_confidence = [
-            event for event in events if event["confidence"] is None or float(event["confidence"]) < threshold
+            event for event in events if event.confidence is None or float(event.confidence) < threshold
         ]
-        return low_confidence[:limit] if limit > 0 else low_confidence
+        selected_events = low_confidence[:limit] if limit > 0 else low_confidence
+        return [
+            {
+                "relation_event_id": event.relation_event_id,
+                "chunk_id": event.chunk_id,
+                "from_entity_id": event.from_entity_id,
+                "to_entity_id": event.to_entity_id,
+                "from_name": event.from_name,
+                "to_name": event.to_name,
+                "relation_type": event.relation_type,
+                "change_type": event.change_type,
+                "evidence": event.evidence,
+                "confidence": event.confidence,
+                "source_relation_row_id": event.source_relation_row_id,
+                "directionality": event.directionality,
+            }
+            for event in selected_events
+        ]
 
     def detect_relation_conflicts(
         self,
@@ -402,26 +500,28 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         active_only: bool = True,
     ) -> list[dict[str, Any]]:
         current_relations = self.fetch_current_relations(run_id, active_only=active_only)
-        pair_map: dict[tuple[int, int], list[dict[str, Any]]] = {}
+        pair_map: dict[tuple[int, int], list[CurrentRelationRow]] = {}
         for rel in current_relations:
-            key = tuple(sorted([rel["from_entity_id"], rel["to_entity_id"]]))
+            left_id = rel.from_entity_id
+            right_id = rel.to_entity_id
+            key = (left_id, right_id) if left_id <= right_id else (right_id, left_id)
             pair_map.setdefault(key, []).append(rel)
 
         conflicts: list[dict[str, Any]] = []
         for (left_id, right_id), relations in pair_map.items():
-            relation_types = {str(item["type"]) for item in relations if item.get("type")}
+            relation_types = {str(item.relation_type) for item in relations if item.relation_type}
             if len(relation_types) < 2:
                 continue
             conflicts.append(
                 {
                     "entity_pair": (left_id, right_id),
                     "entity_names": sorted(
-                        {str(rel_item.get("from_name", left_id)) for rel_item in relations}
-                        | {str(rel_item.get("to_name", right_id)) for rel_item in relations}
+                        {str(rel_item.from_name or left_id) for rel_item in relations}
+                        | {str(rel_item.to_name or right_id) for rel_item in relations}
                     ),
                     "relation_types": sorted(relation_types),
                     "relation_count": len(relations),
-                    "relation_ids": [item.get("relation_id") for item in relations],
+                    "relation_ids": [item.relation_id for item in relations],
                 }
             )
         return conflicts
