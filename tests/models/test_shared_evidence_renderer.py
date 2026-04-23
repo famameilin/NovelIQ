@@ -169,3 +169,50 @@ def test_render_shared_evidence_sections_can_render_emotion_exemplars_separately
     assert sections.emotion_exemplars is not None
     assert "<Emotion_Exemplars>" in sections.emotion_exemplars
     assert "[Chunk 9]" in sections.emotion_exemplars
+
+
+def test_render_shared_evidence_sections_can_exclude_vector_chunks_covered_by_emotion_exemplars() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: level3-mention-retrieval-closure
+    说明: 共享 renderer 若要求 emotion exemplar 优先，应能按 chunk_id 排除同 chunk 的 vector evidence，
+          避免同一历史片段重复占用两类证据预算。
+    """
+    bundle = EvidenceBundle(
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="她面带笑意，眸色却冷。",
+                metadata={"chunk_id": 9, "text": "她面带笑意，眸色却冷。", "similarity": 0.92},
+            ),
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="她面无表情地收剑入鞘。",
+                metadata={"chunk_id": 2, "text": "她面无表情地收剑入鞘。", "similarity": 0.87},
+            ),
+            EvidenceItem(
+                evidence_type="emotion_exemplar",
+                source="chunk_embeddings",
+                content="她面带笑意，眸色却冷。",
+                metadata={
+                    "chunk_id": 9,
+                    "text": "她面带笑意，眸色却冷。",
+                    "similarity": 0.92,
+                    "emotional_valence": "mild_negative",
+                },
+            ),
+        ]
+    )
+
+    sections = render_shared_evidence_sections(
+        bundle,
+        exclude_vector_chunks_with_emotion_exemplars=True,
+    )
+
+    assert sections.vector_evidence is not None
+    assert "[Chunk 2]" in sections.vector_evidence
+    assert "[Chunk 9]" not in sections.vector_evidence
+    assert sections.emotion_exemplars is not None
+    assert "[Chunk 9]" in sections.emotion_exemplars

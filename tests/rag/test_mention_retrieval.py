@@ -107,7 +107,63 @@ def test_build_semantic_recall_items_records_mention_metadata_only_for_mention_r
     assert items[0].metadata["matched_features"] == ["红衣", "女子", "出手"]
     assert items[0].metadata["evidence_granularity"] == "chunk"
     assert items[0].metadata["rerank_method"] == "chunk_embedding"
-    assert "query_kind" not in items[1].metadata
+    assert items[0].chunk_id == 2
+    assert items[0].score == 0.91
+    assert items[1].metadata["query_kind"] == "chunk"
+    assert items[1].metadata["mention_text"] is None
+    assert items[1].metadata["matched_features"] == []
+    assert items[1].metadata["semantic_score"] == 0.83
+    assert items[1].chunk_id == 3
+    assert items[1].score == 0.83
+
+
+def test_build_semantic_recall_items_freezes_rerank_metadata_contract() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: level3-mention-retrieval-closure
+    说明: mention-aware rerank 已进入收口阶段，semantic_recall metadata 应稳定暴露 query/rerank/paragraph 字段，
+          便于后续日志与延期评测直接复用。
+    """
+    item = EvidenceBundleBuilder().build_semantic_recall_items(
+        [
+            SimilarChunkRow(
+                chunk_id=7,
+                text="白芷正是那名红衣女子。",
+                similarity=0.95,
+                query_kind="mention",
+                mention_text="穿红衣的女子",
+                mention_type="feature_action",
+                matched_features=("红衣", "女子", "出手"),
+                local_preview="红衣女子回头看向众人。",
+                paragraph_index=2,
+                paragraph_similarity=0.95,
+                paragraph_start_char=18,
+                paragraph_end_char=31,
+                chunk_similarity=0.82,
+                semantic_score=0.95,
+                rerank_score=1.11,
+                feature_overlap=("红衣", "女子"),
+                active_entity_bonus=0.06,
+                identity_clue_bonus=0.05,
+                candidate_related_bonus=0.05,
+                time_decay=0.04,
+                rerank_penalty=0.0,
+                penalties=(),
+            )
+        ]
+    )[0]
+
+    assert item.metadata["query_kind"] == "mention"
+    assert item.metadata["mention_text"] == "穿红衣的女子"
+    assert item.metadata["mention_type"] == "feature_action"
+    assert item.metadata["matched_features"] == ["红衣", "女子", "出手"]
+    assert item.metadata["rerank_score"] == 1.11
+    assert item.metadata["semantic_score"] == 0.95
+    assert item.metadata["feature_overlap"] == ["红衣", "女子"]
+    assert item.metadata["local_preview"] == "红衣女子回头看向众人。"
+    assert item.metadata["paragraph_index"] == 2
+    assert item.metadata["chunk_similarity"] == 0.82
+    assert item.metadata["business_rerank_method"] == "mention_feature_rerank"
 
 
 def test_build_emotion_exemplar_items_ignores_mention_rows() -> None:
