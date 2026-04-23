@@ -4,9 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult
+from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult, NameReviewState
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
+from src.workflows.annotate_helpers.disambiguation import pipeline_stages as pipeline_stages_mod
 
 
 def test_apply_disambiguation_decisions_keeps_uncertain_self_map_in_review() -> None:
@@ -54,10 +55,10 @@ async def test_run_final_disambiguation_with_state_persists_canonicals_before_re
     )
 
     with (
-        patch.object(pipeline_mod, "AnnotationRepository", _DummyAnnRepo),
-        patch.object(pipeline_mod, "fetch_all_character_names", return_value=[]),
-        patch.object(pipeline_mod, "_process_entity_relations", return_value=(1, [])) as process_mock,
-        patch.object(pipeline_mod, "_save_disambig_checkpoint", return_value=None),
+        patch.object(pipeline_stages_mod, "AnnotationRepository", _DummyAnnRepo),
+        patch.object(pipeline_stages_mod, "fetch_all_character_names", return_value=[]),
+        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(1, [])) as process_mock,
+        patch.object(pipeline_stages_mod, "_save_disambig_checkpoint", return_value=None),
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
@@ -86,15 +87,15 @@ async def test_run_final_disambiguation_with_state_skips_known_canonical_without
     )
 
     with (
-        patch.object(pipeline_mod, "AnnotationRepository", MagicMock()),
+        patch.object(pipeline_stages_mod, "AnnotationRepository", MagicMock()),
         patch.object(
-            pipeline_mod,
+            pipeline_stages_mod,
             "fetch_all_character_names",
             return_value=[{"name": "hou_fei_bai", "count": 12}],
         ),
         patch.object(pipeline_mod, "_retry_disambig") as retry_mock,
-        patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
-        patch.object(pipeline_mod, "_save_disambig_checkpoint", return_value=None),
+        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_stages_mod, "_save_disambig_checkpoint", return_value=None),
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
@@ -110,3 +111,37 @@ async def test_run_final_disambiguation_with_state_skips_known_canonical_without
     assert new_state.review_status == state.review_status
     assert new_state.pending_relations == state.pending_relations
     retry_mock.assert_not_called()
+
+
+def test_apply_disambiguation_decisions_removes_stale_alias_merge_on_demotion() -> None:
+    state = DisambiguationState(
+        discovered_names=frozenset({"masked_person", "bai_zhi"}),
+        known_canonical_names=frozenset({"bai_zhi"}),
+        alias_merges=frozenset({("masked_person", "bai_zhi")}),
+        review_status=(
+            (
+                "masked_person",
+                NameReviewState(
+                    status=disambig_mod.DISAMBIG_STATE_RESOLVED,
+                    confidence="high",
+                    proposed_canonical="bai_zhi",
+                    evidence_strength="strong",
+                    decision_evidence_count=1,
+                    decision_evidence_types=("identity_reveal",),
+                ),
+            ),
+        ),
+    )
+    result = ExtendedDisambigResult(
+        canonical_decisions={"masked_person": "bai_zhi"},
+        entity_types={"bai_zhi": "character"},
+        entity_relations=[],
+        alias_confidence={"masked_person": "medium"},
+    )
+
+    new_state = disambig_mod.apply_disambiguation_decisions(state, result)
+    review = new_state.get_review_status_dict()["masked_person"]
+
+    assert review.status == disambig_mod.DISAMBIG_STATE_REVIEW
+    assert review.proposed_canonical == "bai_zhi"
+    assert ("masked_person", "bai_zhi") not in new_state.alias_merges
