@@ -17,6 +17,7 @@ from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 from src.api.exceptions import NovelNotFoundError
+from src.api.services.metrics_service import MetricsService
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
 from src.storage.db import get_session_factory
@@ -26,6 +27,7 @@ _upload_dir = Path("data/uploads")
 _novel_service_instance: NovelService | None = None
 _task_manager = TaskManager()
 _task_manager.set_db_session_factory(lambda: get_session_factory()())
+_metrics_service_instance: MetricsService | None = None
 
 
 def _get_novel_service_instance() -> NovelService:
@@ -57,6 +59,22 @@ def get_task_manager() -> TaskManager:
           避免 novel/task 删除路径各自维护不同的单例来源。
     """
     return _task_manager
+
+
+def get_metrics_service() -> MetricsService:
+    """
+    获取聚合指标服务单例。
+
+    创建时间: 2026-04-22
+    创建者: TraeAI
+    任务: metrics接口重复计算问题重构
+    说明: MetricsService 提供聚合指标的统一获取和缓存，
+          消除重复计算和代码重复。
+    """
+    global _metrics_service_instance
+    if _metrics_service_instance is None:
+        _metrics_service_instance = MetricsService(cache_ttl=300)
+    return _metrics_service_instance
 
 
 def get_db_session() -> Generator[Session, None, None]:
