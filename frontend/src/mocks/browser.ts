@@ -30,7 +30,6 @@ import {
   emotionStatsHandler,
   characterStatsHandler,
   styleStatsHandler,
-  cultureStatsHandler,
 } from "./handlers/results";
 
 export const worker = setupWorker(
@@ -62,5 +61,4 @@ export const worker = setupWorker(
   emotionStatsHandler,
   characterStatsHandler,
   styleStatsHandler,
-  cultureStatsHandler,
 );

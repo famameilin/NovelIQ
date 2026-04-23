@@ -369,13 +369,6 @@ export interface StyleStatsMetrics {
   dialogue_ratio: number;
 }
 
-export interface CultureStatsMetrics {
-  idiom_density: number;
-  imagery_density: number;
-  classical_sentence_ratio: number;
-  allusion_density: number;
-}
-
 // ============================================================
 // Common
 // ============================================================

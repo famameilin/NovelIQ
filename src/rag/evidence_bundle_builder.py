@@ -8,12 +8,14 @@ RAG EvidenceBundle 组装器。
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 if TYPE_CHECKING:
+    from src.knowledge.authority.types import ActiveEntityContext
     from src.rag.evidence_types import Level1AuthoritySnapshot
+    from src.storage.repositories.chunk import SimilarChunkRow
 
 
 class EvidenceBundleBuilder:
@@ -119,7 +121,7 @@ class EvidenceBundleBuilder:
             level1_snapshot=snapshot,
         )
 
-    def build_active_entity_items(self, active_entities: list[Any]) -> list[EvidenceItem]:
+    def build_active_entity_items(self, active_entities: list[ActiveEntityContext]) -> list[EvidenceItem]:
         """构建 Level2 活跃实体 evidence items。"""
         return [
             EvidenceItem(
@@ -153,33 +155,43 @@ class EvidenceBundleBuilder:
             for name in candidates
         ]
 
-    def build_semantic_recall_items(self, level3_results: list[dict[str, Any]]) -> list[EvidenceItem]:
+    def build_semantic_recall_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
         """构建 Level3 通用语义召回证据。"""
         return [
             EvidenceItem(
                 evidence_type="semantic_recall",
                 source="chunk_embeddings",
-                content=str(result.get("text", "")),
-                metadata=dict(result),
+                content=result.text,
+                metadata={
+                    "chunk_id": result.chunk_id,
+                    "text": result.text,
+                    "similarity": result.similarity,
+                    "emotional_valence": result.emotional_valence,
+                },
             )
             for result in level3_results
         ]
 
-    def build_emotion_exemplar_items(self, level3_results: list[dict[str, Any]]) -> list[EvidenceItem]:
+    def build_emotion_exemplar_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
         """构建用于情绪判断的 Level3 专用证据。"""
         exemplar_items: list[EvidenceItem] = []
         for result in level3_results:
-            emotional_valence = result.get("emotional_valence")
+            emotional_valence = result.emotional_valence
             if emotional_valence in (None, "", "neutral"):
                 continue
 
-            metadata = dict(result)
-            metadata["evidence_purpose"] = "emotion"
+            metadata = {
+                "chunk_id": result.chunk_id,
+                "text": result.text,
+                "similarity": result.similarity,
+                "emotional_valence": emotional_valence,
+                "evidence_purpose": "emotion",
+            }
             exemplar_items.append(
                 EvidenceItem(
                     evidence_type="emotion_exemplar",
                     source="chunk_embeddings",
-                    content=str(result.get("text", "")),
+                    content=result.text,
                     metadata=metadata,
                 )
             )

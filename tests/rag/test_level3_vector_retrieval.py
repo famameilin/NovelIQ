@@ -23,6 +23,7 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.config import settings
+from src.knowledge.authority.types import ActiveEntityContext
 from src.models.local.evidence_renderer_shared import (
     render_disambig_candidates,
     render_emotion_exemplars,
@@ -30,6 +31,7 @@ from src.models.local.evidence_renderer_shared import (
 )
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.rag.retriever import DisambigContextProvider, Level3NotReadyError, Level3VectorEvidence
+from src.storage.repositories.chunk import SimilarChunkRow
 
 
 class TestLevel3VectorEvidence(unittest.TestCase):
@@ -95,7 +97,7 @@ class TestLevel3VectorEvidenceAsync:
         mock_session = MagicMock()
 
         mock_search.return_value = [
-            {"chunk_id": 1, "text": "相似文本", "similarity": 0.9, "emotional_valence": "mild_negative"},
+            SimilarChunkRow(chunk_id=1, text="相似文本", similarity=0.9, emotional_valence="mild_negative"),
         ]
 
         with (
@@ -110,8 +112,8 @@ class TestLevel3VectorEvidenceAsync:
             results = await level3.search_similar_chunks("查询文本")
 
         assert len(results) == 1
-        assert results[0]["chunk_id"] == 1
-        assert results[0]["emotional_valence"] == "mild_negative"
+        assert results[0].chunk_id == 1
+        assert results[0].emotional_valence == "mild_negative"
 
     @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
@@ -259,10 +261,6 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         """结构化证据收集应保留 Level 2 活跃实体，即使 Level 1 已命中。"""
         graph_repo = MagicMock()
         graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
-        graph_repo.fetch_active_entities.return_value = [
-            {"name": "白芷"},
-            {"name": "侯飞白"},
-        ]
 
         provider = DisambigContextProvider(
             graph_repo=graph_repo,
@@ -270,6 +268,11 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             level1_enabled=True,
             level2_enabled=True,
         )
+        provider._graph_authority_service = MagicMock()
+        provider._graph_authority_service.build_active_entity_view.return_value = [
+            ActiveEntityContext(name="白芷"),
+            ActiveEntityContext(name="侯飞白"),
+        ]
 
         bundle = provider.collect_evidence(["灰衣人"], current_chunk=3)
 
@@ -284,6 +287,22 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             ["白芷", "侯飞白"],
         )
         self.assertIsNone(render_disambig_candidates(bundle))
+
+    def test_collect_evidence_does_not_swallow_authority_attribute_errors(self) -> None:
+        """authority 构建失败时应直接暴露异常，避免静默回退掩盖真实问题。"""
+        graph_repo = MagicMock()
+        provider = DisambigContextProvider(
+            graph_repo=graph_repo,
+            run_id="test-run-id",
+            level1_enabled=False,
+            level2_enabled=True,
+            level3_enabled=False,
+        )
+        provider._graph_authority_service = MagicMock()
+        provider._graph_authority_service.build_active_entity_view.side_effect = AttributeError("broken authority")
+
+        with pytest.raises(AttributeError, match="broken authority"):
+            provider.collect_evidence(current_chunk=3)
 
 class TestSharedEvidenceRenderer(unittest.TestCase):
     def test_render_vector_evidence_empty_bundle_returns_none(self) -> None:
@@ -400,18 +419,18 @@ class TestDisambigContextProviderLevel3Async:
         provider._level3.is_available = MagicMock(return_value=True)
         provider._level3.search_similar_chunks = AsyncMock(
             return_value=[
-                {
-                    "chunk_id": 8,
-                    "text": "她说话时指尖微颤，眼底发冷。",
-                    "similarity": 0.93,
-                    "emotional_valence": "mild_negative",
-                },
-                {
-                    "chunk_id": 12,
-                    "text": "他只是点了点头。",
-                    "similarity": 0.81,
-                    "emotional_valence": "neutral",
-                },
+                SimilarChunkRow(
+                    chunk_id=8,
+                    text="她说话时指尖微颤，眼底发冷。",
+                    similarity=0.93,
+                    emotional_valence="mild_negative",
+                ),
+                SimilarChunkRow(
+                    chunk_id=12,
+                    text="他只是点了点头。",
+                    similarity=0.81,
+                    emotional_valence="neutral",
+                ),
             ]
         )
 

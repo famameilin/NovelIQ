@@ -4,7 +4,6 @@ from typing import Any, Final
 
 from src.api.models.responses import (
     CharacterStatsAggregate,
-    CultureStats,
     EmotionStats,
     NarrativeStructureStats,
     StyleStats,
@@ -16,7 +15,6 @@ AGGREGATE_METRIC_CONTRACT_FIELDS: Final[tuple[str, ...]] = (
     "emotion_stats",
     "character_stats",
     "style_stats",
-    "culture_stats",
 )
 AGGREGATE_GRAPH_FORBIDDEN_FIELDS: Final[frozenset[str]] = frozenset({"graph_summary", "graph_quality_report"})
 
@@ -178,25 +176,6 @@ def _convert_style_stats(
     )
 
 
-def _convert_culture_stats(
-    result: AggregateResult,
-) -> CultureStats | None:
-    """转换文化统计数据。
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-api-layer-functions
-    说明: 从 _convert_aggregate_result 拆分出来，专门处理文化统计转换。
-
-    修改时间: 2026-04-04
-    修改者: TraeAI
-    任务: merge-culture-to-style-add-topics
-    修改内容: 不再返回文化指标（成语密度、古典句式比例、意象密度），因为价值有限。
-              保留函数和模型定义，避免破坏性变更。
-    """
-    return None
-
-
 def _convert_aggregate_result(
     result: AggregateResult,
 ) -> tuple[
@@ -204,7 +183,6 @@ def _convert_aggregate_result(
     EmotionStats | None,
     CharacterStatsAggregate | None,
     StyleStats | None,
-    CultureStats | None,
 ]:
     """转换聚合结果为响应模型。
 
@@ -217,9 +195,8 @@ def _convert_aggregate_result(
     emotion_stats = _convert_emotion_stats(result)
     character_stats = _convert_character_stats(result)
     style_stats = _convert_style_stats(result)
-    culture_stats = _convert_culture_stats(result)
 
-    return narrative_structure, emotion_stats, character_stats, style_stats, culture_stats
+    return narrative_structure, emotion_stats, character_stats, style_stats
 
 
 def validate_aggregate_metrics_contract(aggregate_metrics: dict[str, Any]) -> None:
@@ -251,13 +228,12 @@ def validate_aggregate_metrics_contract(aggregate_metrics: dict[str, Any]) -> No
 def build_aggregate_metrics_contract(result: AggregateResult) -> dict[str, Any]:
     """Build the stable non-graph aggregate metrics bundle used by export surfaces."""
 
-    narrative_structure, emotion_stats, character_stats, style_stats, culture_stats = _convert_aggregate_result(result)
+    narrative_structure, emotion_stats, character_stats, style_stats = _convert_aggregate_result(result)
     aggregate_metrics = {
         "narrative_structure": narrative_structure.model_dump() if narrative_structure else None,
         "emotion_stats": emotion_stats.model_dump() if emotion_stats else None,
         "character_stats": character_stats.model_dump() if character_stats else None,
         "style_stats": style_stats.model_dump() if style_stats else None,
-        "culture_stats": culture_stats.model_dump() if culture_stats else None,
     }
     validate_aggregate_metrics_contract(aggregate_metrics)
     return aggregate_metrics

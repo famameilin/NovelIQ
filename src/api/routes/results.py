@@ -351,13 +351,3 @@ async def get_style_stats(
     """获取风格统计指标"""
     return metrics_service.get_style_stats(run_id, session)
 
-
-@router.get("/{novel_id}/metrics/culture-stats")
-async def get_culture_stats(
-    novel_id: str,
-    run_id: Annotated[str, Depends(resolve_run_id)],
-    session: Annotated[Session, Depends(get_db_session)],
-    metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
-) -> Any:
-    """获取文化元素统计指标"""
-    return metrics_service.get_culture_stats(run_id, session)
