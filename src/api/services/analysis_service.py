@@ -100,6 +100,14 @@ class AnalysisService:
         max_chars: int = 2000,
         overlap: int = 200,
     ) -> None:
+        """
+        执行各分析阶段。
+
+        修改时间: 2026-04-23
+        修改者: Codex
+        任务: P0-remove-silent-exception
+        修改内容: annotate 进度总数查询失败时显式记录并降级为 total=0，禁止静默吞错。
+        """
         task_id = bus.task_id
 
         if self._is_cancelled(task_id):
@@ -130,8 +138,14 @@ class AnalysisService:
 
                 chunk_repo = ChunkRepository(session)
                 total_chunks = chunk_repo.count_chunks(run_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to count chunks before annotate stage, "
+                    "falling back to total=0: task_id={} run_id={} error={}",
+                    task_id,
+                    run_id,
+                    exc,
+                )
 
             await bus.emit_stage_start(
                 "annotate",

@@ -149,4 +149,21 @@ describe("useAnalysisStatus", () => {
     expect(onCancelled).not.toHaveBeenCalled();
     expect(onFailed).not.toHaveBeenCalled();
   });
+
+  it("HTTP backfill 失败时会显式记录并暴露同步错误", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    getTaskStatusMock.mockRejectedValue(new Error("network down"));
+
+    render(<HookHarness novelId="novel-1" taskId="task-error" />);
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Failed to backfill analysis task status",
+        expect.any(Error),
+      );
+      expect(streamStoreState.setError).toHaveBeenCalledWith("任务状态同步失败，正在等待实时事件恢复");
+    });
+
+    warnSpy.mockRestore();
+  });
 });
