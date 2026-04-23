@@ -33,6 +33,7 @@ from src.api.exceptions import NovelNotFoundError
 from src.api.models.events import AnalysisEventBus, StreamEvent
 from src.api.models.requests import ReanalyzeRequest
 from src.api.routes import analysis as analysis_mod
+from src.api.services import task_application_service as task_application_mod
 from src.api.services.analysis.error_handler import AnalysisErrorHandler
 from src.api.services.analysis_service import AnalysisService, CancellationStateCheckError
 from src.api.services.novel_service import NovelService
@@ -414,7 +415,11 @@ class TestAnalysis:
                 )
             return False
 
-        with patch.object(analysis_mod, "_cancel_unclaimed_pending_task", side_effect=_simulate_other_worker_finished):
+        with patch.object(
+            task_application_mod,
+            "cancel_unclaimed_pending_task",
+            side_effect=_simulate_other_worker_finished,
+        ):
             response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/cancel")
 
         assert response.status_code == 400
