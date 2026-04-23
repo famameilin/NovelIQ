@@ -148,7 +148,7 @@ def fetch_annotated_chunk_ids(session: Session, run_id: str) -> set[int]:
     """
     stmt = select(ChunkAnnotation.chunk_id).where(ChunkAnnotation.run_id == run_id)
     result = session.execute(stmt)
-    return {row[0] for row in result.fetchall()}
+    return {row.chunk_id for row in result.fetchall()}
 
 
 def fetch_full_annotations(session: Session, run_id: str) -> list[Any]:

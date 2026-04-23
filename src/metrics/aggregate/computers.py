@@ -180,7 +180,7 @@ def compute_character_relation_metrics(
         result["max_degree_value"] = degree_centrality[max_char] or 0.0
         result["degree_centrality"] = degree_centrality
 
-    role_functions = [row[1] for row in char_data.characters if row[1]]
+    role_functions = [role_function for _name, role_function, _score in char_data.characters if role_function]
     result.update({f"function_coverage_{k}": v for k, v in compute_character_function_coverage(role_functions).items()})
     result["greimas_coverage"] = compute_greimas_coverage(role_functions)
 

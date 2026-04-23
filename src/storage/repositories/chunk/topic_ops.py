@@ -28,12 +28,12 @@ def insert_chunk_topics(session: Session, run_id: str, rows: Iterable[tuple[int,
     """
     topic_rows = [
         {
-            "chunk_id": row[0],
-            "topic_id": row[1],
-            "topic_weight": row[2],
+            "chunk_id": chunk_id,
+            "topic_id": topic_id,
+            "topic_weight": topic_weight,
             "run_id": run_id,
         }
-        for row in rows
+        for chunk_id, topic_id, topic_weight in rows
     ]
     if topic_rows:
         session.bulk_insert_mappings(cast(Mapper[Any], ChunkTopic), topic_rows)

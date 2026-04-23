@@ -451,8 +451,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
         .limit(1)
     )
 
-    row = session.execute(stmt).fetchone()
-    result = row[0] if row else None
+    result = session.execute(stmt).scalar_one_or_none()
 
     if result is None:
         stmt = (
@@ -464,8 +463,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
             .order_by(CloudAnalysis.id.desc())
             .limit(1)
         )
-        row = session.execute(stmt).fetchone()
-        result = row[0] if row else None
+        result = session.execute(stmt).scalar_one_or_none()
 
     if result is None:
         return None

@@ -186,6 +186,13 @@ def _log_aggregate_results(agg_result) -> None:
 
 
 def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkRepository) -> dict[str, Any]:
+    """
+    构建聚合质量门报告。
+
+    修改时间: 2026-04-23
+    任务: P0-clean-row-index-access
+    修改内容: imagery 诊断读取具名变量，不再依赖 tuple 下标。
+    """
     language_style = agg_result.language_style if isinstance(agg_result.language_style, dict) else {}
     traditional_culture = agg_result.traditional_culture if isinstance(agg_result.traditional_culture, dict) else {}
 
@@ -197,12 +204,8 @@ def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkReposit
 
     imagery_rows = chunk_repo.fetch_chunk_imagery_lexicon_densities(run_id)
     null_chunk_ids: list[int] = []
-    for row in imagery_rows:
-        if not row:
-            continue
-        chunk_id = int(row[0])
-        density_values = list(row[1:])
-        if density_values and any(value is None for value in density_values):
+    for chunk_id, imagery_lexicon_density in imagery_rows:
+        if imagery_lexicon_density is None:
             null_chunk_ids.append(chunk_id)
 
     null_ratio = (len(null_chunk_ids) / len(imagery_rows)) if imagery_rows else 0.0
@@ -437,8 +440,14 @@ async def run_aggregate(
     chunk_annotations = ann_repo.fetch_chunk_annotations(run_id)
     chunk_styles = chunk_repo.fetch_chunk_styles(run_id)
 
-    annotation_map = {row[0]: (row[1], row[2]) for row in chunk_annotations}
-    style_map = {row[0]: (row[1], row[2], row[3]) for row in chunk_styles}
+    annotation_map = {
+        row.chunk_id: {"event_type": row.event_type, "cliffhanger": row.cliffhanger}
+        for row in chunk_annotations
+    }
+    style_map = {
+        row.chunk_id: {"dialogue_ratio": row.dialogue_ratio, "sent_len_std": row.sent_len_std}
+        for row in chunk_styles
+    }
 
     tension_signals = compute_tension_signals(chunk_texts, all_fight_terms, style_map, annotation_map, raw_densities)
     tension_composite_values = _compute_tension_composite(tension_signals)
@@ -446,13 +455,28 @@ async def run_aggregate(
 
     chunk_curves = list(
         zip(
-            [r[0] for r in emotion_rows],
-            [r[1] for r in emotion_rows],
-            [r[2] for r in emotion_rows],
-            [r[3] for r in emotion_rows],
-            [r[4] for r in emotion_rows],
-            [r[0] for r in rhythm_rows],
-            [r[1] for r in rhythm_rows],
+            [
+                chunk_id
+                for chunk_id, _pos_density, _neg_density, _net_density, _smoothed_density in emotion_rows
+            ],
+            [
+                pos_density
+                for _chunk_id, pos_density, _neg_density, _net_density, _smoothed_density in emotion_rows
+            ],
+            [
+                neg_density
+                for _chunk_id, _pos_density, neg_density, _net_density, _smoothed_density in emotion_rows
+            ],
+            [
+                net_density
+                for _chunk_id, _pos_density, _neg_density, net_density, _smoothed_density in emotion_rows
+            ],
+            [
+                smoothed_density
+                for _chunk_id, _pos_density, _neg_density, _net_density, smoothed_density in emotion_rows
+            ],
+            [tension_proxy for _chunk_id, tension_proxy, _tension_composite in rhythm_rows],
+            [tension_composite for _chunk_id, _tension_proxy, tension_composite in rhythm_rows],
             strict=True,
         )
     )

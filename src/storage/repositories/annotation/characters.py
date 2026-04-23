@@ -48,7 +48,7 @@ def fetch_alias_map(session: Session, run_id: str) -> dict[str, str]:
         .where(GraphEntityAlias.run_id == run_id)
     )
     graph_rows = session.execute(graph_stmt).fetchall()
-    alias_map = {row[0]: row[1] for row in graph_rows}
+    alias_map = {row.alias: row.canonical_name for row in graph_rows}
     for _alias, canonical in list(alias_map.items()):
         alias_map.setdefault(canonical, canonical)
     return alias_map
@@ -73,15 +73,15 @@ def fetch_all_character_names(
     Returns:
         [{"name": "角色名", "count": 频次}, ...] 列表
     """
-    stmt = select(ChunkCharacter.name, func.count().label("count")).where(ChunkCharacter.run_id == run_id)
+    stmt = select(ChunkCharacter.name, func.count().label("appearance_count")).where(ChunkCharacter.run_id == run_id)
     if max_chunk_id is not None:
         stmt = stmt.where(ChunkCharacter.chunk_id <= max_chunk_id)
     stmt = stmt.group_by(ChunkCharacter.name)
     result = session.execute(stmt).fetchall()
     name_counts: dict[str, int] = {}
     for row in result:
-        name = row[0]
-        count = row[1]
+        name = row.name
+        count = int(row.appearance_count or 0)
         if name and isinstance(name, str):
             name_counts[name] = name_counts.get(name, 0) + count
     return [{"name": name, "count": count} for name, count in sorted(name_counts.items(), key=lambda x: -x[1])]

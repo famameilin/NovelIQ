@@ -23,7 +23,7 @@ from src.storage.models import ChunkStyle
 from src.storage.repositories.chunk import ChunkStyleData
 
 
-def fetch_chunk_styles(session: Session, run_id: str) -> list[tuple[int, float, float, float]]:
+def fetch_chunk_styles(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取分块风格数据
 
@@ -32,7 +32,11 @@ def fetch_chunk_styles(session: Session, run_id: str) -> list[tuple[int, float, 
         run_id: 运行ID
 
     Returns:
-        (chunk_id, dialogue_ratio, sent_len_std, avg_sent_len) 元组列表
+        Row 对象序列，支持 row.chunk_id / row.dialogue_ratio / row.sent_len_std / row.avg_sent_len。
+
+    修改时间: 2026-04-23
+    任务: P0-clean-row-index-access
+    修改内容: 不再转换成 tuple，下游通过字段名读取风格指标，避免列顺序错位。
     """
     stmt = select(
         ChunkStyle.chunk_id,
@@ -41,7 +45,7 @@ def fetch_chunk_styles(session: Session, run_id: str) -> list[tuple[int, float, 
         ChunkStyle.avg_sent_len,
     ).where(ChunkStyle.run_id == run_id)
     result = session.execute(stmt)
-    return [(row[0], row[1], row[2], row[3]) for row in result.fetchall()]
+    return result.fetchall()
 
 
 def insert_chunk_style(session: Session, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]) -> None:

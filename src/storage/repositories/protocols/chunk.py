@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
 
+from sqlalchemy.engine import Row
+
 from src.chunking.chunker import Chunk
 
 
@@ -44,12 +46,12 @@ class ChunkRepositoryProtocol(Protocol):
         """
         ...
 
-    def fetch_chunk_styles(self) -> list[tuple[int, float, float, float]]:
+    def fetch_chunk_styles(self) -> Sequence[Row]:
         """
         获取分块风格数据
 
         Returns:
-            (chunk_id, dialogue_ratio, sent_len_std, avg_sent_len) 元组列表
+            Row 对象序列，支持 row.chunk_id / row.dialogue_ratio 等字段名访问
         """
         ...
 

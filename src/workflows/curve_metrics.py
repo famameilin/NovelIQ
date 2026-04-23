@@ -198,8 +198,8 @@ def compute_emotion_curve_weighted(
 def compute_tension_signals(
     chunk_texts: list[tuple[int, str]],
     fight_terms: dict[str, float],
-    style_map: dict,
-    annotation_map: dict,
+    style_map: dict[int, dict[str, float | None]],
+    annotation_map: dict[int, dict[str, str | int | None]],
     raw_densities: list[float],
 ) -> list[dict]:
     """
@@ -213,19 +213,26 @@ def compute_tension_signals(
     修改者: GLM-5
     任务: 清理向后兼容代码
     修改内容: fight_terms 参数类型改为 dict[str, int]
+
+    修改时间: 2026-04-23
+    修改者: Codex
+    任务: P0-clean-row-index-access
+    修改内容: style_map / annotation_map 改为具名字段字典，避免指标计算依赖 tuple 下标。
     """
     tension_signals: list[dict] = []
     for idx, (chunk_id, _text) in enumerate(chunk_texts):
         dialogue_val = 0.0
         sent_len_std = 0.0
-        if chunk_id in style_map:
-            dialogue_val = style_map[chunk_id][0]
-            sent_len_std = style_map[chunk_id][1]
+        style_info = style_map.get(chunk_id)
+        if style_info:
+            dialogue_val = float(style_info.get("dialogue_ratio") or 0.0)
+            sent_len_std = float(style_info.get("sent_len_std") or 0.0)
         event_type = ""
         cliffhanger = 0
-        if chunk_id in annotation_map:
-            event_type = annotation_map[chunk_id][0] or ""
-            cliffhanger = annotation_map[chunk_id][1]
+        annotation_info = annotation_map.get(chunk_id)
+        if annotation_info:
+            event_type = str(annotation_info.get("event_type") or "")
+            cliffhanger = int(annotation_info.get("cliffhanger") or 0)
         event_score = EVENT_TYPE_SCORES.get(event_type, 0.0)
         cliffhanger_score = 1.0 if cliffhanger else 0.0
         emotion_intensity = abs(raw_densities[idx] if idx < len(raw_densities) else 0.0)
@@ -289,9 +296,9 @@ def compute_global_stats(
     global_stats: list[tuple[str, float]] = []
     style_rows = conn.execute(sql_text("SELECT mtld, ttr, avg_sent_len FROM chunk_style")).fetchall()
     if style_rows:
-        mtld_vals = [r[0] for r in style_rows if r[0] is not None]
-        ttr_vals = [r[1] for r in style_rows if r[1] is not None]
-        sent_len_vals = [r[2] for r in style_rows if r[2] is not None]
+        mtld_vals = [row.mtld for row in style_rows if row.mtld is not None]
+        ttr_vals = [row.ttr for row in style_rows if row.ttr is not None]
+        sent_len_vals = [row.avg_sent_len for row in style_rows if row.avg_sent_len is not None]
         if mtld_vals:
             global_stats.append(("global_avg_mtld", sum(mtld_vals) / len(mtld_vals)))
         if ttr_vals:
@@ -306,8 +313,10 @@ def compute_global_stats(
         global_stats.append(("emotion_min", min(raw_densities)))
         max_idx = raw_densities.index(max(raw_densities))
         min_idx = raw_densities.index(min(raw_densities))
-        global_stats.append(("emotion_max_chunk", float(chunk_texts[max_idx][0])))
-        global_stats.append(("emotion_min_chunk", float(chunk_texts[min_idx][0])))
+        max_chunk_id, _max_text = chunk_texts[max_idx]
+        min_chunk_id, _min_text = chunk_texts[min_idx]
+        global_stats.append(("emotion_max_chunk", float(max_chunk_id)))
+        global_stats.append(("emotion_min_chunk", float(min_chunk_id)))
     if tension_composite_values:
         global_stats.append(("rhythm_avg", sum(tension_composite_values) / len(tension_composite_values)))
         variance = sum(

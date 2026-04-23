@@ -83,7 +83,7 @@ def insert_chunk_curve(
     session.commit()
 
 
-def fetch_chunk_culture(session: Session, run_id: str) -> list[tuple[float | None]]:
+def fetch_chunk_culture(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取分块文化数据
 
@@ -92,7 +92,7 @@ def fetch_chunk_culture(session: Session, run_id: str) -> list[tuple[float | Non
         run_id: 运行ID
 
     Returns:
-        (imagery_lexicon_density,) 元组列表
+        Row 对象序列，支持 row.imagery_lexicon_density 字段名访问
 
     修改时间: 2026-03-26
     修改者: TraeAI
@@ -107,8 +107,7 @@ def fetch_chunk_culture(session: Session, run_id: str) -> list[tuple[float | Non
         .order_by(ChunkStyle.chunk_id)
     )
 
-    result = session.execute(stmt).fetchall()
-    return [(row.imagery_lexicon_density,) for row in result]
+    return session.execute(stmt).fetchall()
 
 
 def fetch_chunk_curves_full(session: Session, run_id: str) -> Sequence[Row]:
