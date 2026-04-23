@@ -46,42 +46,34 @@
 修改者: Codex
 任务: fix-token-coverage-fallback-bucket
 修改内容: 即使重试器把 Phase3 切到 annotation_fallback 执行，也仍按 annotation 主业务桶记账
+
+修改时间: 2026-04-23
+任务: annotation-projector-runtime-landing
+修改内容: 单批模型调用改用 thin phase runtime，对话校验和长度派生迁入 dialogue projector。
 """
 
 from __future__ import annotations
 
 import re
-import time
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from src.config import settings
-from src.models.interactions import record_model_interaction
 from src.models.local.annotation.context import DialogueAttributionError
 from src.models.local.annotation.evidence_renderer import render_dialogue_attribution_evidence_sections
+from src.models.local.annotation.projectors.dialogue import (
+    DialogueLengthResult,
+    normalize_dialogue_records,
+    project_dialogue_lengths,
+)
+from src.models.local.annotation.runtime import AnnotationPhaseCallSpec, execute_phase_call
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import DialogueAttributionResult, DialogueRecord, DialogueRecordSchema, QuoteCandidate
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.rag.evidence_types import EvidenceBundle
-
-
-@dataclass
-class DialogueLengthResult:
-    """compute_dialogue_lengths_with_llm 的结构化返回类型
-
-    替代原来基于元组长度的多返回类型，避免调用端用
-    len(result_tuple) 判断结构的脆弱模式。
-    """
-
-    speaker_lengths: dict[str, int] = field(default_factory=dict)
-    canonical_attribution: dict[int, list[str]] = field(default_factory=dict)
-    dialogues: list[tuple[int, str]] = field(default_factory=list)
-    dialogue_tones: dict[int, str] = field(default_factory=dict)
-    dialogue_identity_clues: dict[int, str | None] = field(default_factory=dict)
 
 
 def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[QuoteCandidate]:
@@ -203,8 +195,6 @@ async def attribute_dialogues_with_llm(
     if not config.model:
         raise ValueError("model is required")
 
-    is_cloud = client._is_cloud_api()
-    enable_thinking = config.thinking_enabled
     batch_size = settings.thinking.phase3_candidates_per_batch
 
     async def _execute_single_batch(
@@ -242,58 +232,20 @@ async def attribute_dialogues_with_llm(
             {"role": "user", "content": user_prompt},
         ]
 
-        start_time = time.time()
-        parsed, response = await current_client._call_annotation_api(
-            messages=messages,
-            enable_thinking=enable_thinking,
-            chunk_id=chunk_id,
-            response_model=DialogueAttributionResult,
-            call_type="phase3",
-        )
-
-        try:
-            duration_ms = int((time.time() - start_time) * 1000)
-            content_clean = str(parsed.model_dump())
-            thinking_content = getattr(response, "thinking_content", None)
-            extract_reasoning_tokens = getattr(current_client, "_extract_reasoning_tokens", None)
-            reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
-            process_response = getattr(current_client, "_process_annotation_response", None)
-            if callable(process_response) and hasattr(response, "choices"):
-                content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase3")
-
-            record_model_interaction(
-                run_id=run_id,
-                chunk_id=chunk_id,
-                interaction_type="dialogue_attribution",
+        call_result = await execute_phase_call(
+            current_client,
+            AnnotationPhaseCallSpec(
                 phase="phase3",
-                attempt_number=batch_idx + 1,
+                interaction_type="dialogue_attribution",
+                call_type="phase3",
                 messages=messages,
-                response_text=content_clean,
-                thinking_content=thinking_content,
-                reasoning_tokens=reasoning_tokens,
-                requested_thinking=enable_thinking,
-                duration_ms=duration_ms,
-                model_name=current_client._config.model,
-                model_provider="cloud" if is_cloud else "local",
-                session=current_client._session,
-            )
-            # 中文注释：Phase3 的 fallback 只影响执行模型，不应额外生出 annotation_fallback.phase3 桶。
-            current_client._record_estimated_token_usage_from_messages(
-                messages,
-                content_clean,
-                "phase3",
-                chunk_id,
-                task_type="annotation",
-            )
-        except Exception:
-            current_client._record_estimated_token_usage_from_response(
-                messages,
-                response,
-                "phase3",
-                chunk_id,
-                task_type="annotation",
-            )
-            raise
+                response_model=DialogueAttributionResult,
+                chunk_id=chunk_id,
+                run_id=run_id,
+                attempt_number=batch_idx + 1,
+            ),
+        )
+        parsed = call_result.parsed
 
         logger.info(
             f"dialogue_attribution batch: "
@@ -393,69 +345,12 @@ def _post_process_validation(
     - 2026-04-08: speaker 改为 list[str]，适配多人说话场景
     - 2026-04-10: 删除 _extract_speaker_from_clue 调用和所有 speaker
       修正/丢弃逻辑，只保留别名归一化和日志记录
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 保留兼容入口，实际投影逻辑委托 dialogue projector。
     """
-    valid_records: list[DialogueRecord] = []
-    candidate_indices = {c.index for c in candidates}
-    known_set = None
-    if known_characters:
-        known_set = {alias_map.get(name, name) if alias_map else name for name in known_characters}
-
-    unknown_count = 0
-
-    candidate_map = {c.index: c.content for c in candidates}
-
-    for schema_record in records:
-        if schema_record.index not in candidate_indices:
-            logger.warning(
-                f"phase3_validation: invalid index {schema_record.index}, "
-                f"not in candidates range, skipping, chunk_id={chunk_id}"
-            )
-            continue
-
-        content = candidate_map.get(schema_record.index)
-        record = DialogueRecord(
-            index=schema_record.index,
-            content=content,
-            is_dialogue=schema_record.is_dialogue,
-            speaker=schema_record.speaker,
-            tone=schema_record.tone,
-            is_inner_monologue=schema_record.is_inner_monologue,
-            identity_clue=schema_record.identity_clue,
-        )
-
-        if not record.speaker:
-            # LLM 判断为 null → 保留 null（漏标不错标）
-            valid_records.append(record)
-            continue
-
-        # 别名归一化：将 LLM 输出的别名/外号映射到 canonical 名
-        # 例如 "猴子" → "侯飞白"，由消歧系统的 alias_map 提供
-        canonical_speakers: list[str] = []
-        for s in record.speaker:
-            canonical = alias_map.get(s, s) if alias_map else s
-            canonical_speakers.append(canonical)
-
-        # 记录不在 known_set 中的 speaker（仅日志，不丢弃）
-        # 这些 speaker 可能是新角色首次出现，也可能 LLM 判断有误，
-        # 但后处理无法区分，保留 LLM 判断交由下游决定
-        if known_set:
-            for s in canonical_speakers:
-                if s not in known_set:
-                    unknown_count += 1
-                    logger.info(
-                        f"phase3_validation: speaker '{s}' not in known_set, "
-                        f"keeping LLM judgment. chunk_id={chunk_id} index={record.index}"
-                    )
-
-        if canonical_speakers != record.speaker:
-            valid_records.append(record.model_copy(update={"speaker": canonical_speakers}))
-        else:
-            valid_records.append(record)
-
-    if unknown_count > 0:
-        logger.info(f"phase3_validation summary: unknown_speakers={unknown_count}, chunk_id={chunk_id}")
-
-    return valid_records
+    return normalize_dialogue_records(records, candidates, known_characters, alias_map, chunk_id)
 
 
 async def compute_dialogue_lengths_with_llm(
@@ -494,6 +389,10 @@ async def compute_dialogue_lengths_with_llm(
     修改者: Codex
     任务: strict-phase34-fallback
     修改内容: 接入 fallback_client，确保 Phase3 的批次归属也支持云端兜底
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 对话长度、归属、tone 与 identity clue 派生改由 dialogue projector 完成。
     """
     logger.info(f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}")
 
@@ -520,51 +419,11 @@ async def compute_dialogue_lengths_with_llm(
     )
     logger.info(f"compute_dialogue_lengths_with_llm: got {len(records)} records")
 
-    speaker_lengths: dict[str, int] = {}
-    canonical_attribution: dict[int, list[str]] = {}
-    dialogues: list[tuple[int, str]] = []
-    dialogue_tones: dict[int, str] = {}
-    dialogue_identity_clues: dict[int, str | None] = {}
-    seen_indices: set[int] = set()
-
-    candidate_map = {c.index: c.content for c in candidates}
-    for record in records:
-        if record.index in seen_indices:
-            logger.warning(f"compute_dialogue_lengths_with_llm: duplicate index={record.index}, skipping duplicate")
-            continue
-        seen_indices.add(record.index)
-
-        if not record.is_dialogue:
-            continue
-
-        content = (candidate_map.get(record.index) or "").strip()
-        if not content:
-            content = (record.content or "").strip()
-        if not content:
-            continue
-
-        dialogues.append((record.index, content))
-
-        if record.tone and return_tones:
-            dialogue_tones[record.index] = record.tone
-
-        if record.identity_clue and return_identity_clues:
-            dialogue_identity_clues[record.index] = record.identity_clue
-
-        # record.speaker 已在 _post_process_validation 中完成别名归一化
-        # speaker_lengths 按归一化后的人名独立累加（多人对话每人各计一次）
-        # canonical_attribution 直接存数组，保持 LLM 返回的原始结构
-        if record.speaker:
-            if record.speaker != ["未知"]:
-                for s in record.speaker:
-                    speaker_lengths[s] = speaker_lengths.get(s, 0) + len(content)
-                canonical_attribution[record.index] = record.speaker
-
-    logger.info(f"compute_dialogue_lengths_with_llm: result={speaker_lengths}")
-    return DialogueLengthResult(
-        speaker_lengths=speaker_lengths,
-        canonical_attribution=canonical_attribution,
-        dialogues=dialogues,
-        dialogue_tones=dialogue_tones,
-        dialogue_identity_clues=dialogue_identity_clues,
+    result = project_dialogue_lengths(
+        records,
+        candidates,
+        return_tones=return_tones,
+        return_identity_clues=return_identity_clues,
     )
+    logger.info(f"compute_dialogue_lengths_with_llm: result={result.speaker_lengths}")
+    return result
