@@ -284,7 +284,11 @@ export function useAnalysisStatus(
             prevStatusRef.current = "failed";
           }
         })
-        .catch(() => {});
+        .catch((error: unknown) => {
+          // 中文注释：HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误。
+          console.warn("Failed to backfill analysis task status", error);
+          setError("任务状态同步失败，正在等待实时事件恢复");
+        });
     } else if (!taskId) {
       reset();
     }
