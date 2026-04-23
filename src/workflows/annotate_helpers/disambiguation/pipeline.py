@@ -14,15 +14,11 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
-import time
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interactions import record_model_interaction
 from src.models.interfaces import DisambiguationLike
@@ -31,38 +27,38 @@ from src.models.local.disambiguation import (
     DisambiguationState,
     ExtendedDisambigResult,
     NameReviewState,
-    build_canonical_reselect_messages,
-    build_disambiguate_messages,
-    build_disambiguation_prompt_context,
-    render_disambig_prompt_context,
 )
-from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
-from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
-from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
 
 from ..sentence import build_context_sentences
-from .candidate_filter import CandidateClassification
+from . import pipeline_stages as pipeline_stages_mod
 from .candidates import (
     _build_candidate_payload_by_names,
     _build_existing_character_hint_from_db,
     _build_name_count_lookup,
     _collect_final_disambiguation_candidates,
-    _ensure_state_snapshot_has_known_names,
     extract_new_names_from_db,
     filter_candidates_by_class,
 )
 from .checkpoint import _save_disambig_checkpoint
-from .relations import (
-    _extract_retryable_relations,
-    _merge_relations,
-    _normalize_relations_with_alias_map,
-    _process_entity_relations,
+from .model_adapter import (
+    build_canonical_reselect_call_spec,
+    build_disambiguation_call_spec,
+    call_with_recorded_retry,
+    supports_canonical_reselect,
 )
+from .pipeline_stages import (
+    apply_final_disambiguation_result,
+    apply_incremental_disambiguation_result,
+    assemble_final_prompt_context,
+    persist_final_disambiguation,
+    persist_incremental_checkpoint,
+    plan_final_disambiguation,
+    plan_incremental_disambiguation,
+)
+from .relations import _process_entity_relations
 from .state_logic import (
-    DISAMBIG_STATE_RESOLVED,
-    DISAMBIG_STATE_UNRESOLVED,
     _collect_alias_clusters,
     apply_disambiguation_decisions,
     apply_model_reselected_canonicals,
@@ -72,241 +68,6 @@ from .state_logic import (
 
 if TYPE_CHECKING:
     from src.rag import DisambigContextProvider
-    from src.storage.repositories.graph import CurrentRelationRow
-
-DisambigStateSnapshot = dict[str, dict[str, str]]
-
-
-def _get_client_model_name(client: DisambiguationLike) -> str:
-    """
-    安全获取客户端模型名。
-
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect-review-fix
-    说明: 轻量 fallback client 的 `_config` 可能只是占位对象，不能假定一定有 `model`
-          属性；这里统一做兜底，避免模型交互日志阶段反向把主流程打挂。
-    """
-    config = getattr(client, "_config", None)
-    model_name = getattr(config, "model", None)
-    if isinstance(model_name, str) and model_name.strip():
-        return model_name
-    return "unknown"
-
-
-def _supports_canonical_reselect(client: DisambiguationLike) -> bool:
-    """
-    判断客户端是否支持额外的模型代表名重选。
-
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect-review-fix
-    说明: 正式模型客户端默认支持；像 `_NoopDisambiguationClient` 这样的轻量 fallback
-          会显式声明不支持，此时主流程必须回退到已有 heuristic，而不是继续发起空调用。
-    """
-    checker = getattr(client, "supports_canonical_reselect", None)
-    if callable(checker):
-        result = checker()
-        if isinstance(result, bool):
-            return result
-    return True
-
-
-def _fetch_current_relations(conn: Session, run_id: str) -> list[CurrentRelationRow]:
-    """
-    从 graph_repo 获取当前活跃关系。
-
-    修改时间: 2026-04-23
-    任务: P0-graph-repository-dto-boundary
-    修改内容: 返回 CurrentRelationRow DTO，避免把 repository raw dict 形状泄漏到消歧流程。
-    """
-    from src.storage.repositories import GraphRepository
-
-    graph_repo = GraphRepository(conn)
-    return graph_repo.fetch_current_relations(run_id, active_only=True)
-
-
-async def _generate_and_save_stage_summary(
-    conn: Session,
-    run_id: str,
-    current_chunk_id: int,
-    disambig_interval: int,
-    client: DisambiguationLike,
-) -> None:
-    """
-    生成并保存阶段性摘要
-
-    创建时间: 2026-04-08
-    创建者: GLM-5
-    任务: summary-full-chain-refactor
-    说明: 在增量消歧时，获取最近N个chunk的summary，生成100字阶段性摘要
-
-    Args:
-        conn: 数据库会话
-        run_id: 运行ID
-        current_chunk_id: 当前chunk_id
-        disambig_interval: 消歧间隔（也是摘要区间大小）
-        client: 消歧客户端（用于调用LLM生成摘要）
-    """
-    start_chunk_id = current_chunk_id - disambig_interval + 1
-    if start_chunk_id < 0:
-        start_chunk_id = 0
-
-    summaries = fetch_chunk_summaries_by_range(conn, run_id, start_chunk_id, current_chunk_id)
-    if not summaries:
-        logger.debug(f"No chunk summaries found for range {start_chunk_id}-{current_chunk_id}")
-        return
-
-    summaries_text = "\n".join([f"[{cid}] {s}" for cid, s in summaries])
-    user_content = STAGE_SUMMARY_USER_TEMPLATE.format(
-        count=len(summaries),
-        summaries=summaries_text,
-    )
-    messages = [
-        {"role": "system", "content": STAGE_SUMMARY_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
-    ]
-
-    try:
-        start_time = time.time()
-        stage_summary = await client.generate_summary(messages, max_tokens=150)
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        if len(stage_summary) > 120:
-            stage_summary = stage_summary[:117] + "..."
-
-        insert_stage_summary(conn, run_id, start_chunk_id, current_chunk_id, stage_summary)
-        logger.info(f"Generated stage summary for chunks {start_chunk_id}-{current_chunk_id}: {stage_summary[:50]}...")
-
-        record_model_interaction(
-            run_id=run_id,
-            chunk_id=None,
-            interaction_type="stage_summary",
-            phase="incremental",
-            attempt_number=1,
-            messages=messages,
-            response_text=stage_summary,
-            thinking_content=None,
-            requested_thinking=False,
-            duration_ms=duration_ms,
-            model_name=client._config.model,
-            model_provider="cloud" if client.is_cloud_api() else "local",
-            session=None,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to generate stage summary: {e}")
-
-
-def _inject_category_into_context(
-    classifications: list[CandidateClassification],
-    context_sentences: dict[str, str],
-) -> None:
-    """将 protected 候选的分类标签注入到上下文字符串前缀。"""
-    for cls in classifications:
-        if cls.category == "protected" and cls.name in context_sentences:
-            ctx = context_sentences[cls.name]
-            context_sentences[cls.name] = f"{PROTECTED_CONTEXT_PREFIX}{ctx}"
-
-
-def _resolve_incremental_batch_window(current_chunk_id: int, disambig_interval: int) -> tuple[int, int]:
-    """
-    解析增量消歧批次窗口。
-
-    创建时间: 2026-04-21
-    创建者: Codex
-    任务: align-incremental-disambig-batch-window
-    说明: 增量消歧的触发语义是“对前 N 个尚未触发增量消歧的 chunk 做一轮消歧”，
-         因此上下文窗口也必须显式对齐到同一个批次区间，不能再隐式依赖 prev_chunks。
-    """
-    batch_start_chunk_id = max(0, current_chunk_id - disambig_interval + 1)
-    return batch_start_chunk_id, current_chunk_id
-
-
-def _merge_deferred_candidates_into_state(
-    state: DisambiguationState,
-    deferred_candidates: list[NameCountCandidate],
-) -> DisambiguationState:
-    """
-    将延后处理的候选写回状态，避免低频正式名在候选阶段蒸发。
-
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: preserve-deferred-disambig-candidates
-    说明: deferred 候选本轮不送模型，但仍要进入 discovered_names，并在 review_status
-    中留下 unresolved 记录，供后续增量复审和终消歧重新评估。
-    """
-    if not deferred_candidates:
-        return state
-
-    new_discovered = set(state.discovered_names)
-    new_review_status = dict(state.review_status)
-    recorded_names: list[str] = []
-    current_time = time.time()
-
-    for candidate in deferred_candidates:
-        name = str(candidate.get("name", "")).strip()
-        if not name:
-            continue
-
-        new_discovered.add(name)
-
-        if name in state.known_canonical_names:
-            continue
-
-        old_review = new_review_status.get(name)
-        if old_review is not None and old_review.status == DISAMBIG_STATE_RESOLVED:
-            continue
-        if old_review is not None and old_review.status != DISAMBIG_STATE_UNRESOLVED:
-            continue
-
-        new_review_status[name] = NameReviewState(
-            status=DISAMBIG_STATE_UNRESOLVED,
-            confidence="low",
-            proposed_canonical=None,
-            evidence_strength=None,
-            decision_source="candidate_filter",
-            decision_timestamp=current_time,
-        )
-        recorded_names.append(name)
-
-    if not recorded_names:
-        if new_discovered != state.discovered_names:
-            return state.with_updates(discovered_names=frozenset(new_discovered))
-        return state
-
-    logger.info(
-        "Deferred {} candidates for later disambiguation: {}",
-        len(recorded_names),
-        recorded_names,
-    )
-    return state.with_updates(
-        discovered_names=frozenset(new_discovered),
-        review_status=tuple(new_review_status.items()),
-    )
-
-
-def _collect_review_candidates(
-    state: DisambiguationState,
-) -> list[NameCountCandidate]:
-    """收集需要复审的已判决名字。
-
-    条件（严格，避免推翻已有正确决策）：
-    1. status != resolved
-    2. confidence == low（medium 的不再复审，已有合并决策的不动）
-
-    说明:
-    - 这里也会把 candidate_filter 标成 unresolved 的 deferred 名字重新带回主链路；
-      如果后续 chunk 补出了上下文，它们就能重新进入模型。
-    """
-    review_dict = state.get_review_status_dict()
-    candidates: list[NameCountCandidate] = []
-    for name, review in review_dict.items():
-        if review.status == "resolved":
-            continue
-        if review.confidence != "low":
-            continue
-        candidates.append({"name": name, "count": 0})  # count 仅作占位，真正是否可送模型由上下文和分类器决定
-    return candidates
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
@@ -322,165 +83,36 @@ class DisambiguationMaxRetriesExceededError(Exception):
     pass
 
 
-def _get_git_audit_info() -> dict[str, str]:
-    """获取 git 审计信息（模块加载时缓存，避免每次消歧调用 fork 进程）。"""
-    if not hasattr(_get_git_audit_info, "_cache"):
-        info: dict[str, str] = {}
-        try:
-            info["branch"] = (
-                subprocess.check_output(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    stderr=subprocess.DEVNULL,
-                    timeout=5,
-                )
-                .decode()
-                .strip()
-            )
-            info["commit"] = (
-                subprocess.check_output(
-                    ["git", "rev-parse", "--short", "HEAD"],
-                    stderr=subprocess.DEVNULL,
-                    timeout=5,
-                )
-                .decode()
-                .strip()
-            )
-        except Exception:
-            pass
-        _get_git_audit_info._cache = info  # type: ignore[attr-defined]
-    return _get_git_audit_info._cache  # type: ignore[attr-defined]
-
-
-def _build_disambig_response_text(result: Any) -> str:
+def _sync_stage_dependencies() -> None:
     """
-    构建消歧响应文本
+    同步 pipeline 兼容入口到阶段模块。
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: 创建统一的模型交互记录接口
-    说明: 将消歧结果序列化为 JSON 字符串
+    创建时间: 2026-04-23
+    任务: p1-disambiguation-pipeline-split
+    说明: 旧测试和调用方仍会 patch `pipeline.py` 上的内部函数，这里在进入阶段实现前把当前模块上的
+          名字回灌给 `pipeline_stages`，兼顾模块拆分和既有 patch 入口稳定性。
     """
-    if isinstance(result, ExtendedDisambigResult):
-        response_dict = {
-            "canonical_decisions": result.canonical_decisions,
-            "alias_confidence": result.alias_confidence if hasattr(result, "alias_confidence") else {},
-            "entity_types": result.entity_types if hasattr(result, "entity_types") else {},
-            "entity_relations": result.entity_relations if hasattr(result, "entity_relations") else [],
-            "evidence_profiles": {
-                name: {
-                    "has_original_sentence": profile.has_original_sentence,
-                    "has_identity_clue": profile.has_identity_clue,
-                    "has_summary": profile.has_summary,
-                    "strong_signals": list(profile.strong_signals),
-                    "strength": profile.strength,
-                }
-                for name, profile in getattr(result, "evidence_profiles", {}).items()
-            },
-        }
-    elif isinstance(result, dict):
-        response_dict = {
-            "canonical_decisions": result,
-            "alias_confidence": {},
-            "entity_types": {},
-            "entity_relations": [],
-            "evidence_profiles": {},
-        }
-    else:
-        response_dict = {
-            "canonical_decisions": {},
-            "alias_confidence": {},
-            "entity_types": {},
-            "entity_relations": [],
-            "evidence_profiles": {},
-        }
-
-    response_dict["audit"] = _get_git_audit_info()
-
-    return json.dumps(response_dict, ensure_ascii=False)
+    pipeline_stages_mod.build_context_sentences = build_context_sentences
+    pipeline_stages_mod.extract_new_names_from_db = extract_new_names_from_db
+    pipeline_stages_mod.filter_candidates_by_class = filter_candidates_by_class
+    pipeline_stages_mod._build_existing_character_hint_from_db = _build_existing_character_hint_from_db
+    pipeline_stages_mod.fetch_current_relations = _fetch_current_relations
+    pipeline_stages_mod.fetch_all_character_names = fetch_all_character_names
+    pipeline_stages_mod._collect_final_disambiguation_candidates = _collect_final_disambiguation_candidates
+    pipeline_stages_mod._save_disambig_checkpoint = _save_disambig_checkpoint
+    pipeline_stages_mod.AnnotationRepository = AnnotationRepository  # type: ignore[misc]
+    pipeline_stages_mod._process_entity_relations = _process_entity_relations
+    pipeline_stages_mod.validate_confidence_with_evidence = validate_confidence_with_evidence
+    pipeline_stages_mod.reselect_cluster_canonicals = reselect_cluster_canonicals
+    pipeline_stages_mod.apply_disambiguation_decisions = apply_disambiguation_decisions
+    pipeline_stages_mod.collect_review_candidates = _collect_review_candidates
 
 
-def _build_shared_evidence_query_text(
-    candidates: list[NameCountCandidate],
-    context_sentences: dict[str, str],
-) -> str | None:
-    """将候选名字的例句上下文拼成共享取证查询文本。"""
-
-    parts: list[str] = []
-    for item in candidates:
-        name = str(item.get("name", "")).strip()
-        if not name:
-            continue
-        context = context_sentences.get(name, "").strip()
-        if context:
-            parts.append(f"{name}: {context}")
-
-    return "\n".join(parts) if parts else None
-
-
-async def _build_prompt_context_with_shared_evidence(
-    prompt_context: DisambiguationPromptContext | None,
-    evidence_provider: DisambigContextProvider | None,
-    candidates: list[NameCountCandidate],
-    context_sentences: dict[str, str],
-    *,
-    current_chunk: int | None = None,
-    active_entity_fallback_names: set[str] | None = None,
-) -> DisambiguationPromptContext | None:
-    """把共享 evidence renderer 输出补入消歧 prompt_context。"""
-
-    if evidence_provider is None or not candidates:
-        return prompt_context
-
-    names_in_chunk = [str(item.get("name", "")).strip() for item in candidates if str(item.get("name", "")).strip()]
-    if not names_in_chunk:
-        return prompt_context
-
-    query_text = _build_shared_evidence_query_text(candidates, context_sentences)
-    if evidence_provider.requires_level3():
-        if not evidence_provider.is_level3_available():
-            # 中文注释：这里是“补充 shared evidence prompt_context”的辅助链路，
-            # 不应在 final-only / resume 场景里替代 annotation 主流程的 readiness gate。
-            # Level 3 暂不可用时，退回 Level 1 / Level 2 证据，避免把已有 prompt_context 直接变成硬失败。
-            logger.warning(
-                "shared evidence prompt_context fallback to Level1/2 only because Level3 is required but unavailable"
-            )
-            evidence_bundle = evidence_provider.collect_evidence(
-                names_in_chunk=names_in_chunk,
-                current_chunk=current_chunk,
-            )
-        else:
-            evidence_bundle = await evidence_provider.collect_evidence_with_level3(
-                names_in_chunk=names_in_chunk,
-                current_chunk=current_chunk,
-                context_text=query_text,
-                exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
-            )
-    elif evidence_provider.is_level3_available():
-        evidence_bundle = await evidence_provider.collect_evidence_with_level3(
-            names_in_chunk=names_in_chunk,
-            current_chunk=current_chunk,
-            context_text=query_text,
-            exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
-        )
-    else:
-        evidence_bundle = evidence_provider.collect_evidence(
-            names_in_chunk=names_in_chunk,
-            current_chunk=current_chunk,
-        )
-
-    shared_evidence_context = render_disambig_prompt_context(
-        evidence_bundle,
-        fallback_requested_names=active_entity_fallback_names,
-        priority_names=names_in_chunk,
-    )
-    if not shared_evidence_context:
-        return prompt_context
-
-    return build_disambiguation_prompt_context(
-        existing_character_hint=prompt_context.existing_character_hint if prompt_context else None,
-        graph_hint=prompt_context.graph_hint if prompt_context else None,
-        shared_evidence_context=shared_evidence_context,
-    )
+_build_prompt_context_with_shared_evidence = pipeline_stages_mod.build_prompt_context_with_shared_evidence
+_resolve_incremental_batch_window = pipeline_stages_mod.resolve_incremental_batch_window
+_generate_and_save_stage_summary = pipeline_stages_mod.generate_and_save_stage_summary
+_fetch_current_relations = pipeline_stages_mod.fetch_current_relations
+_collect_review_candidates = pipeline_stages_mod.collect_review_candidates
 
 
 async def _retry_disambig(
@@ -514,85 +146,20 @@ async def _retry_disambig(
     任务: final-canonical-reselect-review-fix
     修改内容: 模型名改为安全读取，避免轻量 fallback client 在交互日志阶段报错
     """
-    max_retries = settings.runtime.disambiguation.max_retries
-    last_exception = None
-    model_name = _get_client_model_name(client)
-
-    for attempt in range(1, max_retries + 1):
-        start_time = time.time()
-        try:
-            result = await client.disambiguate_characters(
-                candidates=candidates,
-                context_sentences=context_sentences,
-                existing_names=existing_names if existing_names else None,
-                prompt_context=prompt_context,
-            )
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            messages = build_disambiguate_messages(
-                candidates,
-                context_sentences,
-                existing_names,
-                prompt_context=prompt_context,
-            )
-            response_text = _build_disambig_response_text(result)
-            thinking_content = getattr(result, "_thinking_content", None)
-            reasoning_tokens = getattr(result, "_reasoning_tokens", None)
-            requested_thinking = getattr(getattr(client, "_config", None), "thinking_enabled", None)
-
-            record_model_interaction(
-                run_id=run_id,
-                chunk_id=None,
-                interaction_type="disambiguate",
-                phase=stage_name.replace(" ", "_"),
-                attempt_number=attempt,
-                messages=messages,
-                response_text=response_text,
-                thinking_content=thinking_content,
-                reasoning_tokens=reasoning_tokens,
-                requested_thinking=requested_thinking,
-                duration_ms=duration_ms,
-                model_name=model_name,
-                model_provider="cloud" if client.is_cloud_api() else "local",
-                session=None,
-            )
-
-            return result
-        except Exception as e:
-            last_exception = e
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            messages = build_disambiguate_messages(
-                candidates,
-                context_sentences,
-                existing_names,
-                prompt_context=prompt_context,
-            )
-
-            record_model_interaction(
-                run_id=run_id,
-                chunk_id=None,
-                interaction_type="disambiguate",
-                phase=stage_name.replace(" ", "_"),
-                attempt_number=attempt,
-                messages=messages,
-                response_text=json.dumps({"error": str(e)}, ensure_ascii=False),
-                thinking_content=None,
-                requested_thinking=getattr(getattr(client, "_config", None), "thinking_enabled", None),
-                duration_ms=duration_ms,
-                model_name=model_name,
-                model_provider="cloud" if client.is_cloud_api() else "local",
-                status="error",
-                error_message=str(e),
-                session=None,
-            )
-
-            if attempt < max_retries:
-                logger.warning(f"{stage_name} failed (attempt {attempt}), retrying: {e}")
-                time.sleep(1)
-            else:
-                logger.error(f"{stage_name} failed after {max_retries} attempts: {e}")
-                raise last_exception from None
+    call_spec = build_disambiguation_call_spec(
+        client,
+        candidates,
+        context_sentences,
+        existing_names,
+        prompt_context,
+        stage_name,
+    )
+    return await call_with_recorded_retry(
+        client,
+        call_spec,
+        run_id=run_id,
+        record_interaction=record_model_interaction,
+    )
 
 
 async def _retry_canonical_reselect(
@@ -618,82 +185,20 @@ async def _retry_canonical_reselect(
     任务: final-canonical-reselect-review-fix
     修改内容: 交互日志改为安全读取模型名，避免 lightweight fallback client 直接崩溃
     """
-    max_retries = settings.runtime.disambiguation.max_retries
-    last_exception = None
-    model_name = _get_client_model_name(client)
-
-    for attempt in range(1, max_retries + 1):
-        start_time = time.time()
-        try:
-            result = await client.reselect_canonicals(
-                candidates=candidates,
-                clusters=clusters,
-                context_sentences=context_sentences,
-                review_states=review_states,
-            )
-            duration_ms = int((time.time() - start_time) * 1000)
-            messages = build_canonical_reselect_messages(
-                candidates,
-                clusters,
-                context_sentences=context_sentences,
-                review_states=review_states,
-            )
-            response_text = _build_disambig_response_text(result)
-            thinking_content = getattr(result, "_thinking_content", None)
-            reasoning_tokens = getattr(result, "_reasoning_tokens", None)
-            requested_thinking = getattr(getattr(client, "_config", None), "thinking_enabled", None)
-
-            record_model_interaction(
-                run_id=run_id,
-                chunk_id=None,
-                interaction_type="disambiguate",
-                phase=stage_name.replace(" ", "_"),
-                attempt_number=attempt,
-                messages=messages,
-                response_text=response_text,
-                thinking_content=thinking_content,
-                reasoning_tokens=reasoning_tokens,
-                requested_thinking=requested_thinking,
-                duration_ms=duration_ms,
-                model_name=model_name,
-                model_provider="cloud" if client.is_cloud_api() else "local",
-                session=None,
-            )
-
-            return result
-        except Exception as e:
-            last_exception = e
-            duration_ms = int((time.time() - start_time) * 1000)
-            messages = build_canonical_reselect_messages(
-                candidates,
-                clusters,
-                context_sentences=context_sentences,
-                review_states=review_states,
-            )
-            record_model_interaction(
-                run_id=run_id,
-                chunk_id=None,
-                interaction_type="disambiguate",
-                phase=stage_name.replace(" ", "_"),
-                attempt_number=attempt,
-                messages=messages,
-                response_text=json.dumps({"error": str(e)}, ensure_ascii=False),
-                thinking_content=None,
-                requested_thinking=getattr(getattr(client, "_config", None), "thinking_enabled", None),
-                duration_ms=duration_ms,
-                model_name=model_name,
-                model_provider="cloud" if client.is_cloud_api() else "local",
-                status="error",
-                error_message=str(e),
-                session=None,
-            )
-
-            if attempt < max_retries:
-                logger.warning(f"{stage_name} failed (attempt {attempt}), retrying: {e}")
-                time.sleep(1)
-            else:
-                logger.error(f"{stage_name} failed after {max_retries} attempts: {e}")
-                raise last_exception from None
+    call_spec = build_canonical_reselect_call_spec(
+        client,
+        candidates,
+        clusters,
+        context_sentences,
+        review_states,
+        stage_name,
+    )
+    return await call_with_recorded_retry(
+        client,
+        call_spec,
+        run_id=run_id,
+        record_interaction=record_model_interaction,
+    )
 
 
 async def _run_final_canonical_reselect(
@@ -725,7 +230,7 @@ async def _run_final_canonical_reselect(
         return state
 
     name_counts = _build_name_count_lookup(all_names)
-    if not _supports_canonical_reselect(full_disambig_client):
+    if not supports_canonical_reselect(full_disambig_client):
         logger.warning("final canonical reselect skipped: client does not support model reselect, falling back")
         return reselect_cluster_canonicals(state, name_counts=name_counts)
 
@@ -734,6 +239,8 @@ async def _run_final_canonical_reselect(
     if not candidate_payload:
         logger.warning("final canonical reselect skipped: no candidate payload for alias clusters, falling back")
         return reselect_cluster_canonicals(state, name_counts=name_counts)
+
+    from ..sentence import build_context_sentences
 
     context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
     review_states = state.get_review_status_dict()
@@ -787,140 +294,39 @@ async def _run_incremental_disambiguation_with_state(
     if (current_idx + 1) % disambig_interval != 0:
         return state
 
-    batch_start_chunk_id, batch_end_chunk_id = _resolve_incremental_batch_window(chunk_id, disambig_interval)
-
-    alias_map_dict = state.get_alias_merges_dict()
-    new_names = extract_new_names_from_db(conn, alias_map_dict, run_id, current_chunk_id=chunk_id)
-
-    truly_new_names: list[NameCountCandidate] = [
-        name for name in new_names if name["name"] not in state.discovered_names
-    ]
-
-    # Collect review candidates: previously decided names that need re-evaluation
-    review_candidates = _collect_review_candidates(state)
-
-    all_disambig_candidates = truly_new_names + review_candidates
-
-    if not all_disambig_candidates:
-        return state
-
-    # 增量消歧只能读取当前 chunk 及之前的例句，避免 future-chunk 线索提前泄漏。
-    context_sentences = build_context_sentences(
+    _sync_stage_dependencies()
+    plan = await plan_incremental_disambiguation(
         conn,
-        all_disambig_candidates,
-        alias_keywords,
-        run_id=run_id,
-        max_chunk_id=chunk_id,
-        chunk_start_id=batch_start_chunk_id,
-        chunk_end_id=batch_end_chunk_id,
-    )
-    _, deferred_candidates, all_disambig_candidates, classifications = filter_candidates_by_class(
-        all_disambig_candidates,
-        context_sentences,
-    )
-    state_after_deferred = _merge_deferred_candidates_into_state(state, deferred_candidates)
-    if not all_disambig_candidates:
-        if state_after_deferred != state:
-            _save_disambig_checkpoint(conn, run_id, state_after_deferred)
-        logger.info("incremental disambiguation skipped: no remaining candidates after filtering")
-        return state_after_deferred
-    # Rebuild context for filtered candidates only
-    context_sentences = build_context_sentences(
-        conn,
-        all_disambig_candidates,
-        alias_keywords,
-        run_id=run_id,
-        max_chunk_id=chunk_id,
-        chunk_start_id=batch_start_chunk_id,
-        chunk_end_id=batch_end_chunk_id,
-    )
-    # Inject protected category labels into context for prompt
-    _inject_category_into_context(classifications, context_sentences)
-    existing_names = list(state_after_deferred.known_canonical_names)
-    alias_map = state_after_deferred.get_alias_merges_dict()
-    relations = _fetch_current_relations(conn, run_id)
-    prompt_context = _build_existing_character_hint_from_db(
-        conn,
-        [str(item.get("name", "")).strip() for item in all_disambig_candidates if str(item.get("name", "")).strip()],
-        existing_names,
+        state,
         alias_keywords,
         run_id,
-        alias_map,
-        relations,
-        current_chunk_id=chunk_id,
-        chunk_start_id=batch_start_chunk_id,
-        chunk_end_id=batch_end_chunk_id,
-    )
-    new_candidate_names = {
-        str(item.get("name", "")).strip()
-        for item in truly_new_names
-        if str(item.get("name", "")).strip()
-    }
-    active_entity_fallback_names = {
-        str(item.get("name", "")).strip()
-        for item in all_disambig_candidates
-        if str(item.get("name", "")).strip() in new_candidate_names
-    }
-    prompt_context = await _build_prompt_context_with_shared_evidence(
-        prompt_context,
+        chunk_id,
+        disambig_interval,
         evidence_provider,
-        all_disambig_candidates,
-        context_sentences,
-        current_chunk=chunk_id,
-        active_entity_fallback_names=active_entity_fallback_names,
     )
+    if plan is None:
+        return state
+    if not plan.candidate_payload:
+        persist_incremental_checkpoint(conn, run_id, state, plan.state_after_deferred)
+        logger.info("incremental disambiguation skipped: no remaining candidates after filtering")
+        return plan.state_after_deferred
 
     result = await _retry_disambig(
         incremental_disambig_client,
-        all_disambig_candidates,
-        context_sentences,
-        existing_names,
+        plan.candidate_payload,
+        plan.context_sentences,
+        plan.existing_names,
         stage_name="incremental disambiguation",
         run_id=run_id,
-        prompt_context=prompt_context,
+        prompt_context=plan.prompt_context,
     )
-
-    result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-    incremental_global_freq = {str(n["name"]): int(n.get("count", 0)) for n in new_names}
-
-    new_state = apply_disambiguation_decisions(state_after_deferred, result)
-    if result.canonical_decisions:
-        affected_cluster_names = set(result.canonical_decisions) | set(result.canonical_decisions.values())
-        new_state = reselect_cluster_canonicals(
-            new_state,
-            name_counts=incremental_global_freq,
-            affected_names=affected_cluster_names,
-        )
-
-    # Accumulate entity_types from LLM output into state
-    if result.entity_types:
-        valid_names = new_state.discovered_names | new_state.known_canonical_names
-        filtered_types = {k: v for k, v in result.entity_types.items() if k in valid_names}
-        if len(filtered_types) < len(result.entity_types):
-            invalid_keys = set(result.entity_types.keys()) - set(filtered_types.keys())
-            logger.warning(
-                "Filtered %d invalid entity_type keys in incremental disambig: %s",
-                len(result.entity_types) - len(filtered_types),
-                invalid_keys,
-            )
-        merged_types = dict(state.entity_types)
-        merged_types.update(filtered_types)
-        new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
-
-    if new_state != state:
-        logger.debug(
-            f"DisambiguationState updated: "
-            f"{len(new_state.discovered_names)} discovered, "
-            f"{len(new_state.known_canonical_names)} canonicals, "
-            f"{len(new_state.alias_merges)} merges"
-        )
-
-        new_relations = _normalize_relations_with_alias_map(result.entity_relations, new_state.get_alias_merges_dict())
-        merged_relations = _merge_relations(list(new_state.pending_relations), new_relations)
-
-        new_state = new_state.with_updates(pending_relations=tuple(merged_relations))
-
-        _save_disambig_checkpoint(conn, run_id, new_state)
+    new_state = apply_incremental_disambiguation_result(
+        plan.state_after_deferred,
+        result,
+        plan.new_names,
+        plan.context_sentences,
+    )
+    persist_incremental_checkpoint(conn, run_id, state, new_state)
 
     await _generate_and_save_stage_summary(
         conn,
@@ -962,93 +368,14 @@ async def _run_final_disambiguation_with_state(
        - 用 pending_relations + alias_merges 归一化关系
     7. 保存最终 checkpoint
     """
-    pending_relations = list(state.pending_relations)
-    if pending_relations:
-        logger.info(f"Found {len(pending_relations)} pending relations from checkpoint, will process them")
-
-    existing_names = list(state.known_canonical_names)
-
-    if not existing_names:
+    _sync_stage_dependencies()
+    plan = plan_final_disambiguation(conn, state, alias_keywords, run_id)
+    if plan is None:
         return state
+    if plan.pending_relations:
+        logger.info("Found {} pending relations from checkpoint, will process them", len(plan.pending_relations))
 
-    raw_all_names = fetch_all_character_names(conn, run_id)
-    all_names: list[NameCountCandidate] = []
-    for item in raw_all_names:
-        name = str(item.get("name", "")).strip()
-        if not name:
-            continue
-        raw_count = item.get("count", 0)
-        try:
-            count = int(raw_count)
-        except (TypeError, ValueError):
-            count = 0
-        all_names.append({"name": name, "count": count})
-    final_global_freq = _build_name_count_lookup(all_names)
-    review_status_dict = state.get_review_status_dict()
-    alias_map_dict = state.get_alias_merges_dict()
-    state_snapshot_for_candidates: DisambigStateSnapshot = {
-        name: {
-            "state": review.status,
-            "confidence": review.confidence,
-            "canonical": review.proposed_canonical or name,
-        }
-        for name, review in review_status_dict.items()
-    }
-    state_snapshot_for_candidates = _ensure_state_snapshot_has_known_names(
-        alias_map_dict,
-        state_snapshot_for_candidates,
-        state.known_canonical_names,
-    )
-    candidates = _collect_final_disambiguation_candidates(all_names, alias_map_dict, state_snapshot_for_candidates)
-
-    if candidates:
-        candidate_payload = _build_candidate_payload_by_names(all_names, candidates)
-        context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-        _, deferred_candidates, candidate_payload, f_classifications = filter_candidates_by_class(
-            candidate_payload,
-            context_sentences,
-        )
-        state_with_deferred = _merge_deferred_candidates_into_state(state, deferred_candidates)
-        if candidate_payload:
-            context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
-            _inject_category_into_context(f_classifications, context_sentences)
-            relations = _fetch_current_relations(conn, run_id)
-            prompt_context = _build_existing_character_hint_from_db(
-                conn,
-                [str(item.get("name", "")).strip() for item in candidate_payload if str(item.get("name", "")).strip()],
-                existing_names,
-                alias_keywords,
-                run_id,
-                alias_map_dict,
-                relations,
-                current_chunk_id=None,
-            )
-            prompt_context = await _build_prompt_context_with_shared_evidence(
-                prompt_context,
-                evidence_provider,
-                candidate_payload,
-                context_sentences,
-            )
-            result = await _retry_disambig(
-                full_disambig_client,
-                candidate_payload,
-                context_sentences,
-                existing_names,
-                stage_name="final disambiguation",
-                run_id=run_id,
-                prompt_context=prompt_context,
-            )
-            result = validate_confidence_with_evidence(result, existing_names, context_sentences)
-        else:
-            logger.info("final disambiguation skipped: no remaining candidates after filtering")
-            result = ExtendedDisambigResult(
-                canonical_decisions={},
-                entity_types={},
-                entity_relations=[],
-                alias_confidence={},
-            )
-        state = state_with_deferred
-    else:
+    if not plan.candidate_payload:
         logger.info("final disambiguation skipped: no unresolved candidates")
         result = ExtendedDisambigResult(
             canonical_decisions={},
@@ -1056,10 +383,26 @@ async def _run_final_disambiguation_with_state(
             entity_relations=[],
             alias_confidence={},
         )
+        working_state = plan.state_before_apply
+    else:
+        plan = await assemble_final_prompt_context(plan, evidence_provider)
+        result = await _retry_disambig(
+            full_disambig_client,
+            plan.candidate_payload,
+            plan.context_sentences,
+            plan.existing_names,
+            stage_name="final disambiguation",
+            run_id=run_id,
+            prompt_context=plan.prompt_context,
+        )
+        working_state = plan.state_before_apply
 
-    new_state = state
-    if result.canonical_decisions:
-        new_state = apply_disambiguation_decisions(state, result)
+    new_state = apply_final_disambiguation_result(
+        working_state,
+        result,
+        plan.final_global_freq,
+        plan.context_sentences,
+    )
     if new_state.alias_merges:
         # 中文注释：只有“本轮 final 确实拿到了新的模型 alias 决策”时，才追加一次模型代表名重选；
         # 如果这轮没有新决策，就沿用既有 state + 全量频次做本地纠偏，避免无意义查库和额外模型调用。
@@ -1068,87 +411,16 @@ async def _run_final_disambiguation_with_state(
                 conn,
                 new_state,
                 full_disambig_client,
-                all_names,
+                plan.all_names,
                 alias_keywords,
                 run_id,
             )
-        else:
-            new_state = reselect_cluster_canonicals(new_state, name_counts=final_global_freq)
-
-    # Merge final disambig entity_types into accumulated state
-    if result.entity_types:
-        valid_names = new_state.discovered_names | new_state.known_canonical_names
-        filtered_types = {k: v for k, v in result.entity_types.items() if k in valid_names}
-        if len(filtered_types) < len(result.entity_types):
-            invalid_keys = set(result.entity_types.keys()) - set(filtered_types.keys())
-            logger.warning(
-                "Filtered %d invalid entity_type keys in final disambig: %s",
-                len(result.entity_types) - len(filtered_types),
-                invalid_keys,
-            )
-        merged_types = dict(new_state.entity_types)
-        merged_types.update(filtered_types)
-        new_state = new_state.with_updates(entity_types=tuple(merged_types.items()))
-
-    # Promote review-status names with mixed/strong evidence to canonical.
-    # These names were seen by the model but never reached high confidence;
-    # promoting them ensures minor characters appear in graph_entities.
-    review_dict = new_state.get_review_status_dict()
-    alias_set = {a for a, _ in new_state.alias_merges}
-    promoted_names: list[str] = []
-    for name, review in review_dict.items():
-        if (
-            review.status == "review"
-            and review.evidence_strength in ("mixed", "strong")
-            and name not in alias_set
-            and name not in new_state.known_canonical_names
-        ):
-            promoted_names.append(name)
-    if promoted_names:
-        logger.info(f"Promoting {len(promoted_names)} review-status names to canonical: {promoted_names}")
-        new_state = new_state.with_updates(
-            known_canonical_names=new_state.known_canonical_names | frozenset(promoted_names),
-        )
-
-    if new_state != state:
-        logger.info(
-            f"Final disambiguation completed: "
-            f"{len(new_state.discovered_names)} discovered, "
-            f"{len(new_state.known_canonical_names)} canonicals, "
-            f"{len(new_state.alias_merges)} merges"
-        )
-
-    ann_repo = AnnotationRepository(conn)
-    ann_repo.ensure_canonical_entities(
+    return persist_final_disambiguation(
+        conn,
+        novel_id,
         run_id,
-        new_state.known_canonical_names,
-        novel_id=novel_id,
-        entity_types=new_state.get_entity_types_dict() or None,
+        working_state,
+        new_state,
+        plan.pending_relations,
+        result,
     )
-    ann_repo.cleanup_self_loop_relations(run_id)
-    conn.commit()
-    logger.info(
-        "Stateful final disambiguation persisted: {} canonicals, {} merges",
-        len(new_state.known_canonical_names),
-        len(new_state.alias_merges),
-    )
-
-    final_relations = _normalize_relations_with_alias_map(result.entity_relations, new_state.get_alias_merges_dict())
-    relations_to_process = _merge_relations(pending_relations, final_relations)
-    retryable_relations: list[dict[str, str]] = []
-    if relations_to_process:
-        success_count, skipped = _process_entity_relations(
-            conn, novel_id, run_id, relations_to_process, result.entity_types, new_state.get_alias_merges_dict()
-        )
-        logger.info(f"Final disambig: processed {success_count} hierarchical relations")
-        retryable_relations = _extract_retryable_relations(skipped)
-        if retryable_relations:
-            logger.warning(
-                "Final disambig: {} relations left for retry, kept in checkpoint",
-                len(retryable_relations),
-            )
-
-    new_state = new_state.with_updates(pending_relations=tuple(retryable_relations))
-    _save_disambig_checkpoint(conn, run_id, new_state)
-
-    return new_state
