@@ -104,6 +104,8 @@ def test_build_semantic_recall_items_records_mention_metadata_only_for_mention_r
     assert items[0].metadata["query_kind"] == "mention"
     assert items[0].metadata["mention_text"] == "穿红衣的女子"
     assert items[0].metadata["matched_features"] == ["红衣", "女子", "出手"]
+    assert items[0].metadata["evidence_granularity"] == "chunk"
+    assert items[0].metadata["rerank_method"] == "chunk_embedding"
     assert "query_kind" not in items[1].metadata
 
 
