@@ -505,7 +505,9 @@ def init_db(include_level3_tables: bool = False) -> None:
     engine = get_engine()
     tables = list(Base.metadata.sorted_tables)
     if not include_level3_tables:
-        tables = [table for table in tables if table.name != "chunk_embeddings"]
+        # 中文注释：Level3 的 pgvector 表由 preprocess 按需 ensure；
+        # 普通启动不主动创建，避免未启用 RAG 的环境被向量扩展约束牵连。
+        tables = [table for table in tables if table.name not in {"chunk_embeddings", "paragraph_embeddings"}]
     Base.metadata.create_all(bind=engine, tables=tables)
     _ensure_runtime_schema(engine)
     logger.info("Database tables created successfully")

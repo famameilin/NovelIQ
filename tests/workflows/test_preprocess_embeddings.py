@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.chunking.chunker import Chunk
-from src.workflows.preprocess import _generate_chunk_embeddings, run_preprocess
+from src.workflows.preprocess import _generate_chunk_embeddings, _split_chunk_paragraphs, run_preprocess
 
 
 @pytest.mark.asyncio
@@ -16,11 +16,14 @@ async def test_generate_chunk_embeddings_uses_chunk_index_as_chunk_id() -> None:
     mock_client = MagicMock()
     mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
     mock_client.get_embedding = AsyncMock(side_effect=[[0.1, 0.2], [0.3, 0.4]])
+    mock_client.embed_texts = AsyncMock(return_value=[[0.5, 0.6], [0.7, 0.8]])
 
     with (
         patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
         patch("src.workflows.preprocess.ensure_chunk_embeddings_schema") as mock_ensure_schema,
+        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
         patch("src.storage.repositories.chunk.insert_chunk_embeddings") as mock_insert_embeddings,
+        patch("src.storage.repositories.chunk.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
     ):
         inserted = await _generate_chunk_embeddings(
             session=MagicMock(),
@@ -31,12 +34,16 @@ async def test_generate_chunk_embeddings_uses_chunk_index_as_chunk_id() -> None:
     assert inserted == 2
     mock_client.detect_embedding_dimension.assert_awaited_once()
     mock_ensure_schema.assert_called_once()
+    mock_ensure_paragraph_schema.assert_called_once()
     assert mock_client.get_embedding.await_args_list[0].kwargs["chunk_id"] == 7
     assert mock_client.get_embedding.await_args_list[1].kwargs["chunk_id"] == 8
     assert mock_insert_embeddings.call_args.args[2] == [
         (7, [0.1, 0.2]),
         (8, [0.3, 0.4]),
     ]
+    paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[2]
+    assert [row.chunk_id for row in paragraph_rows] == [7, 8]
+    assert [row.paragraph_text for row in paragraph_rows] == ["第一段文本", "第二段文本"]
 
 
 @pytest.mark.asyncio
@@ -48,6 +55,7 @@ async def test_generate_chunk_embeddings_fails_fast_on_dimension_mismatch() -> N
     with (
         patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
         patch("src.workflows.preprocess.ensure_chunk_embeddings_schema") as mock_ensure_schema,
+        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
     ):
         with pytest.raises(ValueError, match="dimension mismatch"):
             await _generate_chunk_embeddings(
@@ -58,6 +66,7 @@ async def test_generate_chunk_embeddings_fails_fast_on_dimension_mismatch() -> N
 
     mock_client.get_embedding.assert_not_called()
     mock_ensure_schema.assert_not_called()
+    mock_ensure_paragraph_schema.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -69,6 +78,7 @@ async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> N
     mock_client = MagicMock()
     mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
     mock_client.get_embedding = AsyncMock(side_effect=[[0.1, 0.2], [0.3, 0.4]])
+    mock_client.embed_texts = AsyncMock(return_value=[[0.5, 0.6], [0.7, 0.8]])
     mock_session = MagicMock()
     observed_commit_counts: list[int] = []
 
@@ -78,7 +88,9 @@ async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> N
     with (
         patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
         patch("src.workflows.preprocess.ensure_chunk_embeddings_schema"),
+        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema"),
         patch("src.storage.repositories.chunk.insert_chunk_embeddings"),
+        patch("src.storage.repositories.chunk.insert_paragraph_embeddings"),
         patch("src.workflows.preprocess.settings.models.semantic_chunking.embedding_dim", 1024),
     ):
         inserted = await _generate_chunk_embeddings(
@@ -91,6 +103,19 @@ async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> N
     assert inserted == 2
     assert mock_session.commit.call_count == 2
     assert observed_commit_counts[0] == 1
+
+
+def test_split_chunk_paragraphs_returns_chunk_local_offsets() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: paragraph offset 第一版定义为 chunk 内字符范围，避免误用为全文 offset。
+    """
+    chunk = Chunk(index=1, text=" 第一段。\n\n第二段。  ", start=100, end=120)
+
+    paragraphs = _split_chunk_paragraphs(chunk)
+
+    assert paragraphs == [(1, 5, "第一段。"), (7, 11, "第二段。")]
 
 
 @pytest.mark.asyncio

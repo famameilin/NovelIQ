@@ -11,8 +11,10 @@
 
 本模块提供 chunk 向量嵌入的存储和检索功能：
 - insert_chunk_embeddings: 批量写入 embedding
+- insert_paragraph_embeddings: 批量写入 paragraph embedding
 - get_missing_embedding_chunk_ids: 查询缺失 embedding 的 chunk
 - search_similar_chunks: pgvector 余弦相似度检索
+- search_similar_paragraphs_within_chunks: 在候选 chunk 内检索 paragraph
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from datetime import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from src.storage.models import Chunk, ChunkAnnotation, ChunkEmbedding
+from src.storage.models import Chunk, ChunkAnnotation, ChunkEmbedding, ParagraphEmbedding
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,44 @@ class SimilarChunkRow:
     mention_text: str | None = None
     mention_type: str | None = None
     matched_features: tuple[str, ...] = ()
+    local_preview: str | None = None
+    paragraph_index: int | None = None
+    paragraph_similarity: float | None = None
+    paragraph_start_char: int | None = None
+    paragraph_end_char: int | None = None
+    chunk_similarity: float | None = None
+
+
+@dataclass(frozen=True)
+class ParagraphEmbeddingRow:
+    """
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: paragraph embedding 批量写入 DTO，所有字段使用具名属性，避免仓储层向上暴露匿名 dict。
+    """
+
+    chunk_id: int
+    paragraph_index: int
+    paragraph_text: str
+    start_char: int
+    end_char: int
+    embedding_vector: list[float]
+
+
+@dataclass(frozen=True)
+class SimilarParagraphRow:
+    """
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: 候选 chunk 内 paragraph rerank 的结果 DTO，用于回填 SimilarChunkRow 的局部 evidence 字段。
+    """
+
+    chunk_id: int
+    paragraph_index: int
+    paragraph_text: str
+    start_char: int
+    end_char: int
+    similarity: float
 
 
 def insert_chunk_embeddings(
@@ -85,6 +125,45 @@ def insert_chunk_embeddings(
         session.execute(insert(ChunkEmbedding), rows)
 
     return len(rows)
+
+
+def insert_paragraph_embeddings(
+    session: Session,
+    run_id: str,
+    rows: Iterable[ParagraphEmbeddingRow],
+) -> int:
+    """
+    批量写入 paragraph embedding。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: 每次 preprocess 重新生成当前 run_id 的 paragraph embeddings，
+          与 chunk_embeddings 保持同一恢复语义。
+    """
+    session.execute(delete(ParagraphEmbedding).where(ParagraphEmbedding.run_id == run_id))
+
+    created_at = datetime.now().isoformat()
+    insert_rows = []
+    for row in rows:
+        insert_rows.append(
+            {
+                "run_id": run_id,
+                "chunk_id": row.chunk_id,
+                "paragraph_index": row.paragraph_index,
+                "paragraph_text": row.paragraph_text,
+                "start_char": row.start_char,
+                "end_char": row.end_char,
+                "embedding_vector": row.embedding_vector,
+                "created_at": created_at,
+            }
+        )
+
+    if insert_rows:
+        from sqlalchemy import insert
+
+        session.execute(insert(ParagraphEmbedding), insert_rows)
+
+    return len(insert_rows)
 
 
 def get_missing_embedding_chunk_ids(
@@ -156,6 +235,10 @@ def search_similar_chunks(
     任务: level3-history-cutoff
     修改说明: 增加 max_chunk_id 历史截止边界，确保增量取证不会召回未来 chunk。
 
+    修改时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    修改说明: 回填时改用 SQLAlchemy Row 具名属性访问，遵守数据库访问语义化约束。
+
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
@@ -210,19 +293,72 @@ def search_similar_chunks(
         .limit(top_k)
     )
 
-    rows = session.execute(stmt).mappings().all()
+    rows = session.execute(stmt).all()
 
     similar_chunks: list[SimilarChunkRow] = []
     for row in rows:
         similar_chunks.append(
             SimilarChunkRow(
-                chunk_id=int(row["chunk_id"]),
-                text=str(row["text"]),
-                emotional_valence=str(row["emotional_valence"]) if row["emotional_valence"] is not None else None,
-                similarity=float(row["similarity"]),
+                chunk_id=int(row.chunk_id),
+                text=str(row.text),
+                emotional_valence=str(row.emotional_valence) if row.emotional_valence is not None else None,
+                similarity=float(row.similarity),
             )
         )
     return similar_chunks
+
+
+def search_similar_paragraphs_within_chunks(
+    session: Session,
+    run_id: str,
+    query_embedding: list[float],
+    chunk_ids: Sequence[int],
+    top_k: int = 5,
+    similarity_threshold: float = 0.7,
+) -> list[SimilarParagraphRow]:
+    """
+    在候选 chunk 内检索相似 paragraph。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: paragraph embedding 只允许在 chunk 粗召回结果内使用，避免第一版误开全库 paragraph 检索。
+    """
+    scoped_chunk_ids = list(dict.fromkeys(int(chunk_id) for chunk_id in chunk_ids))
+    if not scoped_chunk_ids:
+        return []
+
+    similarity = (1 - ParagraphEmbedding.embedding_vector.cosine_distance(query_embedding)).label("similarity")
+    stmt = (
+        select(
+            ParagraphEmbedding.chunk_id,
+            ParagraphEmbedding.paragraph_index,
+            ParagraphEmbedding.paragraph_text,
+            ParagraphEmbedding.start_char,
+            ParagraphEmbedding.end_char,
+            similarity,
+        )
+        .where(
+            ParagraphEmbedding.run_id == run_id,
+            ParagraphEmbedding.chunk_id.in_(scoped_chunk_ids),
+            ParagraphEmbedding.embedding_vector.is_not(None),
+            similarity >= similarity_threshold,
+        )
+        .order_by(similarity.desc())
+        .limit(top_k)
+    )
+
+    rows = session.execute(stmt).all()
+    return [
+        SimilarParagraphRow(
+            chunk_id=int(row.chunk_id),
+            paragraph_index=int(row.paragraph_index),
+            paragraph_text=str(row.paragraph_text),
+            start_char=int(row.start_char),
+            end_char=int(row.end_char),
+            similarity=float(row.similarity),
+        )
+        for row in rows
+    ]
 
 
 def has_embeddings(session: Session, run_id: str) -> bool:
@@ -237,5 +373,18 @@ def has_embeddings(session: Session, run_id: str) -> bool:
         是否存在 embedding 数据
     """
     stmt = select(ChunkEmbedding.chunk_id).where(ChunkEmbedding.run_id == run_id).limit(1)
+    result = session.execute(stmt).scalar_one_or_none()
+    return result is not None
+
+
+def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
+    """
+    检查指定 run_id 是否存在 paragraph embedding。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: Level3 可在 paragraph 数据缺失时显式回退 chunk evidence，但不能静默假装已完成 rerank。
+    """
+    stmt = select(ParagraphEmbedding.chunk_id).where(ParagraphEmbedding.run_id == run_id).limit(1)
     result = session.execute(stmt).scalar_one_or_none()
     return result is not None
