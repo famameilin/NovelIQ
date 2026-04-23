@@ -50,6 +50,35 @@ def test_build_mention_evidence_queries_builds_variants() -> None:
     assert any(query.mention_text == "穿红衣的女子" for query in queries)
 
 
+def test_build_mention_evidence_queries_skips_broad_pronoun_role_mentions() -> None:
+    """
+    创建时间: 2026-04-23
+    任务: level3-mention-review-fix
+    说明: 纯“那个少女/那名女子”缺少可区分线索，初版不应生成过宽 Level3 query。
+    """
+    mentions = extract_person_mentions("那个少女回头看了一眼。")
+
+    assert [mention.raw_text for mention in mentions] == ["那个少女"]
+    assert mentions[0].mention_type == "pronoun_role"
+    assert build_mention_evidence_queries(mentions) == []
+
+
+def test_build_mention_evidence_queries_keeps_action_or_location_mentions() -> None:
+    """
+    创建时间: 2026-04-23
+    任务: level3-mention-review-fix
+    说明: 有动作或位置线索的描述性 mention 仍应进入 Level3 query。
+    """
+    mentions = extract_person_mentions("那名女子低声开口。门口的老者没有说话。")
+    queries = build_mention_evidence_queries(mentions)
+
+    query_texts = [query.query_text for query in queries]
+    assert "那名女子" in query_texts
+    assert "女子 开口 低声" in query_texts
+    assert "门口的老者" in query_texts
+    assert "门口 老者" in query_texts
+
+
 def test_build_semantic_recall_items_records_mention_metadata_only_for_mention_rows() -> None:
     """
     创建时间: 2026-04-23
@@ -76,6 +105,37 @@ def test_build_semantic_recall_items_records_mention_metadata_only_for_mention_r
     assert items[0].metadata["mention_text"] == "穿红衣的女子"
     assert items[0].metadata["matched_features"] == ["红衣", "女子", "出手"]
     assert "query_kind" not in items[1].metadata
+
+
+def test_build_emotion_exemplar_items_ignores_mention_rows() -> None:
+    """
+    创建时间: 2026-04-23
+    任务: level3-mention-review-fix
+    说明: mention 级身份召回不能污染 Phase1 情绪 exemplar 证据。
+    """
+    items = EvidenceBundleBuilder().build_emotion_exemplar_items(
+        [
+            SimilarChunkRow(
+                chunk_id=2,
+                text="红衣女子收剑而立。",
+                similarity=0.91,
+                emotional_valence="mild_negative",
+                query_kind="mention",
+                mention_text="穿红衣的女子",
+                mention_type="feature_action",
+                matched_features=("红衣", "女子", "出手"),
+            ),
+            SimilarChunkRow(
+                chunk_id=3,
+                text="她抿唇不语，袖口攥得发白。",
+                similarity=0.88,
+                emotional_valence="mild_negative",
+            ),
+        ]
+    )
+
+    assert len(items) == 1
+    assert items[0].metadata["chunk_id"] == 3
 
 
 @pytest.mark.asyncio

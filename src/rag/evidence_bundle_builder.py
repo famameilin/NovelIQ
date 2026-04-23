@@ -191,9 +191,17 @@ class EvidenceBundleBuilder:
         return items
 
     def build_emotion_exemplar_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
-        """构建用于情绪判断的 Level3 专用证据。"""
+        """
+        构建用于情绪判断的 Level3 专用证据。
+
+        修改时间: 2026-04-23
+        任务: level3-mention-review-fix
+        修改说明: emotion exemplar 只消费 chunk 级语义召回，避免 mention 身份检索结果污染情绪证据。
+        """
         exemplar_items: list[EvidenceItem] = []
         for result in level3_results:
+            if result.query_kind != "chunk":
+                continue
             emotional_valence = result.emotional_valence
             if emotional_valence in (None, "", "neutral"):
                 continue
