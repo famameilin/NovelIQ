@@ -46,14 +46,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-from loguru import logger
+from typing import TYPE_CHECKING
 
 from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.rag.authority import Level1AuthorityProvider
-from src.rag.evidence_types import EvidenceBundle, EvidenceItem, Level1AuthoritySnapshot
+from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
+from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
+from src.rag.level1_alias import AliasLookup
+from src.rag.level2_active_entities import ActiveEntityLookup
+from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -61,212 +63,13 @@ if TYPE_CHECKING:
     from src.models.local.embedding import EmbeddingClient
     from src.storage.repositories import GraphRepository
 
-
-class Level3NotReadyError(RuntimeError):
-    """Level 3 向量检索未就绪。"""
-
-
-class AliasLookup:
-    """Level1: 别名表精确匹配（带缓存）"""
-
-    def __init__(
-        self,
-        graph_repo: GraphRepository | None = None,
-        run_id: str | None = None,
-    ):
-        self._graph_repo = graph_repo
-        self._run_id = run_id
-        self._cache: dict[str, str] | None = None
-
-    def _ensure_cache(self) -> dict[str, str]:
-        if self._cache is None:
-            if self._graph_repo is None or self._run_id is None:
-                self._cache = {}
-            else:
-                self._cache = self._graph_repo.fetch_alias_map(self._run_id)
-        return self._cache
-
-    def invalidate_cache(self) -> None:
-        self._cache = None
-
-    def query(self, alias: str) -> str | None:
-        canonical = self._ensure_cache().get(alias)
-        if canonical:
-            logger.debug(f"AliasLookup: '{alias}' -> '{canonical}'")
-        return canonical
-
-    def get_alias_map(self) -> dict[str, str]:
-        """返回当前缓存的完整别名映射（只读副本）。"""
-        return dict(self._ensure_cache())
-
-
-class ActiveEntityLookup:
-    """Level2: 近期活跃实体候选"""
-
-    def __init__(self, graph_repo: GraphRepository | None = None, run_id: str | None = None):
-        self._graph_repo = graph_repo
-        self._run_id = run_id
-
-    def get_active_candidates(
-        self,
-        current_chunk: int,
-        lookback: int = 10,
-    ) -> list[str]:
-        """
-        获取近期活跃实体名称候选。
-
-        修改时间: 2026-04-23
-        任务: P0-graph-repository-dto-boundary
-        修改内容: 读取 ActiveEntityRow.name，避免依赖 repository raw dict。
-        """
-        if self._graph_repo is None or self._run_id is None:
-            return []
-        rows = self._graph_repo.fetch_active_entities(current_chunk, lookback, self._run_id)
-        return [str(row.get("name", "")) if isinstance(row, dict) else str(row.name) for row in rows]
-
-
-class Level3VectorEvidence:
-    """
-    Level3: 向量语义相似度检索
-
-    使用 EmbeddingClient 和 pgvector 进行语义相似度检索，
-    发现跨 chunk 的隐式身份关联（如"灰衣人 = 白芷"）。
-    """
-
-    def __init__(
-        self,
-        session: Session | None = None,
-        run_id: str | None = None,
-        embedding_client: EmbeddingClient | None = None,
-        similarity_threshold: float = 0.7,
-        top_k: int = 5,
-        expected_embedding_dim: int | None = None,
-    ):
-        self._session = session
-        self._run_id = run_id
-        self._embedding_client = embedding_client
-        self._similarity_threshold = similarity_threshold
-        self._top_k = top_k
-        self._available: bool | None = None
-        self._expected_embedding_dim = expected_embedding_dim or settings.models.semantic_chunking.embedding_dim
-        self._setup_checked = False
-
-    def set_embedding_client(self, client: EmbeddingClient) -> None:
-        """设置 Embedding 客户端"""
-        self._embedding_client = client
-        self._available = None
-        self._setup_checked = False
-
-    def set_session(self, session: Session, run_id: str) -> None:
-        """设置数据库会话"""
-        self._session = session
-        self._run_id = run_id
-        self._available = None
-        self._setup_checked = False
-
-    async def ensure_level3_ready(self) -> None:
-        if self._setup_checked:
-            return
-
-        if self._embedding_client is None or self._session is None or self._run_id is None:
-            raise Level3NotReadyError("Level 3 requires embedding client, session, and run_id")
-
-        actual_dim = await self._embedding_client.detect_embedding_dimension()
-        if actual_dim != self._expected_embedding_dim:
-            raise Level3NotReadyError(
-                f"Level 3 embedding dimension mismatch: configured={self._expected_embedding_dim}, actual={actual_dim}"
-            )
-
-        from src.storage.repositories.chunk import has_embeddings
-        from src.storage.vector_schema import validate_chunk_embeddings_schema
-
-        validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
-        if not has_embeddings(self._session, self._run_id):
-            raise Level3NotReadyError(f"Level 3 embeddings not found for run_id={self._run_id}")
-
-        self._available = True
-        self._setup_checked = True
-
-    def is_available(self) -> bool:
-        """
-        检查 Level 3 是否可用
-
-        Returns:
-            True 如果 EmbeddingClient 已配置且数据库有 embedding 数据
-        """
-        if self._available is not None:
-            return self._available
-
-        if self._embedding_client is None:
-            logger.debug("Level3VectorEvidence: EmbeddingClient not configured")
-            self._available = False
-            return False
-
-        if self._session is None or self._run_id is None:
-            logger.debug("Level3VectorEvidence: session or run_id not set")
-            self._available = False
-            return False
-
-        from src.storage.repositories.chunk import has_embeddings
-
-        self._available = has_embeddings(self._session, self._run_id)
-        if self._available:
-            logger.debug("Level3VectorEvidence: available, embeddings found in database")
-        else:
-            logger.debug("Level3VectorEvidence: no embeddings in database")
-        return self._available
-
-    async def search_similar_chunks(
-        self,
-        query_text: str,
-        exclude_chunk_ids: list[int] | None = None,
-    ) -> list[dict]:
-        """
-        检索语义相似的历史 chunk
-
-        Args:
-            query_text: 查询文本（通常是当前 chunk 的描述性文本）
-            exclude_chunk_ids: 排除的 chunk ID 列表（通常是当前 chunk）
-
-        Returns:
-            相似 chunk 列表，每个元素包含 chunk_id, similarity, text
-        """
-        await self.ensure_level3_ready()
-
-        if not self.is_available():
-            return []
-
-        if not query_text or not query_text.strip():
-            logger.debug("Level3VectorEvidence: empty query text")
-            return []
-
-        if self._embedding_client is None or self._session is None or self._run_id is None:
-            return []
-
-        try:
-            from src.storage.repositories.chunk import search_similar_chunks
-
-            query_embedding = await self._embedding_client.get_embedding(query_text)
-            if not query_embedding:
-                logger.warning("Level3VectorEvidence: failed to get query embedding")
-                return []
-
-            results = search_similar_chunks(
-                self._session,
-                self._run_id,
-                query_embedding,
-                top_k=self._top_k,
-                similarity_threshold=self._similarity_threshold,
-                exclude_chunk_ids=exclude_chunk_ids,
-            )
-
-            logger.debug(f"Level3VectorEvidence: found {len(results)} similar chunks for query (len={len(query_text)})")
-
-            return results
-
-        except Exception as e:
-            logger.error(f"Level3VectorEvidence: search failed: {e}")
-            return []
+__all__ = [
+    "AliasLookup",
+    "ActiveEntityLookup",
+    "Level3NotReadyError",
+    "Level3VectorEvidence",
+    "DisambigContextProvider",
+]
 
 
 class DisambigContextProvider:
@@ -320,6 +123,7 @@ class DisambigContextProvider:
         self._level1_enabled = level1_enabled
         self._level2_enabled = level2_enabled
         self._level3_enabled = level3_enabled
+        self._bundle_builder = EvidenceBundleBuilder()
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
         """设置 Embedding 客户端"""
@@ -344,185 +148,42 @@ class DisambigContextProvider:
 
     def _build_structured_evidence(self, names_in_chunk: list[str] | None = None) -> EvidenceBundle:
         snapshot = self._get_authority_snapshot()
-        requested_names = [name for name in (names_in_chunk or []) if name]
-        relevant_names = set(requested_names)
-        if relevant_names:
-            related_canonicals = {
-                mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names
-            }
-            relevant_names |= related_canonicals
-
-        structured_evidence: list[EvidenceItem] = []
-
-        alias_mappings = snapshot.alias_mappings
-        if relevant_names:
-            alias_mappings = [
-                mapping
-                for mapping in snapshot.alias_mappings
-                if mapping.alias in relevant_names or mapping.canonical in relevant_names
-            ]
-        for mapping in alias_mappings:
-            structured_evidence.append(
-                EvidenceItem(
-                    evidence_type="alias_mapping",
-                    source=mapping.source,
-                    content=f"{mapping.alias} -> {mapping.canonical}",
-                    metadata={
-                        "alias": mapping.alias,
-                        "canonical": mapping.canonical,
-                        "confidence": mapping.confidence,
-                    },
-                )
-            )
-
-        canonical_entities = snapshot.canonical_entities
-        if relevant_names:
-            canonical_entities = [entity for entity in snapshot.canonical_entities if entity.name in relevant_names]
-        for entity in canonical_entities:
-            structured_evidence.append(
-                EvidenceItem(
-                    evidence_type="canonical_entity",
-                    source=entity.source,
-                    content=entity.name,
-                    metadata={"name": entity.name, "entity_type": entity.entity_type},
-                )
-            )
-
-        relations = snapshot.confirmed_relations
-        if relevant_names:
-            relations = [
-                relation
-                for relation in snapshot.confirmed_relations
-                if relation.from_name in relevant_names or relation.to_name in relevant_names
-            ]
-        for relation in relations:
-            structured_evidence.append(
-                EvidenceItem(
-                    evidence_type="confirmed_relation",
-                    source=relation.source,
-                    content=f"{relation.from_name}<{relation.relation_type}>{relation.to_name}",
-                    metadata={
-                        "from_name": relation.from_name,
-                        "to_name": relation.to_name,
-                        "relation_type": relation.relation_type,
-                        "is_active": relation.is_active,
-                        "first_seen_chunk": relation.first_seen_chunk,
-                        "last_seen_chunk": relation.last_seen_chunk,
-                        "support_count": relation.support_count,
-                        "latest_event_id": relation.latest_event_id,
-                    },
-                )
-            )
-
-        entity_types = snapshot.entity_types
-        if relevant_names:
-            entity_types = [item for item in snapshot.entity_types if item.name in relevant_names]
-        for item in entity_types:
-            structured_evidence.append(
-                EvidenceItem(
-                    evidence_type="entity_type",
-                    source=item.source,
-                    content=f"{item.name}:{item.entity_type}",
-                    metadata={"name": item.name, "entity_type": item.entity_type},
-                )
-            )
-
-        return EvidenceBundle(
-            structured_evidence=structured_evidence,
-            requested_names=requested_names,
-            level1_snapshot=snapshot,
-        )
+        return self._bundle_builder.build_structured_bundle(snapshot, names_in_chunk=names_in_chunk)
 
     def collect_evidence(
         self,
         names_in_chunk: list[str] | None = None,
         current_chunk: int | None = None,
     ) -> EvidenceBundle:
+        """
+        收集 Level1/Level2 证据。
+
+        修改时间: 2026-04-23
+        任务: p1-rag-retriever-split
+        修改内容: 若 authority service 暂时拿到旧式 dict 行，则回退到 level2 fallback，避免 provider 直接报错。
+        """
         bundle = self._build_structured_evidence(names_in_chunk=names_in_chunk)
 
         if self._level2_enabled and current_chunk is not None:
             candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
             if self._graph_authority_service is not None and self._run_id is not None:
-                active_entities = self._graph_authority_service.build_active_entity_view(
-                    self._run_id,
-                    current_chunk=current_chunk,
-                    lookback=self._lookback_chunks,
-                )
+                try:
+                    active_entities = self._graph_authority_service.build_active_entity_view(
+                        self._run_id,
+                        current_chunk=current_chunk,
+                        lookback=self._lookback_chunks,
+                    )
+                except AttributeError:
+                    active_entities = []
             else:
                 active_entities = []
 
-            bundle.local_evidence.extend(
-                EvidenceItem(
-                    evidence_type="active_entity",
-                    source=item.source,
-                    content=item.name,
-                    metadata={
-                        "entity_id": item.entity_id,
-                        "name": item.name,
-                        "role": item.role,
-                        "entity_type": item.entity_type,
-                        "status": item.status,
-                        "last_seen_chunk": item.last_seen_chunk,
-                        "recent_action": item.recent_action,
-                        "recent_emotion": item.recent_emotion,
-                    },
-                    chunk_id=item.last_seen_chunk,
-                )
-                for item in active_entities
-            )
+            bundle.local_evidence.extend(self._bundle_builder.build_active_entity_items(active_entities))
 
             if not bundle.local_evidence:
-                bundle.local_evidence.extend(
-                    EvidenceItem(
-                        evidence_type="active_entity",
-                        source="graph_active_entities",
-                        content=name,
-                        metadata={"name": name},
-                    )
-                    for name in candidates
-                )
+                bundle.local_evidence.extend(self._bundle_builder.build_active_entity_fallback_items(candidates))
 
         return bundle
-
-    def _build_semantic_recall_items(self, level3_results: list[dict[str, Any]]) -> list[EvidenceItem]:
-        """
-        修改时间: 2026-04-21
-        任务: emotion-rag-evidence-provider
-        新建原因: 保持 Level3 的通用语义召回证据继续稳定输出，不让情绪扩展改写旧消费者的输入语义。
-        """
-        return [
-            EvidenceItem(
-                evidence_type="semantic_recall",
-                source="chunk_embeddings",
-                content=str(result.get("text", "")),
-                metadata=dict(result),
-            )
-            for result in level3_results
-        ]
-
-    def _build_emotion_exemplar_items(self, level3_results: list[dict[str, Any]]) -> list[EvidenceItem]:
-        """
-        修改时间: 2026-04-21
-        任务: emotion-rag-evidence-provider
-        新建原因: 在不扩 EvidenceBundle 结构的前提下，把可用于情绪判断的相似片段标记为专用 evidence_type。
-        """
-        exemplar_items: list[EvidenceItem] = []
-        for result in level3_results:
-            emotional_valence = result.get("emotional_valence")
-            if emotional_valence in (None, "", "neutral"):
-                continue
-
-            metadata = dict(result)
-            metadata["evidence_purpose"] = "emotion"
-            exemplar_items.append(
-                EvidenceItem(
-                    evidence_type="emotion_exemplar",
-                    source="chunk_embeddings",
-                    content=str(result.get("text", "")),
-                    metadata=metadata,
-                )
-            )
-        return exemplar_items
 
     async def collect_evidence_with_level3(
         self,
@@ -538,8 +199,8 @@ class DisambigContextProvider:
                 context_text,
                 exclude_chunk_ids=exclude_chunk_ids,
             )
-            bundle.semantic_evidence.extend(self._build_semantic_recall_items(level3_results))
-            bundle.semantic_evidence.extend(self._build_emotion_exemplar_items(level3_results))
+            bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
+            bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
 
         return bundle
 
