@@ -39,9 +39,10 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     创建时间: 2026-04-22
     创建者: Codex
     任务: fix-analysis-related-foreign-keys
-    说明: 这里直接查当前测试 schema 的 pg 元数据，确保缺失的 7 条外键已经真正落到数据库。
+    说明: 这里直接查当前测试 schema 的 pg 元数据，确保缺失的 8 条外键已经真正落到数据库。
     """
     expected_constraints = {
+        "analysis_runs_novel_id_fkey",
         "disambig_checkpoint_run_id_fkey",
         "chunk_locations_chunk_id_run_id_fkey",
         "chunk_locations_novel_id_fkey",

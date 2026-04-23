@@ -280,10 +280,27 @@ def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
     任务: fix-analysis-related-foreign-keys
     说明: 这批约束都属于“旧库缺失、新库 ORM 已声明”的收口项。
           先做可安全回填的 novel_id 对齐，再显式校验孤儿数据，最后补约束。
+          其中 analysis_runs.novel_id 是整条分析链路的父约束，必须一并补齐，
+          否则旧库仍能继续写入悬空 novel_id。
     """
     _normalize_analysis_related_novel_ids(connection)
 
     constraint_specs = [
+        {
+            "table": "analysis_runs",
+            "name": "analysis_runs_novel_id_fkey",
+            "ddl": (
+                "ALTER TABLE analysis_runs "
+                "ADD CONSTRAINT analysis_runs_novel_id_fkey "
+                "FOREIGN KEY (novel_id) REFERENCES novels(novel_id) ON DELETE RESTRICT"
+            ),
+            "orphan_check": (
+                "SELECT COUNT(*) FROM analysis_runs child "
+                "LEFT JOIN novels parent ON parent.novel_id = child.novel_id "
+                "WHERE parent.novel_id IS NULL"
+            ),
+            "context": "analysis_runs.novel_id -> novels.novel_id",
+        },
         {
             "table": "disambig_checkpoint",
             "name": "disambig_checkpoint_run_id_fkey",
