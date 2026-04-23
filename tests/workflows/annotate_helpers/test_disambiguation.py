@@ -15,6 +15,10 @@ from src.rag import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.client_init import _NoopDisambiguationClient
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
+from src.workflows.annotate_helpers.disambiguation.candidates import (
+    DisambigStateSnapshot,
+    DisambigStateSnapshotEntry,
+)
 from tests.support.disambiguation_fakes import (
     FakeDisambigClient as _FakeDisambigClient,
 )
@@ -95,11 +99,17 @@ def test_validate_confidence_with_evidence_blocks_protected_merge_without_strong
 
 
 def test_collect_final_disambiguation_candidates_prefers_state_snapshot() -> None:
-    snapshot = {
-        "bai_zhi": {"state": "resolved", "confidence": "high", "canonical": "bai_zhi"},
-        "lin_li_guo": {"state": "review", "confidence": "medium", "canonical": "bai_zhi"},
-        "masked_person": {"state": "unresolved", "confidence": "low", "canonical": "bai_zhi"},
-    }
+    snapshot = DisambigStateSnapshot(
+        entries={
+            "bai_zhi": DisambigStateSnapshotEntry(state="resolved", confidence="high", canonical="bai_zhi"),
+            "lin_li_guo": DisambigStateSnapshotEntry(state="review", confidence="medium", canonical="bai_zhi"),
+            "masked_person": DisambigStateSnapshotEntry(
+                state="unresolved",
+                confidence="low",
+                canonical="bai_zhi",
+            ),
+        }
+    )
     candidates = disambig_mod._collect_final_disambiguation_candidates(
         all_names=_candidates("bai_zhi", "lin_li_guo", "masked_person"),
         alias_map={"bai_zhi": "bai_zhi"},
@@ -109,10 +119,12 @@ def test_collect_final_disambiguation_candidates_prefers_state_snapshot() -> Non
 
 
 def test_collect_final_disambiguation_candidates_rereviews_self_resolved_extension_name() -> None:
-    snapshot = {
-        "伯安": {"state": "resolved", "confidence": "high", "canonical": "伯安"},
-        "贺伯安": {"state": "resolved", "confidence": "high", "canonical": "贺伯安"},
-    }
+    snapshot = DisambigStateSnapshot(
+        entries={
+            "伯安": DisambigStateSnapshotEntry(state="resolved", confidence="high", canonical="伯安"),
+            "贺伯安": DisambigStateSnapshotEntry(state="resolved", confidence="high", canonical="贺伯安"),
+        }
+    )
     candidates = disambig_mod._collect_final_disambiguation_candidates(
         all_names=[
             {"name": "伯安", "count": 33},
@@ -267,38 +279,38 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     )
     with (
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.extract_new_names_from_db",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.extract_new_names_from_db",
             return_value=[{"name": "灰衣人", "count": 3}],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.build_context_sentences",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.build_context_sentences",
             return_value={"灰衣人": "【身份线索】她自称白芷"},
         ) as mock_build_context_sentences,
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.filter_candidates_by_class",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.filter_candidates_by_class",
             return_value=([], [], [{"name": "灰衣人", "count": 3}], []),
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._build_existing_character_hint_from_db",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages._build_existing_character_hint_from_db",
             return_value=DisambiguationPromptContext(
                 existing_character_hint="【已存在角色锚点】\n- 白芷",
                 graph_hint="【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
             ),
         ) as mock_build_existing_hint,
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._fetch_current_relations",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.fetch_current_relations",
             return_value=[],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.validate_confidence_with_evidence",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.validate_confidence_with_evidence",
             side_effect=lambda result, *_: result,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.reselect_cluster_canonicals",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.reselect_cluster_canonicals",
             side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.apply_disambiguation_decisions",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.apply_disambiguation_decisions",
             return_value=state,
         ),
         patch(
@@ -363,46 +375,46 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     )
     with (
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.fetch_all_character_names",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.fetch_all_character_names",
             return_value=[{"name": "灰衣人", "count": 3}],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._collect_final_disambiguation_candidates",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages._collect_final_disambiguation_candidates",
             return_value=["灰衣人"],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.build_context_sentences",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.build_context_sentences",
             return_value={"灰衣人": "【身份线索】她望向白芷"},
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.filter_candidates_by_class",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.filter_candidates_by_class",
             return_value=([], [], [{"name": "灰衣人", "count": 3}], []),
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._build_existing_character_hint_from_db",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages._build_existing_character_hint_from_db",
             return_value=DisambiguationPromptContext(
                 existing_character_hint="【已存在角色锚点】\n- 白芷",
                 graph_hint="【图谱已确认的关系】\n- 白芷 ←盟友→ 侯飞白",
             ),
         ) as mock_build_existing_hint,
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._fetch_current_relations",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.fetch_current_relations",
             return_value=[],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.validate_confidence_with_evidence",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.validate_confidence_with_evidence",
             side_effect=lambda result, *_: result,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.reselect_cluster_canonicals",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.reselect_cluster_canonicals",
             side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.apply_disambiguation_decisions",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.apply_disambiguation_decisions",
             return_value=state,
         ),
-        patch("src.workflows.annotate_helpers.disambiguation.pipeline.AnnotationRepository") as mock_repo_cls,
-        patch("src.workflows.annotate_helpers.disambiguation.pipeline._save_disambig_checkpoint"),
+        patch("src.workflows.annotate_helpers.disambiguation.pipeline_stages.AnnotationRepository") as mock_repo_cls,
+        patch("src.workflows.annotate_helpers.disambiguation.pipeline_stages._save_disambig_checkpoint"),
         patch("src.workflows.annotate_helpers.disambiguation.pipeline.record_model_interaction") as mock_record,
     ):
         mock_repo = MagicMock()
@@ -492,41 +504,41 @@ async def test_incremental_pipeline_skips_active_entity_fallback_for_review_cand
     )
     with (
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.extract_new_names_from_db",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.extract_new_names_from_db",
             return_value=[],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._collect_review_candidates",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.collect_review_candidates",
             return_value=[{"name": "旧别名", "count": 1}],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.build_context_sentences",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.build_context_sentences",
             return_value={"旧别名": "【身份线索】她曾被叫作白姑娘"},
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.filter_candidates_by_class",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.filter_candidates_by_class",
             return_value=([], [], [{"name": "旧别名", "count": 1}], []),
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._build_existing_character_hint_from_db",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages._build_existing_character_hint_from_db",
             return_value=DisambiguationPromptContext(
                 existing_character_hint="【已存在角色锚点】\n- 白芷",
             ),
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._fetch_current_relations",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.fetch_current_relations",
             return_value=[],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.validate_confidence_with_evidence",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.validate_confidence_with_evidence",
             side_effect=lambda result, *_: result,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.reselect_cluster_canonicals",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.reselect_cluster_canonicals",
             side_effect=lambda current_state, *_args, **_kwargs: current_state,
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.apply_disambiguation_decisions",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.apply_disambiguation_decisions",
             return_value=state,
         ),
         patch(

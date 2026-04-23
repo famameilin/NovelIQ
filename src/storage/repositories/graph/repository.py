@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -81,6 +80,35 @@ class RelationEventRow:
     confidence: float | None
     source_relation_row_id: int | None
     directionality: str | None
+
+
+@dataclass(frozen=True)
+class LowConfidenceRelationEventRow:
+    """GraphRepository 低置信度关系事件 DTO。"""
+
+    relation_event_id: int
+    chunk_id: int
+    from_entity_id: int
+    to_entity_id: int
+    from_name: str
+    to_name: str
+    relation_type: str
+    change_type: str
+    evidence: str | None
+    confidence: float | None
+    source_relation_row_id: int | None
+    directionality: str | None
+
+
+@dataclass(frozen=True)
+class RelationConflictRow:
+    """GraphRepository 关系冲突 DTO。"""
+
+    entity_pair: tuple[int, int]
+    entity_names: list[str]
+    relation_types: list[str]
+    relation_count: int
+    relation_ids: list[int | None]
 
 
 class GraphRepository(BaseRepository["GraphRepository"]):
@@ -470,25 +498,25 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         run_id: str,
         threshold: float = 0.6,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[LowConfidenceRelationEventRow]:
         events = self.fetch_relation_events(run_id)
         low_confidence = [event for event in events if event.confidence is None or float(event.confidence) < threshold]
         selected_events = low_confidence[:limit] if limit > 0 else low_confidence
         return [
-            {
-                "relation_event_id": event.relation_event_id,
-                "chunk_id": event.chunk_id,
-                "from_entity_id": event.from_entity_id,
-                "to_entity_id": event.to_entity_id,
-                "from_name": event.from_name,
-                "to_name": event.to_name,
-                "relation_type": event.relation_type,
-                "change_type": event.change_type,
-                "evidence": event.evidence,
-                "confidence": event.confidence,
-                "source_relation_row_id": event.source_relation_row_id,
-                "directionality": event.directionality,
-            }
+            LowConfidenceRelationEventRow(
+                relation_event_id=event.relation_event_id,
+                chunk_id=event.chunk_id,
+                from_entity_id=event.from_entity_id,
+                to_entity_id=event.to_entity_id,
+                from_name=event.from_name,
+                to_name=event.to_name,
+                relation_type=event.relation_type,
+                change_type=event.change_type,
+                evidence=event.evidence,
+                confidence=event.confidence,
+                source_relation_row_id=event.source_relation_row_id,
+                directionality=event.directionality,
+            )
             for event in selected_events
         ]
 
@@ -496,7 +524,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         self,
         run_id: str,
         active_only: bool = True,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RelationConflictRow]:
         current_relations = self.fetch_current_relations(run_id, active_only=active_only)
         pair_map: dict[tuple[int, int], list[CurrentRelationRow]] = {}
         for rel in current_relations:
@@ -505,22 +533,22 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             key = (left_id, right_id) if left_id <= right_id else (right_id, left_id)
             pair_map.setdefault(key, []).append(rel)
 
-        conflicts: list[dict[str, Any]] = []
+        conflicts: list[RelationConflictRow] = []
         for (left_id, right_id), relations in pair_map.items():
             relation_types = {str(item.relation_type) for item in relations if item.relation_type}
             if len(relation_types) < 2:
                 continue
             conflicts.append(
-                {
-                    "entity_pair": (left_id, right_id),
-                    "entity_names": sorted(
+                RelationConflictRow(
+                    entity_pair=(left_id, right_id),
+                    entity_names=sorted(
                         {str(rel_item.from_name or left_id) for rel_item in relations}
                         | {str(rel_item.to_name or right_id) for rel_item in relations}
                     ),
-                    "relation_types": sorted(relation_types),
-                    "relation_count": len(relations),
-                    "relation_ids": [item.relation_id for item in relations],
-                }
+                    relation_types=sorted(relation_types),
+                    relation_count=len(relations),
+                    relation_ids=[item.relation_id for item in relations],
+                )
             )
         return conflicts
 

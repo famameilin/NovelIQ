@@ -28,20 +28,13 @@ from src.models.local.disambiguation import (
     ExtendedDisambigResult,
     NameReviewState,
 )
-from src.storage.repositories import AnnotationRepository
-from src.storage.repositories.annotation.characters import fetch_all_character_names
 
 from ..sentence import build_context_sentences
 from . import pipeline_stages as pipeline_stages_mod
 from .candidates import (
     _build_candidate_payload_by_names,
-    _build_existing_character_hint_from_db,
     _build_name_count_lookup,
-    _collect_final_disambiguation_candidates,
-    extract_new_names_from_db,
-    filter_candidates_by_class,
 )
-from .checkpoint import _save_disambig_checkpoint
 from .model_adapter import (
     build_canonical_reselect_call_spec,
     build_disambiguation_call_spec,
@@ -57,13 +50,10 @@ from .pipeline_stages import (
     plan_final_disambiguation,
     plan_incremental_disambiguation,
 )
-from .relations import _process_entity_relations
 from .state_logic import (
     _collect_alias_clusters,
-    apply_disambiguation_decisions,
     apply_model_reselected_canonicals,
     reselect_cluster_canonicals,
-    validate_confidence_with_evidence,
 )
 
 if TYPE_CHECKING:
@@ -83,36 +73,9 @@ class DisambiguationMaxRetriesExceededError(Exception):
     pass
 
 
-def _sync_stage_dependencies() -> None:
-    """
-    同步 pipeline 兼容入口到阶段模块。
-
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 旧测试和调用方仍会 patch `pipeline.py` 上的内部函数，这里在进入阶段实现前把当前模块上的
-          名字回灌给 `pipeline_stages`，兼顾模块拆分和既有 patch 入口稳定性。
-    """
-    pipeline_stages_mod.build_context_sentences = build_context_sentences
-    pipeline_stages_mod.extract_new_names_from_db = extract_new_names_from_db
-    pipeline_stages_mod.filter_candidates_by_class = filter_candidates_by_class
-    pipeline_stages_mod._build_existing_character_hint_from_db = _build_existing_character_hint_from_db
-    pipeline_stages_mod.fetch_current_relations = _fetch_current_relations
-    pipeline_stages_mod.fetch_all_character_names = fetch_all_character_names
-    pipeline_stages_mod._collect_final_disambiguation_candidates = _collect_final_disambiguation_candidates
-    pipeline_stages_mod._save_disambig_checkpoint = _save_disambig_checkpoint
-    pipeline_stages_mod.AnnotationRepository = AnnotationRepository  # type: ignore[misc]
-    pipeline_stages_mod._process_entity_relations = _process_entity_relations
-    pipeline_stages_mod.validate_confidence_with_evidence = validate_confidence_with_evidence
-    pipeline_stages_mod.reselect_cluster_canonicals = reselect_cluster_canonicals
-    pipeline_stages_mod.apply_disambiguation_decisions = apply_disambiguation_decisions
-    pipeline_stages_mod.collect_review_candidates = _collect_review_candidates
-
-
 _build_prompt_context_with_shared_evidence = pipeline_stages_mod.build_prompt_context_with_shared_evidence
 _resolve_incremental_batch_window = pipeline_stages_mod.resolve_incremental_batch_window
 _generate_and_save_stage_summary = pipeline_stages_mod.generate_and_save_stage_summary
-_fetch_current_relations = pipeline_stages_mod.fetch_current_relations
-_collect_review_candidates = pipeline_stages_mod.collect_review_candidates
 
 
 async def _retry_disambig(
@@ -240,8 +203,6 @@ async def _run_final_canonical_reselect(
         logger.warning("final canonical reselect skipped: no candidate payload for alias clusters, falling back")
         return reselect_cluster_canonicals(state, name_counts=name_counts)
 
-    from ..sentence import build_context_sentences
-
     context_sentences = build_context_sentences(conn, candidate_payload, alias_keywords, run_id=run_id)
     review_states = state.get_review_status_dict()
     cluster_list = [sorted(cluster) for cluster in alias_clusters]
@@ -294,7 +255,6 @@ async def _run_incremental_disambiguation_with_state(
     if (current_idx + 1) % disambig_interval != 0:
         return state
 
-    _sync_stage_dependencies()
     plan = await plan_incremental_disambiguation(
         conn,
         state,
@@ -368,7 +328,6 @@ async def _run_final_disambiguation_with_state(
        - 用 pending_relations + alias_merges 归一化关系
     7. 保存最终 checkpoint
     """
-    _sync_stage_dependencies()
     plan = plan_final_disambiguation(conn, state, alias_keywords, run_id)
     if plan is None:
         return state

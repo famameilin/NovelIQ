@@ -7,6 +7,7 @@ import pytest
 from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult, NameReviewState
 from src.workflows.annotate_helpers import disambiguation as disambig_mod
 from src.workflows.annotate_helpers.disambiguation import pipeline as pipeline_mod
+from src.workflows.annotate_helpers.disambiguation import pipeline_stages as pipeline_stages_mod
 from src.workflows.annotate_helpers.disambiguation.state_logic import (
     apply_model_reselected_canonicals,
     reselect_cluster_canonicals,
@@ -165,15 +166,15 @@ async def test_incremental_pipeline_preserves_deferred_low_frequency_names() -> 
 
     with (
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.extract_new_names_from_db",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.extract_new_names_from_db",
             return_value=[{"name": "侯飞白", "count": 1}],
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline.build_context_sentences",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages.build_context_sentences",
             return_value={},
         ),
         patch(
-            "src.workflows.annotate_helpers.disambiguation.pipeline._save_disambig_checkpoint",
+            "src.workflows.annotate_helpers.disambiguation.pipeline_stages._save_disambig_checkpoint",
         ) as mock_save_checkpoint,
         patch(
             "src.workflows.annotate_helpers.disambiguation.pipeline._generate_and_save_stage_summary",
@@ -231,16 +232,16 @@ async def test_final_pipeline_preserves_deferred_names_without_model_call() -> N
     )
 
     with (
-        patch.object(pipeline_mod, "AnnotationRepository", _DummyAnnRepo),
+        patch.object(pipeline_stages_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(
-            pipeline_mod,
+            pipeline_stages_mod,
             "fetch_all_character_names",
             return_value=[{"name": "猴子", "count": 5}, {"name": "侯飞白", "count": 1}],
         ),
-        patch.object(pipeline_mod, "build_context_sentences", return_value={}),
+        patch.object(pipeline_stages_mod, "build_context_sentences", return_value={}),
         patch.object(pipeline_mod, "_retry_disambig") as retry_mock,
-        patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
-        patch.object(pipeline_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
+        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_stages_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),
@@ -322,17 +323,17 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
     )
 
     with (
-        patch.object(pipeline_mod, "AnnotationRepository", _DummyAnnRepo),
+        patch.object(pipeline_stages_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(
-            pipeline_mod,
+            pipeline_stages_mod,
             "fetch_all_character_names",
             return_value=[{"name": "灰衣人", "count": 2}, {"name": "白芷", "count": 7}],
         ),
-        patch.object(pipeline_mod, "_collect_final_disambiguation_candidates", return_value=[]),
-        patch.object(pipeline_mod, "build_context_sentences") as build_context_sentences_mock,
+        patch.object(pipeline_stages_mod, "_collect_final_disambiguation_candidates", return_value=[]),
+        patch.object(pipeline_stages_mod, "build_context_sentences") as build_context_sentences_mock,
         patch.object(pipeline_mod, "_retry_canonical_reselect") as retry_reselect_mock,
-        patch.object(pipeline_mod, "_process_entity_relations", return_value=(0, [])),
-        patch.object(pipeline_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
+        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_stages_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
             conn=_DummyConn(),

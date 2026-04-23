@@ -35,6 +35,8 @@ from src.storage.repositories.stats import fetch_chunk_summaries_by_range, inser
 from ..sentence import build_context_sentences
 from .candidate_filter import CandidateClassification
 from .candidates import (
+    DisambigStateSnapshot,
+    DisambigStateSnapshotEntry,
     _build_candidate_payload_by_names,
     _build_existing_character_hint_from_db,
     _build_name_count_lookup,
@@ -61,8 +63,6 @@ from .state_logic import (
 if TYPE_CHECKING:
     from src.rag import DisambigContextProvider
     from src.storage.repositories.graph import CurrentRelationRow
-
-DisambigStateSnapshot = dict[str, dict[str, str]]
 
 
 @dataclass(frozen=True)
@@ -577,14 +577,16 @@ def plan_final_disambiguation(
     final_global_freq = _build_name_count_lookup(all_names)
     review_status_dict = state.get_review_status_dict()
     alias_map_dict = state.get_alias_merges_dict()
-    state_snapshot_for_candidates: DisambigStateSnapshot = {
-        name: {
-            "state": review.status,
-            "confidence": review.confidence,
-            "canonical": review.proposed_canonical or name,
+    state_snapshot_for_candidates = DisambigStateSnapshot(
+        entries={
+            name: DisambigStateSnapshotEntry(
+                state=review.status,
+                confidence=review.confidence,
+                canonical=review.proposed_canonical or name,
+            )
+            for name, review in review_status_dict.items()
         }
-        for name, review in review_status_dict.items()
-    }
+    )
     state_snapshot_for_candidates = _ensure_state_snapshot_has_known_names(
         alias_map_dict,
         state_snapshot_for_candidates,

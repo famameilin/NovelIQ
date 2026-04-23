@@ -109,7 +109,7 @@ class TestGraphQualitySignals:
 
         conflicts = graph_repo.detect_relation_conflicts(run_id, active_only=True)
         assert len(conflicts) == 1
-        assert conflicts[0]["relation_types"] == ["敌对", "盟友"]
+        assert conflicts[0].relation_types == ["敌对", "盟友"]
 
     def test_fetch_low_confidence_relation_events_filters_by_threshold(self, db_session) -> None:
         novel_id = uuid.uuid4().hex[:8]
@@ -156,7 +156,7 @@ class TestGraphQualitySignals:
 
         low_conf = graph_repo.fetch_low_confidence_relation_events(run_id, threshold=0.6)
         assert len(low_conf) == 1
-        assert float(low_conf[0]["confidence"]) == 0.31
+        assert float(low_conf[0].confidence) == 0.31
 
 
 class TestFetchEntitiesWithStatus:

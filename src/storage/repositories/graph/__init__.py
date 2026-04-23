@@ -1,3 +1,17 @@
-from .repository import ActiveEntityRow, CurrentRelationRow, GraphRepository, RelationEventRow
+from .repository import (
+    ActiveEntityRow,
+    CurrentRelationRow,
+    GraphRepository,
+    LowConfidenceRelationEventRow,
+    RelationConflictRow,
+    RelationEventRow,
+)
 
-__all__ = ["ActiveEntityRow", "CurrentRelationRow", "GraphRepository", "RelationEventRow"]
+__all__ = [
+    "ActiveEntityRow",
+    "CurrentRelationRow",
+    "GraphRepository",
+    "LowConfidenceRelationEventRow",
+    "RelationConflictRow",
+    "RelationEventRow",
+]
