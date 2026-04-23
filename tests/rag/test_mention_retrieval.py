@@ -197,6 +197,39 @@ def test_build_emotion_exemplar_items_ignores_mention_rows() -> None:
     assert items[0].metadata["chunk_id"] == 3
 
 
+def test_build_emotion_exemplar_items_uses_chunk_similarity_after_paragraph_rerank() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-emotion-exemplar-score-contract
+    说明: paragraph rerank 只影响 semantic_recall；emotion exemplar 仍应按 chunk 级相似度排序和打分。
+    """
+    items = EvidenceBundleBuilder().build_emotion_exemplar_items(
+        [
+            SimilarChunkRow(
+                chunk_id=8,
+                text="她说话时指尖微颤，眼底发冷。",
+                similarity=0.97,
+                chunk_similarity=0.83,
+                emotional_valence="mild_negative",
+                local_preview="她眼底发冷。",
+                paragraph_index=1,
+            ),
+            SimilarChunkRow(
+                chunk_id=9,
+                text="他只是点了点头，语气却更冷。",
+                similarity=0.88,
+                emotional_valence="mild_negative",
+            ),
+        ]
+    )
+
+    assert [item.metadata["chunk_id"] for item in items] == [9, 8]
+    assert items[0].score == 0.88
+    assert items[1].score == 0.83
+    assert items[1].metadata["similarity"] == 0.83
+    assert items[1].content == "她说话时指尖微颤，眼底发冷。"
+
+
 def test_mention_rerank_promotes_feature_consistent_history() -> None:
     """
     创建时间: 2026-04-24
