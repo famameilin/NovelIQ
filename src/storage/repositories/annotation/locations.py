@@ -104,7 +104,7 @@ def fetch_chunk_locations(
     )
     result = session.execute(stmt).fetchall()
 
-    return [{"location_name": row[0], "location_type": row[1]} for row in result]
+    return [{"location_name": row.location_name, "location_type": row.location_type} for row in result]
 
 
 def fetch_all_locations(
@@ -129,11 +129,11 @@ def fetch_all_locations(
     from sqlalchemy import func
 
     stmt = (
-        select(ChunkLocation.location_name, func.count().label("count"))
+        select(ChunkLocation.location_name, func.count().label("location_count"))
         .where(ChunkLocation.run_id == run_id)
         .group_by(ChunkLocation.location_name)
         .order_by(func.count().desc())
     )
     result = session.execute(stmt).fetchall()
 
-    return {row[0]: row[1] for row in result}
+    return {row.location_name: int(row.location_count or 0) for row in result}

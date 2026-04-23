@@ -121,9 +121,9 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             .order_by(ChunkModel.chunk_id)
         )
         result = self.session.execute(stmt)
-        return [(row[0], row[1]) for row in result.fetchall()]
+        return [(row.chunk_id, row.text) for row in result.fetchall()]
 
-    def fetch_chunk_styles(self, run_id: str) -> list[tuple[int, float, float, float]]:
+    def fetch_chunk_styles(self, run_id: str) -> Sequence[Row]:
         return fetch_chunk_styles(self.session, run_id)
 
     def insert_chunk_style(self, run_id: str, rows: Iterable[ChunkStyleData] | Iterable[Any]) -> None:
@@ -162,13 +162,16 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         Returns:
             (total_chunks, total_chars) 元组
         """
-        stmt = select(func.count(), func.sum(func.length(ChunkModel.text))).where(ChunkModel.run_id == run_id)
+        stmt = select(
+            func.count().label("total_chunks"),
+            func.sum(func.length(ChunkModel.text)).label("total_chars"),
+        ).where(ChunkModel.run_id == run_id)
         result = self.session.execute(stmt)
         row = result.fetchone()
         if row is None:
             return (0, 0)
-        total_chunks = row[0] if row[0] else 0
-        total_chars = int(row[1]) if row[1] else 0
+        total_chunks = row.total_chunks if row.total_chunks else 0
+        total_chars = int(row.total_chars) if row.total_chars else 0
         return (total_chunks, total_chars)
 
     def fetch_all_chunk_texts(self, run_id: str) -> list[str]:
@@ -188,7 +191,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         """
         stmt = select(ChunkModel.text).where(ChunkModel.run_id == run_id).order_by(ChunkModel.chunk_id)
         result = self.session.execute(stmt)
-        return [row[0] for row in result.fetchall() if row[0]]
+        return [row.text for row in result.fetchall() if row.text]
 
     def count_chunks(self, run_id: str) -> int:
         """
@@ -206,9 +209,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             分块数量
         """
         stmt = select(func.count()).select_from(ChunkModel).where(ChunkModel.run_id == run_id)
-        result = self.session.execute(stmt)
-        row = result.fetchone()
-        return row[0] if row else 0
+        return int(self.session.execute(stmt).scalar_one() or 0)
 
     def fetch_prev_chunk_text(self, run_id: str, chunk_id: int) -> str | None:
         """
@@ -229,9 +230,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         if chunk_id <= 0:
             return None
         stmt = select(ChunkModel.text).where(ChunkModel.run_id == run_id, ChunkModel.chunk_id == chunk_id - 1)
-        result = self.session.execute(stmt)
-        row = result.fetchone()
-        return row[0] if row else None
+        return self.session.execute(stmt).scalar_one_or_none()
 
     def fetch_next_chunk_text(self, run_id: str, chunk_id: int) -> str | None:
         """
@@ -250,9 +249,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             下一个分块的文本，不存在则返回 None
         """
         stmt = select(ChunkModel.text).where(ChunkModel.run_id == run_id, ChunkModel.chunk_id == chunk_id + 1)
-        result = self.session.execute(stmt)
-        row = result.fetchone()
-        return row[0] if row else None
+        return self.session.execute(stmt).scalar_one_or_none()
 
     def has_chunks(self, run_id: str) -> bool:
         """
@@ -270,9 +267,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             是否有分块数据
         """
         stmt = select(func.count()).select_from(ChunkModel).where(ChunkModel.run_id == run_id)
-        result = self.session.execute(stmt)
-        row = result.fetchone()
-        count = row[0] if row else 0
+        count = int(self.session.execute(stmt).scalar_one() or 0)
         return count > 0
 
     def is_preprocess_complete(self, run_id: str) -> bool:

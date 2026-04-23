@@ -85,15 +85,21 @@ def fetch_annotation_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> AnnotationData:
-    """提取 chunk_annotation 表数据"""
+    """
+    提取 chunk_annotation 表数据。
+
+    修改时间: 2026-04-23
+    任务: P0-clean-row-index-access
+    修改内容: 使用 SQLAlchemy Row 字段名访问，避免聚合层依赖数据库列下标顺序。
+    """
     rows = annotation_repo.fetch_full_annotations(run_id)
 
     return AnnotationData(
-        chunk_ids=[row[0] for row in rows],
-        event_types=[row[1] or "铺垫" for row in rows],
-        cliffhangers=[row[2] or 0 for row in rows],
-        pivot_moments=[row[3] or 0 for row in rows],
-        emotional_valences=[row[4] or "neutral" for row in rows],
+        chunk_ids=[row.chunk_id for row in rows],
+        event_types=[row.event_type or "铺垫" for row in rows],
+        cliffhangers=[row.cliffhanger or 0 for row in rows],
+        pivot_moments=[row.pivot_moment or 0 for row in rows],
+        emotional_valences=[row.emotional_valence or "neutral" for row in rows],
     )
 
 
@@ -231,9 +237,14 @@ def fetch_culture_data(
     修改内容: 只返回 imagery_densities
     """
     culture_rows = stats_repo.fetch_chunk_culture(run_id)
+    imagery_densities = [
+        row.imagery_lexicon_density
+        for row in culture_rows
+        if row.imagery_lexicon_density is not None
+    ]
 
     return CultureData(
-        imagery_densities=[row[0] for row in culture_rows if row[0] is not None],
+        imagery_densities=imagery_densities,
     )
 
 
@@ -289,6 +300,6 @@ def fetch_style_data(
     说明: 从 chunk_styles 表获取 dialogue_ratio 和 avg_sent_len 数据用于聚合计算
     """
     rows = chunk_repo.fetch_chunk_styles(run_id)
-    dialogue_ratios = [row[1] for row in rows if row[1] is not None]
-    avg_sent_lens = [row[3] for row in rows if row[3] is not None]
+    dialogue_ratios = [row.dialogue_ratio for row in rows if row.dialogue_ratio is not None]
+    avg_sent_lens = [row.avg_sent_len for row in rows if row.avg_sent_len is not None]
     return StyleData(dialogue_ratios=dialogue_ratios, avg_sent_lens=avg_sent_lens)

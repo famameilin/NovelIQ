@@ -116,7 +116,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """插入分块曲线数据（情绪 + 节奏）"""
         return chunks.insert_chunk_curve(self.session, run_id, rows)
 
-    def fetch_chunk_culture(self, run_id: str) -> list[tuple[float | None]]:
+    def fetch_chunk_culture(self, run_id: str) -> Sequence[Row]:
         """获取分块文化数据"""
         return chunks.fetch_chunk_culture(self.session, run_id)
 
