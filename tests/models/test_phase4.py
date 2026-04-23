@@ -581,7 +581,7 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
 
         mock_client._call_annotation_api = AsyncMock(return_value=(mock_result, mock_response))
 
-        with patch("src.models.local.annotation.phase4.record_model_interaction") as mock_record_model_interaction:
+        with patch("src.models.local.annotation.runtime.record_model_interaction") as mock_record_model_interaction:
             result = await annotate_chunk_phase4(
                 mock_client,
                 "张三打了李四",
@@ -623,7 +623,7 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         mock_client._session = None
         mock_client._call_annotation_api = AsyncMock(return_value=(RelationExtractionResult(relations=[]), MagicMock()))
 
-        with patch("src.models.local.annotation.phase4.record_model_interaction"):
+        with patch("src.models.local.annotation.runtime.record_model_interaction"):
             result = await annotate_chunk_phase4(
                 mock_client,
                 "白芷看向侯飞白。",
@@ -638,7 +638,7 @@ class TestAnnotateChunkPhase4(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("【近期活跃角色】", call_messages[1]["content"])
         self.assertNotIn("<Vector_Evidence>", call_messages[1]["content"])
 
-    @patch("src.models.local.annotation.phase4.record_model_interaction")
+    @patch("src.models.local.annotation.runtime.record_model_interaction")
     @patch("src.models.local.annotation.phase4.settings")
     async def test_phase4_uses_fallback_client_after_primary_retries(
         self,

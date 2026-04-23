@@ -15,21 +15,22 @@ Phase4: 关系抽取（LLM调用）
 修改者: Codex
 任务: unify-estimated-token-accounting
 修改内容: Phase4 在交互日志之外补记统一估算 token_usage
+
+修改时间: 2026-04-23
+任务: annotation-projector-runtime-landing
+修改内容: Phase4 单次调用改用 thin phase runtime，关系快照转换迁入 relation projector。
 """
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from src.config import settings
-from src.config.constants import (
-    SYMMETRIC_RELATION_TYPES,
-)
-from src.models.interactions import record_model_interaction
 from src.models.local.annotation.evidence_renderer import render_relation_extraction_evidence_sections
+from src.models.local.annotation.projectors.relation import convert_relation_result_to_snapshots
+from src.models.local.annotation.runtime import AnnotationPhaseCallSpec, execute_phase_call
 from src.models.local.retry_handler import AnnotationRetryHandler, RetryConfig
 from src.models.local.schema import RelationChangeSnapshot, RelationExtractionResult
 
@@ -49,10 +50,6 @@ class Phase4MaxRetriesExceededError(Exception):
     """
 
     pass
-
-
-# 默认置信度（LLM 不输出置信度时的回退值）
-_DEFAULT_RELATION_CONFIDENCE: float = 0.85
 
 
 def _build_phase4_messages(
@@ -116,50 +113,12 @@ def _convert_to_snapshots(
     修改者: TraeAI
     任务: phase4-code-review-fix
     修改内容: 移除类型验证（已由 Pydantic Literal 约束处理）
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 保留兼容入口，实际转换逻辑委托 relation projector。
     """
-    snapshots: list[RelationChangeSnapshot] = []
-    seen_keys: set[tuple[str, str, str]] = set()
-
-    for record in result.relations:
-        key = (record.from_name, record.to_name, record.type)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-
-        snapshots.append(
-            RelationChangeSnapshot(
-                from_name=record.from_name,
-                to_name=record.to_name,
-                type=record.type,
-                change=record.change,
-                evidence=record.evidence,
-                confidence=_DEFAULT_RELATION_CONFIDENCE,
-                source_model=source_model,
-                projection_status="pending",
-                directionality="symmetric" if record.type in SYMMETRIC_RELATION_TYPES else "directed",
-            )
-        )
-
-        # 对称关系自动生成反向边（A→B 变成 A→B + B→A）
-        if record.type in SYMMETRIC_RELATION_TYPES and record.from_name != record.to_name:
-            reverse_key = (record.to_name, record.from_name, record.type)
-            if reverse_key not in seen_keys:
-                seen_keys.add(reverse_key)
-                snapshots.append(
-                    RelationChangeSnapshot(
-                        from_name=record.to_name,
-                        to_name=record.from_name,
-                        type=record.type,
-                        change=record.change,
-                        evidence=record.evidence,
-                        confidence=_DEFAULT_RELATION_CONFIDENCE,
-                        source_model=source_model,
-                        projection_status="pending",
-                        directionality="symmetric",
-                    )
-                )
-
-    return snapshots
+    return convert_relation_result_to_snapshots(result, source_model)
 
 
 async def execute_phase4_call(
@@ -188,64 +147,27 @@ async def execute_phase4_call(
     任务: fix-token-coverage-fallback-bucket
     修改内容: Phase4 经 annotation_fallback 执行时仍统一归入 annotation 主业务桶，
               避免 coverage 统计把 fallback 调用误报为缺口
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 委托 execute_phase_call 统一模型调用后的记录、thinking 和 token 估算。
     """
-    start_time = time.time()
-    is_cloud = client._is_cloud_api()
     config = client._config
 
-    enable_thinking = config.thinking_enabled
-
-    parsed, response = await client._call_annotation_api(
-        messages=messages,
-        enable_thinking=enable_thinking,
-        chunk_id=chunk_id,
-        response_model=RelationExtractionResult,
-        call_type="phase4",
-    )
-
-    try:
-        duration_ms = int((time.time() - start_time) * 1000)
-        content_clean = str(parsed.model_dump())
-        thinking_content = getattr(response, "thinking_content", None)
-        extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
-        reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
-        process_response = getattr(client, "_process_annotation_response", None)
-        if callable(process_response) and hasattr(response, "choices"):
-            content_clean, thinking_content, _ = process_response(response, is_cloud, chunk_id, "phase4")
-
-        record_model_interaction(
-            run_id=run_id,
-            chunk_id=chunk_id,
-            interaction_type="relation_extraction",
+    call_result = await execute_phase_call(
+        client,
+        AnnotationPhaseCallSpec(
             phase="phase4",
-            attempt_number=attempt_number,
+            interaction_type="relation_extraction",
+            call_type="phase4",
             messages=messages,
-            response_text=content_clean,
-            thinking_content=thinking_content,
-            reasoning_tokens=reasoning_tokens,
-            requested_thinking=enable_thinking,
-            duration_ms=duration_ms,
-            model_name=config.model,
-            model_provider="cloud" if is_cloud else "local",
-            session=client._session,
-        )
-        # 中文注释：Phase4 的业务归属始终是 annotation，fallback 只是底层执行策略。
-        client._record_estimated_token_usage_from_messages(
-            messages,
-            content_clean,
-            "phase4",
-            chunk_id,
-            task_type="annotation",
-        )
-    except Exception:
-        client._record_estimated_token_usage_from_response(
-            messages,
-            response,
-            "phase4",
-            chunk_id,
-            task_type="annotation",
-        )
-        raise
+            response_model=RelationExtractionResult,
+            chunk_id=chunk_id,
+            run_id=run_id,
+            attempt_number=attempt_number,
+        ),
+    )
+    parsed = call_result.parsed
 
     logger.info(
         "phase4_relation_extraction: chunk_id={} text_len={} relations_count={}",

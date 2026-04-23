@@ -33,6 +33,10 @@
 任务: p2-store-annotation-results-split
 修改内容: 拆分伏笔合并、对话快照转换与 repository 写入逻辑，降低存储主函数复杂度
 
+修改时间: 2026-04-23
+任务: annotation-projector-runtime-landing
+修改内容: 伏笔合并与对话快照转换委托 annotation projectors，storage 只保留 repository 编排。
+
 说明: 本模块包含结果存储相关的函数。
 """
 
@@ -40,6 +44,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
+
+from src.models.local.annotation.projectors.dialogue import build_dialogue_snapshots
+from src.models.local.annotation.projectors.foreshadowing import merge_annotation_foreshadowing
 
 if TYPE_CHECKING:
     from src.models.local.schema import DialogueSnapshot
@@ -52,26 +59,12 @@ def _merge_annotation_foreshadowing(annotation, foreshadowing):
     创建时间: 2026-04-23
     任务: p2-store-annotation-results-split
     新建原因: 把伏笔字段拼装从存储主流程拆出，便于单独核对 annotation 结构变换。
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 保留兼容入口，实际合并逻辑委托 foreshadowing projector。
     """
-    if foreshadowing is None:
-        return annotation
-
-    from src.models.local.schema import ChunkAnnotation
-
-    return ChunkAnnotation(
-        emotional_valence=annotation.emotional_valence,
-        event_type=annotation.event_type,
-        pivot_moment=annotation.pivot_moment,
-        cliffhanger=annotation.cliffhanger,
-        chunk_summary=annotation.chunk_summary,
-        has_foreshadowing=foreshadowing.has_foreshadowing,
-        foreshadowing_type=foreshadowing.foreshadowing_type,
-        foreshadowing_desc=(
-            f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}" if foreshadowing.has_foreshadowing else ""
-        ),
-        characters=annotation.characters,
-        dialogues=annotation.dialogues,
-    )
+    return merge_annotation_foreshadowing(annotation, foreshadowing)
 
 
 def _build_dialogue_snapshots(
@@ -86,28 +79,17 @@ def _build_dialogue_snapshots(
     创建时间: 2026-04-23
     任务: p2-store-annotation-results-split
     新建原因: 把对话快照组装从 repository 写入流程中拆开，避免存储时混入数据转换细节。
+
+    修改时间: 2026-04-23
+    任务: annotation-projector-runtime-landing
+    修改内容: 保留兼容入口，实际快照转换委托 dialogue projector。
     """
-    from src.models.local.schema import DialogueSnapshot
-
-    if not dialogues:
-        return [], []
-
-    snapshots: list[DialogueSnapshot] = []
-    lengths: list[int] = []
-    for dialogue_idx, content in dialogues:
-        speaker_list = dialogue_speakers.get(dialogue_idx) if dialogue_speakers else None
-        tone = dialogue_tones.get(dialogue_idx) if dialogue_tones else None
-        identity_clue = dialogue_identity_clues.get(dialogue_idx) if dialogue_identity_clues else None
-        snapshots.append(
-            DialogueSnapshot(
-                speaker=speaker_list,
-                content=content,
-                tone=tone,
-                identity_clue=identity_clue,
-            )
-        )
-        lengths.append(len(content))
-    return snapshots, lengths
+    return build_dialogue_snapshots(
+        dialogues,
+        dialogue_speakers=dialogue_speakers,
+        dialogue_tones=dialogue_tones,
+        dialogue_identity_clues=dialogue_identity_clues,
+    )
 
 
 def _persist_annotation_repositories(
