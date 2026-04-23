@@ -42,13 +42,18 @@
 任务: count-failed-llm-calls
 修改内容: 新增从响应对象提取文本并补记失败态 token 的通用 helper，覆盖“请求已发出但后处理失败”的场景
 
+修改时间: 2026-04-23
+修改者: Codex
+任务: p2-base-model-client-split
+修改内容:
+1. 将 transport、stream emitter、structured parser、token usage reporter 拆到独立模块
+2. BaseModelClient 保留兼容方法名，内部改为委托 helper，降低基础类复杂度
+
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
 
@@ -58,8 +63,21 @@ from pydantic import BaseModel
 
 from src.config import TaskModelConfig, TaskType, load_task_config
 from src.config.analysis_logger import AnalysisLogger
-from src.models.local.parser.thinking import extract_thinking_unified
-from src.utils.token_counter import count_messages_tokens, count_tokens
+from src.models.local.base_stream_emitter import build_stream_response
+from src.models.local.base_structured_parser import (
+    extract_response_content,
+    parse_response,
+    parse_structured_response,
+)
+from src.models.local.base_token_usage import (
+    extract_reasoning_tokens,
+    record_estimated_token_usage_from_messages,
+    record_estimated_token_usage_from_response,
+    record_token_usage,
+    record_token_usage_estimated,
+    resolve_token_usage_novel_id,
+)
+from src.models.local.base_transport import call_api, call_api_stream
 
 if TYPE_CHECKING:
     from src.api.models.events import StreamEvent
@@ -289,21 +307,15 @@ class BaseModelClient:
         call_type: str,
         chunk_id: int | None = None,
     ) -> None:
-        """记录token使用量"""
-        resolved_novel_id = self._resolve_token_usage_novel_id(call_type)
-        if resolved_novel_id is None:
-            return
-        if self._token_usage_callback and hasattr(response, "usage") and response.usage:
-            self._token_usage_callback(
-                resolved_novel_id,
-                self._task_type,
-                call_type,
-                self._config.model or "unknown",
-                response.usage.prompt_tokens,
-                response.usage.total_tokens,
-                response.usage.completion_tokens,
-                chunk_id,
-            )
+        """
+        记录 token 使用量。
+
+        修改时间: 2026-04-23
+        修改者: Codex
+        任务: p2-base-model-client-split
+        修改内容: 改为委托 base_token_usage helper，BaseModelClient 仅保留兼容入口。
+        """
+        record_token_usage(self, response, call_type, chunk_id)
 
     def _resolve_token_usage_novel_id(self, call_type: str) -> str | None:
         """
@@ -315,14 +327,7 @@ class BaseModelClient:
         说明: token 记账现在已经受 novel 外键保护；
               若运行时上下文没有提供 novel_id，不能再写入 `unknown` 这种脏值。
         """
-        if self._novel_id:
-            return self._novel_id
-        logger.warning(
-            "skip token usage recording because novel_id is missing: task_type={} call_type={}",
-            self._task_type,
-            call_type,
-        )
-        return None
+        return resolve_token_usage_novel_id(self, call_type)
 
     def _extract_reasoning_tokens(self, response: Any) -> int | None:
         """
@@ -334,24 +339,7 @@ class BaseModelClient:
         说明: 优先读取 usage.completion_tokens_details.reasoning_tokens。
               对非标准对象和 dict 结构都做兼容，拿不到时返回 None。
         """
-
-        def _read_attr_or_key(obj: Any, name: str) -> Any:
-            if obj is None:
-                return None
-            if isinstance(obj, dict):
-                return obj.get(name)
-            return getattr(obj, name, None)
-
-        usage = _read_attr_or_key(response, "usage")
-        completion_details = _read_attr_or_key(usage, "completion_tokens_details")
-        reasoning_tokens = _read_attr_or_key(completion_details, "reasoning_tokens")
-        if reasoning_tokens is None:
-            return None
-        try:
-            normalized = int(reasoning_tokens)
-        except (TypeError, ValueError):
-            return None
-        return normalized if normalized >= 0 else None
+        return extract_reasoning_tokens(response)
 
     def _record_token_usage_estimated(
         self,
@@ -369,20 +357,14 @@ class BaseModelClient:
         任务: 为流式API提供token使用估算记录
         说明: 使用tiktoken估算的token数量，用于流式API场景
         """
-        resolved_novel_id = self._resolve_token_usage_novel_id(call_type)
-        if resolved_novel_id is None:
-            return
-        if self._token_usage_callback:
-            self._token_usage_callback(
-                resolved_novel_id,
-                self._task_type,
-                call_type,
-                self._config.model or "unknown",
-                prompt_tokens,
-                total_tokens,
-                completion_tokens,
-                chunk_id,
-            )
+        record_token_usage_estimated(
+            self,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            call_type,
+            chunk_id,
+        )
 
     def _record_estimated_token_usage_from_messages(
         self,
@@ -404,36 +386,14 @@ class BaseModelClient:
               各条调用链都应走这一入口，避免 provider 实报、局部估算、
               以及漏记混成多套账本。
         """
-        if not self._token_usage_callback:
-            return
-        resolved_novel_id = self._resolve_token_usage_novel_id(call_type)
-        if resolved_novel_id is None:
-            return
-
-        resolved_model = model_name or self._config.model
-        if not resolved_model:
-            logger.warning(
-                "skip estimated token usage because model name is missing: task_type={} call_type={}",
-                task_type,
-                call_type,
-            )
-            return
-
-        prompt_tokens = count_messages_tokens(messages, resolved_model)
-        completion_tokens = count_tokens(response_text or "", resolved_model)
-        total_tokens = prompt_tokens + completion_tokens
-
-        # 中文注释：这里显式传 model/task_type，避免共享 callback 再偷用 annotation client
-        # 的模型名，把 disambiguation / fallback / embedding 的账混写到同一个 model 维度。
-        self._token_usage_callback(
-            resolved_novel_id,
-            task_type or self._task_type,
+        record_estimated_token_usage_from_messages(
+            self,
+            messages,
+            response_text,
             call_type,
-            resolved_model,
-            prompt_tokens,
-            total_tokens,
-            completion_tokens,
             chunk_id,
+            task_type=task_type,
+            model_name=model_name,
         )
 
     def _extract_response_text_for_token_usage(self, response: Any) -> str:
@@ -446,16 +406,9 @@ class BaseModelClient:
         说明: 当请求已经返回，但后续结构化解析或业务校验失败时，
               仍应尽量按真实响应文本补记 token；若提取失败则保守回退为空字符串。
         """
-        if response is None or not hasattr(response, "choices") or not response.choices:
-            return ""
+        from src.models.local.base_token_usage import extract_response_text_for_token_usage
 
-        message = response.choices[0].message
-        try:
-            content_clean, _thinking_content = self._extract_response_content(message)
-            return content_clean or ""
-        except Exception:
-            raw_content = getattr(message, "content", None)
-            return raw_content if isinstance(raw_content, str) else ""
+        return extract_response_text_for_token_usage(self, response)
 
     def _record_estimated_token_usage_from_response(
         self,
@@ -476,10 +429,10 @@ class BaseModelClient:
         说明: 主要用于“模型调用已完成，但解析/校验失败”的路径；
               此时至少应把 prompt 算上，若还能提取出响应文本，则连 completion 一并估算。
         """
-        response_text = self._extract_response_text_for_token_usage(response)
-        self._record_estimated_token_usage_from_messages(
+        record_estimated_token_usage_from_response(
+            self,
             messages,
-            response_text,
+            response,
             call_type,
             chunk_id,
             task_type=task_type,
@@ -543,27 +496,12 @@ class BaseModelClient:
         任务: 重构 BaseModelClient 使用 AsyncOpenAI
         修改内容: 改为 async def，使用 await 调用
         """
-        if not self._config.model:
-            raise ValueError("model is required")
-
-        request_params: dict[str, Any] = {
-            "model": self._config.model,
-            "messages": messages,
-            "temperature": self._config.temperature,
-            "top_p": self._config.top_p,
-        }
-
-        if enable_thinking:
-            request_params["reasoning_effort"] = "medium"
-            request_params["extra_body"] = {"think": True}
-        else:
-            request_params["reasoning_effort"] = "none"
-            request_params["extra_body"] = {"think": False}
-
-        if response_model is not None:
-            request_params["response_format"] = self._build_json_schema(response_model)
-
-        return await self._client.chat.completions.create(**request_params)
+        return await call_api(
+            self,
+            messages,
+            enable_thinking=enable_thinking,
+            response_model=response_model,
+        )
 
     async def _call_api_stream(
         self,
@@ -594,86 +532,12 @@ class BaseModelClient:
         任务: refactor/sse-unified-event-bus
         修改内容: stream_callback → emitter (StreamEvent 统一回调)
         """
-        import time
-
-        from src.api.models.events import StreamEvent
-
-        request_params["stream"] = True
-
-        logger.debug("Using streaming mode for API call")
-
-        content_chunks: list[str] = []
-        reasoning_chunks: list[str] = []
-        chunk_count = 0
-        usage = None
-
-        last_output_broadcast_time = 0.0
-        output_buffer = ""
-        output_char_count = 0
-
-        last_thinking_broadcast_time = 0.0
-        thinking_buffer = ""
-        thinking_char_count = 0
-
-        if is_cloud:
-            print(f"[Stream] Starting API call with model={request_params.get('model', 'unknown')}", flush=True)
-
-        stream = await self._client.chat.completions.create(**request_params)
-        async for chunk in stream:
-            chunk_count += 1
-            chunk_usage = getattr(chunk, "usage", None)
-            if chunk_usage is not None:
-                usage = chunk_usage
-            if chunk.choices:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    content_chunks.append(delta.content)
-                    output_buffer += delta.content
-                    output_char_count += len(delta.content)
-
-                    if is_cloud:
-                        print(delta.content, end="", flush=True)
-
-                    current_time = time.time()
-                    should_broadcast = current_time - last_output_broadcast_time >= 0.1 or output_char_count >= 50
-                    if emitter and should_broadcast:
-                        await emitter(StreamEvent(action="output", content=output_buffer))
-                        output_buffer = ""
-                        output_char_count = 0
-                        last_output_broadcast_time = current_time
-
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    reasoning_chunks.append(delta.reasoning_content)
-                    thinking_buffer += delta.reasoning_content
-                    thinking_char_count += len(delta.reasoning_content)
-
-                    if is_cloud:
-                        print(f"\033[90m{delta.reasoning_content}\033[0m", end="", flush=True)
-
-                    current_time = time.time()
-                    should_broadcast = current_time - last_thinking_broadcast_time >= 0.1 or thinking_char_count >= 50
-                    if emitter and should_broadcast:
-                        await emitter(StreamEvent(action="thinking", content=thinking_buffer))
-                        thinking_buffer = ""
-                        thinking_char_count = 0
-                        last_thinking_broadcast_time = current_time
-
-        if is_cloud:
-            print(f"\n[Stream] Completed: received {chunk_count} chunks", flush=True)
-
-        if emitter and output_buffer:
-            await emitter(StreamEvent(action="output", content=output_buffer))
-        if emitter and thinking_buffer:
-            await emitter(StreamEvent(action="thinking", content=thinking_buffer))
-
-        full_content = "".join(content_chunks)
-        full_reasoning = "".join(reasoning_chunks) if reasoning_chunks else None
-
-        if not full_content and full_reasoning:
-            full_content = full_reasoning
-            full_reasoning = None
-
-        return self._build_stream_response(full_content, full_reasoning, usage=usage)
+        return await call_api_stream(
+            self,
+            request_params,
+            is_cloud=is_cloud,
+            emitter=emitter,
+        )
 
     def _build_stream_response(self, content: str, reasoning_content: str | None, usage: Any = None) -> Any:
         """
@@ -684,24 +548,7 @@ class BaseModelClient:
         任务: code-quality-refactor - 提取API调用基类
         说明: 将流式收集的内容构建为标准响应格式
         """
-        from types import SimpleNamespace
-
-        message = SimpleNamespace(
-            content=content,
-            reasoning_content=reasoning_content,
-            role="assistant",
-        )
-        choice = SimpleNamespace(
-            message=message,
-            finish_reason="stop",
-            index=0,
-        )
-        response = SimpleNamespace(
-            choices=[choice],
-            model=self._config.model,
-            usage=usage,
-        )
-        return response
+        return build_stream_response(self._config.model, content, reasoning_content, usage=usage)
 
     def _log_model_call(
         self,
@@ -744,33 +591,7 @@ class BaseModelClient:
         任务: fix-phase3-validation-error-logging
         修改内容: 在 ValidationError 发生前记录原始 JSON 数据，便于调试
         """
-        from src.models.local.parser import try_parse_json
-
-        if not response.choices:
-            raise ValueError("Empty response from API")
-
-        content = response.choices[0].message.content
-        if not content:
-            raise ValueError("Empty content in response")
-
-        if not isinstance(content, str):
-            raise ValueError(f"Content must be a string, got {type(content).__name__}")
-
-        json_data = try_parse_json(content)
-        if json_data is None:
-            raise ValueError(f"Failed to parse JSON from response: {content[:200]}")
-
-        try:
-            return response_model.model_validate(json_data)
-        except Exception as e:
-            logger.error(
-                "Structured response validation failed: model={}, error={}, json_data={}, raw_content={}",
-                response_model.__name__,
-                str(e),
-                json_data,
-                content,
-            )
-            raise
+        return parse_structured_response(response, response_model)
 
     def _build_request_params(self, messages: list[dict], enable_thinking: bool = False) -> dict[str, Any]:
         """
@@ -814,14 +635,7 @@ class BaseModelClient:
         任务: Phase 2 - 统一客户端基类
         说明: 统一云端和本地的响应内容提取逻辑，支持多种思考内容格式
         """
-        content = message.content or ""
-        extraction = extract_thinking_unified(
-            content=content,
-            reasoning_content=getattr(message, "reasoning_content", None),
-            support_reasoning_content=True,
-            support_think_tags=True,
-        )
-        return extraction.content_without_thinking, extraction.thinking_content
+        return extract_response_content(message)
 
     def _parse_response(self, content: str) -> dict[str, Any] | None:
         """
@@ -832,41 +646,4 @@ class BaseModelClient:
         任务: Phase 2 - 统一客户端基类
         说明: 支持处理 markdown 代码块包裹的 JSON，兼容云端和本地响应格式
         """
-        content_to_parse = content.strip()
-
-        if not content_to_parse:
-            return None
-
-        # 尝试直接解析
-        try:
-            data = json.loads(content_to_parse)
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-
-        # 尝试从 markdown 代码块中提取 JSON
-        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content_to_parse)
-        if json_match:
-            extracted = json_match.group(1).strip()
-            try:
-                data = json.loads(extracted)
-                if isinstance(data, dict):
-                    logger.info("[模型] JSON从markdown代码块中提取成功")
-                    return data
-            except json.JSONDecodeError:
-                pass
-
-        # 尝试从混合内容中提取 JSON 对象
-        json_match = re.search(r"\{[\s\S]*\}", content_to_parse)
-        if json_match:
-            extracted = json_match.group(0)
-            try:
-                data = json.loads(extracted)
-                if isinstance(data, dict):
-                    logger.info("[模型] JSON从混合内容中提取成功")
-                    return data
-            except json.JSONDecodeError:
-                pass
-
-        return None
+        return parse_response(content)
