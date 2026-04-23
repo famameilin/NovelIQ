@@ -8,6 +8,7 @@ RAG Level3 向量检索边界。
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from src.models.local.embedding import EmbeddingClient
-    from src.storage.repositories.chunk import SimilarChunkRow
+    from src.storage.repositories.chunk import SimilarChunkRow, SimilarParagraphRow
 
 
 class Level3NotReadyError(RuntimeError):
@@ -51,11 +52,13 @@ class Level3VectorEvidence:
         self._available: bool | None = None
         self._expected_embedding_dim = expected_embedding_dim or settings.models.semantic_chunking.embedding_dim
         self._setup_checked = False
+        self._paragraph_rerank_available: bool | None = None
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
         """设置 Embedding 客户端。"""
         self._embedding_client = client
         self._available = None
+        self._paragraph_rerank_available = None
         self._setup_checked = False
 
     def set_session(self, session: Session, run_id: str) -> None:
@@ -63,10 +66,17 @@ class Level3VectorEvidence:
         self._session = session
         self._run_id = run_id
         self._available = None
+        self._paragraph_rerank_available = None
         self._setup_checked = False
 
     async def ensure_level3_ready(self) -> None:
-        """执行 Level3 readiness 检查。"""
+        """
+        执行 Level3 readiness 检查。
+
+        修改时间: 2026-04-24
+        任务: level3-paragraph-readiness
+        修改说明: paragraph rerank 已是 Level3 必需能力，启动检查必须同时校验 paragraph schema、数据存在与完整性。
+        """
         if self._setup_checked:
             return
         if self._embedding_client is None or self._session is None or self._run_id is None:
@@ -78,15 +88,32 @@ class Level3VectorEvidence:
                 f"Level 3 embedding dimension mismatch: configured={self._expected_embedding_dim}, actual={actual_dim}"
             )
 
-        from src.storage.repositories.chunk import has_embeddings
-        from src.storage.vector_schema import validate_chunk_embeddings_schema
+        from src.storage.repositories.chunk import (
+            get_incomplete_paragraph_embedding_chunk_ids,
+            has_embeddings,
+            has_paragraph_embeddings,
+        )
+        from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
 
         validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
         if not has_embeddings(self._session, self._run_id):
             raise Level3NotReadyError(f"Level 3 embeddings not found for run_id={self._run_id}")
 
+        validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        if not has_paragraph_embeddings(self._session, self._run_id):
+            raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
+        incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
+        if incomplete_chunk_ids:
+            preview_ids = incomplete_chunk_ids[:10]
+            raise Level3NotReadyError(
+                "Level 3 paragraph embeddings incomplete for "
+                f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(incomplete_chunk_ids)}"
+            )
+
         self._available = True
+        self._paragraph_rerank_available = True
         self._setup_checked = True
+        logger.info("Level3 readiness passed with chunk and paragraph embeddings for run_id={}", self._run_id)
 
     def is_available(self) -> bool:
         """检查 Level3 是否可用。"""
@@ -101,13 +128,31 @@ class Level3VectorEvidence:
             self._available = False
             return False
 
-        from src.storage.repositories.chunk import has_embeddings
+        from src.storage.repositories.chunk import (
+            get_incomplete_paragraph_embedding_chunk_ids,
+            has_embeddings,
+            has_paragraph_embeddings,
+        )
 
-        self._available = has_embeddings(self._session, self._run_id)
+        chunk_ready = has_embeddings(self._session, self._run_id)
+        paragraph_ready = has_paragraph_embeddings(self._session, self._run_id)
+        incomplete_chunk_ids = (
+            get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
+            if chunk_ready and paragraph_ready
+            else []
+        )
+        self._available = chunk_ready and paragraph_ready and not incomplete_chunk_ids
         if self._available:
-            logger.debug("Level3VectorEvidence: available, embeddings found in database")
+            self._paragraph_rerank_available = True
+            logger.debug("Level3VectorEvidence: available, chunk and paragraph embeddings found in database")
         else:
-            logger.debug("Level3VectorEvidence: no embeddings in database")
+            self._paragraph_rerank_available = False
+            logger.debug(
+                "Level3VectorEvidence unavailable: chunk_ready={} paragraph_ready={} incomplete_chunks={}",
+                chunk_ready,
+                paragraph_ready,
+                incomplete_chunk_ids[:10],
+            )
         return self._available
 
     async def search_similar_chunks(
@@ -126,6 +171,10 @@ class Level3VectorEvidence:
         修改时间: 2026-04-23
         任务: level3-history-cutoff
         修改说明: 透传 max_chunk_id 到 repository 层，统一约束 Level3 历史边界。
+
+        修改时间: 2026-04-24
+        任务: level3-paragraph-rerank
+        修改说明: chunk 粗召回后，在命中 chunk_ids 内执行 paragraph rerank，并回填局部 evidence 预览。
         """
         await self.ensure_level3_ready()
         if not self.is_available():
@@ -153,12 +202,118 @@ class Level3VectorEvidence:
                 exclude_chunk_ids=exclude_chunk_ids,
                 max_chunk_id=max_chunk_id,
             )
+            results = self._rerank_with_paragraphs(query_embedding, results)
             logger.debug(
-                "Level3VectorEvidence: found {} similar chunks for query (len={})",
+                "Level3VectorEvidence: found {} similar chunks for query (len={}) after paragraph rerank",
                 len(results),
                 len(query_text),
             )
             return results
+        except Level3NotReadyError:
+            raise
         except Exception as exc:
             logger.error("Level3VectorEvidence: search failed: {}", exc)
             return []
+
+    def _is_paragraph_rerank_available(self) -> bool:
+        """
+        检查 paragraph rerank 数据是否可用。
+
+        创建时间: 2026-04-24
+        任务: level3-paragraph-rerank
+        修改时间: 2026-04-24
+        任务: level3-paragraph-readiness
+        修改说明: paragraph rerank 不再是可选增强；缺失时抛出 readiness 错误。
+        """
+        if self._paragraph_rerank_available is not None:
+            return self._paragraph_rerank_available
+        if self._session is None or self._run_id is None:
+            raise Level3NotReadyError("Level 3 paragraph rerank requires session and run_id")
+
+        from src.storage.repositories.chunk import (
+            get_incomplete_paragraph_embedding_chunk_ids,
+            has_paragraph_embeddings,
+        )
+        from src.storage.vector_schema import validate_paragraph_embeddings_schema
+
+        validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        if not has_paragraph_embeddings(self._session, self._run_id):
+            raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
+        incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
+        if incomplete_chunk_ids:
+            raise Level3NotReadyError(
+                "Level 3 paragraph embeddings incomplete for "
+                f"run_id={self._run_id}, chunk_ids={incomplete_chunk_ids[:10]}, total={len(incomplete_chunk_ids)}"
+            )
+
+        self._paragraph_rerank_available = True
+        return self._paragraph_rerank_available
+
+    def _rerank_with_paragraphs(
+        self,
+        query_embedding: list[float],
+        chunk_results: list[SimilarChunkRow],
+    ) -> list[SimilarChunkRow]:
+        """
+        使用候选 chunk 内 paragraph 相似度重排 chunk 结果。
+
+        创建时间: 2026-04-24
+        任务: level3-paragraph-rerank
+        说明: 只在 chunk 粗召回结果内查询 paragraph，避免全库 paragraph search 带来的噪声和时间边界风险。
+        """
+        if not chunk_results or self._session is None or self._run_id is None:
+            return chunk_results
+        if not self._is_paragraph_rerank_available():
+            return chunk_results
+
+        from src.storage.repositories.chunk import search_similar_paragraphs_within_chunks
+
+        chunk_ids = [result.chunk_id for result in chunk_results]
+        paragraph_results = search_similar_paragraphs_within_chunks(
+            self._session,
+            self._run_id,
+            query_embedding,
+            chunk_ids=chunk_ids,
+            top_k=max(len(chunk_results) * 3, self._top_k),
+            similarity_threshold=self._similarity_threshold,
+        )
+        if not paragraph_results:
+            logger.info(
+                "Level3 paragraph rerank found no paragraph matches; keeping chunk order chunk_candidates={}",
+                len(chunk_results),
+            )
+            return chunk_results
+
+        best_paragraph_by_chunk: dict[int, SimilarParagraphRow] = {}
+        for paragraph in paragraph_results:
+            existing = best_paragraph_by_chunk.get(paragraph.chunk_id)
+            if existing is None or paragraph.similarity > existing.similarity:
+                best_paragraph_by_chunk[paragraph.chunk_id] = paragraph
+
+        reranked: list[SimilarChunkRow] = []
+        for result in chunk_results:
+            selected_paragraph = best_paragraph_by_chunk.get(result.chunk_id)
+            if selected_paragraph is None:
+                reranked.append(result)
+                continue
+            reranked.append(
+                replace(
+                    result,
+                    similarity=selected_paragraph.similarity,
+                    chunk_similarity=result.similarity,
+                    local_preview=selected_paragraph.paragraph_text,
+                    paragraph_index=selected_paragraph.paragraph_index,
+                    paragraph_similarity=selected_paragraph.similarity,
+                    paragraph_start_char=selected_paragraph.start_char,
+                    paragraph_end_char=selected_paragraph.end_char,
+                )
+            )
+
+        matched_count = sum(1 for result in reranked if result.local_preview)
+        logger.info(
+            "Level3 paragraph rerank applied: chunk_candidates={} paragraph_matches={} reranked_chunks={}",
+            len(chunk_results),
+            len(paragraph_results),
+            matched_count,
+        )
+        return sorted(reranked, key=lambda item: item.similarity, reverse=True)[: self._top_k]
