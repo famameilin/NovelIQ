@@ -3,11 +3,18 @@
 创建者: TraeAI
 任务: code-quality-refactor - 拆分protocols.py
 说明: 运行管理协议接口
+
+修改时间: 2026-04-23
+任务: P2-基础设施解耦
+修改内容: 使用 RunRecord/RepositoryValue 替代过宽的动态字典。
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from datetime import datetime
+from typing import Protocol, runtime_checkable
+
+from .types import RepositoryValue, RunRecord
 
 
 @runtime_checkable
@@ -18,7 +25,16 @@ class RunRepositoryProtocol(Protocol):
     管理分析运行的创建、查询和状态更新。
     """
 
-    def create_run(self, novel_id: str, source_path: str | None, title: str | None) -> str:
+    def create_run(
+        self,
+        novel_id: str,
+        source_path: str | None = None,
+        title: str | None = None,
+        author: str | None = None,
+        run_id: str | None = None,
+        task_kind: str = "analysis",
+        request_payload: dict[str, RepositoryValue] | None = None,
+    ) -> str:
         """
         创建新的分析运行记录
 
@@ -32,7 +48,7 @@ class RunRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
+    def get_run(self, run_id: str) -> RunRecord | None:
         """
         获取运行记录
 
@@ -54,7 +70,7 @@ class RunRepositoryProtocol(Protocol):
         """
         ...
 
-    def get_latest_run(self, novel_id: str) -> dict[str, Any] | None:
+    def get_latest_run(self, novel_id: str) -> RunRecord | None:
         """
         获取指定小说的最新运行记录
 
@@ -64,4 +80,43 @@ class RunRepositoryProtocol(Protocol):
         Returns:
             最新运行记录字典，不存在则返回 None
         """
+        ...
+
+    def get_runs_by_novel(self, novel_id: str) -> list[RunRecord]:
+        """获取指定小说的所有运行记录"""
+        ...
+
+    def get_by_status(self, status: str) -> list[RunRecord]:
+        """按状态查询任务"""
+        ...
+
+    def get_running_tasks(self) -> list[RunRecord]:
+        """获取所有运行中的任务"""
+        ...
+
+    def get_pending_tasks(self) -> list[RunRecord]:
+        """获取所有 pending 任务"""
+        ...
+
+    def update_run_task_fields(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        progress: float | None = None,
+        stage: str | None = None,
+        sub_stage: str | None = None,
+        current: int | None = None,
+        total: int | None = None,
+        message: str | None = None,
+        error: str | None = None,
+        task_kind: str | None = None,
+        request_payload: dict[str, RepositoryValue] | None = None,
+        cancel_requested: bool | None = None,
+        worker_id: str | None = None,
+        heartbeat_at: datetime | None = None,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+    ) -> None:
+        """批量更新任务运行态字段"""
         ...
