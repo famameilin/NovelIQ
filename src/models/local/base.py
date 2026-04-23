@@ -290,9 +290,12 @@ class BaseModelClient:
         chunk_id: int | None = None,
     ) -> None:
         """记录token使用量"""
+        resolved_novel_id = self._resolve_token_usage_novel_id(call_type)
+        if resolved_novel_id is None:
+            return
         if self._token_usage_callback and hasattr(response, "usage") and response.usage:
             self._token_usage_callback(
-                self._novel_id or "unknown",
+                resolved_novel_id,
                 self._task_type,
                 call_type,
                 self._config.model or "unknown",
@@ -301,6 +304,25 @@ class BaseModelClient:
                 response.usage.completion_tokens,
                 chunk_id,
             )
+
+    def _resolve_token_usage_novel_id(self, call_type: str) -> str | None:
+        """
+        解析 token_usage 记录要落库的 novel_id。
+
+        创建时间: 2026-04-22
+        创建者: Codex
+        任务: fix-token-usage-unknown-novel-id
+        说明: token 记账现在已经受 novel 外键保护；
+              若运行时上下文没有提供 novel_id，不能再写入 `unknown` 这种脏值。
+        """
+        if self._novel_id:
+            return self._novel_id
+        logger.warning(
+            "skip token usage recording because novel_id is missing: task_type={} call_type={}",
+            self._task_type,
+            call_type,
+        )
+        return None
 
     def _extract_reasoning_tokens(self, response: Any) -> int | None:
         """
@@ -347,9 +369,12 @@ class BaseModelClient:
         任务: 为流式API提供token使用估算记录
         说明: 使用tiktoken估算的token数量，用于流式API场景
         """
+        resolved_novel_id = self._resolve_token_usage_novel_id(call_type)
+        if resolved_novel_id is None:
+            return
         if self._token_usage_callback:
             self._token_usage_callback(
-                self._novel_id or "unknown",
+                resolved_novel_id,
                 self._task_type,
                 call_type,
                 self._config.model or "unknown",
@@ -381,6 +406,9 @@ class BaseModelClient:
         """
         if not self._token_usage_callback:
             return
+        resolved_novel_id = self._resolve_token_usage_novel_id(call_type)
+        if resolved_novel_id is None:
+            return
 
         resolved_model = model_name or self._config.model
         if not resolved_model:
@@ -398,7 +426,7 @@ class BaseModelClient:
         # 中文注释：这里显式传 model/task_type，避免共享 callback 再偷用 annotation client
         # 的模型名，把 disambiguation / fallback / embedding 的账混写到同一个 model 维度。
         self._token_usage_callback(
-            self._novel_id or "unknown",
+            resolved_novel_id,
             task_type or self._task_type,
             call_type,
             resolved_model,

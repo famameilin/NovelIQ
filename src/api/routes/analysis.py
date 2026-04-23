@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
+from src.api.dependencies import get_novel_service, get_task_manager
 from src.api.exceptions import NovelNotFoundError
 from src.api.models.requests import ReanalyzeRequest
 from src.api.models.responses import (
@@ -19,7 +20,6 @@ from src.api.models.responses import (
     TaskListResponse,
     TaskStatus,
 )
-from src.api.routes.novels import get_novel_service
 from src.api.services.analysis_service import AnalysisService
 from src.api.services.novel_service import NovelService
 from src.api.services.task_manager import TaskManager
@@ -75,13 +75,6 @@ def _get_task_detail_from_db(task_id: str) -> dict[str, Any] | None:
 
 
 router = APIRouter(prefix="/novels", tags=["analysis"])
-
-_task_manager = TaskManager()
-_task_manager.set_db_session_factory(lambda: get_session_factory()())
-
-
-def get_task_manager() -> TaskManager:
-    return _task_manager
 
 
 def _resolve_task_for_novel(
@@ -422,8 +415,7 @@ async def delete_task(
         )
 
     await _cleanup_task_runtime_before_delete(task_id, task_manager)
-    novel_service.delete_task(task_id)
-    task_manager.delete_task(task_id)
+    novel_service.delete_task(task_id, task_manager=task_manager)
     return {"message": "任务删除成功", "novel_id": novel_id, "task_id": task_id}
 
 
@@ -558,8 +550,7 @@ async def batch_delete_tasks(
                 )
 
             await _cleanup_task_runtime_before_delete(task_id, task_manager)
-            novel_service.delete_task(task_id)
-            task_manager.delete_task(task_id)
+            novel_service.delete_task(task_id, task_manager=task_manager)
             deleted_ids.append(task_id)
             logger.info(f"Batch delete: task {task_id} deleted successfully")
         except HTTPException as exc:

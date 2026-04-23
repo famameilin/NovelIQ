@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from loguru import logger
 
-from src.api.dependencies import get_novel_service
+from src.api.dependencies import get_novel_service, get_task_manager
 from src.api.exceptions import NovelNotFoundError
 from src.api.models.responses import (
     BatchDeleteNovelsRequest,
@@ -11,6 +11,7 @@ from src.api.models.responses import (
     UploadResponse,
 )
 from src.api.services.novel_service import NovelService
+from src.api.services.task_manager import TaskManager
 
 router = APIRouter(prefix="/novels", tags=["novels"])
 
@@ -45,8 +46,15 @@ async def list_novels(
 
 
 @router.delete("/{novel_id}")
-async def delete_novel(novel_id: str, service: NovelService = Depends(get_novel_service)):  # noqa: B008
-    service.delete_novel(novel_id)
+async def delete_novel(
+    novel_id: str,
+    service: NovelService = Depends(get_novel_service),  # noqa: B008
+    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
+):
+    try:
+        service.delete_novel(novel_id, task_manager=task_manager)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"message": "删除成功", "novel_id": novel_id}
 
 
@@ -54,6 +62,7 @@ async def delete_novel(novel_id: str, service: NovelService = Depends(get_novel_
 async def batch_delete_novels(
     request: BatchDeleteNovelsRequest,
     service: NovelService = Depends(get_novel_service),
+    task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
 ) -> BatchDeleteNovelsResponse:
     """
     批量删除小说
@@ -70,12 +79,15 @@ async def batch_delete_novels(
 
     for novel_id in request.novel_ids:
         try:
-            service.delete_novel(novel_id)
+            service.delete_novel(novel_id, task_manager=task_manager)
             deleted_ids.append(novel_id)
             logger.info(f"Batch delete: novel {novel_id} deleted successfully")
         except NovelNotFoundError as e:
             failed_ids.append({"novel_id": novel_id, "reason": str(e)})
             logger.warning(f"Batch delete: novel {novel_id} not found")
+        except ValueError as e:
+            failed_ids.append({"novel_id": novel_id, "reason": str(e)})
+            logger.warning(f"Batch delete: novel {novel_id} rejected - {e}")
         except Exception as e:
             failed_ids.append({"novel_id": novel_id, "reason": f"删除失败: {e}"})
             logger.error(f"Batch delete: failed to delete novel {novel_id}: {e}")

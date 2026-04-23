@@ -24,12 +24,21 @@ class TokenUsage(Base):
     创建者: TraeAI
     任务: postgresql-migration
     说明: 存储 API 调用的 token 使用统计
+
+    修改时间: 2026-04-22
+    修改者: Codex
+    任务: fix-analysis-related-foreign-keys
+    修改内容: 为 novel_id 补充到 novels 表的外键约束，避免 token 记账继续写入 unknown 等脏值。
     """
 
     __tablename__ = "token_usage"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    novel_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    novel_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("novels.novel_id", ondelete="RESTRICT", name="token_usage_novel_id_fkey"),
+        nullable=False,
+    )
     chunk_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     call_type: Mapped[str] = mapped_column(String(50), nullable=False)
