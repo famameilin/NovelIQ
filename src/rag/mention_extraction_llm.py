@@ -60,10 +60,15 @@ class LLMPersonMentionExtractor:
         说明: 调用 LLM 产出结构化 mention；调用失败由 service 统一记录并回退规则版。
         """
         messages = _build_messages(request)
+        # 显式传递 timeout 避免无限阻塞；模型配置自带 timeout_s，优先使用。
+        timeout = getattr(self._model_client, "_config", None) and getattr(
+            self._model_client._config, "timeout_s", None
+        )
         response = await self._model_client._call_api(
             messages,
             enable_thinking=self._enable_thinking,
             response_model=LLMPersonMentionResponse,
+            timeout=timeout,
         )
         parsed = (
             response
