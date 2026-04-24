@@ -97,7 +97,14 @@ class AnalysisErrorHandler:
         bus: AnalysisEventBus | None = None,
         log_prefix: str = "Analysis",
     ) -> None:
-        """处理分析失败"""
+        """
+        处理分析失败
+
+        修改时间: 2026-04-24
+        任务: fix-failure-session-rollback-before-status-commit
+        修改内容: 失败收口前先回滚当前 session 中未提交的业务写入，
+                  避免 preprocess/annotate 中途失败后把半成品数据随 run 状态一起提交
+        """
         if analysis_logger:
             analysis_logger.write_summary(
                 {
@@ -113,6 +120,9 @@ class AnalysisErrorHandler:
         logger.error(f"{log_prefix} failed: {task_id} - {error}")
         self.task_manager.complete_task(task_id, success=False, error=str(error))
 
+        # 中文注释：这里必须先清掉失败现场遗留的未提交事务，
+        # 再写 run 状态；否则后续 commit 会把半成品业务数据一并刷进数据库。
+        session.rollback()
         run_repo = RunRepository(session)
         run_repo.update_run_status(run_id, "failed")
         session.commit()
@@ -136,10 +146,18 @@ class AnalysisErrorHandler:
         修改者: Codex (GPT-5)
         任务: fix-task-system-review-findings
         修改内容: 取消收口时同步清除 cancel_requested，并写入 completed_at，避免 DB 终态留下自相矛盾的脏状态。
+
+        修改时间: 2026-04-24
+        任务: fix-cancel-session-rollback-before-status-commit
+        修改内容: 取消收口前先回滚当前 session 中未提交的业务写入，
+                  避免取消阶段把半成品数据与 cancel 状态一起提交
         """
         self.task_manager.cancel_completed_task(task_id, error="用户取消")
         self.novel_service.update_task_status(task_id, "cancelled")
 
+        # 中文注释：取消路径与失败路径一样，共享同一个 session；
+        # 若不先 rollback，commit cancel 状态时仍会把之前残留的脏写入一起提交。
+        session.rollback()
         run_repo = RunRepository(session)
         run_repo.update_run_task_fields(
             run_id,
