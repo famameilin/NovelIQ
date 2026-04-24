@@ -46,6 +46,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from src.chunking.chunker import Chunk
+from src.config import settings
 from src.storage.models import Chunk as ChunkModel
 from src.storage.models import ChunkSummary
 from src.storage.repositories.base import BaseRepository
@@ -56,9 +57,14 @@ from src.storage.repositories.chunk import (
     fetch_chunk_styles,
     fetch_chunk_styles_full,
     fetch_chunk_topics_agg,
+    get_incomplete_paragraph_embedding_chunk_ids,
+    get_missing_embedding_chunk_ids,
+    has_embeddings,
+    has_paragraph_embeddings,
     insert_chunk_style,
     insert_chunk_topics,
 )
+from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
 
 
 class ChunkRepository(BaseRepository["ChunkModel"]):
@@ -279,13 +285,43 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         任务: storage-layer-decoupling
         修改内容: 新增方法替代 operations.completeness.is_preprocess_complete
 
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: fix-preprocess-completion-level3-contract
+        修改内容: 当当前配置要求 Level3 chunk/paragraph embeddings 时，完成判定不再只看 chunks，
+                  而是要求向量 schema、chunk embeddings 与 paragraph embeddings 一并完整就绪，
+                  避免半成品 run 被误判为 preprocess 已完成
+
         Args:
             run_id: 运行ID
 
         Returns:
             预处理是否完成
         """
-        return self.has_chunks(run_id)
+        if not self.has_chunks(run_id):
+            return False
+
+        if not (settings.rag.embedding_enabled and settings.rag.level3_enabled):
+            return True
+
+        expected_dim = settings.models.semantic_chunking.embedding_dim
+        try:
+            validate_chunk_embeddings_schema(self.session, expected_dim)
+            validate_paragraph_embeddings_schema(self.session, expected_dim)
+        except ValueError:
+            # 中文注释：只要当前运行环境要求 Level3，而 schema 尚未就绪，就不能跳过 preprocess；
+            # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness。
+            return False
+
+        if not has_embeddings(self.session, run_id):
+            return False
+        if get_missing_embedding_chunk_ids(self.session, run_id):
+            return False
+        if not has_paragraph_embeddings(self.session, run_id):
+            return False
+        if get_incomplete_paragraph_embedding_chunk_ids(self.session, run_id):
+            return False
+        return True
 
     def fetch_chunk_summaries(self, run_id: str) -> Sequence[Row]:
         """
