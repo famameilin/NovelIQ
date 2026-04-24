@@ -7,7 +7,7 @@ import { useNovelTheme } from "@/hooks/useNovelTheme";
 import { useNovelStore } from "@/store/novelStore";
 import { DEFAULT_SEED, useThemeStore } from "@/store/themeStore";
 import { getDiagnosis } from "@/api/results";
-import { generateThemePalette } from "@/lib/theme";
+import { generateHomeThemePalette, generateThemePalette } from "@/lib/theme";
 
 const getDiagnosisMock = vi.fn();
 
@@ -205,7 +205,7 @@ describe("useNovelTheme", () => {
     });
   });
 
-  it("新任务主题未返回前应先回退到默认主题，而不是复用旧 seed", async () => {
+  it("新任务主题未返回前应保持中性白底，而不是切到默认紫色主题", async () => {
     let resolveDiagnosis!: (value: { theme_color: string }) => void;
     getDiagnosisMock.mockImplementation(
       () =>
@@ -232,10 +232,10 @@ describe("useNovelTheme", () => {
       expect(getDiagnosisMock).toHaveBeenCalledTimes(1);
     });
 
-    const defaultPalette = generateThemePalette(DEFAULT_SEED);
-    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(defaultPalette.light["--primary"]);
+    const neutralPalette = generateHomeThemePalette();
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(neutralPalette.light["--primary"]);
     expect(document.documentElement.style.getPropertyValue("--background")).toBe(
-      defaultPalette.light["--background"],
+      neutralPalette.light["--background"],
     );
 
     resolveDiagnosis({ theme_color: "#123456" });
@@ -246,6 +246,39 @@ describe("useNovelTheme", () => {
         generateThemePalette("#123456").light["--primary"],
       );
     });
+  });
+
+  it("新任务诊断暂不可用时应保持中性白底并清掉旧 seed", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    getDiagnosisMock.mockRejectedValue(new Error("diagnosis not ready"));
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-running",
+      novelsCache: [],
+    });
+    useThemeStore.setState({
+      seedColor: "#E84393",
+      isDark: false,
+      autoSyncEnabled: true,
+    });
+
+    const queryClient = createQueryClient();
+
+    renderThemeHarness(queryClient, "/novels/novel-1?task_id=task-running");
+
+    const neutralPalette = generateHomeThemePalette();
+    await waitFor(() => {
+      expect(useThemeStore.getState().seedColor).toBe(DEFAULT_SEED);
+      expect(document.documentElement.style.getPropertyValue("--background")).toBe(
+        neutralPalette.light["--background"],
+      );
+      expect(document.documentElement.style.getPropertyValue("--surface")).toBe(
+        neutralPalette.light["--surface"],
+      );
+    });
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it("组件展示页首屏不应发起任务主题同步或覆盖手动试色", async () => {

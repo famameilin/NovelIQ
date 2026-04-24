@@ -50,7 +50,7 @@
       "api_key": null,
       "timeout_s": null,
       "embedding_dim": 1024,
-      "batch_size": 8
+      "batch_size": 4
     },
     "full_disambig": {
       "base_url": null,
@@ -98,12 +98,12 @@
     }
   },
   "thinking": {
-    "annotation": false,
-    "annotation_fallback": false,
+    "annotation": true,
+    "annotation_fallback": true,
     "incremental_disambig": true,
-    "mention_extraction": false,
+    "mention_extraction": true,
     "full_disambig": true,
-    "level3_rerank": false,
+    "level3_rerank": true,
     "diagnosis": true,
     "phase3_candidates_per_batch": 5
   },

@@ -49,6 +49,11 @@
 1. 将 transport、stream emitter、structured parser、token usage reporter 拆到独立模块
 2. BaseModelClient 保留兼容方法名，内部改为委托 helper，降低基础类复杂度
 
+修改时间: 2026-04-24
+修改者: Codex
+任务: omit-thinking-fields-when-disabled
+修改内容: 当 think 关闭时不再下发任何 think / reasoning_effort 相关字段，统一关闭态请求契约。
+
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
@@ -472,10 +477,15 @@ class BaseModelClient:
         修改时间: 2026-03-29
         修改者: TraeAI
         修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
+
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: omit-thinking-fields-when-disabled
+        修改内容: 关闭 thinking 时返回空参数占位，避免调用方继续把 false 契约下发到 provider。
         """
         if enable_thinking:
             return "medium", {"think": True}
-        return "none", {"think": False}
+        return "", {}
 
     async def _call_api(
         self,
@@ -624,6 +634,12 @@ class BaseModelClient:
         任务: deepseek-json-object-compat
         修改内容: 云端未开启 thinking 时不再发送 reasoning_effort=none，兼容只接受
                   low/medium/high/max/xhigh 的 OpenAI-compatible 服务商。
+
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: omit-thinking-fields-when-disabled
+        修改内容: 本地/云端统一在 think 关闭时不发送任何 thinking 相关字段，
+                  避免服务端把显式 false 当成不兼容扩展参数。
         """
         if not self._config.model:
             raise ValueError("model is required")
@@ -635,14 +651,10 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        is_cloud = self.is_cloud_api()
-        # 中文注释：云端 provider 的 thinking 参数兼容性不一致；未请求 thinking 时保持请求体最小化。
+        # 中文注释：关闭 thinking 时统一保持请求体最小化，避免不同 provider 对显式 false 的兼容差异。
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}
-        elif not is_cloud:
-            request_params["reasoning_effort"] = "none"
-            request_params["extra_body"] = {"think": False}
         return request_params
 
     def _extract_response_content(self, message) -> tuple[str, str | None]:
