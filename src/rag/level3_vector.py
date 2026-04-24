@@ -90,6 +90,7 @@ class Level3VectorEvidence:
 
         from src.storage.repositories.chunk import (
             get_incomplete_paragraph_embedding_chunk_ids,
+            get_missing_embedding_chunk_ids,
             has_embeddings,
             has_paragraph_embeddings,
         )
@@ -98,6 +99,13 @@ class Level3VectorEvidence:
         validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
         if not has_embeddings(self._session, self._run_id):
             raise Level3NotReadyError(f"Level 3 embeddings not found for run_id={self._run_id}")
+        missing_chunk_embedding_ids = get_missing_embedding_chunk_ids(self._session, self._run_id)
+        if missing_chunk_embedding_ids:
+            preview_ids = missing_chunk_embedding_ids[:10]
+            raise Level3NotReadyError(
+                "Level 3 chunk embeddings incomplete for "
+                f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(missing_chunk_embedding_ids)}"
+            )
 
         validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
         if not has_paragraph_embeddings(self._session, self._run_id):
@@ -130,26 +138,34 @@ class Level3VectorEvidence:
 
         from src.storage.repositories.chunk import (
             get_incomplete_paragraph_embedding_chunk_ids,
+            get_missing_embedding_chunk_ids,
             has_embeddings,
             has_paragraph_embeddings,
         )
 
         chunk_ready = has_embeddings(self._session, self._run_id)
+        missing_chunk_embedding_ids = (
+            get_missing_embedding_chunk_ids(self._session, self._run_id) if chunk_ready else []
+        )
         paragraph_ready = has_paragraph_embeddings(self._session, self._run_id)
         incomplete_chunk_ids = (
             get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
-            if chunk_ready and paragraph_ready
+            if chunk_ready and not missing_chunk_embedding_ids and paragraph_ready
             else []
         )
-        self._available = chunk_ready and paragraph_ready and not incomplete_chunk_ids
+        self._available = (
+            chunk_ready and not missing_chunk_embedding_ids and paragraph_ready and not incomplete_chunk_ids
+        )
         if self._available:
             self._paragraph_rerank_available = True
             logger.debug("Level3VectorEvidence: available, chunk and paragraph embeddings found in database")
         else:
             self._paragraph_rerank_available = False
             logger.debug(
-                "Level3VectorEvidence unavailable: chunk_ready={} paragraph_ready={} incomplete_chunks={}",
+                "Level3VectorEvidence unavailable: chunk_ready={} missing_chunk_embeddings={} "
+                "paragraph_ready={} incomplete_paragraph_chunks={}",
                 chunk_ready,
+                missing_chunk_embedding_ids[:10],
                 paragraph_ready,
                 incomplete_chunk_ids[:10],
             )

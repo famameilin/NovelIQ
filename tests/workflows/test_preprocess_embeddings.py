@@ -75,6 +75,40 @@ async def test_generate_chunk_embeddings_fails_fast_on_dimension_mismatch() -> N
 
 
 @pytest.mark.asyncio
+async def test_generate_chunk_embeddings_fails_fast_on_missing_chunk_embedding() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-level3-embedding-partial-write
+    说明: chunk embedding 缺失会破坏 Level3 粗召回边界，preprocess 不应继续落库部分结果。
+    """
+    mock_client = MagicMock()
+    mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
+    mock_client.get_embedding = AsyncMock(side_effect=[[0.1, 0.2], []])
+    mock_client.embed_texts = AsyncMock()
+
+    with (
+        patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
+        patch("src.workflows.preprocess.ensure_chunk_embeddings_schema"),
+        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema"),
+        patch("src.storage.repositories.chunk.insert_chunk_embeddings") as mock_insert_embeddings,
+        patch("src.storage.repositories.chunk.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
+    ):
+        with pytest.raises(RuntimeError, match="chunk embeddings incomplete"):
+            await _generate_chunk_embeddings(
+                session=MagicMock(),
+                run_id="run-1",
+                all_chunks=[
+                    Chunk(index=1, text="第一段文本", start=0, end=4),
+                    Chunk(index=2, text="第二段文本", start=5, end=9),
+                ],
+            )
+
+    mock_insert_embeddings.assert_not_called()
+    mock_insert_paragraph_embeddings.assert_not_called()
+    mock_client.embed_texts.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_generate_chunk_embeddings_commits_before_emitting_progress() -> None:
     chunks = [
         Chunk(index=1, text="第一段文本", start=0, end=4),

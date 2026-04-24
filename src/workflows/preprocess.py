@@ -215,6 +215,11 @@ async def _generate_chunk_embeddings(
     任务: level3-paragraph-rerank
     修改内容: 同步生成 paragraph_embeddings，供 Level3 在 chunk 粗召回结果内做局部 evidence rerank
 
+    修改时间: 2026-04-24
+    任务: fix-level3-embedding-partial-write
+    修改内容: chunk embedding 也改为 fail fast；任何 chunk 缺失向量都直接中断 preprocess，
+              避免留下粗召回范围不完整、却仍被 readiness 误判为可用的 run
+
     Args:
         session: 数据库连接
         run_id: 运行ID
@@ -258,6 +263,7 @@ async def _generate_chunk_embeddings(
         )
 
     embeddings: list[tuple[int, list[float]]] = []
+    failed_chunk_ids: list[int] = []
     for idx, chunk in enumerate(all_chunks):
         chunk_id = chunk.index
         if total_chunks > 1 and idx % 10 == 0:
@@ -275,11 +281,22 @@ async def _generate_chunk_embeddings(
 
         try:
             embedding = await embedding_client.get_embedding(chunk.text, chunk_id=chunk_id)
-            if embedding:
-                embeddings.append((chunk_id, embedding))
+            if not embedding:
+                logger.error("empty chunk embedding detected: run_id={} chunk_id={}", run_id, chunk_id)
+                failed_chunk_ids.append(chunk_id)
+                continue
+            embeddings.append((chunk_id, embedding))
         except Exception as e:
-            logger.warning(f"Failed to generate embedding for chunk {chunk_id}: {e}")
+            logger.error("failed to generate chunk embedding: run_id={} chunk_id={} error={}", run_id, chunk_id, e)
+            failed_chunk_ids.append(chunk_id)
             continue
+
+    if failed_chunk_ids:
+        preview_ids = ", ".join(str(chunk_id) for chunk_id in failed_chunk_ids[:10])
+        raise RuntimeError(
+            "chunk embeddings incomplete during preprocess: "
+            f"run_id={run_id}, missing={preview_ids}, total={len(failed_chunk_ids)}"
+        )
 
     if embeddings:
         insert_chunk_embeddings(session, run_id, embeddings)

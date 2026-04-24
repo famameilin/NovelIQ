@@ -95,12 +95,14 @@ class TestLevel3VectorEvidence(unittest.TestCase):
         self.assertFalse(level3.is_available())
 
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[3])
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True)
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     def test_is_available_false_when_paragraph_embeddings_incomplete(
         self,
         mock_has: MagicMock,
         mock_has_paragraph: MagicMock,
+        mock_missing: MagicMock,
         mock_incomplete: MagicMock,
     ) -> None:
         """
@@ -118,13 +120,39 @@ class TestLevel3VectorEvidence(unittest.TestCase):
         )
         self.assertFalse(level3.is_available())
 
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[5])
+    @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True)
+    @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
+    def test_is_available_false_when_chunk_embeddings_incomplete(
+        self,
+        mock_has: MagicMock,
+        mock_has_paragraph: MagicMock,
+        mock_missing: MagicMock,
+    ) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-level3-embedding-partial-write
+        说明: chunk embedding 是粗召回边界，任一 chunk 缺失时 Level3 不应报告可用。
+        """
+        mock_client = MagicMock()
+        mock_session = MagicMock()
+
+        level3 = Level3VectorEvidence(
+            session=mock_session,
+            run_id="test-run-id",
+            embedding_client=mock_client,
+        )
+        self.assertFalse(level3.is_available())
+
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[])
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True)
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     def test_is_available_success(
         self,
         mock_has: MagicMock,
         mock_has_paragraph: MagicMock,
+        mock_missing: MagicMock,
         mock_incomplete: MagicMock,
     ) -> None:
         """所有条件满足时可用"""
@@ -156,6 +184,7 @@ class TestLevel3VectorEvidenceAsync:
 
         with (
             patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
             patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
             patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
             patch("src.storage.repositories.chunk.search_similar_paragraphs_within_chunks", return_value=[]),
@@ -217,6 +246,7 @@ class TestLevel3VectorEvidenceAsync:
 
         with (
             patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
             patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
             patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
             patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
@@ -261,6 +291,7 @@ class TestLevel3VectorEvidenceAsync:
 
         with (
             patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
             patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
             patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
             patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
@@ -287,6 +318,7 @@ class TestLevel3VectorEvidenceAsync:
 
         with (
             patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
             patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
             patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
             patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
@@ -335,11 +367,41 @@ class TestLevel3VectorEvidenceAsync:
             await level3.ensure_level3_ready()
 
     @pytest.mark.asyncio
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[3, 8])
+    @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
+    async def test_ensure_level3_ready_fails_when_chunk_embeddings_incomplete(
+        self,
+        mock_has: MagicMock,
+        mock_missing: MagicMock,
+    ) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-level3-embedding-partial-write
+        说明: chunk embedding 缺失会直接缩小粗召回范围，readiness 必须显式失败。
+        """
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_session = MagicMock()
+        level3 = Level3VectorEvidence(
+            session=mock_session,
+            run_id="test-run-id",
+            embedding_client=mock_client,
+        )
+
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            pytest.raises(Level3NotReadyError, match="chunk embeddings incomplete"),
+        ):
+            await level3.ensure_level3_ready()
+
+    @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=False)
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     async def test_ensure_level3_ready_fails_when_paragraph_embeddings_missing(
         self,
         mock_has: MagicMock,
+        mock_missing: MagicMock,
         mock_has_paragraph: MagicMock,
     ) -> None:
         """
@@ -365,12 +427,14 @@ class TestLevel3VectorEvidenceAsync:
 
     @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[2, 4])
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True)
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     async def test_ensure_level3_ready_fails_when_paragraph_embeddings_incomplete(
         self,
         mock_has: MagicMock,
         mock_has_paragraph: MagicMock,
+        mock_missing: MagicMock,
         mock_incomplete: MagicMock,
     ) -> None:
         """
@@ -418,12 +482,14 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         self.assertFalse(provider.is_level3_available())
 
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[])
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True)
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     def test_level3_enabled_and_available(
         self,
         mock_has: MagicMock,
         mock_has_paragraph: MagicMock,
+        mock_missing: MagicMock,
         mock_incomplete: MagicMock,
     ) -> None:
         """Level 3 启用且可用"""
@@ -439,12 +505,14 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         self.assertTrue(provider.is_level3_available())
 
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[])
+    @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True)
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     def test_set_embedding_client(
         self,
         mock_has: MagicMock,
         mock_has_paragraph: MagicMock,
+        mock_missing: MagicMock,
         mock_incomplete: MagicMock,
     ) -> None:
         """动态设置 EmbeddingClient"""
