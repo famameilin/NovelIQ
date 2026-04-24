@@ -3,7 +3,7 @@
 
 创建时间: 2026-04-24
 任务: structured-output-adapter-instructor-unification
-说明: 统一 json_schema / json_object / Instructor JSON 的调用、解析与响应元信息提取。
+说明: 统一 json_schema / json_object 的调用、解析与响应元信息提取。
 """
 
 from __future__ import annotations
@@ -13,9 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from src.models.structured_output.instructor_adapter import call_with_instructor_json
 from src.models.structured_output.modes import (
-    INSTRUCTOR_JSON_MODE,
     JSON_OBJECT_MODE,
     JSON_SCHEMA_MODE,
     StructuredOutputMode,
@@ -103,8 +101,6 @@ def build_response_format[T: BaseModel](
         return client._build_json_schema(response_model)
     if mode == JSON_OBJECT_MODE:
         return {"type": "json_object"}
-    if mode == INSTRUCTOR_JSON_MODE:
-        return None
     raise ValueError(f"unsupported structured output mode: {mode}")
 
 
@@ -120,11 +116,9 @@ async def call_structured_output[T: BaseModel](
     新建原因: 统一项目内 structured output transport 选择、Pydantic 校验与 raw response 元信息提取。
     """
     mode = resolve_structured_output_mode(client, request.call_type)
-    if mode in {JSON_OBJECT_MODE, INSTRUCTOR_JSON_MODE}:
+    if mode == JSON_OBJECT_MODE:
         _validate_json_output_prompt_contract(request.messages)
 
-    if mode == INSTRUCTOR_JSON_MODE:
-        return await _call_instructor_json(client, request, mode)
     return await _call_openai_compatible(client, request, mode)
 
 
@@ -163,56 +157,6 @@ async def _call_openai_compatible[T: BaseModel](
                 timeout=request.timeout,
             )
         return _parse_openai_compatible_response(client, request.response_model, raw_response, mode)
-    except StructuredOutputError:
-        raise
-    except Exception as exc:
-        if raw_response is None:
-            raise
-        response_text, thinking_content, reasoning_tokens = _extract_response_metadata(client, raw_response)
-        raise StructuredOutputError(
-            str(exc),
-            raw_response=raw_response,
-            response_text=response_text,
-            thinking_content=thinking_content,
-            reasoning_tokens=reasoning_tokens,
-        ) from exc
-
-
-async def _call_instructor_json[T: BaseModel](
-    client: Any,
-    request: StructuredOutputRequest[T],
-    mode: StructuredOutputMode,
-) -> StructuredOutputResult[T]:
-    """
-    通过 Instructor JSON mode 执行结构化调用。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 将 Instructor 限定为适配层内部能力，并通过 raw completion 保留审计数据。
-    """
-    if request.stream:
-        raise StructuredOutputError("instructor_json mode does not support streaming in this adapter")
-
-    raw_response: Any | None = None
-    try:
-        request_params = client._build_request_params(request.messages, enable_thinking=request.enable_thinking)
-        if request.timeout is not None:
-            request_params["timeout"] = request.timeout
-        parsed, raw_response = await call_with_instructor_json(
-            client,
-            request_params=request_params,
-            response_model=request.response_model,
-        )
-        response_text, thinking_content, reasoning_tokens = _extract_response_metadata(client, raw_response)
-        response_text = response_text or _dump_parsed_result(parsed)
-        return StructuredOutputResult(
-            parsed=parsed,
-            raw_response=raw_response,
-            response_text=response_text,
-            thinking_content=thinking_content,
-            reasoning_tokens=reasoning_tokens,
-            mode=mode,
-        )
     except StructuredOutputError:
         raise
     except Exception as exc:
@@ -321,9 +265,9 @@ def _validate_json_output_prompt_contract(messages: list[dict[str, Any]]) -> Non
 
     创建时间: 2026-04-24
     任务: structured-output-adapter-instructor-unification
-    新建原因: json_object / Instructor JSON 模式要求 prompt 显式包含 json 字样；
+    新建原因: json_object 模式要求 prompt 显式包含 json 字样；
               否则部分 provider 会直接拒绝或返回不可解析文本。
     """
     joined = "\n".join(str(message.get("content", "")) for message in messages)
     if "json" not in joined.lower():
-        raise StructuredOutputError("json_object/instructor_json mode requires prompt content to mention json")
+        raise StructuredOutputError("json_object mode requires prompt content to mention json")

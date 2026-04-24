@@ -3,7 +3,7 @@
 
 创建时间: 2026-04-24
 任务: structured-output-adapter-instructor-unification
-说明: 对业务模块暴露稳定 DTO 与 call_structured_output，隐藏 provider 与 Instructor 差异。
+说明: 对业务模块暴露稳定 DTO 与 call_structured_output，隐藏 provider 结构化输出差异。
 """
 
 from .adapter import (
