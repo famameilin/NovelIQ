@@ -336,13 +336,7 @@ async def build_prompt_context_with_shared_evidence(
     mention_queries = build_mention_evidence_queries(extract_person_mentions(query_text or ""))
     if evidence_provider.requires_level3():
         if not evidence_provider.is_level3_available():
-            logger.warning(
-                "shared evidence prompt_context fallback to Level1/2 only because Level3 is required but unavailable"
-            )
-            evidence_bundle = evidence_provider.collect_evidence(
-                names_in_chunk=names_in_chunk,
-                current_chunk=current_chunk,
-            )
+            raise RuntimeError("Level 3 vector retrieval is required but not available")
         else:
             evidence_bundle = await evidence_provider.collect_evidence_with_level3(
                 names_in_chunk=names_in_chunk,
