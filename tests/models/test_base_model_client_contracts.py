@@ -145,18 +145,18 @@ def test_build_request_params_omits_reasoning_none_for_cloud_when_thinking_disab
     assert "extra_body" not in params
 
 
-def test_build_request_params_keeps_local_thinking_false_contract() -> None:
+def test_build_request_params_omits_thinking_fields_when_disabled_for_local() -> None:
     """
     创建时间: 2026-04-24
-    任务: deepseek-json-object-compat
-    说明: 本地 Ollama-compatible 服务仍需要显式 think=false，避免本地行为被云端兼容改动影响。
+    任务: omit-thinking-fields-when-disabled
+    说明: 本地 provider 在关闭 think 时也应保持请求体最小化，避免显式 false 扩展字段触发兼容问题。
     """
     client = _make_client()
 
     params = client._build_request_params([{"role": "user", "content": "json"}], enable_thinking=False)
 
-    assert params["reasoning_effort"] == "none"
-    assert params["extra_body"] == {"think": False}
+    assert "reasoning_effort" not in params
+    assert "extra_body" not in params
 
 
 @pytest.mark.asyncio

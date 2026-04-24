@@ -14,6 +14,7 @@ AnnotationClient 模块
 - 2026-04-07: 添加 stream_callback 参数支持（websocket-streaming-progress）
 - 2026-04-09: 重构为 async def（适配 BaseModelClient._call_api_stream 异步化）
 - 2026-04-24: 移除废弃 Instructor 构造参数，结构化输出统一走项目级适配层
+- 2026-04-24: think 关闭时不再下发 `reasoning_effort=none` / `think=false`，与统一请求契约对齐
 
 说明:
 - 此类继承自 BaseModelClient，同时支持本地和云端
@@ -178,6 +179,11 @@ class AnnotationClient(BaseModelClient):
         修改时间: 2026-04-24
         任务: fix-structured-output-review-findings
         修改内容: 解析失败补记 token 前先确认 raw_response 存在，避免本地前置校验失败被误记账。
+
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: omit-thinking-fields-when-disabled
+        修改内容: Phase1 非结构化流式路径在 think 关闭时同样保持请求体最小化，不再单独透传 false。
         """
         if not self._config.model:
             raise ValueError("model is required")
@@ -226,9 +232,6 @@ class AnnotationClient(BaseModelClient):
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}
-        else:
-            request_params["reasoning_effort"] = "none"
-            request_params["extra_body"] = {"think": False}
 
         response = await self._call_api_stream(request_params, is_cloud=is_cloud, emitter=active_emitter)
         return response

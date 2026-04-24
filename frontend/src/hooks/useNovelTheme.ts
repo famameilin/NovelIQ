@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { useThemeStore, DEFAULT_SEED } from "@/store/themeStore";
@@ -14,6 +14,11 @@ const STALE_TIME = 5 * 60 * 1000;
  * 任务: 修复主题色路由切换闪动与组件展示页串色
  * 修改原因: 首页白底预备态不应污染业务页 seedColor，组件展示页也不应在首屏先吃到任务主题。
  *
+ * 修改时间: 2026-04-24
+ * 任务: 修复开始分析后页面主题切到紫色
+ * 修改原因: 新建任务的诊断结果尚未生成时，不能用 DEFAULT_SEED 推导业务页背景色，
+ * 否则分析进度页会先切到紫色底；只在拿到有效 theme_color 后才进入任务主题。
+ *
  * Applies the dynamic theme palette to :root CSS variables.
  * Auto-fetches theme_color from diagnosis API when novel/task changes.
  */
@@ -21,7 +26,6 @@ export function useNovelTheme() {
   const { seedColor, isDark, setSeedColor } = useThemeStore();
   const { currentNovelId, currentTaskId } = useNovelStore();
   const location = useLocation();
-  const resolvedTaskThemeKeyRef = useRef<string | null>(null);
   const pathname = location.pathname;
   const urlTaskId = new URLSearchParams(location.search).get("task_id");
   const isThemePreviewRoute = pathname === "/dev/components";
@@ -38,14 +42,13 @@ export function useNovelTheme() {
   });
   const themeColor = diagnosisQuery.data?.theme_color;
   const hasValidThemeColor = !!themeColor && HEX_COLOR_RE.test(themeColor);
-  const effectiveSeedColor =
-    hasValidThemeColor
-      ? themeColor
-      : currentTaskThemeKey &&
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- 渲染时读取 ref 判断主题是否可复用，属有意为之的性能优化
-        resolvedTaskThemeKeyRef.current === currentTaskThemeKey
-        ? seedColor
-        : DEFAULT_SEED;
+  const shouldUsePendingTaskTheme =
+    !!currentTaskThemeKey &&
+    !shouldUseNeutralTheme &&
+    !isThemePreviewRoute &&
+    !hasValidThemeColor;
+  const effectiveSeedColor = hasValidThemeColor ? themeColor : DEFAULT_SEED;
+  const shouldUseNeutralPalette = shouldUseNeutralTheme || shouldUsePendingTaskTheme;
 
   // 中文注释：主题色直接复用 diagnosis 的 React Query 缓存，
   // 避免页面和全局 hook 分别请求，造成重复取数与重复设色。
@@ -63,7 +66,6 @@ export function useNovelTheme() {
     }
 
     if (!currentTaskThemeKey) {
-      resolvedTaskThemeKeyRef.current = null;
       if (seedColor !== DEFAULT_SEED) {
         setSeedColor(DEFAULT_SEED);
       }
@@ -71,26 +73,20 @@ export function useNovelTheme() {
     }
 
     if (hasValidThemeColor) {
-      resolvedTaskThemeKeyRef.current = currentTaskThemeKey;
       if (themeColor !== seedColor) {
         setSeedColor(themeColor);
       }
       return;
     }
 
-    // 中文注释：当新 task 的 diagnosis 还没回来时，palette effect 会先回退到 DEFAULT_SEED，
-    // 这里只在请求落定后再把 store 标记为“已解析”，避免旧 task / neutral seed 串到新任务页。
+    // 中文注释：当新 task 的 diagnosis 还没回来或暂时报错时，页面保持 neutral palette；
+    // 这里只清掉旧 seed，不把 task 标记为已解析，避免 DEFAULT_SEED 推出紫色业务页背景。
     if (diagnosisQuery.isFetched && seedColor !== DEFAULT_SEED) {
       if (diagnosisQuery.isError) {
         console.warn("Failed to fetch theme color:", diagnosisQuery.error);
       }
-      resolvedTaskThemeKeyRef.current = currentTaskThemeKey;
       setSeedColor(DEFAULT_SEED);
       return;
-    }
-
-    if (diagnosisQuery.isFetched) {
-      resolvedTaskThemeKeyRef.current = currentTaskThemeKey;
     }
   }, [
     currentTaskThemeKey,
@@ -107,7 +103,7 @@ export function useNovelTheme() {
 
   // Apply theme to CSS variables
   useEffect(() => {
-    const palette = shouldUseNeutralTheme
+    const palette = shouldUseNeutralPalette
       ? generateHomeThemePalette()
       : generateThemePalette(isThemePreviewRoute ? seedColor : effectiveSeedColor);
     const vars = isDark ? palette.dark : palette.light;
@@ -118,5 +114,5 @@ export function useNovelTheme() {
     });
 
     root.classList.toggle("dark", isDark);
-  }, [effectiveSeedColor, isDark, isThemePreviewRoute, seedColor, shouldUseNeutralTheme]);
+  }, [effectiveSeedColor, isDark, isThemePreviewRoute, seedColor, shouldUseNeutralPalette]);
 }

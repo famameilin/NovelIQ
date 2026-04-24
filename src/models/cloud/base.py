@@ -29,6 +29,11 @@
 修改时间: 2026-03-29
 修改者: TraeAI
 修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
+
+修改时间: 2026-04-24
+修改者: Codex
+任务: omit-thinking-fields-when-disabled
+修改内容: think 关闭时不再向云端旧基类透传任何 thinking 相关字段，避免残留旧契约。
 """
 
 from __future__ import annotations
@@ -136,6 +141,11 @@ class BaseCloudModelClient(BaseModelClient):
         修改时间: 2026-03-29
         修改者: TraeAI
         修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
+
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: omit-thinking-fields-when-disabled
+        修改内容: 与主 BaseModelClient 对齐，关闭时不再发送 reasoning_effort=none / think=false。
         """
         request_params: dict[str, Any] = {
             "model": self._config.model,
@@ -146,9 +156,6 @@ class BaseCloudModelClient(BaseModelClient):
         if thinking_enabled:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}
-        else:
-            request_params["reasoning_effort"] = "none"
-            request_params["extra_body"] = {"think": False}
 
         return request_params
 
