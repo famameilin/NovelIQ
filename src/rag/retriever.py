@@ -46,11 +46,14 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from src.api.models.events import StreamEvent
 from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.rag.authority import Level1AuthorityProvider
@@ -107,6 +110,7 @@ class DisambigContextProvider:
         level3_top_k: int = 5,
         mention_extractor: PersonMentionExtractor | None = None,
         level3_reranker: Level3ModelReranker | None = None,
+        progress_emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
     ) -> None:
         self._alias_lookup = AliasLookup(
             graph_repo=graph_repo,
@@ -138,6 +142,27 @@ class DisambigContextProvider:
         self._bundle_builder = EvidenceBundleBuilder()
         self._mention_extraction_service = MentionExtractionService(mention_extractor)
         self._level3_reranker = level3_reranker
+        self._progress_emitter = progress_emitter
+
+    async def _emit_level3_progress(self, current_chunk: int | None, message: str, sub_percent: float) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: level3-progress-sse
+        说明: 复用现有 stage_progress 事件向前端暴露 Level3/mention 长耗时节点；
+              这里只更新 message/sub_stage，不改全局 percent，避免进度条在 chunk 间跳动。
+        """
+        if self._progress_emitter is None:
+            return
+        await self._progress_emitter(
+            StreamEvent(
+                action="progress",
+                stage="annotate",
+                sub_stage="level3",
+                chunk_id=current_chunk,
+                sub_percent=sub_percent,
+                message=message,
+            )
+        )
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
         """设置 Embedding 客户端"""
@@ -225,10 +250,24 @@ class DisambigContextProvider:
         修改时间: 2026-04-24
         任务: llm-mention-rerank-chain
         修改说明: provider 内部统一执行 mention extraction 与 query 构造，workflow 不再负责 Level3 上游编排。
+
+        修改时间: 2026-04-24
+        任务: log-level3-evidence-gaps
+        修改说明: 补充 Level3 证据准备入口/出口耗时日志，避免 chunk 间模型取证阶段看起来像空白等待。
         """
         bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
 
         if self._level3_enabled and self.is_level3_available():
+            started_at = time.perf_counter()
+            logger.info(
+                "Level3 evidence collection start: run_id={} chunk_id={} names={} context_len={} max_chunk_id={}",
+                self._run_id,
+                current_chunk,
+                len(names_in_chunk or []),
+                len(context_text or ""),
+                max_chunk_id,
+            )
+            await self._emit_level3_progress(current_chunk, "正在准备 Level3 证据", 5)
             try:
                 await self._level3.ensure_level3_ready()
                 mention_queries = await self._build_queries(
@@ -253,6 +292,21 @@ class DisambigContextProvider:
                 return bundle
             bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
             bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
+            logger.info(
+                "Level3 evidence collection complete: run_id={} chunk_id={} mention_queries={} results={} "
+                "semantic_items={} duration_ms={}",
+                self._run_id,
+                current_chunk,
+                len(mention_queries or []),
+                len(level3_results),
+                len(bundle.semantic_evidence),
+                int((time.perf_counter() - started_at) * 1000),
+            )
+            await self._emit_level3_progress(
+                current_chunk,
+                f"Level3 证据准备完成：召回 {len(level3_results)} 条",
+                100,
+            )
 
         return bundle
 
@@ -280,12 +334,32 @@ class DisambigContextProvider:
         任务: llm-mention-rerank-chain
         修改说明: 编排拆成 retrieve_candidates / rerank_candidates / dedupe_and_trim，
                   模型 rerank 可用时优先接管最终排序。
+
+        修改时间: 2026-04-24
+        任务: log-level3-evidence-gaps
+        修改说明: 补充候选召回、rerank、去重裁剪三个阶段的耗时与数量日志。
         """
+        started_at = time.perf_counter()
         collected = await self._retrieve_candidates(
             context_text=context_text,
             exclude_chunk_ids=exclude_chunk_ids,
             max_chunk_id=max_chunk_id,
             mention_queries=mention_queries,
+        )
+        retrieved_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "Level3 candidate retrieval complete: run_id={} chunk_id={} mention_queries={} candidates={} "
+            "duration_ms={}",
+            self._run_id,
+            current_chunk,
+            len(mention_queries or []),
+            len(collected),
+            retrieved_ms,
+        )
+        await self._emit_level3_progress(
+            current_chunk,
+            f"Level3 检索完成：候选 {len(collected)} 条",
+            60,
         )
         reranked = await self._rerank_candidates(
             collected,
@@ -295,7 +369,23 @@ class DisambigContextProvider:
             candidate_names=candidate_names,
             current_chunk=current_chunk,
         )
-        return self._dedupe_level3_results(reranked)
+        deduped = self._dedupe_level3_results(reranked)
+        logger.info(
+            "Level3 candidate rerank complete: run_id={} chunk_id={} before_rerank={} after_rerank={} "
+            "after_dedupe={} duration_ms={}",
+            self._run_id,
+            current_chunk,
+            len(collected),
+            len(reranked),
+            len(deduped),
+            int((time.perf_counter() - started_at) * 1000),
+        )
+        await self._emit_level3_progress(
+            current_chunk,
+            f"Level3 重排完成：保留 {len(deduped)} 条证据",
+            90,
+        )
+        return deduped
 
     async def _build_queries(
         self,
@@ -309,18 +399,32 @@ class DisambigContextProvider:
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: provider 内统一抽取 mention 并构造 query；调用方显式传入 mention_queries 时保持兼容。
+
+        修改时间: 2026-04-24
+        任务: log-level3-evidence-gaps
+        修改说明: 补充 mention query 构造数量日志，便于定位 chunk 间取证耗时来源。
         """
         if mention_queries is not None or not context_text:
             return mention_queries
 
         from src.rag.mention_query import build_mention_evidence_queries
 
+        started_at = time.perf_counter()
         mentions = await self._extract_mentions(
             context_text=context_text,
             names_in_chunk=names_in_chunk,
             current_chunk=current_chunk,
         )
-        return build_mention_evidence_queries(mentions)
+        built_queries = build_mention_evidence_queries(mentions)
+        logger.info(
+            "Level3 mention queries built: run_id={} chunk_id={} mentions={} queries={} duration_ms={}",
+            self._run_id,
+            current_chunk,
+            len(mentions),
+            len(built_queries),
+            int((time.perf_counter() - started_at) * 1000),
+        )
+        return built_queries
 
     async def _extract_mentions(
         self,
@@ -333,8 +437,21 @@ class DisambigContextProvider:
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: 调用 mention extraction service；LLM 失败时由 service 显式 fallback 到规则版。
+
+        修改时间: 2026-04-24
+        任务: log-level3-evidence-gaps
+        修改说明: 补充 mention extraction 开始/结束耗时日志，直接暴露 chunk 间长等待。
         """
-        return await self._mention_extraction_service.extract_mentions(
+        started_at = time.perf_counter()
+        logger.info(
+            "Level3 mention extraction start: run_id={} chunk_id={} text_len={} names={}",
+            self._run_id,
+            current_chunk,
+            len(context_text),
+            len(names_in_chunk or []),
+        )
+        await self._emit_level3_progress(current_chunk, "正在抽取 Level3 mention", 15)
+        mentions = await self._mention_extraction_service.extract_mentions(
             MentionExtractionRequest(
                 text=context_text,
                 names_in_chunk=tuple(name for name in (names_in_chunk or []) if name),
@@ -343,6 +460,19 @@ class DisambigContextProvider:
                 current_chunk=current_chunk,
             )
         )
+        logger.info(
+            "Level3 mention extraction complete: run_id={} chunk_id={} mentions={} duration_ms={}",
+            self._run_id,
+            current_chunk,
+            len(mentions),
+            int((time.perf_counter() - started_at) * 1000),
+        )
+        await self._emit_level3_progress(
+            current_chunk,
+            f"Level3 mention 抽取完成：{len(mentions)} 个",
+            35,
+        )
+        return mentions
 
     async def _retrieve_candidates(
         self,
@@ -356,17 +486,32 @@ class DisambigContextProvider:
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: 执行 mention query 与 chunk context query 的粗召回，所有历史 cutoff 仍下沉到 Level3 向量层。
+
+        修改时间: 2026-04-24
+        任务: log-level3-evidence-gaps
+        修改说明: 为每个 mention query 和 chunk context query 补充耗时日志，避免多 query 检索阶段不可见。
         """
         collected: list[SimilarChunkRow] = []
         has_mention_queries = bool(mention_queries)
         retrieval_top_k = self._level3_pool_k() if has_mention_queries else None
 
-        for mention_query in mention_queries or []:
+        for index, mention_query in enumerate(mention_queries or [], start=1):
+            query_started_at = time.perf_counter()
             results = await self._search_level3_query(
                 mention_query.query_text,
                 exclude_chunk_ids=exclude_chunk_ids,
                 max_chunk_id=max_chunk_id,
                 top_k=retrieval_top_k,
+            )
+            logger.debug(
+                "Level3 mention query complete: run_id={} query_index={}/{} query_len={} results={} "
+                "duration_ms={}",
+                self._run_id,
+                index,
+                len(mention_queries or []),
+                len(mention_query.query_text),
+                len(results),
+                int((time.perf_counter() - query_started_at) * 1000),
             )
             collected.extend(
                 replace(
@@ -383,14 +528,23 @@ class DisambigContextProvider:
             )
 
         if context_text:
+            query_started_at = time.perf_counter()
+            context_results = await self._search_level3_query(
+                context_text,
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+                top_k=retrieval_top_k,
+            )
+            logger.debug(
+                "Level3 chunk-context query complete: run_id={} query_len={} results={} duration_ms={}",
+                self._run_id,
+                len(context_text),
+                len(context_results),
+                int((time.perf_counter() - query_started_at) * 1000),
+            )
             collected.extend(
                 replace(result, query_variant="chunk_context")
-                for result in await self._search_level3_query(
-                    context_text,
-                    exclude_chunk_ids=exclude_chunk_ids,
-                    max_chunk_id=max_chunk_id,
-                    top_k=retrieval_top_k,
-                )
+                for result in context_results
             )
 
         return collected
@@ -409,6 +563,10 @@ class DisambigContextProvider:
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: paragraph rerank 后优先尝试模型 rerank；不可用时保留 deterministic mention rerank 作为 fallback。
+
+        修改时间: 2026-04-24
+        任务: log-level3-evidence-gaps
+        修改说明: 补充 deterministic rerank 与模型 rerank 的入口/结果日志。
         """
         collected = results
         has_mention_queries = bool(mention_queries)
@@ -421,6 +579,16 @@ class DisambigContextProvider:
             )
 
         model_query_text = self._build_model_rerank_query_text(context_text, mention_queries)
+        logger.info(
+            "Level3 model rerank start: run_id={} chunk_id={} candidates={} query_len={} model_enabled={}",
+            self._run_id,
+            current_chunk,
+            len(collected),
+            len(model_query_text),
+            self._level3_reranker is not None,
+        )
+        if self._level3_reranker is not None and collected:
+            await self._emit_level3_progress(current_chunk, "正在执行 Level3 模型重排", 75)
         model_reranked = await try_model_rerank_level3_results(
             collected,
             query_text=model_query_text,
@@ -429,7 +597,19 @@ class DisambigContextProvider:
             chunk_id=current_chunk,
         )
         if model_reranked is not None:
+            logger.info(
+                "Level3 model rerank applied: run_id={} chunk_id={} candidates={}",
+                self._run_id,
+                current_chunk,
+                len(model_reranked),
+            )
             return model_reranked
+        logger.info(
+            "Level3 model rerank skipped or unavailable: run_id={} chunk_id={} candidates={}",
+            self._run_id,
+            current_chunk,
+            len(collected),
+        )
         return collected
 
     def _build_model_rerank_query_text(
