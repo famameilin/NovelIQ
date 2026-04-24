@@ -80,6 +80,23 @@ def test_build_mention_evidence_queries_keeps_action_or_location_mentions() -> N
     assert "门口 老者" in query_texts
 
 
+def test_extract_person_mentions_keeps_action_cues_local_to_current_mention() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-local-cue-scope
+    说明: 多人物共句时，后一个人物的动作不能误绑到前一个 mention 上，避免生成错误 query 特征。
+    """
+    mentions = extract_person_mentions("门口的老者没有说话，那名女子低声开口。")
+
+    old_man = next(mention for mention in mentions if mention.raw_text == "门口的老者")
+    woman = next(mention for mention in mentions if mention.raw_text == "那名女子")
+
+    assert old_man.mention_type == "location_role"
+    assert old_man.cues["action"] == []
+    assert woman.mention_type == "action_role"
+    assert woman.cues["action"] == ["开口", "低声"]
+
+
 def test_build_semantic_recall_items_records_mention_metadata_only_for_mention_rows() -> None:
     """
     创建时间: 2026-04-23
