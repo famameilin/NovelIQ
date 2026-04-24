@@ -97,6 +97,7 @@ class LLMPersonMentionExtractor:
         """
         messages = _build_messages(request)
         response_model = _select_response_model(self._model_client)
+        raw_response_format = _select_raw_response_format(self._model_client)
         # 显式传递 timeout 避免无限阻塞；模型配置自带 timeout_s，优先使用。
         timeout = getattr(self._model_client, "_config", None) and getattr(
             self._model_client._config, "timeout_s", None
@@ -105,6 +106,7 @@ class LLMPersonMentionExtractor:
             self._model_client,
             messages=messages,
             response_model=response_model,
+            raw_response_format=raw_response_format,
             normalize_response=normalize_mention_response,
             interaction_type="mention_extraction",
             phase="mention_extraction",
@@ -128,6 +130,19 @@ def _select_response_model(model_client: Any) -> type[LLMPersonMentionResponse] 
     return LLMPersonMentionResponse
 
 
+def _select_raw_response_format(model_client: Any) -> dict[str, str] | None:
+    """
+    创建时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    说明: 云端 mention extraction 使用 JSON Output (`json_object`) 而不是 strict json_schema，
+          兼容 DeepSeek 这类当前不开放 response_format=json_schema 的服务商。
+    """
+    is_cloud_api = getattr(model_client, "is_cloud_api", None)
+    if callable(is_cloud_api) and is_cloud_api():
+        return {"type": "json_object"}
+    return None
+
+
 def normalize_mention_response(
     response_data: LLMPersonMentionResponse | LLMPersonMentionCloudResponse,
 ) -> list[PersonMention]:
@@ -146,13 +161,25 @@ def _build_messages(request: MentionExtractionRequest) -> list[dict[str, str]]:
     创建时间: 2026-04-24
     任务: llm-mention-rerank-chain
     说明: 构造最小任务提示，明确 LLM 只负责抽取描述性人物指代，不允许输出身份判断。
+
+    修改时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    修改内容: 增加明确 JSON 输出样例，满足 DeepSeek JSON Output 对 prompt 的要求。
     """
     names_text = "、".join(request.names_in_chunk) if request.names_in_chunk else "无"
     context_text = request.context_text or ""
+    json_example = (
+        '{"mentions":[{"raw_text":"门口那个穿灰布衫的瘦高男人",'
+        '"mention_type":"descriptive_person","sentence_text":"门口那个穿灰布衫的瘦高男人压低声音说话。",'
+        '"role_word":"男人","appearance":["灰布衫","瘦高"],"action":["压低声音说话"],'
+        '"location":["门口"],"confidence":0.9,"span_start":0,"span_end":14,'
+        '"normalized_query_terms":["灰布衫","瘦高","男人","门口"]}]}'
+    )
     user_content = (
-        "请从文本中抽取人物/角色型描述性 mention，输出 JSON。\n"
+        "请从文本中抽取人物/角色型描述性 mention，输出合法 JSON。\n"
         "约束：不抽纯场景，不做身份猜测，不输出宽泛无区分度 mention，不把已出现的实名当 mention。\n"
         "每条 mention 必须来自原文，并尽量给出外貌、动作、位置、角色词等 cues。\n"
+        f"JSON 输出格式样例：{json_example}\n"
         f"当前显式名字列表：{names_text}\n"
         f"相邻/共享上下文：{context_text}\n"
         f"待抽取文本：{request.text}"

@@ -36,6 +36,7 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     *,
     messages: list[dict[str, str]],
     response_model: type[TResponseModel],
+    raw_response_format: dict[str, Any] | None = None,
     normalize_response: Callable[[TResponseModel], TNormalized],
     interaction_type: str,
     phase: str,
@@ -49,6 +50,11 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     创建时间: 2026-04-24
     任务: llm-mention-rerank-audit
     说明: 执行一次结构化模型调用，并统一补齐成功/失败审计和 token 记账。
+
+    修改时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    修改内容: 支持调用方传入 provider 原生 response_format，解决云端只支持 json_object
+              但项目仍需要 Pydantic 校验内部结构的场景。
     """
     start_time = time.time()
     response: Any = None
@@ -63,6 +69,7 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
             messages,
             enable_thinking=enable_thinking,
             response_model=response_model,
+            raw_response_format=raw_response_format,
             timeout=timeout,
         )
         if isinstance(response, response_model):
