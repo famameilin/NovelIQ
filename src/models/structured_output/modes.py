@@ -10,14 +10,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-StructuredOutputMode = Literal["json_schema", "json_object", "instructor_json"]
+StructuredOutputMode = Literal["json_schema", "json_object"]
 
 JSON_SCHEMA_MODE: StructuredOutputMode = "json_schema"
 JSON_OBJECT_MODE: StructuredOutputMode = "json_object"
-INSTRUCTOR_JSON_MODE: StructuredOutputMode = "instructor_json"
 
 STRUCTURED_OUTPUT_MODES: set[str] = {
     JSON_SCHEMA_MODE,
     JSON_OBJECT_MODE,
-    INSTRUCTOR_JSON_MODE,
 }

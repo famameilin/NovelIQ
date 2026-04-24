@@ -124,7 +124,10 @@
     "mention_extraction": "json_object",
     "full_disambig": "json_schema",
     "level3_rerank": "json_schema",
-    "diagnosis": "json_schema"
+    "diagnosis": "json_schema",
+    "provider_overrides": {
+      "deepseek": "json_object"
+    }
   },
   "logging": {
     "console_level": "INFO",

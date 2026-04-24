@@ -3,19 +3,19 @@
 
 创建时间: 2026-04-24
 任务: structured-output-adapter-instructor-unification
-说明: 覆盖 json_schema / json_object / Instructor JSON 三种 mode 以及失败时 raw_response 保留。
+说明: 覆盖 json_schema / json_object 两种 mode、provider 覆盖以及失败时 raw_response 保留。
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import BaseModel
 
 from src.config import TaskModelConfig, settings
+from src.config.schemas.model import _parse_structured_output_settings
 from src.models.local.base import BaseModelClient
 from src.models.structured_output import (
     StructuredOutputError,
@@ -33,6 +33,16 @@ class _AdapterPayload(BaseModel):
 
     name: str
     score: int
+
+
+def test_structured_output_settings_rejects_removed_instructor_mode() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: remove-instructor-structured-output
+    说明: Instructor 已从结构化输出运行时移除，配置层也应拒绝 instructor_json。
+    """
+    with pytest.raises(ValueError, match="json_object"):
+        _parse_structured_output_settings({"mention_extraction": "instructor_json"})
 
 
 def _make_response(content: object) -> SimpleNamespace:
@@ -143,36 +153,21 @@ async def test_structured_output_deepseek_downgrades_json_schema_to_json_object(
 
 
 @pytest.mark.asyncio
-async def test_structured_output_instructor_json_returns_parsed_and_raw(
+async def test_structured_output_provider_override_can_force_json_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     创建时间: 2026-04-24
     任务: structured-output-adapter-instructor-unification
-    说明: Instructor JSON mode 必须返回 parsed 与 raw completion，供上层继续审计。
+    说明: provider_overrides 是集中能力表；当 marker 指定 json_schema 时，应覆盖任务默认 json_object。
     """
-    monkeypatch.setattr(settings.structured_output, "mention_extraction", "instructor_json")
-    fake_create = AsyncMock()
-    client = _make_client(fake_create, task_type="mention_extraction")
-    raw_response = _make_response('{"name":"白芷","score":7}')
-
-    async def _fake_instructor_call(
-        _client: Any,
-        *,
-        request_params: dict[str, Any],
-        response_model: type[_AdapterPayload],
-    ) -> tuple[_AdapterPayload, Any]:
-        """
-        创建时间: 2026-04-24
-        任务: structured-output-adapter-instructor-unification
-        说明: 模拟 Instructor create_with_completion，确认适配层没有丢 raw completion。
-        """
-        assert "response_format" not in request_params
-        return response_model(name="白芷", score=7), raw_response
-
-    monkeypatch.setattr(
-        "src.models.structured_output.adapter.call_with_instructor_json",
-        _fake_instructor_call,
+    monkeypatch.setattr(settings.structured_output, "mention_extraction", "json_object")
+    monkeypatch.setattr(settings.structured_output, "provider_overrides", {"strict-provider": "json_schema"})
+    fake_create = AsyncMock(return_value=_make_response('{"name":"白芷","score":7}'))
+    client = _make_client(
+        fake_create,
+        task_type="mention_extraction",
+        base_url="https://strict-provider.example/v1",
     )
 
     result = await call_structured_output(
@@ -185,9 +180,8 @@ async def test_structured_output_instructor_json_returns_parsed_and_raw(
         ),
     )
 
-    assert result.mode == "instructor_json"
-    assert result.parsed == _AdapterPayload(name="白芷", score=7)
-    assert result.raw_response is raw_response
+    assert result.mode == "json_schema"
+    assert fake_create.await_args.kwargs["response_format"]["type"] == "json_schema"
 
 
 @pytest.mark.asyncio

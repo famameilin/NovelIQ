@@ -98,7 +98,7 @@ def _build_messages(
 
     修改时间: 2026-04-24
     任务: structured-output-adapter-instructor-unification
-    修改内容: 增加 JSON 输出样例，保证该链路切到 json_object / Instructor JSON 时仍满足 prompt 合同。
+    修改内容: 增加 JSON 输出样例，保证该链路切到 json_object 时仍满足 prompt 合同。
     """
     candidate_payload = [
         {
