@@ -13,16 +13,21 @@
 
 请输出 JSON 格式：
 {
-  "canonical_decisions": {
-    "匿名_C1_0": "真实名",
-    ...
-  }
+  "canonical_decisions": [
+    {"name": "匿名_C1_0", "canonical": "真实名"}
+  ],
+  "alias_confidence": [
+    {"name": "匿名_C1_0", "confidence": "low|medium|high"}
+  ],
+  "entity_types": [],
+  "entity_relations": [],
+  "evidence_sources": []
 }
 
 【重要规则】
-1. 【最关键】映射方向：Key 必须是匿名占位名，Value 必须是真实名
+1. 【最关键】映射方向：name 必须是匿名占位名，canonical 必须是真实名
 2. 真实名必须是【已知常用名】列表中的名字之一，不能使用列表之外的名字
-3. 如果无法确定真实身份，映射到自身（保持匿名），例如 {"匿名_C1_0": "匿名_C1_0"}
+3. 如果无法确定真实身份，映射到自身（保持匿名），例如 {"name": "匿名_C1_0", "canonical": "匿名_C1_0"}
 4. 如果上下文中没有明确称呼，不要猜测
 
 【示例】
@@ -36,8 +41,16 @@
 
 输出：
 {
-  "canonical_decisions": {
-    "匿名_C1_0": "伯安"
-  }
+  "canonical_decisions": [
+    {"name": "匿名_C1_0", "canonical": "伯安"}
+  ],
+  "alias_confidence": [
+    {"name": "匿名_C1_0", "confidence": "high"}
+  ],
+  "entity_types": [],
+  "entity_relations": [],
+  "evidence_sources": [
+    {"name": "匿名_C1_0", "sources": ["原文例句"]}
+  ]
 }
 解释：上下文中"打得伯安龇牙咧嘴"明确指出被打的人是伯安，所以匿名_C1_0 是伯安。

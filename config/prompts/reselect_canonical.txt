@@ -4,21 +4,20 @@
 
 请输出 JSON 格式：
 {
-  "canonical_decisions": {
-    "名字": "该组最终代表名",
-    ...
-  },
-  "alias_confidence": {
-    "名字": "low|medium|high",
-    ...
-  },
-  "entity_types": {},
-  "entity_relations": []
+  "canonical_decisions": [
+    {"name": "名字", "canonical": "该组最终代表名"}
+  ],
+  "alias_confidence": [
+    {"name": "名字", "confidence": "low|medium|high"}
+  ],
+  "entity_types": [],
+  "entity_relations": [],
+  "evidence_sources": []
 }
 
 【硬性规则】
 1. 每组名字已经确认是同一人，禁止拆组，禁止跨组合并
-2. canonical_decisions 的 value 必须来自该名字所在组的成员
+2. canonical_decisions 的 canonical 必须来自该名字所在组的成员
 3. 同一组内所有名字最终必须指向同一个代表名
 4. 如果你选择某个名字作为代表名，那么它自己也要映射到自身
 5. 不要根据“出现次数更多”直接决定代表名；次数只能作为极弱参考
