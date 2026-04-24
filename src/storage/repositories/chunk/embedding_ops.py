@@ -44,6 +44,10 @@ class SimilarChunkRow:
     修改时间: 2026-04-24
     任务: level3-mention-rerank
     修改说明: 增补确定性 mention rerank 的可解释字段，保留原始语义分并记录加权原因。
+
+    修改时间: 2026-04-24
+    任务: split-level3-score-fields
+    修改说明: 显式拆分 chunk/paragraph/business/final 四类分数，避免 `similarity` 在多阶段 rerank 中持续变义。
     """
 
     chunk_id: int
@@ -56,12 +60,12 @@ class SimilarChunkRow:
     matched_features: tuple[str, ...] = ()
     local_preview: str | None = None
     paragraph_index: int | None = None
-    paragraph_similarity: float | None = None
     paragraph_start_char: int | None = None
     paragraph_end_char: int | None = None
-    chunk_similarity: float | None = None
-    semantic_score: float | None = None
-    rerank_score: float | None = None
+    chunk_semantic_score: float | None = None
+    paragraph_semantic_score: float | None = None
+    business_rerank_score: float | None = None
+    final_rank_score: float | None = None
     feature_overlap: tuple[str, ...] = ()
     active_entity_bonus: float = 0.0
     identity_clue_bonus: float = 0.0
@@ -253,6 +257,10 @@ def search_similar_chunks(
     任务: level3-paragraph-rerank
     修改说明: 回填时改用 SQLAlchemy Row 具名属性访问，遵守数据库访问语义化约束。
 
+    修改时间: 2026-04-24
+    任务: split-level3-score-fields
+    修改说明: 初始化显式分数字段，后续 paragraph / business rerank 在不丢失 chunk 语义分的前提下继续叠加。
+
     Args:
         session: SQLAlchemy Session 实例
         run_id: 运行ID
@@ -317,6 +325,8 @@ def search_similar_chunks(
                 text=str(row.text),
                 emotional_valence=str(row.emotional_valence) if row.emotional_valence is not None else None,
                 similarity=float(row.similarity),
+                chunk_semantic_score=float(row.similarity),
+                final_rank_score=float(row.similarity),
             )
         )
     return similar_chunks
@@ -438,6 +448,10 @@ def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) 
     说明: readiness 不只检查是否有任意 paragraph row，还要发现：
           1. 某个 chunk 完全没有 paragraph embedding；
           2. 某个 chunk 的 paragraph_index 没有从 0 开始连续落库。
+
+    修改时间: 2026-04-24
+    任务: fix-paragraph-readiness-null-vectors
+    修改说明: 将 `embedding_vector IS NULL` 视为不完整，避免 readiness 通过但检索阶段被 `IS NOT NULL` 过滤掉。
     """
     paragraph_exists = exists().where(
         (ParagraphEmbedding.run_id == Chunk.run_id) & (ParagraphEmbedding.chunk_id == Chunk.chunk_id)
@@ -461,4 +475,12 @@ def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) 
     )
     gapped_chunk_ids = {int(row.chunk_id) for row in session.execute(gapped_stmt).all()}
 
-    return sorted(missing_chunk_ids | gapped_chunk_ids)
+    null_vector_stmt = (
+        select(ParagraphEmbedding.chunk_id)
+        .where(ParagraphEmbedding.run_id == run_id)
+        .where(ParagraphEmbedding.embedding_vector.is_(None))
+        .group_by(ParagraphEmbedding.chunk_id)
+    )
+    null_vector_chunk_ids = {int(row.chunk_id) for row in session.execute(null_vector_stmt).all()}
+
+    return sorted(missing_chunk_ids | gapped_chunk_ids | null_vector_chunk_ids)

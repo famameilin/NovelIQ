@@ -283,8 +283,10 @@ class TestLevel3VectorEvidenceAsync:
         assert [row.chunk_id for row in results] == [2, 1]
         assert results[0].local_preview == "灰衣人站在门外。"
         assert results[0].paragraph_index == 1
-        assert results[0].chunk_similarity == 0.81
+        assert results[0].chunk_semantic_score == 0.81
         assert results[0].similarity == 0.96
+        assert results[0].paragraph_semantic_score == 0.96
+        assert results[0].final_rank_score == 0.96
         assert mock_search_paragraphs.call_args.kwargs["chunk_ids"] == [1, 2]
 
     @pytest.mark.asyncio
@@ -477,6 +479,37 @@ class TestLevel3VectorEvidenceAsync:
             pytest.raises(Level3NotReadyError, match="paragraph embeddings incomplete"),
         ):
             await level3.ensure_level3_ready()
+
+    @pytest.mark.asyncio
+    async def test_ensure_level3_ready_revalidates_after_previous_success(self) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-level3-readiness-revalidation
+        说明: provider 每次入口都依赖 async readiness 捕获 schema / paragraph 数据漂移，
+              首次成功后不能因为缓存而跳过第二次校验。
+        """
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_session = MagicMock()
+        level3 = Level3VectorEvidence(
+            session=mock_session,
+            run_id="test-run-id",
+            embedding_client=mock_client,
+        )
+
+        with (
+            patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.repositories.chunk.has_paragraph_embeddings", side_effect=[True, False]),
+            patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            await level3.ensure_level3_ready()
+            with pytest.raises(Level3NotReadyError, match="paragraph embeddings not found"):
+                await level3.ensure_level3_ready()
+
+        assert mock_client.detect_embedding_dimension.await_count == 2
 
 
 class TestDisambigContextProviderLevel3(unittest.TestCase):
@@ -740,10 +773,10 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
                     similarity=0.96,
                     local_preview="灰衣人站在门外。",
                     paragraph_index=1,
-                    paragraph_similarity=0.96,
+                    paragraph_semantic_score=0.96,
                     paragraph_start_char=5,
                     paragraph_end_char=13,
-                    chunk_similarity=0.81,
+                    chunk_semantic_score=0.81,
                 )
             ]
         )
@@ -752,7 +785,9 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
         assert metadata["evidence_granularity"] == "paragraph"
         assert metadata["rerank_method"] == "chunk_then_paragraph"
         assert metadata["local_preview_len"] == len("灰衣人站在门外。")
-        assert metadata["chunk_similarity"] == 0.81
+        assert metadata["chunk_semantic_score"] == 0.81
+        assert metadata["paragraph_semantic_score"] == 0.96
+        assert metadata["final_rank_score"] == 0.96
 
     def test_render_vector_evidence_ignores_emotion_exemplar_rows(self) -> None:
         bundle = EvidenceBundle(
