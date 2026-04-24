@@ -14,5 +14,5 @@ env_path = project_root / ".env"
 load_dotenv(env_path)
 
 print(f"Initializing database using: {os.getenv('DATABASE_URL')}")
-init_db()
+init_db(include_level3_tables=True)
 print("Database initialized.")
