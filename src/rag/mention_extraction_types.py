@@ -41,3 +41,5 @@ class MentionExtractionRequest:
     text: str
     names_in_chunk: tuple[str, ...] = ()
     context_text: str | None = None
+    run_id: str | None = None
+    current_chunk: int | None = None

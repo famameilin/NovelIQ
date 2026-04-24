@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.rag.model_call_audit import audited_structured_model_call
 from src.rag.model_rerank import Level3RerankCandidate, Level3RerankResult
 
 
@@ -55,6 +56,8 @@ class LLMLevel3Reranker:
         *,
         query_text: str,
         candidates: list[Level3RerankCandidate],
+        run_id: str | None = None,
+        chunk_id: int | None = None,
     ) -> list[Level3RerankResult]:
         """
         创建时间: 2026-04-24
@@ -68,18 +71,19 @@ class LLMLevel3Reranker:
         timeout = getattr(self._model_client, "_config", None) and getattr(
             self._model_client._config, "timeout_s", None
         )
-        response = await self._model_client._call_api(
-            messages,
-            enable_thinking=self._enable_thinking,
+        return await audited_structured_model_call(
+            self._model_client,
+            messages=messages,
             response_model=LLMLevel3RerankResponse,
+            normalize_response=lambda parsed: _normalize_results(parsed.results),
+            interaction_type="level3_rerank",
+            phase="level3_rerank",
+            call_type="level3_rerank",
+            enable_thinking=self._enable_thinking,
             timeout=timeout,
+            run_id=run_id,
+            chunk_id=chunk_id,
         )
-        parsed = (
-            response
-            if isinstance(response, LLMLevel3RerankResponse)
-            else self._model_client._parse_structured_response(response, LLMLevel3RerankResponse)
-        )
-        return _normalize_results(parsed.results)
 
 
 def _build_messages(

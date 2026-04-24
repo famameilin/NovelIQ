@@ -128,8 +128,8 @@ def _init_evidence_provider(
                 f"checks: {e}"
             )
 
-    mention_extractor = _init_optional_mention_extractor(novel_id=novel_id, session=conn)
-    level3_reranker = _init_optional_level3_reranker(novel_id=novel_id, session=conn)
+    mention_extractor = _init_optional_mention_extractor(novel_id=novel_id, session=conn, run_id=run_id)
+    level3_reranker = _init_optional_level3_reranker(novel_id=novel_id, session=conn, run_id=run_id)
 
     evidence_provider = DisambigContextProvider(
         graph_repo=graph_repo,
@@ -154,6 +154,7 @@ def _init_optional_mention_extractor(
     *,
     novel_id: str,
     session,
+    run_id: str | None,
 ):
     """
     创建时间: 2026-04-24
@@ -165,6 +166,7 @@ def _init_optional_mention_extractor(
         enabled=settings.rag.mention_extraction_enabled,
         novel_id=novel_id,
         session=session,
+        run_id=run_id,
     )
     if model_client is None:
         return None
@@ -181,6 +183,7 @@ def _init_optional_level3_reranker(
     *,
     novel_id: str,
     session,
+    run_id: str | None,
 ):
     """
     创建时间: 2026-04-24
@@ -192,6 +195,7 @@ def _init_optional_level3_reranker(
         enabled=settings.rag.level3_rerank_enabled,
         novel_id=novel_id,
         session=session,
+        run_id=run_id,
     )
     if model_client is None:
         return None
@@ -210,6 +214,7 @@ def _build_optional_task_model_client(
     enabled: bool,
     novel_id: str,
     session,
+    run_id: str | None,
 ):
     """
     创建时间: 2026-04-24
@@ -236,8 +241,45 @@ def _build_optional_task_model_client(
 
     # 中文注释：这里直接复用现有 BaseModelClient，避免为 mention extraction / rerank 再分叉一套 transport。
     client = BaseModelClient(task_type=task_type, novel_id=novel_id, session=session)
+    if run_id:
+        client.set_runtime_context(novel_id, _build_optional_task_token_usage_callback(session, run_id, novel_id))
     logger.info("optional task model initialized: task_type={} model={}", task_type, task_settings.model)
     return client
+
+
+def _build_optional_task_token_usage_callback(session, run_id: str, novel_id: str):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-audit
+    说明: 为 mention extraction / level3 rerank 复用主链 token_usage 落库方式，
+          避免这两条可选增强链只发请求、不进统一统计账本。
+    """
+    from src.storage.repositories import StatsRepository
+
+    def _token_usage_callback(
+        cb_novel_id: str,
+        callback_task_type: str,
+        call_type: str,
+        model: str,
+        prompt_tokens: int,
+        total_tokens: int,
+        completion_tokens: int | None,
+        chunk_id: int | None,
+    ) -> None:
+        stats_repo = StatsRepository(session)
+        stats_repo.insert_token_usage(
+            run_id,
+            cb_novel_id or novel_id,
+            callback_task_type,
+            call_type,
+            model,
+            prompt_tokens,
+            total_tokens,
+            completion_tokens,
+            chunk_id,
+        )
+
+    return _token_usage_callback
 
 
 def _extract_names_from_text(text: str) -> list[str]:

@@ -235,6 +235,7 @@ class DisambigContextProvider:
                     context_text=context_text,
                     names_in_chunk=names_in_chunk,
                     mention_queries=mention_queries,
+                    current_chunk=current_chunk,
                 )
                 level3_results = await self._collect_level3_results(
                     context_text=context_text,
@@ -302,6 +303,7 @@ class DisambigContextProvider:
         context_text: str | None,
         names_in_chunk: list[str] | None,
         mention_queries: list[MentionEvidenceQuery] | None,
+        current_chunk: int | None,
     ) -> list[MentionEvidenceQuery] | None:
         """
         创建时间: 2026-04-24
@@ -313,7 +315,11 @@ class DisambigContextProvider:
 
         from src.rag.mention_query import build_mention_evidence_queries
 
-        mentions = await self._extract_mentions(context_text=context_text, names_in_chunk=names_in_chunk)
+        mentions = await self._extract_mentions(
+            context_text=context_text,
+            names_in_chunk=names_in_chunk,
+            current_chunk=current_chunk,
+        )
         return build_mention_evidence_queries(mentions)
 
     async def _extract_mentions(
@@ -321,6 +327,7 @@ class DisambigContextProvider:
         *,
         context_text: str,
         names_in_chunk: list[str] | None,
+        current_chunk: int | None,
     ) -> list[PersonMention]:
         """
         创建时间: 2026-04-24
@@ -332,6 +339,8 @@ class DisambigContextProvider:
                 text=context_text,
                 names_in_chunk=tuple(name for name in (names_in_chunk or []) if name),
                 context_text=context_text,
+                run_id=self._run_id,
+                current_chunk=current_chunk,
             )
         )
 
@@ -416,6 +425,8 @@ class DisambigContextProvider:
             collected,
             query_text=model_query_text,
             reranker=self._level3_reranker,
+            run_id=self._run_id,
+            chunk_id=current_chunk,
         )
         if model_reranked is not None:
             return model_reranked
