@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from src.models.interactions import record_model_interaction
+from src.models.structured_output import StructuredOutputError, StructuredOutputRequest, call_structured_output
 
 
 def _stringify_structured_response(response_data: BaseModel) -> str:
@@ -36,7 +37,6 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     *,
     messages: list[dict[str, str]],
     response_model: type[TResponseModel],
-    raw_response_format: dict[str, Any] | None = None,
     normalize_response: Callable[[TResponseModel], TNormalized],
     interaction_type: str,
     phase: str,
@@ -55,6 +55,10 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     任务: deepseek-json-object-compat
     修改内容: 支持调用方传入 provider 原生 response_format，解决云端只支持 json_object
               但项目仍需要 Pydantic 校验内部结构的场景。
+
+    修改时间: 2026-04-24
+    任务: structured-output-adapter-instructor-unification
+    修改内容: 改为调用项目级 structured_output 适配层，raw_response_format/mode 选择不再由 RAG 业务模块传入。
     """
     start_time = time.time()
     response: Any = None
@@ -62,32 +66,38 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     response_text = ""
     thinking_content: str | None = None
     reasoning_tokens: int | None = None
+    structured_result: Any = None
     is_cloud = client.is_cloud_api() if hasattr(client, "is_cloud_api") else False
 
     try:
-        response = await client._call_api(
-            messages,
-            enable_thinking=enable_thinking,
-            response_model=response_model,
-            raw_response_format=raw_response_format,
-            timeout=timeout,
+        structured_result = await call_structured_output(
+            client,
+            StructuredOutputRequest(
+                messages=messages,
+                response_model=response_model,
+                call_type=call_type,
+                enable_thinking=enable_thinking,
+                timeout=timeout,
+            ),
         )
-        if isinstance(response, response_model):
-            parsed_response = response
-            response_text = _stringify_structured_response(parsed_response)
-        else:
-            response_text = client._extract_response_text_for_token_usage(response)
-            parsed_response = client._parse_structured_response(response, response_model)
-            response_text = response_text or _stringify_structured_response(parsed_response)
-
-            if hasattr(response, "choices") and response.choices:
-                response_message = response.choices[0].message
-                _content_clean, thinking_content = client._extract_response_content(response_message)
-
-        reasoning_tokens = client._extract_reasoning_tokens(response)
+        response = structured_result.raw_response
+        parsed_response = structured_result.parsed
+        response_text = structured_result.response_text or _stringify_structured_response(parsed_response)
+        thinking_content = structured_result.thinking_content
+        reasoning_tokens = structured_result.reasoning_tokens
         normalized = normalize_response(parsed_response)
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)
+        if isinstance(exc, StructuredOutputError):
+            response = exc.raw_response
+            response_text = exc.response_text
+            thinking_content = exc.thinking_content
+            reasoning_tokens = exc.reasoning_tokens
+        elif structured_result is not None:
+            response = structured_result.raw_response
+            response_text = structured_result.response_text
+            thinking_content = structured_result.thinking_content
+            reasoning_tokens = structured_result.reasoning_tokens
         if response is not None and not response_text:
             response_text = client._extract_response_text_for_token_usage(response)
         if response is not None:
