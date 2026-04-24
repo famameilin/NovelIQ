@@ -5,12 +5,16 @@
 说明: 回归测试 strict structured output 的 JSON Schema 构建，避免云端接口因 additionalProperties 缺失而拒绝请求。
 """
 
+import asyncio
 import unittest
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 from src.config import TaskModelConfig
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
+from src.models.local.disambiguation.api_call import call_disambiguate_api
 from src.models.local.disambiguation.result_builder import normalize_disambiguate_response
 from src.models.local.schema import (
     AliasConfidenceRecord,
@@ -146,6 +150,92 @@ class TestStructuredOutputSchema(unittest.TestCase):
         self.assertEqual(normalized.alias_confidence["灰衣人"], "high")
         self.assertEqual(normalized.thinking_content, "她其实就是白芷")
         self.assertEqual(normalized.reasoning_tokens, 42)
+
+    def test_cloud_disambiguation_accepts_legacy_mapping_shape_from_json_object_provider(self) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-cloud-disambig-json-object-legacy-shape
+        说明: DeepSeek 等 json_object provider 可能按旧 prompt 输出 dict 映射；
+        云端兼容模型应在本地解析阶段接住旧形状，再归一化回内部标准结构。
+        """
+        cloud_response = CloudDisambiguateResponseModel.model_validate(
+            {
+                "canonical_decisions": {
+                    "叶哲泰": "叶哲泰",
+                    "一名男红卫兵": "男红卫兵",
+                },
+                "alias_confidence": {
+                    "叶哲泰": "high",
+                    "一名男红卫兵": "medium",
+                },
+                "entity_types": {
+                    "叶哲泰": "character",
+                    "男红卫兵": "group",
+                },
+                "entity_relations": [
+                    {"from": "男红卫兵", "to": "叶哲泰", "type": "敌对"},
+                ],
+                "evidence_sources": {
+                    "一名男红卫兵": ["原文例句"],
+                },
+            }
+        )
+
+        normalized = normalize_disambiguate_response(cloud_response)
+
+        self.assertEqual(normalized.canonical_decisions["一名男红卫兵"], "男红卫兵")
+        self.assertEqual(normalized.alias_confidence["一名男红卫兵"], "medium")
+        self.assertEqual(normalized.entity_types["男红卫兵"], "group")
+        self.assertEqual(normalized.entity_relations[0].type, "敌对")
+        self.assertEqual(normalized.evidence_sources["一名男红卫兵"], ["原文例句"])
+
+    def test_disambiguation_api_always_uses_record_array_transport_model(self) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: unify-disambig-transport-record-arrays
+        说明: 本地与云端消歧调用都先使用记录数组传输模型，返回后再归一化为内部 dict 模型。
+        """
+        config = TaskModelConfig(
+            base_url="http://127.0.0.1:8000/v1",
+            model="test-model",
+            api_key="test-key",
+        )
+        client = DisambiguationClient(
+            task_type="incremental_disambig",
+            config=config,
+            client=MagicMock(),
+        )
+        parsed = CloudDisambiguateResponseModel(
+            canonical_decisions=[CanonicalDecisionRecord(name="灰衣人", canonical="白芷")],
+            alias_confidence=[AliasConfidenceRecord(name="灰衣人", confidence="high")],
+            entity_types=[EntityTypeRecord(name="白芷", entity_type="character")],
+        )
+
+        async def fake_call_structured_output(_client: object, request: Any) -> object:
+            self.assertIs(request.response_model, CloudDisambiguateResponseModel)
+            return SimpleNamespace(
+                parsed=parsed,
+                raw_response=None,
+                response_text="{}",
+                thinking_content=None,
+                reasoning_tokens=None,
+            )
+
+        with patch(
+            "src.models.local.disambiguation.api_call.call_structured_output",
+            new=fake_call_structured_output,
+        ):
+            normalized = asyncio.run(
+                call_disambiguate_api(
+                    client=client,
+                    config=config,
+                    messages=[{"role": "user", "content": "请输出 JSON"}],
+                    log_type="disambiguate_characters",
+                )
+            )
+
+        self.assertEqual(normalized.canonical_decisions["灰衣人"], "白芷")
+        self.assertEqual(normalized.alias_confidence["灰衣人"], "high")
 
 
 if __name__ == "__main__":

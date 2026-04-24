@@ -96,6 +96,10 @@ async def call_disambiguate_api(
     修改时间: 2026-04-24
     任务: fix-structured-output-review-findings
     修改内容: 仅当结构化适配层带回 raw_response 时补记 token，避免本地前置错误污染 token_usage。
+
+    修改时间: 2026-04-24
+    任务: unify-disambig-transport-record-arrays
+    修改内容: 消歧传输层统一使用记录数组响应模型，解析后再归一化回内部 dict 模型。
     """
     if not config.model:
         raise ValueError("model is required")
@@ -103,8 +107,7 @@ async def call_disambiguate_api(
     if client._client is None:
         raise ValueError("client is required")
 
-    response_model: type[DisambiguateResponseModel] | type[CloudDisambiguateResponseModel]
-    response_model = CloudDisambiguateResponseModel if client.is_cloud_api() else DisambiguateResponseModel
+    response_model: type[CloudDisambiguateResponseModel] = CloudDisambiguateResponseModel
     structured_result: Any = None
     try:
         structured_result = await call_structured_output(

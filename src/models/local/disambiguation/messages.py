@@ -234,7 +234,13 @@ def build_disambiguate_messages(
     prompt_context: DisambiguationPromptContext | None = None,
     classifications: list[CandidateClassification] | None = None,
 ) -> list[dict[str, str]]:
-    """构建角色消歧消息，仅接受标准候选结构。"""
+    """
+    构建角色消歧消息，仅接受标准候选结构。
+
+    修改时间: 2026-04-24
+    任务: unify-disambig-transport-record-arrays
+    修改内容: 消歧提示词统一为记录数组格式，与传输层响应模型保持一致。
+    """
     # Build name -> category lookup
     category_map: dict[str, str] = {}
     if classifications:
@@ -262,7 +268,7 @@ def build_disambiguate_messages(
     system_prompt = _build_dynamic_system_prompt()
     system_prompt += (
         "\n\n【置信度输出要求】请在 JSON 中额外输出 alias_confidence 字段，"
-        "key 为候选名字，value 仅允许 low|medium|high。"
+        "使用记录数组格式，每条记录必须包含 name 与 confidence 字段，confidence 仅允许 low|medium|high。"
         "high 表示证据充分，medium 表示倾向如此但证据不足，low 表示无法确认。"
     )
 
@@ -301,6 +307,10 @@ def build_canonical_reselect_messages(
     任务: final-canonical-reselect
     说明: 该阶段只负责“在已确认同一人的 cluster 内选最终代表名”，
           因此 prompt 明确按组组织输入，禁止模型重新拆组或跨组合并。
+
+    修改时间: 2026-04-24
+    任务: unify-disambig-transport-record-arrays
+    修改内容: 重选提示词统一为记录数组格式，与传输层响应模型保持一致。
     """
     counts_by_name = {str(candidate["name"]): int(candidate.get("count", 0)) for candidate in candidates}
     cluster_blocks: list[str] = []
