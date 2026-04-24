@@ -116,9 +116,15 @@ def _evidence_text(result: SimilarChunkRow) -> str:
     创建时间: 2026-04-24
     任务: level3-mention-rerank
     说明: paragraph preview 命中时优先把局部片段纳入特征匹配，同时保留完整 chunk 兜底。
+
+    修改时间: 2026-04-24
+    任务: fix-mention-rerank-visible-evidence-only
+    修改说明: 一旦已选定 local_preview，就只允许基于这段实际会展示给模型的局部 evidence 做加权；
+              避免隐藏在完整 chunk 其他位置的身份线索影响排序，导致排序依据与 prompt 可见证据不一致。
     """
-    parts = [result.local_preview or "", result.text or ""]
-    return "\n".join(part for part in parts if part)
+    if result.local_preview:
+        return result.local_preview
+    return result.text or ""
 
 
 def _contains_any(text: str, names: set[str]) -> bool:

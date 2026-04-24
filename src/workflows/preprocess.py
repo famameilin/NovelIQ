@@ -225,6 +225,11 @@ async def _generate_chunk_embeddings(
     修改内容: paragraph rows 先完整生成，再统一执行 chunk/paragraph 向量落库；
               避免 paragraph 失败时 session 中残留 chunk-only 向量写入
 
+    修改时间: 2026-04-24
+    任务: fix-level3-embedding-init-failfast
+    修改内容: EmbeddingClient 初始化失败时不再静默跳过；paragraph rerank 已是 Level3 硬前提，
+              preprocess 必须直接失败，避免 run 落入永久 not-ready 状态
+
     Args:
         session: 数据库连接
         run_id: 运行ID
@@ -244,8 +249,10 @@ async def _generate_chunk_embeddings(
     try:
         embedding_client = EmbeddingClient()
     except ValueError as e:
-        logger.warning(f"EmbeddingClient initialization failed, skipping embedding generation: {e}")
-        return 0
+        raise RuntimeError(
+            "embedding client initialization failed during preprocess: "
+            f"Level3 chunk/paragraph embeddings are required, error={e}"
+        ) from e
 
     expected_dim = settings.models.semantic_chunking.embedding_dim
     actual_dim = await embedding_client.detect_embedding_dimension()

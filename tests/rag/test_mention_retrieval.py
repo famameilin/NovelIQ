@@ -270,6 +270,51 @@ def test_mention_rerank_promotes_feature_consistent_history() -> None:
     assert reranked[0].identity_clue_bonus > 0
 
 
+def test_mention_rerank_uses_local_preview_only_when_paragraph_preview_exists() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-rerank-visible-evidence-only
+    说明: paragraph rerank 已选中 local_preview 时，mention rerank 只能依据这段可见局部证据加权，
+          不能再偷看完整 chunk 里未展示的候选名或身份揭示句。
+    """
+    reranked = rerank_mention_level3_results(
+        [
+            SimilarChunkRow(
+                chunk_id=12,
+                text="白芷正是那名红衣女子，众人这才认出她的身份。",
+                similarity=0.85,
+                query_kind="mention",
+                mention_text="穿红衣的女子",
+                mention_type="feature_action",
+                matched_features=("红衣", "女子"),
+                local_preview="她站在门外，没有开口。",
+                paragraph_index=1,
+            ),
+            SimilarChunkRow(
+                chunk_id=18,
+                text="相似场景，但没有身份信息。",
+                similarity=0.86,
+                query_kind="mention",
+                mention_text="穿红衣的女子",
+                mention_type="feature_action",
+                matched_features=("红衣", "女子"),
+                local_preview="她站在门外，没有开口。",
+                paragraph_index=0,
+            ),
+        ],
+        active_entity_names={"白芷"},
+        candidate_names={"白芷"},
+        current_chunk=20,
+    )
+
+    hidden_clue_row = next(row for row in reranked if row.chunk_id == 12)
+    assert hidden_clue_row.feature_overlap == ()
+    assert hidden_clue_row.active_entity_bonus == 0.0
+    assert hidden_clue_row.identity_clue_bonus == 0.0
+    assert hidden_clue_row.candidate_related_bonus == 0.0
+    assert [row.chunk_id for row in reranked] == [18, 12]
+
+
 @pytest.mark.asyncio
 async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     """
@@ -279,6 +324,7 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     """
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
     provider._level3.is_available = MagicMock(return_value=True)
+    provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
     provider._level3.search_similar_chunks = AsyncMock(
         side_effect=[
             [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.94)],
@@ -313,6 +359,7 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     """
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=1)
     provider._level3.is_available = MagicMock(return_value=True)
+    provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
     provider._level3.search_similar_chunks = AsyncMock(
         side_effect=[
             [

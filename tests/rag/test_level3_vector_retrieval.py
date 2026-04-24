@@ -70,7 +70,11 @@ class TestLevel3VectorEvidence(unittest.TestCase):
             run_id="test-run-id",
             embedding_client=mock_client,
         )
-        self.assertFalse(level3.is_available())
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            self.assertFalse(level3.is_available())
 
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=False)
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
@@ -92,7 +96,11 @@ class TestLevel3VectorEvidence(unittest.TestCase):
             run_id="test-run-id",
             embedding_client=mock_client,
         )
-        self.assertFalse(level3.is_available())
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            self.assertFalse(level3.is_available())
 
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[3])
     @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
@@ -118,7 +126,11 @@ class TestLevel3VectorEvidence(unittest.TestCase):
             run_id="test-run-id",
             embedding_client=mock_client,
         )
-        self.assertFalse(level3.is_available())
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            self.assertFalse(level3.is_available())
 
     @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[5])
     @patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True)
@@ -142,7 +154,11 @@ class TestLevel3VectorEvidence(unittest.TestCase):
             run_id="test-run-id",
             embedding_client=mock_client,
         )
-        self.assertFalse(level3.is_available())
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            self.assertFalse(level3.is_available())
 
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
@@ -164,7 +180,11 @@ class TestLevel3VectorEvidence(unittest.TestCase):
             run_id="test-run-id",
             embedding_client=mock_client,
         )
-        self.assertTrue(level3.is_available())
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            self.assertTrue(level3.is_available())
 
 class TestLevel3VectorEvidenceAsync:
     """Level3VectorEvidence 异步测试"""
@@ -502,7 +522,11 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             embedding_client=mock_client,
             level3_enabled=True,
         )
-        self.assertTrue(provider.is_level3_available())
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            self.assertTrue(provider.is_level3_available())
 
     @patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[])
     @patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[])
@@ -524,7 +548,11 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
 
         provider.set_embedding_client(mock_client)
         provider._level3.set_session(mock_session, "test-run-id")
-        self.assertTrue(provider.is_level3_available())
+        with (
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            self.assertTrue(provider.is_level3_available())
 
     def test_level1_can_be_disabled(self) -> None:
         """禁用 Level 1 后 collect_evidence 不应产生 alias_mapping 证据。"""
@@ -792,6 +820,7 @@ class TestDisambigContextProviderLevel3Async:
         """
         provider = DisambigContextProvider(level3_enabled=True)
         provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
         provider._level3.search_similar_chunks = AsyncMock(
             return_value=[
                 SimilarChunkRow(
@@ -826,6 +855,28 @@ class TestDisambigContextProviderLevel3Async:
         exemplar = next(item for item in bundle.semantic_evidence if item.evidence_type == "emotion_exemplar")
         assert exemplar.metadata["emotional_valence"] == "mild_negative"
         assert exemplar.metadata["evidence_purpose"] == "emotion"
+
+    @pytest.mark.asyncio
+    async def test_collect_evidence_with_level3_degrades_when_async_readiness_fails(self) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-level3-provider-readiness-drift
+        说明: 即使 `is_available()` 先前报告可用，provider 也应在 async readiness 失败时安全降级，
+              不能把 Level3NotReadyError 继续抛给上游标注链路。
+        """
+        provider = DisambigContextProvider(level3_enabled=True)
+        provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.ensure_level3_ready = AsyncMock(side_effect=Level3NotReadyError("schema mismatch"))
+        provider._level3.search_similar_chunks = AsyncMock()
+
+        bundle = await provider.collect_evidence_with_level3(
+            context_text="她抿唇不语，袖口却攥得发白。",
+            max_chunk_id=14,
+        )
+
+        assert bundle.semantic_evidence == []
+        provider._level3.ensure_level3_ready.assert_awaited_once()
+        provider._level3.search_similar_chunks.assert_not_awaited()
 
 
 if __name__ == "__main__":

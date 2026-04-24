@@ -96,7 +96,10 @@ class Level3VectorEvidence:
         )
         from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
 
-        validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
+        try:
+            validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
+        except ValueError as exc:
+            raise Level3NotReadyError(str(exc)) from exc
         if not has_embeddings(self._session, self._run_id):
             raise Level3NotReadyError(f"Level 3 embeddings not found for run_id={self._run_id}")
         missing_chunk_embedding_ids = get_missing_embedding_chunk_ids(self._session, self._run_id)
@@ -107,7 +110,10 @@ class Level3VectorEvidence:
                 f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(missing_chunk_embedding_ids)}"
             )
 
-        validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        try:
+            validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        except ValueError as exc:
+            raise Level3NotReadyError(str(exc)) from exc
         if not has_paragraph_embeddings(self._session, self._run_id):
             raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
         incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
@@ -124,7 +130,14 @@ class Level3VectorEvidence:
         logger.info("Level3 readiness passed with chunk and paragraph embeddings for run_id={}", self._run_id)
 
     def is_available(self) -> bool:
-        """检查 Level3 是否可用。"""
+        """
+        检查 Level3 是否可用。
+
+        修改时间: 2026-04-24
+        任务: fix-level3-availability-contract
+        修改说明: 同步补齐 schema 校验，避免 `is_available()` 在表缺失或向量列维度不匹配时误报可用；
+                  embedding 模型维度仍由 async readiness 入口做最终确认。
+        """
         if self._available is not None:
             return self._available
         if self._embedding_client is None:
@@ -142,6 +155,16 @@ class Level3VectorEvidence:
             has_embeddings,
             has_paragraph_embeddings,
         )
+        from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
+
+        try:
+            validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
+            validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        except ValueError as exc:
+            self._available = False
+            self._paragraph_rerank_available = False
+            logger.debug("Level3VectorEvidence unavailable: schema validation failed: {}", exc)
+            return False
 
         chunk_ready = has_embeddings(self._session, self._run_id)
         missing_chunk_embedding_ids = (
@@ -258,7 +281,10 @@ class Level3VectorEvidence:
         )
         from src.storage.vector_schema import validate_paragraph_embeddings_schema
 
-        validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        try:
+            validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+        except ValueError as exc:
+            raise Level3NotReadyError(str(exc)) from exc
         if not has_paragraph_embeddings(self._session, self._run_id):
             raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
         incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
