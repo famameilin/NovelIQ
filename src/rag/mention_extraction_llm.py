@@ -94,10 +94,13 @@ class LLMPersonMentionExtractor:
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: 调用 LLM 产出结构化 mention；调用失败由 service 统一记录并回退规则版。
+
+        修改时间: 2026-04-24
+        任务: structured-output-adapter-instructor-unification
+        修改内容: 移除本模块里的 json_object 特判，结构化输出 mode 统一交给适配层选择。
         """
         messages = _build_messages(request)
         response_model = _select_response_model(self._model_client)
-        raw_response_format = _select_raw_response_format(self._model_client)
         # 显式传递 timeout 避免无限阻塞；模型配置自带 timeout_s，优先使用。
         timeout = getattr(self._model_client, "_config", None) and getattr(
             self._model_client._config, "timeout_s", None
@@ -106,7 +109,6 @@ class LLMPersonMentionExtractor:
             self._model_client,
             messages=messages,
             response_model=response_model,
-            raw_response_format=raw_response_format,
             normalize_response=normalize_mention_response,
             interaction_type="mention_extraction",
             phase="mention_extraction",
@@ -128,19 +130,6 @@ def _select_response_model(model_client: Any) -> type[LLMPersonMentionResponse] 
     if callable(is_cloud_api) and is_cloud_api():
         return LLMPersonMentionCloudResponse
     return LLMPersonMentionResponse
-
-
-def _select_raw_response_format(model_client: Any) -> dict[str, str] | None:
-    """
-    创建时间: 2026-04-24
-    任务: deepseek-json-object-compat
-    说明: 云端 mention extraction 使用 JSON Output (`json_object`) 而不是 strict json_schema，
-          兼容 DeepSeek 这类当前不开放 response_format=json_schema 的服务商。
-    """
-    is_cloud_api = getattr(model_client, "is_cloud_api", None)
-    if callable(is_cloud_api) and is_cloud_api():
-        return {"type": "json_object"}
-    return None
 
 
 def normalize_mention_response(
