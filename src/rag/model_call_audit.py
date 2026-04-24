@@ -59,6 +59,10 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     修改时间: 2026-04-24
     任务: structured-output-adapter-instructor-unification
     修改内容: 改为调用项目级 structured_output 适配层，raw_response_format/mode 选择不再由 RAG 业务模块传入。
+
+    修改时间: 2026-04-24
+    任务: fix-structured-output-review-findings
+    修改内容: 仅在 provider 已返回 raw_response 时补记 token，避免本地 prompt 合同校验失败被误记为模型消耗。
     """
     start_time = time.time()
     response: Any = None
@@ -102,8 +106,6 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
             response_text = client._extract_response_text_for_token_usage(response)
         if response is not None:
             client._record_estimated_token_usage_from_response(messages, response, call_type, chunk_id)
-        else:
-            client._record_estimated_token_usage_from_messages(messages, "", call_type, chunk_id)
         record_model_interaction(
             run_id=run_id,
             chunk_id=chunk_id,

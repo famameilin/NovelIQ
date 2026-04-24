@@ -92,6 +92,10 @@ async def call_disambiguate_api(
     修改时间: 2026-04-24
     任务: structured-output-adapter-instructor-unification
     修改内容: 消歧结构化调用改走项目级 structured_output 适配层，保留 stream/emitter 与 cloud-safe schema。
+
+    修改时间: 2026-04-24
+    任务: fix-structured-output-review-findings
+    修改内容: 仅当结构化适配层带回 raw_response 时补记 token，避免本地前置错误污染 token_usage。
     """
     if not config.model:
         raise ValueError("model is required")
@@ -118,12 +122,13 @@ async def call_disambiguate_api(
         parsed_response = structured_result.parsed
         normalized_response = normalize_disambiguate_response(parsed_response)
     except Exception as exc:
-        response_content = ""
+        raw_response = None
         if isinstance(exc, StructuredOutputError):
-            response_content = exc.response_text
+            raw_response = exc.raw_response
         elif structured_result is not None:
-            response_content = structured_result.response_text
-        client._record_estimated_token_usage_from_messages(messages, response_content, log_type)
+            raw_response = structured_result.raw_response
+        if raw_response is not None:
+            client._record_estimated_token_usage_from_response(messages, raw_response, log_type)
         raise
 
     thinking_content = structured_result.thinking_content
