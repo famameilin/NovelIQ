@@ -482,6 +482,7 @@ class BaseModelClient:
         messages: list[dict],
         enable_thinking: bool = False,
         response_model: type[T] | None = None,
+        timeout: float | None = None,
     ) -> Any:
         """
         非流式API调用
@@ -495,12 +496,18 @@ class BaseModelClient:
         修改者: TraeAI
         任务: 重构 BaseModelClient 使用 AsyncOpenAI
         修改内容: 改为 async def，使用 await 调用
+
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: fix-llm-call-timeout
+        修改内容: 添加显式 timeout 参数传递。
         """
         return await call_api(
             self,
             messages,
             enable_thinking=enable_thinking,
             response_model=response_model,
+            timeout=timeout,
         )
 
     async def _call_api_stream(
