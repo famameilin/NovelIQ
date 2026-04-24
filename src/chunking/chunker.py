@@ -158,7 +158,10 @@ def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
     任务: full-global-offset-rollout
     修改说明: 继续保留旧返回签名，内部改为复用带 offset 的 helper，避免外围调用点被迫同步改签名。
     """
-    return [(chapter_title, chapter_text) for chapter_title, chapter_text, _, _ in _split_by_chapters_with_offsets(text)]
+    return [
+        (chapter_title, chapter_text)
+        for chapter_title, chapter_text, _, _ in _split_by_chapters_with_offsets(text)
+    ]
 
 
 async def chunk_text(
