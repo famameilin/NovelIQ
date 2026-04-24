@@ -14,10 +14,12 @@
 
 from __future__ import annotations
 
+import inspect
 import re
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
+from src.api.models.events import StreamEvent
 from src.config import CHAPTER_PATTERN, PARAGRAPH_SPLIT, settings
 from src.models.local.embedding import EmbeddingClient
 
@@ -170,6 +172,7 @@ async def chunk_text(
     overlap: int = 100,
     split_by_chapter: bool = True,
     use_semantic: bool = False,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
     """
     将文本分割成块（async 版本）
@@ -191,7 +194,7 @@ async def chunk_text(
         from src.models.local.embedding import EmbeddingClient
 
         embedding_client = EmbeddingClient()
-        chunker = SemanticChunker(embedding_client=embedding_client)
+        chunker = SemanticChunker(embedding_client=embedding_client, emitter=emitter)
         return await chunker.chunk_text_semantic(text)
 
     if split_by_chapter:
@@ -297,8 +300,13 @@ class SemanticChunker:
     任务: 改为 async 实现，移除 asyncio.run()
     """
 
-    def __init__(self, embedding_client: EmbeddingClient | None = None):
+    def __init__(
+        self,
+        embedding_client: EmbeddingClient | None = None,
+        emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
+    ):
         self._embedding_client = embedding_client
+        self._emitter = emitter
         self._window_size = settings.chunking.semantic_window_size
         self._percentile = settings.chunking.semantic_percentile
         self._min_chars = settings.chunking.semantic_min_chars
@@ -325,7 +333,48 @@ class SemanticChunker:
         if self._embedding_client is None:
             return []
         texts = [text for _, _, text in paragraphs]
-        return await self._embedding_client.embed_texts(texts)
+        embed_texts = self._embedding_client.embed_texts
+        try:
+            signature = inspect.signature(embed_texts)
+        except (TypeError, ValueError):
+            signature = None
+
+        if signature is not None and "progress_callback" in signature.parameters:
+            return await embed_texts(
+                texts,
+                progress_callback=self._emit_embedding_progress,
+            )
+        return await embed_texts(texts)
+
+    async def _emit_embedding_progress(self, completed_batches: int, total_batches: int, total_items: int) -> None:
+        """
+        发射语义分块 paragraph embedding 的批次进度。
+
+        创建时间: 2026-04-24
+        任务: semantic-chunking-embedding-sse-progress
+        新建原因: 语义分块阶段本身没有 chunk 级循环，必须把 embed_texts 的批量完成信号翻译成 SSE，
+                  前端才能在长文本 paragraph 向量化时看到持续进度。
+        """
+        if self._emitter is None or total_batches <= 0:
+            return
+
+        sub_percent = (completed_batches / total_batches) * 100
+        # 中文注释：这里复用 preprocess/stage_progress 协议，不新增前端事件类型；
+        # current/total 表示“已完成批次/总批次”，message 单独说明这是 paragraph embedding。
+        await self._emitter(
+            StreamEvent(
+                action="progress",
+                stage="preprocess",
+                sub_stage="semantic_chunking_embedding",
+                current=completed_batches,
+                total=total_batches,
+                sub_percent=sub_percent,
+                message=(
+                    f"语义分块段落向量计算 {completed_batches}/{total_batches}"
+                    f" 批（共 {total_items} 段）"
+                ),
+            )
+        )
 
     def _split_into_paragraphs(self, text: str) -> list[tuple[int, int, str]]:
         """
@@ -574,6 +623,7 @@ async def chunk_documents(
     overlap: int = 100,
     split_by_chapter: bool = True,
     use_semantic: bool = False,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Chunk]:
     """
     分块多个文档（async 版本）
@@ -598,7 +648,14 @@ async def chunk_documents(
     document_char_offset = 0
 
     for text in texts:
-        chunks = await chunk_text(text, max_chars, overlap, split_by_chapter, use_semantic)
+        chunks = await chunk_text(
+            text,
+            max_chars,
+            overlap,
+            split_by_chapter,
+            use_semantic,
+            emitter=emitter,
+        )
         for chunk in chunks:
             all_chunks.append(
                 Chunk(

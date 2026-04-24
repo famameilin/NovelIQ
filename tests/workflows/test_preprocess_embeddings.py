@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.api.models.events import StreamEvent
 from src.chunking.chunker import Chunk
 from src.workflows.preprocess import (
     _generate_chunk_embeddings,
@@ -187,6 +188,39 @@ async def test_generate_paragraph_embedding_rows_fails_fast_on_empty_embedding()
             all_chunks=[Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11)],
             row_factory=lambda **kwargs: SimpleNamespace(**kwargs),
         )
+
+
+@pytest.mark.asyncio
+async def test_generate_paragraph_embedding_rows_emits_batch_progress() -> None:
+    mock_client = MagicMock()
+
+    async def fake_embed_texts(texts, *, progress_callback=None):
+        if progress_callback is not None:
+            await progress_callback(1, 2, len(texts))
+            await progress_callback(2, 2, len(texts))
+        return [[0.5, 0.6], [0.7, 0.8]]
+
+    mock_client.embed_texts = AsyncMock(side_effect=fake_embed_texts)
+    emitted: list[StreamEvent] = []
+
+    async def capture(event: StreamEvent) -> None:
+        emitted.append(event)
+
+    rows = await _generate_paragraph_embedding_rows(
+        embedding_client=mock_client,
+        run_id="run-1",
+        all_chunks=[Chunk(index=7, text="第一段文本\n\n第二段文本", start=0, end=11)],
+        row_factory=lambda **kwargs: SimpleNamespace(**kwargs),
+        emitter=capture,
+    )
+
+    assert len(rows) == 2
+    assert len(emitted) == 2
+    assert all(event.sub_stage == "paragraph_embedding" for event in emitted)
+    assert emitted[0].current == 1
+    assert emitted[0].total == 2
+    assert emitted[0].sub_percent == 50.0
+    assert emitted[1].sub_percent == 100.0
 
 
 @pytest.mark.asyncio

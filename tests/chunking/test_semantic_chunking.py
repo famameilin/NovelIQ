@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.api.models.events import StreamEvent
 from src.chunking.chunker import Chunk, SemanticChunker
 
 
@@ -76,6 +77,33 @@ class TestSemanticChunker(unittest.IsolatedAsyncioTestCase):
         chunker = SemanticChunker(embedding_client=self.mock_embedding_client)
         chunks = await chunker.chunk_text_semantic("")
         self.assertEqual(len(chunks), 0)
+
+    async def test_chunk_text_semantic_emits_embedding_progress(self) -> None:
+        emitted: list[StreamEvent] = []
+
+        async def mock_embed_texts(texts, *, progress_callback=None):
+            if progress_callback is not None:
+                await progress_callback(1, 2, len(texts))
+                await progress_callback(2, 2, len(texts))
+            return [[0.1] * 10 for _ in texts]
+
+        async def capture(event: StreamEvent) -> None:
+            emitted.append(event)
+
+        self.mock_embedding_client.embed_texts = mock_embed_texts
+
+        chunker = SemanticChunker(embedding_client=self.mock_embedding_client, emitter=capture)
+        text = "第一段内容。" * 10 + "\n\n" + "第二段内容。" * 10 + "\n\n" + "第三段内容。" * 10
+        await chunker.chunk_text_semantic(text)
+
+        self.assertEqual(len(emitted), 2)
+        self.assertTrue(all(event.action == "progress" for event in emitted))
+        self.assertTrue(all(event.sub_stage == "semantic_chunking_embedding" for event in emitted))
+        self.assertEqual(emitted[0].current, 1)
+        self.assertEqual(emitted[0].total, 2)
+        self.assertEqual(emitted[0].sub_percent, 50.0)
+        self.assertEqual(emitted[1].current, 2)
+        self.assertEqual(emitted[1].sub_percent, 100.0)
 
 
 if __name__ == "__main__":
