@@ -82,6 +82,10 @@ def _score_row(
     任务: split-level3-score-fields
     修改说明: business rerank 基于显式语义分字段计算，并单独产出 `business_rerank_score` / `final_rank_score`，
               避免继续复用含义漂移的 `similarity`。
+
+    修改时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    修改说明: 标记 deterministic_fallback 来源，使模型 rerank 缺席时的排序语义进入 metadata。
     """
     evidence_text = _evidence_text(result)
     normalized_chunk_semantic_score = (
@@ -125,6 +129,7 @@ def _score_row(
         paragraph_semantic_score=normalized_paragraph_semantic_score,
         business_rerank_score=round(business_rerank_score, 6),
         final_rank_score=round(business_rerank_score, 6),
+        rerank_source="deterministic_fallback",
         feature_overlap=feature_overlap,
         active_entity_bonus=active_entity_bonus,
         identity_clue_bonus=identity_clue_bonus,

@@ -59,7 +59,10 @@ from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
 from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
+from src.rag.mention_extraction_service import MentionExtractionService, PersonMentionExtractor
+from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
 from src.rag.mention_rerank import rerank_mention_level3_results
+from src.rag.model_rerank import Level3ModelReranker, try_model_rerank_level3_results
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -102,7 +105,9 @@ class DisambigContextProvider:
         level3_enabled: bool = True,
         similarity_threshold: float = 0.7,
         level3_top_k: int = 5,
-    ):
+        mention_extractor: PersonMentionExtractor | None = None,
+        level3_reranker: Level3ModelReranker | None = None,
+    ) -> None:
         self._alias_lookup = AliasLookup(
             graph_repo=graph_repo,
             run_id=run_id,
@@ -131,6 +136,8 @@ class DisambigContextProvider:
         self._level3_enabled = level3_enabled
         self._level3_top_k = level3_top_k
         self._bundle_builder = EvidenceBundleBuilder()
+        self._mention_extraction_service = MentionExtractionService(mention_extractor)
+        self._level3_reranker = level3_reranker
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
         """设置 Embedding 客户端"""
@@ -214,12 +221,21 @@ class DisambigContextProvider:
         任务: fix-level3-provider-readiness-drift
         修改说明: 即使 `is_available()` 先前通过，也要在 provider 入口做一次 async readiness 确认；
                   若此时发现 schema/维度漂移，则记录告警并安全降级为无 Level3 证据。
+
+        修改时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        修改说明: provider 内部统一执行 mention extraction 与 query 构造，workflow 不再负责 Level3 上游编排。
         """
         bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
 
         if self._level3_enabled and self.is_level3_available():
             try:
                 await self._level3.ensure_level3_ready()
+                mention_queries = await self._build_queries(
+                    context_text=context_text,
+                    names_in_chunk=names_in_chunk,
+                    mention_queries=mention_queries,
+                )
                 level3_results = await self._collect_level3_results(
                     context_text=context_text,
                     exclude_chunk_ids=exclude_chunk_ids,
@@ -258,6 +274,79 @@ class DisambigContextProvider:
         修改时间: 2026-04-24
         任务: level3-mention-rerank
         修改说明: mention 检索使用更大的召回池，并在去重前应用可解释的确定性 rerank。
+
+        修改时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        修改说明: 编排拆成 retrieve_candidates / rerank_candidates / dedupe_and_trim，
+                  模型 rerank 可用时优先接管最终排序。
+        """
+        collected = await self._retrieve_candidates(
+            context_text=context_text,
+            exclude_chunk_ids=exclude_chunk_ids,
+            max_chunk_id=max_chunk_id,
+            mention_queries=mention_queries,
+        )
+        reranked = await self._rerank_candidates(
+            collected,
+            context_text=context_text,
+            mention_queries=mention_queries,
+            active_entity_names=active_entity_names,
+            candidate_names=candidate_names,
+            current_chunk=current_chunk,
+        )
+        return self._dedupe_level3_results(reranked)
+
+    async def _build_queries(
+        self,
+        *,
+        context_text: str | None,
+        names_in_chunk: list[str] | None,
+        mention_queries: list[MentionEvidenceQuery] | None,
+    ) -> list[MentionEvidenceQuery] | None:
+        """
+        创建时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        说明: provider 内统一抽取 mention 并构造 query；调用方显式传入 mention_queries 时保持兼容。
+        """
+        if mention_queries is not None or not context_text:
+            return mention_queries
+
+        from src.rag.mention_query import build_mention_evidence_queries
+
+        mentions = await self._extract_mentions(context_text=context_text, names_in_chunk=names_in_chunk)
+        return build_mention_evidence_queries(mentions)
+
+    async def _extract_mentions(
+        self,
+        *,
+        context_text: str,
+        names_in_chunk: list[str] | None,
+    ) -> list[PersonMention]:
+        """
+        创建时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        说明: 调用 mention extraction service；LLM 失败时由 service 显式 fallback 到规则版。
+        """
+        return await self._mention_extraction_service.extract_mentions(
+            MentionExtractionRequest(
+                text=context_text,
+                names_in_chunk=tuple(name for name in (names_in_chunk or []) if name),
+                context_text=context_text,
+            )
+        )
+
+    async def _retrieve_candidates(
+        self,
+        *,
+        context_text: str | None,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        mention_queries: list[MentionEvidenceQuery] | None,
+    ) -> list[SimilarChunkRow]:
+        """
+        创建时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        说明: 执行 mention query 与 chunk context query 的粗召回，所有历史 cutoff 仍下沉到 Level3 向量层。
         """
         collected: list[SimilarChunkRow] = []
         has_mention_queries = bool(mention_queries)
@@ -277,13 +366,17 @@ class DisambigContextProvider:
                     mention_text=mention_query.mention_text,
                     mention_type=mention_query.mention_type,
                     matched_features=mention_query.matched_features,
+                    mention_source=mention_query.mention_source,
+                    mention_confidence=mention_query.mention_confidence,
+                    query_variant=mention_query.query_variant,
                 )
                 for result in results
             )
 
         if context_text:
             collected.extend(
-                await self._search_level3_query(
+                replace(result, query_variant="chunk_context")
+                for result in await self._search_level3_query(
                     context_text,
                     exclude_chunk_ids=exclude_chunk_ids,
                     max_chunk_id=max_chunk_id,
@@ -291,6 +384,25 @@ class DisambigContextProvider:
                 )
             )
 
+        return collected
+
+    async def _rerank_candidates(
+        self,
+        results: list[SimilarChunkRow],
+        *,
+        context_text: str | None,
+        mention_queries: list[MentionEvidenceQuery] | None,
+        active_entity_names: set[str],
+        candidate_names: set[str],
+        current_chunk: int | None,
+    ) -> list[SimilarChunkRow]:
+        """
+        创建时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        说明: paragraph rerank 后优先尝试模型 rerank；不可用时保留 deterministic mention rerank 作为 fallback。
+        """
+        collected = results
+        has_mention_queries = bool(mention_queries)
         if has_mention_queries:
             collected = rerank_mention_level3_results(
                 collected,
@@ -298,7 +410,32 @@ class DisambigContextProvider:
                 candidate_names=candidate_names,
                 current_chunk=current_chunk,
             )
-        return self._dedupe_level3_results(collected)
+
+        model_query_text = self._build_model_rerank_query_text(context_text, mention_queries)
+        model_reranked = await try_model_rerank_level3_results(
+            collected,
+            query_text=model_query_text,
+            reranker=self._level3_reranker,
+        )
+        if model_reranked is not None:
+            return model_reranked
+        return collected
+
+    def _build_model_rerank_query_text(
+        self,
+        context_text: str | None,
+        mention_queries: list[MentionEvidenceQuery] | None,
+    ) -> str:
+        """
+        创建时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        说明: 给模型 rerank 汇总原文 query 与 mention query，避免模型只看到压缩词而丢失当前语境。
+        """
+        parts = [context_text.strip()] if context_text and context_text.strip() else []
+        for query in mention_queries or []:
+            if query.query_text not in parts:
+                parts.append(query.query_text)
+        return "\n".join(parts)
 
     async def _search_level3_query(
         self,
