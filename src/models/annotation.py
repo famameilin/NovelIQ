@@ -83,6 +83,12 @@ class AnnotationClient(BaseModelClient):
         修改时间: 2026-04-24
         任务: fix-structured-output-review-findings
         修改内容: 删除 Instructor 工厂参数，避免业务客户端继续暴露已取消的结构化输出运行时入口。
+
+        结构化输出机制说明:
+        - 已移除 instructor_client_factory 参数，结构化输出不再依赖 Instructor 库
+        - 统一走项目级 structured_output 适配层 (src.models.structured_output)
+        - 通过 call_structured_output() 函数处理 json_schema / json_object 模式
+        - 适配层自动根据 provider 能力选择最佳结构化输出方式
         """
         super().__init__(
             task_type=task_type,
