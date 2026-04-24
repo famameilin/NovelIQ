@@ -220,6 +220,11 @@ async def _generate_chunk_embeddings(
     修改内容: chunk embedding 也改为 fail fast；任何 chunk 缺失向量都直接中断 preprocess，
               避免留下粗召回范围不完整、却仍被 readiness 误判为可用的 run
 
+    修改时间: 2026-04-24
+    任务: fix-paragraph-failfast-atomicity
+    修改内容: paragraph rows 先完整生成，再统一执行 chunk/paragraph 向量落库；
+              避免 paragraph 失败时 session 中残留 chunk-only 向量写入
+
     Args:
         session: 数据库连接
         run_id: 运行ID
@@ -298,15 +303,16 @@ async def _generate_chunk_embeddings(
             f"run_id={run_id}, missing={preview_ids}, total={len(failed_chunk_ids)}"
         )
 
-    if embeddings:
-        insert_chunk_embeddings(session, run_id, embeddings)
-
     paragraph_rows = await _generate_paragraph_embedding_rows(
         embedding_client,
         run_id,
         all_chunks,
         ParagraphEmbeddingRow,
     )
+    # 中文注释：先把 paragraph rows 全部准备好，再开始任何向量表 DML；
+    # 这样 paragraph fail fast 时，当前 session 不会留下 chunk-only 半成品写入。
+    if embeddings:
+        insert_chunk_embeddings(session, run_id, embeddings)
     if paragraph_rows:
         insert_paragraph_embeddings(session, run_id, paragraph_rows)
 

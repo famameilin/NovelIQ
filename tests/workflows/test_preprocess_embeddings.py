@@ -163,6 +163,42 @@ async def test_generate_paragraph_embedding_rows_fails_fast_on_empty_embedding()
         )
 
 
+@pytest.mark.asyncio
+async def test_generate_chunk_embeddings_does_not_insert_chunk_rows_before_paragraph_rows_ready() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-paragraph-failfast-atomicity
+    说明: paragraph rows 生成失败时，不应先把 chunk embeddings 暂存进当前 session。
+    """
+    chunks = [Chunk(index=7, text="第一段文本", start=0, end=4)]
+    mock_client = MagicMock()
+    mock_client.detect_embedding_dimension = AsyncMock(return_value=1024)
+    mock_client.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+    mock_session = MagicMock()
+
+    with (
+        patch("src.models.local.embedding.EmbeddingClient", return_value=mock_client),
+        patch("src.workflows.preprocess.ensure_chunk_embeddings_schema"),
+        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema"),
+        patch(
+            "src.workflows.preprocess._generate_paragraph_embedding_rows",
+            new=AsyncMock(side_effect=RuntimeError("paragraph embeddings incomplete")),
+        ),
+        patch("src.storage.repositories.chunk.insert_chunk_embeddings") as mock_insert_embeddings,
+        patch("src.storage.repositories.chunk.insert_paragraph_embeddings") as mock_insert_paragraph_embeddings,
+    ):
+        with pytest.raises(RuntimeError, match="paragraph embeddings incomplete"):
+            await _generate_chunk_embeddings(
+                session=mock_session,
+                run_id="run-1",
+                all_chunks=chunks,
+            )
+
+    mock_insert_embeddings.assert_not_called()
+    mock_insert_paragraph_embeddings.assert_not_called()
+    mock_session.commit.assert_called_once()
+
+
 def test_split_chunk_paragraphs_returns_chunk_local_offsets() -> None:
     """
     创建时间: 2026-04-24
