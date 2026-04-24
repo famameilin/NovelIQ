@@ -146,6 +146,77 @@ class StreamingSettings:
         pass
 
 
+@dataclass
+class StructuredOutputSettings:
+    """
+    结构化输出模式配置。
+
+    创建时间: 2026-04-24
+    任务: structured-output-adapter-instructor-unification
+    说明: 集中配置各任务默认使用 json_schema / json_object / instructor_json，
+          避免业务模块散落 provider 兼容判断。
+    """
+
+    annotation: str = "json_schema"
+    annotation_fallback: str = "json_object"
+    incremental_disambig: str = "json_schema"
+    mention_extraction: str = "json_object"
+    full_disambig: str = "json_schema"
+    level3_rerank: str = "json_schema"
+    diagnosis: str = "json_schema"
+
+
+_STRUCTURED_OUTPUT_ALLOWED_MODES = {"json_schema", "json_object", "instructor_json"}
+
+
+def _parse_structured_output_mode(data: dict[str, Any], key: str, default: str) -> str:
+    """
+    解析单个结构化输出模式。
+
+    创建时间: 2026-04-24
+    任务: structured-output-adapter-instructor-unification
+    新建原因: 对配置里的 mode 做白名单校验，避免拼写错误静默退回导致 provider 行为不可解释。
+    """
+    mode = data.get(key, default)
+    if mode not in _STRUCTURED_OUTPUT_ALLOWED_MODES:
+        allowed = ", ".join(sorted(_STRUCTURED_OUTPUT_ALLOWED_MODES))
+        raise ValueError(f"structured_output.{key} 必须是以下值之一: {allowed}")
+    return mode
+
+
+def _parse_structured_output_settings(data: dict[str, Any] | None) -> StructuredOutputSettings:
+    """
+    解析结构化输出模式配置。
+
+    创建时间: 2026-04-24
+    任务: structured-output-adapter-instructor-unification
+    新建原因: 将结构化输出 mode 从业务代码中抽到项目级配置，便于按 provider 能力调整。
+    """
+    json_data = data or {}
+    defaults = StructuredOutputSettings()
+    return StructuredOutputSettings(
+        annotation=_parse_structured_output_mode(json_data, "annotation", defaults.annotation),
+        annotation_fallback=_parse_structured_output_mode(
+            json_data,
+            "annotation_fallback",
+            defaults.annotation_fallback,
+        ),
+        incremental_disambig=_parse_structured_output_mode(
+            json_data,
+            "incremental_disambig",
+            defaults.incremental_disambig,
+        ),
+        mention_extraction=_parse_structured_output_mode(
+            json_data,
+            "mention_extraction",
+            defaults.mention_extraction,
+        ),
+        full_disambig=_parse_structured_output_mode(json_data, "full_disambig", defaults.full_disambig),
+        level3_rerank=_parse_structured_output_mode(json_data, "level3_rerank", defaults.level3_rerank),
+        diagnosis=_parse_structured_output_mode(json_data, "diagnosis", defaults.diagnosis),
+    )
+
+
 def _get_env_var(prefix: str, suffix: str, default: str | None = None) -> str | None:
     """获取环境变量值"""
     return os.getenv(f"{prefix}_{suffix}", default)

@@ -36,6 +36,7 @@ from src.config import TaskModelConfig, TaskType
 from src.config.analysis_logger import AnalysisLogger
 from src.models.local.base import BaseModelClient, TokenUsageCallback
 from src.models.local.schema import ChunkAnnotation
+from src.models.structured_output import StructuredOutputError, StructuredOutputRequest, call_structured_output
 
 from .local.annotation import (
     AnnotationContext,
@@ -154,6 +155,14 @@ class AnnotationClient(BaseModelClient):
         emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
         call_type: str | None = None,
     ) -> Any:
+        """
+        调用 annotation 模型 API。
+
+        修改时间: 2026-04-24
+        任务: structured-output-adapter-instructor-unification
+        修改内容: Phase2/3/4 的结构化调用改走项目级 structured_output 适配层；
+                  Phase1 仍保留原有非结构化 streaming 路径。
+        """
         if not self._config.model:
             raise ValueError("model is required")
 
@@ -161,6 +170,35 @@ class AnnotationClient(BaseModelClient):
             raise ValueError("client is required")
 
         is_cloud = self._is_cloud_api()
+        active_emitter = emitter or self._emitter
+
+        if response_model is not None:
+            try:
+                structured_result = await call_structured_output(
+                    self,
+                    StructuredOutputRequest(
+                        messages=messages,
+                        response_model=response_model,
+                        call_type=call_type or "annotation",
+                        enable_thinking=enable_thinking,
+                        timeout=self._config.timeout_s,
+                        stream=True,
+                        stream_emitter=active_emitter,
+                    ),
+                )
+            except StructuredOutputError as exc:
+                # 中文注释：结构化解析失败时，模型响应可能已经返回，必须保留 token 补记。
+                if call_type:
+                    token_task_type = "annotation" if self._task_type == "annotation_fallback" else None
+                    self._record_estimated_token_usage_from_messages(
+                        messages,
+                        exc.response_text,
+                        call_type,
+                        chunk_id,
+                        task_type=token_task_type,
+                    )
+                raise
+            return structured_result.parsed, structured_result.raw_response
 
         request_params: dict[str, Any] = {
             "model": self._config.model,
@@ -176,32 +214,7 @@ class AnnotationClient(BaseModelClient):
             request_params["reasoning_effort"] = "none"
             request_params["extra_body"] = {"think": False}
 
-        if response_model is not None:
-            request_params["response_format"] = self._build_json_schema(response_model)
-
-        active_emitter = emitter or self._emitter
         response = await self._call_api_stream(request_params, is_cloud=is_cloud, emitter=active_emitter)
-
-        if response_model is not None:
-            try:
-                parsed_result = self._parse_structured_response(response, response_model)
-            except Exception:
-                # 中文注释：结构化解析失败时，说明模型响应已经返回，只是后处理没能吃下；
-                # 这类尝试同样消耗了 token，不能因为 raise 就直接漏账。
-                if call_type:
-                    # 中文注释：annotation_fallback 只是执行通道，parse-failure 这条公共兜底
-                    # 也必须继续回写 annotation 主业务桶，避免原始 token_usage 被写脏。
-                    token_task_type = "annotation" if self._task_type == "annotation_fallback" else None
-                    self._record_estimated_token_usage_from_response(
-                        messages,
-                        response,
-                        call_type,
-                        chunk_id,
-                        task_type=token_task_type,
-                    )
-                raise
-            return parsed_result, response
-
         return response
 
     def _parse_annotation(self, content: str) -> ChunkAnnotation:
