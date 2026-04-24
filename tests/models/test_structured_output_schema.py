@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from pydantic import ValidationError
+
 from src.config import TaskModelConfig
 from src.models.annotation import AnnotationClient
 from src.models.disambiguation import DisambiguationClient
@@ -151,43 +153,35 @@ class TestStructuredOutputSchema(unittest.TestCase):
         self.assertEqual(normalized.thinking_content, "她其实就是白芷")
         self.assertEqual(normalized.reasoning_tokens, 42)
 
-    def test_cloud_disambiguation_accepts_legacy_mapping_shape_from_json_object_provider(self) -> None:
+    def test_cloud_disambiguation_rejects_legacy_mapping_shape(self) -> None:
         """
         创建时间: 2026-04-24
-        任务: fix-cloud-disambig-json-object-legacy-shape
-        说明: DeepSeek 等 json_object provider 可能按旧 prompt 输出 dict 映射；
-        云端兼容模型应在本地解析阶段接住旧形状，再归一化回内部标准结构。
+        任务: unify-disambig-transport-record-arrays
+        说明: 消歧传输层已经统一为记录数组；旧 dict 映射应直接校验失败，避免静默吞掉格式回退。
         """
-        cloud_response = CloudDisambiguateResponseModel.model_validate(
-            {
-                "canonical_decisions": {
-                    "叶哲泰": "叶哲泰",
-                    "一名男红卫兵": "男红卫兵",
-                },
-                "alias_confidence": {
-                    "叶哲泰": "high",
-                    "一名男红卫兵": "medium",
-                },
-                "entity_types": {
-                    "叶哲泰": "character",
-                    "男红卫兵": "group",
-                },
-                "entity_relations": [
-                    {"from": "男红卫兵", "to": "叶哲泰", "type": "敌对"},
-                ],
-                "evidence_sources": {
-                    "一名男红卫兵": ["原文例句"],
-                },
-            }
-        )
-
-        normalized = normalize_disambiguate_response(cloud_response)
-
-        self.assertEqual(normalized.canonical_decisions["一名男红卫兵"], "男红卫兵")
-        self.assertEqual(normalized.alias_confidence["一名男红卫兵"], "medium")
-        self.assertEqual(normalized.entity_types["男红卫兵"], "group")
-        self.assertEqual(normalized.entity_relations[0].type, "敌对")
-        self.assertEqual(normalized.evidence_sources["一名男红卫兵"], ["原文例句"])
+        with self.assertRaises(ValidationError):
+            CloudDisambiguateResponseModel.model_validate(
+                {
+                    "canonical_decisions": {
+                        "叶哲泰": "叶哲泰",
+                        "一名男红卫兵": "男红卫兵",
+                    },
+                    "alias_confidence": {
+                        "叶哲泰": "high",
+                        "一名男红卫兵": "medium",
+                    },
+                    "entity_types": {
+                        "叶哲泰": "character",
+                        "男红卫兵": "group",
+                    },
+                    "entity_relations": [
+                        {"from": "男红卫兵", "to": "叶哲泰", "type": "敌对"},
+                    ],
+                    "evidence_sources": {
+                        "一名男红卫兵": ["原文例句"],
+                    },
+                }
+            )
 
     def test_disambiguation_api_always_uses_record_array_transport_model(self) -> None:
         """

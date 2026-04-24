@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
 EmotionScore = EmotionalValence
@@ -464,8 +464,8 @@ class CloudDisambiguateResponseModel(BaseModel):
           这里将所有动态键对象改为显式记录数组，解析后再归一化回内部标准模型。
 
     修改时间: 2026-04-24
-    任务: fix-cloud-disambig-json-object-legacy-shape
-    修改内容: 兼容 json_object provider 按旧 prompt 返回的 dict 映射，解析前转换为记录数组。
+    任务: unify-disambig-transport-record-arrays
+    修改内容: 消歧传输层统一使用记录数组格式，不再兼容旧的动态键映射输出。
     """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
@@ -490,55 +490,6 @@ class CloudDisambiguateResponseModel(BaseModel):
         default_factory=list,
         description="候选称呼的证据来源列表。",
     )
-
-    @field_validator("canonical_decisions", mode="before")
-    @classmethod
-    def _coerce_canonical_decisions(cls, value: Any) -> Any:
-        """
-        创建时间: 2026-04-24
-        任务: fix-cloud-disambig-json-object-legacy-shape
-        说明: DeepSeek 等 json_object 模式不会被 strict schema 强约束，可能仍按旧 prompt 输出映射对象；
-              这里只在解析入口转换形状，保留对 strict json_schema 的数组记录契约。
-        """
-        if isinstance(value, dict):
-            return [{"name": str(name), "canonical": str(canonical)} for name, canonical in value.items()]
-        return value
-
-    @field_validator("alias_confidence", mode="before")
-    @classmethod
-    def _coerce_alias_confidence(cls, value: Any) -> Any:
-        """
-        创建时间: 2026-04-24
-        任务: fix-cloud-disambig-json-object-legacy-shape
-        说明: 将旧格式 {"称呼": "high"} 转成云端记录数组，避免 json_object 返回后在本地校验阶段失败。
-        """
-        if isinstance(value, dict):
-            return [{"name": str(name), "confidence": str(confidence)} for name, confidence in value.items()]
-        return value
-
-    @field_validator("entity_types", mode="before")
-    @classmethod
-    def _coerce_entity_types(cls, value: Any) -> Any:
-        """
-        创建时间: 2026-04-24
-        任务: fix-cloud-disambig-json-object-legacy-shape
-        说明: 将旧格式 {"实体": "character"} 转成记录数组，兼容 prompt 尚未区分 provider 的历史输出。
-        """
-        if isinstance(value, dict):
-            return [{"name": str(name), "entity_type": str(entity_type)} for name, entity_type in value.items()]
-        return value
-
-    @field_validator("evidence_sources", mode="before")
-    @classmethod
-    def _coerce_evidence_sources(cls, value: Any) -> Any:
-        """
-        创建时间: 2026-04-24
-        任务: fix-cloud-disambig-json-object-legacy-shape
-        说明: 兼容旧的 evidence_sources 映射形状，保持云端响应归一化入口完整。
-        """
-        if isinstance(value, dict):
-            return [{"name": str(name), "sources": sources} for name, sources in value.items()]
-        return value
 
 
 class ChunkAnnotation(BaseModel):
