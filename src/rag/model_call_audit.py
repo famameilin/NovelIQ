@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel
 
 from src.models.interactions import record_model_interaction
@@ -63,6 +64,10 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     修改时间: 2026-04-24
     任务: fix-structured-output-review-findings
     修改内容: 仅在 provider 已返回 raw_response 时补记 token，避免本地 prompt 合同校验失败被误记为模型消耗。
+
+    修改时间: 2026-04-24
+    任务: log-level3-evidence-gaps
+    修改内容: 补充结构化模型调用开始、成功和失败日志，暴露 mention/rerank 阶段的长等待来源。
     """
     start_time = time.time()
     response: Any = None
@@ -72,6 +77,20 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
     reasoning_tokens: int | None = None
     structured_result: Any = None
     is_cloud = client.is_cloud_api() if hasattr(client, "is_cloud_api") else False
+    model_name = getattr(getattr(client, "_config", None), "model", None)
+
+    logger.info(
+        "structured model call start: run_id={} chunk_id={} interaction_type={} call_type={} model={} "
+        "provider={} timeout_s={} thinking={}",
+        run_id,
+        chunk_id,
+        interaction_type,
+        call_type,
+        model_name,
+        "cloud" if is_cloud else "local",
+        timeout,
+        enable_thinking,
+    )
 
     try:
         structured_result = await call_structured_output(
@@ -124,6 +143,17 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
             error_message=str(exc),
             session=getattr(client, "_session", None),
         )
+        logger.warning(
+            "structured model call failed: run_id={} chunk_id={} interaction_type={} call_type={} model={} "
+            "duration_ms={} error={}",
+            run_id,
+            chunk_id,
+            interaction_type,
+            call_type,
+            model_name,
+            duration_ms,
+            str(exc),
+        )
         raise
 
     duration_ms = int((time.time() - start_time) * 1000)
@@ -144,4 +174,16 @@ async def audited_structured_model_call[TResponseModel: BaseModel, TNormalized](
         session=getattr(client, "_session", None),
     )
     client._record_estimated_token_usage_from_messages(messages, response_text, call_type, chunk_id)
+    logger.info(
+        "structured model call complete: run_id={} chunk_id={} interaction_type={} call_type={} model={} "
+        "duration_ms={} response_chars={} thinking_chars={}",
+        run_id,
+        chunk_id,
+        interaction_type,
+        call_type,
+        model_name,
+        duration_ms,
+        len(response_text or ""),
+        len(thinking_content or ""),
+    )
     return normalized

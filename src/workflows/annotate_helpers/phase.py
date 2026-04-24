@@ -200,6 +200,7 @@ async def _init_annotation_phase_with_config(
         config.novel_id,
         config.use_rag,
         run_id=config.run_id,
+        emitter=config.emitter,
     )
     if evidence_provider is not None:
         await evidence_provider.ensure_level3_ready()

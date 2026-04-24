@@ -16,10 +16,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from src.api.models.events import StreamEvent
 from src.config import TaskType, settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
@@ -97,6 +99,7 @@ def _init_evidence_provider(
     novel_id: str,
     use_context: bool,
     run_id: str | None = None,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> DisambigContextProvider | None:
     """初始化 evidence provider
 
@@ -104,6 +107,10 @@ def _init_evidence_provider(
     修改者: TraeAI
     任务: implement-level3-vector-retrieval
     修改内容: 支持 Level 3 向量检索，传入 session 和 embedding_client
+
+    修改时间: 2026-04-24
+    任务: level3-progress-sse
+    修改内容: 将标注流程 emitter 传入 evidence provider，让 Level3/mention 长耗时阶段能推送 SSE 进度。
     """
     if not use_context or not settings.rag.enabled:
         return None
@@ -145,6 +152,7 @@ def _init_evidence_provider(
         level3_top_k=settings.rag.level3_top_k,
         mention_extractor=mention_extractor,
         level3_reranker=level3_reranker,
+        progress_emitter=emitter,
     )
 
     return evidence_provider
