@@ -49,6 +49,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.rag.authority import Level1AuthorityProvider
@@ -207,19 +209,31 @@ class DisambigContextProvider:
         修改时间: 2026-04-23
         任务: level3-mention-retrieval
         修改说明: 支持 mention_queries；mention 召回结果仅通过 metadata 标记来源，不扩张 prompt contract。
+
+        修改时间: 2026-04-24
+        任务: fix-level3-provider-readiness-drift
+        修改说明: 即使 `is_available()` 先前通过，也要在 provider 入口做一次 async readiness 确认；
+                  若此时发现 schema/维度漂移，则记录告警并安全降级为无 Level3 证据。
         """
         bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
 
         if self._level3_enabled and self.is_level3_available():
-            level3_results = await self._collect_level3_results(
-                context_text=context_text,
-                exclude_chunk_ids=exclude_chunk_ids,
-                max_chunk_id=max_chunk_id,
-                mention_queries=mention_queries,
-                active_entity_names=self._extract_active_entity_names(bundle),
-                candidate_names=set(bundle.requested_names),
-                current_chunk=current_chunk,
-            )
+            try:
+                await self._level3.ensure_level3_ready()
+                level3_results = await self._collect_level3_results(
+                    context_text=context_text,
+                    exclude_chunk_ids=exclude_chunk_ids,
+                    max_chunk_id=max_chunk_id,
+                    mention_queries=mention_queries,
+                    active_entity_names=self._extract_active_entity_names(bundle),
+                    candidate_names=set(bundle.requested_names),
+                    current_chunk=current_chunk,
+                )
+            except Level3NotReadyError as exc:
+                # 中文注释：provider 侧必须把 readiness 漂移视为“本次无 Level3 证据”，
+                # 不能因为 schema/维度晚于 is_available() 才暴露，就把整条标注链路直接打断。
+                logger.warning("Level3 skipped during evidence collection: {}", exc)
+                return bundle
             bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
             bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
 

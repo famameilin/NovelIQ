@@ -75,6 +75,30 @@ async def test_generate_chunk_embeddings_fails_fast_on_dimension_mismatch() -> N
 
 
 @pytest.mark.asyncio
+async def test_generate_chunk_embeddings_fails_fast_when_embedding_client_init_fails() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-level3-embedding-init-failfast
+    说明: paragraph rerank 已是 Level3 硬前提，EmbeddingClient 初始化失败时 preprocess 必须直接失败，
+          不能再静默跳过并留下永久 not-ready 的 run。
+    """
+    with (
+        patch("src.models.local.embedding.EmbeddingClient", side_effect=ValueError("missing embedding config")),
+        patch("src.workflows.preprocess.ensure_chunk_embeddings_schema") as mock_ensure_schema,
+        patch("src.workflows.preprocess.ensure_paragraph_embeddings_schema") as mock_ensure_paragraph_schema,
+    ):
+        with pytest.raises(RuntimeError, match="embedding client initialization failed"):
+            await _generate_chunk_embeddings(
+                session=MagicMock(),
+                run_id="run-1",
+                all_chunks=[Chunk(index=1, text="测试文本", start=0, end=4)],
+            )
+
+    mock_ensure_schema.assert_not_called()
+    mock_ensure_paragraph_schema.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_generate_chunk_embeddings_fails_fast_on_missing_chunk_embedding() -> None:
     """
     创建时间: 2026-04-24
