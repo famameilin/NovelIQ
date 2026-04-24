@@ -351,8 +351,8 @@ def _split_chunk_paragraphs(chunk: Chunk) -> list[tuple[int, int, str]]:
 
     创建时间: 2026-04-24
     任务: level3-paragraph-rerank
-    说明: 当前 chunks 表未持久化全文 char_offset，因此这里的 start/end 明确定义为 chunk 内 offset；
-          后续若补齐全文 offset，可在不改变 paragraph_index 主键的前提下增加全局范围字段。
+    说明: 这里专门返回 chunk 内 local offset；
+          全局 offset 由调用方基于 `chunk.start` 统一折算，避免 local/global 语义再次混淆。
     """
     if not chunk.text.strip():
         return []
@@ -399,16 +399,30 @@ async def _generate_paragraph_embedding_rows(
     任务: fix-paragraph-embedding-partial-write
     修改说明: paragraph embedding 缺失已是 Level3 硬故障，这里改为 fail fast，
               避免 preprocess 成功但后续 readiness 永远失败。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: paragraph row 直接落显式的 local/global offset，不再继续写旧的歧义字段。
     """
-    paragraph_refs: list[tuple[int, int, int, int, str]] = []
+    paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
     for chunk in all_chunks:
-        for paragraph_index, (start_char, end_char, paragraph_text) in enumerate(_split_chunk_paragraphs(chunk)):
-            paragraph_refs.append((chunk.index, paragraph_index, start_char, end_char, paragraph_text))
+        for paragraph_index, (local_start_char, local_end_char, paragraph_text) in enumerate(_split_chunk_paragraphs(chunk)):
+            paragraph_refs.append(
+                (
+                    chunk.index,
+                    paragraph_index,
+                    local_start_char,
+                    local_end_char,
+                    chunk.start + local_start_char,
+                    chunk.start + local_end_char,
+                    paragraph_text,
+                )
+            )
 
     if not paragraph_refs:
         return []
 
-    paragraph_texts = [paragraph_text for _, _, _, _, paragraph_text in paragraph_refs]
+    paragraph_texts = [paragraph_text for _, _, _, _, _, _, paragraph_text in paragraph_refs]
     paragraph_embeddings = await embedding_client.embed_texts(paragraph_texts)
     if len(paragraph_embeddings) != len(paragraph_refs):
         raise RuntimeError(
@@ -418,7 +432,15 @@ async def _generate_paragraph_embedding_rows(
 
     rows = []
     missing_refs: list[tuple[int, int]] = []
-    for (chunk_id, paragraph_index, start_char, end_char, paragraph_text), embedding in zip(
+    for (
+        chunk_id,
+        paragraph_index,
+        local_start_char,
+        local_end_char,
+        global_start_char,
+        global_end_char,
+        paragraph_text,
+    ), embedding in zip(
         paragraph_refs,
         paragraph_embeddings,
         strict=True,
@@ -437,8 +459,10 @@ async def _generate_paragraph_embedding_rows(
                 chunk_id=chunk_id,
                 paragraph_index=paragraph_index,
                 paragraph_text=paragraph_text,
-                start_char=start_char,
-                end_char=end_char,
+                local_start_char=local_start_char,
+                local_end_char=local_end_char,
+                global_start_char=global_start_char,
+                global_end_char=global_end_char,
                 embedding_vector=embedding,
             )
         )

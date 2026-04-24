@@ -51,3 +51,20 @@ def test_ensure_paragraph_embeddings_schema_creates_table_in_runtime_schema(db_s
         {"table_name": f"{runtime_schema}.paragraph_embeddings"},
     ).scalar_one_or_none()
     assert table_regclass is not None
+
+    columns = set(
+        db_session.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = :schema_name
+                  AND table_name = 'paragraph_embeddings'
+                """
+            ),
+            {"schema_name": runtime_schema},
+        ).scalars().all()
+    )
+    assert {"local_start_char", "local_end_char", "global_start_char", "global_end_char"} <= columns
+    assert "start_char" not in columns
+    assert "end_char" not in columns

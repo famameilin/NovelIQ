@@ -163,6 +163,13 @@ def test_create_and_insert(db_session, mock_embedding) -> None:
     rows = chunk_repo.fetch_chunk_texts(run_id)
     assert len(rows) == len(chunks)
     assert rows[0][0] == 0
+    offset_row = db_session.execute(
+        text("SELECT char_offset, char_end_offset FROM chunks WHERE run_id = :run_id AND chunk_id = 0"),
+        {"run_id": run_id},
+    ).fetchone()
+    assert offset_row is not None
+    assert offset_row.char_offset == chunks[0].start
+    assert offset_row.char_end_offset == chunks[0].end
 
 
 def test_insert_cloud_analysis(db_session) -> None:

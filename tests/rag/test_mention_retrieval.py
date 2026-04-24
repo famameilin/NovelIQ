@@ -137,8 +137,10 @@ def test_build_semantic_recall_items_freezes_rerank_metadata_contract() -> None:
                 local_preview="红衣女子回头看向众人。",
                 paragraph_index=2,
                 paragraph_semantic_score=0.95,
-                paragraph_start_char=18,
-                paragraph_end_char=31,
+                paragraph_local_start_char=18,
+                paragraph_local_end_char=31,
+                paragraph_global_start_char=318,
+                paragraph_global_end_char=331,
                 chunk_semantic_score=0.82,
                 business_rerank_score=1.11,
                 final_rank_score=1.11,
@@ -164,6 +166,8 @@ def test_build_semantic_recall_items_freezes_rerank_metadata_contract() -> None:
     assert item.metadata["paragraph_semantic_score"] == 0.95
     assert item.metadata["business_rerank_score"] == 1.11
     assert item.metadata["final_rank_score"] == 1.11
+    assert item.metadata["paragraph_local_start_char"] == 18
+    assert item.metadata["paragraph_global_start_char"] == 318
     assert item.score == 1.11
     assert item.metadata["business_rerank_method"] == "mention_feature_rerank"
 
