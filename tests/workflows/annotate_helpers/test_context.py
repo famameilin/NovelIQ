@@ -546,8 +546,24 @@ def test_build_optional_task_model_client_returns_none_when_config_absent():
     任务: llm-mention-rerank-chain
     说明: mention/rerank 未配置时应保持禁用，不创建伪客户端去污染现有规则/确定性主链。
     """
-    assert _build_optional_task_model_client("mention_extraction", novel_id="novel-x", session=object()) is None
-    assert _build_optional_task_model_client("level3_rerank", novel_id="novel-x", session=object()) is None
+    assert (
+        _build_optional_task_model_client(
+            "mention_extraction",
+            enabled=False,
+            novel_id="novel-x",
+            session=object(),
+        )
+        is None
+    )
+    assert (
+        _build_optional_task_model_client(
+            "level3_rerank",
+            enabled=False,
+            novel_id="novel-x",
+            session=object(),
+        )
+        is None
+    )
 
 
 def test_build_optional_task_model_client_raises_on_incomplete_config(monkeypatch):
@@ -556,11 +572,38 @@ def test_build_optional_task_model_client_raises_on_incomplete_config(monkeypatc
     任务: llm-mention-rerank-chain
     说明: 可选增强模型一旦配置半截，就应立刻报错，不能静默退回导致用户误以为已启用。
     """
+    monkeypatch.setattr(settings.rag, "mention_extraction_enabled", True)
     monkeypatch.setattr(settings.models.mention_extraction, "base_url", "http://localhost:9000")
     monkeypatch.setattr(settings.models.mention_extraction, "model", None)
 
     with pytest.raises(RuntimeError, match="optional task model config incomplete"):
-        _build_optional_task_model_client("mention_extraction", novel_id="novel-x", session=object())
+        _build_optional_task_model_client(
+            "mention_extraction",
+            enabled=settings.rag.mention_extraction_enabled,
+            novel_id="novel-x",
+            session=object(),
+        )
+
+
+def test_build_optional_task_model_client_raises_when_enabled_but_config_absent(monkeypatch):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: rag 开关显式启用后，若模型配置完全缺失，应直接报错，避免“以为开了其实没跑”。
+    """
+    monkeypatch.setattr(settings.rag, "level3_rerank_enabled", True)
+    monkeypatch.setattr(settings.models.level3_rerank, "base_url", None)
+    monkeypatch.setattr(settings.models.level3_rerank, "model", None)
+    monkeypatch.setattr(settings.models.level3_rerank, "api_key", None)
+    monkeypatch.setattr(settings.models.level3_rerank, "timeout_s", None)
+
+    with pytest.raises(RuntimeError, match="optional task model enabled but config is absent"):
+        _build_optional_task_model_client(
+            "level3_rerank",
+            enabled=settings.rag.level3_rerank_enabled,
+            novel_id="novel-x",
+            session=object(),
+        )
 
 
 def test_init_evidence_provider_injects_optional_mention_and_rerank_clients(monkeypatch):
@@ -578,6 +621,8 @@ def test_init_evidence_provider_injects_optional_mention_and_rerank_clients(monk
     fake_level3_reranker = object()
     fake_embedding_client = object()
 
+    monkeypatch.setattr(settings.rag, "mention_extraction_enabled", True)
+    monkeypatch.setattr(settings.rag, "level3_rerank_enabled", True)
     monkeypatch.setattr(settings.models.mention_extraction, "base_url", "http://localhost:9001")
     monkeypatch.setattr(settings.models.mention_extraction, "model", "mention-model")
     monkeypatch.setattr(settings.models.level3_rerank, "base_url", "http://localhost:9002")
