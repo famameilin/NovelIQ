@@ -445,7 +445,7 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_prompt_context_with_shared_evidence_falls_back_to_level12_when_required_level3_unavailable() -> (
+async def test_build_prompt_context_with_shared_evidence_raises_when_required_level3_unavailable() -> (
     None
 ):
     evidence_provider = _FakeRagRetriever(
@@ -463,8 +463,8 @@ async def test_build_prompt_context_with_shared_evidence_falls_back_to_level12_w
         level3_available=False,
         requires_level3=True,
     )
-    with patch("src.workflows.annotate_helpers.disambiguation.pipeline.logger.warning") as mock_warning:
-        prompt_context = await pipeline_mod._build_prompt_context_with_shared_evidence(
+    with pytest.raises(RuntimeError, match="Level 3 vector retrieval is required but not available"):
+        await pipeline_mod._build_prompt_context_with_shared_evidence(
             DisambiguationPromptContext(existing_character_hint="【已存在角色锚点】\n- 白芷"),
             evidence_provider,
             [{"name": "灰衣人", "count": 3}],
@@ -472,11 +472,7 @@ async def test_build_prompt_context_with_shared_evidence_falls_back_to_level12_w
             current_chunk=12,
             active_entity_fallback_names={"灰衣人"},
         )
-    assert prompt_context is not None
-    assert prompt_context.shared_evidence_context is not None
-    assert "<Disambig_Candidates>" in prompt_context.shared_evidence_context
-    assert evidence_provider.calls[0]["method"] == "collect_evidence"
-    mock_warning.assert_called_once()
+    assert evidence_provider.calls == []
 
 
 @pytest.mark.asyncio
