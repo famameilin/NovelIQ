@@ -9,7 +9,7 @@ RAG Level3 向量检索边界。
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Never
 
 from loguru import logger
 
@@ -54,7 +54,7 @@ class Level3VectorEvidence:
         self._setup_checked = False
         self._paragraph_rerank_available: bool | None = None
 
-    def _raise_not_ready(self, message: str, *, cause: Exception | None = None) -> None:
+    def _raise_not_ready(self, message: str, *, cause: Exception | None = None) -> Never:
         """
         创建时间: 2026-04-24
         任务: fix-level3-readiness-revalidation
@@ -93,10 +93,13 @@ class Level3VectorEvidence:
         """
         if self._embedding_client is None or self._session is None or self._run_id is None:
             self._raise_not_ready("Level 3 requires embedding client, session, and run_id")
+        embedding_client = self._embedding_client
+        session = self._session
+        run_id = self._run_id
 
         # 中文注释：provider 会在每次入口显式调用 readiness，这里不能因历史成功缓存而跳过重检；
         # 否则 paragraph schema / 数据漂移会被吞掉，破坏“paragraph rerank 是硬前提”的合同。
-        actual_dim = await self._embedding_client.detect_embedding_dimension()
+        actual_dim = await embedding_client.detect_embedding_dimension()
         if actual_dim != self._expected_embedding_dim:
             self._raise_not_ready(
                 f"Level 3 embedding dimension mismatch: configured={self._expected_embedding_dim}, actual={actual_dim}"
@@ -111,31 +114,31 @@ class Level3VectorEvidence:
         from src.storage.vector_schema import validate_chunk_embeddings_schema, validate_paragraph_embeddings_schema
 
         try:
-            validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
+            validate_chunk_embeddings_schema(session, self._expected_embedding_dim)
         except ValueError as exc:
             self._raise_not_ready(str(exc), cause=exc)
-        if not has_embeddings(self._session, self._run_id):
-            self._raise_not_ready(f"Level 3 embeddings not found for run_id={self._run_id}")
-        missing_chunk_embedding_ids = get_missing_embedding_chunk_ids(self._session, self._run_id)
+        if not has_embeddings(session, run_id):
+            self._raise_not_ready(f"Level 3 embeddings not found for run_id={run_id}")
+        missing_chunk_embedding_ids = get_missing_embedding_chunk_ids(session, run_id)
         if missing_chunk_embedding_ids:
             preview_ids = missing_chunk_embedding_ids[:10]
             self._raise_not_ready(
                 "Level 3 chunk embeddings incomplete for "
-                f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(missing_chunk_embedding_ids)}"
+                f"run_id={run_id}, chunk_ids={preview_ids}, total={len(missing_chunk_embedding_ids)}"
             )
 
         try:
-            validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
+            validate_paragraph_embeddings_schema(session, self._expected_embedding_dim)
         except ValueError as exc:
             self._raise_not_ready(str(exc), cause=exc)
-        if not has_paragraph_embeddings(self._session, self._run_id):
-            self._raise_not_ready(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
-        incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
+        if not has_paragraph_embeddings(session, run_id):
+            self._raise_not_ready(f"Level 3 paragraph embeddings not found for run_id={run_id}")
+        incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(session, run_id)
         if incomplete_chunk_ids:
             preview_ids = incomplete_chunk_ids[:10]
             self._raise_not_ready(
                 "Level 3 paragraph embeddings incomplete for "
-                f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(incomplete_chunk_ids)}"
+                f"run_id={run_id}, chunk_ids={preview_ids}, total={len(incomplete_chunk_ids)}"
             )
 
         self._available = True

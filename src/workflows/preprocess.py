@@ -406,7 +406,11 @@ async def _generate_paragraph_embedding_rows(
     """
     paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
     for chunk in all_chunks:
-        for paragraph_index, (local_start_char, local_end_char, paragraph_text) in enumerate(_split_chunk_paragraphs(chunk)):
+        for paragraph_index, (
+            local_start_char,
+            local_end_char,
+            paragraph_text,
+        ) in enumerate(_split_chunk_paragraphs(chunk)):
             paragraph_refs.append(
                 (
                     chunk.index,
