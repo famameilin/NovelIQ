@@ -153,8 +153,8 @@ class StructuredOutputSettings:
 
     创建时间: 2026-04-24
     任务: structured-output-adapter-instructor-unification
-    说明: 集中配置各任务默认使用 json_schema / json_object / instructor_json，
-          避免业务模块散落 provider 兼容判断。
+    说明: 集中配置各任务默认使用 json_schema / json_object，
+          并允许按 provider marker 覆盖，避免业务模块散落 provider 兼容判断。
     """
 
     annotation: str = "json_schema"
@@ -164,9 +164,10 @@ class StructuredOutputSettings:
     full_disambig: str = "json_schema"
     level3_rerank: str = "json_schema"
     diagnosis: str = "json_schema"
+    provider_overrides: dict[str, str] = field(default_factory=lambda: {"deepseek": "json_object"})
 
 
-_STRUCTURED_OUTPUT_ALLOWED_MODES = {"json_schema", "json_object", "instructor_json"}
+_STRUCTURED_OUTPUT_ALLOWED_MODES = {"json_schema", "json_object"}
 
 
 def _parse_structured_output_mode(data: dict[str, Any], key: str, default: str) -> str:
@@ -194,6 +195,18 @@ def _parse_structured_output_settings(data: dict[str, Any] | None) -> Structured
     """
     json_data = data or {}
     defaults = StructuredOutputSettings()
+    provider_overrides = json_data.get("provider_overrides", defaults.provider_overrides)
+    if not isinstance(provider_overrides, dict):
+        raise ValueError("structured_output.provider_overrides 必须是对象")
+    normalized_provider_overrides: dict[str, str] = {}
+    for marker, mode in provider_overrides.items():
+        marker_text = str(marker).strip().lower()
+        if not marker_text:
+            raise ValueError("structured_output.provider_overrides 不允许空 provider marker")
+        if mode not in _STRUCTURED_OUTPUT_ALLOWED_MODES:
+            allowed = ", ".join(sorted(_STRUCTURED_OUTPUT_ALLOWED_MODES))
+            raise ValueError(f"structured_output.provider_overrides.{marker_text} 必须是以下值之一: {allowed}")
+        normalized_provider_overrides[marker_text] = str(mode)
     return StructuredOutputSettings(
         annotation=_parse_structured_output_mode(json_data, "annotation", defaults.annotation),
         annotation_fallback=_parse_structured_output_mode(
@@ -214,6 +227,7 @@ def _parse_structured_output_settings(data: dict[str, Any] | None) -> Structured
         full_disambig=_parse_structured_output_mode(json_data, "full_disambig", defaults.full_disambig),
         level3_rerank=_parse_structured_output_mode(json_data, "level3_rerank", defaults.level3_rerank),
         diagnosis=_parse_structured_output_mode(json_data, "diagnosis", defaults.diagnosis),
+        provider_overrides=normalized_provider_overrides,
     )
 
 
