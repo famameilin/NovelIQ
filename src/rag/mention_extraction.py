@@ -137,8 +137,22 @@ def _build_mention(raw_text: str, role_word: str, sentence_text: str) -> PersonM
     任务: level3-mention-review-fix
     修改说明: 增补位置线索，并让纯指代角色词保留指示词以便正确分桶。
     """
-    appearance = [cue for cue in APPEARANCE_CUES if cue in raw_text or cue in sentence_text]
-    actions = [cue for cue in ACTION_CUES if cue in raw_text or cue in sentence_text]
+    return _build_mention_from_cue_text(raw_text, role_word, sentence_text, raw_text)
+
+
+def _build_mention_from_cue_text(
+    raw_text: str,
+    role_word: str,
+    sentence_text: str,
+    cue_text: str,
+) -> PersonMention:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-local-cue-scope
+    说明: 基于当前 mention 的局部文本抽取线索，避免同一句其他人物的动作被误绑到本 mention。
+    """
+    appearance = [cue for cue in APPEARANCE_CUES if cue in raw_text or cue in cue_text]
+    actions = [cue for cue in ACTION_CUES if cue in raw_text or cue in cue_text]
     locations = [cue for cue in LOCATION_CUES if cue in raw_text]
     cues: dict[str, str | list[str]] = {
         "role_word": role_word,
@@ -154,11 +168,31 @@ def _build_mention(raw_text: str, role_word: str, sentence_text: str) -> PersonM
     )
 
 
+def _build_mention_cue_text(sentence_text: str, start: int, end: int) -> str:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-local-cue-scope
+    说明: 截取当前 mention 到下一个人物 mention 前的局部文本，作为动作/外貌线索扫描范围。
+    """
+    next_start: int | None = None
+    for pattern in _MENTION_PATTERNS:
+        for match in pattern.finditer(sentence_text, end):
+            if match.start() < end:
+                continue
+            next_start = match.start() if next_start is None else min(next_start, match.start())
+            break
+    return sentence_text[start : next_start if next_start is not None else len(sentence_text)]
+
+
 def extract_person_mentions(text: str) -> list[PersonMention]:
     """
     创建时间: 2026-04-23
     任务: level3-mention-retrieval
     说明: 从文本中保守抽取描述性人物 mention；规则宁窄勿宽，避免高频上游噪声。
+
+    修改时间: 2026-04-24
+    任务: fix-mention-local-cue-scope
+    修改说明: 每个 mention 只从局部 cue_text 抽动作/外貌线索，避免多人物共句时互相污染。
     """
     mentions: list[PersonMention] = []
     seen: set[tuple[str, str]] = set()
@@ -177,6 +211,7 @@ def extract_person_mentions(text: str) -> list[PersonMention]:
                 if key in seen:
                     continue
                 seen.add(key)
-                mentions.append(_build_mention(raw_text, role_word, sentence_text))
+                cue_text = _build_mention_cue_text(sentence_text, match.start(), match.end())
+                mentions.append(_build_mention_from_cue_text(raw_text, role_word, sentence_text, cue_text))
 
     return mentions
