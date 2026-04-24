@@ -48,6 +48,10 @@ class SimilarChunkRow:
     修改时间: 2026-04-24
     任务: split-level3-score-fields
     修改说明: 显式拆分 chunk/paragraph/business/final 四类分数，避免 `similarity` 在多阶段 rerank 中持续变义。
+
+    修改时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    修改说明: 增补 LLM mention source、query variant 与模型 rerank 观察字段，保持上层 metadata 合同可冻结。
     """
 
     chunk_id: int
@@ -58,6 +62,9 @@ class SimilarChunkRow:
     mention_text: str | None = None
     mention_type: str | None = None
     matched_features: tuple[str, ...] = ()
+    mention_source: str | None = None
+    mention_confidence: float | None = None
+    query_variant: str | None = None
     local_preview: str | None = None
     paragraph_index: int | None = None
     paragraph_local_start_char: int | None = None
@@ -67,6 +74,11 @@ class SimilarChunkRow:
     chunk_semantic_score: float | None = None
     paragraph_semantic_score: float | None = None
     business_rerank_score: float | None = None
+    model_rerank_score: float | None = None
+    model_rerank_reason: str | None = None
+    model_confidence: float | None = None
+    model_rerank_enabled: bool = False
+    rerank_source: str | None = None
     final_rank_score: float | None = None
     feature_overlap: tuple[str, ...] = ()
     active_entity_bonus: float = 0.0

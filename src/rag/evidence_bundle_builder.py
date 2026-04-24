@@ -8,7 +8,7 @@ RAG EvidenceBundle 组装器。
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
@@ -169,6 +169,10 @@ class EvidenceBundleBuilder:
         修改时间: 2026-04-24
         任务: full-global-offset-rollout
         修改说明: paragraph offset metadata 改为显式 local/global 字段，不再继续输出旧的歧义字段名。
+
+        修改时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        修改说明: 冻结 LLM mention / query_variant / model rerank 观察字段，不改变 EvidenceBundle 主结构。
         """
         chunk_semantic_score = (
             result.chunk_semantic_score
@@ -197,6 +201,9 @@ class EvidenceBundleBuilder:
             "query_kind": result.query_kind,
             "mention_text": result.mention_text,
             "mention_type": result.mention_type,
+            "mention_source": result.mention_source,
+            "mention_confidence": result.mention_confidence,
+            "query_variant": result.query_variant,
             "matched_features": list(result.matched_features),
             "feature_overlap": list(result.feature_overlap),
             "active_entity_bonus": result.active_entity_bonus,
@@ -214,6 +221,11 @@ class EvidenceBundleBuilder:
             "chunk_semantic_score": chunk_semantic_score,
             "paragraph_semantic_score": paragraph_semantic_score,
             "business_rerank_score": business_rerank_score,
+            "model_rerank_score": result.model_rerank_score,
+            "model_rerank_reason": result.model_rerank_reason,
+            "model_confidence": result.model_confidence,
+            "model_rerank_enabled": result.model_rerank_enabled,
+            "rerank_source": result.rerank_source,
             "final_rank_score": final_rank_score,
         }
         if result.local_preview:
@@ -226,6 +238,8 @@ class EvidenceBundleBuilder:
             )
         if result.business_rerank_score is not None:
             metadata["business_rerank_method"] = "mention_feature_rerank"
+        if result.model_rerank_score is not None:
+            metadata["rerank_method"] = "model_rerank"
         return metadata
 
     def build_semantic_recall_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
@@ -243,10 +257,15 @@ class EvidenceBundleBuilder:
         修改时间: 2026-04-24
         任务: level3-mention-rerank
         修改说明: 写入 mention-aware rerank 分数与加权原因，便于后续评测和日志核对。
+
+        修改时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        修改说明: 显式转换 final_rank_score，避免 metadata 的宽 object 类型影响静态检查。
         """
         items: list[EvidenceItem] = []
         for result in level3_results:
             metadata = self._build_semantic_recall_metadata(result)
+            final_rank_score = cast(float | int | str | None, metadata["final_rank_score"])
             items.append(
                 EvidenceItem(
                     evidence_type="semantic_recall",
@@ -254,7 +273,7 @@ class EvidenceBundleBuilder:
                     content=result.text,
                     metadata=metadata,
                     chunk_id=result.chunk_id,
-                    score=float(metadata["final_rank_score"]),
+                    score=float(final_rank_score) if final_rank_score is not None else None,
                 )
             )
         return items

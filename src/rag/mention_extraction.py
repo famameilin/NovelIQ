@@ -9,8 +9,8 @@ Level3 描述性人物 mention 抽取。
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
+from src.rag.mention_extraction_types import PersonMention
 from src.utils.text_utils import split_sentences
 
 APPEARANCE_CUES = (
@@ -93,20 +93,6 @@ _MENTION_PATTERNS = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class PersonMention:
-    """
-    创建时间: 2026-04-23
-    任务: level3-mention-retrieval
-    说明: 描述性人物 mention 的最小结构化表示，暂不扩展 EvidenceBundle 主结构。
-    """
-
-    raw_text: str
-    mention_type: str
-    sentence_text: str
-    cues: dict[str, str | list[str]]
-
-
 def _classify_mention(
     raw_text: str,
     appearance: list[str],
@@ -173,6 +159,7 @@ def _build_mention_from_cue_text(
         mention_type=_classify_mention(raw_text, appearance, actions, locations),
         sentence_text=sentence_text,
         cues=cues,
+        source="rule",
     )
 
 
