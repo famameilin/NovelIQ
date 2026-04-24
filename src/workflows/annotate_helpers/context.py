@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from src.config import settings
+from src.config import TaskType, settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
 from src.models.local.evidence_renderer_shared import render_active_entities_from_authority
@@ -128,6 +128,9 @@ def _init_evidence_provider(
                 f"checks: {e}"
             )
 
+    mention_extractor = _init_optional_mention_extractor(novel_id=novel_id, session=conn, run_id=run_id)
+    level3_reranker = _init_optional_level3_reranker(novel_id=novel_id, session=conn, run_id=run_id)
+
     evidence_provider = DisambigContextProvider(
         graph_repo=graph_repo,
         novel_id=novel_id,
@@ -140,9 +143,143 @@ def _init_evidence_provider(
         level3_enabled=settings.rag.level3_enabled,
         similarity_threshold=settings.rag.similarity_threshold,
         level3_top_k=settings.rag.level3_top_k,
+        mention_extractor=mention_extractor,
+        level3_reranker=level3_reranker,
     )
 
     return evidence_provider
+
+
+def _init_optional_mention_extractor(
+    *,
+    novel_id: str,
+    session,
+    run_id: str | None,
+):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 仅在 mention_extraction 配置完整时初始化 LLM extractor；未配置时保持规则 fallback 主链不变。
+    """
+    model_client = _build_optional_task_model_client(
+        "mention_extraction",
+        enabled=settings.rag.mention_extraction_enabled,
+        novel_id=novel_id,
+        session=session,
+        run_id=run_id,
+    )
+    if model_client is None:
+        return None
+
+    from src.rag.mention_extraction_llm import LLMPersonMentionExtractor
+
+    return LLMPersonMentionExtractor(
+        model_client,
+        enable_thinking=settings.thinking.mention_extraction,
+    )
+
+
+def _init_optional_level3_reranker(
+    *,
+    novel_id: str,
+    session,
+    run_id: str | None,
+):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 仅在 level3_rerank 配置完整时初始化模型 reranker；否则继续走确定性 rerank fallback。
+    """
+    model_client = _build_optional_task_model_client(
+        "level3_rerank",
+        enabled=settings.rag.level3_rerank_enabled,
+        novel_id=novel_id,
+        session=session,
+        run_id=run_id,
+    )
+    if model_client is None:
+        return None
+
+    from src.rag.model_rerank_llm import LLMLevel3Reranker
+
+    return LLMLevel3Reranker(
+        model_client,
+        enable_thinking=settings.thinking.level3_rerank,
+    )
+
+
+def _build_optional_task_model_client(
+    task_type: TaskType,
+    *,
+    enabled: bool,
+    novel_id: str,
+    session,
+    run_id: str | None,
+):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 对可选增强模型统一执行“未配置则禁用、配置不完整则报错、配置完整则初始化”的收口逻辑。
+    """
+    if not enabled:
+        logger.info("optional task model disabled by rag switch: task_type={}", task_type)
+        return None
+
+    task_settings = getattr(settings.models, task_type)
+    config_keys = ("base_url", "model", "api_key", "timeout_s")
+    has_any_runtime_config = any(getattr(task_settings, key) is not None for key in config_keys)
+    if not has_any_runtime_config:
+        raise RuntimeError(f"optional task model enabled but config is absent: task_type={task_type}")
+
+    if task_settings.base_url is None or task_settings.model is None:
+        raise RuntimeError(
+            f"optional task model config incomplete: task_type={task_type} "
+            f"base_url={task_settings.base_url!r} model={task_settings.model!r}"
+        )
+
+    from src.models.local.base import BaseModelClient
+
+    # 中文注释：这里直接复用现有 BaseModelClient，避免为 mention extraction / rerank 再分叉一套 transport。
+    client = BaseModelClient(task_type=task_type, novel_id=novel_id, session=session)
+    if run_id:
+        client.set_runtime_context(novel_id, _build_optional_task_token_usage_callback(session, run_id, novel_id))
+    logger.info("optional task model initialized: task_type={} model={}", task_type, task_settings.model)
+    return client
+
+
+def _build_optional_task_token_usage_callback(session, run_id: str, novel_id: str):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-audit
+    说明: 为 mention extraction / level3 rerank 复用主链 token_usage 落库方式，
+          避免这两条可选增强链只发请求、不进统一统计账本。
+    """
+    from src.storage.repositories import StatsRepository
+
+    def _token_usage_callback(
+        cb_novel_id: str,
+        callback_task_type: str,
+        call_type: str,
+        model: str,
+        prompt_tokens: int,
+        total_tokens: int,
+        completion_tokens: int | None,
+        chunk_id: int | None,
+    ) -> None:
+        stats_repo = StatsRepository(session)
+        stats_repo.insert_token_usage(
+            run_id,
+            cb_novel_id or novel_id,
+            callback_task_type,
+            call_type,
+            model,
+            prompt_tokens,
+            total_tokens,
+            completion_tokens,
+            chunk_id,
+        )
+
+    return _token_usage_callback
 
 
 def _extract_names_from_text(text: str) -> list[str]:
@@ -236,6 +373,14 @@ async def _prepare_chunk_context_with_level3(
     创建者: TraeAI
     任务: implement-level3-vector-retrieval
     说明: 异步版本，支持 Level 3 向量检索
+
+    修改时间: 2026-04-23
+    任务: level3-history-cutoff
+    修改说明: annotation 阶段的 Level3 检索只允许查看当前 chunk 之前的历史。
+
+    修改时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    修改说明: mention extraction/query 构造收口到 provider，workflow 只透传当前 chunk 取证上下文。
     """
     from src.storage.repositories import ChunkRepository
 
@@ -273,6 +418,7 @@ async def _prepare_chunk_context_with_level3(
                 current_chunk=chunk_id,
                 context_text=chunk_text,
                 exclude_chunk_ids=[chunk_id],
+                max_chunk_id=chunk_id - 1,
             )
         elif disambig_provider.is_level3_available():
             context.evidence_bundle = await disambig_provider.collect_evidence_with_level3(
@@ -280,6 +426,7 @@ async def _prepare_chunk_context_with_level3(
                 current_chunk=chunk_id,
                 context_text=chunk_text,
                 exclude_chunk_ids=[chunk_id],
+                max_chunk_id=chunk_id - 1,
             )
         else:
             context.evidence_bundle = disambig_provider.collect_evidence(

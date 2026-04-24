@@ -16,6 +16,7 @@
 import sys
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -28,6 +29,12 @@ from src.storage.repositories import (
     RunRepository,
     StatsRepository,
 )
+from src.storage.repositories.chunk import (
+    ParagraphEmbeddingRow,
+    insert_chunk_embeddings,
+    insert_paragraph_embeddings,
+)
+from src.storage.vector_schema import ensure_chunk_embeddings_schema, ensure_paragraph_embeddings_schema
 
 
 def _create_chunks(count: int = 3) -> list[Chunk]:
@@ -71,8 +78,8 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         assert not chunk_repo.is_preprocess_complete(run_id)
 
-    def test_is_preprocess_complete_with_chunks(self, db_session):
-        """有chunks时preprocess完成"""
+    def test_is_preprocess_complete_with_chunks_when_level3_disabled(self, db_session):
+        """关闭 Level3 时，有 chunks 即可视为 preprocess 完成"""
         run_repo = RunRepository(db_session)
         novel_id = uuid.uuid4().hex[:8]
         _insert_test_novel(db_session, novel_id)
@@ -84,7 +91,93 @@ class TestStageCompleteChecks:
         chunk_repo = ChunkRepository(db_session)
         chunks = _create_chunks(1)
         chunk_repo.insert_chunks(run_id, chunks)
-        assert chunk_repo.is_preprocess_complete(run_id)
+        with (
+            patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", False),
+            patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", False),
+        ):
+            assert chunk_repo.is_preprocess_complete(run_id)
+
+    def test_is_preprocess_complete_false_when_level3_paragraph_embeddings_missing(self, db_session):
+        """
+        创建时间: 2026-04-24
+        任务: fix-preprocess-completion-level3-contract
+        说明: 当前配置要求 Level3 时，只有 chunks 或只有 chunk embeddings 都不能视为 preprocess 完成。
+        """
+        run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Test Novel",
+        )
+        chunk_repo = ChunkRepository(db_session)
+        chunks = _create_chunks(2)
+        chunk_repo.insert_chunks(run_id, chunks)
+        ensure_chunk_embeddings_schema(db_session, 1024)
+        ensure_paragraph_embeddings_schema(db_session, 1024)
+        insert_chunk_embeddings(db_session, run_id, [(0, [0.1] * 1024), (1, [0.2] * 1024)])
+
+        with (
+            patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", True),
+            patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", True),
+            patch("src.storage.repositories.chunk_repository.settings.models.semantic_chunking.embedding_dim", 1024),
+        ):
+            assert not chunk_repo.is_preprocess_complete(run_id)
+
+    def test_is_preprocess_complete_true_when_level3_embeddings_complete(self, db_session):
+        """
+        创建时间: 2026-04-24
+        任务: fix-preprocess-completion-level3-contract
+        说明: 当前配置要求 Level3 时，只有 chunk/paragraph embeddings 都完整就绪，preprocess 才算完成。
+        """
+        run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Test Novel",
+        )
+        chunk_repo = ChunkRepository(db_session)
+        chunks = _create_chunks(2)
+        chunk_repo.insert_chunks(run_id, chunks)
+        ensure_chunk_embeddings_schema(db_session, 1024)
+        ensure_paragraph_embeddings_schema(db_session, 1024)
+        insert_chunk_embeddings(db_session, run_id, [(0, [0.1] * 1024), (1, [0.2] * 1024)])
+        insert_paragraph_embeddings(
+            db_session,
+            run_id,
+            [
+                ParagraphEmbeddingRow(
+                    chunk_id=0,
+                    paragraph_index=0,
+                    paragraph_text="测试文本0",
+                    local_start_char=0,
+                    local_end_char=5,
+                    global_start_char=0,
+                    global_end_char=5,
+                    embedding_vector=[0.3] * 1024,
+                ),
+                ParagraphEmbeddingRow(
+                    chunk_id=1,
+                    paragraph_index=0,
+                    paragraph_text="测试文本1",
+                    local_start_char=0,
+                    local_end_char=5,
+                    global_start_char=100,
+                    global_end_char=105,
+                    embedding_vector=[0.4] * 1024,
+                ),
+            ],
+        )
+
+        with (
+            patch("src.storage.repositories.chunk_repository.settings.rag.embedding_enabled", True),
+            patch("src.storage.repositories.chunk_repository.settings.rag.level3_enabled", True),
+            patch("src.storage.repositories.chunk_repository.settings.models.semantic_chunking.embedding_dim", 1024),
+        ):
+            assert chunk_repo.is_preprocess_complete(run_id)
 
     def test_is_annotate_complete_no_annotations(self, db_session):
         """有chunks但无annotations时annotate未完成"""

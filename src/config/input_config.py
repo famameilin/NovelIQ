@@ -61,7 +61,15 @@ class TaskModelConfig:
             raise ValueError("model 不能为空")
 
 
-TaskType = Literal["annotation", "annotation_fallback", "incremental_disambig", "full_disambig", "diagnosis"]
+TaskType = Literal[
+    "annotation",
+    "annotation_fallback",
+    "incremental_disambig",
+    "mention_extraction",
+    "full_disambig",
+    "level3_rerank",
+    "diagnosis",
+]
 
 
 def load_task_config(task_type: TaskType) -> TaskModelConfig:

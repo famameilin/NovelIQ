@@ -29,22 +29,26 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.api.models.events import StreamEvent
-from src.chunking.chunker import chunk_documents
+from src.chunking.chunker import Chunk, chunk_documents
 from src.config import settings
 from src.ingest.reader import ingest_path
 from src.preprocess.cleaning import normalize_text
 from src.preprocess.tokenize import tokenize
 from src.storage.repositories import ChunkRepository, ChunkStyleData
-from src.storage.vector_schema import ensure_chunk_embeddings_schema
+from src.storage.vector_schema import (
+    ensure_chunk_embeddings_schema,
+    ensure_paragraph_embeddings_schema,
+)
 
 
 async def run_preprocess(
@@ -191,7 +195,7 @@ def _commit_preprocess_writes(session: Session, *, step: str) -> None:
 async def _generate_chunk_embeddings(
     session: Session,
     run_id: str,
-    all_chunks: list,
+    all_chunks: list[Chunk],
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> int:
     """
@@ -207,6 +211,25 @@ async def _generate_chunk_embeddings(
     任务: fix-preprocess-transaction-boundary
     修改内容: 在 schema 准备后和 embedding 落库后及时提交，避免 embedding 长阶段阻塞 analysis_runs 状态写回
 
+    修改时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    修改内容: 同步生成 paragraph_embeddings，供 Level3 在 chunk 粗召回结果内做局部 evidence rerank
+
+    修改时间: 2026-04-24
+    任务: fix-level3-embedding-partial-write
+    修改内容: chunk embedding 也改为 fail fast；任何 chunk 缺失向量都直接中断 preprocess，
+              避免留下粗召回范围不完整、却仍被 readiness 误判为可用的 run
+
+    修改时间: 2026-04-24
+    任务: fix-paragraph-failfast-atomicity
+    修改内容: paragraph rows 先完整生成，再统一执行 chunk/paragraph 向量落库；
+              避免 paragraph 失败时 session 中残留 chunk-only 向量写入
+
+    修改时间: 2026-04-24
+    任务: fix-level3-embedding-init-failfast
+    修改内容: EmbeddingClient 初始化失败时不再静默跳过；paragraph rerank 已是 Level3 硬前提，
+              preprocess 必须直接失败，避免 run 落入永久 not-ready 状态
+
     Args:
         session: 数据库连接
         run_id: 运行ID
@@ -217,13 +240,19 @@ async def _generate_chunk_embeddings(
         生成的 embedding 数量
     """
     from src.models.local.embedding import EmbeddingClient
-    from src.storage.repositories.chunk import insert_chunk_embeddings
+    from src.storage.repositories.chunk import (
+        ParagraphEmbeddingRow,
+        insert_chunk_embeddings,
+        insert_paragraph_embeddings,
+    )
 
     try:
         embedding_client = EmbeddingClient()
     except ValueError as e:
-        logger.warning(f"EmbeddingClient initialization failed, skipping embedding generation: {e}")
-        return 0
+        raise RuntimeError(
+            "embedding client initialization failed during preprocess: "
+            f"Level3 chunk/paragraph embeddings are required, error={e}"
+        ) from e
 
     expected_dim = settings.models.semantic_chunking.embedding_dim
     actual_dim = await embedding_client.detect_embedding_dimension()
@@ -231,7 +260,8 @@ async def _generate_chunk_embeddings(
         raise ValueError(f"Level 3 embedding dimension mismatch: configured={expected_dim}, actual={actual_dim}")
 
     ensure_chunk_embeddings_schema(session, expected_dim)
-    _commit_preprocess_writes(session, step="ensure_chunk_embeddings_schema")
+    ensure_paragraph_embeddings_schema(session, expected_dim)
+    _commit_preprocess_writes(session, step="ensure_embedding_schemas")
 
     total_chunks = len(all_chunks)
     if emitter:
@@ -245,6 +275,7 @@ async def _generate_chunk_embeddings(
         )
 
     embeddings: list[tuple[int, list[float]]] = []
+    failed_chunk_ids: list[int] = []
     for idx, chunk in enumerate(all_chunks):
         chunk_id = chunk.index
         if total_chunks > 1 and idx % 10 == 0:
@@ -262,16 +293,44 @@ async def _generate_chunk_embeddings(
 
         try:
             embedding = await embedding_client.get_embedding(chunk.text, chunk_id=chunk_id)
-            if embedding:
-                embeddings.append((chunk_id, embedding))
+            if not embedding:
+                logger.error("empty chunk embedding detected: run_id={} chunk_id={}", run_id, chunk_id)
+                failed_chunk_ids.append(chunk_id)
+                continue
+            embeddings.append((chunk_id, embedding))
         except Exception as e:
-            logger.warning(f"Failed to generate embedding for chunk {chunk_id}: {e}")
+            logger.error("failed to generate chunk embedding: run_id={} chunk_id={} error={}", run_id, chunk_id, e)
+            failed_chunk_ids.append(chunk_id)
             continue
 
+    if failed_chunk_ids:
+        preview_ids = ", ".join(str(chunk_id) for chunk_id in failed_chunk_ids[:10])
+        raise RuntimeError(
+            "chunk embeddings incomplete during preprocess: "
+            f"run_id={run_id}, missing={preview_ids}, total={len(failed_chunk_ids)}"
+        )
+
+    paragraph_rows = await _generate_paragraph_embedding_rows(
+        embedding_client,
+        run_id,
+        all_chunks,
+        ParagraphEmbeddingRow,
+    )
+    # 中文注释：先把 paragraph rows 全部准备好，再开始任何向量表 DML；
+    # 这样 paragraph fail fast 时，当前 session 不会留下 chunk-only 半成品写入。
     if embeddings:
         insert_chunk_embeddings(session, run_id, embeddings)
-        _commit_preprocess_writes(session, step="insert_chunk_embeddings")
-        logger.info(f"inserted {len(embeddings)} chunk embeddings into db (run_id={run_id})")
+    if paragraph_rows:
+        insert_paragraph_embeddings(session, run_id, paragraph_rows)
+
+    if embeddings or paragraph_rows:
+        _commit_preprocess_writes(session, step="insert_embedding_rows")
+        logger.info(
+            "inserted {} chunk embeddings and {} paragraph embeddings into db (run_id={})",
+            len(embeddings),
+            len(paragraph_rows),
+            run_id,
+        )
 
     if emitter:
         await emitter(
@@ -284,3 +343,137 @@ async def _generate_chunk_embeddings(
         )
 
     return len(embeddings)
+
+
+def _split_chunk_paragraphs(chunk: Chunk) -> list[tuple[int, int, str]]:
+    """
+    将 chunk 文本拆成 chunk 内 paragraph，并保留 chunk 内字符范围。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: 这里专门返回 chunk 内 local offset；
+          全局 offset 由调用方基于 `chunk.start` 统一折算，避免 local/global 语义再次混淆。
+    """
+    if not chunk.text.strip():
+        return []
+
+    paragraphs: list[tuple[int, int, str]] = []
+    start = 0
+    for match in re.finditer(r"\n+", chunk.text):
+        end = match.start()
+        raw_text = chunk.text[start:end]
+        stripped_text = raw_text.strip()
+        if stripped_text:
+            leading_ws = len(raw_text) - len(raw_text.lstrip())
+            trailing_ws = len(raw_text.rstrip())
+            paragraphs.append((start + leading_ws, start + trailing_ws, stripped_text))
+        start = match.end()
+
+    if start < len(chunk.text):
+        raw_text = chunk.text[start:]
+        stripped_text = raw_text.strip()
+        if stripped_text:
+            leading_ws = len(raw_text) - len(raw_text.lstrip())
+            trailing_ws = len(raw_text.rstrip())
+            paragraphs.append((start + leading_ws, start + trailing_ws, stripped_text))
+
+    if paragraphs:
+        return paragraphs
+    return [(0, len(chunk.text), chunk.text.strip())]
+
+
+async def _generate_paragraph_embedding_rows(
+    embedding_client: Any,
+    run_id: str,
+    all_chunks: list[Chunk],
+    row_factory: Any,
+) -> list[Any]:
+    """
+    生成 paragraph embedding 写入 DTO。
+
+    创建时间: 2026-04-24
+    任务: level3-paragraph-rerank
+    说明: 复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求。
+
+    修改时间: 2026-04-24
+    任务: fix-paragraph-embedding-partial-write
+    修改说明: paragraph embedding 缺失已是 Level3 硬故障，这里改为 fail fast，
+              避免 preprocess 成功但后续 readiness 永远失败。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: paragraph row 直接落显式的 local/global offset，不再继续写旧的歧义字段。
+    """
+    paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
+    for chunk in all_chunks:
+        for paragraph_index, (
+            local_start_char,
+            local_end_char,
+            paragraph_text,
+        ) in enumerate(_split_chunk_paragraphs(chunk)):
+            paragraph_refs.append(
+                (
+                    chunk.index,
+                    paragraph_index,
+                    local_start_char,
+                    local_end_char,
+                    chunk.start + local_start_char,
+                    chunk.start + local_end_char,
+                    paragraph_text,
+                )
+            )
+
+    if not paragraph_refs:
+        return []
+
+    paragraph_texts = [paragraph_text for _, _, _, _, _, _, paragraph_text in paragraph_refs]
+    paragraph_embeddings = await embedding_client.embed_texts(paragraph_texts)
+    if len(paragraph_embeddings) != len(paragraph_refs):
+        raise RuntimeError(
+            "paragraph embedding result count mismatch: "
+            f"expected {len(paragraph_refs)}, got {len(paragraph_embeddings)}"
+        )
+
+    rows = []
+    missing_refs: list[tuple[int, int]] = []
+    for (
+        chunk_id,
+        paragraph_index,
+        local_start_char,
+        local_end_char,
+        global_start_char,
+        global_end_char,
+        paragraph_text,
+    ), embedding in zip(
+        paragraph_refs,
+        paragraph_embeddings,
+        strict=True,
+    ):
+        if not embedding:
+            logger.error(
+                "empty paragraph embedding detected: run_id={} chunk_id={} paragraph_index={}",
+                run_id,
+                chunk_id,
+                paragraph_index,
+            )
+            missing_refs.append((chunk_id, paragraph_index))
+            continue
+        rows.append(
+            row_factory(
+                chunk_id=chunk_id,
+                paragraph_index=paragraph_index,
+                paragraph_text=paragraph_text,
+                local_start_char=local_start_char,
+                local_end_char=local_end_char,
+                global_start_char=global_start_char,
+                global_end_char=global_end_char,
+                embedding_vector=embedding,
+            )
+        )
+    if missing_refs:
+        preview_refs = ", ".join(f"{chunk_id}:{paragraph_index}" for chunk_id, paragraph_index in missing_refs[:10])
+        raise RuntimeError(
+            "paragraph embeddings incomplete during preprocess: "
+            f"run_id={run_id}, missing={preview_refs}, total={len(missing_refs)}"
+        )
+    return rows

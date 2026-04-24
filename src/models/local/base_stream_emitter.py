@@ -12,10 +12,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from src.api.models.events import StreamEvent
+from typing import Any
 
 
 @dataclass

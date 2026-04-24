@@ -11,7 +11,7 @@ import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -308,6 +308,34 @@ class TestAnalysisErrorHandler:
     """测试取消收口时会清理 DB 中的 cancel_requested 脏状态"""
 
     @pytest.mark.asyncio
+    async def test_handle_failure_rolls_back_dirty_session_before_committing_status(self) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-failure-session-rollback-before-status-commit
+        说明: 失败收口必须先 rollback 当前 session，避免半成品业务写入跟随失败状态一起提交。
+        """
+        session = MagicMock()
+        handler = AnalysisErrorHandler(
+            novel_service=MagicMock(),
+            task_manager=MagicMock(),
+        )
+
+        with patch("src.api.services.analysis.error_handler.RunRepository") as mock_run_repo_cls:
+            await handler.handle_failure(
+                task_id="task-1",
+                novel_id="novel001",
+                elapsed=1.2,
+                error=RuntimeError("boom"),
+                analysis_logger=None,
+                session=session,
+                run_id="run-1",
+                bus=None,
+            )
+
+        assert session.method_calls[:2] == [call.rollback(), call.commit()]
+        mock_run_repo_cls.return_value.update_run_status.assert_called_once_with("run-1", "failed")
+
+    @pytest.mark.asyncio
     async def test_handle_cancel_clears_cancel_requested_in_db(self, db_session):
         _insert_test_novel("novel001", session=db_session)
         run_repo = RunRepository(db_session)
@@ -335,6 +363,32 @@ class TestAnalysisErrorHandler:
         assert refreshed_run["status"] == "cancelled"
         assert refreshed_run["cancel_requested"] is False
         assert refreshed_run["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_handle_cancel_rolls_back_dirty_session_before_committing_status(self) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-cancel-session-rollback-before-status-commit
+        说明: 取消收口也必须先 rollback 当前 session，避免未提交业务写入跟随 cancel 状态一起提交。
+        """
+        session = MagicMock()
+        handler = AnalysisErrorHandler(
+            novel_service=MagicMock(),
+            task_manager=MagicMock(),
+        )
+
+        with patch("src.api.services.analysis.error_handler.RunRepository") as mock_run_repo_cls:
+            await handler.handle_cancel(
+                task_id="task-1",
+                novel_id="novel001",
+                session=session,
+                run_id="run-1",
+                analysis_logger=None,
+                bus=None,
+            )
+
+        assert session.method_calls[:2] == [call.rollback(), call.commit()]
+        mock_run_repo_cls.return_value.update_run_task_fields.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_success_invalidates_shared_metrics_service_cache(self, db_session):

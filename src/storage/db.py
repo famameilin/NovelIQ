@@ -431,6 +431,10 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     修改者: Codex
     任务: fix-analysis-related-foreign-keys
     修改内容: 在启动期补齐分析链路缺失外键，并修复可安全回填的历史 novel_id 漂移值。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改内容: 为旧库补齐 chunks.char_end_offset，避免 ORM 已声明全文终点列而历史表仍缺列。
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -439,6 +443,7 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     statements = [
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
+        "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
         "CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)",
     ]
@@ -505,7 +510,9 @@ def init_db(include_level3_tables: bool = False) -> None:
     engine = get_engine()
     tables = list(Base.metadata.sorted_tables)
     if not include_level3_tables:
-        tables = [table for table in tables if table.name != "chunk_embeddings"]
+        # 中文注释：Level3 的 pgvector 表由 preprocess 按需 ensure；
+        # 普通启动不主动创建，避免未启用 RAG 的环境被向量扩展约束牵连。
+        tables = [table for table in tables if table.name not in {"chunk_embeddings", "paragraph_embeddings"}]
     Base.metadata.create_all(bind=engine, tables=tables)
     _ensure_runtime_schema(engine)
     logger.info("Database tables created successfully")

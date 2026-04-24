@@ -379,6 +379,9 @@ def render_vector_evidence(
 ) -> str | None:
     # 中文注释：这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
     # 若 Phase1 已单独渲染 emotion exemplar，则再按 chunk_id 排除重复项，避免同一条历史片段占掉两类证据预算。
+    # 修改时间: 2026-04-24
+    # 任务: level3-paragraph-rerank
+    # 修改说明: paragraph rerank 可提供 local_preview；渲染时优先展示局部 evidence，chunk 全文仍保留在 metadata 里兜底。
     vector_parts: list[str] = []
     for item in _select_semantic_items(
         bundle,
@@ -389,9 +392,13 @@ def render_vector_evidence(
             continue
         chunk_id = item.chunk_id if item.chunk_id is not None else item.metadata.get("chunk_id", "?")
         score = item.score if item.score is not None else item.metadata.get("similarity", 0.0)
-        text = str(item.metadata.get("text", item.content))
+        text = str(item.metadata.get("local_preview") or item.metadata.get("text", item.content))
+        paragraph_index = item.metadata.get("paragraph_index")
+        location_label = f"[Chunk {chunk_id}]"
+        if paragraph_index is not None:
+            location_label += f" [Paragraph {paragraph_index}]"
         preview = text[:max_text_len] + "..." if len(text) > max_text_len else text
-        vector_parts.append(f"[Chunk {chunk_id}] (相似度: {float(score):.2f})\n{preview}")
+        vector_parts.append(f"{location_label} (相似度: {float(score):.2f})\n{preview}")
 
     if not vector_parts:
         return None
