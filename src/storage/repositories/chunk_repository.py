@@ -98,12 +98,18 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
         修改时间: 2026-03-16
         修改者: TraeAI
         修改内容: 插入前先删除该 run_id 的旧数据
+
+        修改时间: 2026-04-24
+        任务: full-global-offset-rollout
+        修改说明: 将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象。
         """
         self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
         models = [
             ChunkModel(
                 chunk_id=chunk.index,
                 chapter_id=None,
+                char_offset=chunk.start,
+                char_end_offset=chunk.end,
                 text=chunk.text,
                 run_id=run_id,
             )

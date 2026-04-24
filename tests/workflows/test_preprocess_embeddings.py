@@ -49,6 +49,8 @@ async def test_generate_chunk_embeddings_uses_chunk_index_as_chunk_id() -> None:
     paragraph_rows = mock_insert_paragraph_embeddings.call_args.args[2]
     assert [row.chunk_id for row in paragraph_rows] == [7, 8]
     assert [row.paragraph_text for row in paragraph_rows] == ["第一段文本", "第二段文本"]
+    assert [row.local_start_char for row in paragraph_rows] == [0, 0]
+    assert [row.global_start_char for row in paragraph_rows] == [0, 5]
 
 
 @pytest.mark.asyncio

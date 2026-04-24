@@ -58,8 +58,10 @@ def test_insert_paragraph_embeddings_preserves_local_metadata() -> None:
                 chunk_id=2,
                 paragraph_index=1,
                 paragraph_text="灰衣人站在门外。",
-                start_char=5,
-                end_char=13,
+                local_start_char=5,
+                local_end_char=13,
+                global_start_char=105,
+                global_end_char=113,
                 embedding_vector=[0.3, 0.4],
             )
         ],
@@ -68,8 +70,10 @@ def test_insert_paragraph_embeddings_preserves_local_metadata() -> None:
     assert inserted == 1
     _, rows = session.execute.call_args_list[1].args
     assert rows[0]["paragraph_index"] == 1
-    assert rows[0]["start_char"] == 5
-    assert rows[0]["end_char"] == 13
+    assert rows[0]["local_start_char"] == 5
+    assert rows[0]["local_end_char"] == 13
+    assert rows[0]["global_start_char"] == 105
+    assert rows[0]["global_end_char"] == 113
     assert rows[0]["embedding_vector"] == [0.3, 0.4]
 
 
@@ -179,8 +183,10 @@ def test_search_similar_paragraphs_limits_sql_to_candidate_chunks() -> None:
             chunk_id=2,
             paragraph_index=1,
             paragraph_text="灰衣人站在门外。",
-            start_char=5,
-            end_char=13,
+            local_start_char=5,
+            local_end_char=13,
+            global_start_char=105,
+            global_end_char=113,
             similarity=0.93,
         )
     ]
@@ -200,6 +206,8 @@ def test_search_similar_paragraphs_limits_sql_to_candidate_chunks() -> None:
     assert [row.chunk_id for row in results] == [2]
     assert results[0].paragraph_index == 1
     assert results[0].paragraph_text == "灰衣人站在门外。"
+    assert results[0].local_start_char == 5
+    assert results[0].global_start_char == 105
 
 
 def test_get_incomplete_paragraph_embedding_chunk_ids_combines_missing_gapped_and_null_vector_rows() -> None:
