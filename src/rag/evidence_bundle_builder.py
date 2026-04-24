@@ -161,11 +161,31 @@ class EvidenceBundleBuilder:
         任务: level3-mention-retrieval-closure
         说明: 冻结 Level3 semantic_recall 的 metadata 合同；即使某些字段当前为空，也保持键名稳定，
               便于后续日志观察、共享 renderer 和延期评测直接复用。
+
+        修改时间: 2026-04-24
+        任务: split-level3-score-fields
+        修改说明: 显式暴露 chunk / paragraph / business / final 分数，并删除已废弃的旧分数字段。
         """
+        chunk_semantic_score = (
+            result.chunk_semantic_score
+            if result.chunk_semantic_score is not None
+            else result.similarity
+        )
+        paragraph_semantic_score = result.paragraph_semantic_score
+        business_rerank_score = result.business_rerank_score
+        final_rank_score = (
+            result.final_rank_score
+            if result.final_rank_score is not None
+            else business_rerank_score
+            if business_rerank_score is not None
+            else paragraph_semantic_score
+            if paragraph_semantic_score is not None
+            else chunk_semantic_score
+        )
         metadata: dict[str, object] = {
             "chunk_id": result.chunk_id,
             "text": result.text,
-            "similarity": result.similarity,
+            "similarity": final_rank_score,
             "emotional_valence": result.emotional_valence,
             "evidence_granularity": "chunk",
             "rerank_method": "chunk_embedding",
@@ -174,8 +194,6 @@ class EvidenceBundleBuilder:
             "mention_text": result.mention_text,
             "mention_type": result.mention_type,
             "matched_features": list(result.matched_features),
-            "rerank_score": result.rerank_score,
-            "semantic_score": result.semantic_score if result.semantic_score is not None else result.similarity,
             "feature_overlap": list(result.feature_overlap),
             "active_entity_bonus": result.active_entity_bonus,
             "identity_clue_bonus": result.identity_clue_bonus,
@@ -185,10 +203,12 @@ class EvidenceBundleBuilder:
             "penalties": list(result.penalties),
             "local_preview": result.local_preview,
             "paragraph_index": result.paragraph_index,
-            "paragraph_similarity": result.paragraph_similarity,
             "paragraph_start_char": result.paragraph_start_char,
             "paragraph_end_char": result.paragraph_end_char,
-            "chunk_similarity": result.chunk_similarity,
+            "chunk_semantic_score": chunk_semantic_score,
+            "paragraph_semantic_score": paragraph_semantic_score,
+            "business_rerank_score": business_rerank_score,
+            "final_rank_score": final_rank_score,
         }
         if result.local_preview:
             metadata.update(
@@ -198,7 +218,7 @@ class EvidenceBundleBuilder:
                     "local_preview_len": len(result.local_preview),
                 }
             )
-        if result.rerank_score is not None:
+        if result.business_rerank_score is not None:
             metadata["business_rerank_method"] = "mention_feature_rerank"
         return metadata
 
@@ -228,7 +248,7 @@ class EvidenceBundleBuilder:
                     content=result.text,
                     metadata=metadata,
                     chunk_id=result.chunk_id,
-                    score=result.similarity,
+                    score=float(metadata["final_rank_score"]),
                 )
             )
         return items
@@ -245,6 +265,10 @@ class EvidenceBundleBuilder:
         任务: fix-emotion-exemplar-score-contract
         修改说明: paragraph rerank 仅影响 semantic_recall；emotion exemplar 继续使用 chunk 级分数，
                   避免局部 paragraph 分数污染整段 chunk 示例排序语义。
+
+        修改时间: 2026-04-24
+        任务: split-level3-score-fields
+        修改说明: emotion exemplar 固定读取显式 chunk 语义分，避免 final/business 分数误入情绪示例排序。
         """
         exemplar_items: list[EvidenceItem] = []
         for result in level3_results:
@@ -254,7 +278,11 @@ class EvidenceBundleBuilder:
             if emotional_valence in (None, "", "neutral"):
                 continue
 
-            exemplar_similarity = result.chunk_similarity if result.chunk_similarity is not None else result.similarity
+            exemplar_similarity = (
+                result.chunk_semantic_score
+                if result.chunk_semantic_score is not None
+                else result.similarity
+            )
             metadata = {
                 "chunk_id": result.chunk_id,
                 "text": result.text,

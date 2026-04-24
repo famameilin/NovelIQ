@@ -54,6 +54,20 @@ class Level3VectorEvidence:
         self._setup_checked = False
         self._paragraph_rerank_available: bool | None = None
 
+    def _raise_not_ready(self, message: str, *, cause: Exception | None = None) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-level3-readiness-revalidation
+        说明: readiness 一旦发现 schema / 数据漂移，先清空缓存状态再抛错，
+              避免后续 `is_available()` 或 paragraph rerank 继续复用过期的成功结果。
+        """
+        self._available = False
+        self._paragraph_rerank_available = False
+        self._setup_checked = False
+        if cause is None:
+            raise Level3NotReadyError(message)
+        raise Level3NotReadyError(message) from cause
+
     def set_embedding_client(self, client: EmbeddingClient) -> None:
         """设置 Embedding 客户端。"""
         self._embedding_client = client
@@ -77,14 +91,14 @@ class Level3VectorEvidence:
         任务: level3-paragraph-readiness
         修改说明: paragraph rerank 已是 Level3 必需能力，启动检查必须同时校验 paragraph schema、数据存在与完整性。
         """
-        if self._setup_checked:
-            return
         if self._embedding_client is None or self._session is None or self._run_id is None:
-            raise Level3NotReadyError("Level 3 requires embedding client, session, and run_id")
+            self._raise_not_ready("Level 3 requires embedding client, session, and run_id")
 
+        # 中文注释：provider 会在每次入口显式调用 readiness，这里不能因历史成功缓存而跳过重检；
+        # 否则 paragraph schema / 数据漂移会被吞掉，破坏“paragraph rerank 是硬前提”的合同。
         actual_dim = await self._embedding_client.detect_embedding_dimension()
         if actual_dim != self._expected_embedding_dim:
-            raise Level3NotReadyError(
+            self._raise_not_ready(
                 f"Level 3 embedding dimension mismatch: configured={self._expected_embedding_dim}, actual={actual_dim}"
             )
 
@@ -99,13 +113,13 @@ class Level3VectorEvidence:
         try:
             validate_chunk_embeddings_schema(self._session, self._expected_embedding_dim)
         except ValueError as exc:
-            raise Level3NotReadyError(str(exc)) from exc
+            self._raise_not_ready(str(exc), cause=exc)
         if not has_embeddings(self._session, self._run_id):
-            raise Level3NotReadyError(f"Level 3 embeddings not found for run_id={self._run_id}")
+            self._raise_not_ready(f"Level 3 embeddings not found for run_id={self._run_id}")
         missing_chunk_embedding_ids = get_missing_embedding_chunk_ids(self._session, self._run_id)
         if missing_chunk_embedding_ids:
             preview_ids = missing_chunk_embedding_ids[:10]
-            raise Level3NotReadyError(
+            self._raise_not_ready(
                 "Level 3 chunk embeddings incomplete for "
                 f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(missing_chunk_embedding_ids)}"
             )
@@ -113,13 +127,13 @@ class Level3VectorEvidence:
         try:
             validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
         except ValueError as exc:
-            raise Level3NotReadyError(str(exc)) from exc
+            self._raise_not_ready(str(exc), cause=exc)
         if not has_paragraph_embeddings(self._session, self._run_id):
-            raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
+            self._raise_not_ready(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
         incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
         if incomplete_chunk_ids:
             preview_ids = incomplete_chunk_ids[:10]
-            raise Level3NotReadyError(
+            self._raise_not_ready(
                 "Level 3 paragraph embeddings incomplete for "
                 f"run_id={self._run_id}, chunk_ids={preview_ids}, total={len(incomplete_chunk_ids)}"
             )
@@ -284,12 +298,12 @@ class Level3VectorEvidence:
         try:
             validate_paragraph_embeddings_schema(self._session, self._expected_embedding_dim)
         except ValueError as exc:
-            raise Level3NotReadyError(str(exc)) from exc
+            self._raise_not_ready(str(exc), cause=exc)
         if not has_paragraph_embeddings(self._session, self._run_id):
-            raise Level3NotReadyError(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
+            self._raise_not_ready(f"Level 3 paragraph embeddings not found for run_id={self._run_id}")
         incomplete_chunk_ids = get_incomplete_paragraph_embedding_chunk_ids(self._session, self._run_id)
         if incomplete_chunk_ids:
-            raise Level3NotReadyError(
+            self._raise_not_ready(
                 "Level 3 paragraph embeddings incomplete for "
                 f"run_id={self._run_id}, chunk_ids={incomplete_chunk_ids[:10]}, total={len(incomplete_chunk_ids)}"
             )
@@ -314,6 +328,11 @@ class Level3VectorEvidence:
         修改时间: 2026-04-24
         任务: level3-mention-rerank
         修改说明: 使用调用方指定的 retrieval pool 大小，而不是固定 prompt top_k。
+
+        修改时间: 2026-04-24
+        任务: split-level3-score-fields
+        修改说明: paragraph rerank 只更新 paragraph / final 排序分，显式保留 chunk 语义分，
+                  为后续接入独立 rerank 模型预留稳定字段。
         """
         if not chunk_results or self._session is None or self._run_id is None:
             return chunk_results
@@ -350,16 +369,23 @@ class Level3VectorEvidence:
             if selected_paragraph is None:
                 reranked.append(result)
                 continue
+            chunk_semantic_score = (
+                result.chunk_semantic_score
+                if result.chunk_semantic_score is not None
+                else result.similarity
+            )
+            paragraph_semantic_score = selected_paragraph.similarity
             reranked.append(
                 replace(
                     result,
-                    similarity=selected_paragraph.similarity,
-                    chunk_similarity=result.similarity,
+                    similarity=paragraph_semantic_score,
+                    chunk_semantic_score=chunk_semantic_score,
                     local_preview=selected_paragraph.paragraph_text,
                     paragraph_index=selected_paragraph.paragraph_index,
-                    paragraph_similarity=selected_paragraph.similarity,
+                    paragraph_semantic_score=paragraph_semantic_score,
                     paragraph_start_char=selected_paragraph.start_char,
                     paragraph_end_char=selected_paragraph.end_char,
+                    final_rank_score=paragraph_semantic_score,
                 )
             )
 
@@ -370,4 +396,8 @@ class Level3VectorEvidence:
             len(paragraph_results),
             matched_count,
         )
-        return sorted(reranked, key=lambda item: item.similarity, reverse=True)[:top_k]
+        return sorted(
+            reranked,
+            key=lambda item: item.final_rank_score if item.final_rank_score is not None else item.similarity,
+            reverse=True,
+        )[:top_k]

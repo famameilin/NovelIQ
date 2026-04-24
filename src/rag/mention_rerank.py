@@ -76,10 +76,31 @@ def _score_row(
     """
     创建时间: 2026-04-24
     任务: level3-mention-rerank
-    说明: 给单条候选计算 rerank 分；mention 特征、候选名和历史身份线索都写入可解释字段。
+    说明: 给单条候选计算业务 rerank 分；mention 特征、候选名和历史身份线索都写入可解释字段。
+
+    修改时间: 2026-04-24
+    任务: split-level3-score-fields
+    修改说明: business rerank 基于显式语义分字段计算，并单独产出 `business_rerank_score` / `final_rank_score`，
+              避免继续复用含义漂移的 `similarity`。
     """
     evidence_text = _evidence_text(result)
-    semantic_score = result.similarity
+    normalized_chunk_semantic_score = (
+        result.chunk_semantic_score
+        if result.chunk_semantic_score is not None
+        else None
+    )
+    normalized_paragraph_semantic_score = (
+        result.paragraph_semantic_score
+        if result.paragraph_semantic_score is not None
+        else None
+    )
+    if normalized_chunk_semantic_score is None and normalized_paragraph_semantic_score is None:
+        normalized_chunk_semantic_score = result.similarity
+    semantic_score = (
+        normalized_paragraph_semantic_score
+        if normalized_paragraph_semantic_score is not None
+        else normalized_chunk_semantic_score if normalized_chunk_semantic_score is not None else result.similarity
+    )
     feature_overlap = tuple(feature for feature in result.matched_features if feature and feature in evidence_text)
     active_entity_bonus = ACTIVE_ENTITY_WEIGHT if _contains_any(evidence_text, active_entity_names) else 0.0
     candidate_related_bonus = CANDIDATE_NAME_WEIGHT if _contains_any(evidence_text, candidate_names) else 0.0
@@ -87,7 +108,7 @@ def _score_row(
     time_decay = _time_decay(result.chunk_id, current_chunk)
     penalties = _role_conflict_penalties(result.matched_features, evidence_text)
     rerank_penalty = ROLE_CONFLICT_PENALTY if penalties else 0.0
-    rerank_score = (
+    business_rerank_score = (
         semantic_score
         + len(feature_overlap) * FEATURE_WEIGHT
         + active_entity_bonus
@@ -99,8 +120,11 @@ def _score_row(
 
     return replace(
         result,
-        semantic_score=semantic_score,
-        rerank_score=round(rerank_score, 6),
+        similarity=round(business_rerank_score, 6),
+        chunk_semantic_score=normalized_chunk_semantic_score,
+        paragraph_semantic_score=normalized_paragraph_semantic_score,
+        business_rerank_score=round(business_rerank_score, 6),
+        final_rank_score=round(business_rerank_score, 6),
         feature_overlap=feature_overlap,
         active_entity_bonus=active_entity_bonus,
         identity_clue_bonus=identity_clue_bonus,
@@ -187,7 +211,21 @@ def _sort_key(result: SimilarChunkRow) -> tuple[float, float, int]:
     """
     创建时间: 2026-04-24
     任务: level3-mention-rerank
-    说明: rerank_score 优先，其次回退语义分；chunk_id 只作为稳定排序的最后兜底。
+    说明: final_rank_score 优先，其次回退语义分；chunk_id 只作为稳定排序的最后兜底。
+
+    修改时间: 2026-04-24
+    任务: split-level3-score-fields
+    修改说明: 优先按 `final_rank_score` 排序，旧字段只作为兼容回退。
     """
-    rank_score = result.rerank_score if result.rerank_score is not None else result.similarity
-    return (rank_score, result.similarity, -result.chunk_id)
+    rank_score = (
+        result.final_rank_score
+        if result.final_rank_score is not None
+        else result.business_rerank_score if result.business_rerank_score is not None else result.similarity
+    )
+    semantic_base_score = (
+        result.paragraph_semantic_score
+        if result.paragraph_semantic_score is not None
+        else result.chunk_semantic_score if result.chunk_semantic_score is not None else None
+    )
+    fallback_semantic_score = semantic_base_score if semantic_base_score is not None else result.similarity
+    return (rank_score, fallback_semantic_score, -result.chunk_id)

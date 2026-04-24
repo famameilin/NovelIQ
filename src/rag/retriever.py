@@ -334,7 +334,7 @@ class DisambigContextProvider:
 
         修改时间: 2026-04-24
         任务: level3-mention-rerank
-        修改说明: 若存在 rerank_score，则按 rerank 后分数去重和排序；否则保持原 similarity 语义。
+        修改说明: 若存在 business / final 排序分，则按新分数字段去重和排序；否则保持原 similarity 语义。
         """
         by_chunk_id: dict[int, SimilarChunkRow] = {}
         for result in results:
@@ -358,8 +358,20 @@ class DisambigContextProvider:
         创建时间: 2026-04-24
         任务: level3-mention-rerank
         说明: 统一读取 Level3 排序分，确保 rerank 与旧 similarity 排序路径共用同一比较逻辑。
+
+        修改时间: 2026-04-24
+        任务: split-level3-score-fields
+        修改说明: 优先读取显式 final/business/paragraph/chunk 分数，避免后续模型 rerank 接入时继续依赖歧义字段。
         """
-        return result.rerank_score if result.rerank_score is not None else result.similarity
+        if result.final_rank_score is not None:
+            return result.final_rank_score
+        if result.business_rerank_score is not None:
+            return result.business_rerank_score
+        if result.paragraph_semantic_score is not None:
+            return result.paragraph_semantic_score
+        if result.chunk_semantic_score is not None:
+            return result.chunk_semantic_score
+        return result.similarity
 
     def _level3_pool_k(self) -> int:
         """

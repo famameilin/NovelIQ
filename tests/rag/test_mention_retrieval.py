@@ -112,7 +112,7 @@ def test_build_semantic_recall_items_records_mention_metadata_only_for_mention_r
     assert items[1].metadata["query_kind"] == "chunk"
     assert items[1].metadata["mention_text"] is None
     assert items[1].metadata["matched_features"] == []
-    assert items[1].metadata["semantic_score"] == 0.83
+    assert items[1].metadata["chunk_semantic_score"] == 0.83
     assert items[1].chunk_id == 3
     assert items[1].score == 0.83
 
@@ -136,12 +136,12 @@ def test_build_semantic_recall_items_freezes_rerank_metadata_contract() -> None:
                 matched_features=("红衣", "女子", "出手"),
                 local_preview="红衣女子回头看向众人。",
                 paragraph_index=2,
-                paragraph_similarity=0.95,
+                paragraph_semantic_score=0.95,
                 paragraph_start_char=18,
                 paragraph_end_char=31,
-                chunk_similarity=0.82,
-                semantic_score=0.95,
-                rerank_score=1.11,
+                chunk_semantic_score=0.82,
+                business_rerank_score=1.11,
+                final_rank_score=1.11,
                 feature_overlap=("红衣", "女子"),
                 active_entity_bonus=0.06,
                 identity_clue_bonus=0.05,
@@ -157,12 +157,14 @@ def test_build_semantic_recall_items_freezes_rerank_metadata_contract() -> None:
     assert item.metadata["mention_text"] == "穿红衣的女子"
     assert item.metadata["mention_type"] == "feature_action"
     assert item.metadata["matched_features"] == ["红衣", "女子", "出手"]
-    assert item.metadata["rerank_score"] == 1.11
-    assert item.metadata["semantic_score"] == 0.95
     assert item.metadata["feature_overlap"] == ["红衣", "女子"]
     assert item.metadata["local_preview"] == "红衣女子回头看向众人。"
     assert item.metadata["paragraph_index"] == 2
-    assert item.metadata["chunk_similarity"] == 0.82
+    assert item.metadata["chunk_semantic_score"] == 0.82
+    assert item.metadata["paragraph_semantic_score"] == 0.95
+    assert item.metadata["business_rerank_score"] == 1.11
+    assert item.metadata["final_rank_score"] == 1.11
+    assert item.score == 1.11
     assert item.metadata["business_rerank_method"] == "mention_feature_rerank"
 
 
@@ -197,7 +199,7 @@ def test_build_emotion_exemplar_items_ignores_mention_rows() -> None:
     assert items[0].metadata["chunk_id"] == 3
 
 
-def test_build_emotion_exemplar_items_uses_chunk_similarity_after_paragraph_rerank() -> None:
+def test_build_emotion_exemplar_items_uses_chunk_semantic_score_after_paragraph_rerank() -> None:
     """
     创建时间: 2026-04-24
     任务: fix-emotion-exemplar-score-contract
@@ -209,7 +211,7 @@ def test_build_emotion_exemplar_items_uses_chunk_similarity_after_paragraph_rera
                 chunk_id=8,
                 text="她说话时指尖微颤，眼底发冷。",
                 similarity=0.97,
-                chunk_similarity=0.83,
+                chunk_semantic_score=0.83,
                 emotional_valence="mild_negative",
                 local_preview="她眼底发冷。",
                 paragraph_index=1,
@@ -263,8 +265,9 @@ def test_mention_rerank_promotes_feature_consistent_history() -> None:
     )
 
     assert [row.chunk_id for row in reranked] == [12, 18]
-    assert reranked[0].rerank_score is not None
-    assert reranked[0].semantic_score == 0.82
+    assert reranked[0].business_rerank_score is not None
+    assert reranked[0].final_rank_score == reranked[0].business_rerank_score
+    assert reranked[0].chunk_semantic_score == 0.82
     assert reranked[0].feature_overlap == ("红衣", "女子", "出手")
     assert reranked[0].active_entity_bonus > 0
     assert reranked[0].identity_clue_bonus > 0
@@ -345,7 +348,8 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     assert semantic_items[0].metadata["query_kind"] == "mention"
     assert semantic_items[0].metadata["mention_text"] == "穿红衣的女子"
     assert semantic_items[0].metadata["business_rerank_method"] == "mention_feature_rerank"
-    assert semantic_items[0].metadata["rerank_score"] >= semantic_items[0].metadata["semantic_score"]
+    assert semantic_items[0].metadata["final_rank_score"] == semantic_items[0].score
+    assert semantic_items[0].metadata["business_rerank_score"] >= semantic_items[0].metadata["chunk_semantic_score"]
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["max_chunk_id"] == 9
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
 
@@ -385,6 +389,7 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
 
     semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
     assert [item.metadata["chunk_id"] for item in semantic_items] == [4]
-    assert semantic_items[0].metadata["semantic_score"] == 0.82
+    assert semantic_items[0].metadata["chunk_semantic_score"] == 0.82
+    assert semantic_items[0].metadata["final_rank_score"] == semantic_items[0].score
     assert semantic_items[0].metadata["feature_overlap"] == ["红衣", "女子", "出手"]
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
