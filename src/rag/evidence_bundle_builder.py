@@ -165,6 +165,10 @@ class EvidenceBundleBuilder:
         修改时间: 2026-04-24
         任务: split-level3-score-fields
         修改说明: 显式暴露 chunk / paragraph / business / final 分数，并删除已废弃的旧分数字段。
+
+        修改时间: 2026-04-24
+        任务: full-global-offset-rollout
+        修改说明: paragraph offset metadata 改为显式 local/global 字段，不再继续输出旧的歧义字段名。
         """
         chunk_semantic_score = (
             result.chunk_semantic_score
@@ -203,8 +207,10 @@ class EvidenceBundleBuilder:
             "penalties": list(result.penalties),
             "local_preview": result.local_preview,
             "paragraph_index": result.paragraph_index,
-            "paragraph_start_char": result.paragraph_start_char,
-            "paragraph_end_char": result.paragraph_end_char,
+            "paragraph_local_start_char": result.paragraph_local_start_char,
+            "paragraph_local_end_char": result.paragraph_local_end_char,
+            "paragraph_global_start_char": result.paragraph_global_start_char,
+            "paragraph_global_end_char": result.paragraph_global_end_char,
             "chunk_semantic_score": chunk_semantic_score,
             "paragraph_semantic_score": paragraph_semantic_score,
             "business_rerank_score": business_rerank_score,

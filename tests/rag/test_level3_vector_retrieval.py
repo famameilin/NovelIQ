@@ -251,16 +251,20 @@ class TestLevel3VectorEvidenceAsync:
                 chunk_id=2,
                 paragraph_index=1,
                 paragraph_text="灰衣人站在门外。",
-                start_char=5,
-                end_char=13,
+                local_start_char=5,
+                local_end_char=13,
+                global_start_char=205,
+                global_end_char=213,
                 similarity=0.96,
             ),
             SimilarParagraphRow(
                 chunk_id=1,
                 paragraph_index=0,
                 paragraph_text="普通场景。",
-                start_char=0,
-                end_char=5,
+                local_start_char=0,
+                local_end_char=5,
+                global_start_char=100,
+                global_end_char=105,
                 similarity=0.90,
             ),
         ]
@@ -818,8 +822,10 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
                     local_preview="灰衣人站在门外。",
                     paragraph_index=1,
                     paragraph_semantic_score=0.96,
-                    paragraph_start_char=5,
-                    paragraph_end_char=13,
+                    paragraph_local_start_char=5,
+                    paragraph_local_end_char=13,
+                    paragraph_global_start_char=205,
+                    paragraph_global_end_char=213,
                     chunk_semantic_score=0.81,
                 )
             ]
@@ -832,6 +838,8 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
         assert metadata["chunk_semantic_score"] == 0.81
         assert metadata["paragraph_semantic_score"] == 0.96
         assert metadata["final_rank_score"] == 0.96
+        assert metadata["paragraph_local_start_char"] == 5
+        assert metadata["paragraph_global_start_char"] == 205
 
     def test_render_vector_evidence_ignores_emotion_exemplar_rows(self) -> None:
         bundle = EvidenceBundle(

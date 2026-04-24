@@ -60,8 +60,10 @@ class SimilarChunkRow:
     matched_features: tuple[str, ...] = ()
     local_preview: str | None = None
     paragraph_index: int | None = None
-    paragraph_start_char: int | None = None
-    paragraph_end_char: int | None = None
+    paragraph_local_start_char: int | None = None
+    paragraph_local_end_char: int | None = None
+    paragraph_global_start_char: int | None = None
+    paragraph_global_end_char: int | None = None
     chunk_semantic_score: float | None = None
     paragraph_semantic_score: float | None = None
     business_rerank_score: float | None = None
@@ -81,13 +83,19 @@ class ParagraphEmbeddingRow:
     创建时间: 2026-04-24
     任务: level3-paragraph-rerank
     说明: paragraph embedding 批量写入 DTO，所有字段使用具名属性，避免仓储层向上暴露匿名 dict。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 同时携带 chunk 内 local offset 与 run 级 global offset，避免后续只能通过 chunk 表回推全文坐标。
     """
 
     chunk_id: int
     paragraph_index: int
     paragraph_text: str
-    start_char: int
-    end_char: int
+    local_start_char: int
+    local_end_char: int
+    global_start_char: int
+    global_end_char: int
     embedding_vector: list[float]
 
 
@@ -97,13 +105,19 @@ class SimilarParagraphRow:
     创建时间: 2026-04-24
     任务: level3-paragraph-rerank
     说明: 候选 chunk 内 paragraph rerank 的结果 DTO，用于回填 SimilarChunkRow 的局部 evidence 字段。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 查询结果同时暴露 local/global offset，方便上游在保持兼容字段的同时新增全文定位能力。
     """
 
     chunk_id: int
     paragraph_index: int
     paragraph_text: str
-    start_char: int
-    end_char: int
+    local_start_char: int
+    local_end_char: int
+    global_start_char: int
+    global_end_char: int
     similarity: float
 
 
@@ -169,8 +183,10 @@ def insert_paragraph_embeddings(
                 "chunk_id": row.chunk_id,
                 "paragraph_index": row.paragraph_index,
                 "paragraph_text": row.paragraph_text,
-                "start_char": row.start_char,
-                "end_char": row.end_char,
+                "local_start_char": row.local_start_char,
+                "local_end_char": row.local_end_char,
+                "global_start_char": row.global_start_char,
+                "global_end_char": row.global_end_char,
                 "embedding_vector": row.embedding_vector,
                 "created_at": created_at,
             }
@@ -351,6 +367,10 @@ def search_similar_paragraphs_within_chunks(
     任务: fix-paragraph-rerank-global-limit
     修改说明: 先在每个候选 chunk 内选出最佳 paragraph，再做 chunk 级全局排序，
               避免全局 LIMIT 让部分候选 chunk 完全失去 paragraph rerank 机会。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 返回值改为显式 local/global offset，不再继续暴露歧义的 start_char/end_char 合同。
     """
     scoped_chunk_ids = list(dict.fromkeys(int(chunk_id) for chunk_id in chunk_ids))
     if not scoped_chunk_ids:
@@ -362,8 +382,10 @@ def search_similar_paragraphs_within_chunks(
             ParagraphEmbedding.chunk_id,
             ParagraphEmbedding.paragraph_index,
             ParagraphEmbedding.paragraph_text,
-            ParagraphEmbedding.start_char,
-            ParagraphEmbedding.end_char,
+            ParagraphEmbedding.local_start_char,
+            ParagraphEmbedding.local_end_char,
+            ParagraphEmbedding.global_start_char,
+            ParagraphEmbedding.global_end_char,
             similarity_expr.label("similarity"),
             func.row_number()
             .over(
@@ -385,8 +407,10 @@ def search_similar_paragraphs_within_chunks(
             ranked_candidates.c.chunk_id,
             ranked_candidates.c.paragraph_index,
             ranked_candidates.c.paragraph_text,
-            ranked_candidates.c.start_char,
-            ranked_candidates.c.end_char,
+            ranked_candidates.c.local_start_char,
+            ranked_candidates.c.local_end_char,
+            ranked_candidates.c.global_start_char,
+            ranked_candidates.c.global_end_char,
             ranked_candidates.c.similarity,
         )
         # 中文注释：必须先按 chunk_id 选 best paragraph，再截断 top_k，
@@ -402,8 +426,10 @@ def search_similar_paragraphs_within_chunks(
             chunk_id=int(row.chunk_id),
             paragraph_index=int(row.paragraph_index),
             paragraph_text=str(row.paragraph_text),
-            start_char=int(row.start_char),
-            end_char=int(row.end_char),
+            local_start_char=int(row.local_start_char),
+            local_end_char=int(row.local_end_char),
+            global_start_char=int(row.global_start_char),
+            global_end_char=int(row.global_end_char),
             similarity=float(row.similarity),
         )
         for row in rows
@@ -452,6 +478,10 @@ def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) 
     修改时间: 2026-04-24
     任务: fix-paragraph-readiness-null-vectors
     修改说明: 将 `embedding_vector IS NULL` 视为不完整，避免 readiness 通过但检索阶段被 `IS NOT NULL` 过滤掉。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: local/global 任一 offset 缺失都视为不完整，避免全文定位字段只升级了一半。
     """
     paragraph_exists = exists().where(
         (ParagraphEmbedding.run_id == Chunk.run_id) & (ParagraphEmbedding.chunk_id == Chunk.chunk_id)
@@ -478,7 +508,15 @@ def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) 
     null_vector_stmt = (
         select(ParagraphEmbedding.chunk_id)
         .where(ParagraphEmbedding.run_id == run_id)
-        .where(ParagraphEmbedding.embedding_vector.is_(None))
+        .where(
+            or_(
+                ParagraphEmbedding.embedding_vector.is_(None),
+                ParagraphEmbedding.local_start_char.is_(None),
+                ParagraphEmbedding.local_end_char.is_(None),
+                ParagraphEmbedding.global_start_char.is_(None),
+                ParagraphEmbedding.global_end_char.is_(None),
+            )
+        )
         .group_by(ParagraphEmbedding.chunk_id)
     )
     null_vector_chunk_ids = {int(row.chunk_id) for row in session.execute(null_vector_stmt).all()}

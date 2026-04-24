@@ -68,6 +68,11 @@ class ParagraphEmbedding(Base):
     任务: level3-paragraph-rerank
     说明: 存储 chunk 内 paragraph 的文本、局部字符范围与 embedding，
           仅用于命中 chunk 范围内的局部 evidence rerank，不承担全库召回入口。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 旧的 start_char/end_char 字段已替换为显式 local/global offset，
+              避免继续使用含义模糊的字段名。
     """
 
     __tablename__ = "paragraph_embeddings"
@@ -76,8 +81,10 @@ class ParagraphEmbedding(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     paragraph_index: Mapped[int] = mapped_column(Integer, primary_key=True)
     paragraph_text: Mapped[str] = mapped_column(Text, nullable=False)
-    start_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    local_start_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    local_end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    global_start_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    global_end_char: Mapped[int] = mapped_column(Integer, nullable=False)
     embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

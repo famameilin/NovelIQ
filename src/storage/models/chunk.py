@@ -39,6 +39,10 @@ class Chunk(Base):
     修改时间: 2026-03-16
     修改者: TraeAI
     修改内容: 将主键改为复合主键 (chunk_id, run_id)，支持多 run_id 数据隔离
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 持久化 chunk 的全文起止坐标，供 paragraph global offset 和后续原文定位复用。
     """
 
     __tablename__ = "chunks"
@@ -46,6 +50,7 @@ class Chunk(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     char_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), nullable=False, primary_key=True

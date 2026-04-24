@@ -347,6 +347,10 @@ class Level3VectorEvidence:
         任务: split-level3-score-fields
         修改说明: paragraph rerank 只更新 paragraph / final 排序分，显式保留 chunk 语义分，
                   为后续接入独立 rerank 模型预留稳定字段。
+
+        修改时间: 2026-04-24
+        任务: full-global-offset-rollout
+        修改说明: 回填结果使用显式 local/global offset 字段，不再继续写旧的歧义 offset 名称。
         """
         if not chunk_results or self._session is None or self._run_id is None:
             return chunk_results
@@ -397,8 +401,10 @@ class Level3VectorEvidence:
                     local_preview=selected_paragraph.paragraph_text,
                     paragraph_index=selected_paragraph.paragraph_index,
                     paragraph_semantic_score=paragraph_semantic_score,
-                    paragraph_start_char=selected_paragraph.start_char,
-                    paragraph_end_char=selected_paragraph.end_char,
+                    paragraph_local_start_char=selected_paragraph.local_start_char,
+                    paragraph_local_end_char=selected_paragraph.local_end_char,
+                    paragraph_global_start_char=selected_paragraph.global_start_char,
+                    paragraph_global_end_char=selected_paragraph.global_end_char,
                     final_rank_score=paragraph_semantic_score,
                 )
             )

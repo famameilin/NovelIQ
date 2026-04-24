@@ -125,6 +125,11 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
     任务: level3-paragraph-rerank
     说明: paragraph embedding 只作为候选 chunk 内局部 rerank 数据源，
           表结构保留 chunk_id 与 chunk 内字符范围，方便回溯和 prompt 局部展示。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 旧的 start_char/end_char 已替换为显式 local/global offset，
+              直接升级 paragraph_embeddings 的字段合同，不保留旧歧义字段。
     """
     if embedding_dim <= 0:
         raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
@@ -137,6 +142,18 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
     table_regclass = f"{runtime_schema}.paragraph_embeddings"
     table_exists = session.execute(text(f"SELECT to_regclass('{table_regclass}')")).scalar_one_or_none()
 
+    required_offset_columns = {"local_start_char", "local_end_char", "global_start_char", "global_end_char"}
+    existing_columns = _get_table_columns(session, "paragraph_embeddings") if table_exists is not None else set()
+    if table_exists is not None and (
+        "start_char" in existing_columns
+        or "end_char" in existing_columns
+        or not required_offset_columns.issubset(existing_columns)
+    ):
+        # 中文注释：用户已明确不需要兼容旧 paragraph offset 字段；
+        # 发现旧结构时直接重建整张表，避免留下“列已半升级但约束/语义仍漂移”的状态。
+        session.execute(text(f"DROP TABLE {runtime_schema}.paragraph_embeddings"))
+        table_exists = None
+
     if table_exists is None:
         session.execute(
             text(
@@ -146,8 +163,10 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
                     chunk_id INTEGER NOT NULL,
                     paragraph_index INTEGER NOT NULL,
                     paragraph_text TEXT NOT NULL,
-                    start_char INTEGER NOT NULL,
-                    end_char INTEGER NOT NULL,
+                    local_start_char INTEGER NOT NULL,
+                    local_end_char INTEGER NOT NULL,
+                    global_start_char INTEGER NOT NULL,
+                    global_end_char INTEGER NOT NULL,
                     embedding_vector vector({embedding_dim}),
                     created_at VARCHAR(50),
                     PRIMARY KEY (run_id, chunk_id, paragraph_index),
@@ -211,6 +230,10 @@ def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -
     创建时间: 2026-04-24
     任务: level3-paragraph-rerank
     说明: Level3 paragraph rerank 依赖同一 embedding 模型维度，启动检查应显式失败而不是静默降级。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 同步要求 global offset 列存在，避免新代码读取全文坐标时只在运行期晚失败。
     """
     if embedding_dim <= 0:
         raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
@@ -231,6 +254,15 @@ def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -
         raise ValueError(
             "paragraph_embeddings.embedding_vector type mismatch: "
             f"expected {expected_type}, got {vector_type or 'unknown'}"
+        )
+
+    required_columns = {"local_start_char", "local_end_char", "global_start_char", "global_end_char"}
+    existing_columns = _get_table_columns(session, "paragraph_embeddings")
+    missing_columns = sorted(required_columns - existing_columns)
+    if missing_columns:
+        raise ValueError(
+            "paragraph_embeddings missing required columns: "
+            + ", ".join(missing_columns)
         )
 
 
@@ -274,3 +306,29 @@ def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
         ),
         {"schema_name": runtime_schema, "table_name": table_name},
     ).scalar_one_or_none()
+
+
+def _get_table_columns(session: Session, table_name: str) -> set[str]:
+    """
+    获取当前运行时 schema 下表的列名集合。
+
+    创建时间: 2026-04-24
+    任务: full-global-offset-rollout
+    说明: 在 validate 阶段显式校验新列是否存在，避免旧库只升级了部分 schema 就被误判为可用。
+    """
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
+        raise ValueError(f"invalid table name: {table_name}")
+
+    runtime_schema = _resolve_runtime_schema(session)
+    rows = session.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = :schema_name
+              AND table_name = :table_name
+            """
+        ),
+        {"schema_name": runtime_schema, "table_name": table_name},
+    ).scalars().all()
+    return {str(column_name) for column_name in rows}
