@@ -95,6 +95,10 @@ def _build_messages(
     创建时间: 2026-04-24
     任务: llm-mention-rerank-chain
     说明: 构造 rerank 请求，显式提示模型优先比较同一人物证据而不是泛场景相似度。
+
+    修改时间: 2026-04-24
+    任务: structured-output-adapter-instructor-unification
+    修改内容: 增加 JSON 输出样例，保证该链路切到 json_object / Instructor JSON 时仍满足 prompt 合同。
     """
     candidate_payload = [
         {
@@ -113,6 +117,8 @@ def _build_messages(
         "目标：优先把与 query 所指向同一人物/角色最一致的证据排前，不要把泛场景相似误判为同一人。\n"
         "约束：不生成新候选，不改写 chunk_id，不输出最终身份结论。\n"
         "请为每个候选返回 model_rerank_score，分数越高表示越相关；可选返回简短 reason 与 confidence。\n"
+        'JSON 输出格式样例：{"results":[{"chunk_id":1,"model_rerank_score":0.92,'
+        '"model_rerank_reason":"局部证据与衣着动作一致","model_confidence":0.88}]}\n'
         f"query:\n{query_text}\n"
         "candidates:\n"
         f"{json.dumps(candidate_payload, ensure_ascii=False)}"

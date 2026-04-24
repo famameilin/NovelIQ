@@ -117,6 +117,15 @@
     "diagnosis": true,
     "cloud_only": false
   },
+  "structured_output": {
+    "annotation": "json_schema",
+    "annotation_fallback": "json_object",
+    "incremental_disambig": "json_schema",
+    "mention_extraction": "json_object",
+    "full_disambig": "json_schema",
+    "level3_rerank": "json_schema",
+    "diagnosis": "json_schema"
+  },
   "logging": {
     "console_level": "INFO",
     "file_level": "DEBUG",
