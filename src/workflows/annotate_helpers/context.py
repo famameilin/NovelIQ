@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from src.config import settings
+from src.config import TaskType, settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
 from src.models.local.evidence_renderer_shared import render_active_entities_from_authority
@@ -128,6 +128,9 @@ def _init_evidence_provider(
                 f"checks: {e}"
             )
 
+    mention_extractor = _init_optional_mention_extractor(novel_id=novel_id, session=conn)
+    level3_reranker = _init_optional_level3_reranker(novel_id=novel_id, session=conn)
+
     evidence_provider = DisambigContextProvider(
         graph_repo=graph_repo,
         novel_id=novel_id,
@@ -140,9 +143,87 @@ def _init_evidence_provider(
         level3_enabled=settings.rag.level3_enabled,
         similarity_threshold=settings.rag.similarity_threshold,
         level3_top_k=settings.rag.level3_top_k,
+        mention_extractor=mention_extractor,
+        level3_reranker=level3_reranker,
     )
 
     return evidence_provider
+
+
+def _init_optional_mention_extractor(
+    *,
+    novel_id: str,
+    session,
+):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 仅在 mention_extraction 配置完整时初始化 LLM extractor；未配置时保持规则 fallback 主链不变。
+    """
+    model_client = _build_optional_task_model_client("mention_extraction", novel_id=novel_id, session=session)
+    if model_client is None:
+        return None
+
+    from src.rag.mention_extraction_llm import LLMPersonMentionExtractor
+
+    return LLMPersonMentionExtractor(
+        model_client,
+        enable_thinking=settings.thinking.mention_extraction,
+    )
+
+
+def _init_optional_level3_reranker(
+    *,
+    novel_id: str,
+    session,
+):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 仅在 level3_rerank 配置完整时初始化模型 reranker；否则继续走确定性 rerank fallback。
+    """
+    model_client = _build_optional_task_model_client("level3_rerank", novel_id=novel_id, session=session)
+    if model_client is None:
+        return None
+
+    from src.rag.model_rerank_llm import LLMLevel3Reranker
+
+    return LLMLevel3Reranker(
+        model_client,
+        enable_thinking=settings.thinking.level3_rerank,
+    )
+
+
+def _build_optional_task_model_client(
+    task_type: TaskType,
+    *,
+    novel_id: str,
+    session,
+):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 对可选增强模型统一执行“未配置则禁用、配置不完整则报错、配置完整则初始化”的收口逻辑。
+    """
+    task_settings = getattr(settings.models, task_type)
+    config_keys = ("base_url", "model", "api_key", "timeout_s")
+    has_any_runtime_config = any(getattr(task_settings, key) is not None for key in config_keys)
+    if not has_any_runtime_config:
+        logger.info("optional task model disabled because config is absent: task_type={}", task_type)
+        return None
+
+    if task_settings.base_url is None or task_settings.model is None:
+        raise RuntimeError(
+            f"optional task model config incomplete: task_type={task_type} "
+            f"base_url={task_settings.base_url!r} model={task_settings.model!r}"
+        )
+
+    from src.models.local.base import BaseModelClient
+
+    # 中文注释：这里直接复用现有 BaseModelClient，避免为 mention extraction / rerank 再分叉一套 transport。
+    client = BaseModelClient(task_type=task_type, novel_id=novel_id, session=session)
+    logger.info("optional task model initialized: task_type={} model={}", task_type, task_settings.model)
+    return client
 
 
 def _extract_names_from_text(text: str) -> list[str]:

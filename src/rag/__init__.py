@@ -30,6 +30,7 @@ from src.rag.evidence_types import (
 from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
 from src.rag.model_rerank import Level3ModelReranker, Level3RerankCandidate, Level3RerankResult
+from src.rag.model_rerank_llm import LLMLevel3Reranker
 from src.rag.retriever import (
     ActiveEntityLookup,
     AliasLookup,
@@ -58,4 +59,5 @@ __all__ = [
     "Level3RerankCandidate",
     "Level3RerankResult",
     "Level3ModelReranker",
+    "LLMLevel3Reranker",
 ]
