@@ -73,6 +73,13 @@ ROLE_WORDS = (
 
 _ROLE_PATTERN = "|".join(sorted((re.escape(role) for role in ROLE_WORDS), key=len, reverse=True))
 _FEATURE_PATTERN = "|".join(sorted((re.escape(cue) for cue in APPEARANCE_CUES + ACTION_CUES), key=len, reverse=True))
+_BARE_COMPOUND_ROLE_PATTERN = "|".join(
+    sorted(
+        (re.escape(role) for role in ROLE_WORDS if any(cue in role for cue in APPEARANCE_CUES)),
+        key=len,
+        reverse=True,
+    )
+)
 _DEMONSTRATIVE_PATTERN = r"(?:那个|那名|那位|这名|这位|那|这)"
 _MENTION_PATTERNS = (
     re.compile(
@@ -81,6 +88,7 @@ _MENTION_PATTERNS = (
     ),
     re.compile(rf"(?P<raw>{_DEMONSTRATIVE_PATTERN}(?P<role>{_ROLE_PATTERN}))"),
     re.compile(rf"(?P<raw>(?:{'|'.join(LOCATION_CUES)})的(?P<role>{_ROLE_PATTERN}))"),
+    re.compile(rf"(?P<raw>(?P<role>{_BARE_COMPOUND_ROLE_PATTERN}))"),
     re.compile(r"(?P<raw>掌柜的)"),
 )
 
@@ -184,6 +192,15 @@ def _build_mention_cue_text(sentence_text: str, start: int, end: int) -> str:
     return sentence_text[start : next_start if next_start is not None else len(sentence_text)]
 
 
+def _spans_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    """
+    创建时间: 2026-04-24
+    任务: fix-bare-compound-mention-extraction
+    说明: 判断两个 mention 命中范围是否重叠，用于保留更完整的上游命中，避免“那个灰衣人/灰衣人”重复出证。
+    """
+    return left[0] < right[1] and right[0] < left[1]
+
+
 def extract_person_mentions(text: str) -> list[PersonMention]:
     """
     创建时间: 2026-04-23
@@ -193,6 +210,10 @@ def extract_person_mentions(text: str) -> list[PersonMention]:
     修改时间: 2026-04-24
     任务: fix-mention-local-cue-scope
     修改说明: 每个 mention 只从局部 cue_text 抽动作/外貌线索，避免多人物共句时互相污染。
+
+    修改时间: 2026-04-24
+    任务: fix-bare-compound-mention-extraction
+    修改说明: 增补“灰衣人/黑衣人”等裸露复合角色词的窄规则，并用 span overlap 避免重复抽取子串。
     """
     mentions: list[PersonMention] = []
     seen: set[tuple[str, str]] = set()
@@ -201,16 +222,21 @@ def extract_person_mentions(text: str) -> list[PersonMention]:
         sentence_text = sentence.strip()
         if not sentence_text:
             continue
+        matched_spans: list[tuple[int, int]] = []
         for pattern in _MENTION_PATTERNS:
             for match in pattern.finditer(sentence_text):
                 raw_text = match.group("raw").strip()
                 if not raw_text:
+                    continue
+                current_span = (match.start(), match.end())
+                if any(_spans_overlap(current_span, existing_span) for existing_span in matched_spans):
                     continue
                 role_word = match.groupdict().get("role") or raw_text
                 key = (raw_text, sentence_text)
                 if key in seen:
                     continue
                 seen.add(key)
+                matched_spans.append(current_span)
                 cue_text = _build_mention_cue_text(sentence_text, match.start(), match.end())
                 mentions.append(_build_mention_from_cue_text(raw_text, role_word, sentence_text, cue_text))
 

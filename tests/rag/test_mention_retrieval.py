@@ -80,6 +80,36 @@ def test_build_mention_evidence_queries_keeps_action_or_location_mentions() -> N
     assert "门口 老者" in query_texts
 
 
+def test_extract_person_mentions_captures_bare_compound_role_mentions() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-bare-compound-mention-extraction
+    说明: 文档基线将“灰衣人/黑衣人”列为核心 case，裸露复合角色词也应进入 mention query。
+    """
+    mentions = extract_person_mentions("灰衣人立在门口。黑衣人忽然出手。")
+    queries = build_mention_evidence_queries(mentions)
+
+    raw_texts = [mention.raw_text for mention in mentions]
+    query_texts = [query.query_text for query in queries]
+
+    assert raw_texts == ["灰衣人", "黑衣人"]
+    assert [mention.mention_type for mention in mentions] == ["appearance_based", "feature_action"]
+    assert "灰衣人" in query_texts
+    assert "黑衣人" in query_texts
+    assert "黑衣 黑衣人 出手" in query_texts
+
+
+def test_extract_person_mentions_dedupes_demonstrative_compound_role_subspans() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-bare-compound-mention-extraction
+    说明: “那个灰衣人”已由指示词规则命中时，不应再额外抽取重叠子串“灰衣人”。
+    """
+    mentions = extract_person_mentions("那个灰衣人立在门口。")
+
+    assert [mention.raw_text for mention in mentions] == ["那个灰衣人"]
+
+
 def test_extract_person_mentions_keeps_action_cues_local_to_current_mention() -> None:
     """
     创建时间: 2026-04-24
