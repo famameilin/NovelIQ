@@ -17,6 +17,7 @@ from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMen
 from src.rag.mention_query import build_mention_evidence_queries
 from src.rag.mention_rerank import rerank_mention_level3_results
 from src.rag.model_rerank import Level3RerankResult
+from src.rag.model_rerank_llm import LLMLevel3Reranker, LLMLevel3RerankItem, LLMLevel3RerankResponse
 from src.rag.retriever import DisambigContextProvider
 from src.storage.repositories.chunk import SimilarChunkRow
 
@@ -141,6 +142,56 @@ async def test_mention_extraction_service_falls_back_to_rule_extractor() -> None
 
     assert [mention.raw_text for mention in mentions] == ["穿红衣的女子"]
     assert mentions[0].source == "rule"
+
+
+@pytest.mark.asyncio
+async def test_llm_level3_reranker_keeps_highest_score_for_duplicate_chunk_ids() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: LLM rerank 若异常返回重复 chunk_id，应保留最高分结果，避免 provider 被重复低分覆盖。
+    """
+    model_client = MagicMock()
+    model_client._config = MagicMock(timeout_s=30)
+    model_client._call_api = AsyncMock(
+        return_value=LLMLevel3RerankResponse(
+            results=[
+                LLMLevel3RerankItem(chunk_id=7, model_rerank_score=0.71),
+                LLMLevel3RerankItem(chunk_id=7, model_rerank_score=0.93, model_rerank_reason="局部证据更聚焦"),
+                LLMLevel3RerankItem(chunk_id=8, model_rerank_score=0.65),
+            ]
+        )
+    )
+    reranker = LLMLevel3Reranker(model_client)
+
+    results = await reranker.rerank(
+        query_text="那个穿红衣的女子突然出手。",
+        candidates=[
+            MagicMock(
+                chunk_id=7,
+                mention_text="穿红衣的女子",
+                candidate_chunk_text="白芷正是那名红衣女子。",
+                candidate_local_preview="红衣女子回头看向众人。",
+                chunk_semantic_score=0.81,
+                paragraph_semantic_score=0.95,
+                business_rerank_score=1.03,
+            ),
+            MagicMock(
+                chunk_id=8,
+                mention_text="穿红衣的女子",
+                candidate_chunk_text="相似场景。",
+                candidate_local_preview="众人看向门外。",
+                chunk_semantic_score=0.84,
+                paragraph_semantic_score=0.86,
+                business_rerank_score=0.9,
+            ),
+        ],
+    )
+
+    score_by_chunk = {item.chunk_id: item for item in results}
+    assert score_by_chunk[7].model_rerank_score == 0.93
+    assert score_by_chunk[7].model_rerank_reason == "局部证据更聚焦"
+    assert score_by_chunk[8].model_rerank_score == 0.65
 
 
 def test_build_mention_evidence_queries_skips_broad_pronoun_role_mentions() -> None:
