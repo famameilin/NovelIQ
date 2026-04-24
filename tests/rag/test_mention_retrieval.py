@@ -194,6 +194,7 @@ async def test_llm_person_mention_extractor_uses_cloud_safe_schema_for_cloud_api
         )
 
     assert model_client._call_api.await_args.kwargs["response_model"] is LLMPersonMentionCloudResponse
+    assert model_client._call_api.await_args.kwargs["raw_response_format"] == {"type": "json_object"}
     assert [mention.raw_text for mention in mentions] == ["袖口绣银线的那人"]
     assert mentions[0].cues["role_word"] == "那人"
     assert mentions[0].cues["appearance"] == ["袖口绣银线"]

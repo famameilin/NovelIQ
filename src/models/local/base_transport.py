@@ -27,6 +27,7 @@ async def call_api[T: BaseModel](
     messages: list[dict],
     enable_thinking: bool = False,
     response_model: type[T] | None = None,
+    raw_response_format: dict[str, Any] | None = None,
     timeout: float | None = None,
 ) -> Any:
     """
@@ -40,9 +41,16 @@ async def call_api[T: BaseModel](
     修改者: Codex
     任务: fix-llm-call-timeout
     修改内容: 添加显式 timeout 参数，避免调用层因默认超时未设置而长时间阻塞。
+
+    修改时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    修改内容: 支持调用方显式传入 response_format，兼容只支持 json_object、
+              不支持 strict json_schema 的服务商。
     """
     request_params = client._build_request_params(messages, enable_thinking=enable_thinking)
-    if response_model is not None:
+    if raw_response_format is not None:
+        request_params["response_format"] = raw_response_format
+    elif response_model is not None:
         request_params["response_format"] = client._build_json_schema(response_model)
     if timeout is not None:
         request_params["timeout"] = timeout
