@@ -41,12 +41,17 @@
 修改者: Codex
 任务: fix-embedding-token-callback-signature
 修改内容: 将 EmbeddingClient 的 token callback 签名对齐到统一契约，补上 model 参数
+
+修改时间: 2026-04-24
+修改者: Codex
+任务: semantic-chunking-embedding-sse-progress
+修改内容: 为批量 embedding 增加可选批次进度回调，供语义分块/预处理把批量请求进度映射到 SSE。
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import numpy as np
 from loguru import logger
@@ -55,6 +60,7 @@ from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, BadRequestE
 from src.config import settings
 
 TokenUsageCallback = Callable[[str, str, str, str, int, int, int | None, int | None], None]
+BatchProgressCallback = Callable[[int, int, int], Awaitable[None] | None]
 
 
 class EmbeddingClient:
@@ -298,7 +304,12 @@ class EmbeddingClient:
                 f"embedding dimension mismatch: expected {self._embedding_dim}, got {actual_dim} (model={self._model})"
             )
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        progress_callback: BatchProgressCallback | None = None,
+    ) -> list[list[float]]:
         """
         批量获取文本的embedding向量
 
@@ -321,6 +332,11 @@ class EmbeddingClient:
         任务: clarify-token-accounting-semantics
         修改内容: 补充批量 embedding 记账注释，明确 provider usage 仍可直接复用
 
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: semantic-chunking-embedding-sse-progress
+        修改内容: 支持在每个 batch 完成后回调进度，避免上层只能在整批 paragraphs 全部完成后才更新 UI。
+
         Args:
             texts: 文本列表
 
@@ -334,8 +350,9 @@ class EmbeddingClient:
 
         embeddings: list[list[float]] = [[] for _ in texts]
         valid_items = [(idx, text) for idx, text in enumerate(texts) if text and text.strip()]
+        total_batches = (len(valid_items) + self._batch_size - 1) // self._batch_size if valid_items else 0
 
-        for batch_start in range(0, len(valid_items), self._batch_size):
+        for batch_index, batch_start in enumerate(range(0, len(valid_items), self._batch_size), start=1):
             batch_items = valid_items[batch_start : batch_start + self._batch_size]
             batch_texts = [text for _, text in batch_items]
 
@@ -425,6 +442,10 @@ class EmbeddingClient:
                 response.usage.prompt_tokens if response.usage else 0,
                 response.usage.total_tokens if response.usage else 0,
             )
+            if progress_callback is not None:
+                progress_result = progress_callback(batch_index, total_batches, len(valid_items))
+                if progress_result is not None:
+                    await progress_result
 
         for text in texts:
             if text and text.strip():
