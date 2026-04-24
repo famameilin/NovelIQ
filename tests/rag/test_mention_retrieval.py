@@ -24,6 +24,7 @@ from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
 from src.rag.mention_query import build_mention_evidence_queries
 from src.rag.mention_rerank import rerank_mention_level3_results
+from src.rag.model_call_audit import audited_structured_model_call
 from src.rag.model_rerank import Level3RerankResult
 from src.rag.model_rerank_llm import LLMLevel3Reranker, LLMLevel3RerankItem, LLMLevel3RerankResponse
 from src.rag.retriever import DisambigContextProvider
@@ -301,7 +302,11 @@ async def test_llm_person_mention_extractor_records_error_audit_when_call_fails(
     """
     创建时间: 2026-04-24
     任务: llm-mention-rerank-audit
-    说明: mention extraction 调用失败时，也应留下 error 审计记录，并补记估算 token。
+    说明: mention extraction 调用失败时，也应留下 error 审计记录。
+
+    修改时间: 2026-04-24
+    任务: fix-structured-output-review-findings
+    修改内容: provider 没有返回 raw_response 时不再补记 token，避免把无响应失败误算成模型消耗。
     """
     model_client = MagicMock()
     model_client.is_cloud_api = MagicMock(return_value=True)
@@ -320,10 +325,47 @@ async def test_llm_person_mention_extractor_records_error_audit_when_call_fails(
                 )
             )
 
-    model_client._record_estimated_token_usage_from_messages.assert_called_once()
+    model_client._record_estimated_token_usage_from_messages.assert_not_called()
+    model_client._record_estimated_token_usage_from_response.assert_not_called()
     assert mock_record_model_interaction.call_args.kwargs["status"] == "error"
     assert mock_record_model_interaction.call_args.kwargs["run_id"] == "run-err"
     assert mock_record_model_interaction.call_args.kwargs["chunk_id"] == 9
+
+
+@pytest.mark.asyncio
+async def test_audited_structured_model_call_does_not_record_tokens_for_preflight_error() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-structured-output-review-findings
+    说明: json_object prompt 合同校验属于本地前置错误，provider 未被调用时不能写 token_usage。
+    """
+    model_client = MagicMock()
+    model_client.is_cloud_api = MagicMock(return_value=True)
+    model_client._config = MagicMock(timeout_s=30, model="mention-model")
+    model_client._session = object()
+    model_client._call_api = AsyncMock()
+
+    with patch("src.rag.model_call_audit.record_model_interaction") as mock_record_model_interaction:
+        with pytest.raises(ValueError, match="json_object mode requires prompt content"):
+            await audited_structured_model_call(
+                model_client,
+                messages=[{"role": "user", "content": "只输出结构化结果，但这里故意不写关键字"}],
+                response_model=LLMPersonMentionResponse,
+                normalize_response=lambda parsed: parsed.mentions,
+                interaction_type="mention_extraction",
+                phase="mention_extraction",
+                call_type="mention_extraction",
+                enable_thinking=False,
+                timeout=30,
+                run_id="run-preflight",
+                chunk_id=11,
+            )
+
+    model_client._call_api.assert_not_called()
+    model_client._record_estimated_token_usage_from_messages.assert_not_called()
+    model_client._record_estimated_token_usage_from_response.assert_not_called()
+    assert mock_record_model_interaction.call_args.kwargs["status"] == "error"
+    assert mock_record_model_interaction.call_args.kwargs["run_id"] == "run-preflight"
 
 
 def test_build_mention_evidence_queries_skips_broad_pronoun_role_mentions() -> None:

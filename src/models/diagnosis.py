@@ -192,6 +192,10 @@ class DiagnosisClient(BaseModelClient):
         任务: structured-output-adapter-instructor-unification
         修改内容: 使用项目级 structured_output 适配层负责 response_format 选择和 Pydantic 解析，
                   本函数继续保留诊断审计、analysis_logger 与 token 记账职责。
+
+        修改时间: 2026-04-24
+        任务: fix-structured-output-review-findings
+        修改内容: 结构化调用失败时仅对已返回 raw_response 的场景补记 token，避免本地前置错误被记账。
         """
         start_time = time.time()
 
@@ -212,12 +216,13 @@ class DiagnosisClient(BaseModelClient):
             )
             result = structured_result.parsed
         except Exception as exc:
-            content_clean = ""
+            raw_response = None
             if isinstance(exc, StructuredOutputError):
-                content_clean = exc.response_text
+                raw_response = exc.raw_response
             elif structured_result is not None:
-                content_clean = structured_result.response_text
-            self._record_estimated_token_usage_from_messages(messages, content_clean, "diagnosis", chunk_id=None)
+                raw_response = structured_result.raw_response
+            if raw_response is not None:
+                self._record_estimated_token_usage_from_response(messages, raw_response, "diagnosis", chunk_id=None)
             raise
 
         response = structured_result.raw_response
