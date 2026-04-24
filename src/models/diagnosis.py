@@ -50,6 +50,7 @@ from src.config.analysis_logger import AnalysisLogger
 from src.models.cloud.schema import CloudAnalysis
 from src.models.interactions import record_model_interaction
 from src.models.local.base import BaseModelClient, TokenUsageCallback
+from src.models.structured_output import StructuredOutputError, StructuredOutputRequest, call_structured_output
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -184,32 +185,53 @@ class DiagnosisClient(BaseModelClient):
         run_id: str | None = None,
         attempt_number: int = 1,
     ) -> CloudAnalysis:
+        """
+        执行单次诊断结构化调用。
+
+        修改时间: 2026-04-24
+        任务: structured-output-adapter-instructor-unification
+        修改内容: 使用项目级 structured_output 适配层负责 response_format 选择和 Pydantic 解析，
+                  本函数继续保留诊断审计、analysis_logger 与 token 记账职责。
+
+        修改时间: 2026-04-24
+        任务: fix-structured-output-review-findings
+        修改内容: 结构化调用失败时仅对已返回 raw_response 的场景补记 token，避免本地前置错误被记账。
+        """
         start_time = time.time()
-        request_params = self._build_request_params(messages)
-        request_params["response_format"] = self._build_json_schema(CloudAnalysis)
 
         if self._client is None:
             raise ValueError("client is required")
 
-        response = await self._call_api_with_request_params(request_params, is_cloud=self.is_cloud_api())
-        content_clean = ""
-        thinking_content = None
-        if response:
-            message = response.choices[0].message
-            content_clean, thinking_content = self._extract_response_content(message)
-
+        structured_result: Any = None
         try:
-            result = self._parse_structured_response(response, CloudAnalysis)
-        except Exception:
-            if response:
-                self._record_estimated_token_usage_from_messages(messages, content_clean, "diagnosis", chunk_id=None)
+            structured_result = await call_structured_output(
+                self,
+                StructuredOutputRequest(
+                    messages=messages,
+                    response_model=CloudAnalysis,
+                    call_type="diagnosis",
+                    enable_thinking=self._config.thinking_enabled,
+                    timeout=self._config.timeout_s,
+                ),
+            )
+            result = structured_result.parsed
+        except Exception as exc:
+            raw_response = None
+            if isinstance(exc, StructuredOutputError):
+                raw_response = exc.raw_response
+            elif structured_result is not None:
+                raw_response = structured_result.raw_response
+            if raw_response is not None:
+                self._record_estimated_token_usage_from_response(messages, raw_response, "diagnosis", chunk_id=None)
             raise
 
+        response = structured_result.raw_response
+        content_clean = structured_result.response_text
+        thinking_content = structured_result.thinking_content
         duration_ms = int((time.time() - start_time) * 1000)
 
         if run_id and response:
-            extract_reasoning_tokens = getattr(self, "_extract_reasoning_tokens", None)
-            reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
+            reasoning_tokens = structured_result.reasoning_tokens
 
             record_model_interaction(
                 run_id=run_id,

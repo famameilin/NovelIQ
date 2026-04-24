@@ -184,7 +184,6 @@ class MockAnnotationClient:
         self._fail_times_phase1 = 0
         self._fail_times_phase2 = 0
         self._token_usage_callback = None
-        self._instructor_client = None
         self._client = None
         self._task_type = "annotation"
         self._novel_id = "test-novel"
@@ -247,9 +246,6 @@ class MockAnnotationClient:
 
     def _log_prompt_response(self, chunk_id, content_clean, thinking_content, extraction, messages, text, prev_summary):
         pass
-
-    def _get_instructor_client(self):
-        return None
 
     async def _call_annotation_api(self, messages, enable_thinking, chunk_id, response_model=None, call_type=None):
         self._call_count += 1
@@ -489,15 +485,21 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_record_model_interaction.call_args.kwargs["reasoning_tokens"], 11)
         self.assertFalse(mock_record_model_interaction.call_args.kwargs["requested_thinking"])
 
-    async def test_phase2_retry_on_instructor_failure(self):
-        """Phase2 Instructor 调用失败时重试"""
+    async def test_phase2_retry_on_structured_call_failure(self):
+        """
+        Phase2 结构化调用失败时重试。
+
+        修改时间: 2026-04-24
+        任务: fix-structured-output-review-findings
+        修改内容: Instructor 运行时已移除，测试命名和错误文本改为结构化调用失败。
+        """
         client = MockAnnotationClient()
         call_count = [0]
 
         async def mock_call_annotation_api(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] < 3:
-                raise ConnectionError("Instructor connection failed")
+                raise ConnectionError("structured call connection failed")
 
             result = create_mock_foreshadowing()
             response = MagicMock()

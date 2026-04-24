@@ -41,6 +41,7 @@ from .schemas import (
     RAGSettings,
     RuntimeSettings,
     StreamingSettings,
+    StructuredOutputSettings,
     ThinkingSettings,
     TopicModelSettings,
     _parse_analysis_settings,
@@ -56,6 +57,7 @@ from .schemas import (
     _parse_rag_settings,
     _parse_runtime_settings,
     _parse_streaming_settings,
+    _parse_structured_output_settings,
     _parse_thinking_settings,
     _parse_topic_model_settings,
 )
@@ -84,6 +86,7 @@ class Settings:
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     thinking: ThinkingSettings = field(default_factory=ThinkingSettings)
     streaming: StreamingSettings = field(default_factory=StreamingSettings)
+    structured_output: StructuredOutputSettings = field(default_factory=StructuredOutputSettings)
     logging: LoggingSettings = field(default_factory=LoggingSettings)
     chunking: ChunkingSettings = field(default_factory=ChunkingSettings)
     database: DatabaseSettings = field(default_factory=DatabaseSettings)
@@ -134,6 +137,7 @@ class Settings:
             runtime=_parse_runtime_settings(data.get("runtime")),
             thinking=_parse_thinking_settings(data.get("thinking")),
             streaming=_parse_streaming_settings(data.get("streaming")),
+            structured_output=_parse_structured_output_settings(data.get("structured_output")),
             logging=_parse_logging_settings(data.get("logging")),
             chunking=_parse_chunking_settings(data.get("chunking")),
             database=_parse_database_settings(data.get("database")),

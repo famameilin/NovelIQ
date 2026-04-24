@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from src.api.models.events import StreamEvent
+from src.models.structured_output import StructuredOutputError, StructuredOutputRequest, call_structured_output
 
 from ..schema import CloudDisambiguateResponseModel, DisambiguateResponseModel
 from .result_builder import normalize_disambiguate_response
@@ -87,6 +88,14 @@ async def call_disambiguate_api(
     修改者: Codex
     任务: count-failed-llm-calls
     修改内容: 结构化解析失败时仍补记 token，避免请求已完成却被遗漏
+
+    修改时间: 2026-04-24
+    任务: structured-output-adapter-instructor-unification
+    修改内容: 消歧结构化调用改走项目级 structured_output 适配层，保留 stream/emitter 与 cloud-safe schema。
+
+    修改时间: 2026-04-24
+    任务: fix-structured-output-review-findings
+    修改内容: 仅当结构化适配层带回 raw_response 时补记 token，避免本地前置错误污染 token_usage。
     """
     if not config.model:
         raise ValueError("model is required")
@@ -94,36 +103,39 @@ async def call_disambiguate_api(
     if client._client is None:
         raise ValueError("client is required")
 
-    request_params = client._build_request_params(
-        messages=messages,
-        enable_thinking=config.thinking_enabled,
-    )
     response_model: type[DisambiguateResponseModel] | type[CloudDisambiguateResponseModel]
     response_model = CloudDisambiguateResponseModel if client.is_cloud_api() else DisambiguateResponseModel
-    request_params["response_format"] = client._build_json_schema(response_model)
-
-    response = await client._call_api_stream(
-        request_params,
-        is_cloud=client.is_cloud_api(),
-        emitter=emitter,
-    )
-
-    thinking_content = None
-    extract_reasoning_tokens = getattr(client, "_extract_reasoning_tokens", None)
-    reasoning_tokens = extract_reasoning_tokens(response) if callable(extract_reasoning_tokens) else None
-    if hasattr(response, "choices") and response.choices:
-        message = response.choices[0].message
-        thinking_content = getattr(message, "reasoning_content", None)
-        if thinking_content:
-            logger.debug(f"Extracted thinking_content: {len(thinking_content)} chars")
-
-    response_content = client._extract_response_text_for_token_usage(response)
+    structured_result: Any = None
     try:
-        parsed_response = client._parse_structured_response(response, response_model)
+        structured_result = await call_structured_output(
+            client,
+            StructuredOutputRequest(
+                messages=messages,
+                response_model=response_model,
+                call_type=log_type,
+                enable_thinking=config.thinking_enabled,
+                timeout=config.timeout_s,
+                stream=True,
+                stream_emitter=emitter,
+            ),
+        )
+        parsed_response = structured_result.parsed
         normalized_response = normalize_disambiguate_response(parsed_response)
-    except Exception:
-        client._record_estimated_token_usage_from_messages(messages, response_content, log_type)
+    except Exception as exc:
+        raw_response = None
+        if isinstance(exc, StructuredOutputError):
+            raw_response = exc.raw_response
+        elif structured_result is not None:
+            raw_response = structured_result.raw_response
+        if raw_response is not None:
+            client._record_estimated_token_usage_from_response(messages, raw_response, log_type)
         raise
+
+    thinking_content = structured_result.thinking_content
+    reasoning_tokens = structured_result.reasoning_tokens
+    response_content = structured_result.response_text
+    if thinking_content:
+        logger.debug(f"Extracted thinking_content: {len(thinking_content)} chars")
 
     if thinking_content:
         normalized_response = normalized_response.model_copy(update={"thinking_content": thinking_content})

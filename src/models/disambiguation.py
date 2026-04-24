@@ -70,9 +70,15 @@ class DisambiguationClient(BaseModelClient):
         analysis_logger: AnalysisLogger | None = None,
         token_usage_callback: TokenUsageCallback | None = None,
         novel_id: str | None = None,
-        instructor_client_factory: Any | None = None,
         session: Any | None = None,
     ) -> None:
+        """
+        初始化消歧客户端。
+
+        修改时间: 2026-04-24
+        任务: fix-structured-output-review-findings
+        修改内容: 删除 Instructor 工厂参数，业务客户端不再暴露已取消的结构化输出运行时入口。
+        """
         super().__init__(
             task_type=task_type,
             config=config,
@@ -82,7 +88,6 @@ class DisambiguationClient(BaseModelClient):
             novel_id=novel_id,
             session=session,
         )
-        self._instructor_client_factory = instructor_client_factory
 
     async def disambiguate_characters(
         self,

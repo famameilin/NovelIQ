@@ -3,10 +3,9 @@
 创建者: TraeAI
 任务: 本地模型提示词测试
 
-修改时间: 2026-03-16
-修改者: TraeAI
-任务: 修复 Mock 配置
-修改内容: 使用依赖注入 instructor_client_factory，避免 instructor 内部检查
+修改时间: 2026-04-24
+任务: fix-structured-output-review-findings
+修改内容: 移除已废弃 Instructor mock 说明，客户端初始化测试只验证当前 OpenAI-compatible 入口。
 
 修改时间: 2026-03-16
 修改者: TraeAI
