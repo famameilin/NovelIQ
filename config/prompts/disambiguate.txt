@@ -17,31 +17,30 @@
 
 请输出 JSON 格式：
 {
-  "canonical_decisions": {
-    "名字": "常用名",
-    ...
-  },
-  "alias_confidence": {
-    "名字": "low|medium|high",
-    ...
-  },
-  "entity_types": {
-    "实体名称": "{{ENTITY_TYPES_UNION}}",
-    ...
-  },
+  "canonical_decisions": [
+    {"name": "名字", "canonical": "常用名"}
+  ],
+  "alias_confidence": [
+    {"name": "名字", "confidence": "low|medium|high"}
+  ],
+  "entity_types": [
+    {"name": "实体名称", "entity_type": "{{ENTITY_TYPES_UNION}}"}
+  ],
   "entity_relations": [
-    {"from": "实体A", "to": "实体B", "type": "{{RELATION_TYPES_UNION}}"},
-    ...
+    {"from": "实体A", "to": "实体B", "type": "{{RELATION_TYPES_UNION}}"}
+  ],
+  "evidence_sources": [
+    {"name": "名字", "sources": ["证据来源"]}
   ]
 }
 
 【映射规则】
 - canonical_decisions：
-  - Key：候选名字
-  - Value：常用名
-  - 如果有充分证据，Value 可以是【已存在的角色】中的名字
+  - name：候选名字
+  - canonical：常用名
+  - 如果有充分证据，canonical 可以是【已存在的角色】中的名字
   - 如果没有充分证据，保持映射到自身
-  - canonical_decisions 的 Value 必须来自候选人名列表或【已存在的角色】
+  - canonical_decisions 的 canonical 必须来自候选人名列表或【已存在的角色】
 
 【候选人名格式】
 每个名字附带出现频次，格式：伯安（次数：312）
@@ -64,7 +63,7 @@
 【群体/组织/非人实体处理规则】
 - 群体名称（如"赤甲卫"、"禁军"）和组织名称（如"贺家"、"玄天道宗"）直接映射到自身
 - 非人实体（如"灵禽"、"赤焰驹"等灵兽）也应映射到自身，entity_types 标记为 creature
-- 例如：{"赤甲卫": "赤甲卫", "贺家": "贺家", "灵禽": "灵禽"}
+- 例如：{"name": "赤甲卫", "canonical": "赤甲卫"}、{"name": "贺家", "canonical": "贺家"}、{"name": "灵禽", "canonical": "灵禽"}
 - 不要尝试将群体/组织/非人实体名称与其他人名合并
 - 并列复合名（如"猴子和算盘"、"张三李四"）是多个人物的组合简称，不是群体：
   - 如果组成部分都是已知角色的别名或常用名，保持映射到自身，entity_types 标记为 character
@@ -125,29 +124,33 @@
 输入：猴子（次数：5）、侯飞白（次数：150）、伯安（次数：312）、贺重明（次数：3）、褚大山（次数：3）、柱子（次数：34）、赤甲卫（次数：10）、贺家（次数：20）
 输出：
 {
-  "canonical_decisions": {
-    "猴子": "侯飞白",
-    "贺重明": "伯安",
-    "褚大山": "柱子",
-    "赤甲卫": "赤甲卫",
-    "贺家": "贺家"
-  },
-  "alias_confidence": {
-    "猴子": "high",
-    "贺重明": "high",
-    "褚大山": "high",
-    "赤甲卫": "high",
-    "贺家": "high"
-  },
-  "entity_types": {
-    "伯安": "character",
-    "侯飞白": "character",
-    "柱子": "character",
-    "赤甲卫": "group",
-    "贺家": "organization"
-  },
+  "canonical_decisions": [
+    {"name": "猴子", "canonical": "侯飞白"},
+    {"name": "贺重明", "canonical": "伯安"},
+    {"name": "褚大山", "canonical": "柱子"},
+    {"name": "赤甲卫", "canonical": "赤甲卫"},
+    {"name": "贺家", "canonical": "贺家"}
+  ],
+  "alias_confidence": [
+    {"name": "猴子", "confidence": "high"},
+    {"name": "贺重明", "confidence": "high"},
+    {"name": "褚大山", "confidence": "high"},
+    {"name": "赤甲卫", "confidence": "high"},
+    {"name": "贺家", "confidence": "high"}
+  ],
+  "entity_types": [
+    {"name": "伯安", "entity_type": "character"},
+    {"name": "侯飞白", "entity_type": "character"},
+    {"name": "柱子", "entity_type": "character"},
+    {"name": "赤甲卫", "entity_type": "group"},
+    {"name": "贺家", "entity_type": "organization"}
+  ],
   "entity_relations": [
-    {"from": "伯安", "to": "贺家", "type": "belongs_to"}
+    {"from": "伯安", "to": "贺家", "type": "家族"}
+  ],
+  "evidence_sources": [
+    {"name": "猴子", "sources": ["身份线索"]},
+    {"name": "贺重明", "sources": ["身份线索"]}
   ]
 }
 解释：

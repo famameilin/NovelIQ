@@ -101,7 +101,7 @@
     "annotation": true,
     "annotation_fallback": true,
     "incremental_disambig": true,
-    "mention_extraction": true,
+    "mention_extraction": false,
     "full_disambig": true,
     "level3_rerank": true,
     "diagnosis": true,

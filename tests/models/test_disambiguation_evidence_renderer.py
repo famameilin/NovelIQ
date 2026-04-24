@@ -333,6 +333,23 @@ def test_build_disambiguate_messages_renders_prompt_context_sections() -> None:
     assert user_content.index("【图谱已确认的关系】") < user_content.index("<Vector_Evidence>")
 
 
+def test_build_disambiguate_messages_uses_record_array_output_contract() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: unify-disambig-transport-record-arrays
+    说明: 消歧传输层统一使用记录数组，prompt 不能再要求 canonical_decisions 输出动态键对象。
+    """
+    from src.models.local.disambiguation.messages import build_disambiguate_messages
+
+    messages = build_disambiguate_messages(candidates=[{"name": "灰衣人", "count": 3}])
+
+    system_content = messages[0]["content"]
+    assert '"canonical_decisions": [' in system_content
+    assert '"canonical_decisions": {' not in system_content
+    assert '"alias_confidence": [' in system_content
+    assert '"entity_types": [' in system_content
+
+
 def test_build_disambiguate_messages_filters_empty_prompt_context_sections() -> None:
     from src.models.local.disambiguation.evidence_renderer import DisambiguationPromptContext
     from src.models.local.disambiguation.messages import build_disambiguate_messages
