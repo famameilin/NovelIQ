@@ -11,6 +11,10 @@
 修改者: TraeAI
 任务: implement-level3-vector-retrieval
 修改内容: 重新导出 Level3VectorEvidence
+
+修改时间: 2026-04-24
+任务: llm-mention-rerank-chain
+修改内容: 导出 LLM mention extraction service 与模型 rerank 边界类型，供上层按需注入。
 """
 
 from src.rag.authority import Level1AuthorityProvider
@@ -23,6 +27,10 @@ from src.rag.evidence_types import (
     EvidenceItem,
     Level1AuthoritySnapshot,
 )
+from src.rag.mention_extraction_service import MentionExtractionService
+from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
+from src.rag.model_rerank import Level3ModelReranker, Level3RerankCandidate, Level3RerankResult
+from src.rag.model_rerank_llm import LLMLevel3Reranker
 from src.rag.retriever import (
     ActiveEntityLookup,
     AliasLookup,
@@ -45,4 +53,11 @@ __all__ = [
     "Level1AuthorityProvider",
     "Level3NotReadyError",
     "Level3VectorEvidence",
+    "MentionExtractionService",
+    "MentionExtractionRequest",
+    "PersonMention",
+    "Level3RerankCandidate",
+    "Level3RerankResult",
+    "Level3ModelReranker",
+    "LLMLevel3Reranker",
 ]

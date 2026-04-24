@@ -52,7 +52,7 @@ class MockEmbeddingClient:
     def __init__(self, *args, **kwargs):
         pass
 
-    def get_embedding(self, text: str):
+    async def get_embedding(self, text: str, chunk_id: int | None = None):
         import random
 
         return [random.random() for _ in range(1024)]
@@ -74,7 +74,7 @@ class MockEmbeddingClientPreprocess:
     def __init__(self, *args, **kwargs):
         pass
 
-    def get_embedding(self, text: str):
+    async def get_embedding(self, text: str, chunk_id: int | None = None):
         import random
 
         return [random.random() for _ in range(1024)]

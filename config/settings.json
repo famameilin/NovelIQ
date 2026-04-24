@@ -34,6 +34,16 @@
       "top_k": 20,
       "presence_penalty": 1.5
     },
+    "mention_extraction": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": null,
+      "temperature": 0.2,
+      "top_p": 0.8,
+      "top_k": 20,
+      "presence_penalty": 0.0
+    },
     "semantic_chunking": {
       "base_url": null,
       "model": null,
@@ -51,6 +61,16 @@
       "top_p": 0.95,
       "top_k": 20,
       "presence_penalty": 1.5
+    },
+    "level3_rerank": {
+      "base_url": null,
+      "model": null,
+      "api_key": null,
+      "timeout_s": null,
+      "temperature": 0.0,
+      "top_p": 0.8,
+      "top_k": 20,
+      "presence_penalty": 0.0
     },
     "diagnosis": {
       "base_url": null,
@@ -81,7 +101,9 @@
     "annotation": false,
     "annotation_fallback": false,
     "incremental_disambig": true,
+    "mention_extraction": false,
     "full_disambig": true,
+    "level3_rerank": false,
     "diagnosis": true,
     "phase3_candidates_per_batch": 5
   },
@@ -89,7 +111,9 @@
     "annotation": true,
     "annotation_fallback": true,
     "incremental_disambig": true,
+    "mention_extraction": false,
     "full_disambig": true,
+    "level3_rerank": false,
     "diagnosis": true,
     "cloud_only": false
   },
@@ -260,6 +284,8 @@
     "level1_enabled": true,
     "level2_enabled": true,
     "level3_enabled": true,
+    "mention_extraction_enabled": true,
+    "level3_rerank_enabled": true,
     "level3_top_k": 5
   }
 }
