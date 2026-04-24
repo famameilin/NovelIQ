@@ -25,6 +25,16 @@
 修改者: TraeAI
 任务: implement-level3-vector-retrieval
 修改内容: 添加 chunk embedding 生成功能
+
+修改时间: 2026-04-24
+修改者: Codex
+任务: semantic-chunking-embedding-sse-progress
+修改内容: 将 preprocess 的 emitter 透传到语义分块 paragraph embedding 链路，支持前端实时进度。
+
+修改时间: 2026-04-24
+修改者: Codex
+任务: preprocess-paragraph-embedding-sse-progress
+修改内容: 为 preprocess 的 paragraph_embeddings 批量落库阶段补充按批次 SSE 进度，避免 UI 在长批量请求期间静默等待。
 """
 
 from __future__ import annotations
@@ -126,7 +136,11 @@ async def run_preprocess(
     if use_semantic:
         logger.info("启用语义分块")
     all_chunks = await chunk_documents(
-        normalized_texts, max_chars=max_chars, overlap=overlap, use_semantic=use_semantic
+        normalized_texts,
+        max_chars=max_chars,
+        overlap=overlap,
+        use_semantic=use_semantic,
+        emitter=emitter,
     )
 
     total_chunks = len(all_chunks)
@@ -315,6 +329,7 @@ async def _generate_chunk_embeddings(
         run_id,
         all_chunks,
         ParagraphEmbeddingRow,
+        emitter=emitter,
     )
     # 中文注释：先把 paragraph rows 全部准备好，再开始任何向量表 DML；
     # 这样 paragraph fail fast 时，当前 session 不会留下 chunk-only 半成品写入。
@@ -387,6 +402,7 @@ async def _generate_paragraph_embedding_rows(
     run_id: str,
     all_chunks: list[Chunk],
     row_factory: Any,
+    emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Any]:
     """
     生成 paragraph embedding 写入 DTO。
@@ -403,6 +419,11 @@ async def _generate_paragraph_embedding_rows(
     修改时间: 2026-04-24
     任务: full-global-offset-rollout
     修改说明: paragraph row 直接落显式的 local/global offset，不再继续写旧的歧义字段。
+
+    修改时间: 2026-04-24
+    修改者: Codex
+    任务: preprocess-paragraph-embedding-sse-progress
+    修改说明: 通过批量 embedding 的 progress_callback 发 SSE，前端可看到 paragraph 向量化的持续推进。
     """
     paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
     for chunk in all_chunks:
@@ -426,8 +447,44 @@ async def _generate_paragraph_embedding_rows(
     if not paragraph_refs:
         return []
 
+    async def _emit_paragraph_embedding_progress(
+        completed_batches: int,
+        total_batches: int,
+        total_items: int,
+    ) -> None:
+        """
+        发射 preprocess 阶段 paragraph embedding 的批次进度。
+
+        创建时间: 2026-04-24
+        任务: preprocess-paragraph-embedding-sse-progress
+        新建原因: Level3 paragraph_embeddings 生成可能耗时很长，必须给前端一个独立于 chunk embedding 的可见进度。
+        """
+        if emitter is None or total_batches <= 0:
+            return
+
+        sub_percent = (completed_batches / total_batches) * 100
+        # 中文注释：current/total 在这里表达的是“已完成批次/总批次”，
+        # message 再补充总 paragraph 数，避免和 chunk 级 current/total 语义混淆。
+        await emitter(
+            StreamEvent(
+                action="progress",
+                stage="preprocess",
+                sub_stage="paragraph_embedding",
+                current=completed_batches,
+                total=total_batches,
+                sub_percent=sub_percent,
+                message=(
+                    f"段落向量落库准备 {completed_batches}/{total_batches}"
+                    f" 批（共 {total_items} 段）"
+                ),
+            )
+        )
+
     paragraph_texts = [paragraph_text for _, _, _, _, _, _, paragraph_text in paragraph_refs]
-    paragraph_embeddings = await embedding_client.embed_texts(paragraph_texts)
+    paragraph_embeddings = await embedding_client.embed_texts(
+        paragraph_texts,
+        progress_callback=_emit_paragraph_embedding_progress,
+    )
     if len(paragraph_embeddings) != len(paragraph_refs):
         raise RuntimeError(
             "paragraph embedding result count mismatch: "
