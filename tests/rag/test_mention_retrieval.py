@@ -12,8 +12,11 @@ import pytest
 
 from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.mention_extraction import extract_person_mentions
+from src.rag.mention_extraction_service import MentionExtractionService
+from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
 from src.rag.mention_query import build_mention_evidence_queries
 from src.rag.mention_rerank import rerank_mention_level3_results
+from src.rag.model_rerank import Level3RerankResult
 from src.rag.retriever import DisambigContextProvider
 from src.storage.repositories.chunk import SimilarChunkRow
 
@@ -49,6 +52,95 @@ def test_build_mention_evidence_queries_builds_variants() -> None:
     assert "穿红衣的女子" in query_texts
     assert "红衣 女子 出手" in query_texts
     assert any(query.mention_text == "穿红衣的女子" for query in queries)
+
+
+def test_build_mention_evidence_queries_uses_llm_compressed_terms() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: LLM mention 输出 normalized_query_terms 时，应额外生成 mention_compressed query 供 embedding 检索。
+    """
+    mention = PersonMention(
+        raw_text="一直跟在侯飞白身后的瘦高男子",
+        mention_type="descriptive_person",
+        sentence_text="一直跟在侯飞白身后的瘦高男子忽然停下。",
+        cues={"role_word": "男子", "appearance": ["瘦高"], "action": ["跟在身后"]},
+        normalized_query_terms=("瘦高", "男子", "跟在身后"),
+        source="llm",
+        confidence=0.91,
+    )
+
+    queries = build_mention_evidence_queries([mention])
+    compressed = next(query for query in queries if query.query_variant == "mention_compressed")
+
+    assert compressed.query_text == "瘦高 男子 跟在身后"
+    assert compressed.mention_source == "llm"
+    assert compressed.mention_confidence == 0.91
+
+
+@pytest.mark.asyncio
+async def test_mention_extraction_service_uses_llm_then_normalizes() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: service 应优先采用 LLM mention，并过滤纯实名与不在原文中的幻觉 mention。
+    """
+    extractor = MagicMock()
+    extractor.extract_mentions = AsyncMock(
+        return_value=[
+            PersonMention(
+                raw_text="袖口绣银线的那人",
+                mention_type="descriptive_person",
+                sentence_text="袖口绣银线的那人站在船头。",
+                cues={"appearance": ["袖口绣银线"], "role_word": "那人"},
+                source="llm",
+            ),
+            PersonMention(
+                raw_text="侯飞白",
+                mention_type="name",
+                sentence_text="侯飞白也在场。",
+                cues={},
+                source="llm",
+            ),
+            PersonMention(
+                raw_text="不存在的黑衣人",
+                mention_type="descriptive_person",
+                sentence_text="不存在的黑衣人拔剑。",
+                cues={"appearance": ["黑衣"]},
+                source="llm",
+            ),
+        ]
+    )
+
+    service = MentionExtractionService(extractor)
+    mentions = await service.extract_mentions(
+        MentionExtractionRequest(
+            text="袖口绣银线的那人站在船头。",
+            names_in_chunk=("侯飞白",),
+        )
+    )
+
+    assert [mention.raw_text for mention in mentions] == ["袖口绣银线的那人"]
+    assert mentions[0].source == "llm"
+
+
+@pytest.mark.asyncio
+async def test_mention_extraction_service_falls_back_to_rule_extractor() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: LLM extractor 抛错时不能静默失败，应回退规则 extractor 并继续产出可用 mention。
+    """
+    extractor = MagicMock()
+    extractor.extract_mentions = AsyncMock(side_effect=RuntimeError("model down"))
+
+    service = MentionExtractionService(extractor)
+    mentions = await service.extract_mentions(
+        MentionExtractionRequest(text="那个穿红衣的女子突然出手。")
+    )
+
+    assert [mention.raw_text for mention in mentions] == ["穿红衣的女子"]
+    assert mentions[0].source == "rule"
 
 
 def test_build_mention_evidence_queries_skips_broad_pronoun_role_mentions() -> None:
@@ -404,6 +496,86 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["max_chunk_id"] == 9
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
     assert all(call.kwargs["ensure_ready"] is False for call in provider._level3.search_similar_chunks.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_provider_builds_mention_queries_inside_provider() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: workflow 不传 mention_queries 时，provider 应自己抽取 mention、构造 query 并写入新 metadata。
+    """
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider._level3.is_available = MagicMock(return_value=True)
+    provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+    provider._level3.search_similar_chunks = AsyncMock(
+        side_effect=[
+            [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.94)],
+            [SimilarChunkRow(chunk_id=6, text="红衣女子立在门前。", similarity=0.90)],
+            [],
+            [],
+        ]
+    )
+
+    bundle = await provider.collect_evidence_with_level3(
+        names_in_chunk=["白芷"],
+        current_chunk=9,
+        context_text="那个穿红衣的女子突然出手。",
+        max_chunk_id=8,
+    )
+
+    semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
+    assert semantic_items[0].metadata["query_kind"] == "mention"
+    assert semantic_items[0].metadata["mention_source"] == "rule"
+    assert semantic_items[0].metadata["query_variant"] == "mention_raw"
+    assert semantic_items[0].metadata["rerank_source"] == "deterministic_fallback"
+    assert provider._level3.search_similar_chunks.await_args_list[0].args[0] == "穿红衣的女子"
+
+
+@pytest.mark.asyncio
+async def test_provider_uses_model_rerank_when_available() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 模型 rerank 可用时应覆盖最终排序分，同时保留 deterministic business_rerank_score 作为观察字段。
+    """
+    reranker = MagicMock()
+    reranker.rerank = AsyncMock(
+        return_value=[
+            Level3RerankResult(chunk_id=11, model_rerank_score=0.97, model_rerank_reason="局部证据更一致"),
+            Level3RerankResult(chunk_id=10, model_rerank_score=0.81),
+        ]
+    )
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
+    provider._level3.is_available = MagicMock(return_value=True)
+    provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+    provider._level3.search_similar_chunks = AsyncMock(
+        side_effect=[
+            [
+                SimilarChunkRow(chunk_id=10, text="红衣女子出手。", similarity=0.95),
+                SimilarChunkRow(chunk_id=11, text="白芷正是那名红衣女子。", similarity=0.88),
+            ],
+            [],
+        ]
+    )
+
+    mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:1]
+    bundle = await provider.collect_evidence_with_level3(
+        names_in_chunk=["白芷"],
+        current_chunk=12,
+        context_text="那个穿红衣的女子突然出手。",
+        max_chunk_id=11,
+        mention_queries=mention_queries,
+    )
+
+    semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
+    assert [item.metadata["chunk_id"] for item in semantic_items] == [11, 10]
+    assert semantic_items[0].metadata["model_rerank_score"] == 0.97
+    assert semantic_items[0].metadata["model_rerank_enabled"] is True
+    assert semantic_items[0].metadata["rerank_source"] == "model"
+    assert semantic_items[0].metadata["business_rerank_score"] is not None
+    assert semantic_items[0].score == 0.97
+    reranker.rerank.assert_awaited_once()
 
 
 @pytest.mark.asyncio

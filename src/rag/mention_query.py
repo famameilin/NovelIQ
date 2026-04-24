@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.rag.mention_extraction import PersonMention
+from src.rag.mention_extraction_types import PersonMention
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +25,9 @@ class MentionEvidenceQuery:
     mention_text: str
     mention_type: str
     matched_features: tuple[str, ...]
+    query_variant: str = "mention_raw"
+    mention_source: str = "rule"
+    mention_confidence: float | None = None
 
 
 def _as_string_list(value: object) -> list[str]:
@@ -51,6 +54,10 @@ def build_mention_evidence_queries(mentions: list[PersonMention]) -> list[Mentio
     修改时间: 2026-04-23
     任务: level3-mention-review-fix
     修改说明: 跳过缺少外貌/动作/位置线索的纯指代角色词，避免生成“少女/女子”等过宽 query。
+
+    修改时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    修改说明: 支持 LLM normalized_query_terms 压缩 query，并给每条 query 标记 query_variant / mention_source。
     """
     queries: list[MentionEvidenceQuery] = []
     seen_query_texts: set[str] = set()
@@ -65,14 +72,17 @@ def build_mention_evidence_queries(mentions: list[PersonMention]) -> list[Mentio
 
         matched_features = tuple(dict.fromkeys(appearance + locations + role_words + actions))
 
-        variants = [mention.raw_text]
+        variants: list[tuple[str, str]] = [("mention_raw", mention.raw_text)]
+        compressed_query = _build_compressed_query(mention, matched_features)
+        if compressed_query:
+            variants.append(("mention_compressed", compressed_query))
         compact_features = " ".join(matched_features)
         if compact_features and compact_features != mention.raw_text:
-            variants.append(compact_features)
+            variants.append(("mention_feature", compact_features))
         if actions:
-            variants.append(f"{mention.raw_text} {' '.join(actions)}")
+            variants.append(("mention_feature", f"{mention.raw_text} {' '.join(actions)}"))
 
-        for query_text in variants:
+        for query_variant, query_text in variants:
             normalized = query_text.strip()
             if not normalized or normalized in seen_query_texts:
                 continue
@@ -83,7 +93,23 @@ def build_mention_evidence_queries(mentions: list[PersonMention]) -> list[Mentio
                     mention_text=mention.raw_text,
                     mention_type=mention.mention_type,
                     matched_features=matched_features,
+                    query_variant=query_variant,
+                    mention_source=mention.source,
+                    mention_confidence=mention.confidence,
                 )
             )
 
     return queries
+
+
+def _build_compressed_query(mention: PersonMention, matched_features: tuple[str, ...]) -> str | None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 优先使用 LLM 提供的 normalized_query_terms；没有时只对超长 mention 用特征词压缩。
+    """
+    if mention.normalized_query_terms:
+        return " ".join(mention.normalized_query_terms)
+    if len(mention.raw_text) <= 16 or not matched_features:
+        return None
+    return " ".join(matched_features)
