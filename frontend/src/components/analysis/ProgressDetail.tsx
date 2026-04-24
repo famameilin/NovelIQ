@@ -3,6 +3,10 @@
  * 创建者: GLM-5
  * 任务: 细粒度进度展示组件
  * 说明: 展示任务执行的详细进度，包括当前阶段、进度条、阶段列表和子任务进度
+ *
+ * 修改时间: 2026-04-24
+ * 任务: level3-progress-sse
+ * 修改内容: 增加 level3 子阶段展示文案，让后端 Level3/mention SSE 进度不显示内部代号。
  */
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, Loader2, Circle } from "lucide-react";
@@ -37,6 +41,7 @@ const PHASE_CONFIG: Record<string, { label: string }> = {
   phase2: { label: "人物识别" },
   phase3: { label: "对话归因" },
   phase4: { label: "关系识别" },
+  level3: { label: "Level3 证据准备" },
 };
 
 const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-model", "diagnose"];
@@ -303,5 +308,4 @@ function SubTaskProgress({ subStage, subPercent }: SubTaskProgressProps) {
     </motion.div>
   );
 }
-
 
