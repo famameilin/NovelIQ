@@ -552,6 +552,7 @@ def test_build_optional_task_model_client_returns_none_when_config_absent():
             enabled=False,
             novel_id="novel-x",
             session=object(),
+            run_id=None,
         )
         is None
     )
@@ -561,6 +562,7 @@ def test_build_optional_task_model_client_returns_none_when_config_absent():
             enabled=False,
             novel_id="novel-x",
             session=object(),
+            run_id=None,
         )
         is None
     )
@@ -582,6 +584,7 @@ def test_build_optional_task_model_client_raises_on_incomplete_config(monkeypatc
             enabled=settings.rag.mention_extraction_enabled,
             novel_id="novel-x",
             session=object(),
+            run_id="run-1",
         )
 
 
@@ -603,7 +606,42 @@ def test_build_optional_task_model_client_raises_when_enabled_but_config_absent(
             enabled=settings.rag.level3_rerank_enabled,
             novel_id="novel-x",
             session=object(),
+            run_id="run-1",
         )
+
+
+def test_build_optional_task_model_client_injects_token_usage_callback(monkeypatch):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-audit
+    说明: 可选增强模型接入主链后，也应注入统一 token_usage callback，
+          避免 mention extraction / rerank 请求成功却完全不进账本。
+    """
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.runtime_context = None
+
+        def set_runtime_context(self, novel_id, token_usage_callback) -> None:
+            self.runtime_context = (novel_id, token_usage_callback)
+
+    monkeypatch.setattr(settings.rag, "mention_extraction_enabled", True)
+    monkeypatch.setattr(settings.models.mention_extraction, "base_url", "http://localhost:9000")
+    monkeypatch.setattr(settings.models.mention_extraction, "model", "mention-model")
+    monkeypatch.setattr("src.models.local.base.BaseModelClient", FakeClient)
+
+    client = _build_optional_task_model_client(
+        "mention_extraction",
+        enabled=settings.rag.mention_extraction_enabled,
+        novel_id="novel-x",
+        session=object(),
+        run_id="run-1",
+    )
+
+    assert isinstance(client, FakeClient)
+    assert client.runtime_context is not None
+    assert client.runtime_context[0] == "novel-x"
+    assert callable(client.runtime_context[1])
 
 
 def test_init_evidence_provider_injects_optional_mention_and_rerank_clients(monkeypatch):

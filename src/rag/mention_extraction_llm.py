@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
+from src.rag.model_call_audit import audited_structured_model_call
 
 
 class LLMPersonMentionItem(BaseModel):
@@ -42,6 +43,41 @@ class LLMPersonMentionResponse(BaseModel):
     mentions: list[LLMPersonMentionItem] = Field(default_factory=list)
 
 
+class LLMPersonMentionCloudItem(BaseModel):
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-cloud-schema
+    说明: 云端 strict schema 不稳定支持动态 dict[str, ...] 字段；
+          这里将 cues 显式展开为固定字段，返回后再归一化回内部 PersonMention.cues。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    raw_text: str
+    mention_type: str = "descriptive_person"
+    sentence_text: str = ""
+    role_word: str = ""
+    appearance: list[str] = Field(default_factory=list)
+    action: list[str] = Field(default_factory=list)
+    location: list[str] = Field(default_factory=list)
+    confidence: float | None = None
+    span_start: int | None = None
+    span_end: int | None = None
+    normalized_query_terms: list[str] = Field(default_factory=list)
+
+
+class LLMPersonMentionCloudResponse(BaseModel):
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-cloud-schema
+    说明: 云端兼容的 mention extraction 顶层结构，避免动态键对象被 strict provider 拒绝。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mentions: list[LLMPersonMentionCloudItem] = Field(default_factory=list)
+
+
 class LLMPersonMentionExtractor:
     """
     创建时间: 2026-04-24
@@ -60,22 +96,49 @@ class LLMPersonMentionExtractor:
         说明: 调用 LLM 产出结构化 mention；调用失败由 service 统一记录并回退规则版。
         """
         messages = _build_messages(request)
+        response_model = _select_response_model(self._model_client)
         # 显式传递 timeout 避免无限阻塞；模型配置自带 timeout_s，优先使用。
         timeout = getattr(self._model_client, "_config", None) and getattr(
             self._model_client._config, "timeout_s", None
         )
-        response = await self._model_client._call_api(
-            messages,
+        return await audited_structured_model_call(
+            self._model_client,
+            messages=messages,
+            response_model=response_model,
+            normalize_response=normalize_mention_response,
+            interaction_type="mention_extraction",
+            phase="mention_extraction",
+            call_type="mention_extraction",
             enable_thinking=self._enable_thinking,
-            response_model=LLMPersonMentionResponse,
             timeout=timeout,
+            run_id=request.run_id,
+            chunk_id=request.current_chunk,
         )
-        parsed = (
-            response
-            if isinstance(response, LLMPersonMentionResponse)
-            else self._model_client._parse_structured_response(response, LLMPersonMentionResponse)
-        )
-        return [_to_person_mention(item) for item in parsed.mentions]
+
+
+def _select_response_model(model_client: Any) -> type[LLMPersonMentionResponse] | type[LLMPersonMentionCloudResponse]:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-cloud-schema
+    说明: 复用仓库里“云端 provider 走 cloud-safe schema，本地保留原生 schema”的既有模式。
+    """
+    is_cloud_api = getattr(model_client, "is_cloud_api", None)
+    if callable(is_cloud_api) and is_cloud_api():
+        return LLMPersonMentionCloudResponse
+    return LLMPersonMentionResponse
+
+
+def normalize_mention_response(
+    response_data: LLMPersonMentionResponse | LLMPersonMentionCloudResponse,
+) -> list[PersonMention]:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-cloud-schema
+    说明: 将本地/云端两套结构化 schema 统一归一化为内部 PersonMention，避免影响下游 query builder。
+    """
+    if isinstance(response_data, LLMPersonMentionResponse):
+        return [_to_person_mention(item) for item in response_data.mentions]
+    return [_to_person_mention_from_cloud(item) for item in response_data.mentions]
 
 
 def _build_messages(request: MentionExtractionRequest) -> list[dict[str, str]]:
@@ -111,6 +174,30 @@ def _to_person_mention(item: LLMPersonMentionItem) -> PersonMention:
         mention_type=item.mention_type,
         sentence_text=item.sentence_text,
         cues=item.cues,
+        confidence=item.confidence,
+        span_start=item.span_start,
+        span_end=item.span_end,
+        normalized_query_terms=tuple(item.normalized_query_terms),
+        source="llm",
+    )
+
+
+def _to_person_mention_from_cloud(item: LLMPersonMentionCloudItem) -> PersonMention:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-cloud-schema
+    说明: 将云端兼容 schema 转回内部 cues dict 合同；仅保留 query 层真正消费的固定 cue 键。
+    """
+    return PersonMention(
+        raw_text=item.raw_text,
+        mention_type=item.mention_type,
+        sentence_text=item.sentence_text,
+        cues={
+            "role_word": item.role_word,
+            "appearance": list(item.appearance),
+            "action": list(item.action),
+            "location": list(item.location),
+        },
         confidence=item.confidence,
         span_start=item.span_start,
         span_end=item.span_end,

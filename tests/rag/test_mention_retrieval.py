@@ -6,12 +6,20 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.mention_extraction import extract_person_mentions
+from src.rag.mention_extraction_llm import (
+    LLMPersonMentionCloudItem,
+    LLMPersonMentionCloudResponse,
+    LLMPersonMentionExtractor,
+    LLMPersonMentionItem,
+    LLMPersonMentionResponse,
+    normalize_mention_response,
+)
 from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
 from src.rag.mention_query import build_mention_evidence_queries
@@ -145,6 +153,90 @@ async def test_mention_extraction_service_falls_back_to_rule_extractor() -> None
 
 
 @pytest.mark.asyncio
+async def test_llm_person_mention_extractor_uses_cloud_safe_schema_for_cloud_api() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-cloud-schema
+    说明: 云端 strict schema 不接受动态 cues dict 时，应切换到 cloud-safe response model，
+          并在返回后归一化回内部 PersonMention.cues 合同。
+    """
+    model_client = MagicMock()
+    model_client.is_cloud_api = MagicMock(return_value=True)
+    model_client._config = MagicMock(timeout_s=30, model="mention-model")
+    model_client._session = object()
+    model_client._call_api = AsyncMock(
+        return_value=LLMPersonMentionCloudResponse(
+            mentions=[
+                LLMPersonMentionCloudItem(
+                    raw_text="袖口绣银线的那人",
+                    mention_type="descriptive_person",
+                    sentence_text="袖口绣银线的那人站在船头。",
+                    role_word="那人",
+                    appearance=["袖口绣银线"],
+                    action=["站在船头"],
+                    location=["船头"],
+                    confidence=0.88,
+                    normalized_query_terms=["袖口绣银线", "那人", "船头"],
+                )
+            ]
+        )
+    )
+    extractor = LLMPersonMentionExtractor(model_client)
+
+    with patch("src.rag.model_call_audit.record_model_interaction") as mock_record_model_interaction:
+        mentions = await extractor.extract_mentions(
+            MentionExtractionRequest(
+                text="袖口绣银线的那人站在船头。",
+                names_in_chunk=("侯飞白",),
+                run_id="run-1",
+                current_chunk=17,
+            )
+        )
+
+    assert model_client._call_api.await_args.kwargs["response_model"] is LLMPersonMentionCloudResponse
+    assert [mention.raw_text for mention in mentions] == ["袖口绣银线的那人"]
+    assert mentions[0].cues["role_word"] == "那人"
+    assert mentions[0].cues["appearance"] == ["袖口绣银线"]
+    assert mentions[0].cues["action"] == ["站在船头"]
+    assert mentions[0].cues["location"] == ["船头"]
+    assert mentions[0].normalized_query_terms == ("袖口绣银线", "那人", "船头")
+    assert model_client._record_estimated_token_usage_from_messages.called
+    assert mock_record_model_interaction.call_args.kwargs["interaction_type"] == "mention_extraction"
+    assert mock_record_model_interaction.call_args.kwargs["run_id"] == "run-1"
+    assert mock_record_model_interaction.call_args.kwargs["chunk_id"] == 17
+
+
+def test_normalize_mention_response_keeps_local_schema_contract() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: fix-mention-cloud-schema
+    说明: 本地 schema 与云端 schema 归一化后都应产出同一份内部 PersonMention 合同。
+    """
+    local_mentions = normalize_mention_response(
+        LLMPersonMentionResponse(
+            mentions=[
+                LLMPersonMentionItem(
+                    raw_text="门口的老者",
+                    mention_type="location_role",
+                    sentence_text="门口的老者没有说话。",
+                    cues={
+                        "role_word": "老者",
+                        "appearance": [],
+                        "action": [],
+                        "location": ["门口"],
+                    },
+                    normalized_query_terms=["门口", "老者"],
+                )
+            ]
+        )
+    )
+
+    assert [mention.raw_text for mention in local_mentions] == ["门口的老者"]
+    assert local_mentions[0].cues["role_word"] == "老者"
+    assert local_mentions[0].cues["location"] == ["门口"]
+
+
+@pytest.mark.asyncio
 async def test_llm_level3_reranker_keeps_highest_score_for_duplicate_chunk_ids() -> None:
     """
     创建时间: 2026-04-24
@@ -152,7 +244,9 @@ async def test_llm_level3_reranker_keeps_highest_score_for_duplicate_chunk_ids()
     说明: LLM rerank 若异常返回重复 chunk_id，应保留最高分结果，避免 provider 被重复低分覆盖。
     """
     model_client = MagicMock()
-    model_client._config = MagicMock(timeout_s=30)
+    model_client._config = MagicMock(timeout_s=30, model="rerank-model")
+    model_client.is_cloud_api = MagicMock(return_value=False)
+    model_client._session = object()
     model_client._call_api = AsyncMock(
         return_value=LLMLevel3RerankResponse(
             results=[
@@ -164,34 +258,71 @@ async def test_llm_level3_reranker_keeps_highest_score_for_duplicate_chunk_ids()
     )
     reranker = LLMLevel3Reranker(model_client)
 
-    results = await reranker.rerank(
-        query_text="那个穿红衣的女子突然出手。",
-        candidates=[
-            MagicMock(
-                chunk_id=7,
-                mention_text="穿红衣的女子",
-                candidate_chunk_text="白芷正是那名红衣女子。",
-                candidate_local_preview="红衣女子回头看向众人。",
-                chunk_semantic_score=0.81,
-                paragraph_semantic_score=0.95,
-                business_rerank_score=1.03,
-            ),
-            MagicMock(
-                chunk_id=8,
-                mention_text="穿红衣的女子",
-                candidate_chunk_text="相似场景。",
-                candidate_local_preview="众人看向门外。",
-                chunk_semantic_score=0.84,
-                paragraph_semantic_score=0.86,
-                business_rerank_score=0.9,
-            ),
-        ],
-    )
+    with patch("src.rag.model_call_audit.record_model_interaction") as mock_record_model_interaction:
+        results = await reranker.rerank(
+            query_text="那个穿红衣的女子突然出手。",
+            candidates=[
+                MagicMock(
+                    chunk_id=7,
+                    mention_text="穿红衣的女子",
+                    candidate_chunk_text="白芷正是那名红衣女子。",
+                    candidate_local_preview="红衣女子回头看向众人。",
+                    chunk_semantic_score=0.81,
+                    paragraph_semantic_score=0.95,
+                    business_rerank_score=1.03,
+                ),
+                MagicMock(
+                    chunk_id=8,
+                    mention_text="穿红衣的女子",
+                    candidate_chunk_text="相似场景。",
+                    candidate_local_preview="众人看向门外。",
+                    chunk_semantic_score=0.84,
+                    paragraph_semantic_score=0.86,
+                    business_rerank_score=0.9,
+                ),
+            ],
+            run_id="run-1",
+            chunk_id=23,
+        )
 
     score_by_chunk = {item.chunk_id: item for item in results}
     assert score_by_chunk[7].model_rerank_score == 0.93
     assert score_by_chunk[7].model_rerank_reason == "局部证据更聚焦"
     assert score_by_chunk[8].model_rerank_score == 0.65
+    assert model_client._record_estimated_token_usage_from_messages.called
+    assert mock_record_model_interaction.call_args.kwargs["interaction_type"] == "level3_rerank"
+    assert mock_record_model_interaction.call_args.kwargs["run_id"] == "run-1"
+    assert mock_record_model_interaction.call_args.kwargs["chunk_id"] == 23
+
+
+@pytest.mark.asyncio
+async def test_llm_person_mention_extractor_records_error_audit_when_call_fails() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-audit
+    说明: mention extraction 调用失败时，也应留下 error 审计记录，并补记估算 token。
+    """
+    model_client = MagicMock()
+    model_client.is_cloud_api = MagicMock(return_value=True)
+    model_client._config = MagicMock(timeout_s=30, model="mention-model")
+    model_client._session = object()
+    model_client._call_api = AsyncMock(side_effect=RuntimeError("provider down"))
+    extractor = LLMPersonMentionExtractor(model_client)
+
+    with patch("src.rag.model_call_audit.record_model_interaction") as mock_record_model_interaction:
+        with pytest.raises(RuntimeError, match="provider down"):
+            await extractor.extract_mentions(
+                MentionExtractionRequest(
+                    text="门口那个灰衣人没有说话。",
+                    run_id="run-err",
+                    current_chunk=9,
+                )
+            )
+
+    model_client._record_estimated_token_usage_from_messages.assert_called_once()
+    assert mock_record_model_interaction.call_args.kwargs["status"] == "error"
+    assert mock_record_model_interaction.call_args.kwargs["run_id"] == "run-err"
+    assert mock_record_model_interaction.call_args.kwargs["chunk_id"] == 9
 
 
 def test_build_mention_evidence_queries_skips_broad_pronoun_role_mentions() -> None:

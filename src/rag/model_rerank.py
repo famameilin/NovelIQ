@@ -61,6 +61,8 @@ class Level3ModelReranker(Protocol):
         *,
         query_text: str,
         candidates: list[Level3RerankCandidate],
+        run_id: str | None = None,
+        chunk_id: int | None = None,
     ) -> list[Level3RerankResult]:
         """返回候选 chunk 的模型排序分。"""
 
@@ -70,6 +72,8 @@ async def try_model_rerank_level3_results(
     *,
     query_text: str,
     reranker: Level3ModelReranker | None,
+    run_id: str | None = None,
+    chunk_id: int | None = None,
 ) -> list[SimilarChunkRow] | None:
     """
     创建时间: 2026-04-24
@@ -80,7 +84,12 @@ async def try_model_rerank_level3_results(
         return None
     candidates = [_to_candidate(result, query_text=query_text) for result in results]
     try:
-        rerank_results = await reranker.rerank(query_text=query_text, candidates=candidates)
+        rerank_results = await reranker.rerank(
+            query_text=query_text,
+            candidates=candidates,
+            run_id=run_id,
+            chunk_id=chunk_id,
+        )
     except Exception as exc:
         logger.warning("Level3 model rerank failed; falling back to deterministic rerank: {}", exc)
         return None
