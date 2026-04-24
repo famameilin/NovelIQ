@@ -51,6 +51,56 @@ def _reindex(chunks: list[Chunk]) -> list[Chunk]:
     ]
 
 
+def _resolve_trimmed_span(text: str, start: int, end: int) -> tuple[int, int, str] | None:
+    """
+    解析切片在原文中的真实字符范围，并返回去首尾空白后的文本。
+
+    创建时间: 2026-04-24
+    任务: full-global-offset-rollout
+    说明: chunk/paragraph 最终落库和对外暴露的 offset 必须对应“实际保留下来的文本”，
+          不能继续沿用 strip() 之前的粗边界；否则全文 offset 会系统性偏移。
+    """
+    raw_text = text[start:end]
+    stripped_text = raw_text.strip()
+    if not stripped_text:
+        return None
+
+    leading_ws = len(raw_text) - len(raw_text.lstrip())
+    trimmed_end = len(raw_text.rstrip())
+    return start + leading_ws, start + trimmed_end, stripped_text
+
+
+def _split_by_chapters_with_offsets(text: str) -> list[tuple[str | None, str, int, int]]:
+    """
+    按章节分割文本，并保留章节正文在全文中的字符范围。
+
+    创建时间: 2026-04-24
+    任务: full-global-offset-rollout
+    说明: `split_by_chapters()` 旧接口只返回标题和正文，无法支撑全文 offset；
+          这里新增内部 helper，把章节正文的全文起止位置一并保留下来。
+    """
+    chapters: list[tuple[str | None, str, int, int]] = []
+    last_end = 0
+    last_title: str | None = None
+
+    for match in CHAPTER_PATTERN.finditer(text):
+        if last_end < match.start():
+            chapter_text = text[last_end : match.start()]
+            if chapter_text.strip():
+                chapters.append((last_title, chapter_text, last_end, match.start()))
+        last_title = match.group(0).strip()
+        last_end = match.end()
+
+    if last_end < len(text):
+        chapter_text = text[last_end:]
+        if chapter_text.strip():
+            chapters.append((last_title, chapter_text, last_end, len(text)))
+
+    if chapters:
+        return chapters
+    return [(None, text, 0, len(text))]
+
+
 # =============================================================================
 # 拟声词检测
 # =============================================================================
@@ -101,25 +151,17 @@ def _detect_onomatopoeia(paragraphs: list[tuple[int, int, str]]) -> set[int]:
 
 
 def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
-    """按章节分割文本"""
-    chapters: list[tuple[str | None, str]] = []
-    last_end = 0
-    last_title: str | None = None
+    """
+    按章节分割文本。
 
-    for match in CHAPTER_PATTERN.finditer(text):
-        if last_end < match.start():
-            chapter_text = text[last_end : match.start()]
-            if chapter_text.strip():
-                chapters.append((last_title, chapter_text))
-        last_title = match.group(0).strip()
-        last_end = match.end()
-
-    if last_end < len(text):
-        chapter_text = text[last_end:]
-        if chapter_text.strip():
-            chapters.append((last_title, chapter_text))
-
-    return chapters if chapters else [(None, text)]
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 继续保留旧返回签名，内部改为复用带 offset 的 helper，避免外围调用点被迫同步改签名。
+    """
+    return [
+        (chapter_title, chapter_text)
+        for chapter_title, chapter_text, _, _ in _split_by_chapters_with_offsets(text)
+    ]
 
 
 async def chunk_text(
@@ -159,7 +201,14 @@ async def chunk_text(
 
 
 def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
-    """简单分块（不按章节）"""
+    """
+    简单分块（不按章节）。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 生成的 `Chunk.start/end` 改为最终保留文本的真实全文范围，
+              不再沿用 strip() 之前的粗切片边界。
+    """
     chunks = []
     start = 0
     idx = 0
@@ -177,9 +226,10 @@ def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
                 if sentence_end > start + max_chars * 0.5:
                     end = sentence_end + 1
 
-        chunk_text_content = text[start:end].strip()
-        if chunk_text_content:
-            chunks.append(Chunk(index=idx, text=chunk_text_content, start=start, end=end))
+        span = _resolve_trimmed_span(text, start, end)
+        if span is not None:
+            chunk_start, chunk_end, chunk_text_content = span
+            chunks.append(Chunk(index=idx, text=chunk_text_content, start=chunk_start, end=chunk_end))
             idx += 1
 
         start = end - overlap if end < len(text) else end
@@ -188,12 +238,18 @@ def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
 
 
 def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> list[Chunk]:
-    """按章节分块"""
-    chapters = split_by_chapters(text)
+    """
+    按章节分块。
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 章节内局部切片仍按正文处理，但写回 Chunk 时统一折算为整本文本的真实全文 offset。
+    """
+    chapters = _split_by_chapters_with_offsets(text)
     chunks = []
     idx = 0
 
-    for chapter_title, chapter_text in chapters:
+    for chapter_title, chapter_text, chapter_start_offset, _ in chapters:
         if not chapter_text.strip():
             continue
 
@@ -209,14 +265,15 @@ def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> list[Chunk]:
                     if sentence_end > start + max_chars * 0.5:
                         end = sentence_end + 1
 
-            chunk_text_content = chapter_text[start:end].strip()
-            if chunk_text_content:
+            span = _resolve_trimmed_span(chapter_text, start, end)
+            if span is not None:
+                local_start, local_end, chunk_text_content = span
                 chunks.append(
                     Chunk(
                         index=idx,
                         text=chunk_text_content,
-                        start=start,
-                        end=end,
+                        start=chapter_start_offset + local_start,
+                        end=chapter_start_offset + local_end,
                         chapter_title=chapter_title,
                     )
                 )
@@ -271,21 +328,28 @@ class SemanticChunker:
         return await self._embedding_client.embed_texts(texts)
 
     def _split_into_paragraphs(self, text: str) -> list[tuple[int, int, str]]:
-        """将文本分割成段落"""
+        """
+        将文本分割成段落。
+
+        修改时间: 2026-04-24
+        任务: full-global-offset-rollout
+        修改说明: 段落的 start/end 改为 strip 后正文在全文中的真实坐标，
+                  后续 semantic chunk 和 paragraph global offset 都直接复用这组坐标。
+        """
         paragraphs = []
         start = 0
 
         for match in PARAGRAPH_SPLIT.finditer(text):
             end = match.start()
-            paragraph_text = text[start:end].strip()
-            if paragraph_text:
-                paragraphs.append((start, end, paragraph_text))
+            span = _resolve_trimmed_span(text, start, end)
+            if span is not None:
+                paragraphs.append(span)
             start = match.end()
 
         if start < len(text):
-            paragraph_text = text[start:].strip()
-            if paragraph_text:
-                paragraphs.append((start, len(text), paragraph_text))
+            span = _resolve_trimmed_span(text, start, len(text))
+            if span is not None:
+                paragraphs.append(span)
 
         return paragraphs
 
@@ -390,6 +454,10 @@ class SemanticChunker:
         修改时间: 2026-03-20
         修改者: TraeAI
         任务: 添加超长 chunk 拆分逻辑，当 chunk 超过 max_chars 时按句子边界拆分
+
+        修改时间: 2026-04-24
+        任务: full-global-offset-rollout
+        修改说明: 依赖 paragraph 的真实全文坐标，确保 semantic chunk 最终也落成真实全文 offset。
         """
         chunks: list[Chunk] = []
 
@@ -399,7 +467,7 @@ class SemanticChunker:
 
             start_pos = paragraphs[start_idx][0]
             end_pos = paragraphs[end_idx - 1][1]
-            chunk_text = text[start_pos:end_pos].strip()
+            chunk_text = text[start_pos:end_pos]
 
             if not chunk_text:
                 continue
@@ -413,7 +481,7 @@ class SemanticChunker:
             # 如果块太小，尝试合并到前一个块
             elif chunk_len < self._min_chars and chunks:
                 prev_chunk = chunks[-1]
-                merged_text = text[prev_chunk.start : end_pos].strip()
+                merged_text = text[prev_chunk.start:end_pos]
                 # 检查合并后是否超长
                 if len(merged_text) > self._max_chars:
                     # 不合并，保持原样
@@ -455,6 +523,10 @@ class SemanticChunker:
         - 优先在句子边界（句号）分割
         - 保证每个子块不超过 max_chars
         - 如果无法找到合适的句子边界，则强制按字符分割
+
+        修改时间: 2026-04-24
+        任务: full-global-offset-rollout
+        修改说明: 子块同样使用真实全文坐标，不再沿用 strip 前的粗边界。
         """
         chunks: list[Chunk] = []
         offset = 0
@@ -475,14 +547,15 @@ class SemanticChunker:
                         if last_question > offset + self._max_chars * 0.5:
                             end = last_question + 1
 
-            chunk_text = text[offset:end].strip()
-            if chunk_text:
+            span = _resolve_trimmed_span(text, offset, end)
+            if span is not None:
+                local_start, local_end, chunk_text = span
                 chunks.append(
                     Chunk(
                         index=len(chunks),
                         text=chunk_text,
-                        start=start_pos + offset,
-                        end=start_pos + end,
+                        start=start_pos + local_start,
+                        end=start_pos + local_end,
                     )
                 )
             offset = end
@@ -514,22 +587,29 @@ async def chunk_documents(
 
     Returns:
         所有文档的Chunk列表
+
+    修改时间: 2026-04-24
+    任务: full-global-offset-rollout
+    修改说明: 多文档场景下将每个文档的 chunk offset 折算为 run 级连续全文坐标；
+              这里不额外注入分隔符，run-global offset 口径定义为“按输入顺序直接拼接的规范化文档文本”。
     """
     all_chunks = []
-    offset = 0
+    chunk_index_offset = 0
+    document_char_offset = 0
 
     for text in texts:
         chunks = await chunk_text(text, max_chars, overlap, split_by_chapter, use_semantic)
         for chunk in chunks:
             all_chunks.append(
                 Chunk(
-                    index=chunk.index + offset,
+                    index=chunk.index + chunk_index_offset,
                     text=chunk.text,
-                    start=chunk.start,
-                    end=chunk.end,
+                    start=chunk.start + document_char_offset,
+                    end=chunk.end + document_char_offset,
                     chapter_title=chunk.chapter_title,
                 )
             )
-        offset += len(chunks)
+        chunk_index_offset += len(chunks)
+        document_char_offset += len(text)
 
     return _reindex(all_chunks)

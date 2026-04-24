@@ -52,8 +52,20 @@ def _make_response(content: object) -> SimpleNamespace:
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
-def _make_client(fake_sdk_client: object | None = None) -> BaseModelClient:
-    """构造不访问真实网络的 BaseModelClient。"""
+def _make_client(
+    fake_sdk_client: object | None = None,
+    *,
+    base_url: str = "http://127.0.0.1:8000/v1",
+) -> BaseModelClient:
+    """
+    创建时间: 2026-04-23
+    任务: P0-base-model-client-safety-net
+    说明: 构造不访问真实网络的 BaseModelClient。
+
+    修改时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    修改内容: 允许测试指定 base_url，覆盖云端请求参数兼容逻辑。
+    """
     default_client = SimpleNamespace(
         chat=SimpleNamespace(
             completions=SimpleNamespace(create=AsyncMock()),
@@ -61,7 +73,7 @@ def _make_client(fake_sdk_client: object | None = None) -> BaseModelClient:
     )
     return BaseModelClient(
         task_type="annotation",
-        config=TaskModelConfig(base_url="http://127.0.0.1:8000/v1", model="test-model", api_key="test-key"),
+        config=TaskModelConfig(base_url=base_url, model="test-model", api_key="test-key"),
         client=fake_sdk_client or default_client,
     )
 
@@ -96,6 +108,55 @@ def test_parse_structured_response_rejects_invalid_payload() -> None:
 
     with pytest.raises(ValueError, match="Failed to parse JSON"):
         client._parse_structured_response(_make_response("not-json"), _ParsedPayload)
+
+
+@pytest.mark.asyncio
+async def test_call_api_uses_raw_response_format_when_provided() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    说明: 当调用方传入 provider 原生 response_format 时，transport 应优先使用它，
+          让上层能用 json_object 返回后继续本地 Pydantic 校验。
+    """
+    fake_create = AsyncMock(return_value=_make_response('{"name": "白芷", "score": 7}'))
+    fake_sdk_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)))
+    client = _make_client(fake_sdk_client)
+
+    await client._call_api(
+        [{"role": "user", "content": "json"}],
+        response_model=_ParsedPayload,
+        raw_response_format={"type": "json_object"},
+    )
+
+    assert fake_create.await_args.kwargs["response_format"] == {"type": "json_object"}
+
+
+def test_build_request_params_omits_reasoning_none_for_cloud_when_thinking_disabled() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    说明: 云端服务商可能拒绝 reasoning_effort=none；未请求 thinking 时请求体应保持最小化。
+    """
+    client = _make_client(base_url="https://example.com/v1")
+
+    params = client._build_request_params([{"role": "user", "content": "json"}], enable_thinking=False)
+
+    assert "reasoning_effort" not in params
+    assert "extra_body" not in params
+
+
+def test_build_request_params_keeps_local_thinking_false_contract() -> None:
+    """
+    创建时间: 2026-04-24
+    任务: deepseek-json-object-compat
+    说明: 本地 Ollama-compatible 服务仍需要显式 think=false，避免本地行为被云端兼容改动影响。
+    """
+    client = _make_client()
+
+    params = client._build_request_params([{"role": "user", "content": "json"}], enable_thinking=False)
+
+    assert params["reasoning_effort"] == "none"
+    assert params["extra_body"] == {"think": False}
 
 
 @pytest.mark.asyncio

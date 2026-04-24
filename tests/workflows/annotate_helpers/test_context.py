@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from src.config import settings
 from src.knowledge.authority import (
     ActiveEntityContext,
     AliasMapping,
@@ -27,6 +28,8 @@ from src.workflows.annotate_helpers import context as context_module
 from src.workflows.annotate_helpers.context import (
     ChunkContext,
     _build_active_entities_prompt_from_authority,
+    _build_optional_task_model_client,
+    _init_evidence_provider,
     _prepare_chunk_context,
     _prepare_chunk_context_with_level3,
 )
@@ -510,6 +513,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         current_chunk=21,
         context_text="程霜翻阅旧案卷",
         exclude_chunk_ids=[21],
+        max_chunk_id=20,
     )
     assert expected_active_entities is not None
     assert context.prompt_active_entities == expected_active_entities
@@ -534,3 +538,147 @@ async def test_prepare_chunk_context_with_level3_raises_when_required_but_unavai
             disambig_provider=provider,
             run_id=None,
         )
+
+
+def test_build_optional_task_model_client_returns_none_when_config_absent():
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: mention/rerank 未配置时应保持禁用，不创建伪客户端去污染现有规则/确定性主链。
+    """
+    assert (
+        _build_optional_task_model_client(
+            "mention_extraction",
+            enabled=False,
+            novel_id="novel-x",
+            session=object(),
+            run_id=None,
+        )
+        is None
+    )
+    assert (
+        _build_optional_task_model_client(
+            "level3_rerank",
+            enabled=False,
+            novel_id="novel-x",
+            session=object(),
+            run_id=None,
+        )
+        is None
+    )
+
+
+def test_build_optional_task_model_client_raises_on_incomplete_config(monkeypatch):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: 可选增强模型一旦配置半截，就应立刻报错，不能静默退回导致用户误以为已启用。
+    """
+    monkeypatch.setattr(settings.rag, "mention_extraction_enabled", True)
+    monkeypatch.setattr(settings.models.mention_extraction, "base_url", "http://localhost:9000")
+    monkeypatch.setattr(settings.models.mention_extraction, "model", None)
+
+    with pytest.raises(RuntimeError, match="optional task model config incomplete"):
+        _build_optional_task_model_client(
+            "mention_extraction",
+            enabled=settings.rag.mention_extraction_enabled,
+            novel_id="novel-x",
+            session=object(),
+            run_id="run-1",
+        )
+
+
+def test_build_optional_task_model_client_raises_when_enabled_but_config_absent(monkeypatch):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: rag 开关显式启用后，若模型配置完全缺失，应直接报错，避免“以为开了其实没跑”。
+    """
+    monkeypatch.setattr(settings.rag, "level3_rerank_enabled", True)
+    monkeypatch.setattr(settings.models.level3_rerank, "base_url", None)
+    monkeypatch.setattr(settings.models.level3_rerank, "model", None)
+    monkeypatch.setattr(settings.models.level3_rerank, "api_key", None)
+    monkeypatch.setattr(settings.models.level3_rerank, "timeout_s", None)
+
+    with pytest.raises(RuntimeError, match="optional task model enabled but config is absent"):
+        _build_optional_task_model_client(
+            "level3_rerank",
+            enabled=settings.rag.level3_rerank_enabled,
+            novel_id="novel-x",
+            session=object(),
+            run_id="run-1",
+        )
+
+
+def test_build_optional_task_model_client_injects_token_usage_callback(monkeypatch):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-audit
+    说明: 可选增强模型接入主链后，也应注入统一 token_usage callback，
+          避免 mention extraction / rerank 请求成功却完全不进账本。
+    """
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.runtime_context = None
+
+        def set_runtime_context(self, novel_id, token_usage_callback) -> None:
+            self.runtime_context = (novel_id, token_usage_callback)
+
+    monkeypatch.setattr(settings.rag, "mention_extraction_enabled", True)
+    monkeypatch.setattr(settings.models.mention_extraction, "base_url", "http://localhost:9000")
+    monkeypatch.setattr(settings.models.mention_extraction, "model", "mention-model")
+    monkeypatch.setattr("src.models.local.base.BaseModelClient", FakeClient)
+
+    client = _build_optional_task_model_client(
+        "mention_extraction",
+        enabled=settings.rag.mention_extraction_enabled,
+        novel_id="novel-x",
+        session=object(),
+        run_id="run-1",
+    )
+
+    assert isinstance(client, FakeClient)
+    assert client.runtime_context is not None
+    assert client.runtime_context[0] == "novel-x"
+    assert callable(client.runtime_context[1])
+
+
+def test_init_evidence_provider_injects_optional_mention_and_rerank_clients(monkeypatch):
+    """
+    创建时间: 2026-04-24
+    任务: llm-mention-rerank-chain
+    说明: mention extraction / model rerank 配置完整时，provider 初始化应把两条增强链都接进来。
+    """
+
+    class FakeProvider:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    fake_mention_extractor = object()
+    fake_level3_reranker = object()
+    fake_embedding_client = object()
+
+    monkeypatch.setattr(settings.rag, "mention_extraction_enabled", True)
+    monkeypatch.setattr(settings.rag, "level3_rerank_enabled", True)
+    monkeypatch.setattr(settings.models.mention_extraction, "base_url", "http://localhost:9001")
+    monkeypatch.setattr(settings.models.mention_extraction, "model", "mention-model")
+    monkeypatch.setattr(settings.models.level3_rerank, "base_url", "http://localhost:9002")
+    monkeypatch.setattr(settings.models.level3_rerank, "model", "rerank-model")
+    monkeypatch.setattr("src.storage.repositories.GraphRepository", lambda conn: "graph-repo")
+    monkeypatch.setattr("src.models.local.embedding.EmbeddingClient", lambda novel_id: fake_embedding_client)
+    monkeypatch.setattr(context_module, "_init_optional_mention_extractor", lambda **kwargs: fake_mention_extractor)
+    monkeypatch.setattr(context_module, "_init_optional_level3_reranker", lambda **kwargs: fake_level3_reranker)
+    monkeypatch.setattr("src.rag.DisambigContextProvider", FakeProvider)
+
+    provider = _init_evidence_provider(
+        conn=object(),
+        novel_id="novel-x",
+        use_context=True,
+        run_id="run-1",
+    )
+
+    assert isinstance(provider, FakeProvider)
+    assert provider.kwargs["mention_extractor"] is fake_mention_extractor
+    assert provider.kwargs["level3_reranker"] is fake_level3_reranker
+    assert provider.kwargs["embedding_client"] is fake_embedding_client

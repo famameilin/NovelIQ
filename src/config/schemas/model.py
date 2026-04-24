@@ -86,8 +86,10 @@ class ModelsSettings:
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
     annotation_fallback: TaskModelSettings = field(default_factory=TaskModelSettings)
     incremental_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
+    mention_extraction: TaskModelSettings = field(default_factory=TaskModelSettings)
     semantic_chunking: EmbeddingModelSettings = field(default_factory=EmbeddingModelSettings)
     full_disambig: TaskModelSettings = field(default_factory=TaskModelSettings)
+    level3_rerank: TaskModelSettings = field(default_factory=TaskModelSettings)
     diagnosis: TaskModelSettings = field(default_factory=TaskModelSettings)
 
 
@@ -109,7 +111,9 @@ class ThinkingSettings:
     annotation: bool = False
     annotation_fallback: bool = True
     incremental_disambig: bool = True
+    mention_extraction: bool = False
     full_disambig: bool = True
+    level3_rerank: bool = False
     diagnosis: bool = True
     phase3_candidates_per_batch: int = 5
 
@@ -131,7 +135,9 @@ class StreamingSettings:
     annotation: bool = False
     annotation_fallback: bool = True
     incremental_disambig: bool = True
+    mention_extraction: bool = False
     full_disambig: bool = True
+    level3_rerank: bool = False
     diagnosis: bool = True
     cloud_only: bool = True  # 是否仅在云端模型启用流式模式
 
@@ -279,8 +285,10 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
             "ANNOTATION_FALLBACK",
         ),
         incremental_disambig=_parse_task_model_settings(data.get("incremental_disambig"), "INCREMENTAL_DISAMBIG"),
+        mention_extraction=_parse_task_model_settings(data.get("mention_extraction"), "MENTION_EXTRACTION"),
         semantic_chunking=_parse_embedding_model_settings(data.get("semantic_chunking"), "SEMANTIC_CHUNKING"),
         full_disambig=_parse_task_model_settings(data.get("full_disambig"), "FULL_DISAMBIG"),
+        level3_rerank=_parse_task_model_settings(data.get("level3_rerank"), "LEVEL3_RERANK"),
         diagnosis=_parse_task_model_settings(data.get("diagnosis"), "DIAGNOSIS"),
     )
 
@@ -304,7 +312,9 @@ def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
         annotation=data.get("annotation", False),
         annotation_fallback=data.get("annotation_fallback", True),
         incremental_disambig=data.get("incremental_disambig", True),
+        mention_extraction=data.get("mention_extraction", False),
         full_disambig=data.get("full_disambig", True),
+        level3_rerank=data.get("level3_rerank", False),
         diagnosis=data.get("diagnosis", True),
     )
 
@@ -323,7 +333,9 @@ def _parse_streaming_settings(data: dict[str, Any] | None) -> StreamingSettings:
         annotation=data.get("annotation", False),
         annotation_fallback=data.get("annotation_fallback", True),
         incremental_disambig=data.get("incremental_disambig", True),
+        mention_extraction=data.get("mention_extraction", False),
         full_disambig=data.get("full_disambig", True),
+        level3_rerank=data.get("level3_rerank", False),
         diagnosis=data.get("diagnosis", True),
         cloud_only=data.get("cloud_only", True),
     )

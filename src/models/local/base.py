@@ -482,6 +482,8 @@ class BaseModelClient:
         messages: list[dict],
         enable_thinking: bool = False,
         response_model: type[T] | None = None,
+        raw_response_format: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> Any:
         """
         非流式API调用
@@ -495,12 +497,23 @@ class BaseModelClient:
         修改者: TraeAI
         任务: 重构 BaseModelClient 使用 AsyncOpenAI
         修改内容: 改为 async def，使用 await 调用
+
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: fix-llm-call-timeout
+        修改内容: 添加显式 timeout 参数传递。
+
+        修改时间: 2026-04-24
+        任务: deepseek-json-object-compat
+        修改内容: 允许上层选择 json_object response_format，同时仍用 response_model 做本地校验。
         """
         return await call_api(
             self,
             messages,
             enable_thinking=enable_thinking,
             response_model=response_model,
+            raw_response_format=raw_response_format,
+            timeout=timeout,
         )
 
     async def _call_api_stream(
@@ -606,6 +619,11 @@ class BaseModelClient:
         修改者: TraeAI
         任务: Phase 2 - 统一客户端基类
         修改内容: 统一 reasoning_effort 处理，本地使用 extra_body={"think": true/false}
+
+        修改时间: 2026-04-24
+        任务: deepseek-json-object-compat
+        修改内容: 云端未开启 thinking 时不再发送 reasoning_effort=none，兼容只接受
+                  low/medium/high/max/xhigh 的 OpenAI-compatible 服务商。
         """
         if not self._config.model:
             raise ValueError("model is required")
@@ -617,11 +635,12 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        # Ollama 本地API支持 reasoning_effort 参数
+        is_cloud = self.is_cloud_api()
+        # 中文注释：云端 provider 的 thinking 参数兼容性不一致；未请求 thinking 时保持请求体最小化。
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}
-        else:
+        elif not is_cloud:
             request_params["reasoning_effort"] = "none"
             request_params["extra_body"] = {"think": False}
         return request_params
