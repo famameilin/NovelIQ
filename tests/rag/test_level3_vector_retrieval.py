@@ -222,6 +222,7 @@ class TestLevel3VectorEvidenceAsync:
         assert results[0].chunk_id == 1
         assert results[0].emotional_valence == "mild_negative"
         assert mock_search.call_args.kwargs["max_chunk_id"] == 7
+        assert mock_client.detect_embedding_dimension.await_count == 1
 
     @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.search_similar_paragraphs_within_chunks")
@@ -329,6 +330,49 @@ class TestLevel3VectorEvidenceAsync:
 
         assert [row.chunk_id for row in results] == [1, 2]
         assert all(row.local_preview is None for row in results)
+
+    @pytest.mark.asyncio
+    @patch("src.storage.repositories.chunk.search_similar_paragraphs_within_chunks", return_value=[])
+    @patch("src.storage.repositories.chunk.search_similar_chunks")
+    async def test_search_similar_chunks_reuses_cached_readiness_when_caller_already_ensured(
+        self,
+        mock_search_chunks: MagicMock,
+        mock_search_paragraphs: MagicMock,
+    ) -> None:
+        """
+        创建时间: 2026-04-24
+        任务: fix-level3-query-readiness-duplication
+        说明: 外层已完成 readiness 时，后续多次 Level3 query 不应重复探测 embedding 维度或重跑完整性检查。
+        """
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_client.get_embedding = AsyncMock(return_value=[0.1] * settings.models.semantic_chunking.embedding_dim)
+        mock_session = MagicMock()
+        mock_search_chunks.return_value = [
+            SimilarChunkRow(chunk_id=1, text="chunk-1 full text", similarity=0.82),
+        ]
+
+        with (
+            patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            level3 = Level3VectorEvidence(
+                session=mock_session,
+                run_id="test-run-id",
+                embedding_client=mock_client,
+            )
+            await level3.ensure_level3_ready()
+            first = await level3.search_similar_chunks("第一次查询", ensure_ready=False)
+            second = await level3.search_similar_chunks("第二次查询", ensure_ready=False)
+
+        assert [row.chunk_id for row in first] == [1]
+        assert [row.chunk_id for row in second] == [1]
+        assert mock_client.detect_embedding_dimension.await_count == 1
+        assert mock_search_chunks.call_count == 2
 
     @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
@@ -883,6 +927,7 @@ class TestDisambigContextProviderLevel3Async:
             "她抿唇不语，袖口却攥得发白。",
             exclude_chunk_ids=[15],
             max_chunk_id=14,
+            ensure_ready=False,
         )
         semantic_types = [item.evidence_type for item in bundle.semantic_evidence]
         assert semantic_types.count("semantic_recall") == 2

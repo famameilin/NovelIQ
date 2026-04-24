@@ -318,12 +318,14 @@ class DisambigContextProvider:
                 query_text,
                 exclude_chunk_ids=exclude_chunk_ids,
                 max_chunk_id=max_chunk_id,
+                ensure_ready=False,
             )
         return await self._level3.search_similar_chunks(
             query_text,
             exclude_chunk_ids=exclude_chunk_ids,
             max_chunk_id=max_chunk_id,
             top_k=top_k,
+            ensure_ready=False,
         )
 
     def _dedupe_level3_results(self, results: list[SimilarChunkRow]) -> list[SimilarChunkRow]:

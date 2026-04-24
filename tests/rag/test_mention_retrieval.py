@@ -352,6 +352,7 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     assert semantic_items[0].metadata["business_rerank_score"] >= semantic_items[0].metadata["chunk_semantic_score"]
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["max_chunk_id"] == 9
     assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
+    assert all(call.kwargs["ensure_ready"] is False for call in provider._level3.search_similar_chunks.await_args_list)
 
 
 @pytest.mark.asyncio

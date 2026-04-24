@@ -214,6 +214,7 @@ class Level3VectorEvidence:
         exclude_chunk_ids: list[int] | None = None,
         max_chunk_id: int | None = None,
         top_k: int | None = None,
+        ensure_ready: bool = True,
     ) -> list[SimilarChunkRow]:
         """
         检索语义相似的历史 chunk。
@@ -233,9 +234,22 @@ class Level3VectorEvidence:
         修改时间: 2026-04-24
         任务: level3-mention-rerank
         修改说明: 支持调用方传入 retrieval pool 大小，rerank 后再由 provider 裁剪 prompt 预算。
+
+        修改时间: 2026-04-24
+        修改者: Codex
+        任务: fix-level3-query-readiness-duplication
+        修改内容: 支持外层已完成 readiness 时跳过重复重检，避免 mention/context 多 query
+                  场景下重复探测 embedding 维度并多次扫描完整性
         """
-        await self.ensure_level3_ready()
-        if not self.is_available():
+        if ensure_ready:
+            await self.ensure_level3_ready()
+        elif self._available is not True:
+            # 中文注释：跳过 readiness 重检只允许用于“外层已 ensure 成功”的热路径；
+            # 若当前对象没有成功缓存，就直接返回空，避免这里又偷偷跑一遍重型检查。
+            logger.debug("Level3VectorEvidence: cached readiness missing while ensure_ready=False")
+            return []
+
+        if self._available is not True and not self.is_available():
             return []
         if not query_text or not query_text.strip():
             logger.debug("Level3VectorEvidence: empty query text")
