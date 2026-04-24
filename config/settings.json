@@ -284,6 +284,8 @@
     "level1_enabled": true,
     "level2_enabled": true,
     "level3_enabled": true,
+    "mention_extraction_enabled": true,
+    "level3_rerank_enabled": true,
     "level3_top_k": 5
   }
 }
