@@ -100,15 +100,7 @@ class FakeRagRetriever:
         )
         return self.bundle
 
-    async def collect_evidence_with_level3(
-        self,
-        names_in_chunk=None,
-        current_chunk=None,
-        context_text=None,
-        exclude_chunk_ids=None,
-        max_chunk_id=None,
-        mention_queries=None,
-    ):
+    async def collect_evidence_with_level3(self, request):
         """
         修改时间: 2026-04-23
         任务: level3-history-cutoff
@@ -117,16 +109,22 @@ class FakeRagRetriever:
         修改时间: 2026-04-23
         任务: level3-mention-retrieval
         修改说明: 记录 mention_queries，便于测试确认 mention 检索链路已接入。
+
+        修改时间: 2026-04-25
+        任务: level3-intent-phase-split
+        修改说明: provider 改为只接受显式 Level3Request；假实现同步记录 objective / seed_entities / cutoff。
         """
         self.calls.append(
             {
                 "method": "collect_evidence_with_level3",
-                "names_in_chunk": list(names_in_chunk or []),
-                "current_chunk": current_chunk,
-                "context_text": context_text,
-                "exclude_chunk_ids": list(exclude_chunk_ids or []),
-                "max_chunk_id": max_chunk_id,
-                "mention_queries": list(mention_queries or []),
+                "request": request,
+                "objective": request.objective,
+                "names_in_chunk": list(request.seed_entities),
+                "current_chunk": request.current_chunk,
+                "context_text": request.query_text,
+                "exclude_chunk_ids": list(request.exclude_chunk_ids),
+                "max_chunk_id": request.max_chunk_id,
+                "max_queries": request.max_queries,
             }
         )
         return self.bundle
