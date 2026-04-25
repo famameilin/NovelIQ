@@ -132,16 +132,16 @@ class TestAnnotate:
         chunk_repo.insert_chunks(self.run_id, chunks)
 
     @pytest.mark.asyncio()
-    @patch("src.workflows.annotate_helpers.context._init_evidence_provider")
+    @patch("src.workflows.annotate_helpers.context._init_evidence_service")
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
     async def test_annotate_basic(
         self,
         mock_annotation_class: MagicMock,
         mock_disambiguation_class: MagicMock,
-        mock_evidence_provider: MagicMock,
+        mock_evidence_service: MagicMock,
     ) -> None:
-        mock_evidence_provider.return_value = None
+        mock_evidence_service.return_value = None
 
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
@@ -182,13 +182,13 @@ class TestAnnotate:
         assert dialogue_count == 3
 
     @pytest.mark.asyncio()
-    @patch("src.workflows.annotate_helpers.context._init_evidence_provider")
+    @patch("src.workflows.annotate_helpers.context._init_evidence_service")
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
     async def test_annotate_resume(
-        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock, mock_evidence_provider: MagicMock
+        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock, mock_evidence_service: MagicMock
     ) -> None:
-        mock_evidence_provider.return_value = None
+        mock_evidence_service.return_value = None
 
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
@@ -240,13 +240,13 @@ class TestAnnotate:
         assert annotation_count == 5
 
     @pytest.mark.asyncio()
-    @patch("src.workflows.annotate_helpers.context._init_evidence_provider")
+    @patch("src.workflows.annotate_helpers.context._init_evidence_service")
     @patch("src.workflows.annotate_helpers.client_init.DisambiguationClient")
     @patch("src.workflows.annotate_helpers.client_init.AnnotationClient")
     async def test_annotate_disambiguation(
-        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock, mock_evidence_provider: MagicMock
+        self, mock_annotation_class: MagicMock, mock_disambiguation_class: MagicMock, mock_evidence_service: MagicMock
     ) -> None:
-        mock_evidence_provider.return_value = None
+        mock_evidence_service.return_value = None
 
         mock_annotation_client = MagicMock(spec=AnnotationClient)
         mock_annotation_client.annotate_chunk.return_value = create_mock_annotation()
