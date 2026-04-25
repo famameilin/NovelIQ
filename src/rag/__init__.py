@@ -27,6 +27,12 @@ from src.rag.evidence_types import (
     EvidenceItem,
     Level1AuthoritySnapshot,
 )
+from src.rag.level3_contracts import (
+    Level3Objective,
+    Level3QueryPlan,
+    Level3Request,
+    build_level3_request_fingerprint,
+)
 from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
 from src.rag.model_rerank import Level3ModelReranker, Level3RerankCandidate, Level3RerankResult
@@ -53,6 +59,10 @@ __all__ = [
     "Level1AuthorityProvider",
     "Level3NotReadyError",
     "Level3VectorEvidence",
+    "Level3Objective",
+    "Level3Request",
+    "Level3QueryPlan",
+    "build_level3_request_fingerprint",
     "MentionExtractionService",
     "MentionExtractionRequest",
     "PersonMention",

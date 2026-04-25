@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interactions import record_model_interaction
 from src.models.interfaces import DisambiguationLike
@@ -28,6 +29,7 @@ from src.models.local.disambiguation import (
 )
 from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
+from src.rag import Level3Request
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
@@ -300,6 +302,38 @@ def build_shared_evidence_query_text(
     return "\n".join(parts) if parts else None
 
 
+def _build_shared_evidence_request(
+    *,
+    names_in_chunk: list[str],
+    query_text: str,
+    current_chunk: int | None,
+) -> Level3Request:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: shared evidence 统一走 identity objective；seed_entities 只来自当前待消歧候选，
+          已知 canonical 背景继续留在 existing_character_hint / graph_hint，不再反向污染 requested_names。
+    """
+    seed_entities: list[str] = []
+    for name in names_in_chunk:
+        normalized = str(name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    return Level3Request(
+        objective="identity",
+        query_text=query_text,
+        seed_entities=seed_entities,
+        current_chunk=current_chunk,
+        max_chunk_id=current_chunk,
+        exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
+        allow_llm_query_expansion=True,
+        top_k=settings.rag.level3_top_k,
+        max_queries=settings.rag.level3_max_queries,
+        model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
+    )
+
+
 async def build_prompt_context_with_shared_evidence(
     prompt_context: DisambiguationPromptContext | None,
     evidence_provider: DisambigContextProvider | None,
@@ -324,6 +358,11 @@ async def build_prompt_context_with_shared_evidence(
     修改时间: 2026-04-24
     任务: llm-mention-rerank-chain
     修改内容: mention extraction/query 构造改由 provider 统一编排，消歧 workflow 只传共享 evidence query text。
+
+    修改时间: 2026-04-25
+    任务: fix-shared-evidence-scope-and-fallback
+    修改内容: 已知 canonical 名不再混入 shared-evidence 的 requested_names；
+              当 query_text 为空时仍保留 Level1/2 fallback，避免 protected / 无例句候选失去共享证据。
     """
     if evidence_provider is None or not candidates:
         return prompt_context
@@ -333,30 +372,31 @@ async def build_prompt_context_with_shared_evidence(
         return prompt_context
 
     query_text = build_shared_evidence_query_text(candidates, context_sentences)
-    if evidence_provider.requires_level3():
-        if not evidence_provider.is_level3_available():
-            raise RuntimeError("Level 3 vector retrieval is required but not available")
-        else:
-            evidence_bundle = await evidence_provider.collect_evidence_with_level3(
-                names_in_chunk=names_in_chunk,
-                current_chunk=current_chunk,
-                context_text=query_text,
-                exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
-                max_chunk_id=current_chunk,
-            )
-    elif evidence_provider.is_level3_available():
-        evidence_bundle = await evidence_provider.collect_evidence_with_level3(
-            names_in_chunk=names_in_chunk,
-            current_chunk=current_chunk,
-            context_text=query_text,
-            exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
-            max_chunk_id=current_chunk,
-        )
-    else:
+    if not query_text:
+        # 中文注释：没有可拼的 shared query 时，只跳过 Level3 semantic 检索，
+        # 但仍要保留 Level1/2 fallback，避免 protected / review 候选彻底失去 <Disambig_Candidates>。
         evidence_bundle = evidence_provider.collect_evidence(
             names_in_chunk=names_in_chunk,
             current_chunk=current_chunk,
         )
+    else:
+        request = _build_shared_evidence_request(
+            names_in_chunk=names_in_chunk,
+            query_text=query_text,
+            current_chunk=current_chunk,
+        )
+        if evidence_provider.requires_level3():
+            if not evidence_provider.is_level3_available():
+                raise RuntimeError("Level 3 vector retrieval is required but not available")
+            else:
+                evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
+        elif evidence_provider.is_level3_available():
+            evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
+        else:
+            evidence_bundle = evidence_provider.collect_evidence(
+                names_in_chunk=request.seed_entities,
+                current_chunk=current_chunk,
+            )
 
     shared_evidence_context = render_disambig_prompt_context(
         evidence_bundle,

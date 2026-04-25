@@ -243,6 +243,11 @@ class Level3VectorEvidence:
         任务: fix-level3-query-readiness-duplication
         修改内容: 支持外层已完成 readiness 时跳过重复重检，避免 mention/context 多 query
                   场景下重复探测 embedding 维度并多次扫描完整性
+
+        修改时间: 2026-04-25
+        任务: level3-intent-phase-split
+        修改内容: 单 query 入口改为复用共享的 embedding->检索执行函数，
+                  为多 query batched retrieval 保持完全一致的检索/paragraph rerank 语义。
         """
         if ensure_ready:
             await self.ensure_level3_ready()
@@ -261,24 +266,18 @@ class Level3VectorEvidence:
             return []
 
         try:
-            from src.storage.repositories.chunk import search_similar_chunks
-
             query_embedding = await self._embedding_client.get_embedding(query_text)
             if not query_embedding:
                 logger.warning("Level3VectorEvidence: failed to get query embedding")
                 return []
 
             effective_top_k = top_k or self._top_k
-            results = search_similar_chunks(
-                self._session,
-                self._run_id,
+            results = self._search_similar_chunks_by_embedding(
                 query_embedding,
-                top_k=effective_top_k,
-                similarity_threshold=self._similarity_threshold,
                 exclude_chunk_ids=exclude_chunk_ids,
                 max_chunk_id=max_chunk_id,
+                top_k=effective_top_k,
             )
-            results = self._rerank_with_paragraphs(query_embedding, results, top_k=effective_top_k)
             logger.debug(
                 "Level3VectorEvidence: found {} similar chunks for query (len={}) after paragraph rerank",
                 len(results),
@@ -290,6 +289,164 @@ class Level3VectorEvidence:
         except Exception as exc:
             logger.error("Level3VectorEvidence: search failed: {}", exc)
             return []
+
+    async def search_similar_chunks_many(
+        self,
+        query_texts: list[str],
+        exclude_chunk_ids: list[int] | None = None,
+        max_chunk_id: int | None = None,
+        top_k: int | None = None,
+        ensure_ready: bool = True,
+    ) -> list[list[SimilarChunkRow]]:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 多 query 场景先批量生成 embedding，再逐条执行 run-scoped chunk/paragraph 检索，
+              避免 mention query 在热路径里重复请求 embedding 服务。
+
+        修改时间: 2026-04-25
+        任务: fix-batched-level3-failure-isolation
+        修改内容: batched embedding/search 失败时回退到逐 query 隔离执行；
+                  单个坏 query 只能丢自己，不能把 base query 一起清空。
+        """
+        if not query_texts:
+            return []
+
+        if ensure_ready:
+            await self.ensure_level3_ready()
+        elif self._available is not True:
+            # 中文注释：batch 路径和单 query 路径保持同一护栏；外层没缓存 readiness 时，不允许偷偷补跑重检。
+            logger.debug("Level3VectorEvidence: cached readiness missing while ensure_ready=False for batched queries")
+            return [[] for _ in query_texts]
+
+        if self._available is not True and not self.is_available():
+            return [[] for _ in query_texts]
+        if self._embedding_client is None or self._session is None or self._run_id is None:
+            return [[] for _ in query_texts]
+
+        normalized_queries = [query_text.strip() for query_text in query_texts]
+        if not any(normalized_queries):
+            logger.debug("Level3VectorEvidence: all batched query texts are empty")
+            return [[] for _ in query_texts]
+
+        try:
+            query_embeddings = await self._embedding_client.embed_texts(query_texts)
+        except Level3NotReadyError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Level3VectorEvidence: batched embedding failed, fallback to isolated queries: {}",
+                exc,
+            )
+            return await self._search_similar_chunks_many_isolated(
+                query_texts,
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+                top_k=top_k,
+            )
+
+        try:
+            effective_top_k = top_k or self._top_k
+            results_by_query: list[list[SimilarChunkRow]] = []
+            for normalized_query, query_embedding in zip(normalized_queries, query_embeddings, strict=True):
+                if not normalized_query or not query_embedding:
+                    results_by_query.append([])
+                    continue
+                try:
+                    results_by_query.append(
+                        self._search_similar_chunks_by_embedding(
+                            query_embedding,
+                            exclude_chunk_ids=exclude_chunk_ids,
+                            max_chunk_id=max_chunk_id,
+                            top_k=effective_top_k,
+                        )
+                    )
+                except Level3NotReadyError:
+                    raise
+                except Exception as exc:
+                    logger.error(
+                        "Level3VectorEvidence: isolated batched query search failed query_len={} error={}",
+                        len(normalized_query),
+                        exc,
+                    )
+                    results_by_query.append([])
+            logger.debug(
+                "Level3VectorEvidence: batched query search complete query_count={} top_k={}",
+                len(query_texts),
+                effective_top_k,
+            )
+            return results_by_query
+        except Level3NotReadyError:
+            raise
+        except Exception as exc:
+            logger.error("Level3VectorEvidence: batched search failed: {}", exc)
+            return [[] for _ in query_texts]
+
+    async def _search_similar_chunks_many_isolated(
+        self,
+        query_texts: list[str],
+        *,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        top_k: int | None,
+    ) -> list[list[SimilarChunkRow]]:
+        """
+        创建时间: 2026-04-25
+        任务: fix-batched-level3-failure-isolation
+        说明: batched 路径出错时逐 query 回退，确保单个 query 的 embedding / SQL 异常不会拖垮整批结果。
+        """
+        results_by_query: list[list[SimilarChunkRow]] = []
+        for query_text in query_texts:
+            normalized_query = query_text.strip()
+            if not normalized_query:
+                results_by_query.append([])
+                continue
+            results_by_query.append(
+                await self.search_similar_chunks(
+                    query_text,
+                    exclude_chunk_ids=exclude_chunk_ids,
+                    max_chunk_id=max_chunk_id,
+                    top_k=top_k,
+                    ensure_ready=False,
+                )
+            )
+        return results_by_query
+
+    def _search_similar_chunks_by_embedding(
+        self,
+        query_embedding: list[float],
+        *,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        top_k: int,
+    ) -> list[SimilarChunkRow]:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 统一复用 precomputed query embedding 的 chunk recall + paragraph rerank，
+              确保单 query 和 batched query 看到同一套 SQL 边界与局部证据回填语义。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-typecheck-regressions
+        修改说明: helper 自身重新收紧 session/run_id 非空前提，避免未来复用时依赖“调用方一定先校验”的隐式契约。
+        """
+        from src.storage.repositories.chunk import search_similar_chunks
+
+        session = self._session
+        run_id = self._run_id
+        if session is None or run_id is None:
+            self._raise_not_ready("Level 3 search requires session and run_id")
+
+        results = search_similar_chunks(
+            session,
+            run_id,
+            query_embedding,
+            top_k=top_k,
+            similarity_threshold=self._similarity_threshold,
+            exclude_chunk_ids=exclude_chunk_ids,
+            max_chunk_id=max_chunk_id,
+        )
+        return self._rerank_with_paragraphs(query_embedding, results, top_k=top_k)
 
     def _is_paragraph_rerank_available(self) -> bool:
         """

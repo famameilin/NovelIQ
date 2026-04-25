@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
-    from src.rag import EvidenceBundle
+    from src.rag import DisambigContextProvider, EvidenceBundle, Level3Request
 
 
 @dataclass
@@ -46,10 +46,10 @@ class AnnotationContext:
     任务: remove-unused-annotation-fields
     修改内容: 移除 character_appearances 字段
 
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 字段（Phase1 不再需要前后 chunk）
+    修改时间: 2026-04-25
+    修改者: Codex
+    任务: level3-intent-phase-split
+    修改内容: 改为显式 phase-scoped bundles，并允许多阶段标注在 Phase4 运行前按 request 模板补取证据。
     """
 
     text: str
@@ -59,7 +59,12 @@ class AnnotationContext:
     global_context: str | None = None
     active_entities: str | None = None
     disambig_context: str | None = None
-    evidence_bundle: EvidenceBundle | None = None
+    phase1_bundle: EvidenceBundle | None = None
+    phase2_bundle: EvidenceBundle | None = None
+    phase3_bundle: EvidenceBundle | None = None
+    phase4_bundle: EvidenceBundle | None = None
+    phase4_request_template: Level3Request | None = None
+    evidence_provider: DisambigContextProvider | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None
