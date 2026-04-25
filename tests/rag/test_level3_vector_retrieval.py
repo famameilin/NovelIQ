@@ -380,6 +380,63 @@ class TestLevel3VectorEvidenceAsync:
         assert mock_search_chunks.call_count == 2
 
     @pytest.mark.asyncio
+    @patch("src.storage.repositories.chunk.search_similar_paragraphs_within_chunks", return_value=[])
+    @patch("src.storage.repositories.chunk.search_similar_chunks")
+    async def test_search_similar_chunks_many_batches_embedding_requests(
+        self,
+        mock_search_chunks: MagicMock,
+        mock_search_paragraphs: MagicMock,
+    ) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 多 query 检索应先批量获取 embeddings，再逐条执行 run-scoped chunk search，
+              避免 mention/base query 在热路径里重复请求 embedding 服务。
+        """
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_client.embed_texts = AsyncMock(
+            return_value=[
+                [0.1] * settings.models.semantic_chunking.embedding_dim,
+                [0.2] * settings.models.semantic_chunking.embedding_dim,
+                [],
+            ]
+        )
+        mock_session = MagicMock()
+        mock_search_chunks.side_effect = [
+            [SimilarChunkRow(chunk_id=1, text="第一条相似文本", similarity=0.92)],
+            [SimilarChunkRow(chunk_id=2, text="第二条相似文本", similarity=0.87)],
+        ]
+
+        with (
+            patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            level3 = Level3VectorEvidence(
+                session=mock_session,
+                run_id="test-run-id",
+                embedding_client=mock_client,
+                top_k=3,
+            )
+            await level3.ensure_level3_ready()
+            results = await level3.search_similar_chunks_many(
+                ["第一条查询", "第二条查询", "  "],
+                max_chunk_id=9,
+                top_k=6,
+                ensure_ready=False,
+            )
+
+        assert [[row.chunk_id for row in group] for group in results] == [[1], [2], []]
+        mock_client.embed_texts.assert_awaited_once_with(["第一条查询", "第二条查询", "  "])
+        assert mock_search_chunks.call_count == 2
+        assert all(call.kwargs["max_chunk_id"] == 9 for call in mock_search_chunks.call_args_list)
+        assert all(call.kwargs["top_k"] == 6 for call in mock_search_chunks.call_args_list)
+
+    @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     async def test_search_similar_chunks_empty_query(self, mock_has: MagicMock) -> None:
         """空查询返回空列表"""

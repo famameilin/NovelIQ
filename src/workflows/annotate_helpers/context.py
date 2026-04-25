@@ -433,6 +433,43 @@ def _build_level3_request(
     )
 
 
+def _merge_phase1_identity_and_emotion_bundles(
+    identity_bundle: EvidenceBundle,
+    emotion_bundle: EvidenceBundle,
+) -> EvidenceBundle:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: Phase1 同时需要 identity semantic recall 与 emotion exemplar；
+          这里显式只把 emotion objective 产出的情绪样例并回主 bundle，
+          避免 direct-emotion 的 semantic_recall 反向污染 Phase1 的通用 vector evidence。
+    """
+    from src.rag import EvidenceBundle
+
+    merged_semantic_evidence = list(identity_bundle.semantic_evidence)
+    existing_emotion_keys = {
+        (item.evidence_type, item.chunk_id, item.content)
+        for item in merged_semantic_evidence
+        if item.evidence_type == "emotion_exemplar"
+    }
+    for item in emotion_bundle.semantic_evidence:
+        if item.evidence_type != "emotion_exemplar":
+            continue
+        dedupe_key = (item.evidence_type, item.chunk_id, item.content)
+        if dedupe_key in existing_emotion_keys:
+            continue
+        merged_semantic_evidence.append(item)
+        existing_emotion_keys.add(dedupe_key)
+
+    return EvidenceBundle(
+        structured_evidence=list(identity_bundle.structured_evidence),
+        local_evidence=list(identity_bundle.local_evidence),
+        semantic_evidence=merged_semantic_evidence,
+        requested_names=list(identity_bundle.requested_names),
+        level1_snapshot=identity_bundle.level1_snapshot,
+    )
+
+
 async def _collect_phase_bundle(
     disambig_provider: DisambigContextProvider,
     request: Level3Request,
@@ -591,13 +628,21 @@ async def _prepare_chunk_context_with_level3(
     if disambig_provider:
         active_entity_names = _extract_active_entity_names_from_prompt(context.active_entities_fallback)
 
-        phase1_request = _build_level3_request(
+        phase1_identity_request = _build_level3_request(
             objective="identity",
             query_text=chunk_text,
             seed_entities=_collect_seed_entities(alias_map, active_entity_names),
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
+        )
+        phase1_emotion_request = _build_level3_request(
+            objective="emotion",
+            query_text=chunk_text,
+            seed_entities=[],
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=False,
         )
         phase2_request = _build_level3_request(
             objective="foreshadowing",
@@ -615,13 +660,22 @@ async def _prepare_chunk_context_with_level3(
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
         )
-        context.phase1_bundle = await _collect_phase_bundle(disambig_provider, phase1_request)
+        phase1_identity_bundle = await _collect_phase_bundle(disambig_provider, phase1_identity_request)
+        if disambig_provider.is_level3_available():
+            phase1_emotion_bundle = await _collect_phase_bundle(disambig_provider, phase1_emotion_request)
+            context.phase1_bundle = _merge_phase1_identity_and_emotion_bundles(
+                phase1_identity_bundle,
+                phase1_emotion_bundle,
+            )
+        else:
+            context.phase1_bundle = phase1_identity_bundle
         context.phase2_bundle = await _collect_phase_bundle(disambig_provider, phase2_request)
         if (
-            build_level3_request_fingerprint(phase1_request)
+            build_level3_request_fingerprint(phase1_identity_request)
             == build_level3_request_fingerprint(phase3_request)
         ):
-            context.phase3_bundle = context.phase1_bundle
+            # 中文注释：Phase3 只需要 identity 语义，不应顺手复用 Phase1 并回的 emotion exemplar。
+            context.phase3_bundle = phase1_identity_bundle
         else:
             context.phase3_bundle = await _collect_phase_bundle(disambig_provider, phase3_request)
         context.phase4_request_template = _build_level3_request(
