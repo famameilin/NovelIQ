@@ -61,7 +61,7 @@ from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
 from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
-from src.rag.level3_contracts import Level3QueryPlan, Level3Request
+from src.rag.level3_contracts import Level3QueryMode, Level3QueryPlan, Level3Request
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
 from src.rag.mention_extraction_service import MentionExtractionService, PersonMentionExtractor
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
@@ -315,6 +315,10 @@ class DisambigContextProvider:
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
         说明: 按消费者 objective 显式冻结 query planning 规则；高阶 query 只做增量增强，不替代 direct query。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-typecheck-regressions
+        修改说明: 显式收紧 `mode` 的 Literal 类型，避免 request->plan 改造后破坏仓库 typecheck。
         """
         mention_queries: list[MentionEvidenceQuery] = []
         allow_high_order = request.allow_llm_query_expansion and request.objective in {"identity", "relation"}
@@ -327,13 +331,14 @@ class DisambigContextProvider:
                 max_queries=request.max_queries,
             )
 
-        mode = "hybrid" if mention_queries and request.query_text.strip() else "direct"
-        if mention_queries and not request.query_text.strip():
-            mode = "high_order"
+        base_query_text = request.query_text.strip()
+        mode: Level3QueryMode = "direct"
+        if mention_queries:
+            mode = "hybrid" if base_query_text else "high_order"
 
         return Level3QueryPlan(
             mode=mode,
-            base_query_text=request.query_text.strip(),
+            base_query_text=base_query_text,
             mention_queries=mention_queries,
             candidate_pool_k=self._level3_pool_k(request.top_k),
             top_k=request.top_k,
@@ -534,10 +539,16 @@ class DisambigContextProvider:
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
         说明: 按 query plan 执行粗召回；候选池预算统一由 plan.candidate_pool_k 控制。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-typecheck-regressions
+        修改说明: 显式声明 mixed base/mention query 元组类型，避免 tuple 推断过窄影响仓库 typecheck。
         """
         collected: list[SimilarChunkRow] = []
         retrieval_top_k = plan.candidate_pool_k
-        retrieval_queries = [("mention", mention_query) for mention_query in plan.mention_queries]
+        retrieval_queries: list[tuple[str, MentionEvidenceQuery | None]] = [
+            ("mention", mention_query) for mention_query in plan.mention_queries
+        ]
         if plan.base_query_text:
             retrieval_queries.append(("base", None))
         if not retrieval_queries:
