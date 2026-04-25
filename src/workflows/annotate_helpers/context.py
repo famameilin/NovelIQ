@@ -23,12 +23,13 @@ from loguru import logger
 
 from src.api.models.events import StreamEvent
 from src.config import TaskType, settings
-from src.knowledge.authority import KnowledgeGraphAuthorityService
+from src.knowledge.authority import ActiveEntityContext, KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
 from src.models.local.evidence_renderer_shared import render_active_entities_from_authority
+from src.rag.level3_contracts import Level3Objective, build_level3_request_fingerprint
 
 if TYPE_CHECKING:
-    from src.rag import DisambigContextProvider, EvidenceBundle
+    from src.rag import DisambigContextProvider, EvidenceBundle, Level3Request
 
 
 class ChunkContext:
@@ -48,50 +49,74 @@ class ChunkContext:
     任务: implement-level3-vector-retrieval
     修改内容: 添加 vector_evidence_str 字段
 
-    修改时间: 2026-04-16
+    修改时间: 2026-04-25
     修改者: Codex
-    任务: trim-legacy-string-evidence
-    修改内容: 新增 annotation_prompt_blocks 语义入口，旧字符串字段降为兼容层
-
-    修改时间: 2026-04-17
-    修改者: Codex
-    任务: trim-legacy-string-evidence
-    修改内容: 删除遗留字符串字段和兼容属性，主链路统一使用 annotation_prompt_blocks
+    任务: level3-intent-phase-split
+    修改内容: 改为显式 phase-scoped bundles；Phase1 prompt 只消费 phase1_prompt_blocks，
+              Phase2/3/4 由各自 bundle 独立透传。
     """
 
     def __init__(
         self,
         prev_chunk_text: str | None = None,
         next_chunk_text: str | None = None,
+        phase1_bundle: EvidenceBundle | None = None,
+        phase2_bundle: EvidenceBundle | None = None,
+        phase3_bundle: EvidenceBundle | None = None,
+        phase4_bundle: EvidenceBundle | None = None,
+        phase1_prompt_blocks: AnnotationPromptBlocks | None = None,
+        active_entities_fallback: str | None = None,
+        phase4_request_template: Level3Request | None = None,
         evidence_bundle: EvidenceBundle | None = None,
         annotation_prompt_blocks: AnnotationPromptBlocks | None = None,
-        active_entities_fallback: str | None = None,
     ) -> None:
         self.prev_chunk_text = prev_chunk_text
         self.next_chunk_text = next_chunk_text
-        self.evidence_bundle = evidence_bundle
-        self.annotation_prompt_blocks = annotation_prompt_blocks
+        self.phase1_bundle = phase1_bundle or evidence_bundle
+        self.phase2_bundle = phase2_bundle
+        self.phase3_bundle = phase3_bundle or self.phase1_bundle
+        self.phase4_bundle = phase4_bundle
+        self.phase1_prompt_blocks = phase1_prompt_blocks or annotation_prompt_blocks
         self.active_entities_fallback = active_entities_fallback
+        self.phase4_request_template = phase4_request_template
 
     @property
     def prompt_active_entities(self) -> str | None:
-        if self.annotation_prompt_blocks and self.annotation_prompt_blocks.active_entities is not None:
-            return self.annotation_prompt_blocks.active_entities
+        if self.phase1_prompt_blocks and self.phase1_prompt_blocks.active_entities is not None:
+            return self.phase1_prompt_blocks.active_entities
         if self.active_entities_fallback is not None:
             return self.active_entities_fallback
         return None
 
     @property
     def prompt_disambig_context(self) -> str | None:
-        if self.annotation_prompt_blocks and self.annotation_prompt_blocks.disambig_context is not None:
-            return self.annotation_prompt_blocks.disambig_context
+        if self.phase1_prompt_blocks and self.phase1_prompt_blocks.disambig_context is not None:
+            return self.phase1_prompt_blocks.disambig_context
         return None
 
     @property
     def prompt_vector_evidence(self) -> str | None:
-        if self.annotation_prompt_blocks and self.annotation_prompt_blocks.vector_evidence is not None:
-            return self.annotation_prompt_blocks.vector_evidence
+        if self.phase1_prompt_blocks and self.phase1_prompt_blocks.vector_evidence is not None:
+            return self.phase1_prompt_blocks.vector_evidence
         return None
+
+    @property
+    def evidence_bundle(self) -> EvidenceBundle | None:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 提供只读别名给仍在直接构造 ChunkContext 的低层测试；生产主路径统一读取 phase1_bundle。
+        """
+        return self.phase1_bundle
+
+    @property
+    def annotation_prompt_blocks(self) -> AnnotationPromptBlocks | None:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 提供只读别名给旧测试；生产主路径统一读取 phase1_prompt_blocks。
+        """
+        return self.phase1_prompt_blocks
 
 
 def _init_evidence_provider(
@@ -297,6 +322,25 @@ def _extract_names_from_text(text: str) -> list[str]:
     return re.findall(r"[\u4e00-\u9fff]{2,4}", text)
 
 
+def _build_active_entity_contexts_from_authority(
+    conn,
+    run_id: str,
+    chunk_id: int,
+    lookback: int,
+) -> list[ActiveEntityContext]:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: 统一从 authority 拉取活跃实体上下文，供 prompt fallback 和 Level3 seed_entities 复用，避免重复查询。
+    """
+
+    return KnowledgeGraphAuthorityService.from_session(conn).build_active_entity_view(
+        run_id,
+        current_chunk=chunk_id,
+        lookback=lookback,
+    )
+
+
 def _build_active_entities_prompt_from_authority(
     conn,
     run_id: str,
@@ -305,12 +349,164 @@ def _build_active_entities_prompt_from_authority(
 ) -> str | None:
     """Reuse the authority-owned Level 2 contract even when the RAG provider is unavailable."""
 
-    active_entities = KnowledgeGraphAuthorityService.from_session(conn).build_active_entity_view(
-        run_id,
-        current_chunk=chunk_id,
-        lookback=lookback,
-    )
+    active_entities = _build_active_entity_contexts_from_authority(conn, run_id, chunk_id, lookback)
     return render_active_entities_from_authority(active_entities)
+
+
+def _collect_seed_entities(
+    alias_map: dict[str, str] | None,
+    active_entity_names: list[str],
+    *,
+    query_text: str | None = None,
+    extra_names: list[str] | None = None,
+) -> list[str]:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: Level3 seed_entities 只允许来自可信源：chunk 内显式出现的 alias/canonical、
+          authority active entities、调用方显式补充名；不能把整轮累计 alias_map 全量带进当前 chunk。
+    """
+    seed_entities: list[str] = []
+    normalized_query_text = (query_text or "").strip()
+    for alias, canonical in (alias_map or {}).items():
+        normalized_alias = str(alias).strip()
+        normalized_canonical = str(canonical).strip()
+        if not normalized_query_text:
+            continue
+        if normalized_alias and normalized_alias in normalized_query_text and normalized_alias not in seed_entities:
+            seed_entities.append(normalized_alias)
+        if (
+            normalized_canonical
+            and (
+                normalized_canonical in normalized_query_text
+                or (normalized_alias and normalized_alias in normalized_query_text)
+            )
+            and normalized_canonical not in seed_entities
+        ):
+            seed_entities.append(normalized_canonical)
+
+    for entity_name in active_entity_names:
+        normalized = str(entity_name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    for name in extra_names or []:
+        normalized = str(name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    return seed_entities
+
+
+def _extract_active_entity_names_from_prompt(active_entities_prompt: str | None) -> list[str]:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: 从 authority renderer 的活跃实体区段里提取名字，供 Level3Request.seed_entities 复用；
+          这样 workflow 不需要为了拿名字再额外查一次 authority。
+    """
+    if not active_entities_prompt:
+        return []
+
+    names: list[str] = []
+    for line in active_entities_prompt.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("- "):
+            continue
+        candidate = stripped[2:].split("（", 1)[0].split(":", 1)[0].strip()
+        if candidate and candidate not in names:
+            names.append(candidate)
+    return names
+
+
+def _build_level3_request(
+    *,
+    objective: Level3Objective,
+    query_text: str,
+    seed_entities: list[str],
+    chunk_id: int,
+    max_chunk_id: int | None,
+    allow_llm_query_expansion: bool,
+) -> Level3Request:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: 统一从 workflow 入口构造显式 Level3Request，避免各 phase 再靠弱语义 kwargs 猜测意图。
+    """
+    from src.rag import Level3Request
+
+    return Level3Request(
+        objective=objective,
+        query_text=query_text,
+        seed_entities=seed_entities,
+        current_chunk=chunk_id,
+        max_chunk_id=max_chunk_id,
+        exclude_chunk_ids=[chunk_id],
+        allow_llm_query_expansion=allow_llm_query_expansion,
+        top_k=settings.rag.level3_top_k,
+        max_queries=settings.rag.level3_max_queries,
+        model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
+    )
+
+
+def _merge_phase1_identity_and_emotion_bundles(
+    identity_bundle: EvidenceBundle,
+    emotion_bundle: EvidenceBundle,
+) -> EvidenceBundle:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: Phase1 同时需要 identity semantic recall 与 emotion exemplar；
+          这里显式只把 emotion objective 产出的情绪样例并回主 bundle，
+          避免 direct-emotion 的 semantic_recall 反向污染 Phase1 的通用 vector evidence。
+    """
+    from src.rag import EvidenceBundle
+
+    merged_semantic_evidence = list(identity_bundle.semantic_evidence)
+    existing_emotion_keys = {
+        (item.evidence_type, item.chunk_id, item.content)
+        for item in merged_semantic_evidence
+        if item.evidence_type == "emotion_exemplar"
+    }
+    for item in emotion_bundle.semantic_evidence:
+        if item.evidence_type != "emotion_exemplar":
+            continue
+        dedupe_key = (item.evidence_type, item.chunk_id, item.content)
+        if dedupe_key in existing_emotion_keys:
+            continue
+        merged_semantic_evidence.append(item)
+        existing_emotion_keys.add(dedupe_key)
+
+    return EvidenceBundle(
+        structured_evidence=list(identity_bundle.structured_evidence),
+        local_evidence=list(identity_bundle.local_evidence),
+        semantic_evidence=merged_semantic_evidence,
+        requested_names=list(identity_bundle.requested_names),
+        level1_snapshot=identity_bundle.level1_snapshot,
+    )
+
+
+async def _collect_phase_bundle(
+    disambig_provider: DisambigContextProvider,
+    request: Level3Request,
+) -> EvidenceBundle:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: workflow 侧只声明 request；provider 决定走 Level1/2 还是 Level1/2/3 主链，不再手写参数拼装。
+    """
+    if disambig_provider.requires_level3():
+        if not disambig_provider.is_level3_available():
+            raise RuntimeError("Level 3 vector retrieval is required but not available")
+        return await disambig_provider.collect_evidence_with_level3(request)
+
+    if disambig_provider.is_level3_available():
+        return await disambig_provider.collect_evidence_with_level3(request)
+
+    return disambig_provider.collect_evidence(
+        names_in_chunk=request.seed_entities,
+        current_chunk=request.current_chunk,
+    )
 
 
 def _prepare_chunk_context(
@@ -356,12 +552,41 @@ def _prepare_chunk_context(
         )
 
     if disambig_provider:
-        names_in_chunk = _extract_names_from_text(chunk_text)
-        context.evidence_bundle = disambig_provider.collect_evidence(
-            names_in_chunk=names_in_chunk,
+        active_entity_names = _extract_active_entity_names_from_prompt(context.active_entities_fallback)
+        phase1_request = _build_level3_request(
+            objective="identity",
+            query_text=chunk_text,
+            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=True,
+        )
+        phase2_request = _build_level3_request(
+            objective="foreshadowing",
+            query_text=chunk_text,
+            seed_entities=_collect_seed_entities(None, active_entity_names),
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=False,
+        )
+        context.phase1_bundle = disambig_provider.collect_evidence(
+            names_in_chunk=phase1_request.seed_entities,
             current_chunk=chunk_id,
         )
-        context.annotation_prompt_blocks = render_annotation_prompt_blocks(context.evidence_bundle)
+        context.phase2_bundle = disambig_provider.collect_evidence(
+            names_in_chunk=phase2_request.seed_entities,
+            current_chunk=chunk_id,
+        )
+        context.phase3_bundle = context.phase1_bundle
+        context.phase4_request_template = _build_level3_request(
+            objective="relation",
+            query_text=chunk_text,
+            seed_entities=_collect_seed_entities(None, active_entity_names),
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=False,
+        )
+        context.phase1_prompt_blocks = render_annotation_prompt_blocks(context.phase1_bundle)
 
     return context
 
@@ -417,31 +642,66 @@ async def _prepare_chunk_context_with_level3(
         )
 
     if disambig_provider:
-        names_in_chunk = _extract_names_from_text(chunk_text)
-        if disambig_provider.requires_level3():
-            if not disambig_provider.is_level3_available():
-                raise RuntimeError("Level 3 vector retrieval is required but not available")
-            context.evidence_bundle = await disambig_provider.collect_evidence_with_level3(
-                names_in_chunk=names_in_chunk,
-                current_chunk=chunk_id,
-                context_text=chunk_text,
-                exclude_chunk_ids=[chunk_id],
-                max_chunk_id=chunk_id - 1,
-            )
-        elif disambig_provider.is_level3_available():
-            context.evidence_bundle = await disambig_provider.collect_evidence_with_level3(
-                names_in_chunk=names_in_chunk,
-                current_chunk=chunk_id,
-                context_text=chunk_text,
-                exclude_chunk_ids=[chunk_id],
-                max_chunk_id=chunk_id - 1,
+        active_entity_names = _extract_active_entity_names_from_prompt(context.active_entities_fallback)
+
+        phase1_identity_request = _build_level3_request(
+            objective="identity",
+            query_text=chunk_text,
+            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=True,
+        )
+        phase1_emotion_request = _build_level3_request(
+            objective="emotion",
+            query_text=chunk_text,
+            seed_entities=[],
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=False,
+        )
+        phase2_request = _build_level3_request(
+            objective="foreshadowing",
+            query_text=chunk_text,
+            seed_entities=_collect_seed_entities(None, active_entity_names),
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=False,
+        )
+        phase3_request = _build_level3_request(
+            objective="identity",
+            query_text=chunk_text,
+            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=True,
+        )
+        phase1_identity_bundle = await _collect_phase_bundle(disambig_provider, phase1_identity_request)
+        if disambig_provider.is_level3_available():
+            phase1_emotion_bundle = await _collect_phase_bundle(disambig_provider, phase1_emotion_request)
+            context.phase1_bundle = _merge_phase1_identity_and_emotion_bundles(
+                phase1_identity_bundle,
+                phase1_emotion_bundle,
             )
         else:
-            context.evidence_bundle = disambig_provider.collect_evidence(
-                names_in_chunk=names_in_chunk,
-                current_chunk=chunk_id,
-            )
-
-        context.annotation_prompt_blocks = render_annotation_prompt_blocks(context.evidence_bundle)
+            context.phase1_bundle = phase1_identity_bundle
+        context.phase2_bundle = await _collect_phase_bundle(disambig_provider, phase2_request)
+        if (
+            build_level3_request_fingerprint(phase1_identity_request)
+            == build_level3_request_fingerprint(phase3_request)
+        ):
+            # 中文注释：Phase3 只需要 identity 语义，不应顺手复用 Phase1 并回的 emotion exemplar。
+            context.phase3_bundle = phase1_identity_bundle
+        else:
+            context.phase3_bundle = await _collect_phase_bundle(disambig_provider, phase3_request)
+        context.phase4_request_template = _build_level3_request(
+            objective="relation",
+            query_text=chunk_text,
+            seed_entities=_collect_seed_entities(None, active_entity_names),
+            chunk_id=chunk_id,
+            max_chunk_id=chunk_id - 1,
+            allow_llm_query_expansion=False,
+        )
+        context.phase1_prompt_blocks = render_annotation_prompt_blocks(context.phase1_bundle)
 
     return context

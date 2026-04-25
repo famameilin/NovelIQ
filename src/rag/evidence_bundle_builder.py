@@ -34,6 +34,14 @@ class EvidenceBundleBuilder:
     ) -> EvidenceBundle:
         """按请求名字构建 Level1 structured evidence。"""
         requested_names = [name for name in (names_in_chunk or []) if name]
+        if names_in_chunk is not None and not requested_names:
+            # 中文注释：显式传入空请求名表示“当前消费者没有可信实体锚点”，
+            # 这里不能退回全量 Level1 事实，否则会把整本书的结构化事实误注入 direct-only 的消费者。
+            return EvidenceBundle(
+                structured_evidence=[],
+                requested_names=[],
+                level1_snapshot=snapshot,
+            )
         relevant_names = set(requested_names)
         if relevant_names:
             related_canonicals = {

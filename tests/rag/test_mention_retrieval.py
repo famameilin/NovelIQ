@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
+from src.rag.level3_contracts import Level3QueryPlan, Level3Request
 from src.rag.mention_extraction import extract_person_mentions
 from src.rag.mention_extraction_llm import (
     LLMPersonMentionCloudItem,
@@ -22,13 +23,44 @@ from src.rag.mention_extraction_llm import (
 )
 from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
-from src.rag.mention_query import build_mention_evidence_queries
+from src.rag.mention_query import MentionEvidenceQuery, build_mention_evidence_queries
 from src.rag.mention_rerank import rerank_mention_level3_results
 from src.rag.model_call_audit import audited_structured_model_call
 from src.rag.model_rerank import Level3RerankResult
 from src.rag.model_rerank_llm import LLMLevel3Reranker, LLMLevel3RerankItem, LLMLevel3RerankResponse
 from src.rag.retriever import DisambigContextProvider
 from src.storage.repositories.chunk import SimilarChunkRow
+
+
+def _build_level3_request(
+    *,
+    objective: str = "identity",
+    query_text: str = "那个穿红衣的女子突然出手。",
+    seed_entities: list[str] | None = None,
+    current_chunk: int | None = 9,
+    max_chunk_id: int | None = 8,
+    top_k: int = 2,
+    max_queries: int = 6,
+    model_rerank_query_max_chars: int = 320,
+    allow_llm_query_expansion: bool = True,
+) -> Level3Request:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: 统一生成 Level3Request，减少 request-cutover 后各测试重复手写显式合同。
+    """
+    return Level3Request(
+        objective=objective,  # type: ignore[arg-type]
+        query_text=query_text,
+        seed_entities=seed_entities or ["白芷"],
+        current_chunk=current_chunk,
+        max_chunk_id=max_chunk_id,
+        exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
+        allow_llm_query_expansion=allow_llm_query_expansion,
+        top_k=top_k,
+        max_queries=max_queries,
+        model_rerank_query_max_chars=model_rerank_query_max_chars,
+    )
 
 
 def test_extract_person_mentions_captures_descriptive_person_mentions() -> None:
@@ -149,6 +181,28 @@ async def test_mention_extraction_service_falls_back_to_rule_extractor() -> None
         MentionExtractionRequest(text="那个穿红衣的女子突然出手。")
     )
 
+    assert [mention.raw_text for mention in mentions] == ["穿红衣的女子"]
+    assert mentions[0].source == "rule"
+
+
+@pytest.mark.asyncio
+async def test_mention_extraction_service_skips_llm_when_prefer_llm_disabled() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-level3-relation-query-expansion-contract
+    说明: relation 这类受限扩展场景允许 query expansion，但不应默认走 LLM 主路径；
+          service 显式关闭 prefer_llm 时应直接复用规则 extractor。
+    """
+    extractor = MagicMock()
+    extractor.extract_mentions = AsyncMock(return_value=[])
+
+    service = MentionExtractionService(extractor)
+    mentions = await service.extract_mentions(
+        MentionExtractionRequest(text="那个穿红衣的女子突然出手。"),
+        prefer_llm=False,
+    )
+
+    extractor.extract_mentions.assert_not_awaited()
     assert [mention.raw_text for mention in mentions] == ["穿红衣的女子"]
     assert mentions[0].source == "rule"
 
@@ -687,6 +741,115 @@ def test_mention_rerank_uses_local_preview_only_when_paragraph_preview_exists() 
 
 
 @pytest.mark.asyncio
+async def test_build_level3_query_plan_uses_hybrid_for_identity_requests() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: identity objective 且允许 LLM expansion 时，应保留 direct base query，并生成 hybrid plan。
+    """
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    plan = await provider.build_level3_query_plan(
+        _build_level3_request(
+            objective="identity",
+            query_text="那个穿红衣的女子突然出手。",
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+        )
+    )
+
+    assert plan.mode == "hybrid"
+    assert plan.base_query_text == "那个穿红衣的女子突然出手。"
+    assert len(plan.mention_queries) >= 1
+    assert plan.candidate_pool_k == 20
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_uses_direct_for_relation_requests() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: relation objective 首版固定 direct-only，不应再默认触发 mention extraction。
+    """
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    plan = await provider.build_level3_query_plan(
+        _build_level3_request(
+            objective="relation",
+            query_text="白芷看向侯飞白。",
+            seed_entities=["白芷", "侯飞白"],
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=False,
+        )
+    )
+
+    assert plan.mode == "direct"
+    assert plan.mention_queries == []
+    assert plan.base_query_text == "白芷看向侯飞白。"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_uses_limited_hybrid_for_relation_requests_when_explicitly_allowed() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-level3-relation-query-expansion-contract
+    说明: relation objective 显式允许 expansion 时，应从默认 direct 切到受限 hybrid；
+          但 relation 只复用规则 extractor，不走 LLM 主路径。
+    """
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider._mention_extraction_service.extract_mentions = AsyncMock(
+        return_value=[
+            PersonMention(
+                raw_text="门口的老者",
+                mention_type="location_role",
+                sentence_text="门口的老者看向白芷。",
+                cues={"location": ["门口"], "role_word": "老者"},
+                source="rule",
+            )
+        ]
+    )
+    plan = await provider.build_level3_query_plan(
+        _build_level3_request(
+            objective="relation",
+            query_text="门口的老者看向白芷。",
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=6,
+        )
+    )
+
+    assert plan.mode == "hybrid"
+    assert len(plan.mention_queries) == 2
+    assert plan.base_query_text == "门口的老者看向白芷。"
+    assert provider._mention_extraction_service.extract_mentions.await_args.kwargs["prefer_llm"] is False
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_trims_queries_by_budget() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: max_queries 应直接裁掉高阶 query 数量，避免 identity 路径继续失控增长。
+    """
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    plan = await provider.build_level3_query_plan(
+        _build_level3_request(
+            objective="identity",
+            query_text="那个穿红衣的女子突然出手，门口的老者没有说话。",
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+            max_queries=1,
+        )
+    )
+
+    assert len(plan.mention_queries) == 1
+    assert plan.base_query_text == "那个穿红衣的女子突然出手，门口的老者没有说话。"
+
+
+@pytest.mark.asyncio
 async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     """
     创建时间: 2026-04-23
@@ -696,8 +859,9 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
             [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.94)],
             [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.90)],
             [SimilarChunkRow(chunk_id=6, text="相似场景。", similarity=0.88)],
@@ -705,10 +869,22 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     )
 
     mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:2]
+    provider.build_level3_query_plan = AsyncMock(
+        return_value=Level3QueryPlan(
+            mode="hybrid",
+            base_query_text="那个穿红衣的女子突然出手。",
+            mention_queries=mention_queries,
+            candidate_pool_k=20,
+            top_k=2,
+        )
+    )
     bundle = await provider.collect_evidence_with_level3(
-        context_text="那个穿红衣的女子突然出手。",
-        max_chunk_id=9,
-        mention_queries=mention_queries,
+        _build_level3_request(
+            query_text="那个穿红衣的女子突然出手。",
+            current_chunk=None,
+            max_chunk_id=9,
+            seed_entities=["白芷"],
+        )
     )
 
     semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
@@ -718,9 +894,16 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     assert semantic_items[0].metadata["business_rerank_method"] == "mention_feature_rerank"
     assert semantic_items[0].metadata["final_rank_score"] == semantic_items[0].score
     assert semantic_items[0].metadata["business_rerank_score"] >= semantic_items[0].metadata["chunk_semantic_score"]
-    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["max_chunk_id"] == 9
-    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
-    assert all(call.kwargs["ensure_ready"] is False for call in provider._level3.search_similar_chunks.await_args_list)
+    provider._level3.search_similar_chunks_many.assert_awaited_once()
+    assert provider._level3.search_similar_chunks_many.await_args.args[0] == [
+        mention_queries[0].query_text,
+        mention_queries[1].query_text,
+        "那个穿红衣的女子突然出手。",
+    ]
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["max_chunk_id"] == 9
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 20
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["ensure_ready"] is False
+    provider._level3.search_similar_chunks.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -733,20 +916,26 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    batched_query_texts: list[str] = []
+
+    async def _fake_search_similar_chunks_many(query_texts, **_kwargs):
+        batched_query_texts[:] = list(query_texts)
+        return [
             [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.94)],
             [SimilarChunkRow(chunk_id=6, text="红衣女子立在门前。", similarity=0.90)],
-            [],
-            [],
+            *([[]] * max(len(query_texts) - 2, 0)),
         ]
-    )
+
+    provider._level3.search_similar_chunks_many = AsyncMock(side_effect=_fake_search_similar_chunks_many)
 
     bundle = await provider.collect_evidence_with_level3(
-        names_in_chunk=["白芷"],
-        current_chunk=9,
-        context_text="那个穿红衣的女子突然出手。",
-        max_chunk_id=8,
+        _build_level3_request(
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+            query_text="那个穿红衣的女子突然出手。",
+        )
     )
 
     semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
@@ -754,7 +943,9 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     assert semantic_items[0].metadata["mention_source"] == "rule"
     assert semantic_items[0].metadata["query_variant"] == "mention_raw"
     assert semantic_items[0].metadata["rerank_source"] == "deterministic_fallback"
-    assert provider._level3.search_similar_chunks.await_args_list[0].args[0] == "穿红衣的女子"
+    assert batched_query_texts[0] == "穿红衣的女子"
+    provider._level3.search_similar_chunks_many.assert_awaited_once()
+    provider._level3.search_similar_chunks.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -774,8 +965,9 @@ async def test_provider_uses_model_rerank_when_available() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
             [
                 SimilarChunkRow(chunk_id=10, text="红衣女子出手。", similarity=0.95),
                 SimilarChunkRow(chunk_id=11, text="白芷正是那名红衣女子。", similarity=0.88),
@@ -785,12 +977,22 @@ async def test_provider_uses_model_rerank_when_available() -> None:
     )
 
     mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:1]
+    provider.build_level3_query_plan = AsyncMock(
+        return_value=Level3QueryPlan(
+            mode="hybrid",
+            base_query_text="那个穿红衣的女子突然出手。",
+            mention_queries=mention_queries,
+            candidate_pool_k=20,
+            top_k=2,
+        )
+    )
     bundle = await provider.collect_evidence_with_level3(
-        names_in_chunk=["白芷"],
-        current_chunk=12,
-        context_text="那个穿红衣的女子突然出手。",
-        max_chunk_id=11,
-        mention_queries=mention_queries,
+        _build_level3_request(
+            seed_entities=["白芷"],
+            current_chunk=12,
+            max_chunk_id=11,
+            query_text="那个穿红衣的女子突然出手。",
+        )
     )
 
     semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
@@ -801,6 +1003,81 @@ async def test_provider_uses_model_rerank_when_available() -> None:
     assert semantic_items[0].metadata["business_rerank_score"] is not None
     assert semantic_items[0].score == 0.97
     reranker.rerank.assert_awaited_once()
+    provider._level3.search_similar_chunks_many.assert_awaited_once()
+    provider._level3.search_similar_chunks.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_caps_model_rerank_query_text_by_explicit_budget() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-level3-required-readiness-and-rerank-budget
+    说明: model rerank 只应消费压缩后的 query summary，并严格受 request budget 约束；
+          不能再把 base query 与所有 mention query 无上限拼接进 rerank prompt。
+    """
+    reranker = MagicMock()
+    reranker.rerank = AsyncMock(return_value=[])
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
+    provider._level3.is_available = MagicMock(return_value=True)
+    provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
+            [SimilarChunkRow(chunk_id=10, text="红衣女子出手。", similarity=0.95)],
+            [SimilarChunkRow(chunk_id=11, text="白芷正是那名红衣女子。", similarity=0.88)],
+            [],
+        ]
+    )
+
+    provider.build_level3_query_plan = AsyncMock(
+        return_value=Level3QueryPlan(
+            mode="hybrid",
+            base_query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水，所有人都在看她。",
+            mention_queries=[
+                next(
+                    query
+                    for query in build_mention_evidence_queries(
+                        [
+                            PersonMention(
+                                raw_text="那个穿红衣的女子在门口忽然出手",
+                                mention_type="descriptive_person",
+                                sentence_text="那个穿红衣的女子在门口忽然出手。",
+                                cues={"appearance": ["红衣"], "action": ["出手"], "location": ["门口"]},
+                                normalized_query_terms=("红衣", "女子", "门口", "出手"),
+                                source="llm",
+                            )
+                        ]
+                    )
+                    if query.query_variant == "mention_compressed"
+                ),
+                MentionEvidenceQuery(
+                    query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水",
+                    mention_text="那个穿红衣的女子在门口忽然出手",
+                    mention_type="descriptive_person",
+                    matched_features=("红衣", "门口", "出手"),
+                    query_variant="mention_raw",
+                    mention_source="llm",
+                ),
+            ],
+            candidate_pool_k=20,
+            top_k=2,
+        )
+    )
+
+    await provider.collect_evidence_with_level3(
+        _build_level3_request(
+            seed_entities=["白芷"],
+            current_chunk=12,
+            max_chunk_id=11,
+            query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水，所有人都在看她。",
+            model_rerank_query_max_chars=60,
+        )
+    )
+
+    rerank_query_text = reranker.rerank.await_args.kwargs["query_text"]
+    assert len(rerank_query_text) <= 60
+    assert "q1: 红衣 女子 门口 出手" in rerank_query_text
+    assert "袖口还沾着雨水，所有人都在看她" not in rerank_query_text
 
 
 @pytest.mark.asyncio
@@ -813,8 +1090,9 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=1)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
             [
                 SimilarChunkRow(
                     chunk_id=4,
@@ -828,12 +1106,23 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     )
 
     mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:1]
+    provider.build_level3_query_plan = AsyncMock(
+        return_value=Level3QueryPlan(
+            mode="hybrid",
+            base_query_text="那个穿红衣的女子突然出手。",
+            mention_queries=mention_queries,
+            candidate_pool_k=20,
+            top_k=1,
+        )
+    )
     bundle = await provider.collect_evidence_with_level3(
-        names_in_chunk=["白芷"],
-        current_chunk=6,
-        context_text="那个穿红衣的女子突然出手。",
-        max_chunk_id=5,
-        mention_queries=mention_queries,
+        _build_level3_request(
+            seed_entities=["白芷"],
+            current_chunk=6,
+            max_chunk_id=5,
+            query_text="那个穿红衣的女子突然出手。",
+            top_k=1,
+        )
     )
 
     semantic_items = [item for item in bundle.semantic_evidence if item.evidence_type == "semantic_recall"]
@@ -841,4 +1130,5 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     assert semantic_items[0].metadata["chunk_semantic_score"] == 0.82
     assert semantic_items[0].metadata["final_rank_score"] == semantic_items[0].score
     assert semantic_items[0].metadata["feature_overlap"] == ["红衣", "女子", "出手"]
-    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 20
+    provider._level3.search_similar_chunks.assert_not_awaited()

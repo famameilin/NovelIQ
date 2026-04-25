@@ -61,6 +61,7 @@ from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
 from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
+from src.rag.level3_contracts import Level3QueryMode, Level3QueryPlan, Level3Request
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
 from src.rag.mention_extraction_service import MentionExtractionService, PersonMentionExtractor
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
@@ -222,25 +223,9 @@ class DisambigContextProvider:
 
         return bundle
 
-    async def collect_evidence_with_level3(
-        self,
-        names_in_chunk: list[str] | None = None,
-        current_chunk: int | None = None,
-        context_text: str | None = None,
-        exclude_chunk_ids: list[int] | None = None,
-        max_chunk_id: int | None = None,
-        mention_queries: list[MentionEvidenceQuery] | None = None,
-    ) -> EvidenceBundle:
+    async def collect_evidence_with_level3(self, request: Level3Request) -> EvidenceBundle:
         """
         收集 Level1/2/3 证据。
-
-        修改时间: 2026-04-23
-        任务: level3-history-cutoff
-        修改说明: 增加 max_chunk_id 透传，调用方可显式声明 Level3 历史截止边界。
-
-        修改时间: 2026-04-23
-        任务: level3-mention-retrieval
-        修改说明: 支持 mention_queries；mention 召回结果仅通过 metadata 标记来源，不扩张 prompt contract。
 
         修改时间: 2026-04-24
         任务: fix-level3-provider-readiness-drift
@@ -254,135 +239,188 @@ class DisambigContextProvider:
         修改时间: 2026-04-24
         任务: log-level3-evidence-gaps
         修改说明: 补充 Level3 证据准备入口/出口耗时日志，避免 chunk 间模型取证阶段看起来像空白等待。
+
+        修改时间: 2026-04-25
+        任务: level3-intent-phase-split
+        修改说明: 旧的弱语义多参数签名已移除，调用方必须显式传入 Level3Request。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        修改说明: required Level3 场景下 async readiness 漂移必须继续向上抛错；
+                  同时后续 model rerank query summary 将按 request 显式预算收口。
         """
-        bundle = self.collect_evidence(names_in_chunk=names_in_chunk, current_chunk=current_chunk)
+        bundle = self.collect_evidence(names_in_chunk=request.seed_entities, current_chunk=request.current_chunk)
 
         if self._level3_enabled and self.is_level3_available():
             started_at = time.perf_counter()
             logger.info(
-                "Level3 evidence collection start: run_id={} chunk_id={} names={} context_len={} max_chunk_id={}",
+                "Level3 evidence collection start: run_id={} objective={} chunk_id={} seed_entities={} "
+                "query_len={} max_chunk_id={} top_k={} max_queries={}",
                 self._run_id,
-                current_chunk,
-                len(names_in_chunk or []),
-                len(context_text or ""),
-                max_chunk_id,
+                request.objective,
+                request.current_chunk,
+                len(request.seed_entities),
+                len(request.query_text or ""),
+                request.max_chunk_id,
+                request.top_k,
+                request.max_queries,
             )
-            await self._emit_level3_progress(current_chunk, "正在准备 Level3 证据", 5)
+            await self._emit_level3_progress(
+                request.current_chunk,
+                f"[{request.objective}] 正在准备 Level3 证据",
+                5,
+            )
             try:
                 await self._level3.ensure_level3_ready()
-                mention_queries = await self._build_queries(
-                    context_text=context_text,
-                    names_in_chunk=names_in_chunk,
-                    mention_queries=mention_queries,
-                    current_chunk=current_chunk,
-                )
-                level3_results = await self._collect_level3_results(
-                    context_text=context_text,
-                    exclude_chunk_ids=exclude_chunk_ids,
-                    max_chunk_id=max_chunk_id,
-                    mention_queries=mention_queries,
+                plan = await self.build_level3_query_plan(request)
+                level3_results = await self.execute_level3_query_plan(
+                    plan,
+                    request,
                     active_entity_names=self._extract_active_entity_names(bundle),
                     candidate_names=set(bundle.requested_names),
-                    current_chunk=current_chunk,
                 )
             except Level3NotReadyError as exc:
-                # 中文注释：provider 侧必须把 readiness 漂移视为“本次无 Level3 证据”，
-                # 不能因为 schema/维度晚于 is_available() 才暴露，就把整条标注链路直接打断。
+                if self.requires_level3():
+                    # 中文注释：required Level3 语义下，入口已声明“没有 Level3 就不能继续”，
+                    # 因此 async readiness 漂移必须 fail loudly，不能偷偷退回 Level1/2。
+                    logger.error("Level3 readiness drift surfaced on required path: {}", exc)
+                    raise
                 logger.warning("Level3 skipped during evidence collection: {}", exc)
                 return bundle
             bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
-            bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
+            if request.objective == "emotion":
+                bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
             logger.info(
-                "Level3 evidence collection complete: run_id={} chunk_id={} mention_queries={} results={} "
-                "semantic_items={} duration_ms={}",
+                "Level3 evidence collection complete: run_id={} objective={} chunk_id={} mode={} "
+                "mention_queries={} results={} semantic_items={} duration_ms={}",
                 self._run_id,
-                current_chunk,
-                len(mention_queries or []),
+                request.objective,
+                request.current_chunk,
+                plan.mode,
+                len(plan.mention_queries),
                 len(level3_results),
                 len(bundle.semantic_evidence),
                 int((time.perf_counter() - started_at) * 1000),
             )
             await self._emit_level3_progress(
-                current_chunk,
-                f"Level3 证据准备完成：召回 {len(level3_results)} 条",
+                request.current_chunk,
+                f"[{request.objective}] Level3 证据准备完成：召回 {len(level3_results)} 条",
                 100,
             )
 
         return bundle
 
+    async def build_level3_query_plan(self, request: Level3Request) -> Level3QueryPlan:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 按消费者 objective 显式冻结 query planning 规则；高阶 query 只做增量增强，不替代 direct query。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-typecheck-regressions
+        修改说明: 显式收紧 `mode` 的 Literal 类型，避免 request->plan 改造后破坏仓库 typecheck。
+        """
+        mention_queries: list[MentionEvidenceQuery] = []
+        allow_high_order = request.allow_llm_query_expansion and request.objective in {"identity", "relation"}
+        if allow_high_order:
+            mention_queries = await self._build_queries(
+                context_text=request.query_text,
+                seed_entities=request.seed_entities,
+                current_chunk=request.current_chunk,
+                objective=request.objective,
+                max_queries=request.max_queries,
+            )
+
+        base_query_text = request.query_text.strip()
+        mode: Level3QueryMode = "direct"
+        if mention_queries:
+            mode = "hybrid" if base_query_text else "high_order"
+
+        return Level3QueryPlan(
+            mode=mode,
+            base_query_text=base_query_text,
+            mention_queries=mention_queries,
+            candidate_pool_k=self._level3_pool_k(request.top_k),
+            top_k=request.top_k,
+        )
+
+    async def execute_level3_query_plan(
+        self,
+        plan: Level3QueryPlan,
+        request: Level3Request,
+        *,
+        active_entity_names: set[str],
+        candidate_names: set[str],
+    ) -> list[SimilarChunkRow]:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 执行显式 query plan；retrieve / rerank / dedupe 仍保留在 provider 编排层，但不再直接耦合 workflow 弱参数。
+        """
+        return await self._collect_level3_results(
+            plan=plan,
+            request=request,
+            active_entity_names=active_entity_names,
+            candidate_names=candidate_names,
+        )
+
     async def _collect_level3_results(
         self,
         *,
-        context_text: str | None,
-        exclude_chunk_ids: list[int] | None,
-        max_chunk_id: int | None,
-        mention_queries: list[MentionEvidenceQuery] | None,
+        plan: Level3QueryPlan,
+        request: Level3Request,
         active_entity_names: set[str],
         candidate_names: set[str],
-        current_chunk: int | None,
     ) -> list[SimilarChunkRow]:
         """
-        创建时间: 2026-04-23
-        任务: level3-mention-retrieval
-        说明: 统一执行 chunk query 与 mention query，并按 chunk_id 去重后限制证据预算。
-
-        修改时间: 2026-04-24
-        任务: level3-mention-rerank
-        修改说明: mention 检索使用更大的召回池，并在去重前应用可解释的确定性 rerank。
-
-        修改时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        修改说明: 编排拆成 retrieve_candidates / rerank_candidates / dedupe_and_trim，
-                  模型 rerank 可用时优先接管最终排序。
-
-        修改时间: 2026-04-24
-        任务: log-level3-evidence-gaps
-        修改说明: 补充候选召回、rerank、去重裁剪三个阶段的耗时与数量日志。
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: query planning 已外提后，这里只负责执行计划、重排候选并按请求预算裁剪。
         """
         started_at = time.perf_counter()
         collected = await self._retrieve_candidates(
-            context_text=context_text,
-            exclude_chunk_ids=exclude_chunk_ids,
-            max_chunk_id=max_chunk_id,
-            mention_queries=mention_queries,
+            plan=plan,
+            request=request,
         )
         retrieved_ms = int((time.perf_counter() - started_at) * 1000)
         logger.info(
-            "Level3 candidate retrieval complete: run_id={} chunk_id={} mention_queries={} candidates={} "
-            "duration_ms={}",
+            "Level3 candidate retrieval complete: run_id={} objective={} chunk_id={} mode={} "
+            "mention_queries={} candidates={} duration_ms={}",
             self._run_id,
-            current_chunk,
-            len(mention_queries or []),
+            request.objective,
+            request.current_chunk,
+            plan.mode,
+            len(plan.mention_queries),
             len(collected),
             retrieved_ms,
         )
         await self._emit_level3_progress(
-            current_chunk,
-            f"Level3 检索完成：候选 {len(collected)} 条",
+            request.current_chunk,
+            f"[{request.objective}] Level3 检索完成：候选 {len(collected)} 条",
             60,
         )
         reranked = await self._rerank_candidates(
             collected,
-            context_text=context_text,
-            mention_queries=mention_queries,
+            plan=plan,
+            request=request,
             active_entity_names=active_entity_names,
             candidate_names=candidate_names,
-            current_chunk=current_chunk,
         )
-        deduped = self._dedupe_level3_results(reranked)
+        deduped = self._dedupe_level3_results(reranked, top_k=plan.top_k)
         logger.info(
-            "Level3 candidate rerank complete: run_id={} chunk_id={} before_rerank={} after_rerank={} "
-            "after_dedupe={} duration_ms={}",
+            "Level3 candidate rerank complete: run_id={} objective={} chunk_id={} before_rerank={} "
+            "after_rerank={} after_dedupe={} duration_ms={}",
             self._run_id,
-            current_chunk,
+            request.objective,
+            request.current_chunk,
             len(collected),
             len(reranked),
             len(deduped),
             int((time.perf_counter() - started_at) * 1000),
         )
         await self._emit_level3_progress(
-            current_chunk,
-            f"Level3 重排完成：保留 {len(deduped)} 条证据",
+            request.current_chunk,
+            f"[{request.objective}] Level3 重排完成：保留 {len(deduped)} 条证据",
             90,
         )
         return deduped
@@ -391,31 +429,40 @@ class DisambigContextProvider:
         self,
         *,
         context_text: str | None,
-        names_in_chunk: list[str] | None,
-        mention_queries: list[MentionEvidenceQuery] | None,
+        seed_entities: list[str],
         current_chunk: int | None,
-    ) -> list[MentionEvidenceQuery] | None:
+        objective: str,
+        max_queries: int,
+    ) -> list[MentionEvidenceQuery]:
         """
-        创建时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        说明: provider 内统一抽取 mention 并构造 query；调用方显式传入 mention_queries 时保持兼容。
-
-        修改时间: 2026-04-24
-        任务: log-level3-evidence-gaps
-        修改说明: 补充 mention query 构造数量日志，便于定位 chunk 间取证耗时来源。
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 按 objective 构造高阶 query；identity 默认允许完整 hybrid，
+              relation 仅在显式允许时做受限扩展，其余目标保持 direct-only。
         """
-        if mention_queries is not None or not context_text:
-            return mention_queries
+        if not context_text or objective not in {"identity", "relation"}:
+            return []
 
         from src.rag.mention_query import build_mention_evidence_queries
 
         started_at = time.perf_counter()
         mentions = await self._extract_mentions(
             context_text=context_text,
-            names_in_chunk=names_in_chunk,
+            seed_entities=seed_entities,
             current_chunk=current_chunk,
+            objective=objective,
         )
         built_queries = build_mention_evidence_queries(mentions)
+        effective_max_queries = max_queries if objective == "identity" else min(max_queries, 2)
+        if len(built_queries) > effective_max_queries:
+            logger.info(
+                "Level3 mention queries trimmed by budget: run_id={} chunk_id={} before={} after={}",
+                self._run_id,
+                current_chunk,
+                len(built_queries),
+                effective_max_queries,
+            )
+            built_queries = built_queries[:effective_max_queries]
         logger.info(
             "Level3 mention queries built: run_id={} chunk_id={} mentions={} queries={} duration_ms={}",
             self._run_id,
@@ -430,8 +477,9 @@ class DisambigContextProvider:
         self,
         *,
         context_text: str,
-        names_in_chunk: list[str] | None,
+        seed_entities: list[str],
         current_chunk: int | None,
+        objective: str,
     ) -> list[PersonMention]:
         """
         创建时间: 2026-04-24
@@ -441,24 +489,31 @@ class DisambigContextProvider:
         修改时间: 2026-04-24
         任务: log-level3-evidence-gaps
         修改说明: 补充 mention extraction 开始/结束耗时日志，直接暴露 chunk 间长等待。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-relation-query-expansion-contract
+        修改内容: identity 才允许走 LLM 主路径；relation 的受限扩展只复用规则 extractor，
+                  避免 Phase4 类消费者一旦显式放开 expansion 就被统一拉进高成本 LLM 热路径。
         """
         started_at = time.perf_counter()
         logger.info(
-            "Level3 mention extraction start: run_id={} chunk_id={} text_len={} names={}",
+            "Level3 mention extraction start: run_id={} objective={} chunk_id={} text_len={} seed_entities={}",
             self._run_id,
+            objective,
             current_chunk,
             len(context_text),
-            len(names_in_chunk or []),
+            len(seed_entities),
         )
-        await self._emit_level3_progress(current_chunk, "正在抽取 Level3 mention", 15)
+        await self._emit_level3_progress(current_chunk, f"[{objective}] 正在抽取 Level3 mention", 15)
         mentions = await self._mention_extraction_service.extract_mentions(
             MentionExtractionRequest(
                 text=context_text,
-                names_in_chunk=tuple(name for name in (names_in_chunk or []) if name),
+                names_in_chunk=tuple(name for name in seed_entities if name),
                 context_text=context_text,
                 run_id=self._run_id,
                 current_chunk=current_chunk,
-            )
+            ),
+            prefer_llm=objective == "identity",
         )
         logger.info(
             "Level3 mention extraction complete: run_id={} chunk_id={} mentions={} duration_ms={}",
@@ -469,7 +524,7 @@ class DisambigContextProvider:
         )
         await self._emit_level3_progress(
             current_chunk,
-            f"Level3 mention 抽取完成：{len(mentions)} 个",
+            f"[{objective}] Level3 mention 抽取完成：{len(mentions)} 个",
             35,
         )
         return mentions
@@ -477,156 +532,305 @@ class DisambigContextProvider:
     async def _retrieve_candidates(
         self,
         *,
-        context_text: str | None,
-        exclude_chunk_ids: list[int] | None,
-        max_chunk_id: int | None,
-        mention_queries: list[MentionEvidenceQuery] | None,
+        plan: Level3QueryPlan,
+        request: Level3Request,
     ) -> list[SimilarChunkRow]:
         """
-        创建时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        说明: 执行 mention query 与 chunk context query 的粗召回，所有历史 cutoff 仍下沉到 Level3 向量层。
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 按 query plan 执行粗召回；候选池预算统一由 plan.candidate_pool_k 控制。
 
-        修改时间: 2026-04-24
-        任务: log-level3-evidence-gaps
-        修改说明: 为每个 mention query 和 chunk context query 补充耗时日志，避免多 query 检索阶段不可见。
+        修改时间: 2026-04-25
+        任务: fix-level3-typecheck-regressions
+        修改说明: 显式声明 mixed base/mention query 元组类型，避免 tuple 推断过窄影响仓库 typecheck。
         """
         collected: list[SimilarChunkRow] = []
-        has_mention_queries = bool(mention_queries)
-        retrieval_top_k = self._level3_pool_k() if has_mention_queries else None
+        retrieval_top_k = plan.candidate_pool_k
+        retrieval_queries: list[tuple[str, MentionEvidenceQuery | None]] = [
+            ("mention", mention_query) for mention_query in plan.mention_queries
+        ]
+        if plan.base_query_text:
+            retrieval_queries.append(("base", None))
+        if not retrieval_queries:
+            return collected
 
-        for index, mention_query in enumerate(mention_queries or [], start=1):
-            query_started_at = time.perf_counter()
-            results = await self._search_level3_query(
-                mention_query.query_text,
-                exclude_chunk_ids=exclude_chunk_ids,
-                max_chunk_id=max_chunk_id,
-                top_k=retrieval_top_k,
-            )
-            logger.debug(
-                "Level3 mention query complete: run_id={} query_index={}/{} query_len={} results={} "
-                "duration_ms={}",
-                self._run_id,
-                index,
-                len(mention_queries or []),
-                len(mention_query.query_text),
-                len(results),
-                int((time.perf_counter() - query_started_at) * 1000),
-            )
-            collected.extend(
-                replace(
-                    result,
-                    query_kind="mention",
-                    mention_text=mention_query.mention_text,
-                    mention_type=mention_query.mention_type,
-                    matched_features=mention_query.matched_features,
-                    mention_source=mention_query.mention_source,
-                    mention_confidence=mention_query.mention_confidence,
-                    query_variant=mention_query.query_variant,
+        query_texts = [
+            query.query_text if query is not None else plan.base_query_text
+            for _, query in retrieval_queries
+        ]
+        batch_started_at = time.perf_counter()
+        results_by_query = await self._search_level3_queries(
+            query_texts,
+            exclude_chunk_ids=request.exclude_chunk_ids,
+            max_chunk_id=request.max_chunk_id,
+            top_k=retrieval_top_k,
+        )
+        logger.debug(
+            "Level3 batched retrieval complete: run_id={} objective={} query_count={} duration_ms={}",
+            self._run_id,
+            request.objective,
+            len(query_texts),
+            int((time.perf_counter() - batch_started_at) * 1000),
+        )
+        for index, ((query_kind, mention_query), query_results) in enumerate(
+            zip(retrieval_queries, results_by_query, strict=True),
+            start=1,
+        ):
+            if query_kind == "mention" and mention_query is not None:
+                logger.debug(
+                    "Level3 mention query complete: run_id={} query_index={}/{} query_len={} results={} batched={}",
+                    self._run_id,
+                    index,
+                    len(retrieval_queries),
+                    len(mention_query.query_text),
+                    len(query_results),
+                    len(query_texts) > 1,
                 )
-                for result in results
-            )
+                collected.extend(
+                    replace(
+                        result,
+                        query_kind="mention",
+                        mention_text=mention_query.mention_text,
+                        mention_type=mention_query.mention_type,
+                        matched_features=mention_query.matched_features,
+                        mention_source=mention_query.mention_source,
+                        mention_confidence=mention_query.mention_confidence,
+                        query_variant=mention_query.query_variant,
+                    )
+                    for result in query_results
+                )
+                continue
 
-        if context_text:
-            query_started_at = time.perf_counter()
-            context_results = await self._search_level3_query(
-                context_text,
-                exclude_chunk_ids=exclude_chunk_ids,
-                max_chunk_id=max_chunk_id,
-                top_k=retrieval_top_k,
-            )
             logger.debug(
-                "Level3 chunk-context query complete: run_id={} query_len={} results={} duration_ms={}",
+                "Level3 chunk-context query complete: run_id={} query_len={} results={} batched={}",
                 self._run_id,
-                len(context_text),
-                len(context_results),
-                int((time.perf_counter() - query_started_at) * 1000),
+                len(plan.base_query_text),
+                len(query_results),
+                len(query_texts) > 1,
             )
-            collected.extend(
-                replace(result, query_variant="chunk_context")
-                for result in context_results
-            )
+            collected.extend(replace(result, query_variant="chunk_context") for result in query_results)
 
         return collected
+
+    async def _search_level3_queries(
+        self,
+        query_texts: list[str],
+        *,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        top_k: int | None,
+    ) -> list[list[SimilarChunkRow]]:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 多 query 时统一走 batched Level3 检索，单 query 仍复用既有入口，
+              避免热路径继续逐条请求 embedding 服务。
+        """
+        if not query_texts:
+            return []
+        if len(query_texts) == 1:
+            single_result = await self._search_level3_query(
+                query_texts[0],
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+                top_k=top_k,
+            )
+            return [single_result]
+        return await self._level3.search_similar_chunks_many(
+            query_texts,
+            exclude_chunk_ids=exclude_chunk_ids,
+            max_chunk_id=max_chunk_id,
+            top_k=top_k,
+            ensure_ready=False,
+        )
 
     async def _rerank_candidates(
         self,
         results: list[SimilarChunkRow],
         *,
-        context_text: str | None,
-        mention_queries: list[MentionEvidenceQuery] | None,
+        plan: Level3QueryPlan,
+        request: Level3Request,
         active_entity_names: set[str],
         candidate_names: set[str],
-        current_chunk: int | None,
     ) -> list[SimilarChunkRow]:
         """
-        创建时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        说明: paragraph rerank 后优先尝试模型 rerank；不可用时保留 deterministic mention rerank 作为 fallback。
-
-        修改时间: 2026-04-24
-        任务: log-level3-evidence-gaps
-        修改说明: 补充 deterministic rerank 与模型 rerank 的入口/结果日志。
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: plan 决定是否存在高阶 query；只有 hybrid/high_order 情况才启用 deterministic mention rerank。
         """
         collected = results
-        has_mention_queries = bool(mention_queries)
-        if has_mention_queries:
+        if plan.mention_queries:
             collected = rerank_mention_level3_results(
                 collected,
                 active_entity_names=active_entity_names,
                 candidate_names=candidate_names,
-                current_chunk=current_chunk,
+                current_chunk=request.current_chunk,
             )
 
-        model_query_text = self._build_model_rerank_query_text(context_text, mention_queries)
+        model_query_text = self._build_model_rerank_query_text(plan, request)
         logger.info(
-            "Level3 model rerank start: run_id={} chunk_id={} candidates={} query_len={} model_enabled={}",
+            "Level3 model rerank start: run_id={} objective={} chunk_id={} candidates={} query_len={} model_enabled={}",
             self._run_id,
-            current_chunk,
+            request.objective,
+            request.current_chunk,
             len(collected),
             len(model_query_text),
             self._level3_reranker is not None,
         )
         if self._level3_reranker is not None and collected:
-            await self._emit_level3_progress(current_chunk, "正在执行 Level3 模型重排", 75)
+            await self._emit_level3_progress(
+                request.current_chunk,
+                f"[{request.objective}] 正在执行 Level3 模型重排",
+                75,
+            )
         model_reranked = await try_model_rerank_level3_results(
-            collected,
+            collected[: plan.candidate_pool_k],
             query_text=model_query_text,
             reranker=self._level3_reranker,
             run_id=self._run_id,
-            chunk_id=current_chunk,
+            chunk_id=request.current_chunk,
         )
         if model_reranked is not None:
             logger.info(
-                "Level3 model rerank applied: run_id={} chunk_id={} candidates={}",
+                "Level3 model rerank applied: run_id={} objective={} chunk_id={} candidates={}",
                 self._run_id,
-                current_chunk,
+                request.objective,
+                request.current_chunk,
                 len(model_reranked),
             )
             return model_reranked
         logger.info(
-            "Level3 model rerank skipped or unavailable: run_id={} chunk_id={} candidates={}",
+            "Level3 model rerank skipped or unavailable: run_id={} objective={} chunk_id={} candidates={}",
             self._run_id,
-            current_chunk,
+            request.objective,
+            request.current_chunk,
             len(collected),
         )
         return collected
 
-    def _build_model_rerank_query_text(
-        self,
-        context_text: str | None,
-        mention_queries: list[MentionEvidenceQuery] | None,
-    ) -> str:
+    def _build_model_rerank_query_text(self, plan: Level3QueryPlan, request: Level3Request) -> str:
         """
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: 给模型 rerank 汇总原文 query 与 mention query，避免模型只看到压缩词而丢失当前语境。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        修改说明: rerank 不再直接拼接无限增长的原文 query；这里会优先选取压缩 query 变体，
+                  并严格按 request.model_rerank_query_max_chars 收口总长度。
         """
-        parts = [context_text.strip()] if context_text and context_text.strip() else []
-        for query in mention_queries or []:
-            if query.query_text not in parts:
-                parts.append(query.query_text)
-        return "\n".join(parts)
+        max_chars = max(int(request.model_rerank_query_max_chars), 0)
+        if max_chars <= 0:
+            return ""
+
+        segments = self._collect_model_rerank_query_segments(plan)
+        return self._render_model_rerank_query_segments(segments, max_chars=max_chars)
+
+    def _collect_model_rerank_query_segments(self, plan: Level3QueryPlan) -> list[tuple[str, str]]:
+        """
+        创建时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        说明: 为 model rerank 组装 query summary 片段；base query 保留语境，
+              mention query 则优先选更短、更稳定的压缩/特征变体，避免重复拼入整段原文。
+        """
+        segments: list[tuple[str, str]] = []
+        base_query_text = " ".join(plan.base_query_text.split())
+        if base_query_text:
+            segments.append(("base", base_query_text))
+
+        variant_priority = {
+            "mention_compressed": 0,
+            "mention_feature": 1,
+            "mention_raw": 2,
+        }
+        best_query_by_mention: dict[str, MentionEvidenceQuery] = {}
+        for query in plan.mention_queries:
+            mention_key = query.mention_text.strip() or query.query_text.strip()
+            existing = best_query_by_mention.get(mention_key)
+            if existing is None:
+                best_query_by_mention[mention_key] = query
+                continue
+            current_priority = variant_priority.get(existing.query_variant, 99)
+            next_priority = variant_priority.get(query.query_variant, 99)
+            if next_priority < current_priority:
+                best_query_by_mention[mention_key] = query
+                continue
+            if next_priority == current_priority and len(query.query_text) < len(existing.query_text):
+                best_query_by_mention[mention_key] = query
+
+        for mention_index, query in enumerate(best_query_by_mention.values(), start=1):
+            compact_query_text = " ".join(query.query_text.split())
+            if compact_query_text:
+                segments.append((f"q{mention_index}", compact_query_text))
+        return segments
+
+    def _render_model_rerank_query_segments(self, segments: list[tuple[str, str]], *, max_chars: int) -> str:
+        """
+        创建时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        说明: 将 summary 片段压缩到固定字符预算内；这里按“每段至少保留最小摘要”的方式分配，
+              避免 base query 吞掉全部 budget，或后续 mention summary 完全挤不进去。
+        """
+        if max_chars <= 0:
+            return ""
+
+        rendered_parts: list[str] = []
+        remaining = max_chars
+        minimum_body_chars = 12
+
+        for index, (label, text) in enumerate(segments):
+            cleaned_text = " ".join(text.split())
+            if not cleaned_text:
+                continue
+            separator = "\n" if rendered_parts else ""
+            remaining_segment_count = len(segments) - index
+            available_for_current = max(remaining - len(separator), 0)
+            if available_for_current <= len(label) + 2:
+                break
+
+            target_segment_budget = max(
+                available_for_current // remaining_segment_count,
+                len(label) + 2 + minimum_body_chars,
+            )
+            body_budget = min(
+                max(target_segment_budget - len(label) - 2, minimum_body_chars),
+                available_for_current - len(label) - 2,
+            )
+            summarized_text = self._summarize_model_rerank_query_text(cleaned_text, max_chars=body_budget)
+            if not summarized_text:
+                continue
+
+            candidate = f"{label}: {summarized_text}"
+            if len(separator) + len(candidate) > remaining:
+                overflow_budget = remaining - len(separator) - len(label) - 2
+                if overflow_budget <= 0:
+                    break
+                summarized_text = self._summarize_model_rerank_query_text(cleaned_text, max_chars=overflow_budget)
+                if not summarized_text:
+                    break
+                candidate = f"{label}: {summarized_text}"
+
+            rendered_parts.append(candidate)
+            remaining -= len(separator) + len(candidate)
+            if remaining <= 0:
+                break
+
+        return "\n".join(rendered_parts)
+
+    def _summarize_model_rerank_query_text(self, text: str, *, max_chars: int) -> str:
+        """
+        创建时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        说明: 对单条 rerank query 片段做最小压缩；优先保留前缀关键信息，超长时用省略号截断。
+        """
+        cleaned_text = " ".join(text.split())
+        if max_chars <= 0 or not cleaned_text:
+            return ""
+        if len(cleaned_text) <= max_chars:
+            return cleaned_text
+        if max_chars <= 3:
+            return cleaned_text[:max_chars]
+        return f"{cleaned_text[: max_chars - 3]}..."
 
     async def _search_level3_query(
         self,
@@ -656,7 +860,7 @@ class DisambigContextProvider:
             ensure_ready=False,
         )
 
-    def _dedupe_level3_results(self, results: list[SimilarChunkRow]) -> list[SimilarChunkRow]:
+    def _dedupe_level3_results(self, results: list[SimilarChunkRow], *, top_k: int) -> list[SimilarChunkRow]:
         """
         创建时间: 2026-04-23
         任务: level3-mention-retrieval
@@ -681,7 +885,7 @@ class DisambigContextProvider:
                 by_chunk_id[result.chunk_id] = result
 
         ordered = sorted(by_chunk_id.values(), key=self._level3_rank_score, reverse=True)
-        return ordered[: self._level3_top_k]
+        return ordered[:top_k]
 
     def _level3_rank_score(self, result: SimilarChunkRow) -> float:
         """
@@ -703,13 +907,13 @@ class DisambigContextProvider:
             return result.chunk_semantic_score
         return result.similarity
 
-    def _level3_pool_k(self) -> int:
+    def _level3_pool_k(self, top_k: int) -> int:
         """
-        创建时间: 2026-04-24
-        任务: level3-mention-rerank
-        说明: mention rerank 先扩大召回池，再裁剪回 prompt top_k，避免只重排过小候选集。
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: Level3 候选池预算不再由各路径各自推断，而是统一从 final top_k 派生。
         """
-        return max(self._level3_top_k * 4, 20)
+        return max(top_k * 4, 20)
 
     def _extract_active_entity_names(self, bundle: EvidenceBundle) -> set[str]:
         """

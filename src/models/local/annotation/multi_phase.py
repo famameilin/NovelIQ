@@ -60,6 +60,7 @@ from .projectors.foreshadowing import normalize_foreshadowing_result as project_
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
+    from src.rag import DisambigContextProvider, Level3Request
     from src.rag.evidence_types import EvidenceBundle
 
 PhaseEventAction = Literal["start", "progress", "complete", "output", "thinking"]
@@ -122,7 +123,12 @@ class _MultiPhaseExecutionContext:
     position_pct: float | None = None
     chapter_id: int | None = None
     active_entities: str | None = None
-    evidence_bundle: EvidenceBundle | None = None
+    phase1_bundle: EvidenceBundle | None = None
+    phase2_bundle: EvidenceBundle | None = None
+    phase3_bundle: EvidenceBundle | None = None
+    phase4_bundle: EvidenceBundle | None = None
+    phase4_request_template: Level3Request | None = None
+    evidence_provider: DisambigContextProvider | None = None
     fallback_client: AnnotationClient | None = None
     run_id: str | None = None
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None
@@ -175,7 +181,7 @@ async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> Chun
         position_pct=context.position_pct,
         chapter_id=context.chapter_id,
         active_entities=context.active_entities,
-        evidence_bundle=context.evidence_bundle,
+        evidence_bundle=context.phase1_bundle,
         fallback_client=context.fallback_client,
         run_id=context.run_id,
         disambig_context=context.disambig_context,
@@ -200,7 +206,7 @@ async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> Fore
         main_characters=context.main_characters,
         position_pct=context.position_pct,
         chapter_id=context.chapter_id,
-        evidence_bundle=context.evidence_bundle,
+        evidence_bundle=context.phase2_bundle,
         fallback_client=context.fallback_client,
         run_id=context.run_id,
     )
@@ -221,7 +227,7 @@ async def _run_phase3_from_context(
         client=context.client,
         text=context.text,
         alias_map=context.alias_map,
-        evidence_bundle=context.evidence_bundle,
+        evidence_bundle=context.phase3_bundle,
         chunk_id=context.chunk_id,
         run_id=context.run_id,
         known_characters=known_characters,
@@ -241,18 +247,57 @@ async def _run_phase4_from_context(
     任务: p2-multi-phase-shared-context
     新建原因: 统一 Phase4 的共享 evidence/fallback 透传，减少串并行路径重复实现。
     """
+    phase4_bundle = await _resolve_phase4_bundle(context, known_characters)
     relations = await annotate_chunk_phase4(
         client=context.client,
         text=context.text,
         known_characters=known_characters,
         # 中文注释：Phase4 统一只消费上游传入的 evidence_bundle，
         # multi_phase 负责调度，不在这里重建关系抽取上下文。
-        evidence_bundle=context.evidence_bundle,
+        evidence_bundle=phase4_bundle,
         chunk_id=context.chunk_id,
         run_id=context.run_id,
         fallback_client=context.fallback_client,
     )
     return _Phase4Result(relations=relations)
+
+
+async def _resolve_phase4_bundle(
+    context: _MultiPhaseExecutionContext,
+    known_characters: list[str] | None,
+) -> EvidenceBundle | None:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: Phase4 的 relation request 需要等 Phase1 产出 known_characters 后再补全 seed_entities，
+          因此在真正进入 Phase4 前动态取证，而不是继续复用 Phase1 的 identity bundle。
+    """
+    if context.phase4_bundle is not None:
+        return context.phase4_bundle
+    if context.phase4_request_template is None or context.evidence_provider is None:
+        return None
+
+    seed_entities: list[str] = []
+    for name in list(known_characters or []) + list(context.phase4_request_template.seed_entities):
+        normalized = str(name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    from dataclasses import replace
+
+    phase4_request = replace(context.phase4_request_template, seed_entities=seed_entities)
+    if context.evidence_provider.requires_level3():
+        if not context.evidence_provider.is_level3_available():
+            raise RuntimeError("Level 3 vector retrieval is required but not available")
+        return await context.evidence_provider.collect_evidence_with_level3(phase4_request)
+
+    if context.evidence_provider.is_level3_available():
+        return await context.evidence_provider.collect_evidence_with_level3(phase4_request)
+
+    return context.evidence_provider.collect_evidence(
+        names_in_chunk=phase4_request.seed_entities,
+        current_chunk=phase4_request.current_chunk,
+    )
 
 
 def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:
@@ -521,6 +566,12 @@ async def annotate_chunk_multi_phase(
     prev_chunk_text: str | None = None,
     active_entities: str | None = None,
     evidence_bundle: EvidenceBundle | None = None,
+    phase1_bundle: EvidenceBundle | None = None,
+    phase2_bundle: EvidenceBundle | None = None,
+    phase3_bundle: EvidenceBundle | None = None,
+    phase4_bundle: EvidenceBundle | None = None,
+    phase4_request_template: Level3Request | None = None,
+    evidence_provider: DisambigContextProvider | None = None,
     disambig_context: str | None = None,
     next_chunk_text: str | None = None,
     novel_title: str | None = None,
@@ -560,7 +611,12 @@ async def annotate_chunk_multi_phase(
             fallback_client=fallback_client,
             run_id=run_id,
             active_entities=active_entities,
-            evidence_bundle=evidence_bundle,
+            phase1_bundle=phase1_bundle or evidence_bundle,
+            phase2_bundle=phase2_bundle or evidence_bundle,
+            phase3_bundle=phase3_bundle or phase1_bundle or evidence_bundle,
+            phase4_bundle=phase4_bundle or evidence_bundle,
+            phase4_request_template=phase4_request_template,
+            evidence_provider=evidence_provider,
             emitter=emitter,
             disambig_context=disambig_context,
         )
@@ -579,7 +635,12 @@ async def annotate_chunk_multi_phase(
             fallback_client=fallback_client,
             run_id=run_id,
             active_entities=active_entities,
-            evidence_bundle=evidence_bundle,
+            phase1_bundle=phase1_bundle or evidence_bundle,
+            phase2_bundle=phase2_bundle or evidence_bundle,
+            phase3_bundle=phase3_bundle or phase1_bundle or evidence_bundle,
+            phase4_bundle=phase4_bundle or evidence_bundle,
+            phase4_request_template=phase4_request_template,
+            evidence_provider=evidence_provider,
             emitter=emitter,
             disambig_context=disambig_context,
         )
@@ -598,6 +659,12 @@ async def annotate_chunk_parallel(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     evidence_bundle: EvidenceBundle | None = None,
+    phase1_bundle: EvidenceBundle | None = None,
+    phase2_bundle: EvidenceBundle | None = None,
+    phase3_bundle: EvidenceBundle | None = None,
+    phase4_bundle: EvidenceBundle | None = None,
+    phase4_request_template: Level3Request | None = None,
+    evidence_provider: DisambigContextProvider | None = None,
     fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
@@ -630,7 +697,12 @@ async def annotate_chunk_parallel(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
-        evidence_bundle=evidence_bundle,
+        phase1_bundle=phase1_bundle or evidence_bundle,
+        phase2_bundle=phase2_bundle or evidence_bundle,
+        phase3_bundle=phase3_bundle or phase1_bundle or evidence_bundle,
+        phase4_bundle=phase4_bundle or evidence_bundle,
+        phase4_request_template=phase4_request_template,
+        evidence_provider=evidence_provider,
         fallback_client=fallback_client,
         run_id=run_id,
         emitter=emitter,
@@ -684,6 +756,12 @@ async def annotate_chunk_serial(
     chapter_id: int | None = None,
     active_entities: str | None = None,
     evidence_bundle: EvidenceBundle | None = None,
+    phase1_bundle: EvidenceBundle | None = None,
+    phase2_bundle: EvidenceBundle | None = None,
+    phase3_bundle: EvidenceBundle | None = None,
+    phase4_bundle: EvidenceBundle | None = None,
+    phase4_request_template: Level3Request | None = None,
+    evidence_provider: DisambigContextProvider | None = None,
     fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
@@ -714,7 +792,12 @@ async def annotate_chunk_serial(
         position_pct=position_pct,
         chapter_id=chapter_id,
         active_entities=active_entities,
-        evidence_bundle=evidence_bundle,
+        phase1_bundle=phase1_bundle or evidence_bundle,
+        phase2_bundle=phase2_bundle or evidence_bundle,
+        phase3_bundle=phase3_bundle or phase1_bundle or evidence_bundle,
+        phase4_bundle=phase4_bundle or evidence_bundle,
+        phase4_request_template=phase4_request_template,
+        evidence_provider=evidence_provider,
         fallback_client=fallback_client,
         run_id=run_id,
         emitter=emitter,
