@@ -30,12 +30,12 @@ from src.models.local.evidence_renderer_shared import (
     render_vector_evidence,
 )
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
-from src.rag.level3_contracts import Level3Request
+from src.rag.evidence_contracts import EvidenceRequest
 from src.rag.retriever import NarrativeEvidenceService, Level3NotReadyError, Level3VectorEvidence
 from src.storage.repositories.chunk import SimilarChunkRow, SimilarParagraphRow
 
 
-def _build_level3_request(
+def _build_evidence_request(
     *,
     consumer: str = "incremental_disambiguation",
     objective: str = "identity",
@@ -50,7 +50,7 @@ def _build_level3_request(
     need_level2: bool = True,
     need_level3: bool = False,
     allow_llm_query_expansion: bool = False,
-) -> Level3Request:
+) -> EvidenceRequest:
     """
     创建时间: 2026-04-25
     任务: evidence-service-request-unification
@@ -60,7 +60,7 @@ def _build_level3_request(
 
     normalized_requested = requested_names or list(seed_entities or [])
     normalized_seed = seed_entities or []
-    return Level3Request(
+    return EvidenceRequest(
         consumer=consumer,
         objective=objective,  # type: ignore[arg-type]
         query_text=query_text,
@@ -880,7 +880,7 @@ class TestNarrativeEvidenceServiceLevel3(unittest.TestCase):
             level1_enabled=False,
         )
         bundle = provider._collect_base_evidence(
-            _build_level3_request(
+            _build_evidence_request(
                 requested_names=["灰衣人"],
                 current_chunk=3,
                 need_level3=False,
@@ -905,7 +905,7 @@ class TestNarrativeEvidenceServiceLevel3(unittest.TestCase):
             level2_enabled=False,
         )
         bundle = provider._collect_base_evidence(
-            _build_level3_request(
+            _build_evidence_request(
                 requested_names=["灰衣人"],
                 current_chunk=3,
                 need_level3=False,
@@ -939,7 +939,7 @@ class TestNarrativeEvidenceServiceLevel3(unittest.TestCase):
         ]
 
         bundle = provider._collect_base_evidence(
-            _build_level3_request(
+            _build_evidence_request(
                 requested_names=["灰衣人"],
                 current_chunk=3,
                 need_level3=False,
@@ -973,7 +973,7 @@ class TestNarrativeEvidenceServiceLevel3(unittest.TestCase):
 
         with pytest.raises(AttributeError, match="broken authority"):
             provider._collect_base_evidence(
-                _build_level3_request(current_chunk=3, need_level3=False)
+                _build_evidence_request(current_chunk=3, need_level3=False)
             )
 
 class TestSharedEvidenceRenderer(unittest.TestCase):
@@ -1180,7 +1180,7 @@ class TestNarrativeEvidenceServiceLevel3Async:
         )
 
         bundle = await provider.collect(
-            _build_level3_request(
+            _build_evidence_request(
                 consumer="annotation_phase1",
                 objective="emotion",
                 query_text="她抿唇不语，袖口却攥得发白。",
@@ -1228,7 +1228,7 @@ class TestNarrativeEvidenceServiceLevel3Async:
 
         with pytest.raises(Level3NotReadyError, match="schema mismatch"):
             await provider.collect(
-                _build_level3_request(
+                _build_evidence_request(
                     objective="identity",
                     query_text="她抿唇不语，袖口却攥得发白。",
                     current_chunk=None,
@@ -1254,7 +1254,7 @@ class TestNarrativeEvidenceServiceLevel3Async:
         provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
 
         bundle = await provider.collect(
-            _build_level3_request(
+            _build_evidence_request(
                 consumer="incremental_disambiguation",
                 objective="identity",
                 query_text="",
@@ -1279,7 +1279,7 @@ class TestNarrativeEvidenceServiceLevel3Async:
         说明: 同语义 request 重复进入 service 时，应直接复用 cache，并把 cache_reuse 写进 generation_meta。
         """
         provider = NarrativeEvidenceService(level3_enabled=False)
-        request = _build_level3_request(
+        request = _build_evidence_request(
             consumer="annotation_phase2",
             objective="foreshadowing",
             query_text="当前 chunk 里埋了前文伏笔。",

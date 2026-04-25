@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
-    from src.rag import EvidenceBundle, Level3Request, NarrativeEvidenceService
+    from src.rag import EvidenceBundle, EvidenceRequest, NarrativeEvidenceService
 
 
 @dataclass
@@ -63,8 +63,8 @@ class AnnotationContext:
     phase2_bundle: EvidenceBundle | None = None
     phase3_bundle: EvidenceBundle | None = None
     phase4_bundle: EvidenceBundle | None = None
-    phase4_request_template: Level3Request | None = None
-    evidence_provider: NarrativeEvidenceService | None = None
+    phase4_request_template: EvidenceRequest | None = None
+    evidence_service: NarrativeEvidenceService | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None

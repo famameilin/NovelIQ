@@ -23,7 +23,7 @@ from tests.support.disambiguation_fakes import (
     FakeDisambigClient as _FakeDisambigClient,
 )
 from tests.support.disambiguation_fakes import (
-    FakeRagRetriever as _FakeRagRetriever,
+    FakeNarrativeEvidenceService as _FakeNarrativeEvidenceService,
 )
 from tests.support.disambiguation_fakes import (
     candidates as _candidates,
@@ -256,7 +256,7 @@ async def test_run_final_canonical_reselect_falls_back_for_noop_client() -> None
 async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> None:
     client = _FakeDisambigClient()
     state = DisambiguationState.empty().with_updates(known_canonical_names=frozenset({"白芷"}))
-    evidence_provider = _FakeRagRetriever(
+    evidence_service = _FakeNarrativeEvidenceService(
         EvidenceBundle(
             local_evidence=[
                 EvidenceItem(
@@ -329,25 +329,25 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
             chunk_id=12,
             current_idx=2,
             disambig_interval=3,
-            evidence_provider=evidence_provider,
+            evidence_service=evidence_service,
         )
     assert new_state is state
     assert client.received_prompt_context is not None
     assert client.received_prompt_context.shared_evidence_context is not None
     assert "<Disambig_Candidates>" in client.received_prompt_context.shared_evidence_context
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
-    assert evidence_provider.calls[0]["method"] == "collect"
-    assert evidence_provider.calls[0]["consumer"] == "incremental_disambiguation"
-    assert evidence_provider.calls[0]["objective"] == "identity"
-    assert evidence_provider.calls[0]["requested_names"] == ["灰衣人"]
-    assert evidence_provider.calls[0]["names_in_chunk"] == ["灰衣人"]
-    assert evidence_provider.calls[0]["background_entities"] == ["白芷"]
-    assert evidence_provider.calls[0]["current_chunk"] == 12
-    assert evidence_provider.calls[0]["exclude_chunk_ids"] == [12]
-    assert evidence_provider.calls[0]["max_chunk_id"] == 12
-    assert evidence_provider.calls[0]["need_level1"] is True
-    assert evidence_provider.calls[0]["need_level2"] is True
-    assert evidence_provider.calls[0]["need_level3"] is True
+    assert evidence_service.calls[0]["method"] == "collect"
+    assert evidence_service.calls[0]["consumer"] == "incremental_disambiguation"
+    assert evidence_service.calls[0]["objective"] == "identity"
+    assert evidence_service.calls[0]["requested_names"] == ["灰衣人"]
+    assert evidence_service.calls[0]["names_in_chunk"] == ["灰衣人"]
+    assert evidence_service.calls[0]["background_entities"] == ["白芷"]
+    assert evidence_service.calls[0]["current_chunk"] == 12
+    assert evidence_service.calls[0]["exclude_chunk_ids"] == [12]
+    assert evidence_service.calls[0]["max_chunk_id"] == 12
+    assert evidence_service.calls[0]["need_level1"] is True
+    assert evidence_service.calls[0]["need_level2"] is True
+    assert evidence_service.calls[0]["need_level3"] is True
     assert mock_build_context_sentences.call_count == 2
     for call in mock_build_context_sentences.call_args_list:
         assert call.kwargs["max_chunk_id"] == 12
@@ -369,7 +369,7 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
 async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     client = _FakeDisambigClient()
     state = DisambiguationState.empty().with_updates(known_canonical_names=frozenset({"白芷"}))
-    evidence_provider = _FakeRagRetriever(
+    evidence_service = _FakeNarrativeEvidenceService(
         EvidenceBundle(
             semantic_evidence=[
                 EvidenceItem(
@@ -435,21 +435,21 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
             alias_keywords=["号"],
             novel_id="novel-1",
             run_id="run-1",
-            evidence_provider=evidence_provider,
+            evidence_service=evidence_service,
         )
     assert new_state.known_canonical_names == state.known_canonical_names
     assert client.received_prompt_context is not None
     assert client.received_prompt_context.shared_evidence_context is not None
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
-    assert evidence_provider.calls[0]["method"] == "collect"
-    assert evidence_provider.calls[0]["consumer"] == "final_disambiguation"
-    assert evidence_provider.calls[0]["objective"] == "identity"
-    assert evidence_provider.calls[0]["requested_names"] == ["灰衣人"]
-    assert evidence_provider.calls[0]["names_in_chunk"] == ["灰衣人"]
-    assert evidence_provider.calls[0]["background_entities"] == ["白芷"]
-    assert evidence_provider.calls[0]["current_chunk"] is None
-    assert evidence_provider.calls[0]["max_chunk_id"] is None
-    assert evidence_provider.calls[0]["need_level3"] is True
+    assert evidence_service.calls[0]["method"] == "collect"
+    assert evidence_service.calls[0]["consumer"] == "final_disambiguation"
+    assert evidence_service.calls[0]["objective"] == "identity"
+    assert evidence_service.calls[0]["requested_names"] == ["灰衣人"]
+    assert evidence_service.calls[0]["names_in_chunk"] == ["灰衣人"]
+    assert evidence_service.calls[0]["background_entities"] == ["白芷"]
+    assert evidence_service.calls[0]["current_chunk"] is None
+    assert evidence_service.calls[0]["max_chunk_id"] is None
+    assert evidence_service.calls[0]["need_level3"] is True
     build_hint_call = mock_build_existing_hint.call_args
     assert build_hint_call.kwargs["current_chunk_id"] is None
     user_content = mock_record.call_args.kwargs["messages"][-1]["content"]
@@ -462,7 +462,7 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
 async def test_build_prompt_context_with_shared_evidence_raises_when_required_level3_unavailable() -> (
     None
 ):
-    evidence_provider = _FakeRagRetriever(
+    evidence_service = _FakeNarrativeEvidenceService(
         EvidenceBundle(
             local_evidence=[
                 EvidenceItem(
@@ -480,14 +480,14 @@ async def test_build_prompt_context_with_shared_evidence_raises_when_required_le
     with pytest.raises(RuntimeError, match="Level 3 vector retrieval is required but not available"):
         await pipeline_mod._build_prompt_context_with_shared_evidence(
             DisambiguationPromptContext(existing_character_hint="【已存在角色锚点】\n- 白芷"),
-            evidence_provider,
+            evidence_service,
             [{"name": "灰衣人", "count": 3}],
             {"灰衣人": "【身份线索】她自称白芷"},
             current_chunk=12,
             active_entity_fallback_names={"灰衣人"},
     )
-    assert evidence_provider.calls[0]["method"] == "collect"
-    assert evidence_provider.calls[0]["need_level3"] is True
+    assert evidence_service.calls[0]["method"] == "collect"
+    assert evidence_service.calls[0]["need_level3"] is True
 
 
 @pytest.mark.asyncio
@@ -498,7 +498,7 @@ async def test_build_prompt_context_with_shared_evidence_keeps_level12_fallback_
     说明: 当候选暂无例句无法拼 shared query 时，仍应保留 Level1/2 fallback，
           不能把 <Disambig_Candidates> 一起短路掉。
     """
-    evidence_provider = _FakeRagRetriever(
+    evidence_service = _FakeNarrativeEvidenceService(
         EvidenceBundle(
             local_evidence=[
                 EvidenceItem(
@@ -516,7 +516,7 @@ async def test_build_prompt_context_with_shared_evidence_keeps_level12_fallback_
 
     prompt_context = await pipeline_mod._build_prompt_context_with_shared_evidence(
         DisambiguationPromptContext(existing_character_hint="【已存在角色锚点】\n- 白芷"),
-        evidence_provider,
+        evidence_service,
         [{"name": "灰衣人", "count": 2}],
         {},
         current_chunk=12,
@@ -527,10 +527,10 @@ async def test_build_prompt_context_with_shared_evidence_keeps_level12_fallback_
     assert prompt_context.shared_evidence_context is not None
     assert "<Disambig_Candidates>" in prompt_context.shared_evidence_context
     assert "「灰衣人」可能是：白芷" in prompt_context.shared_evidence_context
-    assert evidence_provider.calls == [
+    assert evidence_service.calls == [
         {
             "method": "collect",
-            "request": evidence_provider.calls[0]["request"],
+            "request": evidence_service.calls[0]["request"],
             "consumer": "incremental_disambiguation",
             "objective": "identity",
             "requested_names": ["灰衣人"],
@@ -540,7 +540,7 @@ async def test_build_prompt_context_with_shared_evidence_keeps_level12_fallback_
             "context_text": "",
             "exclude_chunk_ids": [12],
             "max_chunk_id": 12,
-            "max_queries": evidence_provider.calls[0]["max_queries"],
+            "max_queries": evidence_service.calls[0]["max_queries"],
             "need_level1": True,
             "need_level2": True,
             "need_level3": False,
@@ -552,7 +552,7 @@ async def test_build_prompt_context_with_shared_evidence_keeps_level12_fallback_
 async def test_incremental_pipeline_skips_active_entity_fallback_for_review_candidates() -> None:
     client = _FakeDisambigClient()
     state = DisambiguationState.empty().with_updates(known_canonical_names=frozenset({"白芷"}))
-    evidence_provider = _FakeRagRetriever(
+    evidence_service = _FakeNarrativeEvidenceService(
         EvidenceBundle(
             local_evidence=[
                 EvidenceItem(
@@ -628,7 +628,7 @@ async def test_incremental_pipeline_skips_active_entity_fallback_for_review_cand
             chunk_id=12,
             current_idx=2,
             disambig_interval=3,
-            evidence_provider=evidence_provider,
+            evidence_service=evidence_service,
         )
     assert new_state is state
     assert client.received_prompt_context is not None

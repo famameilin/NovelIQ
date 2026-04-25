@@ -1,13 +1,13 @@
 """
-Level3 消费者意图驱动合同。
+Evidence / Level3 消费者意图驱动合同。
 
 创建时间: 2026-04-25
 任务: level3-intent-phase-split
-说明: 收口 Level3Request / QueryPlan / 请求指纹，避免 workflow/provider 继续通过弱语义参数耦合。
+说明: 收口 EvidenceRequest / Level3QueryPlan / 请求指纹，避免 workflow/provider 继续通过弱语义参数耦合。
 
 修改时间: 2026-04-25
 任务: evidence-service-request-unification
-修改说明: 将 Level3Request 升格为整个 evidence 层的统一输入合同；
+修改说明: 将 EvidenceRequest 定义为整个 evidence 层的统一输入合同；
           新增 consumer/requested_names/background_entities/need_level*，
           显式区分“当前要处理的名字”“可用于检索的锚点”和“仅作为背景存在的名字”。
 """
@@ -19,7 +19,7 @@ from typing import Literal
 
 from src.rag.mention_query import MentionEvidenceQuery
 
-Level3Consumer = Literal[
+EvidenceConsumer = Literal[
     "annotation_phase1",
     "annotation_phase2",
     "annotation_phase3",
@@ -27,7 +27,7 @@ Level3Consumer = Literal[
     "incremental_disambiguation",
     "final_disambiguation",
 ]
-Level3Objective = Literal["identity", "emotion", "relation", "foreshadowing"]
+EvidenceObjective = Literal["identity", "emotion", "relation", "foreshadowing"]
 Level3QueryMode = Literal["direct", "high_order", "hybrid"]
 
 
@@ -62,7 +62,7 @@ def _normalize_int_list(values: list[int]) -> list[int]:
 
 
 @dataclass(frozen=True, slots=True)
-class Level3Request:
+class EvidenceRequest:
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
@@ -70,8 +70,8 @@ class Level3Request:
           层级需求、预算和是否允许 LLM query expansion。
     """
 
-    consumer: Level3Consumer
-    objective: Level3Objective
+    consumer: EvidenceConsumer
+    objective: EvidenceObjective
     query_text: str
     requested_names: list[str]
     seed_entities: list[str]
@@ -117,7 +117,7 @@ class Level3QueryPlan:
     top_k: int
 
 
-def build_level3_request_fingerprint(request: Level3Request) -> tuple[object, ...]:
+def build_evidence_request_fingerprint(request: EvidenceRequest) -> tuple[object, ...]:
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
