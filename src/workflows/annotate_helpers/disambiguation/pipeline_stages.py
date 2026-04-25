@@ -29,7 +29,7 @@ from src.models.local.disambiguation import (
 )
 from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
-from src.rag import Level3Request
+from src.rag import EvidenceRequest
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
@@ -308,7 +308,7 @@ def _build_shared_evidence_request(
     background_entities: list[str],
     query_text: str,
     current_chunk: int | None,
-) -> Level3Request:
+) -> EvidenceRequest:
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
@@ -321,7 +321,7 @@ def _build_shared_evidence_request(
         if normalized and normalized not in seed_entities:
             seed_entities.append(normalized)
 
-    return Level3Request(
+    return EvidenceRequest(
         consumer="incremental_disambiguation" if current_chunk is not None else "final_disambiguation",
         objective="identity",
         query_text=query_text,
@@ -343,7 +343,7 @@ def _build_shared_evidence_request(
 
 async def build_prompt_context_with_shared_evidence(
     prompt_context: DisambiguationPromptContext | None,
-    evidence_provider: NarrativeEvidenceService | None,
+    evidence_service: NarrativeEvidenceService | None,
     candidates: list[NameCountCandidate],
     context_sentences: dict[str, str],
     *,
@@ -372,7 +372,7 @@ async def build_prompt_context_with_shared_evidence(
     修改内容: 已知 canonical 名不再混入 shared-evidence 的 requested_names；
               当 query_text 为空时仍保留 Level1/2 fallback，避免 protected / 无例句候选失去共享证据。
     """
-    if evidence_provider is None or not candidates:
+    if evidence_service is None or not candidates:
         return prompt_context
 
     names_in_chunk = [str(item.get("name", "")).strip() for item in candidates if str(item.get("name", "")).strip()]
@@ -386,7 +386,7 @@ async def build_prompt_context_with_shared_evidence(
         query_text=query_text,
         current_chunk=current_chunk,
     )
-    evidence_bundle = await evidence_provider.collect(request)
+    evidence_bundle = await evidence_service.collect(request)
 
     shared_evidence_context = render_disambig_prompt_context(
         evidence_bundle,
@@ -410,7 +410,7 @@ async def plan_incremental_disambiguation(
     run_id: str,
     chunk_id: int,
     disambig_interval: int,
-    evidence_provider: NarrativeEvidenceService | None,
+    evidence_service: NarrativeEvidenceService | None,
 ) -> IncrementalDisambiguationPlan | None:
     """
     规划增量消歧候选与 prompt 输入。
@@ -486,7 +486,7 @@ async def plan_incremental_disambiguation(
     }
     prompt_context = await build_prompt_context_with_shared_evidence(
         prompt_context,
-        evidence_provider,
+        evidence_service,
         filtered_candidates,
         context_sentences,
         current_chunk=chunk_id,
@@ -687,7 +687,7 @@ def plan_final_disambiguation(
 
 async def assemble_final_prompt_context(
     plan: FinalDisambiguationPlan,
-    evidence_provider: NarrativeEvidenceService | None,
+    evidence_service: NarrativeEvidenceService | None,
 ) -> FinalDisambiguationPlan:
     """
     组装最终消歧 prompt 上下文。
@@ -701,7 +701,7 @@ async def assemble_final_prompt_context(
 
     prompt_context = await build_prompt_context_with_shared_evidence(
         plan.prompt_context,
-        evidence_provider,
+        evidence_service,
         plan.candidate_payload,
         plan.context_sentences,
         background_entities=plan.state_before_apply.known_canonical_names,

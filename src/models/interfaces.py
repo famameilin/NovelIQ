@@ -56,7 +56,7 @@ class AnnotationLike(Protocol):
         phase3_bundle: Any | None = None,
         phase4_bundle: Any | None = None,
         phase4_request_template: Any | None = None,
-        evidence_provider: Any | None = None,
+        evidence_service: Any | None = None,
         fallback_client: AnnotationLike | None = None,
         run_id: str | None = None,
         disambig_context: str | None = None,

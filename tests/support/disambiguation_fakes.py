@@ -65,7 +65,7 @@ class FakeDisambigClient:
         return False
 
 
-class FakeRagRetriever:
+class FakeNarrativeEvidenceService:
     """
     创建时间: 2026-04-23
     任务: 复杂度与耦合审查 P2 - 测试工程化

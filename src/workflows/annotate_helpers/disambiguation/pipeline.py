@@ -238,7 +238,7 @@ async def _run_incremental_disambiguation_with_state(
     chunk_id: int,
     current_idx: int,
     disambig_interval: int,
-    evidence_provider: NarrativeEvidenceService | None = None,
+    evidence_service: NarrativeEvidenceService | None = None,
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
@@ -262,7 +262,7 @@ async def _run_incremental_disambiguation_with_state(
         run_id,
         chunk_id,
         disambig_interval,
-        evidence_provider,
+            evidence_service,
     )
     if plan is None:
         return state
@@ -306,7 +306,7 @@ async def _run_final_disambiguation_with_state(
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
-    evidence_provider: NarrativeEvidenceService | None = None,
+    evidence_service: NarrativeEvidenceService | None = None,
 ) -> DisambiguationState:
     """
     执行最终消歧（使用新的三层状态）
@@ -344,7 +344,7 @@ async def _run_final_disambiguation_with_state(
         )
         working_state = plan.state_before_apply
     else:
-        plan = await assemble_final_prompt_context(plan, evidence_provider)
+        plan = await assemble_final_prompt_context(plan, evidence_service)
         result = await _retry_disambig(
             full_disambig_client,
             plan.candidate_payload,

@@ -4,7 +4,7 @@ import uuid
 
 from src.chunking.chunker import Chunk
 from src.rag import Level1AuthorityProvider, NarrativeEvidenceService
-from src.rag.level3_contracts import Level3Request
+from src.rag.evidence_contracts import EvidenceRequest
 from src.storage.repositories import ChunkRepository, GraphRepository, RunRepository
 
 
@@ -185,7 +185,7 @@ class TestLevel1AuthoritySnapshot:
         )
 
         bundle = provider._collect_base_evidence(
-            Level3Request(
+            EvidenceRequest(
                 consumer="annotation_phase1",
                 objective="identity",
                 query_text="",

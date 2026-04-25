@@ -30,10 +30,10 @@ from src.config import TaskType, settings
 from src.knowledge.authority import ActiveEntityContext, KnowledgeGraphAuthorityService
 from src.models.local.annotation.evidence_renderer import AnnotationPromptBlocks, render_annotation_prompt_blocks
 from src.models.local.evidence_renderer_shared import render_active_entities_from_authority
-from src.rag.level3_contracts import Level3Objective
+from src.rag.evidence_contracts import EvidenceObjective
 
 if TYPE_CHECKING:
-    from src.rag import EvidenceBundle, Level3Request, NarrativeEvidenceService
+    from src.rag import EvidenceBundle, EvidenceRequest, NarrativeEvidenceService
 
 
 class ChunkContext:
@@ -70,7 +70,7 @@ class ChunkContext:
         phase4_bundle: EvidenceBundle | None = None,
         phase1_prompt_blocks: AnnotationPromptBlocks | None = None,
         active_entities_fallback: str | None = None,
-        phase4_request_template: Level3Request | None = None,
+        phase4_request_template: EvidenceRequest | None = None,
         evidence_bundle: EvidenceBundle | None = None,
         annotation_prompt_blocks: AnnotationPromptBlocks | None = None,
     ) -> None:
@@ -123,7 +123,7 @@ class ChunkContext:
         return self.phase1_prompt_blocks
 
 
-def _init_evidence_provider(
+def _init_evidence_service(
     conn,
     novel_id: str,
     use_context: bool,
@@ -167,7 +167,7 @@ def _init_evidence_provider(
     mention_extractor = _init_optional_mention_extractor(novel_id=novel_id, session=conn, run_id=run_id)
     level3_reranker = _init_optional_level3_reranker(novel_id=novel_id, session=conn, run_id=run_id)
 
-    evidence_provider = NarrativeEvidenceService(
+    evidence_service = NarrativeEvidenceService(
         graph_repo=graph_repo,
         novel_id=novel_id,
         run_id=run_id,
@@ -184,7 +184,7 @@ def _init_evidence_provider(
         progress_emitter=emitter,
     )
 
-    return evidence_provider
+    return evidence_service
 
 
 def _init_optional_mention_extractor(
@@ -427,7 +427,7 @@ def _extract_active_entity_names_from_prompt(active_entities_prompt: str | None)
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
-    说明: 从 authority renderer 的活跃实体区段里提取名字，供 Level3Request.seed_entities 复用；
+    说明: 从 authority renderer 的活跃实体区段里提取名字，供 EvidenceRequest.seed_entities 复用；
           这样 workflow 不需要为了拿名字再额外查一次 authority。
     """
     if not active_entities_prompt:
@@ -444,10 +444,10 @@ def _extract_active_entity_names_from_prompt(active_entities_prompt: str | None)
     return names
 
 
-def _build_level3_request(
+def _build_evidence_request(
     *,
     consumer: str,
-    objective: Level3Objective,
+    objective: EvidenceObjective,
     query_text: str,
     requested_names: list[str],
     seed_entities: list[str],
@@ -458,15 +458,16 @@ def _build_level3_request(
     need_level1: bool = True,
     need_level2: bool = True,
     need_level3: bool = True,
-) -> Level3Request:
+) -> EvidenceRequest:
     """
     创建时间: 2026-04-25
-    任务: level3-intent-phase-split
-    说明: 统一从 workflow 入口构造显式 Level3Request，避免各 phase 再靠弱语义 kwargs 猜测意图。
+    修改时间: 2026-04-25
+    任务: evidence-service-request-unification
+    修改说明: 统一从 workflow 入口构造显式 EvidenceRequest，避免各 phase 再靠弱语义 kwargs 猜测意图。
     """
-    from src.rag import Level3Request
+    from src.rag import EvidenceRequest
 
-    return Level3Request(
+    return EvidenceRequest(
         consumer=consumer,
         objective=objective,
         query_text=query_text,
@@ -529,8 +530,8 @@ def _merge_phase1_identity_and_emotion_bundles(
 
 
 async def _collect_phase_bundle(
-    disambig_provider: NarrativeEvidenceService,
-    request: Level3Request,
+    evidence_service: NarrativeEvidenceService,
+    request: EvidenceRequest,
 ) -> EvidenceBundle:
     """
     创建时间: 2026-04-25
@@ -539,7 +540,7 @@ async def _collect_phase_bundle(
     任务: evidence-service-request-unification
     修改说明: workflow 侧只声明统一 request；service 自己决定是否进入 Level3。
     """
-    return await disambig_provider.collect(request)
+    return await evidence_service.collect(request)
 
 
 def _prepare_chunk_context(
@@ -548,7 +549,7 @@ def _prepare_chunk_context(
     chunk_text: str,
     alias_map: dict[str, str],
     use_context_enhancement: bool,
-    disambig_provider: NarrativeEvidenceService | None,
+    evidence_service: NarrativeEvidenceService | None,
     run_id: str | None = None,
 ) -> ChunkContext:
     """准备chunk上下文（同步版本，不使用 Level 3）
@@ -584,13 +585,13 @@ def _prepare_chunk_context(
             lookback=lookback,
         )
 
-    if disambig_provider:
+    if evidence_service:
         active_entity_names = _extract_active_entity_names_from_prompt(context.active_entities_fallback)
         phase1_requested_names = _collect_requested_names(alias_map, query_text=chunk_text)
         phase1_seed_entities = _collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text)
         phase2_requested_names = list(active_entity_names)
         phase2_seed_entities = _collect_seed_entities(None, active_entity_names)
-        phase1_request = _build_level3_request(
+        phase1_request = _build_evidence_request(
             consumer="annotation_phase1",
             objective="identity",
             query_text=chunk_text,
@@ -602,7 +603,7 @@ def _prepare_chunk_context(
             allow_llm_query_expansion=False,
             need_level3=False,
         )
-        phase2_request = _build_level3_request(
+        phase2_request = _build_evidence_request(
             consumer="annotation_phase2",
             objective="foreshadowing",
             query_text=chunk_text,
@@ -614,10 +615,10 @@ def _prepare_chunk_context(
             allow_llm_query_expansion=False,
             need_level3=False,
         )
-        context.phase1_bundle = disambig_provider._collect_base_evidence(phase1_request)
-        context.phase2_bundle = disambig_provider._collect_base_evidence(phase2_request)
+        context.phase1_bundle = evidence_service._collect_base_evidence(phase1_request)
+        context.phase2_bundle = evidence_service._collect_base_evidence(phase2_request)
         context.phase3_bundle = context.phase1_bundle
-        context.phase4_request_template = _build_level3_request(
+        context.phase4_request_template = _build_evidence_request(
             consumer="annotation_phase4",
             objective="relation",
             query_text=chunk_text,
@@ -640,7 +641,7 @@ async def _prepare_chunk_context_with_level3(
     chunk_text: str,
     alias_map: dict[str, str],
     use_context_enhancement: bool,
-    disambig_provider: NarrativeEvidenceService | None,
+    evidence_service: NarrativeEvidenceService | None,
     run_id: str | None = None,
 ) -> ChunkContext:
     """准备chunk上下文（异步版本，支持 Level 3 向量检索）
@@ -684,14 +685,14 @@ async def _prepare_chunk_context_with_level3(
             lookback=lookback,
         )
 
-    if disambig_provider:
+    if evidence_service:
         active_entity_names = _extract_active_entity_names_from_prompt(context.active_entities_fallback)
         phase1_requested_names = _collect_requested_names(alias_map, query_text=chunk_text)
         phase1_seed_entities = _collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text)
         phase2_requested_names = list(active_entity_names)
         phase2_seed_entities = _collect_seed_entities(None, active_entity_names)
 
-        phase1_identity_request = _build_level3_request(
+        phase1_identity_request = _build_evidence_request(
             consumer="annotation_phase1",
             objective="identity",
             query_text=chunk_text,
@@ -702,7 +703,7 @@ async def _prepare_chunk_context_with_level3(
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
         )
-        phase1_emotion_request = _build_level3_request(
+        phase1_emotion_request = _build_evidence_request(
             consumer="annotation_phase1",
             objective="emotion",
             query_text=chunk_text,
@@ -715,7 +716,7 @@ async def _prepare_chunk_context_with_level3(
             need_level1=False,
             need_level2=False,
         )
-        phase2_request = _build_level3_request(
+        phase2_request = _build_evidence_request(
             consumer="annotation_phase2",
             objective="foreshadowing",
             query_text=chunk_text,
@@ -726,7 +727,7 @@ async def _prepare_chunk_context_with_level3(
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=False,
         )
-        phase3_request = _build_level3_request(
+        phase3_request = _build_evidence_request(
             consumer="annotation_phase3",
             objective="identity",
             query_text=chunk_text,
@@ -737,18 +738,18 @@ async def _prepare_chunk_context_with_level3(
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
         )
-        phase1_identity_bundle = await _collect_phase_bundle(disambig_provider, phase1_identity_request)
-        if disambig_provider.is_level3_available():
-            phase1_emotion_bundle = await _collect_phase_bundle(disambig_provider, phase1_emotion_request)
+        phase1_identity_bundle = await _collect_phase_bundle(evidence_service, phase1_identity_request)
+        if evidence_service.is_level3_available():
+            phase1_emotion_bundle = await _collect_phase_bundle(evidence_service, phase1_emotion_request)
             context.phase1_bundle = _merge_phase1_identity_and_emotion_bundles(
                 phase1_identity_bundle,
                 phase1_emotion_bundle,
             )
         else:
             context.phase1_bundle = phase1_identity_bundle
-        context.phase2_bundle = await _collect_phase_bundle(disambig_provider, phase2_request)
-        context.phase3_bundle = await _collect_phase_bundle(disambig_provider, phase3_request)
-        context.phase4_request_template = _build_level3_request(
+        context.phase2_bundle = await _collect_phase_bundle(evidence_service, phase2_request)
+        context.phase3_bundle = await _collect_phase_bundle(evidence_service, phase3_request)
+        context.phase4_request_template = _build_evidence_request(
             consumer="annotation_phase4",
             objective="relation",
             query_text=chunk_text,
