@@ -84,13 +84,21 @@ class DiagnosisClient(BaseModelClient):
             session=session,
         )
 
-    async def diagnose(self, payload: dict) -> CloudAnalysis:
+    async def diagnose(self, payload: dict, *, run_id: str | None = None) -> CloudAnalysis:
+        """
+        修改时间: 2026-04-25
+        修改者: Codex
+        任务: remove-diagnosis-cache-and-fix-interaction-persistence
+        修改内容: diagnose 审计记录所需的 run_id 改为显式参数传入，
+                  不再依赖 payload 隐式夹带，避免 prompt 输入和落库上下文混在一起。
+        """
         if not self._config.model:
             raise ValueError("model is required for diagnosis")
         novel_id = payload.get("novel_id")
         messages = payload.get("messages")
         if not isinstance(messages, list):
             messages = self._build_messages(payload)
+        effective_run_id = run_id if run_id is not None else payload.get("run_id")
 
         is_cloud = self.is_cloud_api()
         if is_cloud:
@@ -124,7 +132,7 @@ class DiagnosisClient(BaseModelClient):
             payload,
             messages,
             novel_id,
-            run_id=payload.get("run_id"),
+            run_id=effective_run_id,
             pass_attempt_number=True,
         )
 

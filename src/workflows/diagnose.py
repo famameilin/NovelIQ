@@ -25,7 +25,6 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -35,7 +34,6 @@ from src.config.analysis_logger import AnalysisLogger
 from src.models.cloud import build_diagnosis_payload
 from src.models.cloud.schema import CloudAnalysis
 from src.models.diagnosis import DiagnosisClient
-from src.pipeline.pipeline import FileCache, MemoryCache
 from src.storage.repositories import RunRepository, StatsRepository
 
 
@@ -118,7 +116,6 @@ def _log_diagnosis_results(result: CloudAnalysis) -> None:
 async def run_diagnose(
     run_id: str,
     session: Session,
-    cache_path: Path | None = None,
     client: DiagnosisClient | None = None,
     analysis_logger: AnalysisLogger | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
@@ -144,10 +141,15 @@ async def run_diagnose(
     任务: fix-token-usage-unknown-novel-id
     修改内容: 改为从 analysis_runs 获取 novel_id，禁止 diagnosis 链路再把 unknown 传播进 cloud_analysis / token_usage。
 
+    修改时间: 2026-04-25
+    修改者: Codex
+    任务: remove-diagnosis-cache-and-fix-interaction-persistence
+    修改内容: 删除未被主链实际复用的 diagnosis 结果缓存，
+              并把 run_id 显式传给 DiagnosisClient，确保 diagnose 调用能落库到 model_interactions。
+
     Args:
         run_id: 运行ID
         session: 数据库连接
-        cache_path: 缓存路径
         client: 诊断客户端
         analysis_logger: 分析日志器
 
@@ -165,22 +167,13 @@ async def run_diagnose(
 
     logger.debug(f"built diagnosis payload with keys={sorted(payload.keys())}")
 
-    cache_key_base = f"diagnose:{run_id}"
-    cache = FileCache(cache_path) if cache_path else MemoryCache()
-
     cloud_client = client or DiagnosisClient(analysis_logger=analysis_logger)
 
     _setup_diagnose_callback(cloud_client, session, novel_id, run_id=run_id)
-
-    cache_key = f"{cache_key_base}:result"
-    if cache and cache.has(cache_key):
-        result = cache.get(cache_key)
-        if isinstance(result, dict):
-            result = CloudAnalysis(**result)
+    if isinstance(cloud_client, DiagnosisClient):
+        result = await cloud_client.diagnose(payload, run_id=run_id)
     else:
         result = await cloud_client.diagnose(payload)
-        if cache:
-            cache.set(cache_key, result)
 
     stats_repo.insert_cloud_analysis(run_id, result)
     logger.debug(f"diagnosis persisted run_id={run_id}")
