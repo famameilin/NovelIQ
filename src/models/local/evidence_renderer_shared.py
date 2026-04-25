@@ -371,23 +371,70 @@ def _collect_semantic_chunk_ids(
     return chunk_ids
 
 
+def _prioritize_semantic_items(
+    items: list[EvidenceItem],
+    *,
+    priority_names: Iterable[str] | None,
+) -> list[EvidenceItem]:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: `background_entities` 只作为 renderer 侧背景 hint 使用；
+          这里仅调整 vector evidence 的展示顺序，不回流到 requested_names/candidate_names。
+    """
+    if not priority_names:
+        return items
+
+    priority_set = {str(name).strip() for name in priority_names if str(name).strip()}
+    if not priority_set:
+        return items
+
+    prioritized: list[EvidenceItem] = []
+    deferred: list[EvidenceItem] = []
+    for item in items:
+        text_candidates = (
+            str(item.metadata.get("local_preview") or ""),
+            str(item.metadata.get("text") or ""),
+            str(item.content or ""),
+        )
+        item_text = "\n".join(part for part in text_candidates if part)
+        if any(name in item_text for name in priority_set):
+            prioritized.append(item)
+        else:
+            deferred.append(item)
+    return prioritized + deferred
+
+
 def render_vector_evidence(
     bundle: EvidenceBundle,
     max_chunks: int = 3,
     max_text_len: int = 200,
     exclude_chunk_ids: set[int] | None = None,
+    priority_names: Iterable[str] | None = None,
 ) -> str | None:
     # 中文注释：这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
     # 若 Phase1 已单独渲染 emotion exemplar，则再按 chunk_id 排除重复项，避免同一条历史片段占掉两类证据预算。
     # 修改时间: 2026-04-24
     # 任务: level3-paragraph-rerank
     # 修改说明: paragraph rerank 可提供 local_preview；渲染时优先展示局部 evidence，chunk 全文仍保留在 metadata 里兜底。
-    vector_parts: list[str] = []
-    for item in _select_semantic_items(
+    selected_items = _select_semantic_items(
         bundle,
         evidence_types={"semantic_recall", "vector_evidence"},
-        max_items=max_chunks,
-    ):
+        max_items=None,
+    )
+    if exclude_chunk_ids is not None:
+        selected_items = [
+            item
+            for item in selected_items
+            if item.chunk_id is None or item.chunk_id not in exclude_chunk_ids
+        ]
+    selected_items = _prioritize_semantic_items(
+        selected_items,
+        priority_names=priority_names,
+    )
+
+    vector_parts: list[str] = []
+    for item in selected_items[:max_chunks]:
         if exclude_chunk_ids is not None and item.chunk_id is not None and item.chunk_id in exclude_chunk_ids:
             continue
         chunk_id = item.chunk_id if item.chunk_id is not None else item.metadata.get("chunk_id", "?")
@@ -468,6 +515,7 @@ def render_shared_evidence_sections(
         return SharedEvidenceSections()
 
     active_entity_items = [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
+    background_entities = bundle.request_meta.get("background_entities")
     emotion_exemplar_chunk_ids = (
         _collect_semantic_chunk_ids(
             bundle,
@@ -506,6 +554,7 @@ def render_shared_evidence_sections(
             max_chunks=max_vector_chunks,
             max_text_len=max_vector_text_len,
             exclude_chunk_ids=emotion_exemplar_chunk_ids if emotion_exemplar_chunk_ids else None,
+            priority_names=background_entities,
         ),
     )
 

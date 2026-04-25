@@ -23,6 +23,8 @@ from src.knowledge.authority import (
     Level1AuthoritySnapshot,
 )
 from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
+from src.rag import AnnotationEvidencePlan
+from src.rag.evidence_contracts import EvidenceRequest
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers import context as context_module
 from src.workflows.annotate_helpers.context import (
@@ -305,15 +307,28 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
         requested_names=["蒙面人"],
     )
     provider = Mock()
-    provider._collect_base_evidence.return_value = bundle
+    provider.build_annotation_base_plan.return_value = AnnotationEvidencePlan(
+        phase1_bundle=bundle,
+        phase2_bundle=EvidenceBundle(),
+        phase3_bundle=bundle,
+        phase4_request_template=None,
+    )
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
         context_module,
-        "_build_active_entities_prompt_from_authority",
-        lambda *_args, **_kwargs: "【近期活跃角色】\n- 白芷（helper）：观察 [chunk=12]",
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="白芷",
+                entity_id=7,
+                role="helper",
+                recent_action="观察",
+                recent_emotion=None,
+                last_seen_chunk=12,
+            )
+        ],
     )
-    monkeypatch.setattr(context_module, "_extract_names_from_text", lambda _text: ["蒙面人"])
 
     context = _prepare_chunk_context(
         conn=object(),
@@ -350,16 +365,29 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
         ]
     )
     provider = Mock()
-    provider._collect_base_evidence.return_value = bundle
+    provider.build_annotation_base_plan.return_value = AnnotationEvidencePlan(
+        phase1_bundle=bundle,
+        phase2_bundle=EvidenceBundle(),
+        phase3_bundle=bundle,
+        phase4_request_template=None,
+    )
     expected_active_entities = render_annotation_prompt_blocks(bundle).active_entities
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
         context_module,
-        "_build_active_entities_prompt_from_authority",
-        lambda *_args, **_kwargs: "【近期活跃角色】\n- 旧值（helper）：观察 [chunk=19]",
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="旧值",
+                entity_id=9,
+                role="helper",
+                recent_action="观察",
+                recent_emotion=None,
+                last_seen_chunk=19,
+            )
+        ],
     )
-    monkeypatch.setattr(context_module, "_extract_names_from_text", lambda _text: ["陆明"])
 
     context = _prepare_chunk_context(
         conn=object(),
@@ -378,8 +406,8 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
 
 
 def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
-    build_authority_prompt = Mock(return_value="不应被调用")
-    monkeypatch.setattr(context_module, "_build_active_entities_prompt_from_authority", build_authority_prompt)
+    build_authority_contexts = Mock(return_value=[])
+    monkeypatch.setattr(context_module, "_build_active_entity_contexts_from_authority", build_authority_contexts)
 
     context = _prepare_chunk_context(
         conn=object(),
@@ -391,7 +419,7 @@ def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
         run_id="run-disabled",
     )
 
-    build_authority_prompt.assert_not_called()
+    build_authority_contexts.assert_not_called()
     assert context.prev_chunk_text is None
     assert context.next_chunk_text is None
     assert context.prompt_active_entities is None
@@ -399,8 +427,8 @@ def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
 
 
 def test_prepare_chunk_context_skips_context_loading_when_run_id_missing(monkeypatch):
-    build_authority_prompt = Mock(return_value="不应被调用")
-    monkeypatch.setattr(context_module, "_build_active_entities_prompt_from_authority", build_authority_prompt)
+    build_authority_contexts = Mock(return_value=[])
+    monkeypatch.setattr(context_module, "_build_active_entity_contexts_from_authority", build_authority_contexts)
 
     context = _prepare_chunk_context(
         conn=object(),
@@ -412,7 +440,7 @@ def test_prepare_chunk_context_skips_context_loading_when_run_id_missing(monkeyp
         run_id=None,
     )
 
-    build_authority_prompt.assert_not_called()
+    build_authority_contexts.assert_not_called()
     assert context.prev_chunk_text is None
     assert context.next_chunk_text is None
     assert context.prompt_active_entities is None
@@ -423,8 +451,17 @@ def test_prepare_chunk_context_without_disambig_provider_keeps_authority_context
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
         context_module,
-        "_build_active_entities_prompt_from_authority",
-        lambda *_args, **_kwargs: "【近期活跃角色】\n- 苏镜（protagonist）：思考 [chunk=9]",
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="苏镜",
+                entity_id=3,
+                role="protagonist",
+                recent_action="思考",
+                recent_emotion=None,
+                last_seen_chunk=9,
+            )
+        ],
     )
 
     context = _prepare_chunk_context(
@@ -460,17 +497,30 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
         requested_names=["黑衣人"],
     )
     provider = Mock()
-    provider.requires_level3.return_value = False
-    provider.is_level3_available.return_value = False
-    provider.collect = AsyncMock(return_value=bundle)
+    provider.prepare_annotation_evidence_plan = AsyncMock(
+        return_value=AnnotationEvidencePlan(
+            phase1_bundle=bundle,
+            phase2_bundle=EvidenceBundle(),
+            phase3_bundle=bundle,
+            phase4_request_template=None,
+        )
+    )
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
         context_module,
-        "_build_active_entities_prompt_from_authority",
-        lambda *_args, **_kwargs: "【近期活跃角色】\n- 陆明（helper）：巡查 [chunk=18]",
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="陆明",
+                entity_id=11,
+                role="helper",
+                recent_action="巡查",
+                recent_emotion=None,
+                last_seen_chunk=18,
+            )
+        ],
     )
-    monkeypatch.setattr(context_module, "_extract_names_from_text", lambda _text: ["黑衣人"])
 
     context = await _prepare_chunk_context_with_level3(
         conn=object(),
@@ -488,11 +538,12 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
     assert context.evidence_bundle is bundle
     assert context.prompt_disambig_context is not None
     assert "「黑衣人」可能是：陆明" in context.prompt_disambig_context
+    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["active_entity_names"] == ["陆明"]
 
 
 @pytest.mark.asyncio
 async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_available(monkeypatch):
-    identity_bundle = EvidenceBundle(
+    phase1_bundle = EvidenceBundle(
         local_evidence=[
             EvidenceItem(
                 evidence_type="active_entity",
@@ -516,37 +567,77 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
                 metadata={"text": "程霜在旧案卷中发现了线索。", "similarity": 0.91},
             )
         ],
+        requested_names=["程霜"],
     )
-    emotion_bundle = EvidenceBundle(
-        semantic_evidence=[
-            EvidenceItem(
-                evidence_type="emotion_exemplar",
-                source="chunk_embeddings",
-                content="她翻阅旧案卷时指节发白。",
-                chunk_id=7,
-                score=0.88,
-                metadata={
-                    "chunk_id": 7,
-                    "text": "她翻阅旧案卷时指节发白。",
-                    "similarity": 0.88,
-                    "emotional_valence": "mild_negative",
-                },
-            )
-        ]
+    phase1_bundle.semantic_evidence.append(
+        EvidenceItem(
+            evidence_type="emotion_exemplar",
+            source="chunk_embeddings",
+            content="她翻阅旧案卷时指节发白。",
+            chunk_id=7,
+            score=0.88,
+            metadata={
+                "chunk_id": 7,
+                "text": "她翻阅旧案卷时指节发白。",
+                "similarity": 0.88,
+                "emotional_valence": "mild_negative",
+            },
+        )
     )
     phase2_bundle = EvidenceBundle()
-    phase3_bundle = identity_bundle
+    phase3_bundle = EvidenceBundle(
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="vector_evidence",
+                source="level3",
+                content="程霜在旧案卷中发现了线索。",
+                chunk_id=4,
+                score=0.91,
+                metadata={"text": "程霜在旧案卷中发现了线索。", "similarity": 0.91},
+            )
+        ],
+    )
     provider = Mock()
-    provider.is_level3_available.return_value = True
-    provider.collect = AsyncMock(
-        side_effect=[identity_bundle, emotion_bundle, phase2_bundle, phase3_bundle]
+    provider.prepare_annotation_evidence_plan = AsyncMock(
+        return_value=AnnotationEvidencePlan(
+            phase1_bundle=phase1_bundle,
+            phase2_bundle=phase2_bundle,
+            phase3_bundle=phase3_bundle,
+            phase4_request_template=EvidenceRequest(
+                consumer="annotation_phase4",
+                objective="relation",
+                query_text="程霜翻阅旧案卷",
+                requested_names=["旧值"],
+                seed_entities=["旧值"],
+                background_entities=[],
+                current_chunk=21,
+                max_chunk_id=20,
+                exclude_chunk_ids=[21],
+                need_level1=True,
+                need_level2=True,
+                need_level3=True,
+                allow_llm_query_expansion=False,
+                top_k=settings.rag.level3_top_k,
+                max_queries=settings.rag.level3_max_queries,
+                model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
+            ),
+        )
     )
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
         context_module,
-        "_build_active_entities_prompt_from_authority",
-        lambda *_args, **_kwargs: "【近期活跃角色】\n- 旧值（helper）：观察 [chunk=20]",
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="旧值",
+                entity_id=12,
+                role="helper",
+                recent_action="观察",
+                recent_emotion=None,
+                last_seen_chunk=20,
+            )
+        ],
     )
 
     context = await _prepare_chunk_context_with_level3(
@@ -559,42 +650,11 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         run_id="run-level3-available",
     )
 
-    assert provider.collect.await_count == 4
-    phase1_identity_request = provider.collect.await_args_list[0].args[0]
-    phase1_emotion_request = provider.collect.await_args_list[1].args[0]
-    phase2_request = provider.collect.await_args_list[2].args[0]
-    phase3_request = provider.collect.await_args_list[3].args[0]
-    assert phase1_identity_request.consumer == "annotation_phase1"
-    assert phase1_identity_request.objective == "identity"
-    assert phase1_identity_request.query_text == "程霜翻阅旧案卷"
-    assert phase1_identity_request.current_chunk == 21
-    assert phase1_identity_request.max_chunk_id == 20
-    assert phase1_identity_request.exclude_chunk_ids == [21]
-    assert phase1_identity_request.requested_names == ["程霜"]
-    assert "程霜" in phase1_identity_request.seed_entities
-    assert "小七" not in phase1_identity_request.seed_entities
-    assert "老刀" not in phase1_identity_request.seed_entities
-    assert "韩山" not in phase1_identity_request.seed_entities
-    assert phase1_identity_request.need_level1 is True
-    assert phase1_identity_request.need_level2 is True
-    assert phase1_identity_request.need_level3 is True
-    assert phase1_emotion_request.objective == "emotion"
-    assert phase1_emotion_request.allow_llm_query_expansion is False
-    assert phase1_emotion_request.requested_names == ["程霜"]
-    assert phase1_emotion_request.seed_entities == []
-    assert phase1_emotion_request.need_level1 is False
-    assert phase1_emotion_request.need_level2 is False
-    assert phase1_emotion_request.need_level3 is True
-    assert phase2_request.consumer == "annotation_phase2"
-    assert phase2_request.objective == "foreshadowing"
-    assert phase2_request.allow_llm_query_expansion is False
-    assert phase2_request.requested_names == ["旧值"]
-    assert phase2_request.seed_entities == ["旧值"]
-    assert phase2_request.need_level3 is True
-    assert phase3_request.consumer == "annotation_phase3"
-    assert phase3_request.requested_names == ["程霜"]
-    assert phase3_request.seed_entities == phase1_identity_request.seed_entities
-    assert context.phase1_bundle is not identity_bundle
+    assert provider.prepare_annotation_evidence_plan.await_count == 1
+    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["chunk_text"] == "程霜翻阅旧案卷"
+    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["current_chunk"] == 21
+    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["active_entity_names"] == ["旧值"]
+    assert context.phase1_bundle is phase1_bundle
     assert context.phase2_bundle is phase2_bundle
     assert context.phase3_bundle is phase3_bundle
     assert any(item.evidence_type == "emotion_exemplar" for item in context.phase1_bundle.semantic_evidence)
@@ -615,8 +675,9 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
 @pytest.mark.asyncio
 async def test_prepare_chunk_context_with_level3_raises_when_required_but_unavailable(monkeypatch):
     provider = Mock()
-    provider.collect = AsyncMock(side_effect=RuntimeError("Level 3 vector retrieval is required but not available"))
-    monkeypatch.setattr(context_module, "_extract_names_from_text", lambda _text: ["程霜"])
+    provider.prepare_annotation_evidence_plan = AsyncMock(
+        side_effect=RuntimeError("Level 3 vector retrieval is required but not available")
+    )
 
     with pytest.raises(RuntimeError, match="Level 3 vector retrieval is required but not available"):
         await _prepare_chunk_context_with_level3(
@@ -625,7 +686,7 @@ async def test_prepare_chunk_context_with_level3_raises_when_required_but_unavai
             chunk_text="程霜追查旧线索",
             alias_map={},
             use_context_enhancement=False,
-                evidence_service=provider,
+            evidence_service=provider,
             run_id=None,
         )
 
