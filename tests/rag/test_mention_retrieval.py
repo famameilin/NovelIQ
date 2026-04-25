@@ -23,7 +23,7 @@ from src.rag.mention_extraction_llm import (
 )
 from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
-from src.rag.mention_query import build_mention_evidence_queries
+from src.rag.mention_query import MentionEvidenceQuery, build_mention_evidence_queries
 from src.rag.mention_rerank import rerank_mention_level3_results
 from src.rag.model_call_audit import audited_structured_model_call
 from src.rag.model_rerank import Level3RerankResult
@@ -41,6 +41,7 @@ def _build_level3_request(
     max_chunk_id: int | None = 8,
     top_k: int = 2,
     max_queries: int = 6,
+    model_rerank_query_max_chars: int = 320,
     allow_llm_query_expansion: bool = True,
 ) -> Level3Request:
     """
@@ -58,6 +59,7 @@ def _build_level3_request(
         allow_llm_query_expansion=allow_llm_query_expansion,
         top_k=top_k,
         max_queries=max_queries,
+        model_rerank_query_max_chars=model_rerank_query_max_chars,
     )
 
 
@@ -1003,6 +1005,79 @@ async def test_provider_uses_model_rerank_when_available() -> None:
     reranker.rerank.assert_awaited_once()
     provider._level3.search_similar_chunks_many.assert_awaited_once()
     provider._level3.search_similar_chunks.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_caps_model_rerank_query_text_by_explicit_budget() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-level3-required-readiness-and-rerank-budget
+    说明: model rerank 只应消费压缩后的 query summary，并严格受 request budget 约束；
+          不能再把 base query 与所有 mention query 无上限拼接进 rerank prompt。
+    """
+    reranker = MagicMock()
+    reranker.rerank = AsyncMock(return_value=[])
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
+    provider._level3.is_available = MagicMock(return_value=True)
+    provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
+            [SimilarChunkRow(chunk_id=10, text="红衣女子出手。", similarity=0.95)],
+            [SimilarChunkRow(chunk_id=11, text="白芷正是那名红衣女子。", similarity=0.88)],
+            [],
+        ]
+    )
+
+    provider.build_level3_query_plan = AsyncMock(
+        return_value=Level3QueryPlan(
+            mode="hybrid",
+            base_query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水，所有人都在看她。",
+            mention_queries=[
+                next(
+                    query
+                    for query in build_mention_evidence_queries(
+                        [
+                            PersonMention(
+                                raw_text="那个穿红衣的女子在门口忽然出手",
+                                mention_type="descriptive_person",
+                                sentence_text="那个穿红衣的女子在门口忽然出手。",
+                                cues={"appearance": ["红衣"], "action": ["出手"], "location": ["门口"]},
+                                normalized_query_terms=("红衣", "女子", "门口", "出手"),
+                                source="llm",
+                            )
+                        ]
+                    )
+                    if query.query_variant == "mention_compressed"
+                ),
+                MentionEvidenceQuery(
+                    query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水",
+                    mention_text="那个穿红衣的女子在门口忽然出手",
+                    mention_type="descriptive_person",
+                    matched_features=("红衣", "门口", "出手"),
+                    query_variant="mention_raw",
+                    mention_source="llm",
+                ),
+            ],
+            candidate_pool_k=20,
+            top_k=2,
+        )
+    )
+
+    await provider.collect_evidence_with_level3(
+        _build_level3_request(
+            seed_entities=["白芷"],
+            current_chunk=12,
+            max_chunk_id=11,
+            query_text="那个穿红衣的女子在门口忽然出手，袖口还沾着雨水，所有人都在看她。",
+            model_rerank_query_max_chars=60,
+        )
+    )
+
+    rerank_query_text = reranker.rerank.await_args.kwargs["query_text"]
+    assert len(rerank_query_text) <= 60
+    assert "q1: 红衣 女子 门口 出手" in rerank_query_text
+    assert "袖口还沾着雨水，所有人都在看她" not in rerank_query_text
 
 
 @pytest.mark.asyncio
