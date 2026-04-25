@@ -42,7 +42,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
@@ -277,10 +277,29 @@ async def _resolve_phase4_bundle(
         return context.phase4_bundle
     if context.phase4_request_template is None or context.evidence_service is None:
         return None
-    return await context.evidence_service.collect_annotation_phase4_bundle(
+
+    requested_names: list[str] = []
+    for name in (
+        list(known_characters or [])
+        + list(context.phase4_request_template.requested_names)
+        + list(context.phase4_request_template.seed_entities)
+    ):
+        normalized = str(name).strip()
+        if normalized and normalized not in requested_names:
+            requested_names.append(normalized)
+
+    seed_entities: list[str] = []
+    for name in list(known_characters or []) + list(context.phase4_request_template.seed_entities):
+        normalized = str(name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    phase4_request = replace(
         context.phase4_request_template,
-        known_characters,
+        requested_names=requested_names,
+        seed_entities=seed_entities,
     )
+    return await context.evidence_service.collect(phase4_request)
 
 
 def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:

@@ -11,7 +11,6 @@ from src.knowledge.authority import (
     EntityTypeFact,
     Level1AuthoritySnapshot,
 )
-from src.rag.evidence_contracts import EvidenceRequest
 
 __all__ = [
     "ActiveEntityContext",
@@ -22,7 +21,6 @@ __all__ = [
     "Level1AuthoritySnapshot",
     "EvidenceItem",
     "EvidenceBundle",
-    "AnnotationEvidencePlan",
 ]
 
 
@@ -117,18 +115,3 @@ class EvidenceBundle:
             for mapping in self.level1_snapshot.alias_mappings
             if mapping.alias and mapping.canonical and mapping.alias != mapping.canonical
         }
-
-
-@dataclass(slots=True)
-class AnnotationEvidencePlan:
-    """
-    创建时间: 2026-04-25
-    任务: evidence-service-request-unification
-    说明: evidence service 返回给 annotation workflow 的阶段取证计划；
-          workflow 只消费 plan 中的 bundle/template，不再自己拆 phase request 或合并 overlay。
-    """
-
-    phase1_bundle: EvidenceBundle | None = None
-    phase2_bundle: EvidenceBundle | None = None
-    phase3_bundle: EvidenceBundle | None = None
-    phase4_request_template: EvidenceRequest | None = None

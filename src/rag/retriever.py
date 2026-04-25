@@ -65,14 +65,12 @@ from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.rag.authority import Level1AuthorityProvider
 from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.evidence_contracts import (
-    EvidenceConsumer,
-    EvidenceObjective,
     EvidenceRequest,
     Level3QueryMode,
     Level3QueryPlan,
     build_evidence_request_fingerprint,
 )
-from src.rag.evidence_types import AnnotationEvidencePlan, EvidenceBundle, Level1AuthoritySnapshot
+from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
 from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
@@ -96,85 +94,6 @@ __all__ = [
     "Level3VectorEvidence",
     "NarrativeEvidenceService",
 ]
-
-
-def _dedupe_names(values: list[str]) -> list[str]:
-    """
-    创建时间: 2026-04-25
-    任务: evidence-service-request-unification
-    说明: evidence service 内部统一去重名字序列，避免 annotation/disambiguation 多处各自维护同一套顺序规则。
-    """
-    normalized: list[str] = []
-    for value in values:
-        cleaned = str(value).strip()
-        if cleaned and cleaned not in normalized:
-            normalized.append(cleaned)
-    return normalized
-
-
-def _collect_annotation_seed_entities(
-    alias_map: dict[str, str] | None,
-    active_entity_names: list[str],
-    *,
-    query_text: str | None = None,
-    extra_names: list[str] | None = None,
-) -> list[str]:
-    """
-    创建时间: 2026-04-25
-    任务: evidence-service-request-unification
-    说明: annotation request 的 retrieval 锚点只允许来自当前 chunk 命中的 alias/canonical、
-          authority active entities 与显式补充名字，不能把整轮 alias 状态整体带进来。
-    """
-    seed_entities: list[str] = []
-    normalized_query_text = (query_text or "").strip()
-    for alias, canonical in (alias_map or {}).items():
-        normalized_alias = str(alias).strip()
-        normalized_canonical = str(canonical).strip()
-        if not normalized_query_text:
-            continue
-        if normalized_alias and normalized_alias in normalized_query_text and normalized_alias not in seed_entities:
-            seed_entities.append(normalized_alias)
-        if (
-            normalized_canonical
-            and (
-                normalized_canonical in normalized_query_text
-                or (normalized_alias and normalized_alias in normalized_query_text)
-            )
-            and normalized_canonical not in seed_entities
-        ):
-            seed_entities.append(normalized_canonical)
-
-    for name in active_entity_names:
-        normalized = str(name).strip()
-        if normalized and normalized not in seed_entities:
-            seed_entities.append(normalized)
-
-    for name in extra_names or []:
-        normalized = str(name).strip()
-        if normalized and normalized not in seed_entities:
-            seed_entities.append(normalized)
-
-    return seed_entities
-
-
-def _collect_annotation_requested_names(
-    alias_map: dict[str, str] | None,
-    *,
-    query_text: str | None = None,
-    extra_names: list[str] | None = None,
-) -> list[str]:
-    """
-    创建时间: 2026-04-25
-    任务: evidence-service-request-unification
-    说明: annotation 的 requested_names 只表达“当前 consumer 正在处理谁”，
-          不混入 active entities 这种仅用于 retrieval 扩锚的背景名。
-    """
-    return _collect_annotation_seed_entities(
-        alias_map,
-        [],
-        query_text=query_text,
-        extra_names=extra_names,
-    )
 
 
 def _merge_annotation_phase1_identity_and_emotion_bundles(
@@ -214,6 +133,16 @@ def _merge_annotation_phase1_identity_and_emotion_bundles(
             "emotion_overlay_applied": True,
         },
     )
+
+
+def _should_apply_annotation_phase1_overlay(request: EvidenceRequest) -> bool:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: Phase1 的 identity request 对外仍只暴露单一 EvidenceRequest；
+          若需要 emotion exemplar overlay，由 service 在 collect() 内部统一补齐。
+    """
+    return request.consumer == "annotation_phase1" and request.objective == "identity" and request.need_level3
 
 
 class NarrativeEvidenceService:
@@ -396,238 +325,6 @@ class NarrativeEvidenceService:
         cache_key = build_evidence_request_fingerprint(request)
         self._bundle_cache[cache_key] = bundle.clone_with_meta()
 
-    def _build_annotation_request(
-        self,
-        *,
-        consumer: EvidenceConsumer,
-        objective: EvidenceObjective,
-        query_text: str,
-        requested_names: list[str],
-        seed_entities: list[str],
-        background_entities: list[str] | None,
-        current_chunk: int,
-        max_chunk_id: int | None,
-        allow_llm_query_expansion: bool,
-        need_level1: bool = True,
-        need_level2: bool = True,
-        need_level3: bool = True,
-    ) -> EvidenceRequest:
-        """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: annotation 侧 request 统一在 service 内构造，workflow 只传业务语义输入，
-              不再自己拼 phase request 或维护 top_k/max_queries 等细节。
-        """
-        return EvidenceRequest(
-            consumer=consumer,
-            objective=objective,
-            query_text=query_text,
-            requested_names=requested_names,
-            seed_entities=seed_entities,
-            background_entities=list(background_entities or []),
-            current_chunk=current_chunk,
-            max_chunk_id=max_chunk_id,
-            exclude_chunk_ids=[current_chunk],
-            need_level1=need_level1,
-            need_level2=need_level2,
-            need_level3=need_level3,
-            allow_llm_query_expansion=allow_llm_query_expansion,
-            top_k=settings.rag.level3_top_k,
-            max_queries=settings.rag.level3_max_queries,
-            model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
-        )
-
-    def build_annotation_base_plan(
-        self,
-        *,
-        chunk_text: str,
-        alias_map: dict[str, str] | None,
-        current_chunk: int,
-        active_entity_names: list[str],
-    ) -> AnnotationEvidencePlan:
-        """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: 无 Level3 的 annotation 场景也由 evidence service 统一生成阶段 bundle，
-              避免 workflow 再回退到手工拼 request / base bundle 的旧模式。
-        """
-        max_chunk_id = current_chunk - 1
-        phase1_requested_names = _collect_annotation_requested_names(alias_map, query_text=chunk_text)
-        phase1_seed_entities = _collect_annotation_seed_entities(
-            alias_map,
-            active_entity_names,
-            query_text=chunk_text,
-        )
-        phase2_requested_names = _dedupe_names(active_entity_names)
-        phase2_seed_entities = _collect_annotation_seed_entities(None, active_entity_names)
-
-        phase1_request = self._build_annotation_request(
-            consumer="annotation_phase1",
-            objective="identity",
-            query_text=chunk_text,
-            requested_names=phase1_requested_names,
-            seed_entities=phase1_seed_entities,
-            background_entities=[],
-            current_chunk=current_chunk,
-            max_chunk_id=max_chunk_id,
-            allow_llm_query_expansion=False,
-            need_level3=False,
-        )
-        phase2_request = self._build_annotation_request(
-            consumer="annotation_phase2",
-            objective="foreshadowing",
-            query_text=chunk_text,
-            requested_names=phase2_requested_names,
-            seed_entities=phase2_seed_entities,
-            background_entities=[],
-            current_chunk=current_chunk,
-            max_chunk_id=max_chunk_id,
-            allow_llm_query_expansion=False,
-            need_level3=False,
-        )
-        phase1_bundle = self._collect_base_evidence(phase1_request)
-        phase2_bundle = self._collect_base_evidence(phase2_request)
-
-        return AnnotationEvidencePlan(
-            phase1_bundle=phase1_bundle,
-            phase2_bundle=phase2_bundle,
-            phase3_bundle=phase1_bundle,
-            phase4_request_template=self._build_annotation_request(
-                consumer="annotation_phase4",
-                objective="relation",
-                query_text=chunk_text,
-                requested_names=phase2_requested_names,
-                seed_entities=phase2_seed_entities,
-                background_entities=[],
-                current_chunk=current_chunk,
-                max_chunk_id=max_chunk_id,
-                allow_llm_query_expansion=False,
-                need_level3=False,
-            ),
-        )
-
-    async def prepare_annotation_evidence_plan(
-        self,
-        *,
-        chunk_text: str,
-        alias_map: dict[str, str] | None,
-        current_chunk: int,
-        active_entity_names: list[str],
-    ) -> AnnotationEvidencePlan:
-        """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: annotation workflow 只提供 chunk 语义和 authority 活跃实体；
-              phase1/2/3 request 规划、overlay 复用与 bundle 收集统一收口到 service。
-        """
-        max_chunk_id = current_chunk - 1
-        phase1_requested_names = _collect_annotation_requested_names(alias_map, query_text=chunk_text)
-        phase1_seed_entities = _collect_annotation_seed_entities(
-            alias_map,
-            active_entity_names,
-            query_text=chunk_text,
-        )
-        phase2_requested_names = _dedupe_names(active_entity_names)
-        phase2_seed_entities = _collect_annotation_seed_entities(None, active_entity_names)
-
-        phase1_identity_request = self._build_annotation_request(
-            consumer="annotation_phase1",
-            objective="identity",
-            query_text=chunk_text,
-            requested_names=phase1_requested_names,
-            seed_entities=phase1_seed_entities,
-            background_entities=[],
-            current_chunk=current_chunk,
-            max_chunk_id=max_chunk_id,
-            allow_llm_query_expansion=True,
-        )
-        phase1_emotion_request = self._build_annotation_request(
-            consumer="annotation_phase1",
-            objective="emotion",
-            query_text=chunk_text,
-            requested_names=phase1_requested_names,
-            seed_entities=[],
-            background_entities=[],
-            current_chunk=current_chunk,
-            max_chunk_id=max_chunk_id,
-            allow_llm_query_expansion=False,
-            need_level1=False,
-            need_level2=False,
-        )
-        phase2_request = self._build_annotation_request(
-            consumer="annotation_phase2",
-            objective="foreshadowing",
-            query_text=chunk_text,
-            requested_names=phase2_requested_names,
-            seed_entities=phase2_seed_entities,
-            background_entities=[],
-            current_chunk=current_chunk,
-            max_chunk_id=max_chunk_id,
-            allow_llm_query_expansion=False,
-        )
-        phase3_request = self._build_annotation_request(
-            consumer="annotation_phase3",
-            objective="identity",
-            query_text=chunk_text,
-            requested_names=phase1_requested_names,
-            seed_entities=phase1_seed_entities,
-            background_entities=[],
-            current_chunk=current_chunk,
-            max_chunk_id=max_chunk_id,
-            allow_llm_query_expansion=True,
-        )
-
-        phase1_identity_bundle = await self.collect(phase1_identity_request)
-        phase1_bundle = phase1_identity_bundle
-        if self.is_level3_available():
-            phase1_emotion_bundle = await self.collect(phase1_emotion_request)
-            phase1_bundle = _merge_annotation_phase1_identity_and_emotion_bundles(
-                phase1_identity_bundle,
-                phase1_emotion_bundle,
-            )
-
-        return AnnotationEvidencePlan(
-            phase1_bundle=phase1_bundle,
-            phase2_bundle=await self.collect(phase2_request),
-            phase3_bundle=await self.collect(phase3_request),
-            phase4_request_template=self._build_annotation_request(
-                consumer="annotation_phase4",
-                objective="relation",
-                query_text=chunk_text,
-                requested_names=phase2_requested_names,
-                seed_entities=phase2_seed_entities,
-                background_entities=[],
-                current_chunk=current_chunk,
-                max_chunk_id=max_chunk_id,
-                allow_llm_query_expansion=False,
-            ),
-        )
-
-    async def collect_annotation_phase4_bundle(
-        self,
-        request_template: EvidenceRequest | None,
-        known_characters: list[str] | None,
-    ) -> EvidenceBundle | None:
-        """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: Phase4 relation evidence 需要等 Phase1 产出 known_characters 后再补齐；
-              这里由 service 统一扩展 request，再回到 collect(request) 主入口。
-        """
-        if request_template is None:
-            return None
-
-        phase4_request = replace(
-            request_template,
-            requested_names=_dedupe_names(
-                list(known_characters or [])
-                + list(request_template.requested_names)
-                + list(request_template.seed_entities)
-            ),
-            seed_entities=_dedupe_names(list(known_characters or []) + list(request_template.seed_entities)),
-        )
-        return await self.collect(phase4_request)
-
     def _collect_base_evidence(self, request: EvidenceRequest) -> EvidenceBundle:
         """
         收集 Level1/Level2 证据。
@@ -670,51 +367,62 @@ class NarrativeEvidenceService:
         bundle.requested_names = list(request.requested_names)
         return bundle
 
-    async def collect(self, request: EvidenceRequest) -> EvidenceBundle:
+    def _build_annotation_phase1_emotion_request(self, request: EvidenceRequest) -> EvidenceRequest:
         """
-        收集统一 evidence bundle。
-
-        修改时间: 2026-04-24
-        任务: fix-level3-provider-readiness-drift
-        修改说明: 即使 `is_available()` 先前通过，也要在 provider 入口做一次 async readiness 确认；
-                  若此时发现 schema/维度漂移，则记录告警并安全降级为无 Level3 证据。
-
-        修改时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        修改说明: provider 内部统一执行 mention extraction 与 query 构造，workflow 不再负责 Level3 上游编排。
-
-        修改时间: 2026-04-24
-        任务: log-level3-evidence-gaps
-        修改说明: 补充 Level3 证据准备入口/出口耗时日志，避免 chunk 间模型取证阶段看起来像空白等待。
-
-        修改时间: 2026-04-25
+        创建时间: 2026-04-25
         任务: evidence-service-request-unification
-        修改说明: 对外公开入口收口为 collect(request)；
-                  workflow 不再决定走 Level1/2 还是 Level1/2/3，而是统一由 service 按 request.need_level* 编排。
+        说明: Phase1 对外只暴露 identity request；
+              emotion overlay 的 query 由 service 内部派生，避免 workflow 再显式管理第二份 request。
         """
-        cached_bundle = self._restore_cached_bundle(request)
-        if cached_bundle is not None:
-            return cached_bundle
+        return replace(
+            request,
+            objective="emotion",
+            seed_entities=[],
+            need_level1=False,
+            need_level2=False,
+            allow_llm_query_expansion=False,
+        )
+
+    async def _collect_request(
+        self,
+        request: EvidenceRequest,
+        *,
+        allow_cache: bool,
+        store_cache: bool,
+    ) -> EvidenceBundle:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: 统一执行单条 EvidenceRequest，不处理 annotation Phase1 的 overlay 特例；
+              collect() 会在需要时用这个基础执行器拼出最终返回值。
+        """
+        if allow_cache:
+            cached_bundle = self._restore_cached_bundle(request)
+            if cached_bundle is not None:
+                return cached_bundle
 
         bundle = self._collect_base_evidence(request)
         bundle.request_meta = self._build_request_meta(request)
         bundle.generation_meta = self._build_generation_meta(request)
 
         if not request.need_level3:
-            self._cache_bundle(request, bundle)
+            if store_cache:
+                self._cache_bundle(request, bundle)
             return bundle
 
         if not request.query_text:
             bundle.generation_meta["level3_skipped_reason"] = "query_text_empty"
             bundle.generation_meta["empty_query_fallback_reason"] = "query_text_empty"
-            self._cache_bundle(request, bundle)
+            if store_cache:
+                self._cache_bundle(request, bundle)
             return bundle
 
         if not self.is_level3_available():
             if self.requires_level3():
                 raise RuntimeError("Level 3 vector retrieval is required but not available")
             bundle.generation_meta["level3_skipped_reason"] = "level3_unavailable"
-            self._cache_bundle(request, bundle)
+            if store_cache:
+                self._cache_bundle(request, bundle)
             return bundle
 
         started_at = time.perf_counter()
@@ -740,7 +448,7 @@ class NarrativeEvidenceService:
         try:
             await self._level3.ensure_level3_ready()
             plan = await self.build_level3_query_plan(request)
-            level3_results = await self.execute_level3_query_plan(
+            level3_results, failed_queries = await self.execute_level3_query_plan(
                 plan,
                 request,
                 active_entity_names=self._extract_active_entity_names(bundle),
@@ -754,7 +462,8 @@ class NarrativeEvidenceService:
                 raise
             logger.warning("Level3 skipped during evidence collection: {}", exc)
             bundle.generation_meta["level3_skipped_reason"] = "readiness_failed"
-            self._cache_bundle(request, bundle)
+            if store_cache:
+                self._cache_bundle(request, bundle)
             return bundle
 
         bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
@@ -769,8 +478,8 @@ class NarrativeEvidenceService:
                 "query_count": query_count,
                 "top_k": plan.top_k,
                 "batch_mode": "batched" if query_count > 1 else "single",
-                "failed_queries": [],
-                "dropped_queries": [],
+                "failed_queries": failed_queries,
+                "dropped_queries": list(plan.dropped_queries),
             }
         )
         logger.info(
@@ -792,8 +501,49 @@ class NarrativeEvidenceService:
             100,
         )
 
-        self._cache_bundle(request, bundle)
+        if store_cache:
+            self._cache_bundle(request, bundle)
         return bundle
+
+    async def collect(self, request: EvidenceRequest) -> EvidenceBundle:
+        """
+        收集统一 evidence bundle。
+
+        修改时间: 2026-04-24
+        任务: fix-level3-provider-readiness-drift
+        修改说明: 即使 `is_available()` 先前通过，也要在 provider 入口做一次 async readiness 确认；
+                  若此时发现 schema/维度漂移，则记录告警并安全降级为无 Level3 证据。
+
+        修改时间: 2026-04-24
+        任务: llm-mention-rerank-chain
+        修改说明: provider 内部统一执行 mention extraction 与 query 构造，workflow 不再负责 Level3 上游编排。
+
+        修改时间: 2026-04-24
+        任务: log-level3-evidence-gaps
+        修改说明: 补充 Level3 证据准备入口/出口耗时日志，避免 chunk 间模型取证阶段看起来像空白等待。
+
+        修改时间: 2026-04-25
+        任务: evidence-service-request-unification
+        修改说明: 对外公开入口收口为 collect(request)；
+                  workflow 不再决定走 Level1/2 还是 Level1/2/3，而是统一由 service 按 request.need_level* 编排。
+        """
+        if not _should_apply_annotation_phase1_overlay(request):
+            return await self._collect_request(request, allow_cache=True, store_cache=True)
+
+        cached_bundle = self._restore_cached_bundle(request)
+        if cached_bundle is not None:
+            return cached_bundle
+
+        identity_bundle = await self._collect_request(request, allow_cache=False, store_cache=False)
+        if not identity_bundle.generation_meta.get("level3_executed"):
+            self._cache_bundle(request, identity_bundle)
+            return identity_bundle
+
+        emotion_request = self._build_annotation_phase1_emotion_request(request)
+        emotion_bundle = await self._collect_request(emotion_request, allow_cache=True, store_cache=True)
+        merged_bundle = _merge_annotation_phase1_identity_and_emotion_bundles(identity_bundle, emotion_bundle)
+        self._cache_bundle(request, merged_bundle)
+        return merged_bundle
 
     async def build_level3_query_plan(self, request: EvidenceRequest) -> Level3QueryPlan:
         """
@@ -806,9 +556,10 @@ class NarrativeEvidenceService:
         修改说明: 显式收紧 `mode` 的 Literal 类型，避免 request->plan 改造后破坏仓库 typecheck。
         """
         mention_queries: list[MentionEvidenceQuery] = []
+        dropped_queries: list[dict[str, str]] = []
         allow_high_order = request.allow_llm_query_expansion and request.objective in {"identity", "relation"}
         if allow_high_order:
-            mention_queries = await self._build_queries(
+            mention_queries, dropped_queries = await self._build_queries(
                 context_text=request.query_text,
                 seed_entities=request.seed_entities,
                 current_chunk=request.current_chunk,
@@ -827,6 +578,7 @@ class NarrativeEvidenceService:
             mention_queries=mention_queries,
             candidate_pool_k=self._level3_pool_k(request.top_k),
             top_k=request.top_k,
+            dropped_queries=dropped_queries,
         )
 
     async def execute_level3_query_plan(
@@ -836,7 +588,7 @@ class NarrativeEvidenceService:
         *,
         active_entity_names: set[str],
         candidate_names: set[str],
-    ) -> list[SimilarChunkRow]:
+    ) -> tuple[list[SimilarChunkRow], list[dict[str, object]]]:
         """
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
@@ -856,14 +608,14 @@ class NarrativeEvidenceService:
         request: EvidenceRequest,
         active_entity_names: set[str],
         candidate_names: set[str],
-    ) -> list[SimilarChunkRow]:
+    ) -> tuple[list[SimilarChunkRow], list[dict[str, object]]]:
         """
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
         说明: query planning 已外提后，这里只负责执行计划、重排候选并按请求预算裁剪。
         """
         started_at = time.perf_counter()
-        collected = await self._retrieve_candidates(
+        collected, failed_queries = await self._retrieve_candidates(
             plan=plan,
             request=request,
         )
@@ -908,7 +660,7 @@ class NarrativeEvidenceService:
             f"[{request.objective}] Level3 重排完成：保留 {len(deduped)} 条证据",
             90,
         )
-        return deduped
+        return deduped, failed_queries
 
     async def _build_queries(
         self,
@@ -918,7 +670,7 @@ class NarrativeEvidenceService:
         current_chunk: int | None,
         objective: str,
         max_queries: int,
-    ) -> list[MentionEvidenceQuery]:
+    ) -> tuple[list[MentionEvidenceQuery], list[dict[str, str]]]:
         """
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
@@ -926,7 +678,7 @@ class NarrativeEvidenceService:
               relation 仅在显式允许时做受限扩展，其余目标保持 direct-only。
         """
         if not context_text or objective not in {"identity", "relation"}:
-            return []
+            return [], []
 
         from src.rag.mention_query import build_mention_evidence_queries
 
@@ -938,8 +690,18 @@ class NarrativeEvidenceService:
             objective=objective,
         )
         built_queries = build_mention_evidence_queries(mentions)
+        dropped_queries: list[dict[str, str]] = []
         effective_max_queries = max_queries if objective == "identity" else min(max_queries, 2)
         if len(built_queries) > effective_max_queries:
+            dropped_queries = [
+                {
+                    "query_text": query.query_text,
+                    "mention_text": query.mention_text,
+                    "query_variant": query.query_variant,
+                    "reason": "max_queries_budget",
+                }
+                for query in built_queries[effective_max_queries:]
+            ]
             logger.info(
                 "Level3 mention queries trimmed by budget: run_id={} chunk_id={} before={} after={}",
                 self._run_id,
@@ -956,7 +718,7 @@ class NarrativeEvidenceService:
             len(built_queries),
             int((time.perf_counter() - started_at) * 1000),
         )
-        return built_queries
+        return built_queries, dropped_queries
 
     async def _extract_mentions(
         self,
@@ -1019,7 +781,7 @@ class NarrativeEvidenceService:
         *,
         plan: Level3QueryPlan,
         request: EvidenceRequest,
-    ) -> list[SimilarChunkRow]:
+    ) -> tuple[list[SimilarChunkRow], list[dict[str, object]]]:
         """
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
@@ -1030,6 +792,7 @@ class NarrativeEvidenceService:
         修改说明: 显式声明 mixed base/mention query 元组类型，避免 tuple 推断过窄影响仓库 typecheck。
         """
         collected: list[SimilarChunkRow] = []
+        failed_queries: list[dict[str, object]] = []
         retrieval_top_k = plan.candidate_pool_k
         retrieval_queries: list[tuple[str, MentionEvidenceQuery | None]] = [
             ("mention", mention_query) for mention_query in plan.mention_queries
@@ -1037,19 +800,24 @@ class NarrativeEvidenceService:
         if plan.base_query_text:
             retrieval_queries.append(("base", None))
         if not retrieval_queries:
-            return collected
+            return collected, failed_queries
 
         query_texts = [
             query.query_text if query is not None else plan.base_query_text
             for _, query in retrieval_queries
         ]
         batch_started_at = time.perf_counter()
-        results_by_query = await self._search_level3_queries(
+        results_by_query, level3_failures = await self._search_level3_queries(
             query_texts,
             exclude_chunk_ids=request.exclude_chunk_ids,
             max_chunk_id=request.max_chunk_id,
             top_k=retrieval_top_k,
         )
+        failure_by_index: dict[int, dict[str, object]] = {}
+        for failure in level3_failures:
+            query_index = failure.get("query_index")
+            if isinstance(query_index, int):
+                failure_by_index[query_index] = failure
         logger.debug(
             "Level3 batched retrieval complete: run_id={} objective={} query_count={} duration_ms={}",
             self._run_id,
@@ -1061,6 +829,23 @@ class NarrativeEvidenceService:
             zip(retrieval_queries, results_by_query, strict=True),
             start=1,
         ):
+            query_failure: dict[str, object] | None = failure_by_index.get(index - 1)
+            if query_failure is not None:
+                failure_entry: dict[str, object] = {
+                    "query_index": index - 1,
+                    "query_kind": query_kind,
+                    "query_text": query_failure.get("query_text"),
+                    "stage": query_failure.get("stage"),
+                    "reason": query_failure.get("reason"),
+                }
+                if mention_query is not None:
+                    failure_entry.update(
+                        {
+                            "mention_text": mention_query.mention_text,
+                            "query_variant": mention_query.query_variant,
+                        }
+                    )
+                failed_queries.append(failure_entry)
             if query_kind == "mention" and mention_query is not None:
                 logger.debug(
                     "Level3 mention query complete: run_id={} query_index={}/{} query_len={} results={} batched={}",
@@ -1095,7 +880,7 @@ class NarrativeEvidenceService:
             )
             collected.extend(replace(result, query_variant="chunk_context") for result in query_results)
 
-        return collected
+        return collected, failed_queries
 
     async def _search_level3_queries(
         self,
@@ -1104,7 +889,7 @@ class NarrativeEvidenceService:
         exclude_chunk_ids: list[int] | None,
         max_chunk_id: int | None,
         top_k: int | None,
-    ) -> list[list[SimilarChunkRow]]:
+    ) -> tuple[list[list[SimilarChunkRow]], list[dict[str, object]]]:
         """
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
@@ -1112,7 +897,7 @@ class NarrativeEvidenceService:
               避免热路径继续逐条请求 embedding 服务。
         """
         if not query_texts:
-            return []
+            return [], []
         if len(query_texts) == 1:
             single_result = await self._search_level3_query(
                 query_texts[0],
@@ -1120,14 +905,18 @@ class NarrativeEvidenceService:
                 max_chunk_id=max_chunk_id,
                 top_k=top_k,
             )
-            return [single_result]
-        return await self._level3.search_similar_chunks_many(
+            failures = self._level3.consume_last_query_failures()
+            for failure in failures:
+                failure.setdefault("query_index", 0)
+            return [single_result], failures
+        results_by_query = await self._level3.search_similar_chunks_many(
             query_texts,
             exclude_chunk_ids=exclude_chunk_ids,
             max_chunk_id=max_chunk_id,
             top_k=top_k,
             ensure_ready=False,
         )
+        return results_by_query, self._level3.consume_last_query_failures()
 
     async def _rerank_candidates(
         self,
