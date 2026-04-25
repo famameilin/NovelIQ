@@ -339,6 +339,9 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
     assert context.evidence_bundle is bundle
     assert context.prompt_disambig_context is not None
     assert "「蒙面人」可能是：白芷" in context.prompt_disambig_context
+    assert context.phase4_request_template is not None
+    assert context.phase4_request_template.requested_names == []
+    assert context.phase4_request_template.seed_entities == []
 
 
 def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_bundle_has_value(monkeypatch):
@@ -632,8 +635,8 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
     assert context.phase4_request_template is not None
     assert context.phase4_request_template.consumer == "annotation_phase4"
     assert context.phase4_request_template.objective == "relation"
-    assert context.phase4_request_template.requested_names == ["旧值"]
-    assert context.phase4_request_template.seed_entities == ["旧值"]
+    assert context.phase4_request_template.requested_names == []
+    assert context.phase4_request_template.seed_entities == []
     expected_blocks = render_annotation_prompt_blocks(context.phase1_bundle)
     assert expected_blocks.active_entities is not None
     assert context.prompt_active_entities == expected_blocks.active_entities

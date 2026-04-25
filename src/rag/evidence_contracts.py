@@ -61,6 +61,20 @@ def _normalize_int_list(values: list[int]) -> list[int]:
     return normalized
 
 
+def _build_evidence_cache_content_variant(request: EvidenceRequest) -> str:
+    """
+    创建时间: 2026-04-25
+    任务: fix-phase1-overlay-cache-scope
+    说明: cache key 仍尽量忽略纯标签差异，但若某个 consumer 会真的改变 bundle 内容，
+          就必须显式打出 content variant；当前仅 annotation_phase1 的 identity+Level3
+          会额外合并 emotion overlay，不能再与普通 identity request 共用同一 cache 键。
+    """
+
+    if request.consumer == "annotation_phase1" and request.objective == "identity" and request.need_level3:
+        return "annotation_phase1_identity_with_emotion_overlay"
+    return "default"
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceRequest:
     """
@@ -126,8 +140,14 @@ def build_evidence_request_fingerprint(request: EvidenceRequest) -> tuple[object
     任务: evidence-service-request-unification
     修改说明: 指纹服务于 evidence 复用，因此只保留会影响实际取证结果的字段；
               consumer/background_entities 不改变 bundle 内容时，不应阻止 cache reuse。
+
+    修改时间: 2026-04-25
+    任务: fix-phase1-overlay-cache-scope
+    修改说明: 若某个 consumer 会额外改变 bundle 内容，则要把该 content variant
+              纳入 fingerprint，避免 annotation_phase1 的 emotion overlay 污染其他 identity consumer。
     """
     return (
+        _build_evidence_cache_content_variant(request),
         request.objective,
         request.query_text,
         tuple(request.requested_names),

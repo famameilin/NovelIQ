@@ -272,6 +272,11 @@ async def _resolve_phase4_bundle(
     任务: evidence-service-request-unification
     修改说明: Phase4 的 relation request 需要等 Phase1 产出 known_characters 后再补全 requested_names/seed_entities；
           这一步统一委托 evidence service，multi_phase 只负责调度。
+
+    修改时间: 2026-04-25
+    任务: fix-phase4-request-scope
+    修改说明: `requested_names` 只代表当前 relation consumer 真正要看的角色；
+              template.seed_entities 只保留为检索锚点，不再反向抬升成 consumer target。
     """
     if context.phase4_bundle is not None:
         return context.phase4_bundle
@@ -282,7 +287,6 @@ async def _resolve_phase4_bundle(
     for name in (
         list(known_characters or [])
         + list(context.phase4_request_template.requested_names)
-        + list(context.phase4_request_template.seed_entities)
     ):
         normalized = str(name).strip()
         if normalized and normalized not in requested_names:
