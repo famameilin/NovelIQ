@@ -15,6 +15,10 @@
 修改时间: 2026-04-24
 任务: llm-mention-rerank-chain
 修改内容: 导出 LLM mention extraction service 与模型 rerank 边界类型，供上层按需注入。
+
+修改时间: 2026-04-25
+任务: evidence-service-request-unification
+修改内容: 公开语义切换到 NarrativeEvidenceService；不再导出 DisambigContextProvider 旧命名。
 """
 
 from src.rag.authority import Level1AuthorityProvider
@@ -28,6 +32,7 @@ from src.rag.evidence_types import (
     Level1AuthoritySnapshot,
 )
 from src.rag.level3_contracts import (
+    Level3Consumer,
     Level3Objective,
     Level3QueryPlan,
     Level3Request,
@@ -40,13 +45,13 @@ from src.rag.model_rerank_llm import LLMLevel3Reranker
 from src.rag.retriever import (
     ActiveEntityLookup,
     AliasLookup,
-    DisambigContextProvider,
     Level3NotReadyError,
     Level3VectorEvidence,
+    NarrativeEvidenceService,
 )
 
 __all__ = [
-    "DisambigContextProvider",
+    "NarrativeEvidenceService",
     "AliasLookup",
     "ActiveEntityLookup",
     "AliasMapping",
@@ -59,6 +64,7 @@ __all__ = [
     "Level1AuthorityProvider",
     "Level3NotReadyError",
     "Level3VectorEvidence",
+    "Level3Consumer",
     "Level3Objective",
     "Level3Request",
     "Level3QueryPlan",

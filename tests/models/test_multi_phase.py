@@ -368,10 +368,8 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
     说明: Phase4 relation bundle 应在 Phase1 产出 known_characters 后再取证，不能继续复用 Phase1 identity bundle。
     """
     evidence_provider = MagicMock()
-    evidence_provider.requires_level3.return_value = False
-    evidence_provider.is_level3_available.return_value = True
     phase4_bundle = MagicMock(name="phase4_bundle")
-    evidence_provider.collect_evidence_with_level3 = AsyncMock(return_value=phase4_bundle)
+    evidence_provider.collect = AsyncMock(return_value=phase4_bundle)
 
     with (
         patch(
@@ -406,12 +404,18 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
             phase2_bundle=MagicMock(name="phase2_bundle"),
             phase3_bundle=MagicMock(name="phase3_bundle"),
             phase4_request_template=Level3Request(
+                consumer="annotation_phase4",
                 objective="relation",
                 query_text="白芷看向侯飞白。",
+                requested_names=["侯飞白"],
                 seed_entities=["侯飞白"],
+                background_entities=[],
                 current_chunk=12,
                 max_chunk_id=11,
                 exclude_chunk_ids=[12],
+                need_level1=True,
+                need_level2=True,
+                need_level3=True,
                 allow_llm_query_expansion=False,
                 top_k=settings.rag.level3_top_k,
                 max_queries=settings.rag.level3_max_queries,
@@ -420,9 +424,10 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
             evidence_provider=evidence_provider,
         )
 
-    evidence_provider.collect_evidence_with_level3.assert_awaited_once()
-    resolved_request = evidence_provider.collect_evidence_with_level3.await_args.args[0]
+    evidence_provider.collect.assert_awaited_once()
+    resolved_request = evidence_provider.collect.await_args.args[0]
     assert resolved_request.objective == "relation"
+    assert resolved_request.requested_names == ["白芷", "侯飞白"]
     assert resolved_request.seed_entities == ["白芷", "侯飞白"]
     assert mock_phase4.await_args.kwargs["evidence_bundle"] is phase4_bundle
 

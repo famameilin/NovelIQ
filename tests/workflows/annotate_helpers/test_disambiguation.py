@@ -336,12 +336,18 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     assert client.received_prompt_context.shared_evidence_context is not None
     assert "<Disambig_Candidates>" in client.received_prompt_context.shared_evidence_context
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
-    assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
+    assert evidence_provider.calls[0]["method"] == "collect"
+    assert evidence_provider.calls[0]["consumer"] == "incremental_disambiguation"
     assert evidence_provider.calls[0]["objective"] == "identity"
+    assert evidence_provider.calls[0]["requested_names"] == ["灰衣人"]
     assert evidence_provider.calls[0]["names_in_chunk"] == ["灰衣人"]
+    assert evidence_provider.calls[0]["background_entities"] == ["白芷"]
     assert evidence_provider.calls[0]["current_chunk"] == 12
     assert evidence_provider.calls[0]["exclude_chunk_ids"] == [12]
     assert evidence_provider.calls[0]["max_chunk_id"] == 12
+    assert evidence_provider.calls[0]["need_level1"] is True
+    assert evidence_provider.calls[0]["need_level2"] is True
+    assert evidence_provider.calls[0]["need_level3"] is True
     assert mock_build_context_sentences.call_count == 2
     for call in mock_build_context_sentences.call_args_list:
         assert call.kwargs["max_chunk_id"] == 12
@@ -435,11 +441,15 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     assert client.received_prompt_context is not None
     assert client.received_prompt_context.shared_evidence_context is not None
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
-    assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
+    assert evidence_provider.calls[0]["method"] == "collect"
+    assert evidence_provider.calls[0]["consumer"] == "final_disambiguation"
     assert evidence_provider.calls[0]["objective"] == "identity"
+    assert evidence_provider.calls[0]["requested_names"] == ["灰衣人"]
     assert evidence_provider.calls[0]["names_in_chunk"] == ["灰衣人"]
+    assert evidence_provider.calls[0]["background_entities"] == ["白芷"]
     assert evidence_provider.calls[0]["current_chunk"] is None
     assert evidence_provider.calls[0]["max_chunk_id"] is None
+    assert evidence_provider.calls[0]["need_level3"] is True
     build_hint_call = mock_build_existing_hint.call_args
     assert build_hint_call.kwargs["current_chunk_id"] is None
     user_content = mock_record.call_args.kwargs["messages"][-1]["content"]
@@ -476,7 +486,8 @@ async def test_build_prompt_context_with_shared_evidence_raises_when_required_le
             current_chunk=12,
             active_entity_fallback_names={"灰衣人"},
     )
-    assert evidence_provider.calls == []
+    assert evidence_provider.calls[0]["method"] == "collect"
+    assert evidence_provider.calls[0]["need_level3"] is True
 
 
 @pytest.mark.asyncio
@@ -518,9 +529,21 @@ async def test_build_prompt_context_with_shared_evidence_keeps_level12_fallback_
     assert "「灰衣人」可能是：白芷" in prompt_context.shared_evidence_context
     assert evidence_provider.calls == [
         {
-            "method": "collect_evidence",
+            "method": "collect",
+            "request": evidence_provider.calls[0]["request"],
+            "consumer": "incremental_disambiguation",
+            "objective": "identity",
+            "requested_names": ["灰衣人"],
             "names_in_chunk": ["灰衣人"],
+            "background_entities": [],
             "current_chunk": 12,
+            "context_text": "",
+            "exclude_chunk_ids": [12],
+            "max_chunk_id": 12,
+            "max_queries": evidence_provider.calls[0]["max_queries"],
+            "need_level1": True,
+            "need_level2": True,
+            "need_level3": False,
         }
     ]
 
