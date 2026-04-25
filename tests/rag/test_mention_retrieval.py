@@ -797,8 +797,9 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
             [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.94)],
             [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.90)],
             [SimilarChunkRow(chunk_id=6, text="相似场景。", similarity=0.88)],
@@ -831,9 +832,16 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     assert semantic_items[0].metadata["business_rerank_method"] == "mention_feature_rerank"
     assert semantic_items[0].metadata["final_rank_score"] == semantic_items[0].score
     assert semantic_items[0].metadata["business_rerank_score"] >= semantic_items[0].metadata["chunk_semantic_score"]
-    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["max_chunk_id"] == 9
-    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
-    assert all(call.kwargs["ensure_ready"] is False for call in provider._level3.search_similar_chunks.await_args_list)
+    provider._level3.search_similar_chunks_many.assert_awaited_once()
+    assert provider._level3.search_similar_chunks_many.await_args.args[0] == [
+        mention_queries[0].query_text,
+        mention_queries[1].query_text,
+        "那个穿红衣的女子突然出手。",
+    ]
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["max_chunk_id"] == 9
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 20
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["ensure_ready"] is False
+    provider._level3.search_similar_chunks.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -846,14 +854,18 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    batched_query_texts: list[str] = []
+
+    async def _fake_search_similar_chunks_many(query_texts, **_kwargs):
+        batched_query_texts[:] = list(query_texts)
+        return [
             [SimilarChunkRow(chunk_id=5, text="白芷曾穿红衣出手。", similarity=0.94)],
             [SimilarChunkRow(chunk_id=6, text="红衣女子立在门前。", similarity=0.90)],
-            [],
-            [],
+            *([[]] * max(len(query_texts) - 2, 0)),
         ]
-    )
+
+    provider._level3.search_similar_chunks_many = AsyncMock(side_effect=_fake_search_similar_chunks_many)
 
     bundle = await provider.collect_evidence_with_level3(
         _build_level3_request(
@@ -869,7 +881,9 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     assert semantic_items[0].metadata["mention_source"] == "rule"
     assert semantic_items[0].metadata["query_variant"] == "mention_raw"
     assert semantic_items[0].metadata["rerank_source"] == "deterministic_fallback"
-    assert provider._level3.search_similar_chunks.await_args_list[0].args[0] == "穿红衣的女子"
+    assert batched_query_texts[0] == "穿红衣的女子"
+    provider._level3.search_similar_chunks_many.assert_awaited_once()
+    provider._level3.search_similar_chunks.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -889,8 +903,9 @@ async def test_provider_uses_model_rerank_when_available() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
             [
                 SimilarChunkRow(chunk_id=10, text="红衣女子出手。", similarity=0.95),
                 SimilarChunkRow(chunk_id=11, text="白芷正是那名红衣女子。", similarity=0.88),
@@ -926,6 +941,8 @@ async def test_provider_uses_model_rerank_when_available() -> None:
     assert semantic_items[0].metadata["business_rerank_score"] is not None
     assert semantic_items[0].score == 0.97
     reranker.rerank.assert_awaited_once()
+    provider._level3.search_similar_chunks_many.assert_awaited_once()
+    provider._level3.search_similar_chunks.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -938,8 +955,9 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     provider = DisambigContextProvider(level3_enabled=True, level3_top_k=1)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
-    provider._level3.search_similar_chunks = AsyncMock(
-        side_effect=[
+    provider._level3.search_similar_chunks = AsyncMock()
+    provider._level3.search_similar_chunks_many = AsyncMock(
+        return_value=[
             [
                 SimilarChunkRow(
                     chunk_id=4,
@@ -977,4 +995,5 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     assert semantic_items[0].metadata["chunk_semantic_score"] == 0.82
     assert semantic_items[0].metadata["final_rank_score"] == semantic_items[0].score
     assert semantic_items[0].metadata["feature_overlap"] == ["红衣", "女子", "出手"]
-    assert provider._level3.search_similar_chunks.await_args_list[0].kwargs["top_k"] == 20
+    assert provider._level3.search_similar_chunks_many.await_args.kwargs["top_k"] == 20
+    provider._level3.search_similar_chunks.assert_not_awaited()

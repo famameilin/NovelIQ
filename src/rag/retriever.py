@@ -521,60 +521,101 @@ class DisambigContextProvider:
         """
         collected: list[SimilarChunkRow] = []
         retrieval_top_k = plan.candidate_pool_k
-
-        for index, mention_query in enumerate(plan.mention_queries, start=1):
-            query_started_at = time.perf_counter()
-            results = await self._search_level3_query(
-                mention_query.query_text,
-                exclude_chunk_ids=request.exclude_chunk_ids,
-                max_chunk_id=request.max_chunk_id,
-                top_k=retrieval_top_k,
-            )
-            logger.debug(
-                "Level3 mention query complete: run_id={} query_index={}/{} query_len={} results={} "
-                "duration_ms={}",
-                self._run_id,
-                index,
-                len(plan.mention_queries),
-                len(mention_query.query_text),
-                len(results),
-                int((time.perf_counter() - query_started_at) * 1000),
-            )
-            collected.extend(
-                replace(
-                    result,
-                    query_kind="mention",
-                    mention_text=mention_query.mention_text,
-                    mention_type=mention_query.mention_type,
-                    matched_features=mention_query.matched_features,
-                    mention_source=mention_query.mention_source,
-                    mention_confidence=mention_query.mention_confidence,
-                    query_variant=mention_query.query_variant,
-                )
-                for result in results
-            )
-
+        retrieval_queries = [("mention", mention_query) for mention_query in plan.mention_queries]
         if plan.base_query_text:
-            query_started_at = time.perf_counter()
-            context_results = await self._search_level3_query(
-                plan.base_query_text,
-                exclude_chunk_ids=request.exclude_chunk_ids,
-                max_chunk_id=request.max_chunk_id,
-                top_k=retrieval_top_k,
-            )
+            retrieval_queries.append(("base", None))
+        if not retrieval_queries:
+            return collected
+
+        query_texts = [
+            query.query_text if query is not None else plan.base_query_text
+            for _, query in retrieval_queries
+        ]
+        batch_started_at = time.perf_counter()
+        results_by_query = await self._search_level3_queries(
+            query_texts,
+            exclude_chunk_ids=request.exclude_chunk_ids,
+            max_chunk_id=request.max_chunk_id,
+            top_k=retrieval_top_k,
+        )
+        logger.debug(
+            "Level3 batched retrieval complete: run_id={} objective={} query_count={} duration_ms={}",
+            self._run_id,
+            request.objective,
+            len(query_texts),
+            int((time.perf_counter() - batch_started_at) * 1000),
+        )
+        for index, ((query_kind, mention_query), query_results) in enumerate(
+            zip(retrieval_queries, results_by_query, strict=True),
+            start=1,
+        ):
+            if query_kind == "mention" and mention_query is not None:
+                logger.debug(
+                    "Level3 mention query complete: run_id={} query_index={}/{} query_len={} results={} batched={}",
+                    self._run_id,
+                    index,
+                    len(retrieval_queries),
+                    len(mention_query.query_text),
+                    len(query_results),
+                    len(query_texts) > 1,
+                )
+                collected.extend(
+                    replace(
+                        result,
+                        query_kind="mention",
+                        mention_text=mention_query.mention_text,
+                        mention_type=mention_query.mention_type,
+                        matched_features=mention_query.matched_features,
+                        mention_source=mention_query.mention_source,
+                        mention_confidence=mention_query.mention_confidence,
+                        query_variant=mention_query.query_variant,
+                    )
+                    for result in query_results
+                )
+                continue
+
             logger.debug(
-                "Level3 chunk-context query complete: run_id={} query_len={} results={} duration_ms={}",
+                "Level3 chunk-context query complete: run_id={} query_len={} results={} batched={}",
                 self._run_id,
                 len(plan.base_query_text),
-                len(context_results),
-                int((time.perf_counter() - query_started_at) * 1000),
+                len(query_results),
+                len(query_texts) > 1,
             )
-            collected.extend(
-                replace(result, query_variant="chunk_context")
-                for result in context_results
-            )
+            collected.extend(replace(result, query_variant="chunk_context") for result in query_results)
 
         return collected
+
+    async def _search_level3_queries(
+        self,
+        query_texts: list[str],
+        *,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        top_k: int | None,
+    ) -> list[list[SimilarChunkRow]]:
+        """
+        创建时间: 2026-04-25
+        任务: level3-intent-phase-split
+        说明: 多 query 时统一走 batched Level3 检索，单 query 仍复用既有入口，
+              避免热路径继续逐条请求 embedding 服务。
+        """
+        if not query_texts:
+            return []
+        if len(query_texts) == 1:
+            single_result = await self._search_level3_query(
+                query_texts[0],
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+                top_k=top_k,
+            )
+            return [single_result]
+        return await self._level3.search_similar_chunks_many(
+            query_texts,
+            exclude_chunk_ids=exclude_chunk_ids,
+            max_chunk_id=max_chunk_id,
+            top_k=top_k,
+            ensure_ready=False,
+        )
 
     async def _rerank_candidates(
         self,

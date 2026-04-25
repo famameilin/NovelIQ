@@ -459,7 +459,7 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
 
 @pytest.mark.asyncio
 async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_available(monkeypatch):
-    bundle = EvidenceBundle(
+    identity_bundle = EvidenceBundle(
         local_evidence=[
             EvidenceItem(
                 evidence_type="active_entity",
@@ -484,11 +484,30 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
             )
         ],
     )
+    emotion_bundle = EvidenceBundle(
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="emotion_exemplar",
+                source="chunk_embeddings",
+                content="她翻阅旧案卷时指节发白。",
+                chunk_id=7,
+                score=0.88,
+                metadata={
+                    "chunk_id": 7,
+                    "text": "她翻阅旧案卷时指节发白。",
+                    "similarity": 0.88,
+                    "emotional_valence": "mild_negative",
+                },
+            )
+        ]
+    )
+    phase2_bundle = EvidenceBundle()
     provider = Mock()
     provider.requires_level3.return_value = False
     provider.is_level3_available.return_value = True
-    provider.collect_evidence_with_level3 = AsyncMock(return_value=bundle)
-    expected_active_entities = render_annotation_prompt_blocks(bundle).active_entities
+    provider.collect_evidence_with_level3 = AsyncMock(
+        side_effect=[identity_bundle, emotion_bundle, phase2_bundle]
+    )
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
@@ -496,7 +515,6 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         "_build_active_entities_prompt_from_authority",
         lambda *_args, **_kwargs: "【近期活跃角色】\n- 旧值（helper）：观察 [chunk=20]",
     )
-    monkeypatch.setattr(context_module, "_extract_names_from_text", lambda _text: ["程霜"])
 
     context = await _prepare_chunk_context_with_level3(
         conn=object(),
@@ -508,23 +526,31 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         run_id="run-level3-available",
     )
 
-    assert provider.collect_evidence_with_level3.await_count == 2
-    phase1_request = provider.collect_evidence_with_level3.await_args_list[0].args[0]
-    phase2_request = provider.collect_evidence_with_level3.await_args_list[1].args[0]
-    assert phase1_request.objective == "identity"
-    assert phase1_request.query_text == "程霜翻阅旧案卷"
-    assert phase1_request.current_chunk == 21
-    assert phase1_request.max_chunk_id == 20
-    assert phase1_request.exclude_chunk_ids == [21]
+    assert provider.collect_evidence_with_level3.await_count == 3
+    phase1_identity_request = provider.collect_evidence_with_level3.await_args_list[0].args[0]
+    phase1_emotion_request = provider.collect_evidence_with_level3.await_args_list[1].args[0]
+    phase2_request = provider.collect_evidence_with_level3.await_args_list[2].args[0]
+    assert phase1_identity_request.objective == "identity"
+    assert phase1_identity_request.query_text == "程霜翻阅旧案卷"
+    assert phase1_identity_request.current_chunk == 21
+    assert phase1_identity_request.max_chunk_id == 20
+    assert phase1_identity_request.exclude_chunk_ids == [21]
+    assert phase1_emotion_request.objective == "emotion"
+    assert phase1_emotion_request.allow_llm_query_expansion is False
+    assert phase1_emotion_request.seed_entities == []
     assert phase2_request.objective == "foreshadowing"
     assert phase2_request.allow_llm_query_expansion is False
-    assert context.phase1_bundle is bundle
-    assert context.phase2_bundle is bundle
-    assert context.phase3_bundle is context.phase1_bundle
+    assert context.phase1_bundle is not identity_bundle
+    assert context.phase2_bundle is phase2_bundle
+    assert context.phase3_bundle is identity_bundle
+    assert any(item.evidence_type == "emotion_exemplar" for item in context.phase1_bundle.semantic_evidence)
     assert context.phase4_request_template is not None
     assert context.phase4_request_template.objective == "relation"
-    assert expected_active_entities is not None
-    assert context.prompt_active_entities == expected_active_entities
+    expected_blocks = render_annotation_prompt_blocks(context.phase1_bundle)
+    assert expected_blocks.active_entities is not None
+    assert context.prompt_active_entities == expected_blocks.active_entities
+    assert context.prompt_disambig_context is not None
+    assert "<Emotion_Exemplars>" in context.prompt_disambig_context
     assert context.prompt_vector_evidence is not None
     assert "[Chunk 4]" in context.prompt_vector_evidence
 
