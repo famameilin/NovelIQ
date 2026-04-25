@@ -53,7 +53,6 @@ class TestCli:
         analysis = await run_diagnose(
             run_id=self.run_id,
             session=self.db_session,
-            cache_path=None,
             client=FakeClient(),
             analysis_logger=None,
         )

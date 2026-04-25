@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -34,7 +33,6 @@ async def run_annotate(
     run_id: str,
     session: Session,
     resume: bool = False,
-    cache_path: Path | None = None,
     analysis_logger: AnalysisLogger | None = None,
     novel_id: str = "default",
     novel_title: str | None = None,
@@ -83,11 +81,15 @@ async def run_annotate(
     任务: refactor/annotate-async
     修改内容: 改为 async def
 
+    修改时间: 2026-04-25
+    修改者: Codex
+    任务: remove-unused-workflow-cache-hooks
+    修改内容: 删除未被主链实际消费的 cache_path 参数，避免保留无效接口。
+
     Args:
         run_id: 运行ID
         session: 数据库连接
         resume: 是否恢复模式
-        cache_path: 缓存路径
         analysis_logger: 分析日志器
         novel_id: 小说ID
         novel_title: 小说标题

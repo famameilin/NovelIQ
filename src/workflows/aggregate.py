@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -325,7 +324,6 @@ def _log_quality_gate_report(run_id: str, report: dict[str, Any]) -> None:
 async def run_aggregate(
     run_id: str,
     session: Session,
-    cache_path: Path | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, int]:
     """
@@ -344,10 +342,14 @@ async def run_aggregate(
     任务: workflows 使用 Repository 模式重构
     修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
+    修改时间: 2026-04-25
+    修改者: Codex
+    任务: remove-unused-workflow-cache-hooks
+    修改内容: 删除未被主链实际消费的 cache_path 参数，避免继续暴露无效缓存接口。
+
     Args:
         run_id: 运行ID
         session: 数据库连接
-        cache_path: 缓存路径
         emitter: 统一事件发送器，签名为 async (StreamEvent) -> None
 
     Returns:

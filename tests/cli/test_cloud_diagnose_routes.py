@@ -40,6 +40,8 @@ import json
 import sys
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import text
@@ -352,6 +354,74 @@ class TestCloudDiagnose:
         assert fetched["protagonist"] == "角色0"
         assert fetched["main_characters"] is not None
         assert fetched["core_cast"] is not None
+
+    @pytest.mark.asyncio()
+    async def test_run_diagnose_persists_model_interaction(self) -> None:
+        """
+        修改时间: 2026-04-25
+        修改者: Codex
+        任务: remove-diagnosis-cache-and-fix-interaction-persistence
+        修改内容: 回归验证 diagnosis 阶段的 prompt/response/thinking 会写入 model_interactions。
+        """
+        self._create_full_data(3)
+
+        content = json.dumps(
+            {
+                "novel_id": self.novel_id,
+                "foreshadow_rate": 0.2,
+                "arc_scores": {"角色0": 9.1},
+                "narrative_type": "三幕",
+                "topic_labels": ["成长"],
+                "diagnosis": "诊断完成",
+                "narrative_arc_type": "白手起家",
+                "protagonist": "角色0",
+                "main_characters": ["角色0"],
+                "core_cast": ["角色0", "角色1"],
+            },
+            ensure_ascii=False,
+        )
+        raw_response = MagicMock()
+        raw_response.choices = [MagicMock(message=MagicMock(content=content))]
+        structured_result = SimpleNamespace(
+            parsed=CloudAnalysis.model_validate_json(content),
+            raw_response=raw_response,
+            response_text=content,
+            thinking_content="诊断思考内容",
+            reasoning_tokens=17,
+        )
+        diagnose_client = DiagnosisClient(
+            client=MagicMock(),
+            analysis_logger=None,
+            session=self.db_session,
+        )
+
+        with patch(
+            "src.models.diagnosis.call_structured_output",
+            new=AsyncMock(return_value=structured_result),
+        ):
+            await run_diagnose(
+                run_id=self.run_id,
+                session=self.db_session,
+                client=diagnose_client,
+            )
+
+        row = self.db_session.execute(
+            text(
+                """
+                SELECT interaction_type, phase, response, thinking, reasoning_tokens
+                FROM model_interactions
+                WHERE run_id = :run_id AND interaction_type = 'diagnose'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {"run_id": self.run_id},
+        ).mappings().one()
+        assert row["interaction_type"] == "diagnose"
+        assert row["phase"] == "diagnose"
+        assert row["reasoning_tokens"] == 17
+        assert "诊断完成" in row["response"]
+        assert row["thinking"] == "诊断思考内容"
 
     def test_finalize_result_preserves_character_fields(self) -> None:
         client = object.__new__(DiagnosisClient)
