@@ -257,6 +257,7 @@ class RAGSettings:
     level3_rerank_enabled: bool = False
     level3_top_k: int = 5
     level3_max_queries: int = 6
+    level3_model_rerank_query_max_chars: int = 320
 
 
 def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
@@ -516,4 +517,5 @@ def _parse_rag_settings(data: dict[str, Any] | None) -> RAGSettings:
         level3_rerank_enabled=data.get("level3_rerank_enabled", False),
         level3_top_k=data.get("level3_top_k", data.get("top_k", 5)),
         level3_max_queries=data.get("level3_max_queries", 6),
+        level3_model_rerank_query_max_chars=data.get("level3_model_rerank_query_max_chars", 320),
     )

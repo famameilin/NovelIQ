@@ -34,6 +34,7 @@ class Level3Request:
     allow_llm_query_expansion: bool
     top_k: int
     max_queries: int
+    model_rerank_query_max_chars: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,4 +74,5 @@ def build_level3_request_fingerprint(request: Level3Request) -> tuple[object, ..
         request.allow_llm_query_expansion,
         request.top_k,
         request.max_queries,
+        request.model_rerank_query_max_chars,
     )

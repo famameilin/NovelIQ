@@ -415,6 +415,7 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
                 allow_llm_query_expansion=False,
                 top_k=settings.rag.level3_top_k,
                 max_queries=settings.rag.level3_max_queries,
+                model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
             ),
             evidence_provider=evidence_provider,
         )
