@@ -383,6 +383,16 @@ class NarrativeEvidenceService:
             allow_llm_query_expansion=False,
         )
 
+    def _build_annotation_phase1_identity_base_request(self, request: EvidenceRequest) -> EvidenceRequest:
+        """
+        创建时间: 2026-04-26
+        任务: fix-phase1-phase3-base-cache-reuse
+        说明: Phase1 的 emotion overlay 只改变最终返回 bundle，不改变 identity base recall；
+              这里显式派生一个“无 overlay content variant”的请求键，供 Phase3 等纯 identity consumer
+              复用同一份 Level3 base evidence，避免同 chunk 重复 embedding/检索/rerank。
+        """
+        return replace(request, consumer="annotation_phase3")
+
     async def _collect_request(
         self,
         request: EvidenceRequest,
@@ -534,7 +544,13 @@ class NarrativeEvidenceService:
         if cached_bundle is not None:
             return cached_bundle
 
-        identity_bundle = await self._collect_request(request, allow_cache=False, store_cache=False)
+        base_request = self._build_annotation_phase1_identity_base_request(request)
+        identity_bundle = self._restore_cached_bundle(base_request)
+        if identity_bundle is None:
+            identity_bundle = await self._collect_request(request, allow_cache=False, store_cache=False)
+            # 中文注释：先把不带 emotion overlay 的 identity base 存进“普通 identity”缓存键，
+            # 后续 annotation_phase3 命中同语义请求时即可直接复用，不必再跑一轮 Level3 热路径。
+            self._cache_bundle(base_request, identity_bundle)
         if not identity_bundle.generation_meta.get("level3_executed"):
             self._cache_bundle(request, identity_bundle)
             return identity_bundle

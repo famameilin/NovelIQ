@@ -305,7 +305,7 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
         requested_names=["蒙面人"],
     )
     provider = Mock()
-    provider._collect_base_evidence.side_effect = [bundle, EvidenceBundle()]
+    provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle()])
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
@@ -339,6 +339,9 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
     assert context.evidence_bundle is bundle
     assert context.prompt_disambig_context is not None
     assert "「蒙面人」可能是：白芷" in context.prompt_disambig_context
+    assert provider.collect.await_count == 2
+    assert provider.collect.await_args_list[0].args[0].consumer == "annotation_phase1"
+    assert provider.collect.await_args_list[1].args[0].consumer == "annotation_phase2"
     assert context.phase4_request_template is not None
     assert context.phase4_request_template.requested_names == []
     assert context.phase4_request_template.seed_entities == []
@@ -361,7 +364,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
         ]
     )
     provider = Mock()
-    provider._collect_base_evidence.side_effect = [bundle, EvidenceBundle()]
+    provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle()])
     expected_active_entities = render_annotation_prompt_blocks(bundle).active_entities
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
@@ -394,6 +397,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
     assert context.prompt_active_entities == expected_active_entities
     assert context.prev_chunk_text == "prev:run-override:20"
     assert context.next_chunk_text == "next:run-override:20"
+    assert provider.collect.await_count == 2
 
 
 def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
