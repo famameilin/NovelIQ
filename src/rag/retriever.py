@@ -37,6 +37,12 @@
 任务: emotion-rag-evidence-provider
 修改内容: 在统一 semantic_evidence 主路径内补充 emotion exemplar 证据，供 Phase1 情绪判断复用
 
+修改时间: 2026-04-25
+修改者: Codex
+任务: evidence-service-request-unification
+修改内容: 将公开语义从 DisambigContextProvider 收口到 NarrativeEvidenceService.collect(request)，
+    workflow 不再决定走哪个 evidence 入口，Level3Request 也同步升格为统一输入合同。
+
 说明: 本模块提供证据收集功能（Provider 层），支持三级证据：
 - Level1: 别名表精确匹配
 - Level2: 活跃实体候选
@@ -49,7 +55,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -61,7 +67,12 @@ from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
 from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
-from src.rag.level3_contracts import Level3QueryMode, Level3QueryPlan, Level3Request
+from src.rag.level3_contracts import (
+    Level3QueryMode,
+    Level3QueryPlan,
+    Level3Request,
+    build_level3_request_fingerprint,
+)
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
 from src.rag.mention_extraction_service import MentionExtractionService, PersonMentionExtractor
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
@@ -81,19 +92,19 @@ __all__ = [
     "ActiveEntityLookup",
     "Level3NotReadyError",
     "Level3VectorEvidence",
-    "DisambigContextProvider",
+    "NarrativeEvidenceService",
 ]
 
 
-class DisambigContextProvider:
-    """证据收集提供器（Provider 层）
+class NarrativeEvidenceService:
+    """叙事证据服务（Evidence Service 层）
 
-    负责收集三级证据并组装为 EvidenceBundle：
+    负责接收统一的 Level3Request，并编排三级证据为 EvidenceBundle：
     - Level1: 别名表精确映射
     - Level2: 近期活跃实体
     - Level3: 向量语义相似 chunk
 
-    prompt block 的文本渲染已迁移至 renderer 层。
+    prompt block 的文本渲染仍留在 renderer 层；service 只负责取证编排。
     """
 
     def __init__(
@@ -144,6 +155,7 @@ class DisambigContextProvider:
         self._mention_extraction_service = MentionExtractionService(mention_extractor)
         self._level3_reranker = level3_reranker
         self._progress_emitter = progress_emitter
+        self._bundle_cache: dict[tuple[object, ...], EvidenceBundle] = {}
 
     async def _emit_level3_progress(self, current_chunk: int | None, message: str, sub_percent: float) -> None:
         """
@@ -178,6 +190,7 @@ class DisambigContextProvider:
         """别名映射和关系缓存失效（每个 chunk 处理后调用，因为 projection 可能更新了别名表）"""
         self._alias_lookup.invalidate_cache()
         self._authority_snapshot_cache = None
+        self._bundle_cache.clear()
 
     def _get_authority_snapshot(self) -> Level1AuthoritySnapshot:
         if not self._level1_enabled or self._authority_provider is None or self._run_id is None:
@@ -186,15 +199,84 @@ class DisambigContextProvider:
             self._authority_snapshot_cache = self._authority_provider.build_snapshot(self._run_id)
         return self._authority_snapshot_cache
 
-    def _build_structured_evidence(self, names_in_chunk: list[str] | None = None) -> EvidenceBundle:
+    def _build_structured_evidence(self, requested_names: list[str] | None = None) -> EvidenceBundle:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: Level1 只按 request.requested_names 过滤；
+              不再把 retrieval seed_entities 误当成“当前 consumer 真正要看的名字”。
+        """
         snapshot = self._get_authority_snapshot()
-        return self._bundle_builder.build_structured_bundle(snapshot, names_in_chunk=names_in_chunk)
+        return self._bundle_builder.build_structured_bundle(snapshot, requested_names=requested_names)
 
-    def collect_evidence(
-        self,
-        names_in_chunk: list[str] | None = None,
-        current_chunk: int | None = None,
-    ) -> EvidenceBundle:
+    def _build_request_meta(self, request: Level3Request) -> dict[str, Any]:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: request_meta 直接记录调用方显式声明的输入边界，方便后续日志、回放和问题归因。
+        """
+        return {
+            "consumer": request.consumer,
+            "objective": request.objective,
+            "requested_names": list(request.requested_names),
+            "seed_entities": list(request.seed_entities),
+            "background_entities": list(request.background_entities),
+            "current_chunk": request.current_chunk,
+            "max_chunk_id": request.max_chunk_id,
+            "exclude_chunk_ids": list(request.exclude_chunk_ids),
+        }
+
+    def _build_generation_meta(self, request: Level3Request) -> dict[str, Any]:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: generation_meta 统一承载本次 evidence 编排观察字段；
+              即使某条路径没有真正执行 Level3，也保留稳定键名，避免观察面继续分裂。
+        """
+        return {
+            "need_level1": request.need_level1,
+            "need_level2": request.need_level2,
+            "need_level3": request.need_level3,
+            "level3_executed": False,
+            "query_mode": "disabled",
+            "query_count": 0,
+            "top_k": request.top_k,
+            "failed_queries": [],
+            "dropped_queries": [],
+            "batch_mode": "none",
+            "cache_reuse": False,
+            "level3_skipped_reason": None,
+            "empty_query_fallback_reason": None,
+        }
+
+    def _restore_cached_bundle(self, request: Level3Request) -> EvidenceBundle | None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: cache 只复用 evidence 内容本身；每次命中后仍用当前 request 的 meta 重新打戳，
+              避免 Phase1/Phase3 这类 consumer 复用时把上一跳标签带过去。
+        """
+        cache_key = build_level3_request_fingerprint(request)
+        cached_bundle = self._bundle_cache.get(cache_key)
+        if cached_bundle is None:
+            return None
+        generation_meta = dict(cached_bundle.generation_meta)
+        generation_meta["cache_reuse"] = True
+        return cached_bundle.clone_with_meta(
+            request_meta=self._build_request_meta(request),
+            generation_meta=generation_meta,
+        )
+
+    def _cache_bundle(self, request: Level3Request, bundle: EvidenceBundle) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: service 级 cache 只按真实取证语义复用，供同一 chunk 内的多 consumer 复用相同 bundle。
+        """
+        cache_key = build_level3_request_fingerprint(request)
+        self._bundle_cache[cache_key] = bundle.clone_with_meta()
+
+    def _collect_base_evidence(self, request: Level3Request) -> EvidenceBundle:
         """
         收集 Level1/Level2 证据。
 
@@ -202,15 +284,27 @@ class DisambigContextProvider:
         任务: fix-coupling-review-findings
         修改内容: authority Level2 合同已落地后，不再吞掉 AttributeError；
                   若 authority 构建异常，直接暴露给调用方，避免静默降级掩盖真实问题。
-        """
-        bundle = self._build_structured_evidence(names_in_chunk=names_in_chunk)
 
-        if self._level2_enabled and current_chunk is not None:
-            candidates = self._active_lookup.get_active_candidates(current_chunk, self._lookback_chunks)
+        修改时间: 2026-04-25
+        任务: evidence-service-request-unification
+        修改内容: base evidence 改由统一 request 驱动；
+                  Level1 只消费 requested_names，Level2 只受 need_level2/current_chunk 控制。
+        """
+        if request.need_level1:
+            bundle = self._build_structured_evidence(requested_names=request.requested_names)
+        else:
+            bundle = EvidenceBundle(
+                structured_evidence=[],
+                requested_names=list(request.requested_names),
+                level1_snapshot=None,
+            )
+
+        if request.need_level2 and self._level2_enabled and request.current_chunk is not None:
+            candidates = self._active_lookup.get_active_candidates(request.current_chunk, self._lookback_chunks)
             if self._graph_authority_service is not None and self._run_id is not None:
                 active_entities = self._graph_authority_service.build_active_entity_view(
                     self._run_id,
-                    current_chunk=current_chunk,
+                    current_chunk=request.current_chunk,
                     lookback=self._lookback_chunks,
                 )
             else:
@@ -221,11 +315,12 @@ class DisambigContextProvider:
             if not bundle.local_evidence:
                 bundle.local_evidence.extend(self._bundle_builder.build_active_entity_fallback_items(candidates))
 
+        bundle.requested_names = list(request.requested_names)
         return bundle
 
-    async def collect_evidence_with_level3(self, request: Level3Request) -> EvidenceBundle:
+    async def collect(self, request: Level3Request) -> EvidenceBundle:
         """
-        收集 Level1/2/3 证据。
+        收集统一 evidence bundle。
 
         修改时间: 2026-04-24
         任务: fix-level3-provider-readiness-drift
@@ -241,73 +336,111 @@ class DisambigContextProvider:
         修改说明: 补充 Level3 证据准备入口/出口耗时日志，避免 chunk 间模型取证阶段看起来像空白等待。
 
         修改时间: 2026-04-25
-        任务: level3-intent-phase-split
-        修改说明: 旧的弱语义多参数签名已移除，调用方必须显式传入 Level3Request。
-
-        修改时间: 2026-04-25
-        任务: fix-level3-required-readiness-and-rerank-budget
-        修改说明: required Level3 场景下 async readiness 漂移必须继续向上抛错；
-                  同时后续 model rerank query summary 将按 request 显式预算收口。
+        任务: evidence-service-request-unification
+        修改说明: 对外公开入口收口为 collect(request)；
+                  workflow 不再决定走 Level1/2 还是 Level1/2/3，而是统一由 service 按 request.need_level* 编排。
         """
-        bundle = self.collect_evidence(names_in_chunk=request.seed_entities, current_chunk=request.current_chunk)
+        cached_bundle = self._restore_cached_bundle(request)
+        if cached_bundle is not None:
+            return cached_bundle
 
-        if self._level3_enabled and self.is_level3_available():
-            started_at = time.perf_counter()
-            logger.info(
-                "Level3 evidence collection start: run_id={} objective={} chunk_id={} seed_entities={} "
-                "query_len={} max_chunk_id={} top_k={} max_queries={}",
-                self._run_id,
-                request.objective,
-                request.current_chunk,
-                len(request.seed_entities),
-                len(request.query_text or ""),
-                request.max_chunk_id,
-                request.top_k,
-                request.max_queries,
-            )
-            await self._emit_level3_progress(
-                request.current_chunk,
-                f"[{request.objective}] 正在准备 Level3 证据",
-                5,
-            )
-            try:
-                await self._level3.ensure_level3_ready()
-                plan = await self.build_level3_query_plan(request)
-                level3_results = await self.execute_level3_query_plan(
-                    plan,
-                    request,
-                    active_entity_names=self._extract_active_entity_names(bundle),
-                    candidate_names=set(bundle.requested_names),
-                )
-            except Level3NotReadyError as exc:
-                if self.requires_level3():
-                    # 中文注释：required Level3 语义下，入口已声明“没有 Level3 就不能继续”，
-                    # 因此 async readiness 漂移必须 fail loudly，不能偷偷退回 Level1/2。
-                    logger.error("Level3 readiness drift surfaced on required path: {}", exc)
-                    raise
-                logger.warning("Level3 skipped during evidence collection: {}", exc)
-                return bundle
-            bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
-            if request.objective == "emotion":
-                bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
-            logger.info(
-                "Level3 evidence collection complete: run_id={} objective={} chunk_id={} mode={} "
-                "mention_queries={} results={} semantic_items={} duration_ms={}",
-                self._run_id,
-                request.objective,
-                request.current_chunk,
-                plan.mode,
-                len(plan.mention_queries),
-                len(level3_results),
-                len(bundle.semantic_evidence),
-                int((time.perf_counter() - started_at) * 1000),
-            )
-            await self._emit_level3_progress(
-                request.current_chunk,
-                f"[{request.objective}] Level3 证据准备完成：召回 {len(level3_results)} 条",
-                100,
-            )
+        bundle = self._collect_base_evidence(request)
+        bundle.request_meta = self._build_request_meta(request)
+        bundle.generation_meta = self._build_generation_meta(request)
 
+        if not request.need_level3:
+            self._cache_bundle(request, bundle)
+            return bundle
+
+        if not request.query_text:
+            bundle.generation_meta["level3_skipped_reason"] = "query_text_empty"
+            bundle.generation_meta["empty_query_fallback_reason"] = "query_text_empty"
+            self._cache_bundle(request, bundle)
+            return bundle
+
+        if not self.is_level3_available():
+            if self.requires_level3():
+                raise RuntimeError("Level 3 vector retrieval is required but not available")
+            bundle.generation_meta["level3_skipped_reason"] = "level3_unavailable"
+            self._cache_bundle(request, bundle)
+            return bundle
+
+        started_at = time.perf_counter()
+        logger.info(
+            "Level3 evidence collection start: run_id={} consumer={} objective={} chunk_id={} "
+            "requested_names={} seed_entities={} query_len={} max_chunk_id={} top_k={} max_queries={}",
+            self._run_id,
+            request.consumer,
+            request.objective,
+            request.current_chunk,
+            len(request.requested_names),
+            len(request.seed_entities),
+            len(request.query_text),
+            request.max_chunk_id,
+            request.top_k,
+            request.max_queries,
+        )
+        await self._emit_level3_progress(
+            request.current_chunk,
+            f"[{request.objective}] 正在准备 Level3 证据",
+            5,
+        )
+        try:
+            await self._level3.ensure_level3_ready()
+            plan = await self.build_level3_query_plan(request)
+            level3_results = await self.execute_level3_query_plan(
+                plan,
+                request,
+                active_entity_names=self._extract_active_entity_names(bundle),
+                candidate_names=set(request.requested_names),
+            )
+        except Level3NotReadyError as exc:
+            if self.requires_level3():
+                # 中文注释：required Level3 语义下，入口已声明“没有 Level3 就不能继续”，
+                # 因此 async readiness 漂移必须 fail loudly，不能偷偷退回 Level1/2。
+                logger.error("Level3 readiness drift surfaced on required path: {}", exc)
+                raise
+            logger.warning("Level3 skipped during evidence collection: {}", exc)
+            bundle.generation_meta["level3_skipped_reason"] = "readiness_failed"
+            self._cache_bundle(request, bundle)
+            return bundle
+
+        bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
+        if request.objective == "emotion":
+            bundle.semantic_evidence.extend(self._bundle_builder.build_emotion_exemplar_items(level3_results))
+
+        query_count = len(plan.mention_queries) + (1 if plan.base_query_text else 0)
+        bundle.generation_meta.update(
+            {
+                "level3_executed": True,
+                "query_mode": plan.mode,
+                "query_count": query_count,
+                "top_k": plan.top_k,
+                "batch_mode": "batched" if query_count > 1 else "single",
+                "failed_queries": [],
+                "dropped_queries": [],
+            }
+        )
+        logger.info(
+            "Level3 evidence collection complete: run_id={} consumer={} objective={} chunk_id={} mode={} "
+            "mention_queries={} results={} semantic_items={} duration_ms={}",
+            self._run_id,
+            request.consumer,
+            request.objective,
+            request.current_chunk,
+            plan.mode,
+            len(plan.mention_queries),
+            len(level3_results),
+            len(bundle.semantic_evidence),
+            int((time.perf_counter() - started_at) * 1000),
+        )
+        await self._emit_level3_progress(
+            request.current_chunk,
+            f"[{request.objective}] Level3 证据准备完成：召回 {len(level3_results)} 条",
+            100,
+        )
+
+        self._cache_bundle(request, bundle)
         return bundle
 
     async def build_level3_query_plan(self, request: Level3Request) -> Level3QueryPlan:

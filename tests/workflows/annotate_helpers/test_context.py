@@ -305,7 +305,7 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
         requested_names=["蒙面人"],
     )
     provider = Mock()
-    provider.collect_evidence.return_value = bundle
+    provider._collect_base_evidence.return_value = bundle
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
@@ -350,7 +350,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
         ]
     )
     provider = Mock()
-    provider.collect_evidence.return_value = bundle
+    provider._collect_base_evidence.return_value = bundle
     expected_active_entities = render_annotation_prompt_blocks(bundle).active_entities
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
@@ -462,7 +462,7 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
     provider = Mock()
     provider.requires_level3.return_value = False
     provider.is_level3_available.return_value = False
-    provider.collect_evidence.return_value = bundle
+    provider.collect = AsyncMock(return_value=bundle)
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
@@ -535,11 +535,11 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         ]
     )
     phase2_bundle = EvidenceBundle()
+    phase3_bundle = identity_bundle
     provider = Mock()
-    provider.requires_level3.return_value = False
     provider.is_level3_available.return_value = True
-    provider.collect_evidence_with_level3 = AsyncMock(
-        side_effect=[identity_bundle, emotion_bundle, phase2_bundle]
+    provider.collect = AsyncMock(
+        side_effect=[identity_bundle, emotion_bundle, phase2_bundle, phase3_bundle]
     )
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
@@ -559,30 +559,50 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         run_id="run-level3-available",
     )
 
-    assert provider.collect_evidence_with_level3.await_count == 3
-    phase1_identity_request = provider.collect_evidence_with_level3.await_args_list[0].args[0]
-    phase1_emotion_request = provider.collect_evidence_with_level3.await_args_list[1].args[0]
-    phase2_request = provider.collect_evidence_with_level3.await_args_list[2].args[0]
+    assert provider.collect.await_count == 4
+    phase1_identity_request = provider.collect.await_args_list[0].args[0]
+    phase1_emotion_request = provider.collect.await_args_list[1].args[0]
+    phase2_request = provider.collect.await_args_list[2].args[0]
+    phase3_request = provider.collect.await_args_list[3].args[0]
+    assert phase1_identity_request.consumer == "annotation_phase1"
     assert phase1_identity_request.objective == "identity"
     assert phase1_identity_request.query_text == "程霜翻阅旧案卷"
     assert phase1_identity_request.current_chunk == 21
     assert phase1_identity_request.max_chunk_id == 20
     assert phase1_identity_request.exclude_chunk_ids == [21]
+    assert phase1_identity_request.requested_names == ["程霜"]
     assert "程霜" in phase1_identity_request.seed_entities
     assert "小七" not in phase1_identity_request.seed_entities
     assert "老刀" not in phase1_identity_request.seed_entities
     assert "韩山" not in phase1_identity_request.seed_entities
+    assert phase1_identity_request.need_level1 is True
+    assert phase1_identity_request.need_level2 is True
+    assert phase1_identity_request.need_level3 is True
     assert phase1_emotion_request.objective == "emotion"
     assert phase1_emotion_request.allow_llm_query_expansion is False
+    assert phase1_emotion_request.requested_names == ["程霜"]
     assert phase1_emotion_request.seed_entities == []
+    assert phase1_emotion_request.need_level1 is False
+    assert phase1_emotion_request.need_level2 is False
+    assert phase1_emotion_request.need_level3 is True
+    assert phase2_request.consumer == "annotation_phase2"
     assert phase2_request.objective == "foreshadowing"
     assert phase2_request.allow_llm_query_expansion is False
+    assert phase2_request.requested_names == ["旧值"]
+    assert phase2_request.seed_entities == ["旧值"]
+    assert phase2_request.need_level3 is True
+    assert phase3_request.consumer == "annotation_phase3"
+    assert phase3_request.requested_names == ["程霜"]
+    assert phase3_request.seed_entities == phase1_identity_request.seed_entities
     assert context.phase1_bundle is not identity_bundle
     assert context.phase2_bundle is phase2_bundle
-    assert context.phase3_bundle is identity_bundle
+    assert context.phase3_bundle is phase3_bundle
     assert any(item.evidence_type == "emotion_exemplar" for item in context.phase1_bundle.semantic_evidence)
     assert context.phase4_request_template is not None
+    assert context.phase4_request_template.consumer == "annotation_phase4"
     assert context.phase4_request_template.objective == "relation"
+    assert context.phase4_request_template.requested_names == ["旧值"]
+    assert context.phase4_request_template.seed_entities == ["旧值"]
     expected_blocks = render_annotation_prompt_blocks(context.phase1_bundle)
     assert expected_blocks.active_entities is not None
     assert context.prompt_active_entities == expected_blocks.active_entities
@@ -595,8 +615,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
 @pytest.mark.asyncio
 async def test_prepare_chunk_context_with_level3_raises_when_required_but_unavailable(monkeypatch):
     provider = Mock()
-    provider.requires_level3.return_value = True
-    provider.is_level3_available.return_value = False
+    provider.collect = AsyncMock(side_effect=RuntimeError("Level 3 vector retrieval is required but not available"))
     monkeypatch.setattr(context_module, "_extract_names_from_text", lambda _text: ["程霜"])
 
     with pytest.raises(RuntimeError, match="Level 3 vector retrieval is required but not available"):
@@ -740,7 +759,7 @@ def test_init_evidence_provider_injects_optional_mention_and_rerank_clients(monk
     monkeypatch.setattr("src.models.local.embedding.EmbeddingClient", lambda novel_id: fake_embedding_client)
     monkeypatch.setattr(context_module, "_init_optional_mention_extractor", lambda **kwargs: fake_mention_extractor)
     monkeypatch.setattr(context_module, "_init_optional_level3_reranker", lambda **kwargs: fake_level3_reranker)
-    monkeypatch.setattr("src.rag.DisambigContextProvider", FakeProvider)
+    monkeypatch.setattr("src.rag.NarrativeEvidenceService", FakeProvider)
 
     provider = _init_evidence_provider(
         conn=object(),

@@ -29,7 +29,7 @@ from src.models.local.disambiguation import DisambiguationState
 
 if TYPE_CHECKING:
     from src.models.local.annotation import MultiPhaseAnnotationResult
-    from src.rag import DisambigContextProvider, EvidenceBundle
+    from src.rag import EvidenceBundle, NarrativeEvidenceService
 
 
 @dataclass
@@ -71,7 +71,7 @@ async def _annotate_chunk(
     phase3_bundle: EvidenceBundle | None = None,
     phase4_bundle: EvidenceBundle | None = None,
     phase4_request_template=None,
-    evidence_provider: DisambigContextProvider | None = None,
+    evidence_provider: NarrativeEvidenceService | None = None,
     fallback_client: AnnotationLike | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
@@ -143,7 +143,7 @@ class AnnotationPhaseResult:
         annotation_fallback_client: AnnotationLike | None,
         incremental_disambig_client: DisambiguationLike,
         full_disambig_client: DisambiguationLike,
-        evidence_provider: DisambigContextProvider | None,
+        evidence_provider: NarrativeEvidenceService | None,
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
