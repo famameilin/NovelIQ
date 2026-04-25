@@ -338,6 +338,7 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
     assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
     assert evidence_provider.calls[0]["objective"] == "identity"
+    assert evidence_provider.calls[0]["names_in_chunk"] == ["灰衣人"]
     assert evidence_provider.calls[0]["current_chunk"] == 12
     assert evidence_provider.calls[0]["exclude_chunk_ids"] == [12]
     assert evidence_provider.calls[0]["max_chunk_id"] == 12
@@ -436,6 +437,7 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
     assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
     assert evidence_provider.calls[0]["objective"] == "identity"
+    assert evidence_provider.calls[0]["names_in_chunk"] == ["灰衣人"]
     assert evidence_provider.calls[0]["current_chunk"] is None
     assert evidence_provider.calls[0]["max_chunk_id"] is None
     build_hint_call = mock_build_existing_hint.call_args
@@ -473,8 +475,54 @@ async def test_build_prompt_context_with_shared_evidence_raises_when_required_le
             {"灰衣人": "【身份线索】她自称白芷"},
             current_chunk=12,
             active_entity_fallback_names={"灰衣人"},
-        )
+    )
     assert evidence_provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_context_with_shared_evidence_keeps_level12_fallback_when_query_text_empty() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-shared-evidence-scope-and-fallback
+    说明: 当候选暂无例句无法拼 shared query 时，仍应保留 Level1/2 fallback，
+          不能把 <Disambig_Candidates> 一起短路掉。
+    """
+    evidence_provider = _FakeRagRetriever(
+        EvidenceBundle(
+            local_evidence=[
+                EvidenceItem(
+                    evidence_type="active_entity",
+                    source="level2",
+                    content="白芷",
+                    metadata={"name": "白芷"},
+                )
+            ],
+            requested_names=["灰衣人"],
+        ),
+        level3_available=True,
+        requires_level3=False,
+    )
+
+    prompt_context = await pipeline_mod._build_prompt_context_with_shared_evidence(
+        DisambiguationPromptContext(existing_character_hint="【已存在角色锚点】\n- 白芷"),
+        evidence_provider,
+        [{"name": "灰衣人", "count": 2}],
+        {},
+        current_chunk=12,
+        active_entity_fallback_names={"灰衣人"},
+    )
+
+    assert prompt_context is not None
+    assert prompt_context.shared_evidence_context is not None
+    assert "<Disambig_Candidates>" in prompt_context.shared_evidence_context
+    assert "「灰衣人」可能是：白芷" in prompt_context.shared_evidence_context
+    assert evidence_provider.calls == [
+        {
+            "method": "collect_evidence",
+            "names_in_chunk": ["灰衣人"],
+            "current_chunk": 12,
+        }
+    ]
 
 
 @pytest.mark.asyncio

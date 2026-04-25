@@ -29,6 +29,7 @@ from src.workflows.annotate_helpers.context import (
     ChunkContext,
     _build_active_entities_prompt_from_authority,
     _build_optional_task_model_client,
+    _collect_seed_entities,
     _init_evidence_provider,
     _prepare_chunk_context,
     _prepare_chunk_context_with_level3,
@@ -247,6 +248,38 @@ def test_render_annotation_prompt_blocks_includes_level1_facts_in_main_disambig_
     assert "已确认别名：白老板 -> 白芷" in blocks.disambig_context
     assert "已确认实体：白芷 (character)" in blocks.disambig_context
     assert "「蒙面人」可能是：白芷" in blocks.disambig_context
+
+
+def test_collect_seed_entities_only_keeps_aliases_explicitly_mentioned_in_current_chunk():
+    """
+    创建时间: 2026-04-25
+    任务: fix-phase-seed-entity-scope
+    说明: alias_map 是整轮累计状态，seed_entities 只能保留当前 chunk 明确提到的 alias/canonical，
+          不能把无关历史别名一并带进本轮 Level3 request。
+    """
+    seed_entities = _collect_seed_entities(
+        {"小七": "程霜", "老刀": "韩山"},
+        ["白芷"],
+        query_text="小七跟着白芷翻阅旧案卷。",
+    )
+
+    assert seed_entities == ["小七", "程霜", "白芷"]
+
+
+def test_collect_seed_entities_keeps_canonical_when_chunk_mentions_canonical_directly():
+    """
+    创建时间: 2026-04-25
+    任务: fix-phase-seed-entity-scope
+    说明: 若 chunk 直接提到 canonical，本轮只需带 canonical 本身；
+          不应因为 alias_map 存在就把同 canonical 的其他历史 alias 全量注入。
+    """
+    seed_entities = _collect_seed_entities(
+        {"小七": "程霜", "老刀": "韩山"},
+        [],
+        query_text="程霜翻阅旧案卷，神色不动。",
+    )
+
+    assert seed_entities == ["程霜"]
 
 
 class FakeChunkRepository:
@@ -520,7 +553,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         conn=object(),
         chunk_id=21,
         chunk_text="程霜翻阅旧案卷",
-        alias_map={},
+        alias_map={"小七": "程霜", "老刀": "韩山"},
         use_context_enhancement=True,
         disambig_provider=provider,
         run_id="run-level3-available",
@@ -535,6 +568,10 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
     assert phase1_identity_request.current_chunk == 21
     assert phase1_identity_request.max_chunk_id == 20
     assert phase1_identity_request.exclude_chunk_ids == [21]
+    assert "程霜" in phase1_identity_request.seed_entities
+    assert "小七" not in phase1_identity_request.seed_entities
+    assert "老刀" not in phase1_identity_request.seed_entities
+    assert "韩山" not in phase1_identity_request.seed_entities
     assert phase1_emotion_request.objective == "emotion"
     assert phase1_emotion_request.allow_llm_query_expansion is False
     assert phase1_emotion_request.seed_entities == []

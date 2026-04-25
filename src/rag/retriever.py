@@ -309,7 +309,7 @@ class DisambigContextProvider:
         说明: 按消费者 objective 显式冻结 query planning 规则；高阶 query 只做增量增强，不替代 direct query。
         """
         mention_queries: list[MentionEvidenceQuery] = []
-        allow_high_order = request.objective == "identity" and request.allow_llm_query_expansion
+        allow_high_order = request.allow_llm_query_expansion and request.objective in {"identity", "relation"}
         if allow_high_order:
             mention_queries = await self._build_queries(
                 context_text=request.query_text,
@@ -424,9 +424,10 @@ class DisambigContextProvider:
         """
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
-        说明: 仅 identity objective 允许构造高阶 query，并在 provider 内统一应用 max_queries 预算。
+        说明: 按 objective 构造高阶 query；identity 默认允许完整 hybrid，
+              relation 仅在显式允许时做受限扩展，其余目标保持 direct-only。
         """
-        if not context_text or objective != "identity":
+        if not context_text or objective not in {"identity", "relation"}:
             return []
 
         from src.rag.mention_query import build_mention_evidence_queries
@@ -439,15 +440,16 @@ class DisambigContextProvider:
             objective=objective,
         )
         built_queries = build_mention_evidence_queries(mentions)
-        if len(built_queries) > max_queries:
+        effective_max_queries = max_queries if objective == "identity" else min(max_queries, 2)
+        if len(built_queries) > effective_max_queries:
             logger.info(
                 "Level3 mention queries trimmed by budget: run_id={} chunk_id={} before={} after={}",
                 self._run_id,
                 current_chunk,
                 len(built_queries),
-                max_queries,
+                effective_max_queries,
             )
-            built_queries = built_queries[:max_queries]
+            built_queries = built_queries[:effective_max_queries]
         logger.info(
             "Level3 mention queries built: run_id={} chunk_id={} mentions={} queries={} duration_ms={}",
             self._run_id,
@@ -474,6 +476,11 @@ class DisambigContextProvider:
         修改时间: 2026-04-24
         任务: log-level3-evidence-gaps
         修改说明: 补充 mention extraction 开始/结束耗时日志，直接暴露 chunk 间长等待。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-relation-query-expansion-contract
+        修改内容: identity 才允许走 LLM 主路径；relation 的受限扩展只复用规则 extractor，
+                  避免 Phase4 类消费者一旦显式放开 expansion 就被统一拉进高成本 LLM 热路径。
         """
         started_at = time.perf_counter()
         logger.info(
@@ -492,7 +499,8 @@ class DisambigContextProvider:
                 context_text=context_text,
                 run_id=self._run_id,
                 current_chunk=current_chunk,
-            )
+            ),
+            prefer_llm=objective == "identity",
         )
         logger.info(
             "Level3 mention extraction complete: run_id={} chunk_id={} mentions={} duration_ms={}",

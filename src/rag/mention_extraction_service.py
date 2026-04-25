@@ -38,13 +38,23 @@ class MentionExtractionService:
     def __init__(self, llm_extractor: PersonMentionExtractor | None = None) -> None:
         self._llm_extractor = llm_extractor
 
-    async def extract_mentions(self, request: MentionExtractionRequest) -> list[PersonMention]:
+    async def extract_mentions(
+        self,
+        request: MentionExtractionRequest,
+        *,
+        prefer_llm: bool = True,
+    ) -> list[PersonMention]:
         """
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: 优先执行 LLM 抽取；模型不可用或返回空结果时回退规则抽取，并显式记录回退原因。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-relation-query-expansion-contract
+        修改内容: 支持调用方显式关闭 LLM 主路径；relation 这类“允许受限扩展但不默认走 LLM”
+                  的 objective 可直接复用规则 extractor，而不必复制一套 service。
         """
-        if self._llm_extractor is not None:
+        if prefer_llm and self._llm_extractor is not None:
             try:
                 llm_mentions = await self._llm_extractor.extract_mentions(request)
             except Exception as exc:
