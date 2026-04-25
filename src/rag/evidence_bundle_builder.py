@@ -30,11 +30,11 @@ class EvidenceBundleBuilder:
     def build_structured_bundle(
         self,
         snapshot: Level1AuthoritySnapshot,
-        names_in_chunk: list[str] | None = None,
+        requested_names: list[str] | None = None,
     ) -> EvidenceBundle:
         """按请求名字构建 Level1 structured evidence。"""
-        requested_names = [name for name in (names_in_chunk or []) if name]
-        if names_in_chunk is not None and not requested_names:
+        normalized_requested_names = [name for name in (requested_names or []) if name]
+        if requested_names is not None and not normalized_requested_names:
             # 中文注释：显式传入空请求名表示“当前消费者没有可信实体锚点”，
             # 这里不能退回全量 Level1 事实，否则会把整本书的结构化事实误注入 direct-only 的消费者。
             return EvidenceBundle(
@@ -42,7 +42,7 @@ class EvidenceBundleBuilder:
                 requested_names=[],
                 level1_snapshot=snapshot,
             )
-        relevant_names = set(requested_names)
+        relevant_names = set(normalized_requested_names)
         if relevant_names:
             related_canonicals = {
                 mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias in relevant_names
@@ -125,7 +125,7 @@ class EvidenceBundleBuilder:
 
         return EvidenceBundle(
             structured_evidence=structured_evidence,
-            requested_names=requested_names,
+            requested_names=normalized_requested_names,
             level1_snapshot=snapshot,
         )
 

@@ -9,11 +9,12 @@ from src.config import settings
 from src.models.local.annotation.multi_phase import (
     _emit_phase_event,
     _MultiPhaseExecutionContext,
+    _resolve_phase4_bundle,
     annotate_chunk_multi_phase,
     annotate_chunk_parallel,
     annotate_chunk_serial,
 )
-from src.rag.level3_contracts import Level3Request
+from src.rag.evidence_contracts import EvidenceRequest
 
 
 def _annotation_result() -> SimpleNamespace:
@@ -367,11 +368,9 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
     任务: level3-intent-phase-split
     说明: Phase4 relation bundle 应在 Phase1 产出 known_characters 后再取证，不能继续复用 Phase1 identity bundle。
     """
-    evidence_provider = MagicMock()
-    evidence_provider.requires_level3.return_value = False
-    evidence_provider.is_level3_available.return_value = True
+    evidence_service = MagicMock()
     phase4_bundle = MagicMock(name="phase4_bundle")
-    evidence_provider.collect_evidence_with_level3 = AsyncMock(return_value=phase4_bundle)
+    evidence_service.collect = AsyncMock(return_value=phase4_bundle)
 
     with (
         patch(
@@ -405,26 +404,78 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
             phase1_bundle=MagicMock(name="phase1_bundle"),
             phase2_bundle=MagicMock(name="phase2_bundle"),
             phase3_bundle=MagicMock(name="phase3_bundle"),
-            phase4_request_template=Level3Request(
+            phase4_request_template=EvidenceRequest(
+                consumer="annotation_phase4",
                 objective="relation",
                 query_text="白芷看向侯飞白。",
+                requested_names=["侯飞白"],
                 seed_entities=["侯飞白"],
+                background_entities=[],
                 current_chunk=12,
                 max_chunk_id=11,
                 exclude_chunk_ids=[12],
+                need_level1=True,
+                need_level2=True,
+                need_level3=True,
                 allow_llm_query_expansion=False,
                 top_k=settings.rag.level3_top_k,
                 max_queries=settings.rag.level3_max_queries,
                 model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
             ),
-            evidence_provider=evidence_provider,
+            evidence_service=evidence_service,
         )
 
-    evidence_provider.collect_evidence_with_level3.assert_awaited_once()
-    resolved_request = evidence_provider.collect_evidence_with_level3.await_args.args[0]
+    evidence_service.collect.assert_awaited_once()
+    resolved_request = evidence_service.collect.await_args.args[0]
     assert resolved_request.objective == "relation"
+    assert resolved_request.requested_names == ["白芷", "侯飞白"]
     assert resolved_request.seed_entities == ["白芷", "侯飞白"]
     assert mock_phase4.await_args.kwargs["evidence_bundle"] is phase4_bundle
+
+
+@pytest.mark.asyncio
+async def test_resolve_phase4_bundle_keeps_seed_entities_out_of_requested_names() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-phase4-request-scope
+    说明: Phase4 的 retrieval seed 不能反向扩大 consumer target；
+          requested_names 只能来自 known_characters 和模板显式 requested_names。
+    """
+    evidence_service = MagicMock()
+    phase4_bundle = MagicMock(name="phase4_bundle")
+    evidence_service.collect = AsyncMock(return_value=phase4_bundle)
+    context = _MultiPhaseExecutionContext(
+        client=MagicMock(),
+        text="白芷看向侯飞白。",
+        chunk_id=12,
+        phase4_request_template=EvidenceRequest(
+            consumer="annotation_phase4",
+            objective="relation",
+            query_text="白芷看向侯飞白。",
+            requested_names=[],
+            seed_entities=["旧值"],
+            background_entities=[],
+            current_chunk=12,
+            max_chunk_id=11,
+            exclude_chunk_ids=[12],
+            need_level1=True,
+            need_level2=True,
+            need_level3=True,
+            allow_llm_query_expansion=False,
+            top_k=settings.rag.level3_top_k,
+            max_queries=settings.rag.level3_max_queries,
+            model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
+        ),
+        evidence_service=evidence_service,
+    )
+
+    resolved_bundle = await _resolve_phase4_bundle(context, known_characters=["白芷"])
+
+    evidence_service.collect.assert_awaited_once()
+    resolved_request = evidence_service.collect.await_args.args[0]
+    assert resolved_request.requested_names == ["白芷"]
+    assert resolved_request.seed_entities == ["白芷", "旧值"]
+    assert resolved_bundle is phase4_bundle
 
 
 @pytest.mark.asyncio

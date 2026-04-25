@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from src.knowledge.authority import ActiveEntityContext
+from src.knowledge.authority import (
+    ActiveEntityContext,
+    AliasMapping,
+    CanonicalEntity,
+    ConfirmedRelation,
+    EntityTypeFact,
+    Level1AuthoritySnapshot,
+)
 from src.models.local.evidence_renderer_shared import (
     render_active_entities_from_authority,
     render_shared_evidence_sections,
@@ -89,6 +96,67 @@ def test_render_shared_evidence_sections_can_suppress_level1_alias_lines() -> No
     assert sections.level1_facts is not None
     assert "已确认别名：" not in sections.level1_facts
     assert "已确认实体：白芷" in sections.level1_facts
+
+
+def test_render_shared_evidence_sections_snapshot_fallback_respects_empty_requested_names() -> None:
+    """
+    创建时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    说明: 显式空 `requested_names` 表示当前 consumer 没有可信 Level1 目标；
+          renderer 不应再从 snapshot 回退整本书的结构化事实。
+    """
+    bundle = EvidenceBundle(
+        requested_names=[],
+        level1_snapshot=Level1AuthoritySnapshot(
+            alias_mappings=[AliasMapping(alias="灰衣人", canonical="白芷")],
+            canonical_entities=[CanonicalEntity(name="白芷", entity_type="character")],
+            confirmed_relations=[ConfirmedRelation(from_name="白芷", to_name="侯飞白", relation_type="盟友")],
+            entity_types=[EntityTypeFact(name="白芷", entity_type="character")],
+        ),
+    )
+
+    sections = render_shared_evidence_sections(bundle)
+
+    assert sections.level1_facts is None
+
+
+def test_render_shared_evidence_sections_snapshot_fallback_keeps_request_scoped_lines() -> None:
+    """
+    创建时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    说明: snapshot-only bundle 仍可作为兼容输入，但只能渲染与 `requested_names`
+          命中的 alias/canonical 相关的事实，不能回退成全量快照。
+    """
+    bundle = EvidenceBundle(
+        requested_names=["灰衣人"],
+        level1_snapshot=Level1AuthoritySnapshot(
+            alias_mappings=[
+                AliasMapping(alias="灰衣人", canonical="白芷"),
+                AliasMapping(alias="旧代号", canonical="韩山"),
+            ],
+            canonical_entities=[
+                CanonicalEntity(name="白芷", entity_type="character"),
+                CanonicalEntity(name="韩山", entity_type="character"),
+            ],
+            confirmed_relations=[
+                ConfirmedRelation(from_name="白芷", to_name="侯飞白", relation_type="盟友"),
+                ConfirmedRelation(from_name="韩山", to_name="旧友", relation_type="同伴"),
+            ],
+            entity_types=[
+                EntityTypeFact(name="白芷", entity_type="character"),
+                EntityTypeFact(name="韩山", entity_type="character"),
+            ],
+        ),
+    )
+
+    sections = render_shared_evidence_sections(bundle)
+
+    assert sections.level1_facts is not None
+    assert "已确认别名：灰衣人 -> 白芷" in sections.level1_facts
+    assert "已确认实体：白芷 (character)" in sections.level1_facts
+    assert "已确认关系：白芷 -盟友-> 侯飞白" in sections.level1_facts
+    assert "旧代号 -> 韩山" not in sections.level1_facts
+    assert "已确认实体：韩山" not in sections.level1_facts
 
 
 def test_render_shared_evidence_sections_respects_requested_name_filter_for_fallback_candidates() -> None:
@@ -216,3 +284,38 @@ def test_render_shared_evidence_sections_can_exclude_vector_chunks_covered_by_em
     assert "[Chunk 9]" not in sections.vector_evidence
     assert sections.emotion_exemplars is not None
     assert "[Chunk 9]" in sections.emotion_exemplars
+
+
+def test_render_shared_evidence_sections_prioritizes_background_entities_in_vector_evidence() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: `background_entities` 只应作为 renderer 背景 hint 使用；
+          这里验证它会优先展示和背景名更相关的 vector evidence，而不会回流到 requested_names/fallback。
+    """
+    bundle = EvidenceBundle(
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="陌生人翻过残墙，场景相似。",
+                metadata={"chunk_id": 1, "text": "陌生人翻过残墙，场景相似。", "similarity": 0.93},
+            ),
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="白芷抬手按住袖中银针。",
+                metadata={"chunk_id": 2, "text": "白芷抬手按住袖中银针。", "similarity": 0.89},
+            ),
+        ],
+        request_meta={"background_entities": ["白芷"]},
+    )
+
+    sections = render_shared_evidence_sections(
+        bundle,
+        max_vector_chunks=1,
+    )
+
+    assert sections.vector_evidence is not None
+    assert "[Chunk 2]" in sections.vector_evidence
+    assert "[Chunk 1]" not in sections.vector_evidence

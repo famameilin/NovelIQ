@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -29,7 +30,7 @@ from src.models.local.disambiguation import (
 )
 from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
-from src.rag import Level3Request
+from src.rag import EvidenceRequest
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
@@ -63,7 +64,7 @@ from .state_logic import (
 )
 
 if TYPE_CHECKING:
-    from src.rag import DisambigContextProvider
+    from src.rag import NarrativeEvidenceService
     from src.storage.repositories.graph import CurrentRelationRow
 
 
@@ -305,9 +306,10 @@ def build_shared_evidence_query_text(
 def _build_shared_evidence_request(
     *,
     names_in_chunk: list[str],
+    background_entities: list[str],
     query_text: str,
     current_chunk: int | None,
-) -> Level3Request:
+) -> EvidenceRequest:
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
@@ -320,13 +322,19 @@ def _build_shared_evidence_request(
         if normalized and normalized not in seed_entities:
             seed_entities.append(normalized)
 
-    return Level3Request(
+    return EvidenceRequest(
+        consumer="incremental_disambiguation" if current_chunk is not None else "final_disambiguation",
         objective="identity",
         query_text=query_text,
+        requested_names=seed_entities,
         seed_entities=seed_entities,
+        background_entities=background_entities,
         current_chunk=current_chunk,
         max_chunk_id=current_chunk,
         exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
+        need_level1=True,
+        need_level2=True,
+        need_level3=bool(query_text.strip()),
         allow_llm_query_expansion=True,
         top_k=settings.rag.level3_top_k,
         max_queries=settings.rag.level3_max_queries,
@@ -336,12 +344,13 @@ def _build_shared_evidence_request(
 
 async def build_prompt_context_with_shared_evidence(
     prompt_context: DisambiguationPromptContext | None,
-    evidence_provider: DisambigContextProvider | None,
+    evidence_service: NarrativeEvidenceService | None,
     candidates: list[NameCountCandidate],
     context_sentences: dict[str, str],
     *,
     current_chunk: int | None = None,
-    active_entity_fallback_names: set[str] | None = None,
+    background_entities: Iterable[str] | None = None,
+    active_entity_fallback_names: Iterable[str] | None = None,
 ) -> DisambiguationPromptContext | None:
     """
     把共享 evidence renderer 输出补入消歧 prompt_context。
@@ -364,39 +373,21 @@ async def build_prompt_context_with_shared_evidence(
     修改内容: 已知 canonical 名不再混入 shared-evidence 的 requested_names；
               当 query_text 为空时仍保留 Level1/2 fallback，避免 protected / 无例句候选失去共享证据。
     """
-    if evidence_provider is None or not candidates:
+    if evidence_service is None or not candidates:
         return prompt_context
 
     names_in_chunk = [str(item.get("name", "")).strip() for item in candidates if str(item.get("name", "")).strip()]
     if not names_in_chunk:
         return prompt_context
 
-    query_text = build_shared_evidence_query_text(candidates, context_sentences)
-    if not query_text:
-        # 中文注释：没有可拼的 shared query 时，只跳过 Level3 semantic 检索，
-        # 但仍要保留 Level1/2 fallback，避免 protected / review 候选彻底失去 <Disambig_Candidates>。
-        evidence_bundle = evidence_provider.collect_evidence(
-            names_in_chunk=names_in_chunk,
-            current_chunk=current_chunk,
-        )
-    else:
-        request = _build_shared_evidence_request(
-            names_in_chunk=names_in_chunk,
-            query_text=query_text,
-            current_chunk=current_chunk,
-        )
-        if evidence_provider.requires_level3():
-            if not evidence_provider.is_level3_available():
-                raise RuntimeError("Level 3 vector retrieval is required but not available")
-            else:
-                evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
-        elif evidence_provider.is_level3_available():
-            evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
-        else:
-            evidence_bundle = evidence_provider.collect_evidence(
-                names_in_chunk=request.seed_entities,
-                current_chunk=current_chunk,
-            )
+    query_text = build_shared_evidence_query_text(candidates, context_sentences) or ""
+    request = _build_shared_evidence_request(
+        names_in_chunk=names_in_chunk,
+        background_entities=sorted(background_entities or set()),
+        query_text=query_text,
+        current_chunk=current_chunk,
+    )
+    evidence_bundle = await evidence_service.collect(request)
 
     shared_evidence_context = render_disambig_prompt_context(
         evidence_bundle,
@@ -420,7 +411,7 @@ async def plan_incremental_disambiguation(
     run_id: str,
     chunk_id: int,
     disambig_interval: int,
-    evidence_provider: DisambigContextProvider | None,
+    evidence_service: NarrativeEvidenceService | None,
 ) -> IncrementalDisambiguationPlan | None:
     """
     规划增量消歧候选与 prompt 输入。
@@ -496,10 +487,11 @@ async def plan_incremental_disambiguation(
     }
     prompt_context = await build_prompt_context_with_shared_evidence(
         prompt_context,
-        evidence_provider,
+        evidence_service,
         filtered_candidates,
         context_sentences,
         current_chunk=chunk_id,
+        background_entities=state_after_deferred.known_canonical_names,
         active_entity_fallback_names=active_entity_fallback_names,
     )
     return IncrementalDisambiguationPlan(
@@ -696,7 +688,7 @@ def plan_final_disambiguation(
 
 async def assemble_final_prompt_context(
     plan: FinalDisambiguationPlan,
-    evidence_provider: DisambigContextProvider | None,
+    evidence_service: NarrativeEvidenceService | None,
 ) -> FinalDisambiguationPlan:
     """
     组装最终消歧 prompt 上下文。
@@ -710,9 +702,10 @@ async def assemble_final_prompt_context(
 
     prompt_context = await build_prompt_context_with_shared_evidence(
         plan.prompt_context,
-        evidence_provider,
+        evidence_service,
         plan.candidate_payload,
         plan.context_sentences,
+        background_entities=plan.state_before_apply.known_canonical_names,
     )
     return FinalDisambiguationPlan(
         state_before_apply=plan.state_before_apply,

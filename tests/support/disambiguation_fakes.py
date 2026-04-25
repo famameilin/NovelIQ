@@ -65,7 +65,7 @@ class FakeDisambigClient:
         return False
 
 
-class FakeRagRetriever:
+class FakeNarrativeEvidenceService:
     """
     创建时间: 2026-04-23
     任务: 复杂度与耦合审查 P2 - 测试工程化
@@ -90,17 +90,7 @@ class FakeRagRetriever:
     def is_level3_available(self) -> bool:
         return self.level3_available
 
-    def collect_evidence(self, names_in_chunk=None, current_chunk=None):
-        self.calls.append(
-            {
-                "method": "collect_evidence",
-                "names_in_chunk": list(names_in_chunk or []),
-                "current_chunk": current_chunk,
-            }
-        )
-        return self.bundle
-
-    async def collect_evidence_with_level3(self, request):
+    async def collect(self, request):
         """
         修改时间: 2026-04-23
         任务: level3-history-cutoff
@@ -111,20 +101,29 @@ class FakeRagRetriever:
         修改说明: 记录 mention_queries，便于测试确认 mention 检索链路已接入。
 
         修改时间: 2026-04-25
-        任务: level3-intent-phase-split
-        修改说明: provider 改为只接受显式 Level3Request；假实现同步记录 objective / seed_entities / cutoff。
+        任务: evidence-service-request-unification
+        修改说明: service 统一改为 collect(request)；假实现同步记录 consumer/requested_names/seed_entities/
+                  background_entities/need_level*，便于测试真实输入合同是否收口。
         """
         self.calls.append(
             {
-                "method": "collect_evidence_with_level3",
+                "method": "collect",
                 "request": request,
+                "consumer": request.consumer,
                 "objective": request.objective,
+                "requested_names": list(request.requested_names),
                 "names_in_chunk": list(request.seed_entities),
+                "background_entities": list(request.background_entities),
                 "current_chunk": request.current_chunk,
                 "context_text": request.query_text,
                 "exclude_chunk_ids": list(request.exclude_chunk_ids),
                 "max_chunk_id": request.max_chunk_id,
                 "max_queries": request.max_queries,
+                "need_level1": request.need_level1,
+                "need_level2": request.need_level2,
+                "need_level3": request.need_level3,
             }
         )
+        if request.need_level3 and self._requires_level3 and not self.level3_available:
+            raise RuntimeError("Level 3 vector retrieval is required but not available")
         return self.bundle
