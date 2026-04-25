@@ -414,14 +414,27 @@ def _collect_requested_names(
     任务: evidence-service-request-unification
     说明: requested_names 只表达“当前 consumer 正在处理谁”，
           不应混入 Level2 active entities 这类仅用于 retrieval 扩锚的背景名。
-    """
 
-    return _collect_seed_entities(
+    修改时间: 2026-04-26
+    任务: fix-direct-canonical-requested-names
+    修改内容: 对正文里直接出现的 canonical 名，也允许从调用方给出的显式候选里提升为 requested_names；
+              但只有真正出现在当前 query_text 中的名字才会进入，不会把背景活跃实体整包抬成 consumer target。
+    """
+    requested_names = _collect_seed_entities(
         alias_map,
         [],
         query_text=query_text,
-        extra_names=extra_names,
     )
+    normalized_query_text = (query_text or "").strip()
+    if not normalized_query_text:
+        return requested_names
+
+    for name in extra_names or []:
+        normalized = str(name).strip()
+        if normalized and normalized in normalized_query_text and normalized not in requested_names:
+            requested_names.append(normalized)
+
+    return requested_names
 
 
 def _build_evidence_request(
@@ -552,16 +565,18 @@ def _prepare_chunk_context(
 
     if evidence_service:
         active_entity_names = _extract_active_entity_names(active_entity_contexts)
-        phase1_requested_names = _collect_requested_names(alias_map, query_text=chunk_text)
         phase1_seed_entities = _collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text)
-        phase2_requested_names = list(active_entity_names)
         phase2_seed_entities = _collect_seed_entities(None, active_entity_names)
 
         phase1_request = _build_evidence_request(
             consumer="annotation_phase1",
             objective="identity",
             query_text=chunk_text,
-            requested_names=phase1_requested_names,
+            requested_names=_collect_requested_names(
+                alias_map,
+                query_text=chunk_text,
+                extra_names=active_entity_names,
+            ),
             seed_entities=phase1_seed_entities,
             background_entities=[],
             chunk_id=chunk_id,
@@ -573,7 +588,7 @@ def _prepare_chunk_context(
             consumer="annotation_phase2",
             objective="foreshadowing",
             query_text=chunk_text,
-            requested_names=phase2_requested_names,
+            requested_names=list(active_entity_names),
             seed_entities=phase2_seed_entities,
             background_entities=[],
             chunk_id=chunk_id,
@@ -668,7 +683,11 @@ async def _prepare_chunk_context_with_level3(
             consumer="annotation_phase1",
             objective="identity",
             query_text=chunk_text,
-            requested_names=_collect_requested_names(alias_map, query_text=chunk_text),
+            requested_names=_collect_requested_names(
+                alias_map,
+                query_text=chunk_text,
+                extra_names=active_entity_names,
+            ),
             seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
             background_entities=[],
             chunk_id=chunk_id,
@@ -690,7 +709,11 @@ async def _prepare_chunk_context_with_level3(
             consumer="annotation_phase3",
             objective="identity",
             query_text=chunk_text,
-            requested_names=_collect_requested_names(alias_map, query_text=chunk_text),
+            requested_names=_collect_requested_names(
+                alias_map,
+                query_text=chunk_text,
+                extra_names=active_entity_names,
+            ),
             seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
             background_entities=[],
             chunk_id=chunk_id,

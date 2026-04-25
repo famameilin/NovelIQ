@@ -32,6 +32,35 @@ def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> N
         seen_lines.add(line)
 
 
+def _resolve_level1_relevant_names(
+    snapshot: Level1AuthoritySnapshot,
+    requested_names: Iterable[str] | None,
+) -> set[str]:
+    """
+    创建时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    说明: snapshot fallback 也必须遵守 request 边界；
+          这里只保留当前 consumer 明确请求的名字，并在 alias 命中时补齐关联 canonical。
+    """
+    if requested_names is None:
+        return set()
+
+    normalized_requested_names = {
+        str(name).strip() for name in requested_names if str(name).strip()
+    }
+    if not normalized_requested_names:
+        return set()
+
+    relevant_names = set(normalized_requested_names)
+    related_canonicals = {
+        mapping.canonical.strip()
+        for mapping in snapshot.alias_mappings
+        if mapping.alias.strip() in relevant_names and mapping.canonical.strip()
+    }
+    relevant_names |= related_canonicals
+    return relevant_names
+
+
 def _limit_items(items: list[Any], max_items: int | None) -> list[Any]:
     if max_items is None or max_items < 0:
         return items
@@ -147,25 +176,48 @@ def _collect_level1_lines_from_snapshot(
     snapshot: Level1AuthoritySnapshot,
     *,
     include_alias_mappings: bool = True,
+    requested_names: Iterable[str] | None = None,
 ) -> Level1EvidenceBuckets:
+    """
+    创建时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    说明: 当 renderer 只能从 snapshot 回退时，也要按 request 边界过滤；
+          显式空请求或完全不命中时，不能重新渲染整本书的 Level1 事实。
+    """
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
     seen_lines: set[str] = set()
+    relevant_names = _resolve_level1_relevant_names(snapshot, requested_names)
+    if requested_names is not None and not relevant_names:
+        return Level1EvidenceBuckets(
+            alias_lines=[],
+            entity_lines=[],
+            relation_lines=[],
+        )
+
     entity_types = {
-        item.name.strip(): item.entity_type.strip() for item in snapshot.entity_types if item.name and item.entity_type
+        item.name.strip(): item.entity_type.strip()
+        for item in snapshot.entity_types
+        if item.name
+        and item.entity_type
+        and (not relevant_names or item.name.strip() in relevant_names)
     }
 
     if include_alias_mappings:
         for mapping in snapshot.alias_mappings:
             alias = mapping.alias.strip()
             canonical = mapping.canonical.strip()
+            if relevant_names and alias not in relevant_names and canonical not in relevant_names:
+                continue
             if alias and canonical:
                 _append_unique_line(alias_lines, seen_lines, f"- 已确认别名：{alias} -> {canonical}")
 
     for entity in snapshot.canonical_entities:
         name = entity.name.strip()
         if not name:
+            continue
+        if relevant_names and name not in relevant_names:
             continue
         entity_type = entity_types.get(name, entity.entity_type.strip())
         type_suffix = f" ({entity_type})" if entity_type else ""
@@ -177,6 +229,8 @@ def _collect_level1_lines_from_snapshot(
         from_name = relation.from_name.strip()
         to_name = relation.to_name.strip()
         relation_type = relation.relation_type.strip()
+        if relevant_names and from_name not in relevant_names and to_name not in relevant_names:
+            continue
         if from_name and to_name and relation_type:
             _append_unique_line(relation_lines, seen_lines, f"- 已确认关系：{from_name} -{relation_type}-> {to_name}")
 
@@ -196,6 +250,12 @@ def render_level1_facts(
     max_entity_lines: int | None = None,
     max_relation_lines: int | None = None,
 ) -> str | None:
+    """
+    修改时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    修改说明: renderer fallback 到 `level1_snapshot` 时也要按 `bundle.requested_names`
+              过滤，显式空请求或快照 miss 都不允许回退成全量 Level1 注入。
+    """
     buckets = (
         _collect_level1_lines_from_structured(bundle, include_alias_mappings=include_alias_mappings)
         if bundle.structured_evidence
@@ -208,6 +268,7 @@ def render_level1_facts(
         buckets = _collect_level1_lines_from_snapshot(
             bundle.level1_snapshot,
             include_alias_mappings=include_alias_mappings,
+            requested_names=bundle.requested_names,
         )
 
     if any(limit is not None for limit in (max_alias_lines, max_entity_lines, max_relation_lines)):
