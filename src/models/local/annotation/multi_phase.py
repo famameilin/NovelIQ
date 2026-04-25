@@ -270,38 +270,17 @@ async def _resolve_phase4_bundle(
     创建时间: 2026-04-25
     修改时间: 2026-04-25
     任务: evidence-service-request-unification
-    修改说明: Phase4 的 relation request 需要等 Phase1 产出 known_characters 后再补全 requested_names/seed_entities，
-          因此在真正进入 Phase4 前动态取证，而不是继续复用 Phase1 的 identity bundle。
+    修改说明: Phase4 的 relation request 需要等 Phase1 产出 known_characters 后再补全 requested_names/seed_entities；
+          这一步统一委托 evidence service，multi_phase 只负责调度。
     """
     if context.phase4_bundle is not None:
         return context.phase4_bundle
     if context.phase4_request_template is None or context.evidence_service is None:
         return None
-
-    requested_names: list[str] = []
-    for name in (
-        list(known_characters or [])
-        + list(context.phase4_request_template.requested_names)
-        + list(context.phase4_request_template.seed_entities)
-    ):
-        normalized = str(name).strip()
-        if normalized and normalized not in requested_names:
-            requested_names.append(normalized)
-
-    seed_entities: list[str] = []
-    for name in list(known_characters or []) + list(context.phase4_request_template.seed_entities):
-        normalized = str(name).strip()
-        if normalized and normalized not in seed_entities:
-            seed_entities.append(normalized)
-
-    from dataclasses import replace
-
-    phase4_request = replace(
+    return await context.evidence_service.collect_annotation_phase4_bundle(
         context.phase4_request_template,
-        requested_names=requested_names,
-        seed_entities=seed_entities,
+        known_characters,
     )
-    return await context.evidence_service.collect(phase4_request)
 
 
 def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:

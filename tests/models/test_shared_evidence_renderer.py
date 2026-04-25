@@ -216,3 +216,38 @@ def test_render_shared_evidence_sections_can_exclude_vector_chunks_covered_by_em
     assert "[Chunk 9]" not in sections.vector_evidence
     assert sections.emotion_exemplars is not None
     assert "[Chunk 9]" in sections.emotion_exemplars
+
+
+def test_render_shared_evidence_sections_prioritizes_background_entities_in_vector_evidence() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: `background_entities` 只应作为 renderer 背景 hint 使用；
+          这里验证它会优先展示和背景名更相关的 vector evidence，而不会回流到 requested_names/fallback。
+    """
+    bundle = EvidenceBundle(
+        semantic_evidence=[
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="陌生人翻过残墙，场景相似。",
+                metadata={"chunk_id": 1, "text": "陌生人翻过残墙，场景相似。", "similarity": 0.93},
+            ),
+            EvidenceItem(
+                evidence_type="semantic_recall",
+                source="level3",
+                content="白芷抬手按住袖中银针。",
+                metadata={"chunk_id": 2, "text": "白芷抬手按住袖中银针。", "similarity": 0.89},
+            ),
+        ],
+        request_meta={"background_entities": ["白芷"]},
+    )
+
+    sections = render_shared_evidence_sections(
+        bundle,
+        max_vector_chunks=1,
+    )
+
+    assert sections.vector_evidence is not None
+    assert "[Chunk 2]" in sections.vector_evidence
+    assert "[Chunk 1]" not in sections.vector_evidence

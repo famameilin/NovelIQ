@@ -64,15 +64,17 @@ from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.rag.authority import Level1AuthorityProvider
 from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
-from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
-from src.rag.level1_alias import AliasLookup
-from src.rag.level2_active_entities import ActiveEntityLookup
 from src.rag.evidence_contracts import (
+    EvidenceConsumer,
+    EvidenceObjective,
     EvidenceRequest,
     Level3QueryMode,
     Level3QueryPlan,
     build_evidence_request_fingerprint,
 )
+from src.rag.evidence_types import AnnotationEvidencePlan, EvidenceBundle, Level1AuthoritySnapshot
+from src.rag.level1_alias import AliasLookup
+from src.rag.level2_active_entities import ActiveEntityLookup
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
 from src.rag.mention_extraction_service import MentionExtractionService, PersonMentionExtractor
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
@@ -94,6 +96,124 @@ __all__ = [
     "Level3VectorEvidence",
     "NarrativeEvidenceService",
 ]
+
+
+def _dedupe_names(values: list[str]) -> list[str]:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: evidence service 内部统一去重名字序列，避免 annotation/disambiguation 多处各自维护同一套顺序规则。
+    """
+    normalized: list[str] = []
+    for value in values:
+        cleaned = str(value).strip()
+        if cleaned and cleaned not in normalized:
+            normalized.append(cleaned)
+    return normalized
+
+
+def _collect_annotation_seed_entities(
+    alias_map: dict[str, str] | None,
+    active_entity_names: list[str],
+    *,
+    query_text: str | None = None,
+    extra_names: list[str] | None = None,
+) -> list[str]:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: annotation request 的 retrieval 锚点只允许来自当前 chunk 命中的 alias/canonical、
+          authority active entities 与显式补充名字，不能把整轮 alias 状态整体带进来。
+    """
+    seed_entities: list[str] = []
+    normalized_query_text = (query_text or "").strip()
+    for alias, canonical in (alias_map or {}).items():
+        normalized_alias = str(alias).strip()
+        normalized_canonical = str(canonical).strip()
+        if not normalized_query_text:
+            continue
+        if normalized_alias and normalized_alias in normalized_query_text and normalized_alias not in seed_entities:
+            seed_entities.append(normalized_alias)
+        if (
+            normalized_canonical
+            and (
+                normalized_canonical in normalized_query_text
+                or (normalized_alias and normalized_alias in normalized_query_text)
+            )
+            and normalized_canonical not in seed_entities
+        ):
+            seed_entities.append(normalized_canonical)
+
+    for name in active_entity_names:
+        normalized = str(name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    for name in extra_names or []:
+        normalized = str(name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    return seed_entities
+
+
+def _collect_annotation_requested_names(
+    alias_map: dict[str, str] | None,
+    *,
+    query_text: str | None = None,
+    extra_names: list[str] | None = None,
+) -> list[str]:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: annotation 的 requested_names 只表达“当前 consumer 正在处理谁”，
+          不混入 active entities 这种仅用于 retrieval 扩锚的背景名。
+    """
+    return _collect_annotation_seed_entities(
+        alias_map,
+        [],
+        query_text=query_text,
+        extra_names=extra_names,
+    )
+
+
+def _merge_annotation_phase1_identity_and_emotion_bundles(
+    identity_bundle: EvidenceBundle,
+    emotion_bundle: EvidenceBundle,
+) -> EvidenceBundle:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: Phase1 需要 identity semantic recall + emotion exemplar；
+          overlay 合并在 service 内完成，workflow 不再自己拼两份 bundle。
+    """
+    merged_semantic_evidence = list(identity_bundle.semantic_evidence)
+    existing_emotion_keys = {
+        (item.evidence_type, item.chunk_id, item.content)
+        for item in merged_semantic_evidence
+        if item.evidence_type == "emotion_exemplar"
+    }
+    for item in emotion_bundle.semantic_evidence:
+        if item.evidence_type != "emotion_exemplar":
+            continue
+        dedupe_key = (item.evidence_type, item.chunk_id, item.content)
+        if dedupe_key in existing_emotion_keys:
+            continue
+        merged_semantic_evidence.append(item)
+        existing_emotion_keys.add(dedupe_key)
+
+    return EvidenceBundle(
+        structured_evidence=list(identity_bundle.structured_evidence),
+        local_evidence=list(identity_bundle.local_evidence),
+        semantic_evidence=merged_semantic_evidence,
+        requested_names=list(identity_bundle.requested_names),
+        level1_snapshot=identity_bundle.level1_snapshot,
+        request_meta=dict(identity_bundle.request_meta),
+        generation_meta={
+            **identity_bundle.generation_meta,
+            "emotion_overlay_applied": True,
+        },
+    )
 
 
 class NarrativeEvidenceService:
@@ -275,6 +395,238 @@ class NarrativeEvidenceService:
         """
         cache_key = build_evidence_request_fingerprint(request)
         self._bundle_cache[cache_key] = bundle.clone_with_meta()
+
+    def _build_annotation_request(
+        self,
+        *,
+        consumer: EvidenceConsumer,
+        objective: EvidenceObjective,
+        query_text: str,
+        requested_names: list[str],
+        seed_entities: list[str],
+        background_entities: list[str] | None,
+        current_chunk: int,
+        max_chunk_id: int | None,
+        allow_llm_query_expansion: bool,
+        need_level1: bool = True,
+        need_level2: bool = True,
+        need_level3: bool = True,
+    ) -> EvidenceRequest:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: annotation 侧 request 统一在 service 内构造，workflow 只传业务语义输入，
+              不再自己拼 phase request 或维护 top_k/max_queries 等细节。
+        """
+        return EvidenceRequest(
+            consumer=consumer,
+            objective=objective,
+            query_text=query_text,
+            requested_names=requested_names,
+            seed_entities=seed_entities,
+            background_entities=list(background_entities or []),
+            current_chunk=current_chunk,
+            max_chunk_id=max_chunk_id,
+            exclude_chunk_ids=[current_chunk],
+            need_level1=need_level1,
+            need_level2=need_level2,
+            need_level3=need_level3,
+            allow_llm_query_expansion=allow_llm_query_expansion,
+            top_k=settings.rag.level3_top_k,
+            max_queries=settings.rag.level3_max_queries,
+            model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
+        )
+
+    def build_annotation_base_plan(
+        self,
+        *,
+        chunk_text: str,
+        alias_map: dict[str, str] | None,
+        current_chunk: int,
+        active_entity_names: list[str],
+    ) -> AnnotationEvidencePlan:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: 无 Level3 的 annotation 场景也由 evidence service 统一生成阶段 bundle，
+              避免 workflow 再回退到手工拼 request / base bundle 的旧模式。
+        """
+        max_chunk_id = current_chunk - 1
+        phase1_requested_names = _collect_annotation_requested_names(alias_map, query_text=chunk_text)
+        phase1_seed_entities = _collect_annotation_seed_entities(
+            alias_map,
+            active_entity_names,
+            query_text=chunk_text,
+        )
+        phase2_requested_names = _dedupe_names(active_entity_names)
+        phase2_seed_entities = _collect_annotation_seed_entities(None, active_entity_names)
+
+        phase1_request = self._build_annotation_request(
+            consumer="annotation_phase1",
+            objective="identity",
+            query_text=chunk_text,
+            requested_names=phase1_requested_names,
+            seed_entities=phase1_seed_entities,
+            background_entities=[],
+            current_chunk=current_chunk,
+            max_chunk_id=max_chunk_id,
+            allow_llm_query_expansion=False,
+            need_level3=False,
+        )
+        phase2_request = self._build_annotation_request(
+            consumer="annotation_phase2",
+            objective="foreshadowing",
+            query_text=chunk_text,
+            requested_names=phase2_requested_names,
+            seed_entities=phase2_seed_entities,
+            background_entities=[],
+            current_chunk=current_chunk,
+            max_chunk_id=max_chunk_id,
+            allow_llm_query_expansion=False,
+            need_level3=False,
+        )
+        phase1_bundle = self._collect_base_evidence(phase1_request)
+        phase2_bundle = self._collect_base_evidence(phase2_request)
+
+        return AnnotationEvidencePlan(
+            phase1_bundle=phase1_bundle,
+            phase2_bundle=phase2_bundle,
+            phase3_bundle=phase1_bundle,
+            phase4_request_template=self._build_annotation_request(
+                consumer="annotation_phase4",
+                objective="relation",
+                query_text=chunk_text,
+                requested_names=phase2_requested_names,
+                seed_entities=phase2_seed_entities,
+                background_entities=[],
+                current_chunk=current_chunk,
+                max_chunk_id=max_chunk_id,
+                allow_llm_query_expansion=False,
+                need_level3=False,
+            ),
+        )
+
+    async def prepare_annotation_evidence_plan(
+        self,
+        *,
+        chunk_text: str,
+        alias_map: dict[str, str] | None,
+        current_chunk: int,
+        active_entity_names: list[str],
+    ) -> AnnotationEvidencePlan:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: annotation workflow 只提供 chunk 语义和 authority 活跃实体；
+              phase1/2/3 request 规划、overlay 复用与 bundle 收集统一收口到 service。
+        """
+        max_chunk_id = current_chunk - 1
+        phase1_requested_names = _collect_annotation_requested_names(alias_map, query_text=chunk_text)
+        phase1_seed_entities = _collect_annotation_seed_entities(
+            alias_map,
+            active_entity_names,
+            query_text=chunk_text,
+        )
+        phase2_requested_names = _dedupe_names(active_entity_names)
+        phase2_seed_entities = _collect_annotation_seed_entities(None, active_entity_names)
+
+        phase1_identity_request = self._build_annotation_request(
+            consumer="annotation_phase1",
+            objective="identity",
+            query_text=chunk_text,
+            requested_names=phase1_requested_names,
+            seed_entities=phase1_seed_entities,
+            background_entities=[],
+            current_chunk=current_chunk,
+            max_chunk_id=max_chunk_id,
+            allow_llm_query_expansion=True,
+        )
+        phase1_emotion_request = self._build_annotation_request(
+            consumer="annotation_phase1",
+            objective="emotion",
+            query_text=chunk_text,
+            requested_names=phase1_requested_names,
+            seed_entities=[],
+            background_entities=[],
+            current_chunk=current_chunk,
+            max_chunk_id=max_chunk_id,
+            allow_llm_query_expansion=False,
+            need_level1=False,
+            need_level2=False,
+        )
+        phase2_request = self._build_annotation_request(
+            consumer="annotation_phase2",
+            objective="foreshadowing",
+            query_text=chunk_text,
+            requested_names=phase2_requested_names,
+            seed_entities=phase2_seed_entities,
+            background_entities=[],
+            current_chunk=current_chunk,
+            max_chunk_id=max_chunk_id,
+            allow_llm_query_expansion=False,
+        )
+        phase3_request = self._build_annotation_request(
+            consumer="annotation_phase3",
+            objective="identity",
+            query_text=chunk_text,
+            requested_names=phase1_requested_names,
+            seed_entities=phase1_seed_entities,
+            background_entities=[],
+            current_chunk=current_chunk,
+            max_chunk_id=max_chunk_id,
+            allow_llm_query_expansion=True,
+        )
+
+        phase1_identity_bundle = await self.collect(phase1_identity_request)
+        phase1_bundle = phase1_identity_bundle
+        if self.is_level3_available():
+            phase1_emotion_bundle = await self.collect(phase1_emotion_request)
+            phase1_bundle = _merge_annotation_phase1_identity_and_emotion_bundles(
+                phase1_identity_bundle,
+                phase1_emotion_bundle,
+            )
+
+        return AnnotationEvidencePlan(
+            phase1_bundle=phase1_bundle,
+            phase2_bundle=await self.collect(phase2_request),
+            phase3_bundle=await self.collect(phase3_request),
+            phase4_request_template=self._build_annotation_request(
+                consumer="annotation_phase4",
+                objective="relation",
+                query_text=chunk_text,
+                requested_names=phase2_requested_names,
+                seed_entities=phase2_seed_entities,
+                background_entities=[],
+                current_chunk=current_chunk,
+                max_chunk_id=max_chunk_id,
+                allow_llm_query_expansion=False,
+            ),
+        )
+
+    async def collect_annotation_phase4_bundle(
+        self,
+        request_template: EvidenceRequest | None,
+        known_characters: list[str] | None,
+    ) -> EvidenceBundle | None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: Phase4 relation evidence 需要等 Phase1 产出 known_characters 后再补齐；
+              这里由 service 统一扩展 request，再回到 collect(request) 主入口。
+        """
+        if request_template is None:
+            return None
+
+        phase4_request = replace(
+            request_template,
+            requested_names=_dedupe_names(
+                list(known_characters or [])
+                + list(request_template.requested_names)
+                + list(request_template.seed_entities)
+            ),
+            seed_entities=_dedupe_names(list(known_characters or []) + list(request_template.seed_entities)),
+        )
+        return await self.collect(phase4_request)
 
     def _collect_base_evidence(self, request: EvidenceRequest) -> EvidenceBundle:
         """

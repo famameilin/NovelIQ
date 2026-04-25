@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -348,8 +349,8 @@ async def build_prompt_context_with_shared_evidence(
     context_sentences: dict[str, str],
     *,
     current_chunk: int | None = None,
-    background_entities: set[str] | None = None,
-    active_entity_fallback_names: set[str] | None = None,
+    background_entities: Iterable[str] | None = None,
+    active_entity_fallback_names: Iterable[str] | None = None,
 ) -> DisambiguationPromptContext | None:
     """
     把共享 evidence renderer 输出补入消歧 prompt_context。
