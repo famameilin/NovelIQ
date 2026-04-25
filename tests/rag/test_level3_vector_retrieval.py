@@ -1376,53 +1376,45 @@ class TestNarrativeEvidenceServiceLevel3Async:
         创建时间: 2026-04-25
         任务: fix-phase1-overlay-cache-scope
         说明: Phase1 的 emotion overlay 只属于 annotation_phase1 自己的内容变体；
-              同 query 的 annotation_phase3 request 不能命中这份 overlay cache。
+              同 query 的 annotation_phase3 request 应复用 identity base cache，但不能命中带 overlay 的结果。
         """
-        identity_bundle = EvidenceBundle(
-            semantic_evidence=[
-                EvidenceItem(
-                    evidence_type="vector_evidence",
-                    source="level3",
-                    content="程霜在旧案卷中发现了线索。",
-                    chunk_id=4,
-                    score=0.91,
-                    metadata={"text": "程霜在旧案卷中发现了线索。", "similarity": 0.91},
-                )
-            ],
-            generation_meta={"level3_executed": True},
-        )
-        emotion_overlay_bundle = EvidenceBundle(
-            semantic_evidence=[
-                EvidenceItem(
-                    evidence_type="emotion_exemplar",
-                    source="chunk_embeddings",
-                    content="她翻阅旧案卷时指节发白。",
-                    chunk_id=7,
-                    score=0.88,
-                    metadata={
-                        "chunk_id": 7,
-                        "text": "她翻阅旧案卷时指节发白。",
-                        "similarity": 0.88,
-                        "emotional_valence": "mild_negative",
-                    },
-                )
-            ],
-        )
-        phase3_bundle = EvidenceBundle(
-            semantic_evidence=[
-                EvidenceItem(
-                    evidence_type="vector_evidence",
-                    source="level3",
-                    content="程霜在旧案卷中发现了线索。",
-                    chunk_id=4,
-                    score=0.91,
-                    metadata={"text": "程霜在旧案卷中发现了线索。", "similarity": 0.91},
-                )
-            ],
-            generation_meta={"level3_executed": True},
-        )
         provider = NarrativeEvidenceService(level3_enabled=True)
-        provider._collect_request = AsyncMock(side_effect=[identity_bundle, emotion_overlay_bundle, phase3_bundle])
+        provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+        provider.build_level3_query_plan = AsyncMock(
+            side_effect=[
+                Level3QueryPlan(
+                    mode="direct",
+                    base_query_text="程霜翻阅旧案卷",
+                    mention_queries=[],
+                    candidate_pool_k=20,
+                    top_k=settings.rag.level3_top_k,
+                ),
+                Level3QueryPlan(
+                    mode="direct",
+                    base_query_text="程霜翻阅旧案卷",
+                    mention_queries=[],
+                    candidate_pool_k=20,
+                    top_k=settings.rag.level3_top_k,
+                ),
+            ]
+        )
+        provider.execute_level3_query_plan = AsyncMock(
+            side_effect=[
+                ([SimilarChunkRow(chunk_id=4, text="程霜在旧案卷中发现了线索。", similarity=0.91)], []),
+                (
+                    [
+                        SimilarChunkRow(
+                            chunk_id=7,
+                            text="她翻阅旧案卷时指节发白。",
+                            similarity=0.88,
+                            emotional_valence="mild_negative",
+                        )
+                    ],
+                    [],
+                ),
+            ]
+        )
         phase1_request = _build_evidence_request(
             consumer="annotation_phase1",
             objective="identity",
@@ -1458,13 +1450,15 @@ class TestNarrativeEvidenceServiceLevel3Async:
         cached_phase1_bundle = await provider.collect(phase1_request)
         resolved_phase3_bundle = await provider.collect(phase3_request)
 
-        assert provider._collect_request.await_count == 3
+        assert provider.build_level3_query_plan.await_count == 2
+        assert provider.execute_level3_query_plan.await_count == 2
         assert any(item.evidence_type == "emotion_exemplar" for item in first_phase1_bundle.semantic_evidence)
         assert any(item.evidence_type == "emotion_exemplar" for item in cached_phase1_bundle.semantic_evidence)
         assert cached_phase1_bundle.generation_meta["cache_reuse"] is True
+        assert resolved_phase3_bundle.generation_meta["cache_reuse"] is True
         assert not any(item.evidence_type == "emotion_exemplar" for item in resolved_phase3_bundle.semantic_evidence)
         assert resolved_phase3_bundle.generation_meta.get("emotion_overlay_applied") is None
-        assert provider._collect_request.await_args_list[2].args[0].consumer == "annotation_phase3"
+        assert first_phase1_bundle.generation_meta["cache_reuse"] is False
 
     @pytest.mark.asyncio
     async def test_collect_records_failed_queries_and_dropped_queries_in_generation_meta(self) -> None:
