@@ -29,6 +29,7 @@ from src.workflows.annotate_helpers.context import (
     ChunkContext,
     _build_active_entities_prompt_from_authority,
     _build_optional_task_model_client,
+    _collect_requested_names,
     _collect_seed_entities,
     _init_evidence_service,
     _prepare_chunk_context,
@@ -235,7 +236,7 @@ def test_render_annotation_prompt_blocks_includes_level1_facts_in_main_disambig_
         ],
         requested_names=["蒙面人"],
         level1_snapshot=Level1AuthoritySnapshot(
-            alias_mappings=[AliasMapping(alias="白老板", canonical="白芷")],
+            alias_mappings=[AliasMapping(alias="蒙面人", canonical="白芷")],
             canonical_entities=[CanonicalEntity(name="白芷", entity_type="character")],
             entity_types=[EntityTypeFact(name="白芷", entity_type="character")],
         ),
@@ -245,9 +246,8 @@ def test_render_annotation_prompt_blocks_includes_level1_facts_in_main_disambig_
 
     assert blocks.level1_facts is not None
     assert blocks.disambig_context is not None
-    assert "已确认别名：白老板 -> 白芷" in blocks.disambig_context
+    assert "已确认别名：蒙面人 -> 白芷" in blocks.disambig_context
     assert "已确认实体：白芷 (character)" in blocks.disambig_context
-    assert "「蒙面人」可能是：白芷" in blocks.disambig_context
 
 
 def test_collect_seed_entities_only_keeps_aliases_explicitly_mentioned_in_current_chunk():
@@ -280,6 +280,22 @@ def test_collect_seed_entities_keeps_canonical_when_chunk_mentions_canonical_dir
     )
 
     assert seed_entities == ["程霜"]
+
+
+def test_collect_requested_names_promotes_direct_canonical_mentions_only_when_explicitly_present():
+    """
+    创建时间: 2026-04-26
+    任务: fix-direct-canonical-requested-names
+    说明: `requested_names` 可以从可信候选中补 canonical 直出现，
+          但只能提升正文里真的出现的名字，不能把背景名字整包抬成当前 consumer target。
+    """
+    requested_names = _collect_requested_names(
+        {},
+        query_text="程霜翻阅旧案卷，韩山没有出场。",
+        extra_names=["程霜", "白芷"],
+    )
+
+    assert requested_names == ["程霜"]
 
 
 class FakeChunkRepository:
@@ -648,6 +664,52 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
     assert "<Emotion_Exemplars>" in context.prompt_disambig_context
     assert context.prompt_vector_evidence is not None
     assert "[Chunk 4]" in context.prompt_vector_evidence
+
+
+@pytest.mark.asyncio
+async def test_prepare_chunk_context_with_level3_promotes_direct_canonical_mentions_into_requested_names(monkeypatch):
+    """
+    创建时间: 2026-04-26
+    任务: fix-direct-canonical-requested-names
+    说明: 当正文直接出现 canonical 名且它来自可信 active-entity 上下文时，
+          Phase1/Phase3 request 都应把它写入 requested_names，而不是只留在 seed_entities。
+    """
+    provider = Mock()
+    provider.collect = AsyncMock(side_effect=[EvidenceBundle(), EvidenceBundle(), EvidenceBundle()])
+
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr(
+        context_module,
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="程霜",
+                entity_id=12,
+                role="helper",
+                recent_action="追查",
+                recent_emotion=None,
+                last_seen_chunk=20,
+            )
+        ],
+    )
+
+    await _prepare_chunk_context_with_level3(
+        conn=object(),
+        chunk_id=21,
+        chunk_text="程霜翻阅旧案卷。",
+        alias_map={},
+        use_context_enhancement=True,
+        evidence_service=provider,
+        run_id="run-canonical-name",
+    )
+
+    assert provider.collect.await_count == 3
+    phase1_request = provider.collect.await_args_list[0].args[0]
+    phase3_request = provider.collect.await_args_list[2].args[0]
+    assert phase1_request.requested_names == ["程霜"]
+    assert phase1_request.seed_entities == ["程霜"]
+    assert phase3_request.requested_names == ["程霜"]
+    assert phase3_request.seed_entities == ["程霜"]
 
 
 @pytest.mark.asyncio
