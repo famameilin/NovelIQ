@@ -425,12 +425,21 @@ class Level3VectorEvidence:
         任务: level3-intent-phase-split
         说明: 统一复用 precomputed query embedding 的 chunk recall + paragraph rerank，
               确保单 query 和 batched query 看到同一套 SQL 边界与局部证据回填语义。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-typecheck-regressions
+        修改说明: helper 自身重新收紧 session/run_id 非空前提，避免未来复用时依赖“调用方一定先校验”的隐式契约。
         """
         from src.storage.repositories.chunk import search_similar_chunks
 
+        session = self._session
+        run_id = self._run_id
+        if session is None or run_id is None:
+            self._raise_not_ready("Level 3 search requires session and run_id")
+
         results = search_similar_chunks(
-            self._session,
-            self._run_id,
+            session,
+            run_id,
             query_embedding,
             top_k=top_k,
             similarity_threshold=self._similarity_threshold,
