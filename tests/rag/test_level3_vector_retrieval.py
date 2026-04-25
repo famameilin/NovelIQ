@@ -187,6 +187,22 @@ class TestLevel3VectorEvidence(unittest.TestCase):
         ):
             self.assertTrue(level3.is_available())
 
+    def test_search_similar_chunks_by_embedding_requires_runtime_state(self) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: fix-level3-typecheck-regressions
+        说明: 预计算 embedding 的 helper 不能只依赖外层调用者兜底；缺少 session/run_id 时应立即报错。
+        """
+        level3 = Level3VectorEvidence()
+
+        with self.assertRaisesRegex(Level3NotReadyError, "requires session and run_id"):
+            level3._search_similar_chunks_by_embedding(
+                [0.1] * settings.models.semantic_chunking.embedding_dim,
+                exclude_chunk_ids=None,
+                max_chunk_id=None,
+                top_k=5,
+            )
+
 class TestLevel3VectorEvidenceAsync:
     """Level3VectorEvidence 异步测试"""
 
