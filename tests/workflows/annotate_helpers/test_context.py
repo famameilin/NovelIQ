@@ -23,8 +23,6 @@ from src.knowledge.authority import (
     Level1AuthoritySnapshot,
 )
 from src.models.local.annotation.evidence_renderer import render_annotation_prompt_blocks
-from src.rag import AnnotationEvidencePlan
-from src.rag.evidence_contracts import EvidenceRequest
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 from src.workflows.annotate_helpers import context as context_module
 from src.workflows.annotate_helpers.context import (
@@ -307,12 +305,7 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
         requested_names=["蒙面人"],
     )
     provider = Mock()
-    provider.build_annotation_base_plan.return_value = AnnotationEvidencePlan(
-        phase1_bundle=bundle,
-        phase2_bundle=EvidenceBundle(),
-        phase3_bundle=bundle,
-        phase4_request_template=None,
-    )
+    provider._collect_base_evidence.side_effect = [bundle, EvidenceBundle()]
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
@@ -365,12 +358,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
         ]
     )
     provider = Mock()
-    provider.build_annotation_base_plan.return_value = AnnotationEvidencePlan(
-        phase1_bundle=bundle,
-        phase2_bundle=EvidenceBundle(),
-        phase3_bundle=bundle,
-        phase4_request_template=None,
-    )
+    provider._collect_base_evidence.side_effect = [bundle, EvidenceBundle()]
     expected_active_entities = render_annotation_prompt_blocks(bundle).active_entities
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
@@ -497,14 +485,7 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
         requested_names=["黑衣人"],
     )
     provider = Mock()
-    provider.prepare_annotation_evidence_plan = AsyncMock(
-        return_value=AnnotationEvidencePlan(
-            phase1_bundle=bundle,
-            phase2_bundle=EvidenceBundle(),
-            phase3_bundle=bundle,
-            phase4_request_template=None,
-        )
-    )
+    provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle(), bundle])
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
@@ -538,7 +519,11 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
     assert context.evidence_bundle is bundle
     assert context.prompt_disambig_context is not None
     assert "「黑衣人」可能是：陆明" in context.prompt_disambig_context
-    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["active_entity_names"] == ["陆明"]
+    assert provider.collect.await_count == 3
+    phase1_request = provider.collect.await_args_list[0].args[0]
+    assert phase1_request.consumer == "annotation_phase1"
+    assert phase1_request.requested_names == []
+    assert phase1_request.seed_entities == ["陆明"]
 
 
 @pytest.mark.asyncio
@@ -598,31 +583,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         ],
     )
     provider = Mock()
-    provider.prepare_annotation_evidence_plan = AsyncMock(
-        return_value=AnnotationEvidencePlan(
-            phase1_bundle=phase1_bundle,
-            phase2_bundle=phase2_bundle,
-            phase3_bundle=phase3_bundle,
-            phase4_request_template=EvidenceRequest(
-                consumer="annotation_phase4",
-                objective="relation",
-                query_text="程霜翻阅旧案卷",
-                requested_names=["旧值"],
-                seed_entities=["旧值"],
-                background_entities=[],
-                current_chunk=21,
-                max_chunk_id=20,
-                exclude_chunk_ids=[21],
-                need_level1=True,
-                need_level2=True,
-                need_level3=True,
-                allow_llm_query_expansion=False,
-                top_k=settings.rag.level3_top_k,
-                max_queries=settings.rag.level3_max_queries,
-                model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
-            ),
-        )
-    )
+    provider.collect = AsyncMock(side_effect=[phase1_bundle, phase2_bundle, phase3_bundle])
 
     monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
     monkeypatch.setattr(
@@ -650,10 +611,20 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         run_id="run-level3-available",
     )
 
-    assert provider.prepare_annotation_evidence_plan.await_count == 1
-    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["chunk_text"] == "程霜翻阅旧案卷"
-    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["current_chunk"] == 21
-    assert provider.prepare_annotation_evidence_plan.await_args.kwargs["active_entity_names"] == ["旧值"]
+    assert provider.collect.await_count == 3
+    phase1_request = provider.collect.await_args_list[0].args[0]
+    phase2_request = provider.collect.await_args_list[1].args[0]
+    phase3_request = provider.collect.await_args_list[2].args[0]
+    assert phase1_request.consumer == "annotation_phase1"
+    assert phase1_request.objective == "identity"
+    assert phase1_request.requested_names == ["程霜"]
+    assert phase1_request.seed_entities == ["程霜", "旧值"]
+    assert phase2_request.consumer == "annotation_phase2"
+    assert phase2_request.requested_names == ["旧值"]
+    assert phase2_request.seed_entities == ["旧值"]
+    assert phase3_request.consumer == "annotation_phase3"
+    assert phase3_request.requested_names == ["程霜"]
+    assert phase3_request.seed_entities == ["程霜", "旧值"]
     assert context.phase1_bundle is phase1_bundle
     assert context.phase2_bundle is phase2_bundle
     assert context.phase3_bundle is phase3_bundle
@@ -675,9 +646,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
 @pytest.mark.asyncio
 async def test_prepare_chunk_context_with_level3_raises_when_required_but_unavailable(monkeypatch):
     provider = Mock()
-    provider.prepare_annotation_evidence_plan = AsyncMock(
-        side_effect=RuntimeError("Level 3 vector retrieval is required but not available")
-    )
+    provider.collect = AsyncMock(side_effect=RuntimeError("Level 3 vector retrieval is required but not available"))
 
     with pytest.raises(RuntimeError, match="Level 3 vector retrieval is required but not available"):
         await _prepare_chunk_context_with_level3(
