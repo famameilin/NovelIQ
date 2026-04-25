@@ -493,6 +493,11 @@ def _prepare_chunk_context(
     修改者: TraeAI
     任务: refactor-phase1-identity-extraction
     修改内容: 移除 character_appearances 数据获取（已迁移至 Phase 3）
+
+    修改时间: 2026-04-25
+    任务: fix-phase4-request-scope
+    修改内容: Phase4 request template 改为空占位；关系取证目标必须等 Phase1 产出 known_characters
+              后再补齐，不能在上下文准备阶段先把历史 active entities 写进 consumer 名字边界。
     """
     from src.storage.repositories import ChunkRepository
 
@@ -557,12 +562,14 @@ def _prepare_chunk_context(
         context.phase1_bundle = evidence_service._collect_base_evidence(phase1_request)
         context.phase2_bundle = evidence_service._collect_base_evidence(phase2_request)
         context.phase3_bundle = context.phase1_bundle
+        # 中文注释：Phase4 的 consumer target 只能由当前 chunk 的 Phase1 known_characters 决定；
+        # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities。
         context.phase4_request_template = _build_evidence_request(
             consumer="annotation_phase4",
             objective="relation",
             query_text=chunk_text,
-            requested_names=phase2_requested_names,
-            seed_entities=phase2_seed_entities,
+            requested_names=[],
+            seed_entities=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
@@ -598,6 +605,11 @@ async def _prepare_chunk_context_with_level3(
     修改时间: 2026-04-24
     任务: llm-mention-rerank-chain
     修改说明: mention extraction/query 构造收口到 provider，workflow 只透传当前 chunk 取证上下文。
+
+    修改时间: 2026-04-25
+    任务: fix-phase4-request-scope
+    修改内容: Phase4 request template 改为空占位；关系取证目标必须等 Phase1 产出 known_characters
+              后再补齐，不能在上下文准备阶段先把历史 active entities 写进 consumer 名字边界。
     """
     from src.storage.repositories import ChunkRepository
 
@@ -665,12 +677,14 @@ async def _prepare_chunk_context_with_level3(
         context.phase1_bundle = await evidence_service.collect(phase1_request)
         context.phase2_bundle = await evidence_service.collect(phase2_request)
         context.phase3_bundle = await evidence_service.collect(phase3_request)
+        # 中文注释：Phase4 的 consumer target 只能由当前 chunk 的 Phase1 known_characters 决定；
+        # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities。
         context.phase4_request_template = _build_evidence_request(
             consumer="annotation_phase4",
             objective="relation",
             query_text=chunk_text,
-            requested_names=list(active_entity_names),
-            seed_entities=_collect_seed_entities(None, active_entity_names),
+            requested_names=[],
+            seed_entities=[],
             background_entities=[],
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
