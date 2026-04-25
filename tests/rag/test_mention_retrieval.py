@@ -28,21 +28,27 @@ from src.rag.mention_rerank import rerank_mention_level3_results
 from src.rag.model_call_audit import audited_structured_model_call
 from src.rag.model_rerank import Level3RerankResult
 from src.rag.model_rerank_llm import LLMLevel3Reranker, LLMLevel3RerankItem, LLMLevel3RerankResponse
-from src.rag.retriever import DisambigContextProvider
+from src.rag.retriever import NarrativeEvidenceService
 from src.storage.repositories.chunk import SimilarChunkRow
 
 
 def _build_level3_request(
     *,
+    consumer: str = "incremental_disambiguation",
     objective: str = "identity",
     query_text: str = "那个穿红衣的女子突然出手。",
+    requested_names: list[str] | None = None,
     seed_entities: list[str] | None = None,
+    background_entities: list[str] | None = None,
     current_chunk: int | None = 9,
     max_chunk_id: int | None = 8,
     top_k: int = 2,
     max_queries: int = 6,
     model_rerank_query_max_chars: int = 320,
     allow_llm_query_expansion: bool = True,
+    need_level1: bool = True,
+    need_level2: bool = True,
+    need_level3: bool = True,
 ) -> Level3Request:
     """
     创建时间: 2026-04-25
@@ -50,12 +56,18 @@ def _build_level3_request(
     说明: 统一生成 Level3Request，减少 request-cutover 后各测试重复手写显式合同。
     """
     return Level3Request(
+        consumer=consumer,
         objective=objective,  # type: ignore[arg-type]
         query_text=query_text,
+        requested_names=requested_names or list(seed_entities or ["白芷"]),
         seed_entities=seed_entities or ["白芷"],
+        background_entities=background_entities or [],
         current_chunk=current_chunk,
         max_chunk_id=max_chunk_id,
         exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
+        need_level1=need_level1,
+        need_level2=need_level2,
+        need_level3=need_level3,
         allow_llm_query_expansion=allow_llm_query_expansion,
         top_k=top_k,
         max_queries=max_queries,
@@ -747,7 +759,7 @@ async def test_build_level3_query_plan_uses_hybrid_for_identity_requests() -> No
     任务: level3-intent-phase-split
     说明: identity objective 且允许 LLM expansion 时，应保留 direct base query，并生成 hybrid plan。
     """
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     plan = await provider.build_level3_query_plan(
         _build_level3_request(
             objective="identity",
@@ -771,7 +783,7 @@ async def test_build_level3_query_plan_uses_direct_for_relation_requests() -> No
     任务: level3-intent-phase-split
     说明: relation objective 首版固定 direct-only，不应再默认触发 mention extraction。
     """
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     plan = await provider.build_level3_query_plan(
         _build_level3_request(
             objective="relation",
@@ -796,7 +808,7 @@ async def test_build_level3_query_plan_uses_limited_hybrid_for_relation_requests
     说明: relation objective 显式允许 expansion 时，应从默认 direct 切到受限 hybrid；
           但 relation 只复用规则 extractor，不走 LLM 主路径。
     """
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     provider._mention_extraction_service.extract_mentions = AsyncMock(
         return_value=[
             PersonMention(
@@ -833,7 +845,7 @@ async def test_build_level3_query_plan_trims_queries_by_budget() -> None:
     任务: level3-intent-phase-split
     说明: max_queries 应直接裁掉高阶 query 数量，避免 identity 路径继续失控增长。
     """
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     plan = await provider.build_level3_query_plan(
         _build_level3_request(
             objective="identity",
@@ -856,7 +868,7 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
     任务: level3-mention-retrieval
     说明: provider 应执行 mention query 并按 chunk_id 去重，同时保留 mention metadata。
     """
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
     provider._level3.search_similar_chunks = AsyncMock()
@@ -878,7 +890,7 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
             top_k=2,
         )
     )
-    bundle = await provider.collect_evidence_with_level3(
+    bundle = await provider.collect(
         _build_level3_request(
             query_text="那个穿红衣的女子突然出手。",
             current_chunk=None,
@@ -913,7 +925,7 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     任务: llm-mention-rerank-chain
     说明: workflow 不传 mention_queries 时，provider 应自己抽取 mention、构造 query 并写入新 metadata。
     """
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
     provider._level3.search_similar_chunks = AsyncMock()
@@ -929,7 +941,7 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
 
     provider._level3.search_similar_chunks_many = AsyncMock(side_effect=_fake_search_similar_chunks_many)
 
-    bundle = await provider.collect_evidence_with_level3(
+    bundle = await provider.collect(
         _build_level3_request(
             seed_entities=["白芷"],
             current_chunk=9,
@@ -943,6 +955,12 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     assert semantic_items[0].metadata["mention_source"] == "rule"
     assert semantic_items[0].metadata["query_variant"] == "mention_raw"
     assert semantic_items[0].metadata["rerank_source"] == "deterministic_fallback"
+    assert bundle.request_meta["consumer"] == "incremental_disambiguation"
+    assert bundle.request_meta["requested_names"] == ["白芷"]
+    assert bundle.generation_meta["level3_executed"] is True
+    assert bundle.generation_meta["batch_mode"] == "batched"
+    assert bundle.generation_meta["query_count"] >= 2
+    assert bundle.generation_meta["failed_queries"] == []
     assert batched_query_texts[0] == "穿红衣的女子"
     provider._level3.search_similar_chunks_many.assert_awaited_once()
     provider._level3.search_similar_chunks.assert_not_awaited()
@@ -962,7 +980,7 @@ async def test_provider_uses_model_rerank_when_available() -> None:
             Level3RerankResult(chunk_id=10, model_rerank_score=0.81),
         ]
     )
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
     provider._level3.search_similar_chunks = AsyncMock()
@@ -986,7 +1004,7 @@ async def test_provider_uses_model_rerank_when_available() -> None:
             top_k=2,
         )
     )
-    bundle = await provider.collect_evidence_with_level3(
+    bundle = await provider.collect(
         _build_level3_request(
             seed_entities=["白芷"],
             current_chunk=12,
@@ -1002,6 +1020,8 @@ async def test_provider_uses_model_rerank_when_available() -> None:
     assert semantic_items[0].metadata["rerank_source"] == "model"
     assert semantic_items[0].metadata["business_rerank_score"] is not None
     assert semantic_items[0].score == 0.97
+    assert bundle.generation_meta["query_mode"] == "hybrid"
+    assert bundle.generation_meta["batch_mode"] == "batched"
     reranker.rerank.assert_awaited_once()
     provider._level3.search_similar_chunks_many.assert_awaited_once()
     provider._level3.search_similar_chunks.assert_not_awaited()
@@ -1017,7 +1037,7 @@ async def test_provider_caps_model_rerank_query_text_by_explicit_budget() -> Non
     """
     reranker = MagicMock()
     reranker.rerank = AsyncMock(return_value=[])
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2, level3_reranker=reranker)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
     provider._level3.search_similar_chunks = AsyncMock()
@@ -1064,7 +1084,7 @@ async def test_provider_caps_model_rerank_query_text_by_explicit_budget() -> Non
         )
     )
 
-    await provider.collect_evidence_with_level3(
+    await provider.collect(
         _build_level3_request(
             seed_entities=["白芷"],
             current_chunk=12,
@@ -1087,7 +1107,7 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
     任务: level3-mention-rerank
     说明: provider 应先扩大召回池并 rerank，再裁剪回 prompt top_k，避免只按向量分保留相似场景。
     """
-    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=1)
+    provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=1)
     provider._level3.is_available = MagicMock(return_value=True)
     provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
     provider._level3.search_similar_chunks = AsyncMock()
@@ -1115,7 +1135,7 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
             top_k=1,
         )
     )
-    bundle = await provider.collect_evidence_with_level3(
+    bundle = await provider.collect(
         _build_level3_request(
             seed_entities=["白芷"],
             current_chunk=6,

@@ -62,6 +62,31 @@ class EvidenceBundle:
     semantic_evidence: list[EvidenceItem] = field(default_factory=list)
     requested_names: list[str] = field(default_factory=list)
     level1_snapshot: Level1AuthoritySnapshot | None = None
+    request_meta: dict[str, Any] = field(default_factory=dict)
+    generation_meta: dict[str, Any] = field(default_factory=dict)
+
+    def clone_with_meta(
+        self,
+        *,
+        request_meta: dict[str, Any] | None = None,
+        generation_meta: dict[str, Any] | None = None,
+    ) -> EvidenceBundle:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: evidence service 需要在 cache reuse 时保留同一份证据内容，
+              但用当前请求的 request_meta / generation_meta 重新打戳，避免不同 consumer 共用旧标签。
+        """
+
+        return EvidenceBundle(
+            structured_evidence=list(self.structured_evidence),
+            local_evidence=list(self.local_evidence),
+            semantic_evidence=list(self.semantic_evidence),
+            requested_names=list(self.requested_names),
+            level1_snapshot=self.level1_snapshot,
+            request_meta=dict(request_meta if request_meta is not None else self.request_meta),
+            generation_meta=dict(generation_meta if generation_meta is not None else self.generation_meta),
+        )
 
     def structured_alias_map(self) -> dict[str, str]:
         alias_map: dict[str, str] = {}

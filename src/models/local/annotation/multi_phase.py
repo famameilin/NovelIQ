@@ -60,7 +60,7 @@ from .projectors.foreshadowing import normalize_foreshadowing_result as project_
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
     from src.models.local.schema import ChunkAnnotation, ForeshadowingResult, RelationChangeSnapshot
-    from src.rag import DisambigContextProvider, Level3Request
+    from src.rag import Level3Request, NarrativeEvidenceService
     from src.rag.evidence_types import EvidenceBundle
 
 PhaseEventAction = Literal["start", "progress", "complete", "output", "thinking"]
@@ -128,7 +128,7 @@ class _MultiPhaseExecutionContext:
     phase3_bundle: EvidenceBundle | None = None
     phase4_bundle: EvidenceBundle | None = None
     phase4_request_template: Level3Request | None = None
-    evidence_provider: DisambigContextProvider | None = None
+    evidence_provider: NarrativeEvidenceService | None = None
     fallback_client: AnnotationClient | None = None
     run_id: str | None = None
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None
@@ -277,6 +277,16 @@ async def _resolve_phase4_bundle(
     if context.phase4_request_template is None or context.evidence_provider is None:
         return None
 
+    requested_names: list[str] = []
+    for name in (
+        list(known_characters or [])
+        + list(context.phase4_request_template.requested_names)
+        + list(context.phase4_request_template.seed_entities)
+    ):
+        normalized = str(name).strip()
+        if normalized and normalized not in requested_names:
+            requested_names.append(normalized)
+
     seed_entities: list[str] = []
     for name in list(known_characters or []) + list(context.phase4_request_template.seed_entities):
         normalized = str(name).strip()
@@ -285,19 +295,12 @@ async def _resolve_phase4_bundle(
 
     from dataclasses import replace
 
-    phase4_request = replace(context.phase4_request_template, seed_entities=seed_entities)
-    if context.evidence_provider.requires_level3():
-        if not context.evidence_provider.is_level3_available():
-            raise RuntimeError("Level 3 vector retrieval is required but not available")
-        return await context.evidence_provider.collect_evidence_with_level3(phase4_request)
-
-    if context.evidence_provider.is_level3_available():
-        return await context.evidence_provider.collect_evidence_with_level3(phase4_request)
-
-    return context.evidence_provider.collect_evidence(
-        names_in_chunk=phase4_request.seed_entities,
-        current_chunk=phase4_request.current_chunk,
+    phase4_request = replace(
+        context.phase4_request_template,
+        requested_names=requested_names,
+        seed_entities=seed_entities,
     )
+    return await context.evidence_provider.collect(phase4_request)
 
 
 def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:
@@ -571,7 +574,7 @@ async def annotate_chunk_multi_phase(
     phase3_bundle: EvidenceBundle | None = None,
     phase4_bundle: EvidenceBundle | None = None,
     phase4_request_template: Level3Request | None = None,
-    evidence_provider: DisambigContextProvider | None = None,
+    evidence_provider: NarrativeEvidenceService | None = None,
     disambig_context: str | None = None,
     next_chunk_text: str | None = None,
     novel_title: str | None = None,
@@ -664,7 +667,7 @@ async def annotate_chunk_parallel(
     phase3_bundle: EvidenceBundle | None = None,
     phase4_bundle: EvidenceBundle | None = None,
     phase4_request_template: Level3Request | None = None,
-    evidence_provider: DisambigContextProvider | None = None,
+    evidence_provider: NarrativeEvidenceService | None = None,
     fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
@@ -761,7 +764,7 @@ async def annotate_chunk_serial(
     phase3_bundle: EvidenceBundle | None = None,
     phase4_bundle: EvidenceBundle | None = None,
     phase4_request_template: Level3Request | None = None,
-    evidence_provider: DisambigContextProvider | None = None,
+    evidence_provider: NarrativeEvidenceService | None = None,
     fallback_client: AnnotationClient | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,

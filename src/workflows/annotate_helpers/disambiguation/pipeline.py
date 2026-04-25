@@ -57,7 +57,7 @@ from .state_logic import (
 )
 
 if TYPE_CHECKING:
-    from src.rag import DisambigContextProvider
+    from src.rag import NarrativeEvidenceService
 
 
 class DisambiguationMaxRetriesExceededError(Exception):
@@ -238,7 +238,7 @@ async def _run_incremental_disambiguation_with_state(
     chunk_id: int,
     current_idx: int,
     disambig_interval: int,
-    evidence_provider: DisambigContextProvider | None = None,
+    evidence_provider: NarrativeEvidenceService | None = None,
 ) -> DisambiguationState:
     """
     执行增量消歧（使用新的三层状态）
@@ -306,7 +306,7 @@ async def _run_final_disambiguation_with_state(
     alias_keywords: list[str],
     novel_id: str,
     run_id: str,
-    evidence_provider: DisambigContextProvider | None = None,
+    evidence_provider: NarrativeEvidenceService | None = None,
 ) -> DisambiguationState:
     """
     执行最终消歧（使用新的三层状态）

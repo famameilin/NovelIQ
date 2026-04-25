@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 
 from src.chunking.chunker import Chunk
-from src.rag import DisambigContextProvider, Level1AuthorityProvider
+from src.rag import Level1AuthorityProvider, NarrativeEvidenceService
+from src.rag.level3_contracts import Level3Request
 from src.storage.repositories import ChunkRepository, GraphRepository, RunRepository
 
 
@@ -173,7 +174,7 @@ class TestLevel1AuthoritySnapshot:
         )
         db_session.commit()
 
-        provider = DisambigContextProvider(
+        provider = NarrativeEvidenceService(
             graph_repo=graph_repo,
             novel_id=novel_id,
             run_id=run_id,
@@ -183,7 +184,26 @@ class TestLevel1AuthoritySnapshot:
             level3_enabled=False,
         )
 
-        bundle = provider.collect_evidence(current_chunk=12)
+        bundle = provider._collect_base_evidence(
+            Level3Request(
+                consumer="annotation_phase1",
+                objective="identity",
+                query_text="",
+                requested_names=[],
+                seed_entities=[],
+                background_entities=[],
+                current_chunk=12,
+                max_chunk_id=11,
+                exclude_chunk_ids=[12],
+                need_level1=False,
+                need_level2=True,
+                need_level3=False,
+                allow_llm_query_expansion=False,
+                top_k=5,
+                max_queries=1,
+                model_rerank_query_max_chars=0,
+            )
+        )
 
         assert len(bundle.local_evidence) == 1
         metadata = bundle.local_evidence[0].metadata
