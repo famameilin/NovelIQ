@@ -337,6 +337,7 @@ async def test_incremental_pipeline_builds_shared_evidence_prompt_context() -> N
     assert "<Disambig_Candidates>" in client.received_prompt_context.shared_evidence_context
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
     assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
+    assert evidence_provider.calls[0]["objective"] == "identity"
     assert evidence_provider.calls[0]["current_chunk"] == 12
     assert evidence_provider.calls[0]["exclude_chunk_ids"] == [12]
     assert evidence_provider.calls[0]["max_chunk_id"] == 12
@@ -434,6 +435,7 @@ async def test_final_pipeline_builds_shared_evidence_prompt_context() -> None:
     assert client.received_prompt_context.shared_evidence_context is not None
     assert "<Vector_Evidence>" in client.received_prompt_context.shared_evidence_context
     assert evidence_provider.calls[0]["method"] == "collect_evidence_with_level3"
+    assert evidence_provider.calls[0]["objective"] == "identity"
     assert evidence_provider.calls[0]["current_chunk"] is None
     assert evidence_provider.calls[0]["max_chunk_id"] is None
     build_hint_call = mock_build_existing_hint.call_args

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.config import settings
 from src.models.disambiguation_types import NameCountCandidate
 from src.models.interactions import record_model_interaction
 from src.models.interfaces import DisambiguationLike
@@ -28,6 +29,7 @@ from src.models.local.disambiguation import (
 )
 from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
+from src.rag import Level3Request
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
@@ -300,6 +302,37 @@ def build_shared_evidence_query_text(
     return "\n".join(parts) if parts else None
 
 
+def _build_shared_evidence_request(
+    *,
+    names_in_chunk: list[str],
+    query_text: str,
+    current_chunk: int | None,
+    existing_names: set[str],
+) -> Level3Request:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: shared evidence 统一走 identity objective；seed_entities 只来自候选名和已知 canonical 名，不再拼旧弱语义参数。
+    """
+    seed_entities: list[str] = []
+    for name in names_in_chunk + list(existing_names):
+        normalized = str(name).strip()
+        if normalized and normalized not in seed_entities:
+            seed_entities.append(normalized)
+
+    return Level3Request(
+        objective="identity",
+        query_text=query_text,
+        seed_entities=seed_entities,
+        current_chunk=current_chunk,
+        max_chunk_id=current_chunk,
+        exclude_chunk_ids=[current_chunk] if current_chunk is not None else [],
+        allow_llm_query_expansion=True,
+        top_k=settings.rag.level3_top_k,
+        max_queries=settings.rag.level3_max_queries,
+    )
+
+
 async def build_prompt_context_with_shared_evidence(
     prompt_context: DisambiguationPromptContext | None,
     evidence_provider: DisambigContextProvider | None,
@@ -308,6 +341,7 @@ async def build_prompt_context_with_shared_evidence(
     *,
     current_chunk: int | None = None,
     active_entity_fallback_names: set[str] | None = None,
+    known_canonical_names: set[str] | None = None,
 ) -> DisambiguationPromptContext | None:
     """
     把共享 evidence renderer 输出补入消歧 prompt_context。
@@ -333,28 +367,24 @@ async def build_prompt_context_with_shared_evidence(
         return prompt_context
 
     query_text = build_shared_evidence_query_text(candidates, context_sentences)
+    if not query_text:
+        return prompt_context
+    request = _build_shared_evidence_request(
+        names_in_chunk=names_in_chunk,
+        query_text=query_text,
+        current_chunk=current_chunk,
+        existing_names=known_canonical_names or set(),
+    )
     if evidence_provider.requires_level3():
         if not evidence_provider.is_level3_available():
             raise RuntimeError("Level 3 vector retrieval is required but not available")
         else:
-            evidence_bundle = await evidence_provider.collect_evidence_with_level3(
-                names_in_chunk=names_in_chunk,
-                current_chunk=current_chunk,
-                context_text=query_text,
-                exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
-                max_chunk_id=current_chunk,
-            )
+            evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
     elif evidence_provider.is_level3_available():
-        evidence_bundle = await evidence_provider.collect_evidence_with_level3(
-            names_in_chunk=names_in_chunk,
-            current_chunk=current_chunk,
-            context_text=query_text,
-            exclude_chunk_ids=[current_chunk] if current_chunk is not None else None,
-            max_chunk_id=current_chunk,
-        )
+        evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
     else:
         evidence_bundle = evidence_provider.collect_evidence(
-            names_in_chunk=names_in_chunk,
+            names_in_chunk=request.seed_entities,
             current_chunk=current_chunk,
         )
 
@@ -461,6 +491,7 @@ async def plan_incremental_disambiguation(
         context_sentences,
         current_chunk=chunk_id,
         active_entity_fallback_names=active_entity_fallback_names,
+        known_canonical_names=set(existing_names),
     )
     return IncrementalDisambiguationPlan(
         state_after_deferred=state_after_deferred,
@@ -673,6 +704,7 @@ async def assemble_final_prompt_context(
         evidence_provider,
         plan.candidate_payload,
         plan.context_sentences,
+        known_canonical_names=set(plan.existing_names),
     )
     return FinalDisambiguationPlan(
         state_before_apply=plan.state_before_apply,
