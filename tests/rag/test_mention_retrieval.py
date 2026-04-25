@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
-from src.rag.level3_contracts import Level3QueryPlan, Level3Request
+from src.rag.evidence_contracts import EvidenceRequest, Level3QueryPlan
 from src.rag.mention_extraction import extract_person_mentions
 from src.rag.mention_extraction_llm import (
     LLMPersonMentionCloudItem,
@@ -32,7 +32,7 @@ from src.rag.retriever import NarrativeEvidenceService
 from src.storage.repositories.chunk import SimilarChunkRow
 
 
-def _build_level3_request(
+def _build_evidence_request(
     *,
     consumer: str = "incremental_disambiguation",
     objective: str = "identity",
@@ -49,13 +49,13 @@ def _build_level3_request(
     need_level1: bool = True,
     need_level2: bool = True,
     need_level3: bool = True,
-) -> Level3Request:
+) -> EvidenceRequest:
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
-    说明: 统一生成 Level3Request，减少 request-cutover 后各测试重复手写显式合同。
+    说明: 统一生成 EvidenceRequest，减少 request-cutover 后各测试重复手写显式合同。
     """
-    return Level3Request(
+    return EvidenceRequest(
         consumer=consumer,
         objective=objective,  # type: ignore[arg-type]
         query_text=query_text,
@@ -761,7 +761,7 @@ async def test_build_level3_query_plan_uses_hybrid_for_identity_requests() -> No
     """
     provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     plan = await provider.build_level3_query_plan(
-        _build_level3_request(
+            _build_evidence_request(
             objective="identity",
             query_text="那个穿红衣的女子突然出手。",
             seed_entities=["白芷"],
@@ -785,7 +785,7 @@ async def test_build_level3_query_plan_uses_direct_for_relation_requests() -> No
     """
     provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     plan = await provider.build_level3_query_plan(
-        _build_level3_request(
+            _build_evidence_request(
             objective="relation",
             query_text="白芷看向侯飞白。",
             seed_entities=["白芷", "侯飞白"],
@@ -821,7 +821,7 @@ async def test_build_level3_query_plan_uses_limited_hybrid_for_relation_requests
         ]
     )
     plan = await provider.build_level3_query_plan(
-        _build_level3_request(
+        _build_evidence_request(
             objective="relation",
             query_text="门口的老者看向白芷。",
             seed_entities=["白芷"],
@@ -847,7 +847,7 @@ async def test_build_level3_query_plan_trims_queries_by_budget() -> None:
     """
     provider = NarrativeEvidenceService(level3_enabled=True, level3_top_k=2)
     plan = await provider.build_level3_query_plan(
-        _build_level3_request(
+            _build_evidence_request(
             objective="identity",
             query_text="那个穿红衣的女子突然出手，门口的老者没有说话。",
             seed_entities=["白芷"],
@@ -891,7 +891,7 @@ async def test_provider_collects_mention_queries_and_dedupes_results() -> None:
         )
     )
     bundle = await provider.collect(
-        _build_level3_request(
+            _build_evidence_request(
             query_text="那个穿红衣的女子突然出手。",
             current_chunk=None,
             max_chunk_id=9,
@@ -942,7 +942,7 @@ async def test_provider_builds_mention_queries_inside_provider() -> None:
     provider._level3.search_similar_chunks_many = AsyncMock(side_effect=_fake_search_similar_chunks_many)
 
     bundle = await provider.collect(
-        _build_level3_request(
+            _build_evidence_request(
             seed_entities=["白芷"],
             current_chunk=9,
             max_chunk_id=8,
@@ -1005,7 +1005,7 @@ async def test_provider_uses_model_rerank_when_available() -> None:
         )
     )
     bundle = await provider.collect(
-        _build_level3_request(
+            _build_evidence_request(
             seed_entities=["白芷"],
             current_chunk=12,
             max_chunk_id=11,
@@ -1085,7 +1085,7 @@ async def test_provider_caps_model_rerank_query_text_by_explicit_budget() -> Non
     )
 
     await provider.collect(
-        _build_level3_request(
+        _build_evidence_request(
             seed_entities=["白芷"],
             current_chunk=12,
             max_chunk_id=11,
@@ -1136,7 +1136,7 @@ async def test_provider_reranks_before_prompt_budget_cutoff() -> None:
         )
     )
     bundle = await provider.collect(
-        _build_level3_request(
+            _build_evidence_request(
             seed_entities=["白芷"],
             current_chunk=6,
             max_chunk_id=5,

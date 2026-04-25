@@ -30,7 +30,7 @@ from src.workflows.annotate_helpers.context import (
     _build_active_entities_prompt_from_authority,
     _build_optional_task_model_client,
     _collect_seed_entities,
-    _init_evidence_provider,
+    _init_evidence_service,
     _prepare_chunk_context,
     _prepare_chunk_context_with_level3,
 )
@@ -321,7 +321,7 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
         chunk_text="蒙面人出现了",
         alias_map={},
         use_context_enhancement=True,
-        disambig_provider=provider,
+        evidence_service=provider,
         run_id="run-1",
     )
 
@@ -367,7 +367,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
         chunk_text="陆明再次出现",
         alias_map={},
         use_context_enhancement=True,
-        disambig_provider=provider,
+        evidence_service=provider,
         run_id="run-override",
     )
 
@@ -387,7 +387,7 @@ def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
         chunk_text="无上下文增强",
         alias_map={},
         use_context_enhancement=False,
-        disambig_provider=None,
+        evidence_service=None,
         run_id="run-disabled",
     )
 
@@ -408,7 +408,7 @@ def test_prepare_chunk_context_skips_context_loading_when_run_id_missing(monkeyp
         chunk_text="缺少 run_id",
         alias_map={},
         use_context_enhancement=True,
-        disambig_provider=None,
+        evidence_service=None,
         run_id=None,
     )
 
@@ -433,7 +433,7 @@ def test_prepare_chunk_context_without_disambig_provider_keeps_authority_context
         chunk_text="苏镜独自思考",
         alias_map={},
         use_context_enhancement=True,
-        disambig_provider=None,
+        evidence_service=None,
         run_id="run-authority-only",
     )
 
@@ -478,7 +478,7 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
         chunk_text="黑衣人现身",
         alias_map={},
         use_context_enhancement=True,
-        disambig_provider=provider,
+        evidence_service=provider,
         run_id="run-async",
     )
 
@@ -555,7 +555,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         chunk_text="程霜翻阅旧案卷",
         alias_map={"小七": "程霜", "老刀": "韩山"},
         use_context_enhancement=True,
-        disambig_provider=provider,
+        evidence_service=provider,
         run_id="run-level3-available",
     )
 
@@ -625,7 +625,7 @@ async def test_prepare_chunk_context_with_level3_raises_when_required_but_unavai
             chunk_text="程霜追查旧线索",
             alias_map={},
             use_context_enhancement=False,
-            disambig_provider=provider,
+                evidence_service=provider,
             run_id=None,
         )
 
@@ -734,7 +734,7 @@ def test_build_optional_task_model_client_injects_token_usage_callback(monkeypat
     assert callable(client.runtime_context[1])
 
 
-def test_init_evidence_provider_injects_optional_mention_and_rerank_clients(monkeypatch):
+def test_init_evidence_service_injects_optional_mention_and_rerank_clients(monkeypatch):
     """
     创建时间: 2026-04-24
     任务: llm-mention-rerank-chain
@@ -761,7 +761,7 @@ def test_init_evidence_provider_injects_optional_mention_and_rerank_clients(monk
     monkeypatch.setattr(context_module, "_init_optional_level3_reranker", lambda **kwargs: fake_level3_reranker)
     monkeypatch.setattr("src.rag.NarrativeEvidenceService", FakeProvider)
 
-    provider = _init_evidence_provider(
+    provider = _init_evidence_service(
         conn=object(),
         novel_id="novel-x",
         use_context=True,

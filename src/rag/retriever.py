@@ -41,7 +41,7 @@
 修改者: Codex
 任务: evidence-service-request-unification
 修改内容: 将公开语义从 DisambigContextProvider 收口到 NarrativeEvidenceService.collect(request)，
-    workflow 不再决定走哪个 evidence 入口，Level3Request 也同步升格为统一输入合同。
+    workflow 不再决定走哪个 evidence 入口，EvidenceRequest 也同步升格为统一输入合同。
 
 说明: 本模块提供证据收集功能（Provider 层），支持三级证据：
 - Level1: 别名表精确匹配
@@ -67,11 +67,11 @@ from src.rag.evidence_bundle_builder import EvidenceBundleBuilder
 from src.rag.evidence_types import EvidenceBundle, Level1AuthoritySnapshot
 from src.rag.level1_alias import AliasLookup
 from src.rag.level2_active_entities import ActiveEntityLookup
-from src.rag.level3_contracts import (
+from src.rag.evidence_contracts import (
+    EvidenceRequest,
     Level3QueryMode,
     Level3QueryPlan,
-    Level3Request,
-    build_level3_request_fingerprint,
+    build_evidence_request_fingerprint,
 )
 from src.rag.level3_vector import Level3NotReadyError, Level3VectorEvidence
 from src.rag.mention_extraction_service import MentionExtractionService, PersonMentionExtractor
@@ -99,7 +99,7 @@ __all__ = [
 class NarrativeEvidenceService:
     """叙事证据服务（Evidence Service 层）
 
-    负责接收统一的 Level3Request，并编排三级证据为 EvidenceBundle：
+    负责接收统一的 EvidenceRequest，并编排三级证据为 EvidenceBundle：
     - Level1: 别名表精确映射
     - Level2: 近期活跃实体
     - Level3: 向量语义相似 chunk
@@ -209,7 +209,7 @@ class NarrativeEvidenceService:
         snapshot = self._get_authority_snapshot()
         return self._bundle_builder.build_structured_bundle(snapshot, requested_names=requested_names)
 
-    def _build_request_meta(self, request: Level3Request) -> dict[str, Any]:
+    def _build_request_meta(self, request: EvidenceRequest) -> dict[str, Any]:
         """
         创建时间: 2026-04-25
         任务: evidence-service-request-unification
@@ -226,7 +226,7 @@ class NarrativeEvidenceService:
             "exclude_chunk_ids": list(request.exclude_chunk_ids),
         }
 
-    def _build_generation_meta(self, request: Level3Request) -> dict[str, Any]:
+    def _build_generation_meta(self, request: EvidenceRequest) -> dict[str, Any]:
         """
         创建时间: 2026-04-25
         任务: evidence-service-request-unification
@@ -249,14 +249,14 @@ class NarrativeEvidenceService:
             "empty_query_fallback_reason": None,
         }
 
-    def _restore_cached_bundle(self, request: Level3Request) -> EvidenceBundle | None:
+    def _restore_cached_bundle(self, request: EvidenceRequest) -> EvidenceBundle | None:
         """
         创建时间: 2026-04-25
         任务: evidence-service-request-unification
         说明: cache 只复用 evidence 内容本身；每次命中后仍用当前 request 的 meta 重新打戳，
               避免 Phase1/Phase3 这类 consumer 复用时把上一跳标签带过去。
         """
-        cache_key = build_level3_request_fingerprint(request)
+        cache_key = build_evidence_request_fingerprint(request)
         cached_bundle = self._bundle_cache.get(cache_key)
         if cached_bundle is None:
             return None
@@ -267,16 +267,16 @@ class NarrativeEvidenceService:
             generation_meta=generation_meta,
         )
 
-    def _cache_bundle(self, request: Level3Request, bundle: EvidenceBundle) -> None:
+    def _cache_bundle(self, request: EvidenceRequest, bundle: EvidenceBundle) -> None:
         """
         创建时间: 2026-04-25
         任务: evidence-service-request-unification
         说明: service 级 cache 只按真实取证语义复用，供同一 chunk 内的多 consumer 复用相同 bundle。
         """
-        cache_key = build_level3_request_fingerprint(request)
+        cache_key = build_evidence_request_fingerprint(request)
         self._bundle_cache[cache_key] = bundle.clone_with_meta()
 
-    def _collect_base_evidence(self, request: Level3Request) -> EvidenceBundle:
+    def _collect_base_evidence(self, request: EvidenceRequest) -> EvidenceBundle:
         """
         收集 Level1/Level2 证据。
 
@@ -318,7 +318,7 @@ class NarrativeEvidenceService:
         bundle.requested_names = list(request.requested_names)
         return bundle
 
-    async def collect(self, request: Level3Request) -> EvidenceBundle:
+    async def collect(self, request: EvidenceRequest) -> EvidenceBundle:
         """
         收集统一 evidence bundle。
 
@@ -443,7 +443,7 @@ class NarrativeEvidenceService:
         self._cache_bundle(request, bundle)
         return bundle
 
-    async def build_level3_query_plan(self, request: Level3Request) -> Level3QueryPlan:
+    async def build_level3_query_plan(self, request: EvidenceRequest) -> Level3QueryPlan:
         """
         创建时间: 2026-04-25
         任务: level3-intent-phase-split
@@ -480,7 +480,7 @@ class NarrativeEvidenceService:
     async def execute_level3_query_plan(
         self,
         plan: Level3QueryPlan,
-        request: Level3Request,
+        request: EvidenceRequest,
         *,
         active_entity_names: set[str],
         candidate_names: set[str],
@@ -501,7 +501,7 @@ class NarrativeEvidenceService:
         self,
         *,
         plan: Level3QueryPlan,
-        request: Level3Request,
+        request: EvidenceRequest,
         active_entity_names: set[str],
         candidate_names: set[str],
     ) -> list[SimilarChunkRow]:
@@ -666,7 +666,7 @@ class NarrativeEvidenceService:
         self,
         *,
         plan: Level3QueryPlan,
-        request: Level3Request,
+        request: EvidenceRequest,
     ) -> list[SimilarChunkRow]:
         """
         创建时间: 2026-04-25
@@ -782,7 +782,7 @@ class NarrativeEvidenceService:
         results: list[SimilarChunkRow],
         *,
         plan: Level3QueryPlan,
-        request: Level3Request,
+        request: EvidenceRequest,
         active_entity_names: set[str],
         candidate_names: set[str],
     ) -> list[SimilarChunkRow]:
@@ -841,7 +841,7 @@ class NarrativeEvidenceService:
         )
         return collected
 
-    def _build_model_rerank_query_text(self, plan: Level3QueryPlan, request: Level3Request) -> str:
+    def _build_model_rerank_query_text(self, plan: Level3QueryPlan, request: EvidenceRequest) -> str:
         """
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain

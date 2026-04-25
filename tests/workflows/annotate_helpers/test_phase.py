@@ -25,7 +25,7 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
         incremental_disambig_client=MagicMock(),
         alias_keywords=["称号"],
         global_context_str="global-context",
-        evidence_provider=MagicMock(),
+        evidence_service=MagicMock(),
         emitter=None,
     )
     context = SimpleNamespace(
@@ -98,7 +98,7 @@ async def test_process_single_chunk_prefers_prompt_blocks_over_legacy_strings() 
         incremental_disambig_client=MagicMock(),
         alias_keywords=["称号"],
         global_context_str="global-context",
-        evidence_provider=MagicMock(),
+        evidence_service=MagicMock(),
         emitter=None,
     )
     context = ChunkContext(
@@ -158,8 +158,8 @@ async def test_process_single_chunk_prefers_prompt_blocks_over_legacy_strings() 
 
 @pytest.mark.asyncio
 async def test_init_annotation_phase_validates_level3_once_up_front() -> None:
-    evidence_provider = MagicMock()
-    evidence_provider.ensure_level3_ready = AsyncMock()
+    evidence_service = MagicMock()
+    evidence_service.ensure_level3_ready = AsyncMock()
 
     annotation_client = MagicMock()
     annotation_fallback_client = MagicMock()
@@ -180,7 +180,7 @@ async def test_init_annotation_phase_validates_level3_once_up_front() -> None:
             return_value=(annotation_client, annotation_fallback_client, incremental_client, full_client),
         ),
         patch("src.workflows.annotate_helpers.client_init._setup_token_usage_callback"),
-        patch("src.workflows.annotate_helpers.context._init_evidence_provider", return_value=evidence_provider),
+        patch("src.workflows.annotate_helpers.context._init_evidence_service", return_value=evidence_service),
         patch(
             "src.workflows.annotate_helpers.sentence._extract_and_save_global_context",
             new=AsyncMock(return_value="global-context"),
@@ -188,14 +188,14 @@ async def test_init_annotation_phase_validates_level3_once_up_front() -> None:
     ):
         result = await _init_annotation_phase_with_config(config)
 
-    assert result.evidence_provider is evidence_provider
-    evidence_provider.ensure_level3_ready.assert_awaited_once()
+    assert result.evidence_service is evidence_service
+    evidence_service.ensure_level3_ready.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_init_annotation_phase_fails_early_when_level3_not_ready() -> None:
-    evidence_provider = MagicMock()
-    evidence_provider.ensure_level3_ready = AsyncMock(side_effect=Level3NotReadyError("schema missing"))
+    evidence_service = MagicMock()
+    evidence_service.ensure_level3_ready = AsyncMock(side_effect=Level3NotReadyError("schema missing"))
 
     annotation_client = MagicMock()
     annotation_fallback_client = MagicMock()
@@ -216,7 +216,7 @@ async def test_init_annotation_phase_fails_early_when_level3_not_ready() -> None
             return_value=(annotation_client, annotation_fallback_client, incremental_client, full_client),
         ),
         patch("src.workflows.annotate_helpers.client_init._setup_token_usage_callback"),
-        patch("src.workflows.annotate_helpers.context._init_evidence_provider", return_value=evidence_provider),
+        patch("src.workflows.annotate_helpers.context._init_evidence_service", return_value=evidence_service),
         patch(
             "src.workflows.annotate_helpers.sentence._extract_and_save_global_context",
             new=AsyncMock(return_value="global-context"),

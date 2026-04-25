@@ -71,7 +71,7 @@ async def _annotate_chunk(
     phase3_bundle: EvidenceBundle | None = None,
     phase4_bundle: EvidenceBundle | None = None,
     phase4_request_template=None,
-    evidence_provider: NarrativeEvidenceService | None = None,
+    evidence_service: NarrativeEvidenceService | None = None,
     fallback_client: AnnotationLike | None = None,
     run_id: str | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
@@ -122,7 +122,7 @@ async def _annotate_chunk(
             phase3_bundle=phase3_bundle,
             phase4_bundle=phase4_bundle,
             phase4_request_template=phase4_request_template,
-            evidence_provider=evidence_provider,
+            evidence_service=evidence_service,
             fallback_client=fallback_client,
             run_id=run_id,
             emitter=emitter,
@@ -143,7 +143,7 @@ class AnnotationPhaseResult:
         annotation_fallback_client: AnnotationLike | None,
         incremental_disambig_client: DisambiguationLike,
         full_disambig_client: DisambiguationLike,
-        evidence_provider: NarrativeEvidenceService | None,
+        evidence_service: NarrativeEvidenceService | None,
         alias_keywords: list[str],
         global_context_str: str | None,
         alias_map: dict[str, str],
@@ -153,7 +153,7 @@ class AnnotationPhaseResult:
         self.annotation_fallback_client = annotation_fallback_client
         self.incremental_disambig_client = incremental_disambig_client
         self.full_disambig_client = full_disambig_client
-        self.evidence_provider = evidence_provider
+        self.evidence_service = evidence_service
         self.alias_keywords = alias_keywords
         self.global_context_str = global_context_str
         self.alias_map = alias_map
@@ -176,7 +176,7 @@ async def _init_annotation_phase_with_config(
 ) -> AnnotationPhaseResult:
     """初始化标注阶段（使用配置对象）"""
     from .client_init import _init_annotation_clients, _setup_token_usage_callback
-    from .context import _init_evidence_provider
+    from .context import _init_evidence_service
     from .sentence import _extract_and_save_global_context
 
     if not config.run_id:
@@ -207,15 +207,15 @@ async def _init_annotation_phase_with_config(
 
     alias_keywords: list[str] = ["某", "名", "号", "就是", "称号", "全名"]
 
-    evidence_provider = _init_evidence_provider(
+    evidence_service = _init_evidence_service(
         config.conn,
         config.novel_id,
         config.use_rag,
         run_id=config.run_id,
         emitter=config.emitter,
     )
-    if evidence_provider is not None:
-        await evidence_provider.ensure_level3_ready()
+    if evidence_service is not None:
+        await evidence_service.ensure_level3_ready()
 
     global_context_str = await _extract_and_save_global_context(
         config.conn,
@@ -233,7 +233,7 @@ async def _init_annotation_phase_with_config(
         annotation_fallback_client=annotation_fallback_client,
         incremental_disambig_client=incremental_client,
         full_disambig_client=full_client,
-        evidence_provider=evidence_provider,
+        evidence_service=evidence_service,
         alias_keywords=alias_keywords,
         global_context_str=global_context_str,
         alias_map={},
@@ -347,7 +347,7 @@ async def _process_single_chunk(
     alias_map = state.get_alias_merges_dict()
 
     ctx = await _prepare_chunk_context_with_level3(
-        conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.evidence_provider, run_id=run_id
+        conn, chunk_id, chunk_text, alias_map, use_context_enhancement, phase_result.evidence_service, run_id=run_id
     )
 
     annotation_result = await _annotate_chunk(
@@ -363,7 +363,7 @@ async def _process_single_chunk(
         phase3_bundle=ctx.phase3_bundle,
         phase4_bundle=ctx.phase4_bundle,
         phase4_request_template=ctx.phase4_request_template,
-        evidence_provider=phase_result.evidence_provider,
+            evidence_service=phase_result.evidence_service,
         disambig_context=ctx.prompt_disambig_context,
         fallback_client=phase_result.annotation_fallback_client,
         run_id=run_id,
@@ -397,7 +397,7 @@ async def _process_single_chunk(
         chunk_id,
         idx,
         incremental_interval,
-        evidence_provider=phase_result.evidence_provider,
+            evidence_service=phase_result.evidence_service,
     )
 
     return state
@@ -523,8 +523,8 @@ async def _process_chunks_phase(
             if run_id and newly_annotated % projection_interval == 0:
                 project_graph_tables(run_id, to_chunk=chunk_id, session=conn)
                 # projection 更新了别名表，需刷新消歧缓存
-                if phase_result.evidence_provider:
-                    phase_result.evidence_provider.invalidate_cache()
+                if phase_result.evidence_service:
+                    phase_result.evidence_service.invalidate_cache()
 
         except ChunkAnnotationMaxRetriesExceededError as e:
             logger.error(f"chunk annotation max retries exceeded for chunk_id={chunk_id}: {str(e)}")
@@ -537,8 +537,8 @@ async def _process_chunks_phase(
     if run_id and all_chunks:
         final_chunk_id = all_chunks[-1][0]
         project_graph_tables(run_id, to_chunk=final_chunk_id, session=conn)
-        if phase_result.evidence_provider:
-            phase_result.evidence_provider.invalidate_cache()
+    if phase_result.evidence_service:
+        phase_result.evidence_service.invalidate_cache()
 
     return success_count, state
 
@@ -567,7 +567,7 @@ async def _run_disambiguation_phase(
         phase_result.alias_keywords,
         novel_id,
         run_id=run_id,
-        evidence_provider=phase_result.evidence_provider,
+        evidence_service=phase_result.evidence_service,
     )
 
     return state
