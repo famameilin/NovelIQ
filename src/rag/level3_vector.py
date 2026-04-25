@@ -303,6 +303,11 @@ class Level3VectorEvidence:
         任务: level3-intent-phase-split
         说明: 多 query 场景先批量生成 embedding，再逐条执行 run-scoped chunk/paragraph 检索，
               避免 mention query 在热路径里重复请求 embedding 服务。
+
+        修改时间: 2026-04-25
+        任务: fix-batched-level3-failure-isolation
+        修改内容: batched embedding/search 失败时回退到逐 query 隔离执行；
+                  单个坏 query 只能丢自己，不能把 base query 一起清空。
         """
         if not query_texts:
             return []
@@ -326,20 +331,45 @@ class Level3VectorEvidence:
 
         try:
             query_embeddings = await self._embedding_client.embed_texts(query_texts)
+        except Level3NotReadyError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Level3VectorEvidence: batched embedding failed, fallback to isolated queries: {}",
+                exc,
+            )
+            return await self._search_similar_chunks_many_isolated(
+                query_texts,
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+                top_k=top_k,
+            )
+
+        try:
             effective_top_k = top_k or self._top_k
             results_by_query: list[list[SimilarChunkRow]] = []
             for normalized_query, query_embedding in zip(normalized_queries, query_embeddings, strict=True):
                 if not normalized_query or not query_embedding:
                     results_by_query.append([])
                     continue
-                results_by_query.append(
-                    self._search_similar_chunks_by_embedding(
-                        query_embedding,
-                        exclude_chunk_ids=exclude_chunk_ids,
-                        max_chunk_id=max_chunk_id,
-                        top_k=effective_top_k,
+                try:
+                    results_by_query.append(
+                        self._search_similar_chunks_by_embedding(
+                            query_embedding,
+                            exclude_chunk_ids=exclude_chunk_ids,
+                            max_chunk_id=max_chunk_id,
+                            top_k=effective_top_k,
+                        )
                     )
-                )
+                except Level3NotReadyError:
+                    raise
+                except Exception as exc:
+                    logger.error(
+                        "Level3VectorEvidence: isolated batched query search failed query_len={} error={}",
+                        len(normalized_query),
+                        exc,
+                    )
+                    results_by_query.append([])
             logger.debug(
                 "Level3VectorEvidence: batched query search complete query_count={} top_k={}",
                 len(query_texts),
@@ -351,6 +381,36 @@ class Level3VectorEvidence:
         except Exception as exc:
             logger.error("Level3VectorEvidence: batched search failed: {}", exc)
             return [[] for _ in query_texts]
+
+    async def _search_similar_chunks_many_isolated(
+        self,
+        query_texts: list[str],
+        *,
+        exclude_chunk_ids: list[int] | None,
+        max_chunk_id: int | None,
+        top_k: int | None,
+    ) -> list[list[SimilarChunkRow]]:
+        """
+        创建时间: 2026-04-25
+        任务: fix-batched-level3-failure-isolation
+        说明: batched 路径出错时逐 query 回退，确保单个 query 的 embedding / SQL 异常不会拖垮整批结果。
+        """
+        results_by_query: list[list[SimilarChunkRow]] = []
+        for query_text in query_texts:
+            normalized_query = query_text.strip()
+            if not normalized_query:
+                results_by_query.append([])
+                continue
+            results_by_query.append(
+                await self.search_similar_chunks(
+                    query_text,
+                    exclude_chunk_ids=exclude_chunk_ids,
+                    max_chunk_id=max_chunk_id,
+                    top_k=top_k,
+                    ensure_ready=False,
+                )
+            )
+        return results_by_query
 
     def _search_similar_chunks_by_embedding(
         self,

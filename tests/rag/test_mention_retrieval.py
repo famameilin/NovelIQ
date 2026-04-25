@@ -184,6 +184,28 @@ async def test_mention_extraction_service_falls_back_to_rule_extractor() -> None
 
 
 @pytest.mark.asyncio
+async def test_mention_extraction_service_skips_llm_when_prefer_llm_disabled() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-level3-relation-query-expansion-contract
+    说明: relation 这类受限扩展场景允许 query expansion，但不应默认走 LLM 主路径；
+          service 显式关闭 prefer_llm 时应直接复用规则 extractor。
+    """
+    extractor = MagicMock()
+    extractor.extract_mentions = AsyncMock(return_value=[])
+
+    service = MentionExtractionService(extractor)
+    mentions = await service.extract_mentions(
+        MentionExtractionRequest(text="那个穿红衣的女子突然出手。"),
+        prefer_llm=False,
+    )
+
+    extractor.extract_mentions.assert_not_awaited()
+    assert [mention.raw_text for mention in mentions] == ["穿红衣的女子"]
+    assert mentions[0].source == "rule"
+
+
+@pytest.mark.asyncio
 async def test_llm_person_mention_extractor_uses_cloud_safe_schema_for_cloud_api() -> None:
     """
     创建时间: 2026-04-24
@@ -762,6 +784,44 @@ async def test_build_level3_query_plan_uses_direct_for_relation_requests() -> No
     assert plan.mode == "direct"
     assert plan.mention_queries == []
     assert plan.base_query_text == "白芷看向侯飞白。"
+
+
+@pytest.mark.asyncio
+async def test_build_level3_query_plan_uses_limited_hybrid_for_relation_requests_when_explicitly_allowed() -> None:
+    """
+    创建时间: 2026-04-25
+    任务: fix-level3-relation-query-expansion-contract
+    说明: relation objective 显式允许 expansion 时，应从默认 direct 切到受限 hybrid；
+          但 relation 只复用规则 extractor，不走 LLM 主路径。
+    """
+    provider = DisambigContextProvider(level3_enabled=True, level3_top_k=2)
+    provider._mention_extraction_service.extract_mentions = AsyncMock(
+        return_value=[
+            PersonMention(
+                raw_text="门口的老者",
+                mention_type="location_role",
+                sentence_text="门口的老者看向白芷。",
+                cues={"location": ["门口"], "role_word": "老者"},
+                source="rule",
+            )
+        ]
+    )
+    plan = await provider.build_level3_query_plan(
+        _build_level3_request(
+            objective="relation",
+            query_text="门口的老者看向白芷。",
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+            allow_llm_query_expansion=True,
+            max_queries=6,
+        )
+    )
+
+    assert plan.mode == "hybrid"
+    assert len(plan.mention_queries) == 2
+    assert plan.base_query_text == "门口的老者看向白芷。"
+    assert provider._mention_extraction_service.extract_mentions.await_args.kwargs["prefer_llm"] is False
 
 
 @pytest.mark.asyncio

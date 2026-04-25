@@ -357,18 +357,33 @@ def _collect_seed_entities(
     alias_map: dict[str, str] | None,
     active_entity_names: list[str],
     *,
+    query_text: str | None = None,
     extra_names: list[str] | None = None,
 ) -> list[str]:
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
-    说明: Level3 seed_entities 只允许来自可信源：alias_map、authority active entities、调用方显式补充名。
+    说明: Level3 seed_entities 只允许来自可信源：chunk 内显式出现的 alias/canonical、
+          authority active entities、调用方显式补充名；不能把整轮累计 alias_map 全量带进当前 chunk。
     """
     seed_entities: list[str] = []
-    for name in list((alias_map or {}).keys()) + list((alias_map or {}).values()):
-        normalized = str(name).strip()
-        if normalized and normalized not in seed_entities:
-            seed_entities.append(normalized)
+    normalized_query_text = (query_text or "").strip()
+    for alias, canonical in (alias_map or {}).items():
+        normalized_alias = str(alias).strip()
+        normalized_canonical = str(canonical).strip()
+        if not normalized_query_text:
+            continue
+        if normalized_alias and normalized_alias in normalized_query_text and normalized_alias not in seed_entities:
+            seed_entities.append(normalized_alias)
+        if (
+            normalized_canonical
+            and (
+                normalized_canonical in normalized_query_text
+                or (normalized_alias and normalized_alias in normalized_query_text)
+            )
+            and normalized_canonical not in seed_entities
+        ):
+            seed_entities.append(normalized_canonical)
 
     for entity_name in active_entity_names:
         normalized = str(entity_name).strip()
@@ -540,7 +555,7 @@ def _prepare_chunk_context(
         phase1_request = _build_level3_request(
             objective="identity",
             query_text=chunk_text,
-            seed_entities=_collect_seed_entities(alias_map, active_entity_names),
+            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
@@ -631,7 +646,7 @@ async def _prepare_chunk_context_with_level3(
         phase1_identity_request = _build_level3_request(
             objective="identity",
             query_text=chunk_text,
-            seed_entities=_collect_seed_entities(alias_map, active_entity_names),
+            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
@@ -655,7 +670,7 @@ async def _prepare_chunk_context_with_level3(
         phase3_request = _build_level3_request(
             objective="identity",
             query_text=chunk_text,
-            seed_entities=_collect_seed_entities(alias_map, active_entity_names),
+            seed_entities=_collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text),
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,

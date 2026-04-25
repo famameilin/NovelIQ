@@ -437,6 +437,121 @@ class TestLevel3VectorEvidenceAsync:
         assert all(call.kwargs["top_k"] == 6 for call in mock_search_chunks.call_args_list)
 
     @pytest.mark.asyncio
+    @patch("src.storage.repositories.chunk.search_similar_paragraphs_within_chunks", return_value=[])
+    @patch("src.storage.repositories.chunk.search_similar_chunks")
+    async def test_search_similar_chunks_many_falls_back_to_isolated_queries_when_batch_embedding_fails(
+        self,
+        mock_search_chunks: MagicMock,
+        mock_search_paragraphs: MagicMock,
+    ) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: fix-batched-level3-failure-isolation
+        说明: batched embedding 失败时，应回退到逐 query 执行；单个坏 query 只能丢自己，不能把整批结果清空。
+        """
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_client.embed_texts = AsyncMock(side_effect=RuntimeError("batch request rejected"))
+
+        async def _fake_get_embedding(query_text: str):
+            if query_text == "坏查询":
+                raise RuntimeError("single query rejected")
+            return [0.1] * settings.models.semantic_chunking.embedding_dim
+
+        mock_client.get_embedding = AsyncMock(side_effect=_fake_get_embedding)
+        mock_session = MagicMock()
+        mock_search_chunks.side_effect = [
+            [SimilarChunkRow(chunk_id=1, text="第一条相似文本", similarity=0.92)],
+            [SimilarChunkRow(chunk_id=3, text="第三条相似文本", similarity=0.87)],
+        ]
+
+        with (
+            patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            level3 = Level3VectorEvidence(
+                session=mock_session,
+                run_id="test-run-id",
+                embedding_client=mock_client,
+                top_k=3,
+            )
+            await level3.ensure_level3_ready()
+            results = await level3.search_similar_chunks_many(
+                ["第一条查询", "坏查询", "第三条查询"],
+                max_chunk_id=9,
+                top_k=6,
+                ensure_ready=False,
+            )
+
+        assert [[row.chunk_id for row in group] for group in results] == [[1], [], [3]]
+        mock_client.embed_texts.assert_awaited_once_with(["第一条查询", "坏查询", "第三条查询"])
+        assert mock_client.get_embedding.await_count == 3
+        assert mock_search_chunks.call_count == 2
+        assert all(call.kwargs["max_chunk_id"] == 9 for call in mock_search_chunks.call_args_list)
+        assert all(call.kwargs["top_k"] == 6 for call in mock_search_chunks.call_args_list)
+
+    @pytest.mark.asyncio
+    @patch("src.storage.repositories.chunk.search_similar_paragraphs_within_chunks", return_value=[])
+    @patch("src.storage.repositories.chunk.search_similar_chunks")
+    async def test_search_similar_chunks_many_isolates_single_query_search_errors_inside_batch(
+        self,
+        mock_search_chunks: MagicMock,
+        mock_search_paragraphs: MagicMock,
+    ) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: fix-batched-level3-failure-isolation
+        说明: batched embeddings 成功后，某一条 query 的数据库检索异常也只能影响自己。
+        """
+        mock_client = MagicMock()
+        mock_client.detect_embedding_dimension = AsyncMock(return_value=settings.models.semantic_chunking.embedding_dim)
+        mock_client.embed_texts = AsyncMock(
+            return_value=[
+                [0.1] * settings.models.semantic_chunking.embedding_dim,
+                [0.2] * settings.models.semantic_chunking.embedding_dim,
+                [0.3] * settings.models.semantic_chunking.embedding_dim,
+            ]
+        )
+        mock_session = MagicMock()
+        mock_search_chunks.side_effect = [
+            [SimilarChunkRow(chunk_id=1, text="第一条相似文本", similarity=0.92)],
+            RuntimeError("db timeout"),
+            [SimilarChunkRow(chunk_id=3, text="第三条相似文本", similarity=0.87)],
+        ]
+
+        with (
+            patch("src.storage.repositories.chunk.has_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_missing_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.repositories.chunk.has_paragraph_embeddings", return_value=True),
+            patch("src.storage.repositories.chunk.get_incomplete_paragraph_embedding_chunk_ids", return_value=[]),
+            patch("src.storage.vector_schema.validate_chunk_embeddings_schema"),
+            patch("src.storage.vector_schema.validate_paragraph_embeddings_schema"),
+        ):
+            level3 = Level3VectorEvidence(
+                session=mock_session,
+                run_id="test-run-id",
+                embedding_client=mock_client,
+                top_k=3,
+            )
+            await level3.ensure_level3_ready()
+            results = await level3.search_similar_chunks_many(
+                ["第一条查询", "第二条查询", "第三条查询"],
+                max_chunk_id=9,
+                top_k=6,
+                ensure_ready=False,
+            )
+
+        assert [[row.chunk_id for row in group] for group in results] == [[1], [], [3]]
+        mock_client.embed_texts.assert_awaited_once_with(["第一条查询", "第二条查询", "第三条查询"])
+        assert mock_search_chunks.call_count == 3
+        assert all(call.kwargs["max_chunk_id"] == 9 for call in mock_search_chunks.call_args_list)
+        assert all(call.kwargs["top_k"] == 6 for call in mock_search_chunks.call_args_list)
+
+    @pytest.mark.asyncio
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
     async def test_search_similar_chunks_empty_query(self, mock_has: MagicMock) -> None:
         """空查询返回空列表"""
