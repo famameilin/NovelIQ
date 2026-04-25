@@ -1109,6 +1109,7 @@ class TestDisambigContextProviderLevel3Async:
                 allow_llm_query_expansion=False,
                 top_k=settings.rag.level3_top_k,
                 max_queries=settings.rag.level3_max_queries,
+                model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
             )
         )
 
@@ -1127,33 +1128,34 @@ class TestDisambigContextProviderLevel3Async:
         assert exemplar.metadata["evidence_purpose"] == "emotion"
 
     @pytest.mark.asyncio
-    async def test_collect_evidence_with_level3_degrades_when_async_readiness_fails(self) -> None:
+    async def test_collect_evidence_with_level3_raises_when_async_readiness_fails_on_required_path(self) -> None:
         """
-        创建时间: 2026-04-24
-        任务: fix-level3-provider-readiness-drift
-        说明: 即使 `is_available()` 先前报告可用，provider 也应在 async readiness 失败时安全降级，
-              不能把 Level3NotReadyError 继续抛给上游标注链路。
+        创建时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        说明: required Level3 场景下，若 async readiness 晚于 is_available() 才发现漂移，
+              provider 必须继续抛出 Level3NotReadyError，不能静默退回 Level1/2。
         """
         provider = DisambigContextProvider(level3_enabled=True)
         provider._level3.is_available = MagicMock(return_value=True)
         provider._level3.ensure_level3_ready = AsyncMock(side_effect=Level3NotReadyError("schema mismatch"))
         provider._level3.search_similar_chunks = AsyncMock()
 
-        bundle = await provider.collect_evidence_with_level3(
-            Level3Request(
-                objective="identity",
-                query_text="她抿唇不语，袖口却攥得发白。",
-                seed_entities=[],
-                current_chunk=None,
-                max_chunk_id=14,
-                exclude_chunk_ids=[],
-                allow_llm_query_expansion=True,
-                top_k=settings.rag.level3_top_k,
-                max_queries=settings.rag.level3_max_queries,
+        with pytest.raises(Level3NotReadyError, match="schema mismatch"):
+            await provider.collect_evidence_with_level3(
+                Level3Request(
+                    objective="identity",
+                    query_text="她抿唇不语，袖口却攥得发白。",
+                    seed_entities=[],
+                    current_chunk=None,
+                    max_chunk_id=14,
+                    exclude_chunk_ids=[],
+                    allow_llm_query_expansion=True,
+                    top_k=settings.rag.level3_top_k,
+                    max_queries=settings.rag.level3_max_queries,
+                    model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
+                )
             )
-        )
 
-        assert bundle.semantic_evidence == []
         provider._level3.ensure_level3_ready.assert_awaited_once()
         provider._level3.search_similar_chunks.assert_not_awaited()
 

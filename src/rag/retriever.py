@@ -243,6 +243,11 @@ class DisambigContextProvider:
         修改时间: 2026-04-25
         任务: level3-intent-phase-split
         修改说明: 旧的弱语义多参数签名已移除，调用方必须显式传入 Level3Request。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        修改说明: required Level3 场景下 async readiness 漂移必须继续向上抛错；
+                  同时后续 model rerank query summary 将按 request 显式预算收口。
         """
         bundle = self.collect_evidence(names_in_chunk=request.seed_entities, current_chunk=request.current_chunk)
 
@@ -275,8 +280,11 @@ class DisambigContextProvider:
                     candidate_names=set(bundle.requested_names),
                 )
             except Level3NotReadyError as exc:
-                # 中文注释：provider 侧必须把 readiness 漂移视为“本次无 Level3 证据”，
-                # 不能因为 schema/维度晚于 is_available() 才暴露，就把整条标注链路直接打断。
+                if self.requires_level3():
+                    # 中文注释：required Level3 语义下，入口已声明“没有 Level3 就不能继续”，
+                    # 因此 async readiness 漂移必须 fail loudly，不能偷偷退回 Level1/2。
+                    logger.error("Level3 readiness drift surfaced on required path: {}", exc)
+                    raise
                 logger.warning("Level3 skipped during evidence collection: {}", exc)
                 return bundle
             bundle.semantic_evidence.extend(self._bundle_builder.build_semantic_recall_items(level3_results))
@@ -648,7 +656,7 @@ class DisambigContextProvider:
                 current_chunk=request.current_chunk,
             )
 
-        model_query_text = self._build_model_rerank_query_text(plan)
+        model_query_text = self._build_model_rerank_query_text(plan, request)
         logger.info(
             "Level3 model rerank start: run_id={} objective={} chunk_id={} candidates={} query_len={} model_enabled={}",
             self._run_id,
@@ -689,17 +697,129 @@ class DisambigContextProvider:
         )
         return collected
 
-    def _build_model_rerank_query_text(self, plan: Level3QueryPlan) -> str:
+    def _build_model_rerank_query_text(self, plan: Level3QueryPlan, request: Level3Request) -> str:
         """
         创建时间: 2026-04-24
         任务: llm-mention-rerank-chain
         说明: 给模型 rerank 汇总原文 query 与 mention query，避免模型只看到压缩词而丢失当前语境。
+
+        修改时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        修改说明: rerank 不再直接拼接无限增长的原文 query；这里会优先选取压缩 query 变体，
+                  并严格按 request.model_rerank_query_max_chars 收口总长度。
         """
-        parts = [plan.base_query_text] if plan.base_query_text else []
+        max_chars = max(int(request.model_rerank_query_max_chars), 0)
+        if max_chars <= 0:
+            return ""
+
+        segments = self._collect_model_rerank_query_segments(plan)
+        return self._render_model_rerank_query_segments(segments, max_chars=max_chars)
+
+    def _collect_model_rerank_query_segments(self, plan: Level3QueryPlan) -> list[tuple[str, str]]:
+        """
+        创建时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        说明: 为 model rerank 组装 query summary 片段；base query 保留语境，
+              mention query 则优先选更短、更稳定的压缩/特征变体，避免重复拼入整段原文。
+        """
+        segments: list[tuple[str, str]] = []
+        base_query_text = " ".join(plan.base_query_text.split())
+        if base_query_text:
+            segments.append(("base", base_query_text))
+
+        variant_priority = {
+            "mention_compressed": 0,
+            "mention_feature": 1,
+            "mention_raw": 2,
+        }
+        best_query_by_mention: dict[str, MentionEvidenceQuery] = {}
         for query in plan.mention_queries:
-            if query.query_text not in parts:
-                parts.append(query.query_text)
-        return "\n".join(parts)
+            mention_key = query.mention_text.strip() or query.query_text.strip()
+            existing = best_query_by_mention.get(mention_key)
+            if existing is None:
+                best_query_by_mention[mention_key] = query
+                continue
+            current_priority = variant_priority.get(existing.query_variant, 99)
+            next_priority = variant_priority.get(query.query_variant, 99)
+            if next_priority < current_priority:
+                best_query_by_mention[mention_key] = query
+                continue
+            if next_priority == current_priority and len(query.query_text) < len(existing.query_text):
+                best_query_by_mention[mention_key] = query
+
+        for mention_index, query in enumerate(best_query_by_mention.values(), start=1):
+            compact_query_text = " ".join(query.query_text.split())
+            if compact_query_text:
+                segments.append((f"q{mention_index}", compact_query_text))
+        return segments
+
+    def _render_model_rerank_query_segments(self, segments: list[tuple[str, str]], *, max_chars: int) -> str:
+        """
+        创建时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        说明: 将 summary 片段压缩到固定字符预算内；这里按“每段至少保留最小摘要”的方式分配，
+              避免 base query 吞掉全部 budget，或后续 mention summary 完全挤不进去。
+        """
+        if max_chars <= 0:
+            return ""
+
+        rendered_parts: list[str] = []
+        remaining = max_chars
+        minimum_body_chars = 12
+
+        for index, (label, text) in enumerate(segments):
+            cleaned_text = " ".join(text.split())
+            if not cleaned_text:
+                continue
+            separator = "\n" if rendered_parts else ""
+            remaining_segment_count = len(segments) - index
+            available_for_current = max(remaining - len(separator), 0)
+            if available_for_current <= len(label) + 2:
+                break
+
+            target_segment_budget = max(
+                available_for_current // remaining_segment_count,
+                len(label) + 2 + minimum_body_chars,
+            )
+            body_budget = min(
+                max(target_segment_budget - len(label) - 2, minimum_body_chars),
+                available_for_current - len(label) - 2,
+            )
+            summarized_text = self._summarize_model_rerank_query_text(cleaned_text, max_chars=body_budget)
+            if not summarized_text:
+                continue
+
+            candidate = f"{label}: {summarized_text}"
+            if len(separator) + len(candidate) > remaining:
+                overflow_budget = remaining - len(separator) - len(label) - 2
+                if overflow_budget <= 0:
+                    break
+                summarized_text = self._summarize_model_rerank_query_text(cleaned_text, max_chars=overflow_budget)
+                if not summarized_text:
+                    break
+                candidate = f"{label}: {summarized_text}"
+
+            rendered_parts.append(candidate)
+            remaining -= len(separator) + len(candidate)
+            if remaining <= 0:
+                break
+
+        return "\n".join(rendered_parts)
+
+    def _summarize_model_rerank_query_text(self, text: str, *, max_chars: int) -> str:
+        """
+        创建时间: 2026-04-25
+        任务: fix-level3-required-readiness-and-rerank-budget
+        说明: 对单条 rerank query 片段做最小压缩；优先保留前缀关键信息，超长时用省略号截断。
+        """
+        cleaned_text = " ".join(text.split())
+        if max_chars <= 0 or not cleaned_text:
+            return ""
+        if len(cleaned_text) <= max_chars:
+            return cleaned_text
+        if max_chars <= 3:
+            return cleaned_text[:max_chars]
+        return f"{cleaned_text[: max_chars - 3]}..."
 
     async def _search_level3_query(
         self,

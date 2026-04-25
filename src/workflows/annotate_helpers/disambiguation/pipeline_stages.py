@@ -330,6 +330,7 @@ def _build_shared_evidence_request(
         allow_llm_query_expansion=True,
         top_k=settings.rag.level3_top_k,
         max_queries=settings.rag.level3_max_queries,
+        model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
     )
 
 
