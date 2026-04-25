@@ -508,13 +508,21 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         run_id="run-level3-available",
     )
 
-    provider.collect_evidence_with_level3.assert_awaited_once_with(
-        names_in_chunk=["程霜"],
-        current_chunk=21,
-        context_text="程霜翻阅旧案卷",
-        exclude_chunk_ids=[21],
-        max_chunk_id=20,
-    )
+    assert provider.collect_evidence_with_level3.await_count == 2
+    phase1_request = provider.collect_evidence_with_level3.await_args_list[0].args[0]
+    phase2_request = provider.collect_evidence_with_level3.await_args_list[1].args[0]
+    assert phase1_request.objective == "identity"
+    assert phase1_request.query_text == "程霜翻阅旧案卷"
+    assert phase1_request.current_chunk == 21
+    assert phase1_request.max_chunk_id == 20
+    assert phase1_request.exclude_chunk_ids == [21]
+    assert phase2_request.objective == "foreshadowing"
+    assert phase2_request.allow_llm_query_expansion is False
+    assert context.phase1_bundle is bundle
+    assert context.phase2_bundle is bundle
+    assert context.phase3_bundle is context.phase1_bundle
+    assert context.phase4_request_template is not None
+    assert context.phase4_request_template.objective == "relation"
     assert expected_active_entities is not None
     assert context.prompt_active_entities == expected_active_entities
     assert context.prompt_vector_evidence is not None

@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.config import settings
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
 from src.rag.model_call_audit import audited_structured_model_call
 
@@ -155,8 +156,10 @@ def _build_messages(request: MentionExtractionRequest) -> list[dict[str, str]]:
     任务: deepseek-json-object-compat
     修改内容: 增加明确 JSON 输出样例，满足 DeepSeek JSON Output 对 prompt 的要求。
     """
-    names_text = "、".join(request.names_in_chunk) if request.names_in_chunk else "无"
-    context_text = request.context_text or ""
+    limited_names = _limit_seed_entities(request.names_in_chunk)
+    names_text = "、".join(limited_names) if limited_names else "无"
+    context_text = _build_prompt_context_text(request)
+    mention_limit = min(max(settings.rag.level3_max_queries, 1), 6)
     json_example = (
         '{"mentions":[{"raw_text":"门口那个穿灰布衫的瘦高男人",'
         '"mention_type":"descriptive_person","sentence_text":"门口那个穿灰布衫的瘦高男人压低声音说话。",'
@@ -167,7 +170,7 @@ def _build_messages(request: MentionExtractionRequest) -> list[dict[str, str]]:
     user_content = (
         "请从文本中抽取人物/角色型描述性 mention，输出合法 JSON。\n"
         "约束：不抽纯场景，不做身份猜测，不输出宽泛无区分度 mention，不把已出现的实名当 mention。\n"
-        "每条 mention 必须来自原文，并尽量给出外貌、动作、位置、角色词等 cues。\n"
+        f"每条 mention 必须来自原文，并尽量给出外貌、动作、位置、角色词等 cues，最多输出 {mention_limit} 条。\n"
         f"JSON 输出格式样例：{json_example}\n"
         f"当前显式名字列表：{names_text}\n"
         f"相邻/共享上下文：{context_text}\n"
@@ -220,3 +223,35 @@ def _to_person_mention_from_cloud(item: LLMPersonMentionCloudItem) -> PersonMent
         normalized_query_terms=tuple(item.normalized_query_terms),
         source="llm",
     )
+
+
+def _limit_seed_entities(seed_entities: tuple[str, ...]) -> list[str]:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: mention extraction prompt 只保留少量可信实体锚点，避免 alias/active entity 太多时把提示词挤爆。
+    """
+    limited: list[str] = []
+    for entity in seed_entities:
+        text = str(entity).strip()
+        if not text or text in limited:
+            continue
+        limited.append(text[:24])
+        if len(limited) >= 8:
+            break
+    return limited
+
+
+def _build_prompt_context_text(request: MentionExtractionRequest) -> str:
+    """
+    创建时间: 2026-04-25
+    任务: level3-intent-phase-split
+    说明: 如果 context_text 与主文本相同，则不重复注入；避免 LLM prompt 因完全重复文本无意义膨胀。
+    """
+    context_text = (request.context_text or "").strip()
+    request_text = request.text.strip()
+    if not context_text:
+        return "无"
+    if context_text == request_text:
+        return "与待抽取文本相同，不重复注入"
+    return context_text

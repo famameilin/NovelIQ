@@ -30,6 +30,7 @@ from src.models.local.evidence_renderer_shared import (
     render_vector_evidence,
 )
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
+from src.rag.level3_contracts import Level3Request
 from src.rag.retriever import DisambigContextProvider, Level3NotReadyError, Level3VectorEvidence
 from src.storage.repositories.chunk import SimilarChunkRow, SimilarParagraphRow
 
@@ -926,15 +927,24 @@ class TestDisambigContextProviderLevel3Async:
         )
 
         bundle = await provider.collect_evidence_with_level3(
-            context_text="她抿唇不语，袖口却攥得发白。",
-            exclude_chunk_ids=[15],
-            max_chunk_id=14,
+            Level3Request(
+                objective="emotion",
+                query_text="她抿唇不语，袖口却攥得发白。",
+                seed_entities=[],
+                current_chunk=15,
+                max_chunk_id=14,
+                exclude_chunk_ids=[15],
+                allow_llm_query_expansion=False,
+                top_k=settings.rag.level3_top_k,
+                max_queries=settings.rag.level3_max_queries,
+            )
         )
 
         provider._level3.search_similar_chunks.assert_awaited_once_with(
             "她抿唇不语，袖口却攥得发白。",
             exclude_chunk_ids=[15],
             max_chunk_id=14,
+            top_k=20,
             ensure_ready=False,
         )
         semantic_types = [item.evidence_type for item in bundle.semantic_evidence]
@@ -958,8 +968,17 @@ class TestDisambigContextProviderLevel3Async:
         provider._level3.search_similar_chunks = AsyncMock()
 
         bundle = await provider.collect_evidence_with_level3(
-            context_text="她抿唇不语，袖口却攥得发白。",
-            max_chunk_id=14,
+            Level3Request(
+                objective="identity",
+                query_text="她抿唇不语，袖口却攥得发白。",
+                seed_entities=[],
+                current_chunk=None,
+                max_chunk_id=14,
+                exclude_chunk_ids=[],
+                allow_llm_query_expansion=True,
+                top_k=settings.rag.level3_top_k,
+                max_queries=settings.rag.level3_max_queries,
+            )
         )
 
         assert bundle.semantic_evidence == []
