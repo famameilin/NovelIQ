@@ -40,7 +40,6 @@ async def run_topic_model(
     iterations: int | None = None,
     top_n: int = 5,
     force: bool = False,
-    cache_path: Path | None = None,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int]:
     """
@@ -55,6 +54,11 @@ async def run_topic_model(
     任务: workflows 使用 Repository 模式重构
     修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
+    修改时间: 2026-04-25
+    修改者: Codex
+    任务: remove-unused-workflow-cache-hooks
+    修改内容: 删除未被主链实际消费的 cache_path 参数，避免保留无效缓存接口。
+
     Args:
         run_id: 运行ID
         session: 数据库连接
@@ -63,7 +67,6 @@ async def run_topic_model(
         iterations: 训练迭代次数
         top_n: 每个文档返回的 top N 主题
         force: 是否强制重新计算
-        cache_path: 缓存路径
 
     Returns:
         Tuple[int, int]: (总块数, 主题数量)

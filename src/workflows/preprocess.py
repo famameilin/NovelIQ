@@ -66,7 +66,6 @@ async def run_preprocess(
     run_id: str,
     session: Session,
     metadata_path: Path | None = None,
-    cache_path: Path | None = None,
     max_chars: int = 2000,
     overlap: int = 200,
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
@@ -91,12 +90,16 @@ async def run_preprocess(
     任务: fix-preprocess-transaction-boundary
     修改内容: 将 chunks/style/embedding 写入切成短事务，避免长事务阻塞 analysis_runs 状态写回
 
+    修改时间: 2026-04-25
+    修改者: Codex
+    任务: remove-unused-workflow-cache-hooks
+    修改内容: 删除未被主链实际消费的 cache_path 参数，避免继续暴露无效缓存入口。
+
     Args:
         source_path: 源文件路径
         run_id: 运行ID
         session: 数据库连接
         metadata_path: 元数据路径
-        cache_path: 缓存路径
         max_chars: 最大字符数
         overlap: 重叠字符数
 
