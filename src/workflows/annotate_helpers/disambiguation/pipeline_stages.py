@@ -307,15 +307,15 @@ def _build_shared_evidence_request(
     names_in_chunk: list[str],
     query_text: str,
     current_chunk: int | None,
-    existing_names: set[str],
 ) -> Level3Request:
     """
     创建时间: 2026-04-25
     任务: level3-intent-phase-split
-    说明: shared evidence 统一走 identity objective；seed_entities 只来自候选名和已知 canonical 名，不再拼旧弱语义参数。
+    说明: shared evidence 统一走 identity objective；seed_entities 只来自当前待消歧候选，
+          已知 canonical 背景继续留在 existing_character_hint / graph_hint，不再反向污染 requested_names。
     """
     seed_entities: list[str] = []
-    for name in names_in_chunk + list(existing_names):
+    for name in names_in_chunk:
         normalized = str(name).strip()
         if normalized and normalized not in seed_entities:
             seed_entities.append(normalized)
@@ -341,7 +341,6 @@ async def build_prompt_context_with_shared_evidence(
     *,
     current_chunk: int | None = None,
     active_entity_fallback_names: set[str] | None = None,
-    known_canonical_names: set[str] | None = None,
 ) -> DisambiguationPromptContext | None:
     """
     把共享 evidence renderer 输出补入消歧 prompt_context。
@@ -358,6 +357,11 @@ async def build_prompt_context_with_shared_evidence(
     修改时间: 2026-04-24
     任务: llm-mention-rerank-chain
     修改内容: mention extraction/query 构造改由 provider 统一编排，消歧 workflow 只传共享 evidence query text。
+
+    修改时间: 2026-04-25
+    任务: fix-shared-evidence-scope-and-fallback
+    修改内容: 已知 canonical 名不再混入 shared-evidence 的 requested_names；
+              当 query_text 为空时仍保留 Level1/2 fallback，避免 protected / 无例句候选失去共享证据。
     """
     if evidence_provider is None or not candidates:
         return prompt_context
@@ -368,25 +372,30 @@ async def build_prompt_context_with_shared_evidence(
 
     query_text = build_shared_evidence_query_text(candidates, context_sentences)
     if not query_text:
-        return prompt_context
-    request = _build_shared_evidence_request(
-        names_in_chunk=names_in_chunk,
-        query_text=query_text,
-        current_chunk=current_chunk,
-        existing_names=known_canonical_names or set(),
-    )
-    if evidence_provider.requires_level3():
-        if not evidence_provider.is_level3_available():
-            raise RuntimeError("Level 3 vector retrieval is required but not available")
-        else:
-            evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
-    elif evidence_provider.is_level3_available():
-        evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
-    else:
+        # 中文注释：没有可拼的 shared query 时，只跳过 Level3 semantic 检索，
+        # 但仍要保留 Level1/2 fallback，避免 protected / review 候选彻底失去 <Disambig_Candidates>。
         evidence_bundle = evidence_provider.collect_evidence(
-            names_in_chunk=request.seed_entities,
+            names_in_chunk=names_in_chunk,
             current_chunk=current_chunk,
         )
+    else:
+        request = _build_shared_evidence_request(
+            names_in_chunk=names_in_chunk,
+            query_text=query_text,
+            current_chunk=current_chunk,
+        )
+        if evidence_provider.requires_level3():
+            if not evidence_provider.is_level3_available():
+                raise RuntimeError("Level 3 vector retrieval is required but not available")
+            else:
+                evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
+        elif evidence_provider.is_level3_available():
+            evidence_bundle = await evidence_provider.collect_evidence_with_level3(request)
+        else:
+            evidence_bundle = evidence_provider.collect_evidence(
+                names_in_chunk=request.seed_entities,
+                current_chunk=current_chunk,
+            )
 
     shared_evidence_context = render_disambig_prompt_context(
         evidence_bundle,
@@ -491,7 +500,6 @@ async def plan_incremental_disambiguation(
         context_sentences,
         current_chunk=chunk_id,
         active_entity_fallback_names=active_entity_fallback_names,
-        known_canonical_names=set(existing_names),
     )
     return IncrementalDisambiguationPlan(
         state_after_deferred=state_after_deferred,
@@ -704,7 +712,6 @@ async def assemble_final_prompt_context(
         evidence_provider,
         plan.candidate_payload,
         plan.context_sentences,
-        known_canonical_names=set(plan.existing_names),
     )
     return FinalDisambiguationPlan(
         state_before_apply=plan.state_before_apply,
