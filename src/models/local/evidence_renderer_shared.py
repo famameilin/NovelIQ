@@ -32,6 +32,35 @@ def _append_unique_line(bucket: list[str], seen_lines: set[str], line: str) -> N
         seen_lines.add(line)
 
 
+def _resolve_level1_relevant_names(
+    snapshot: Level1AuthoritySnapshot,
+    requested_names: Iterable[str] | None,
+) -> set[str]:
+    """
+    创建时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    说明: snapshot fallback 也必须遵守 request 边界；
+          这里只保留当前 consumer 明确请求的名字，并在 alias 命中时补齐关联 canonical。
+    """
+    if requested_names is None:
+        return set()
+
+    normalized_requested_names = {
+        str(name).strip() for name in requested_names if str(name).strip()
+    }
+    if not normalized_requested_names:
+        return set()
+
+    relevant_names = set(normalized_requested_names)
+    related_canonicals = {
+        mapping.canonical.strip()
+        for mapping in snapshot.alias_mappings
+        if mapping.alias.strip() in relevant_names and mapping.canonical.strip()
+    }
+    relevant_names |= related_canonicals
+    return relevant_names
+
+
 def _limit_items(items: list[Any], max_items: int | None) -> list[Any]:
     if max_items is None or max_items < 0:
         return items
@@ -147,25 +176,48 @@ def _collect_level1_lines_from_snapshot(
     snapshot: Level1AuthoritySnapshot,
     *,
     include_alias_mappings: bool = True,
+    requested_names: Iterable[str] | None = None,
 ) -> Level1EvidenceBuckets:
+    """
+    创建时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    说明: 当 renderer 只能从 snapshot 回退时，也要按 request 边界过滤；
+          显式空请求或完全不命中时，不能重新渲染整本书的 Level1 事实。
+    """
     alias_lines: list[str] = []
     entity_lines: list[str] = []
     relation_lines: list[str] = []
     seen_lines: set[str] = set()
+    relevant_names = _resolve_level1_relevant_names(snapshot, requested_names)
+    if requested_names is not None and not relevant_names:
+        return Level1EvidenceBuckets(
+            alias_lines=[],
+            entity_lines=[],
+            relation_lines=[],
+        )
+
     entity_types = {
-        item.name.strip(): item.entity_type.strip() for item in snapshot.entity_types if item.name and item.entity_type
+        item.name.strip(): item.entity_type.strip()
+        for item in snapshot.entity_types
+        if item.name
+        and item.entity_type
+        and (not relevant_names or item.name.strip() in relevant_names)
     }
 
     if include_alias_mappings:
         for mapping in snapshot.alias_mappings:
             alias = mapping.alias.strip()
             canonical = mapping.canonical.strip()
+            if relevant_names and alias not in relevant_names and canonical not in relevant_names:
+                continue
             if alias and canonical:
                 _append_unique_line(alias_lines, seen_lines, f"- 已确认别名：{alias} -> {canonical}")
 
     for entity in snapshot.canonical_entities:
         name = entity.name.strip()
         if not name:
+            continue
+        if relevant_names and name not in relevant_names:
             continue
         entity_type = entity_types.get(name, entity.entity_type.strip())
         type_suffix = f" ({entity_type})" if entity_type else ""
@@ -177,6 +229,8 @@ def _collect_level1_lines_from_snapshot(
         from_name = relation.from_name.strip()
         to_name = relation.to_name.strip()
         relation_type = relation.relation_type.strip()
+        if relevant_names and from_name not in relevant_names and to_name not in relevant_names:
+            continue
         if from_name and to_name and relation_type:
             _append_unique_line(relation_lines, seen_lines, f"- 已确认关系：{from_name} -{relation_type}-> {to_name}")
 
@@ -196,6 +250,12 @@ def render_level1_facts(
     max_entity_lines: int | None = None,
     max_relation_lines: int | None = None,
 ) -> str | None:
+    """
+    修改时间: 2026-04-26
+    任务: fix-empty-requested-names-level1-fallback
+    修改说明: renderer fallback 到 `level1_snapshot` 时也要按 `bundle.requested_names`
+              过滤，显式空请求或快照 miss 都不允许回退成全量 Level1 注入。
+    """
     buckets = (
         _collect_level1_lines_from_structured(bundle, include_alias_mappings=include_alias_mappings)
         if bundle.structured_evidence
@@ -208,6 +268,7 @@ def render_level1_facts(
         buckets = _collect_level1_lines_from_snapshot(
             bundle.level1_snapshot,
             include_alias_mappings=include_alias_mappings,
+            requested_names=bundle.requested_names,
         )
 
     if any(limit is not None for limit in (max_alias_lines, max_entity_lines, max_relation_lines)):
@@ -371,23 +432,70 @@ def _collect_semantic_chunk_ids(
     return chunk_ids
 
 
+def _prioritize_semantic_items(
+    items: list[EvidenceItem],
+    *,
+    priority_names: Iterable[str] | None,
+) -> list[EvidenceItem]:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: `background_entities` 只作为 renderer 侧背景 hint 使用；
+          这里仅调整 vector evidence 的展示顺序，不回流到 requested_names/candidate_names。
+    """
+    if not priority_names:
+        return items
+
+    priority_set = {str(name).strip() for name in priority_names if str(name).strip()}
+    if not priority_set:
+        return items
+
+    prioritized: list[EvidenceItem] = []
+    deferred: list[EvidenceItem] = []
+    for item in items:
+        text_candidates = (
+            str(item.metadata.get("local_preview") or ""),
+            str(item.metadata.get("text") or ""),
+            str(item.content or ""),
+        )
+        item_text = "\n".join(part for part in text_candidates if part)
+        if any(name in item_text for name in priority_set):
+            prioritized.append(item)
+        else:
+            deferred.append(item)
+    return prioritized + deferred
+
+
 def render_vector_evidence(
     bundle: EvidenceBundle,
     max_chunks: int = 3,
     max_text_len: int = 200,
     exclude_chunk_ids: set[int] | None = None,
+    priority_names: Iterable[str] | None = None,
 ) -> str | None:
     # 中文注释：这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
     # 若 Phase1 已单独渲染 emotion exemplar，则再按 chunk_id 排除重复项，避免同一条历史片段占掉两类证据预算。
     # 修改时间: 2026-04-24
     # 任务: level3-paragraph-rerank
     # 修改说明: paragraph rerank 可提供 local_preview；渲染时优先展示局部 evidence，chunk 全文仍保留在 metadata 里兜底。
-    vector_parts: list[str] = []
-    for item in _select_semantic_items(
+    selected_items = _select_semantic_items(
         bundle,
         evidence_types={"semantic_recall", "vector_evidence"},
-        max_items=max_chunks,
-    ):
+        max_items=None,
+    )
+    if exclude_chunk_ids is not None:
+        selected_items = [
+            item
+            for item in selected_items
+            if item.chunk_id is None or item.chunk_id not in exclude_chunk_ids
+        ]
+    selected_items = _prioritize_semantic_items(
+        selected_items,
+        priority_names=priority_names,
+    )
+
+    vector_parts: list[str] = []
+    for item in selected_items[:max_chunks]:
         if exclude_chunk_ids is not None and item.chunk_id is not None and item.chunk_id in exclude_chunk_ids:
             continue
         chunk_id = item.chunk_id if item.chunk_id is not None else item.metadata.get("chunk_id", "?")
@@ -468,6 +576,7 @@ def render_shared_evidence_sections(
         return SharedEvidenceSections()
 
     active_entity_items = [item for item in bundle.local_evidence if item.evidence_type == "active_entity"]
+    background_entities = bundle.request_meta.get("background_entities")
     emotion_exemplar_chunk_ids = (
         _collect_semantic_chunk_ids(
             bundle,
@@ -506,6 +615,7 @@ def render_shared_evidence_sections(
             max_chunks=max_vector_chunks,
             max_text_len=max_vector_text_len,
             exclude_chunk_ids=emotion_exemplar_chunk_ids if emotion_exemplar_chunk_ids else None,
+            priority_names=background_entities,
         ),
     )
 

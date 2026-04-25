@@ -8,7 +8,7 @@
 - ChunkEmbedding ORM 模型
 - 向量存储与检索功能
 - Level3VectorEvidence 可用性检查
-- DisambigContextProvider Level 3 集成
+- NarrativeEvidenceService Level 3 集成
 - 共享 evidence renderer 边界回归
 """
 
@@ -29,10 +29,57 @@ from src.models.local.evidence_renderer_shared import (
     render_emotion_exemplars,
     render_vector_evidence,
 )
+from src.rag.evidence_contracts import EvidenceRequest, Level3QueryPlan
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
-from src.rag.level3_contracts import Level3Request
-from src.rag.retriever import DisambigContextProvider, Level3NotReadyError, Level3VectorEvidence
+from src.rag.mention_extraction import extract_person_mentions
+from src.rag.mention_query import build_mention_evidence_queries
+from src.rag.retriever import Level3NotReadyError, Level3VectorEvidence, NarrativeEvidenceService
 from src.storage.repositories.chunk import SimilarChunkRow, SimilarParagraphRow
+
+
+def _build_evidence_request(
+    *,
+    consumer: str = "incremental_disambiguation",
+    objective: str = "identity",
+    query_text: str = "",
+    requested_names: list[str] | None = None,
+    seed_entities: list[str] | None = None,
+    background_entities: list[str] | None = None,
+    current_chunk: int | None = None,
+    max_chunk_id: int | None = None,
+    exclude_chunk_ids: list[int] | None = None,
+    need_level1: bool = True,
+    need_level2: bool = True,
+    need_level3: bool = False,
+    allow_llm_query_expansion: bool = False,
+) -> EvidenceRequest:
+    """
+    创建时间: 2026-04-25
+    任务: evidence-service-request-unification
+    说明: 统一生成 NarrativeEvidenceService.collect() 可消费的显式 request，
+          避免各测试继续散落着旧 provider 的弱语义调用方式。
+    """
+
+    normalized_requested = requested_names or list(seed_entities or [])
+    normalized_seed = seed_entities or []
+    return EvidenceRequest(
+        consumer=consumer,
+        objective=objective,  # type: ignore[arg-type]
+        query_text=query_text,
+        requested_names=normalized_requested,
+        seed_entities=normalized_seed,
+        background_entities=background_entities or [],
+        current_chunk=current_chunk,
+        max_chunk_id=max_chunk_id,
+        exclude_chunk_ids=exclude_chunk_ids or ([] if current_chunk is None else [current_chunk]),
+        need_level1=need_level1,
+        need_level2=need_level2,
+        need_level3=need_level3,
+        allow_llm_query_expansion=allow_llm_query_expansion,
+        top_k=settings.rag.level3_top_k,
+        max_queries=settings.rag.level3_max_queries,
+        model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
+    )
 
 
 class TestLevel3VectorEvidence(unittest.TestCase):
@@ -749,12 +796,12 @@ class TestLevel3VectorEvidenceAsync:
         assert mock_client.detect_embedding_dimension.await_count == 2
 
 
-class TestDisambigContextProviderLevel3(unittest.TestCase):
-    """DisambigContextProvider Level 3 集成测试"""
+class TestNarrativeEvidenceServiceLevel3(unittest.TestCase):
+    """NarrativeEvidenceService Level 3 集成测试"""
 
     def test_is_level3_available_false_without_client(self) -> None:
         """没有 EmbeddingClient 时 Level 3 不可用"""
-        provider = DisambigContextProvider()
+        provider = NarrativeEvidenceService()
         self.assertFalse(provider.is_level3_available())
 
     @patch("src.storage.repositories.chunk.has_embeddings", return_value=True)
@@ -763,7 +810,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         mock_client = MagicMock()
         mock_session = MagicMock()
 
-        provider = DisambigContextProvider(
+        provider = NarrativeEvidenceService(
             session=mock_session,
             run_id="test-run-id",
             embedding_client=mock_client,
@@ -786,7 +833,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         mock_client = MagicMock()
         mock_session = MagicMock()
 
-        provider = DisambigContextProvider(
+        provider = NarrativeEvidenceService(
             session=mock_session,
             run_id="test-run-id",
             embedding_client=mock_client,
@@ -810,7 +857,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         mock_incomplete: MagicMock,
     ) -> None:
         """动态设置 EmbeddingClient"""
-        provider = DisambigContextProvider(level3_enabled=True)
+        provider = NarrativeEvidenceService(level3_enabled=True)
         self.assertFalse(provider.is_level3_available())
 
         mock_client = MagicMock()
@@ -829,12 +876,18 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         graph_repo = MagicMock()
         graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
 
-        provider = DisambigContextProvider(
+        provider = NarrativeEvidenceService(
             graph_repo=graph_repo,
             run_id="test-run-id",
             level1_enabled=False,
         )
-        bundle = provider.collect_evidence(names_in_chunk=["灰衣人"], current_chunk=3)
+        bundle = provider._collect_base_evidence(
+            _build_evidence_request(
+                requested_names=["灰衣人"],
+                current_chunk=3,
+                need_level3=False,
+            )
+        )
 
         alias_items = [item for item in bundle.structured_evidence if item.evidence_type == "alias_mapping"]
         self.assertEqual(len(alias_items), 0)
@@ -848,12 +901,18 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             {"name": "侯飞白"},
         ]
 
-        provider = DisambigContextProvider(
+        provider = NarrativeEvidenceService(
             graph_repo=graph_repo,
             run_id="test-run-id",
             level2_enabled=False,
         )
-        bundle = provider.collect_evidence(names_in_chunk=["灰衣人"], current_chunk=3)
+        bundle = provider._collect_base_evidence(
+            _build_evidence_request(
+                requested_names=["灰衣人"],
+                current_chunk=3,
+                need_level3=False,
+            )
+        )
 
         self.assertEqual(
             [
@@ -869,7 +928,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         graph_repo = MagicMock()
         graph_repo.fetch_alias_map.return_value = {"灰衣人": "白芷"}
 
-        provider = DisambigContextProvider(
+        provider = NarrativeEvidenceService(
             graph_repo=graph_repo,
             run_id="test-run-id",
             level1_enabled=True,
@@ -881,7 +940,13 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
             ActiveEntityContext(name="侯飞白"),
         ]
 
-        bundle = provider.collect_evidence(["灰衣人"], current_chunk=3)
+        bundle = provider._collect_base_evidence(
+            _build_evidence_request(
+                requested_names=["灰衣人"],
+                current_chunk=3,
+                need_level3=False,
+            )
+        )
 
         self.assertEqual(len(bundle.structured_evidence), 1)
         self.assertEqual(bundle.structured_evidence[0].content, "灰衣人 -> 白芷")
@@ -898,7 +963,7 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
     def test_collect_evidence_does_not_swallow_authority_attribute_errors(self) -> None:
         """authority 构建失败时应直接暴露异常，避免静默回退掩盖真实问题。"""
         graph_repo = MagicMock()
-        provider = DisambigContextProvider(
+        provider = NarrativeEvidenceService(
             graph_repo=graph_repo,
             run_id="test-run-id",
             level1_enabled=False,
@@ -909,7 +974,9 @@ class TestDisambigContextProviderLevel3(unittest.TestCase):
         provider._graph_authority_service.build_active_entity_view.side_effect = AttributeError("broken authority")
 
         with pytest.raises(AttributeError, match="broken authority"):
-            provider.collect_evidence(current_chunk=3)
+            provider._collect_base_evidence(
+                _build_evidence_request(current_chunk=3, need_level3=False)
+            )
 
 class TestSharedEvidenceRenderer(unittest.TestCase):
     def test_render_vector_evidence_empty_bundle_returns_none(self) -> None:
@@ -1079,14 +1146,14 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
         self.assertFalse(hasattr(EvidenceBundle, "render_vector_evidence"))
         self.assertFalse(hasattr(Level3VectorEvidence, "format_evidence_for_prompt"))
 
-        provider_source = inspect.getsource(DisambigContextProvider)
+        provider_source = inspect.getsource(NarrativeEvidenceService)
         level3_source = inspect.getsource(Level3VectorEvidence)
         self.assertNotIn("<Disambig_Candidates>", provider_source)
         self.assertNotIn("<Vector_Evidence>", provider_source)
         self.assertNotIn("<Vector_Evidence>", level3_source)
 
 
-class TestDisambigContextProviderLevel3Async:
+class TestNarrativeEvidenceServiceLevel3Async:
     @pytest.mark.asyncio
     async def test_collect_evidence_with_level3_adds_emotion_exemplar_items(self) -> None:
         """
@@ -1094,7 +1161,7 @@ class TestDisambigContextProviderLevel3Async:
         任务: level3-history-cutoff
         修改说明: provider 层应把 max_chunk_id 原样透传给 Level3 vector 边界。
         """
-        provider = DisambigContextProvider(level3_enabled=True)
+        provider = NarrativeEvidenceService(level3_enabled=True)
         provider._level3.is_available = MagicMock(return_value=True)
         provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
         provider._level3.search_similar_chunks = AsyncMock(
@@ -1114,18 +1181,18 @@ class TestDisambigContextProviderLevel3Async:
             ]
         )
 
-        bundle = await provider.collect_evidence_with_level3(
-            Level3Request(
+        bundle = await provider.collect(
+            _build_evidence_request(
+                consumer="annotation_phase1",
                 objective="emotion",
                 query_text="她抿唇不语，袖口却攥得发白。",
-                seed_entities=[],
                 current_chunk=15,
                 max_chunk_id=14,
                 exclude_chunk_ids=[15],
+                need_level1=False,
+                need_level2=False,
+                need_level3=True,
                 allow_llm_query_expansion=False,
-                top_k=settings.rag.level3_top_k,
-                max_queries=settings.rag.level3_max_queries,
-                model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
             )
         )
 
@@ -1142,6 +1209,11 @@ class TestDisambigContextProviderLevel3Async:
         exemplar = next(item for item in bundle.semantic_evidence if item.evidence_type == "emotion_exemplar")
         assert exemplar.metadata["emotional_valence"] == "mild_negative"
         assert exemplar.metadata["evidence_purpose"] == "emotion"
+        assert bundle.request_meta["consumer"] == "annotation_phase1"
+        assert bundle.generation_meta["level3_executed"] is True
+        assert bundle.generation_meta["query_mode"] == "direct"
+        assert bundle.generation_meta["batch_mode"] == "single"
+        assert bundle.generation_meta["cache_reuse"] is False
 
     @pytest.mark.asyncio
     async def test_collect_evidence_with_level3_raises_when_async_readiness_fails_on_required_path(self) -> None:
@@ -1151,29 +1223,330 @@ class TestDisambigContextProviderLevel3Async:
         说明: required Level3 场景下，若 async readiness 晚于 is_available() 才发现漂移，
               provider 必须继续抛出 Level3NotReadyError，不能静默退回 Level1/2。
         """
-        provider = DisambigContextProvider(level3_enabled=True)
+        provider = NarrativeEvidenceService(level3_enabled=True)
         provider._level3.is_available = MagicMock(return_value=True)
         provider._level3.ensure_level3_ready = AsyncMock(side_effect=Level3NotReadyError("schema mismatch"))
         provider._level3.search_similar_chunks = AsyncMock()
 
         with pytest.raises(Level3NotReadyError, match="schema mismatch"):
-            await provider.collect_evidence_with_level3(
-                Level3Request(
+            await provider.collect(
+                _build_evidence_request(
                     objective="identity",
                     query_text="她抿唇不语，袖口却攥得发白。",
-                    seed_entities=[],
                     current_chunk=None,
                     max_chunk_id=14,
                     exclude_chunk_ids=[],
+                    need_level3=True,
                     allow_llm_query_expansion=True,
-                    top_k=settings.rag.level3_top_k,
-                    max_queries=settings.rag.level3_max_queries,
-                    model_rerank_query_max_chars=settings.rag.level3_model_rerank_query_max_chars,
                 )
             )
 
         provider._level3.ensure_level3_ready.assert_awaited_once()
         provider._level3.search_similar_chunks.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_collect_keeps_fallback_bundle_when_query_text_empty(self) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: query_text 为空时只跳过 Level3，不得把 Level1/2 fallback 一起短路掉；
+              generation_meta 也应显式记录 empty-query fallback 原因。
+        """
+        provider = NarrativeEvidenceService(level3_enabled=True)
+        provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+
+        bundle = await provider.collect(
+            _build_evidence_request(
+                consumer="incremental_disambiguation",
+                objective="identity",
+                query_text="",
+                requested_names=["灰衣人"],
+                current_chunk=15,
+                max_chunk_id=14,
+                need_level3=True,
+            )
+        )
+
+        assert bundle.request_meta["requested_names"] == ["灰衣人"]
+        assert bundle.generation_meta["level3_executed"] is False
+        assert bundle.generation_meta["empty_query_fallback_reason"] == "query_text_empty"
+        assert bundle.generation_meta["level3_skipped_reason"] == "query_text_empty"
+        provider._level3.ensure_level3_ready.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_collect_marks_cache_reuse_on_repeated_request(self) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: 同语义 request 重复进入 service 时，应直接复用 cache，并把 cache_reuse 写进 generation_meta。
+        """
+        provider = NarrativeEvidenceService(level3_enabled=False)
+        request = _build_evidence_request(
+            consumer="annotation_phase2",
+            objective="foreshadowing",
+            query_text="当前 chunk 里埋了前文伏笔。",
+            requested_names=["白芷"],
+            seed_entities=["白芷"],
+            current_chunk=9,
+            max_chunk_id=8,
+            need_level3=False,
+        )
+
+        first_bundle = await provider.collect(request)
+        second_bundle = await provider.collect(request)
+
+        assert first_bundle.generation_meta["cache_reuse"] is False
+        assert second_bundle.generation_meta["cache_reuse"] is True
+        assert second_bundle.request_meta["consumer"] == "annotation_phase2"
+
+    @pytest.mark.asyncio
+    async def test_collect_annotation_phase1_identity_request_applies_emotion_overlay_inside_service(self) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: annotation 主链对外只暴露 identity EvidenceRequest；
+              Phase1 emotion overlay 必须在 collect() 内部派生并合并，不能回到 workflow 手工编排。
+        """
+        identity_bundle = EvidenceBundle(
+            semantic_evidence=[
+                EvidenceItem(
+                    evidence_type="vector_evidence",
+                    source="level3",
+                    content="程霜在旧案卷中发现了线索。",
+                    chunk_id=4,
+                    score=0.91,
+                    metadata={"text": "程霜在旧案卷中发现了线索。", "similarity": 0.91},
+                )
+            ],
+            generation_meta={"level3_executed": True},
+        )
+        emotion_overlay_bundle = EvidenceBundle(
+            semantic_evidence=[
+                EvidenceItem(
+                    evidence_type="emotion_exemplar",
+                    source="chunk_embeddings",
+                    content="她翻阅旧案卷时指节发白。",
+                    chunk_id=7,
+                    score=0.88,
+                    metadata={
+                        "chunk_id": 7,
+                        "text": "她翻阅旧案卷时指节发白。",
+                        "similarity": 0.88,
+                        "emotional_valence": "mild_negative",
+                    },
+                )
+            ],
+        )
+        provider = NarrativeEvidenceService(level3_enabled=True)
+        provider._collect_request = AsyncMock(side_effect=[identity_bundle, emotion_overlay_bundle])
+
+        merged_bundle = await provider.collect(
+            _build_evidence_request(
+                consumer="annotation_phase1",
+                objective="identity",
+                query_text="程霜翻阅旧案卷",
+                requested_names=["程霜"],
+                seed_entities=["程霜", "旧值"],
+                background_entities=[],
+                current_chunk=21,
+                max_chunk_id=20,
+                exclude_chunk_ids=[21],
+                need_level1=True,
+                need_level2=True,
+                need_level3=True,
+                allow_llm_query_expansion=True,
+            )
+        )
+
+        assert provider._collect_request.await_count == 2
+        identity_request = provider._collect_request.await_args_list[0].args[0]
+        emotion_request = provider._collect_request.await_args_list[1].args[0]
+        assert identity_request.objective == "identity"
+        assert emotion_request.objective == "emotion"
+        assert emotion_request.requested_names == ["程霜"]
+        assert emotion_request.seed_entities == []
+        assert emotion_request.need_level1 is False
+        assert emotion_request.need_level2 is False
+        assert merged_bundle.generation_meta["emotion_overlay_applied"] is True
+        assert any(item.evidence_type == "emotion_exemplar" for item in merged_bundle.semantic_evidence)
+
+    @pytest.mark.asyncio
+    async def test_collect_phase1_overlay_cache_does_not_pollute_phase3_identity_request(self) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: fix-phase1-overlay-cache-scope
+        说明: Phase1 的 emotion overlay 只属于 annotation_phase1 自己的内容变体；
+              同 query 的 annotation_phase3 request 应复用 identity base cache，但不能命中带 overlay 的结果。
+        """
+        provider = NarrativeEvidenceService(level3_enabled=True)
+        provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+        provider.build_level3_query_plan = AsyncMock(
+            side_effect=[
+                Level3QueryPlan(
+                    mode="direct",
+                    base_query_text="程霜翻阅旧案卷",
+                    mention_queries=[],
+                    candidate_pool_k=20,
+                    top_k=settings.rag.level3_top_k,
+                ),
+                Level3QueryPlan(
+                    mode="direct",
+                    base_query_text="程霜翻阅旧案卷",
+                    mention_queries=[],
+                    candidate_pool_k=20,
+                    top_k=settings.rag.level3_top_k,
+                ),
+            ]
+        )
+        provider.execute_level3_query_plan = AsyncMock(
+            side_effect=[
+                ([SimilarChunkRow(chunk_id=4, text="程霜在旧案卷中发现了线索。", similarity=0.91)], []),
+                (
+                    [
+                        SimilarChunkRow(
+                            chunk_id=7,
+                            text="她翻阅旧案卷时指节发白。",
+                            similarity=0.88,
+                            emotional_valence="mild_negative",
+                        )
+                    ],
+                    [],
+                ),
+            ]
+        )
+        phase1_request = _build_evidence_request(
+            consumer="annotation_phase1",
+            objective="identity",
+            query_text="程霜翻阅旧案卷",
+            requested_names=["程霜"],
+            seed_entities=["程霜", "旧值"],
+            background_entities=[],
+            current_chunk=21,
+            max_chunk_id=20,
+            exclude_chunk_ids=[21],
+            need_level1=True,
+            need_level2=True,
+            need_level3=True,
+            allow_llm_query_expansion=True,
+        )
+        phase3_request = _build_evidence_request(
+            consumer="annotation_phase3",
+            objective="identity",
+            query_text="程霜翻阅旧案卷",
+            requested_names=["程霜"],
+            seed_entities=["程霜", "旧值"],
+            background_entities=[],
+            current_chunk=21,
+            max_chunk_id=20,
+            exclude_chunk_ids=[21],
+            need_level1=True,
+            need_level2=True,
+            need_level3=True,
+            allow_llm_query_expansion=True,
+        )
+
+        first_phase1_bundle = await provider.collect(phase1_request)
+        cached_phase1_bundle = await provider.collect(phase1_request)
+        resolved_phase3_bundle = await provider.collect(phase3_request)
+
+        assert provider.build_level3_query_plan.await_count == 2
+        assert provider.execute_level3_query_plan.await_count == 2
+        assert any(item.evidence_type == "emotion_exemplar" for item in first_phase1_bundle.semantic_evidence)
+        assert any(item.evidence_type == "emotion_exemplar" for item in cached_phase1_bundle.semantic_evidence)
+        assert cached_phase1_bundle.generation_meta["cache_reuse"] is True
+        assert resolved_phase3_bundle.generation_meta["cache_reuse"] is True
+        assert not any(item.evidence_type == "emotion_exemplar" for item in resolved_phase3_bundle.semantic_evidence)
+        assert resolved_phase3_bundle.generation_meta.get("emotion_overlay_applied") is None
+        assert first_phase1_bundle.generation_meta["cache_reuse"] is False
+
+    @pytest.mark.asyncio
+    async def test_collect_records_failed_queries_and_dropped_queries_in_generation_meta(self) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: batched Level3 已支持 per-query failure containment 后，
+              collect() 应把失败 query 与预算裁掉的 query 一并写进 generation_meta。
+        """
+        provider = NarrativeEvidenceService(level3_enabled=True)
+        provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+        provider._level3.search_similar_chunks = AsyncMock()
+        provider._level3.search_similar_chunks_many = AsyncMock(
+            return_value=[
+                [],
+                [SimilarChunkRow(chunk_id=6, text="白芷曾穿红衣出手。", similarity=0.91)],
+                [SimilarChunkRow(chunk_id=7, text="当前 chunk 场景相似。", similarity=0.88)],
+            ]
+        )
+        provider._level3.consume_last_query_failures = MagicMock(
+            return_value=[
+                {
+                    "query_index": 0,
+                    "query_text": "穿红衣的女子",
+                    "stage": "search",
+                    "reason": "db timeout",
+                }
+            ]
+        )
+
+        mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:2]
+        provider.build_level3_query_plan = AsyncMock(
+            return_value=Level3QueryPlan(
+                mode="hybrid",
+                base_query_text="那个穿红衣的女子突然出手。",
+                mention_queries=mention_queries,
+                candidate_pool_k=20,
+                top_k=2,
+                dropped_queries=[
+                    {
+                        "query_text": "门口的老者",
+                        "mention_text": "门口的老者",
+                        "query_variant": "mention_raw",
+                        "reason": "max_queries_budget",
+                    }
+                ],
+            )
+        )
+
+        bundle = await provider.collect(
+            _build_evidence_request(
+                consumer="incremental_disambiguation",
+                objective="identity",
+                query_text="那个穿红衣的女子突然出手。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
+                background_entities=[],
+                current_chunk=12,
+                max_chunk_id=11,
+                exclude_chunk_ids=[12],
+                need_level1=True,
+                need_level2=True,
+                need_level3=True,
+                allow_llm_query_expansion=True,
+            ),
+        )
+
+        assert bundle.generation_meta["failed_queries"] == [
+            {
+                "query_index": 0,
+                "query_kind": "mention",
+                "query_text": "穿红衣的女子",
+                "stage": "search",
+                "reason": "db timeout",
+                "mention_text": mention_queries[0].mention_text,
+                "query_variant": mention_queries[0].query_variant,
+            }
+        ]
+        assert bundle.generation_meta["dropped_queries"] == [
+            {
+                "query_text": "门口的老者",
+                "mention_text": "门口的老者",
+                "query_variant": "mention_raw",
+                "reason": "max_queries_budget",
+            }
+        ]
+        provider._level3.search_similar_chunks_many.assert_awaited_once()
 
 
 if __name__ == "__main__":
