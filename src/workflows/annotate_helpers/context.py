@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -478,6 +479,28 @@ def _extract_active_entity_names(
     return [item.name for item in active_entities if str(item.name).strip()]
 
 
+def _collect_evidence_sync(
+    evidence_service: NarrativeEvidenceService,
+    request: EvidenceRequest,
+) -> EvidenceBundle:
+    """
+    创建时间: 2026-04-26
+    任务: fix-sync-context-collect-entry
+    说明: 无 Level3 的同步 annotation 路径也必须统一走 `NarrativeEvidenceService.collect(request)`，
+          这样 request_meta/generation_meta/cache reuse 等语义才不会只在异步路径生效。
+          这里显式限制为“当前线程没有运行中事件循环”的同步场景；若已在 async 上下文中，应改走异步入口。
+    """
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(evidence_service.collect(request))
+    raise RuntimeError(
+        "Synchronous chunk context cannot call NarrativeEvidenceService.collect() inside a running event loop; "
+        "use the async chunk-context path instead."
+    )
+
+
 def _prepare_chunk_context(
     conn,
     chunk_id: int,
@@ -559,8 +582,8 @@ def _prepare_chunk_context(
             need_level3=False,
         )
 
-        context.phase1_bundle = evidence_service._collect_base_evidence(phase1_request)
-        context.phase2_bundle = evidence_service._collect_base_evidence(phase2_request)
+        context.phase1_bundle = _collect_evidence_sync(evidence_service, phase1_request)
+        context.phase2_bundle = _collect_evidence_sync(evidence_service, phase2_request)
         context.phase3_bundle = context.phase1_bundle
         # 中文注释：Phase4 的 consumer target 只能由当前 chunk 的 Phase1 known_characters 决定；
         # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities。
