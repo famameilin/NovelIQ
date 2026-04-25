@@ -31,7 +31,11 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     context = SimpleNamespace(
         prompt_active_entities="active-entities",
         prompt_disambig_context="vector-evidence",
-        evidence_bundle={"structured_evidence": ["authority"]},
+        phase1_bundle={"structured_evidence": ["authority"]},
+        phase2_bundle={"foreshadowing": ["bundle"]},
+        phase3_bundle={"structured_evidence": ["authority"]},
+        phase4_bundle=None,
+        phase4_request_template=None,
     )
     annotation_result = SimpleNamespace(
         annotation={"entities": []},
@@ -76,7 +80,8 @@ async def test_process_single_chunk_uses_async_level3_context_builder() -> None:
     mock_prepare_context.assert_awaited_once()
     mock_annotate_chunk.assert_awaited_once()
     assert mock_annotate_chunk.await_args.kwargs["disambig_context"] == "vector-evidence"
-    assert mock_annotate_chunk.await_args.kwargs["evidence_bundle"] == {"structured_evidence": ["authority"]}
+    assert mock_annotate_chunk.await_args.kwargs["phase1_bundle"] == {"structured_evidence": ["authority"]}
+    assert mock_annotate_chunk.await_args.kwargs["phase3_bundle"] == {"structured_evidence": ["authority"]}
     mock_store_results.assert_called_once()
     mock_run_disambig.assert_awaited_once()
 
@@ -97,8 +102,10 @@ async def test_process_single_chunk_prefers_prompt_blocks_over_legacy_strings() 
         emitter=None,
     )
     context = ChunkContext(
-        evidence_bundle=MagicMock(),
-        annotation_prompt_blocks=AnnotationPromptBlocks(
+        phase1_bundle=MagicMock(),
+        phase2_bundle=MagicMock(),
+        phase3_bundle=MagicMock(),
+        phase1_prompt_blocks=AnnotationPromptBlocks(
             active_entities="BLOCK_ACTIVE",
             disambig_context="BLOCK_DISAMBIG",
         ),
