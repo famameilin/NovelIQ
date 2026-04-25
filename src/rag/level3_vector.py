@@ -53,6 +53,50 @@ class Level3VectorEvidence:
         self._expected_embedding_dim = expected_embedding_dim or settings.models.semantic_chunking.embedding_dim
         self._setup_checked = False
         self._paragraph_rerank_available: bool | None = None
+        self._last_query_failures: list[dict[str, object]] = []
+
+    def _reset_last_query_failures(self) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: 每次 Level3 query/batch query 开始前都清空上一跳失败观察字段，
+              避免新的 evidence 请求读到过期的 per-query failure attribution。
+        """
+        self._last_query_failures = []
+
+    def _record_query_failure(
+        self,
+        *,
+        query_text: str,
+        stage: str,
+        reason: str,
+        query_index: int | None = None,
+    ) -> None:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: batched retrieval 的失败要按 query 单独归因；
+              这里统一记录 query_text/index/stage，供 evidence service 回填 generation_meta。
+        """
+        failure: dict[str, object] = {
+            "query_text": query_text,
+            "stage": stage,
+            "reason": reason,
+        }
+        if query_index is not None:
+            failure["query_index"] = query_index
+        self._last_query_failures.append(failure)
+
+    def consume_last_query_failures(self) -> list[dict[str, object]]:
+        """
+        创建时间: 2026-04-25
+        任务: evidence-service-request-unification
+        说明: failure attribution 由上层 evidence service 消费后立即清空，
+              避免后续 query 误复用上一轮失败信息。
+        """
+        failures = list(self._last_query_failures)
+        self._last_query_failures = []
+        return failures
 
     def _raise_not_ready(self, message: str, *, cause: Exception | None = None) -> Never:
         """
@@ -218,6 +262,7 @@ class Level3VectorEvidence:
         max_chunk_id: int | None = None,
         top_k: int | None = None,
         ensure_ready: bool = True,
+        query_index: int | None = None,
     ) -> list[SimilarChunkRow]:
         """
         检索语义相似的历史 chunk。
@@ -249,6 +294,8 @@ class Level3VectorEvidence:
         修改内容: 单 query 入口改为复用共享的 embedding->检索执行函数，
                   为多 query batched retrieval 保持完全一致的检索/paragraph rerank 语义。
         """
+        self._reset_last_query_failures()
+
         if ensure_ready:
             await self.ensure_level3_ready()
         elif self._available is not True:
@@ -267,10 +314,29 @@ class Level3VectorEvidence:
 
         try:
             query_embedding = await self._embedding_client.get_embedding(query_text)
-            if not query_embedding:
-                logger.warning("Level3VectorEvidence: failed to get query embedding")
-                return []
+        except Level3NotReadyError:
+            raise
+        except Exception as exc:
+            logger.error("Level3VectorEvidence: query embedding failed: {}", exc)
+            self._record_query_failure(
+                query_text=query_text,
+                stage="embedding",
+                reason=str(exc),
+                query_index=query_index,
+            )
+            return []
 
+        if not query_embedding:
+            logger.warning("Level3VectorEvidence: failed to get query embedding")
+            self._record_query_failure(
+                query_text=query_text,
+                stage="embedding",
+                reason="embedding_empty",
+                query_index=query_index,
+            )
+            return []
+
+        try:
             effective_top_k = top_k or self._top_k
             results = self._search_similar_chunks_by_embedding(
                 query_embedding,
@@ -288,6 +354,12 @@ class Level3VectorEvidence:
             raise
         except Exception as exc:
             logger.error("Level3VectorEvidence: search failed: {}", exc)
+            self._record_query_failure(
+                query_text=query_text,
+                stage="search",
+                reason=str(exc),
+                query_index=query_index,
+            )
             return []
 
     async def search_similar_chunks_many(
@@ -309,6 +381,8 @@ class Level3VectorEvidence:
         修改内容: batched embedding/search 失败时回退到逐 query 隔离执行；
                   单个坏 query 只能丢自己，不能把 base query 一起清空。
         """
+        self._reset_last_query_failures()
+
         if not query_texts:
             return []
 
@@ -349,7 +423,15 @@ class Level3VectorEvidence:
             effective_top_k = top_k or self._top_k
             results_by_query: list[list[SimilarChunkRow]] = []
             for normalized_query, query_embedding in zip(normalized_queries, query_embeddings, strict=True):
+                query_index = len(results_by_query)
                 if not normalized_query or not query_embedding:
+                    if normalized_query:
+                        self._record_query_failure(
+                            query_text=normalized_query,
+                            stage="embedding",
+                            reason="embedding_empty",
+                            query_index=query_index,
+                        )
                     results_by_query.append([])
                     continue
                 try:
@@ -369,6 +451,12 @@ class Level3VectorEvidence:
                         len(normalized_query),
                         exc,
                     )
+                    self._record_query_failure(
+                        query_text=normalized_query,
+                        stage="search",
+                        reason=str(exc),
+                        query_index=query_index,
+                    )
                     results_by_query.append([])
             logger.debug(
                 "Level3VectorEvidence: batched query search complete query_count={} top_k={}",
@@ -380,6 +468,15 @@ class Level3VectorEvidence:
             raise
         except Exception as exc:
             logger.error("Level3VectorEvidence: batched search failed: {}", exc)
+            for query_index, normalized_query in enumerate(normalized_queries):
+                if not normalized_query:
+                    continue
+                self._record_query_failure(
+                    query_text=normalized_query,
+                    stage="batch_search",
+                    reason=str(exc),
+                    query_index=query_index,
+                )
             return [[] for _ in query_texts]
 
     async def _search_similar_chunks_many_isolated(
@@ -395,21 +492,24 @@ class Level3VectorEvidence:
         任务: fix-batched-level3-failure-isolation
         说明: batched 路径出错时逐 query 回退，确保单个 query 的 embedding / SQL 异常不会拖垮整批结果。
         """
+        aggregated_failures: list[dict[str, object]] = []
         results_by_query: list[list[SimilarChunkRow]] = []
-        for query_text in query_texts:
+        for query_index, query_text in enumerate(query_texts):
             normalized_query = query_text.strip()
             if not normalized_query:
                 results_by_query.append([])
                 continue
-            results_by_query.append(
-                await self.search_similar_chunks(
-                    query_text,
-                    exclude_chunk_ids=exclude_chunk_ids,
-                    max_chunk_id=max_chunk_id,
-                    top_k=top_k,
-                    ensure_ready=False,
-                )
+            query_results = await self.search_similar_chunks(
+                query_text,
+                exclude_chunk_ids=exclude_chunk_ids,
+                max_chunk_id=max_chunk_id,
+                top_k=top_k,
+                ensure_ready=False,
+                query_index=query_index,
             )
+            aggregated_failures.extend(self.consume_last_query_failures())
+            results_by_query.append(query_results)
+        self._last_query_failures = aggregated_failures
         return results_by_query
 
     def _search_similar_chunks_by_embedding(

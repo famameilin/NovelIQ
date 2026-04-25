@@ -859,6 +859,8 @@ async def test_build_level3_query_plan_trims_queries_by_budget() -> None:
 
     assert len(plan.mention_queries) == 1
     assert plan.base_query_text == "那个穿红衣的女子突然出手，门口的老者没有说话。"
+    assert len(plan.dropped_queries) >= 1
+    assert all(item["reason"] == "max_queries_budget" for item in plan.dropped_queries)
 
 
 @pytest.mark.asyncio

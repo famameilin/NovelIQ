@@ -369,7 +369,7 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
     """
     evidence_service = MagicMock()
     phase4_bundle = MagicMock(name="phase4_bundle")
-    evidence_service.collect_annotation_phase4_bundle = AsyncMock(return_value=phase4_bundle)
+    evidence_service.collect = AsyncMock(return_value=phase4_bundle)
 
     with (
         patch(
@@ -424,9 +424,11 @@ async def test_serial_multi_phase_resolves_phase4_bundle_from_known_characters()
             evidence_service=evidence_service,
         )
 
-    evidence_service.collect_annotation_phase4_bundle.assert_awaited_once()
-    assert evidence_service.collect_annotation_phase4_bundle.await_args.args[0].objective == "relation"
-    assert evidence_service.collect_annotation_phase4_bundle.await_args.args[1] == ["白芷"]
+    evidence_service.collect.assert_awaited_once()
+    resolved_request = evidence_service.collect.await_args.args[0]
+    assert resolved_request.objective == "relation"
+    assert resolved_request.requested_names == ["白芷", "侯飞白"]
+    assert resolved_request.seed_entities == ["白芷", "侯飞白"]
     assert mock_phase4.await_args.kwargs["evidence_bundle"] is phase4_bundle
 
 

@@ -29,9 +29,11 @@ from src.models.local.evidence_renderer_shared import (
     render_emotion_exemplars,
     render_vector_evidence,
 )
+from src.rag.evidence_contracts import EvidenceRequest, Level3QueryPlan
 from src.rag.evidence_types import EvidenceBundle, EvidenceItem
-from src.rag.evidence_contracts import EvidenceRequest
-from src.rag.retriever import NarrativeEvidenceService, Level3NotReadyError, Level3VectorEvidence
+from src.rag.mention_extraction import extract_person_mentions
+from src.rag.mention_query import build_mention_evidence_queries
+from src.rag.retriever import Level3NotReadyError, Level3VectorEvidence, NarrativeEvidenceService
 from src.storage.repositories.chunk import SimilarChunkRow, SimilarParagraphRow
 
 
@@ -1298,22 +1300,14 @@ class TestNarrativeEvidenceServiceLevel3Async:
         assert second_bundle.request_meta["consumer"] == "annotation_phase2"
 
     @pytest.mark.asyncio
-    async def test_prepare_annotation_evidence_plan_collects_phase_requests_inside_service(self) -> None:
+    async def test_collect_annotation_phase1_identity_request_applies_emotion_overlay_inside_service(self) -> None:
         """
         创建时间: 2026-04-25
         任务: evidence-service-request-unification
-        说明: annotation workflow 不应再手工拆 phase1/2/3 request；service 应内部完成 request 规划、
-              Phase1 emotion overlay 合并和 Phase4 request template 构造。
+        说明: annotation 主链对外只暴露 identity EvidenceRequest；
+              Phase1 emotion overlay 必须在 collect() 内部派生并合并，不能回到 workflow 手工编排。
         """
         identity_bundle = EvidenceBundle(
-            local_evidence=[
-                EvidenceItem(
-                    evidence_type="active_entity",
-                    source="graph_active_entities",
-                    content="程霜",
-                    metadata={"name": "程霜", "role": "helper", "recent_action": "追查", "last_seen_chunk": 21},
-                )
-            ],
             semantic_evidence=[
                 EvidenceItem(
                     evidence_type="vector_evidence",
@@ -1324,8 +1318,9 @@ class TestNarrativeEvidenceServiceLevel3Async:
                     metadata={"text": "程霜在旧案卷中发现了线索。", "similarity": 0.91},
                 )
             ],
+            generation_meta={"level3_executed": True},
         )
-        emotion_bundle = EvidenceBundle(
+        emotion_overlay_bundle = EvidenceBundle(
             semantic_evidence=[
                 EvidenceItem(
                     evidence_type="emotion_exemplar",
@@ -1340,90 +1335,97 @@ class TestNarrativeEvidenceServiceLevel3Async:
                         "emotional_valence": "mild_negative",
                     },
                 )
-            ]
+            ],
         )
-        phase2_bundle = EvidenceBundle()
-        phase3_bundle = EvidenceBundle()
         provider = NarrativeEvidenceService(level3_enabled=True)
-        provider.is_level3_available = MagicMock(return_value=True)
-        provider.collect = AsyncMock(side_effect=[identity_bundle, emotion_bundle, phase2_bundle, phase3_bundle])
+        provider._collect_request = AsyncMock(side_effect=[identity_bundle, emotion_overlay_bundle])
 
-        plan = await provider.prepare_annotation_evidence_plan(
-            chunk_text="程霜翻阅旧案卷",
-            alias_map={"小七": "程霜", "老刀": "韩山"},
-            current_chunk=21,
-            active_entity_names=["旧值"],
+        merged_bundle = await provider.collect(
+            _build_evidence_request(
+                consumer="annotation_phase1",
+                objective="identity",
+                query_text="程霜翻阅旧案卷",
+                requested_names=["程霜"],
+                seed_entities=["程霜", "旧值"],
+                background_entities=[],
+                current_chunk=21,
+                max_chunk_id=20,
+                exclude_chunk_ids=[21],
+                need_level1=True,
+                need_level2=True,
+                need_level3=True,
+                allow_llm_query_expansion=True,
+            )
         )
 
-        assert provider.collect.await_count == 4
-        phase1_identity_request = provider.collect.await_args_list[0].args[0]
-        phase1_emotion_request = provider.collect.await_args_list[1].args[0]
-        phase2_request = provider.collect.await_args_list[2].args[0]
-        phase3_request = provider.collect.await_args_list[3].args[0]
-
-        assert phase1_identity_request.consumer == "annotation_phase1"
-        assert phase1_identity_request.objective == "identity"
-        assert phase1_identity_request.query_text == "程霜翻阅旧案卷"
-        assert phase1_identity_request.current_chunk == 21
-        assert phase1_identity_request.max_chunk_id == 20
-        assert phase1_identity_request.exclude_chunk_ids == [21]
-        assert phase1_identity_request.requested_names == ["程霜"]
-        assert "程霜" in phase1_identity_request.seed_entities
-        assert "旧值" in phase1_identity_request.seed_entities
-        assert "小七" not in phase1_identity_request.seed_entities
-        assert "老刀" not in phase1_identity_request.seed_entities
-        assert "韩山" not in phase1_identity_request.seed_entities
-        assert phase1_identity_request.need_level1 is True
-        assert phase1_identity_request.need_level2 is True
-        assert phase1_identity_request.need_level3 is True
-
-        assert phase1_emotion_request.objective == "emotion"
-        assert phase1_emotion_request.allow_llm_query_expansion is False
-        assert phase1_emotion_request.requested_names == ["程霜"]
-        assert phase1_emotion_request.seed_entities == []
-        assert phase1_emotion_request.need_level1 is False
-        assert phase1_emotion_request.need_level2 is False
-        assert phase1_emotion_request.need_level3 is True
-
-        assert phase2_request.consumer == "annotation_phase2"
-        assert phase2_request.objective == "foreshadowing"
-        assert phase2_request.allow_llm_query_expansion is False
-        assert phase2_request.requested_names == ["旧值"]
-        assert phase2_request.seed_entities == ["旧值"]
-        assert phase2_request.need_level3 is True
-
-        assert phase3_request.consumer == "annotation_phase3"
-        assert phase3_request.requested_names == ["程霜"]
-        assert phase3_request.seed_entities == phase1_identity_request.seed_entities
-
-        assert plan.phase1_bundle is not None
-        assert any(item.evidence_type == "emotion_exemplar" for item in plan.phase1_bundle.semantic_evidence)
-        assert plan.phase2_bundle is phase2_bundle
-        assert plan.phase3_bundle is phase3_bundle
-        assert plan.phase4_request_template is not None
-        assert plan.phase4_request_template.consumer == "annotation_phase4"
-        assert plan.phase4_request_template.objective == "relation"
-        assert plan.phase4_request_template.requested_names == ["旧值"]
-        assert plan.phase4_request_template.seed_entities == ["旧值"]
+        assert provider._collect_request.await_count == 2
+        identity_request = provider._collect_request.await_args_list[0].args[0]
+        emotion_request = provider._collect_request.await_args_list[1].args[0]
+        assert identity_request.objective == "identity"
+        assert emotion_request.objective == "emotion"
+        assert emotion_request.requested_names == ["程霜"]
+        assert emotion_request.seed_entities == []
+        assert emotion_request.need_level1 is False
+        assert emotion_request.need_level2 is False
+        assert merged_bundle.generation_meta["emotion_overlay_applied"] is True
+        assert any(item.evidence_type == "emotion_exemplar" for item in merged_bundle.semantic_evidence)
 
     @pytest.mark.asyncio
-    async def test_collect_annotation_phase4_bundle_expands_known_characters_inside_service(self) -> None:
+    async def test_collect_records_failed_queries_and_dropped_queries_in_generation_meta(self) -> None:
         """
         创建时间: 2026-04-25
         任务: evidence-service-request-unification
-        说明: Phase4 relation evidence 的 requested_names/seed_entities 扩展应由 service 完成，
-              multi_phase 不再自己拼 Phase4 request。
+        说明: batched Level3 已支持 per-query failure containment 后，
+              collect() 应把失败 query 与预算裁掉的 query 一并写进 generation_meta。
         """
-        provider = NarrativeEvidenceService(level3_enabled=False)
-        provider.collect = AsyncMock(return_value=EvidenceBundle())
+        provider = NarrativeEvidenceService(level3_enabled=True)
+        provider._level3.is_available = MagicMock(return_value=True)
+        provider._level3.ensure_level3_ready = AsyncMock(return_value=None)
+        provider._level3.search_similar_chunks = AsyncMock()
+        provider._level3.search_similar_chunks_many = AsyncMock(
+            return_value=[
+                [],
+                [SimilarChunkRow(chunk_id=6, text="白芷曾穿红衣出手。", similarity=0.91)],
+                [SimilarChunkRow(chunk_id=7, text="当前 chunk 场景相似。", similarity=0.88)],
+            ]
+        )
+        provider._level3.consume_last_query_failures = MagicMock(
+            return_value=[
+                {
+                    "query_index": 0,
+                    "query_text": "穿红衣的女子",
+                    "stage": "search",
+                    "reason": "db timeout",
+                }
+            ]
+        )
 
-        await provider.collect_annotation_phase4_bundle(
+        mention_queries = build_mention_evidence_queries(extract_person_mentions("那个穿红衣的女子突然出手。"))[:2]
+        provider.build_level3_query_plan = AsyncMock(
+            return_value=Level3QueryPlan(
+                mode="hybrid",
+                base_query_text="那个穿红衣的女子突然出手。",
+                mention_queries=mention_queries,
+                candidate_pool_k=20,
+                top_k=2,
+                dropped_queries=[
+                    {
+                        "query_text": "门口的老者",
+                        "mention_text": "门口的老者",
+                        "query_variant": "mention_raw",
+                        "reason": "max_queries_budget",
+                    }
+                ],
+            )
+        )
+
+        bundle = await provider.collect(
             _build_evidence_request(
-                consumer="annotation_phase4",
-                objective="relation",
-                query_text="白芷看向侯飞白。",
-                requested_names=["侯飞白"],
-                seed_entities=["侯飞白"],
+                consumer="incremental_disambiguation",
+                objective="identity",
+                query_text="那个穿红衣的女子突然出手。",
+                requested_names=["白芷"],
+                seed_entities=["白芷"],
                 background_entities=[],
                 current_chunk=12,
                 max_chunk_id=11,
@@ -1431,15 +1433,30 @@ class TestNarrativeEvidenceServiceLevel3Async:
                 need_level1=True,
                 need_level2=True,
                 need_level3=True,
-                allow_llm_query_expansion=False,
+                allow_llm_query_expansion=True,
             ),
-            ["白芷"],
         )
 
-        provider.collect.assert_awaited_once()
-        resolved_request = provider.collect.await_args.args[0]
-        assert resolved_request.requested_names == ["白芷", "侯飞白"]
-        assert resolved_request.seed_entities == ["白芷", "侯飞白"]
+        assert bundle.generation_meta["failed_queries"] == [
+            {
+                "query_index": 0,
+                "query_kind": "mention",
+                "query_text": "穿红衣的女子",
+                "stage": "search",
+                "reason": "db timeout",
+                "mention_text": mention_queries[0].mention_text,
+                "query_variant": mention_queries[0].query_variant,
+            }
+        ]
+        assert bundle.generation_meta["dropped_queries"] == [
+            {
+                "query_text": "门口的老者",
+                "mention_text": "门口的老者",
+                "query_variant": "mention_raw",
+                "reason": "max_queries_budget",
+            }
+        ]
+        provider._level3.search_similar_chunks_many.assert_awaited_once()
 
 
 if __name__ == "__main__":

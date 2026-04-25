@@ -14,7 +14,7 @@ Evidence / Level3 消费者意图驱动合同。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from src.rag.mention_query import MentionEvidenceQuery
@@ -115,6 +115,7 @@ class Level3QueryPlan:
     mention_queries: list[MentionEvidenceQuery]
     candidate_pool_k: int
     top_k: int
+    dropped_queries: list[dict[str, str]] = field(default_factory=list)
 
 
 def build_evidence_request_fingerprint(request: EvidenceRequest) -> tuple[object, ...]:

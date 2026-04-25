@@ -22,22 +22,21 @@
 """
 
 from src.rag.authority import Level1AuthorityProvider
-from src.rag.evidence_types import (
-    AliasMapping,
-    AnnotationEvidencePlan,
-    CanonicalEntity,
-    ConfirmedRelation,
-    EntityTypeFact,
-    EvidenceBundle,
-    EvidenceItem,
-    Level1AuthoritySnapshot,
-)
 from src.rag.evidence_contracts import (
     EvidenceConsumer,
     EvidenceObjective,
     EvidenceRequest,
     Level3QueryPlan,
     build_evidence_request_fingerprint,
+)
+from src.rag.evidence_types import (
+    AliasMapping,
+    CanonicalEntity,
+    ConfirmedRelation,
+    EntityTypeFact,
+    EvidenceBundle,
+    EvidenceItem,
+    Level1AuthoritySnapshot,
 )
 from src.rag.mention_extraction_service import MentionExtractionService
 from src.rag.mention_extraction_types import MentionExtractionRequest, PersonMention
@@ -56,7 +55,6 @@ __all__ = [
     "AliasLookup",
     "ActiveEntityLookup",
     "AliasMapping",
-    "AnnotationEvidencePlan",
     "CanonicalEntity",
     "ConfirmedRelation",
     "EntityTypeFact",
