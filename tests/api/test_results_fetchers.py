@@ -467,8 +467,12 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
                     pivot_moment=True,
                     cliffhanger=False,
                     has_foreshadowing=False,
+                    is_strong_setup=False,
                     foreshadowing_type=None,
+                    setup_kind=None,
                     foreshadowing_desc=None,
+                    why_unresolved_now=None,
+                    expected_payoff_family=None,
                 )
             ]
 
@@ -503,8 +507,59 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
     )
 
     assert len(result) == 1
+    assert result[0].is_strong_setup is False
+    assert result[0].setup_kind is None
+    assert result[0].why_unresolved_now is None
+    assert result[0].expected_payoff_family is None
     assert len(result[0].relations) == 1
     assert result[0].relations[0].from_char == "贺铮"
     assert result[0].relations[0].to_char == "伯安"
     assert result[0].relations[0].type == "父子"
     assert result[0].relations[0].change == "新建"
+
+
+def test_fetch_chunk_annotations_allows_pending_graph_when_projection_not_required():
+    class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
+        def fetch_chunk_annotations_full(self, _run_id):
+            return [
+                _DummyRow(
+                    chunk_id=3,
+                    emotional_valence="正向",
+                    event_type="冲突",
+                    pivot_moment=True,
+                    cliffhanger=False,
+                    has_foreshadowing=True,
+                    is_strong_setup=True,
+                    foreshadowing_type="物件",
+                    setup_kind="异常物件",
+                    foreshadowing_desc=(
+                        "玉佩发热 - 具体钩子：玉佩出现异常发热。"
+                        "未闭合原因：当前还没有解释它为何会发热。"
+                    ),
+                    why_unresolved_now="当前还没有解释它为何会发热。",
+                    expected_payoff_family="能力触发",
+                )
+            ]
+
+        def fetch_chunk_characters_full(self, _run_id):
+            return []
+
+        def fetch_chunk_dialogues_full(self, _run_id):
+            return []
+
+    annotation_repo = _AnnotationRepoWithChunkRows()
+    annotation_repo._pending = [object()]
+
+    result = _fetch_chunk_annotations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        alias_map={},
+        export_graph_view=ExportGraphAuthorityView(),
+        require_graph_projection=False,
+    )
+
+    assert len(result) == 1
+    assert result[0].chunk_id == 3
+    assert result[0].is_strong_setup is True
+    assert result[0].setup_kind == "异常物件"
+    assert result[0].relations == []

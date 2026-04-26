@@ -45,7 +45,7 @@ def _build_annotation(foreshadowing_desc: str) -> ChunkAnnotation:
         pivot_moment=True,
         cliffhanger=False,
         has_foreshadowing=True,
-        foreshadowing_type="causal",
+        foreshadowing_type="场景",
         foreshadowing_desc=foreshadowing_desc,
         characters=[],
         dialogues=[],

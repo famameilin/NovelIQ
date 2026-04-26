@@ -36,9 +36,11 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db_session, get_metrics_service, get_novel_service, resolve_run_id
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
+from src.api.models.responses import ChunkAnnotation as ChunkAnnotationResponse
 from src.api.models.responses import ResultsWriteResponse
 from src.api.routes.results_fetchers import (
     _fetch_characters,
+    _fetch_chunk_annotations,
     _fetch_chunk_curves,
     _fetch_diagnosis,
     _fetch_graph_events_page,
@@ -58,6 +60,31 @@ from src.storage.repositories import (
 
 router = APIRouter(prefix="/novels", tags=["results"])
 GRAPH_PAGE_EVENT_LIMIT = 200
+
+
+def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
+    """
+    校验 run_id 存在且属于当前小说。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    新建原因: 结果接口此前只解析了 `task_id -> run_id`，却没有统一校验
+    URL 里的 `novel_id` 与该 run 的归属关系，导致跨小说 task_id 仍可能读到结果。
+    """
+    run_repo = RunRepository(session)
+    run = run_repo.get_run(run_id)
+    if not run:
+        raise NovelNotFoundError(novel_id=novel_id, message=f"运行记录不存在: {run_id}")
+
+    if run.get("novel_id") != novel_id:
+        actual_task_id = run_id[:8] if len(run_id) >= 8 else run_id
+        raise NovelNotFoundError(
+            novel_id=novel_id,
+            message=f"任务 {actual_task_id} 不属于小说 {novel_id}",
+        )
+
+    return run
 
 
 @router.get(
@@ -82,6 +109,7 @@ GRAPH_PAGE_EVENT_LIMIT = 200
 
 **生产环境数据获取请使用专用接口：**
 - `GET /{novel_id}/chunk-curves` - 获取分块曲线（情绪 + 节奏）
+- `GET /{novel_id}/chunk-annotations` - 获取分块标注与伏笔详情
 - `GET /{novel_id}/characters` - 获取人物统计
 - `GET /{novel_id}/topics` - 获取主题分布
 - `GET /{novel_id}/diagnosis` - 获取云端诊断
@@ -138,17 +166,7 @@ async def get_results(
     2026-03-19: TraeAI重构，将run_id参数改为task_id，内部转换为run_id
     2026-03-30: CodeBuddy重构，使用 Depends 注入 session
     """
-    # run_id 已通过 resolve_run_id 依赖注入获取
-    run_repo = RunRepository(session)
-    run = run_repo.get_run(run_id)
-    if not run:
-        raise NovelNotFoundError(f"运行记录不存在: {run_id}")
-
-    # 验证 run 是否属于该 novel
-    if run.get("novel_id") != novel_id:
-        # 使用 run_id 的前8位作为 task_id 确保错误消息准确
-        actual_task_id = run_id[:8] if len(run_id) >= 8 else run_id
-        raise NovelNotFoundError(f"任务 {actual_task_id} 不属于小说 {novel_id}")
+    run = _require_run_for_novel(session, novel_id, run_id)
 
     VALID_EXPORT_STATUSES = ("completed", "aggregated", "diagnosed")
     if run["status"] not in VALID_EXPORT_STATUSES:
@@ -215,10 +233,39 @@ async def get_chunk_curves(
     任务: fuse-display-emotion-curve
     修改内容: 返回展示层融合后的单曲线结果，保持前端仍只消费一个 chunk_curves 接口
     """
+    _require_run_for_novel(session, novel_id, run_id)
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
     return _fetch_chunk_curves(run_id, stats_repo, annotation_repo, chunk_repo)
+
+
+@router.get(
+    "/{novel_id}/chunk-annotations",
+    response_model=list[ChunkAnnotationResponse],
+)
+async def get_chunk_annotations(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> list[ChunkAnnotationResponse]:
+    """
+    获取分块标注与伏笔详情数据。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 暴露 chunk_annotations 结果接口，便于前端后续新增伏笔展示页直接消费强伏笔结构化字段。
+    """
+    _require_run_for_novel(session, novel_id, run_id)
+    annotation_repo = AnnotationRepository(session)
+    alias_map = annotation_repo.fetch_alias_map(run_id)
+    return _fetch_chunk_annotations(
+        run_id,
+        annotation_repo,
+        alias_map,
+        require_graph_projection=False,
+    )
 
 
 @router.get("/{novel_id}/characters")
@@ -235,6 +282,7 @@ async def get_characters(
     任务: protagonist-score-fusion
     修改内容: 先获取 diagnosis，传递 arc_scores 和 main_characters 给 _fetch_characters
     """
+    _require_run_for_novel(session, novel_id, run_id)
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
 
@@ -257,6 +305,7 @@ async def get_topics(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list:
     """获取主题分布数据"""
+    _require_run_for_novel(session, novel_id, run_id)
     chunk_repo = ChunkRepository(session)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
@@ -270,6 +319,7 @@ async def get_diagnosis(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> Any:
     """获取云端诊断数据"""
+    _require_run_for_novel(session, novel_id, run_id)
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
@@ -283,6 +333,7 @@ async def get_graph(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     """获取知识图谱快照"""
+    _require_run_for_novel(session, novel_id, run_id)
     annotation_repo = AnnotationRepository(session)
     return _fetch_graph_snapshot(run_id, annotation_repo)
 
@@ -296,6 +347,7 @@ async def get_graph_events(
     events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict:
     """获取 graph page relation events 的增量分页结果。"""
+    _require_run_for_novel(session, novel_id, run_id)
     annotation_repo = AnnotationRepository(session)
     try:
         return _fetch_graph_events_page(
@@ -316,6 +368,7 @@ async def get_narrative_structure(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取叙事结构指标"""
+    _require_run_for_novel(session, novel_id, run_id)
     return metrics_service.get_narrative_structure(run_id, session)
 
 
@@ -327,6 +380,7 @@ async def get_emotion_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取情感统计指标"""
+    _require_run_for_novel(session, novel_id, run_id)
     return metrics_service.get_emotion_stats(run_id, session)
 
 
@@ -338,6 +392,7 @@ async def get_character_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取角色统计指标"""
+    _require_run_for_novel(session, novel_id, run_id)
     return metrics_service.get_character_stats(run_id, session)
 
 
@@ -349,5 +404,5 @@ async def get_style_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取风格统计指标"""
+    _require_run_for_novel(session, novel_id, run_id)
     return metrics_service.get_style_stats(run_id, session)
-
