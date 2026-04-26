@@ -396,6 +396,81 @@ def _resolve_phase3_fastpath_candidates(
     return fastpath_records, llm_candidates, hit_types, reject_reasons
 
 
+def _collect_fastpath_metadata_candidates(
+    fastpath_records: list[DialogueRecordSchema],
+    candidates: list[QuoteCandidate],
+) -> list[QuoteCandidate]:
+    """
+    收集需要补充 metadata 的 fastpath 命中候选。
+
+    创建时间: 2026-04-27
+    任务: fix-phase3-fastpath-followup-review-findings
+    新建原因: 让 fastpath 先锁定 speaker，再仅对命中的候选补充 tone / identity clue，避免主链上完全绕开 fastpath。
+    """
+    candidate_by_index = {candidate.index: candidate for candidate in candidates}
+    return [candidate_by_index[record.index] for record in fastpath_records if record.index in candidate_by_index]
+
+
+def _collect_fastpath_metadata_known_characters(
+    fastpath_records: list[DialogueRecordSchema],
+    batch_candidates: list[QuoteCandidate],
+    fallback_known_characters: list[str] | None,
+) -> list[str] | None:
+    """
+    为 fastpath metadata enrichment 收敛当前 batch 的已知说话者提示。
+
+    创建时间: 2026-04-27
+    任务: fix-phase3-fastpath-followup-review-findings
+    新建原因: metadata enrichment 不再需要整段角色池，只保留 proof-only 已证明的 speaker，减小 prompt 负担。
+    """
+    speaker_by_index = {record.index: record.speaker or [] for record in fastpath_records}
+    ordered_speakers: list[str] = []
+    for candidate in batch_candidates:
+        for speaker in speaker_by_index.get(candidate.index, []):
+            if speaker and speaker not in ordered_speakers:
+                ordered_speakers.append(speaker)
+    return ordered_speakers or fallback_known_characters
+
+
+def _merge_fastpath_metadata_records(
+    fastpath_records: list[DialogueRecord],
+    metadata_records: list[DialogueRecord],
+    require_tones: bool,
+    require_identity_clues: bool,
+) -> list[DialogueRecord]:
+    """
+    将 LLM metadata enrichment 结果合并回 fastpath 记录。
+
+    创建时间: 2026-04-27
+    任务: fix-phase3-fastpath-followup-review-findings
+    新建原因: fastpath 继续作为 speaker 的权威来源，metadata batch 只补 tone / identity clue，
+    避免主链再次退回纯 LLM speaker 判断。
+    """
+    metadata_by_index = {record.index: record for record in metadata_records}
+    merged_records: list[DialogueRecord] = []
+
+    for record in fastpath_records:
+        metadata_record = metadata_by_index.get(record.index)
+        if metadata_record is None:
+            merged_records.append(record)
+            continue
+
+        merged_records.append(
+            record.model_copy(
+                update={
+                    "tone": metadata_record.tone if require_tones and metadata_record.tone else record.tone,
+                    "identity_clue": (
+                        metadata_record.identity_clue
+                        if require_identity_clues and metadata_record.identity_clue
+                        else record.identity_clue
+                    ),
+                }
+            )
+        )
+
+    return merged_records
+
+
 def _clone_annotation_client_for_parallel(client: AnnotationClient) -> AnnotationClient:
     """
     为并行 batch 构造无共享 session 的轻量客户端副本。
@@ -533,7 +608,8 @@ async def attribute_dialogues_with_llm(
     修改时间: 2026-04-27
     修改者: Codex
     任务: fix-phase3-proof-only-fastpath-followup-review-findings
-    修改内容: 请求 tone / identity clue 时禁用 fastpath 短路，并恢复按 batch 校验返回 index。
+    修改内容: 请求 tone / identity clue 时改为对 fastpath 命中候选做轻量 metadata enrichment，
+    恢复主链 fastpath 可达性并保留按 batch 校验返回 index。
     """
     if not candidates:
         return []
@@ -555,17 +631,23 @@ async def attribute_dialogues_with_llm(
         batch_idx: int,
         total_batches: int,
         attempt_number: int,
+        batch_known_characters: list[str] | None = None,
+        include_evidence: bool = True,
+        batch_label: str = "dialogue_attribution",
     ) -> list[DialogueRecordSchema]:
         dialogue_list = "\n".join([f'{c.index}. content: "{c.content}"' for c in batch_candidates])
-        known_chars = "、".join(known_characters) if known_characters else "无"
-        # 中文注释：Phase3 的共享 evidence 需要按当前 batch 重新裁剪，
-        # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选。
-        evidence_sections = render_dialogue_attribution_evidence_sections(
-            evidence_bundle,
-            alias_map=alias_map,
-            active_entities=active_entities,
-            priority_candidate_names=_collect_priority_candidate_names(evidence_bundle, batch_candidates),
-        )
+        effective_known_characters = batch_known_characters if batch_known_characters is not None else known_characters
+        known_chars = "、".join(effective_known_characters) if effective_known_characters else "无"
+        evidence_sections: list[str] = []
+        if include_evidence:
+            # 中文注释：Phase3 的共享 evidence 需要按当前 batch 重新裁剪，
+            # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选。
+            evidence_sections = render_dialogue_attribution_evidence_sections(
+                evidence_bundle,
+                alias_map=alias_map,
+                active_entities=active_entities,
+                priority_candidate_names=_collect_priority_candidate_names(evidence_bundle, batch_candidates),
+            )
 
         prompts = settings.prompts
         system_prompt = prompts.phase3.system
@@ -601,7 +683,7 @@ async def attribute_dialogues_with_llm(
         parsed = call_result.parsed
 
         logger.info(
-            f"dialogue_attribution batch: "
+            f"{batch_label} batch: "
             f"batch={batch_idx + 1}/{total_batches} "
             f"candidates={len(batch_candidates)} "
             f"result_count={len(parsed.dialogues)}"
@@ -612,22 +694,17 @@ async def attribute_dialogues_with_llm(
     async def _execute_all_batches(
         current_client: AnnotationClient,
     ) -> list[DialogueRecord]:
-        if require_tones or require_identity_clues:
-            fastpath_records = []
-            llm_candidates = list(candidates)
-            hit_types: Counter[str] = Counter()
-            reject_reasons: Counter[str] = Counter(
-                {
-                    "metadata_requested": len(candidates),
-                }
-            )
-        else:
-            fastpath_records, llm_candidates, hit_types, reject_reasons = _resolve_phase3_fastpath_candidates(
-                chunk_text=chunk_text,
-                candidates=candidates,
-                known_characters=known_characters,
-                alias_map=alias_map,
-            )
+        fastpath_records, llm_candidates, hit_types, reject_reasons = _resolve_phase3_fastpath_candidates(
+            chunk_text=chunk_text,
+            candidates=candidates,
+            known_characters=known_characters,
+            alias_map=alias_map,
+        )
+        metadata_candidates = (
+            _collect_fastpath_metadata_candidates(fastpath_records, candidates)
+            if (require_tones or require_identity_clues)
+            else []
+        )
         logger.info(
             "phase3_fastpath summary: chunk_id={} hits={} fallbacks={} hit_types={} reject_reasons={}",
             chunk_id,
@@ -637,23 +714,34 @@ async def attribute_dialogues_with_llm(
             dict(sorted(reject_reasons.items())),
         )
 
-        if not llm_candidates:
-            return _post_process_validation(fastpath_records, candidates, known_characters, alias_map, chunk_id)
+        validated_fastpath_records = _post_process_validation(
+            fastpath_records,
+            candidates,
+            known_characters,
+            alias_map,
+            chunk_id,
+        )
+        if not llm_candidates and not metadata_candidates:
+            return validated_fastpath_records
 
-        total_batches = (len(llm_candidates) + batch_size - 1) // batch_size
         semaphore = asyncio.Semaphore(batch_parallelism)
 
         async def _run_single_batched_retry(
             batch_idx: int,
             batch_candidates: list[QuoteCandidate],
-        ) -> tuple[int, list[DialogueRecord]]:
+            *,
+            batch_label: str,
+            total_batches: int,
+            batch_known_characters: list[str] | None = None,
+            include_evidence: bool = True,
+        ) -> tuple[str, int, list[DialogueRecord]]:
             async with semaphore:
                 phase3_max_retries = settings.runtime.annotation.phase3_max_retries
                 if not isinstance(phase3_max_retries, int) or phase3_max_retries < 1:
                     phase3_max_retries = 3
                 retry_config = RetryConfig(
                     max_retries=phase3_max_retries,
-                    operation_name=f"phase3_dialogue_attribution_batch_{batch_idx}",
+                    operation_name=f"{batch_label}_batch_{batch_idx}",
                     chunk_id=chunk_id,
                 )
                 # 中文注释：并行 worker 复用同一个 SDK client，但显式去掉 _session，
@@ -677,7 +765,16 @@ async def attribute_dialogues_with_llm(
                 ) -> list[DialogueRecordSchema]:
                     # 中文注释：重试器可能把执行客户端切到 fallback_worker，这里必须消费传入的 working_client，
                     # 不能闭包捕获 primary_worker，否则兜底分支仍会错误走主客户端。
-                    return await _execute_single_batch(working_client, bc, bi, tb, retry_handler.state.attempt)
+                    return await _execute_single_batch(
+                        working_client,
+                        bc,
+                        bi,
+                        tb,
+                        retry_handler.state.attempt,
+                        batch_known_characters=batch_known_characters,
+                        include_evidence=include_evidence,
+                        batch_label=batch_label,
+                    )
 
                 batch_results = await retry_handler.execute(batch_operation)
                 # 中文注释：每个 batch 都必须先按自己的候选集合校验返回 index，
@@ -689,28 +786,56 @@ async def attribute_dialogues_with_llm(
                     alias_map,
                     chunk_id,
                 )
-                return batch_idx, batch_records
+                return batch_label, batch_idx, batch_records
 
-        batch_tasks: list[asyncio.Task[tuple[int, list[DialogueRecord]]]] = [
+        llm_total_batches = (len(llm_candidates) + batch_size - 1) // batch_size if llm_candidates else 0
+        metadata_total_batches = (len(metadata_candidates) + batch_size - 1) // batch_size if metadata_candidates else 0
+
+        llm_tasks: list[asyncio.Task[tuple[str, int, list[DialogueRecord]]]] = [
             asyncio.create_task(
                 _run_single_batched_retry(
                     batch_idx=i // batch_size,
                     batch_candidates=llm_candidates[i : i + batch_size],
+                    batch_label="phase3_dialogue_attribution",
+                    total_batches=llm_total_batches,
                 )
             )
             for i in range(0, len(llm_candidates), batch_size)
         ]
-        completed_batches = await asyncio.gather(*batch_tasks)
+        metadata_tasks: list[asyncio.Task[tuple[str, int, list[DialogueRecord]]]] = [
+            asyncio.create_task(
+                _run_single_batched_retry(
+                    batch_idx=i // batch_size,
+                    batch_candidates=metadata_candidates[i : i + batch_size],
+                    batch_label="phase3_fastpath_metadata",
+                    total_batches=metadata_total_batches,
+                    batch_known_characters=_collect_fastpath_metadata_known_characters(
+                        fastpath_records,
+                        metadata_candidates[i : i + batch_size],
+                        known_characters,
+                    ),
+                    include_evidence=False,
+                )
+            )
+            for i in range(0, len(metadata_candidates), batch_size)
+        ]
+        completed_batches = await asyncio.gather(*(metadata_tasks + llm_tasks))
 
-        ordered_records: list[DialogueRecord] = _post_process_validation(
-            fastpath_records,
-            candidates,
-            known_characters,
-            alias_map,
-            chunk_id,
+        metadata_records: list[DialogueRecord] = []
+        llm_records: list[DialogueRecord] = []
+        for batch_label, _batch_idx, batch_results in completed_batches:
+            if batch_label == "phase3_fastpath_metadata":
+                metadata_records.extend(batch_results)
+            else:
+                llm_records.extend(batch_results)
+
+        ordered_records: list[DialogueRecord] = _merge_fastpath_metadata_records(
+            validated_fastpath_records,
+            metadata_records,
+            require_tones=require_tones,
+            require_identity_clues=require_identity_clues,
         )
-        for _, batch_results in sorted(completed_batches, key=lambda item: item[0]):
-            ordered_records.extend(batch_results)
+        ordered_records.extend(llm_records)
         # 中文注释：各 batch 已各自完成 index 校验，这里只按全局 index 排序，
         # 保证 fastpath 与 LLM 混合结果对 projector 来说仍是稳定的原文顺序。
         ordered_records.sort(key=lambda record: record.index)

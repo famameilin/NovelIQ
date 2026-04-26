@@ -147,7 +147,14 @@ class AnnotationRetryHandler[T]:
         operation: Callable[..., Any],
         build_retry_messages: Callable[[], Any] | None = None,
     ) -> T:
-        """尝试兜底客户端。"""
+        """
+        尝试兜底客户端。
+
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: fix-phase3-fastpath-followup-review-findings
+        修改内容: fallback 视为独立一次调用，进入兜底前补记真实 attempt 次数，避免 runtime 审计少记一次重试。
+        """
         logger.warning(
             "{} primary client failed after {} attempts, falling back to fallback client chunk_id={}",
             self.config.operation_name,
@@ -156,9 +163,11 @@ class AnnotationRetryHandler[T]:
         )
 
         try:
+            self.state.attempt = self.config.max_retries + 1
             logger.debug(
-                "{} fallback attempt chunk_id={}",
+                "{} fallback attempt {} chunk_id={}",
                 self.config.operation_name,
+                self.state.attempt,
                 self.config.chunk_id,
             )
 
@@ -169,8 +178,9 @@ class AnnotationRetryHandler[T]:
                 result = await operation(self.fallback_client)
 
             logger.info(
-                "{} fallback succeeded chunk_id={}",
+                "{} fallback succeeded on attempt {} chunk_id={}",
                 self.config.operation_name,
+                self.state.attempt,
                 self.config.chunk_id,
             )
             return result
