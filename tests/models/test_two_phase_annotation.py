@@ -125,6 +125,21 @@ class TestForeshadowingParsing(unittest.TestCase):
         self.assertFalse(result.is_strong_setup)
         self.assertIsNone(result.foreshadowing_type)
 
+    def test_parse_foreshadowing_invalid_confidence_defaults_to_low(self) -> None:
+        data = {
+            "has_foreshadowing": True,
+            "is_strong_setup": True,
+            "foreshadowing_type": "物件",
+            "setup_kind": "异常物件",
+            "anchor_text": "那枚玉佩在夜里自行发热。",
+            "anchor_reason": "具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+            "why_unresolved_now": "当前还没有解释它为何会发热。",
+            "expected_payoff_family": "能力触发",
+            "confidence": "INVALID",
+        }
+        result = parse_foreshadowing_result(data)
+        self.assertEqual(result.confidence, "low")
+
     def test_parse_foreshadowing_invalid_type_raises_validation_error(self) -> None:
         data = {
             "has_foreshadowing": True,
@@ -151,6 +166,20 @@ class TestForeshadowingValidation(unittest.TestCase):
             confidence="high",
         )
         self.assertTrue(validate_foreshadowing_result(result, "any text"))
+
+    def test_validate_negative_with_stale_strong_setup_fields_returns_false(self) -> None:
+        result = ForeshadowingResult.model_construct(
+            has_foreshadowing=False,
+            is_strong_setup=True,
+            foreshadowing_type=None,
+            setup_kind="异常物件",
+            anchor_text="",
+            anchor_reason="具体钩子：无。未闭合原因：这里只是在解释为什么不是伏笔。",
+            why_unresolved_now="",
+            expected_payoff_family="",
+            confidence="low",
+        )
+        self.assertFalse(validate_foreshadowing_result(result, "any text"))
 
     def test_validate_low_confidence_returns_false(self) -> None:
         result = ForeshadowingResult(
@@ -289,6 +318,21 @@ class TestForeshadowingValidation(unittest.TestCase):
             setup_kind="其他",
             anchor_text="她决定明天去镇上卖药。",
             anchor_reason="具体钩子：人物做出明天去镇上卖药的决定。未闭合原因：当前只是提出决定，尚未执行。",
+            why_unresolved_now="当前只是提出决定，尚未执行。",
+            expected_payoff_family="重大行动",
+            confidence="high",
+        )
+        chunk_text = "她决定明天去镇上卖药。"
+        self.assertFalse(validate_foreshadowing_result(result, chunk_text))
+
+    def test_validate_formal_setup_kind_still_requires_concrete_signal(self) -> None:
+        result = ForeshadowingResult(
+            has_foreshadowing=True,
+            is_strong_setup=True,
+            foreshadowing_type="人物行为",
+            setup_kind="明确承诺",
+            anchor_text="她决定明天去镇上卖药。",
+            anchor_reason="具体钩子：人物决定明天去镇上卖药。未闭合原因：当前只是提出决定，尚未执行。",
             why_unresolved_now="当前只是提出决定，尚未执行。",
             expected_payoff_family="重大行动",
             confidence="high",

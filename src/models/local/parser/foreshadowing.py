@@ -104,6 +104,16 @@ _GENERIC_FUTURE_SPECULATION_MARKERS = (
     "暗示后面有事",
     "预示命运不好",
 )
+_SETUP_KIND_HOOK_MARKERS: dict[str, tuple[str, ...]] = {
+    "异常物件": _ANOMALY_HOOK_MARKERS,
+    "异常规则": ("规则", "禁忌", "条件", "代价", "限制"),
+    "隐藏身份": ("身份", "来历", "身世", "真相"),
+    "明确承诺": ("承诺", "约定", "发誓", "立誓", "答应", "保证"),
+    "明确威胁": ("威胁", "若不", "否则", "下场", "后果", "偿命", "灭门"),
+    "倒计时": ("倒计时", "时限", "期限", "限期"),
+    "未解释能力": ("能力", "力量", "术法", "本领"),
+    "因果引线": ("原因", "线索", "真相", "力量", "代价", "后果"),
+}
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
@@ -149,6 +159,27 @@ def _has_concrete_setup_signal(hook_text: str, unresolved_text: str) -> bool:
     """
     combined = f"{hook_text} {unresolved_text}"
     return _contains_any(hook_text, _ANOMALY_HOOK_MARKERS) or _contains_any(combined, _STRONG_SETUP_TARGET_MARKERS)
+
+
+def _has_setup_kind_consistent_signal(setup_kind: str, hook_text: str, unresolved_text: str) -> bool:
+    """
+    判断 setup_kind 是否得到了文本理由里的具体信号支撑。
+
+    创建时间: 2026-04-26
+    任务: phase2-strong-foreshadowing
+    新建原因: setup_kind 只能作为“收紧语义范围”的提示，不能替代对 hook/unresolved 文本本身的校验。
+    """
+    if setup_kind == "其他":
+        return _has_concrete_setup_signal(hook_text, unresolved_text)
+
+    combined = f"{hook_text} {unresolved_text}"
+    markers = _SETUP_KIND_HOOK_MARKERS.get(setup_kind, ())
+    if markers and _contains_any(combined, markers):
+        return True
+
+    # 中文注释：模型就算挑了正式 setup_kind，也仍然要回到文本理由里确认
+    # “具体钩子到底是什么”；否则普通决定被误标成“明确承诺”时会直接绕过强伏笔 gate。
+    return _has_concrete_setup_signal(hook_text, unresolved_text)
 
 
 def _is_generic_future_speculation(text: str) -> bool:
@@ -205,10 +236,8 @@ def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
     if _is_generic_future_speculation(unresolved_text):
         return False
 
-    if result.setup_kind is not None and result.setup_kind != "其他":
-        return True
-
-    return _has_concrete_setup_signal(hook_text, unresolved_text)
+    merged_unresolved_text = f"{anchor_unresolved_text} {unresolved_text}".strip()
+    return _has_setup_kind_consistent_signal(result.setup_kind or "其他", hook_text, merged_unresolved_text)
 
 
 def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
@@ -224,7 +253,7 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     修改内容: 伏笔类型枚举改为当前中文合同，不再兼容历史 causal/thematic 残留。
     """
     has_foreshadowing = data.get("has_foreshadowing", False)
-    is_strong_setup = bool(data.get("is_strong_setup", False))
+    is_strong_setup = bool(data.get("is_strong_setup", False)) if has_foreshadowing else False
 
     foreshadowing_type_raw = data.get("foreshadowing_type")
     if has_foreshadowing and foreshadowing_type_raw in _VALID_FORESHADOWING_TYPES:
@@ -239,7 +268,7 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
         setup_kind = None
 
     confidence_raw = data.get("confidence", "high")
-    confidence: ForeshadowingConfidence = confidence_raw if confidence_raw in _VALID_CONFIDENCES else "high"
+    confidence: ForeshadowingConfidence = confidence_raw if confidence_raw in _VALID_CONFIDENCES else "low"
 
     return ForeshadowingResult(
         has_foreshadowing=has_foreshadowing,
@@ -248,8 +277,8 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
         setup_kind=setup_kind,
         anchor_text=data.get("anchor_text", ""),
         anchor_reason=data.get("anchor_reason", ""),
-        why_unresolved_now=data.get("why_unresolved_now", ""),
-        expected_payoff_family=data.get("expected_payoff_family", ""),
+        why_unresolved_now=data.get("why_unresolved_now", "") if has_foreshadowing else "",
+        expected_payoff_family=data.get("expected_payoff_family", "") if has_foreshadowing else "",
         confidence=confidence,
     )
 
@@ -265,6 +294,7 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     修改时间: 2026-04-26
     任务: phase2-strong-foreshadowing
     修改内容:
+    - `has_foreshadowing=false` 时也要拒绝夹带 strong setup 字段的脏 negative
     - 只有 high 级 positive 才允许入强伏笔池
     - positive 结果必须携带正式 foreshadowing_type
     - positive 结果必须补齐结构化语义字段，减少仅凭 anchor_reason 猜意图
@@ -274,6 +304,16 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     返回 False 则丢弃该条记录，不入库。
     """
     if not result.has_foreshadowing:
+        if result.is_strong_setup:
+            return False
+        if result.foreshadowing_type is not None:
+            return False
+        if result.setup_kind is not None:
+            return False
+        if result.why_unresolved_now.strip():
+            return False
+        if result.expected_payoff_family.strip():
+            return False
         return True
 
     if not result.is_strong_setup:
