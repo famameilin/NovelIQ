@@ -15,12 +15,15 @@ import sys
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.schema import (
     CharacterSnapshot,
     ChunkAnnotation,
     DialogueSnapshot,
+    ForeshadowingResult,
 )
 
 
@@ -54,6 +57,10 @@ class TestLocalSchema(unittest.TestCase):
         self.assertIn("event_type", payload)
         self.assertIn("characters", payload)
         self.assertIn("dialogues", payload)
+        self.assertIn("is_strong_setup", payload)
+        self.assertIn("setup_kind", payload)
+        self.assertIn("why_unresolved_now", payload)
+        self.assertIn("expected_payoff_family", payload)
 
     def test_emotion_score_enum(self) -> None:
         annotation = ChunkAnnotation(
@@ -75,6 +82,61 @@ class TestLocalSchema(unittest.TestCase):
             ],
         )
         self.assertIsNotNone(annotation)
+
+    def test_positive_foreshadowing_requires_formal_type(self) -> None:
+        with self.assertRaises(ValidationError):
+            ForeshadowingResult(
+                has_foreshadowing=True,
+                is_strong_setup=True,
+                foreshadowing_type=None,
+                anchor_text="玉佩在夜里自行发热。",
+                anchor_reason="具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+                why_unresolved_now="当前还没有解释它为何会发热。",
+                expected_payoff_family="能力触发",
+                confidence="high",
+            )
+
+    def test_positive_foreshadowing_requires_strong_setup_flag(self) -> None:
+        with self.assertRaises(ValidationError):
+            ForeshadowingResult(
+                has_foreshadowing=True,
+                is_strong_setup=False,
+                foreshadowing_type="物件",
+                setup_kind="异常物件",
+                anchor_text="玉佩在夜里自行发热。",
+                anchor_reason="具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+                why_unresolved_now="当前还没有解释它为何会发热。",
+                expected_payoff_family="能力触发",
+                confidence="high",
+            )
+
+    def test_positive_foreshadowing_requires_setup_kind(self) -> None:
+        with self.assertRaises(ValidationError):
+            ForeshadowingResult(
+                has_foreshadowing=True,
+                is_strong_setup=True,
+                foreshadowing_type="物件",
+                setup_kind=None,
+                anchor_text="玉佩在夜里自行发热。",
+                anchor_reason="具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+                why_unresolved_now="当前还没有解释它为何会发热。",
+                expected_payoff_family="能力触发",
+                confidence="high",
+            )
+
+    def test_negative_foreshadowing_rejects_strong_setup_fields(self) -> None:
+        with self.assertRaises(ValidationError):
+            ForeshadowingResult(
+                has_foreshadowing=False,
+                is_strong_setup=True,
+                foreshadowing_type=None,
+                setup_kind="异常物件",
+                anchor_text="",
+                anchor_reason="具体钩子：无。未闭合原因：这里只是在解释为什么不是伏笔。",
+                why_unresolved_now="",
+                expected_payoff_family="",
+                confidence="low",
+            )
 
 
 if __name__ == "__main__":

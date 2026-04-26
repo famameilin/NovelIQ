@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
 EmotionScore = EmotionalValence
 EventType = Literal["冲突", "铺垫", "转折"]
-ForeshadowingType = Literal["causal", "thematic"]
+ForeshadowingType = Literal["物件", "对话", "场景", "人物行为", "其他"]
 ForeshadowingConfidence = Literal["high", "medium", "low"]
+ForeshadowingSetupKind = Literal["异常物件", "异常规则", "隐藏身份", "明确承诺", "明确威胁", "倒计时", "未解释能力", "因果引线", "其他"]
 DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
@@ -164,6 +165,31 @@ class ForeshadowingResult(BaseModel):
     修改者: TraeAI
     任务: 迁移数据模型至 Pydantic
     修改内容: 从 dataclass 迁移至 Pydantic BaseModel
+
+    修改时间: 2026-04-26
+    任务: phase2-strong-foreshadowing
+    修改内容: 伏笔类型与置信度字段收紧为正式 Literal 合同，避免继续接受任意字符串。
+
+    修改时间: 2026-04-26
+    任务: phase2-strong-foreshadowing
+    修改内容: positive 结果必须携带正式伏笔类型，避免无类型强伏笔继续进入热路径。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 增加 setup_kind / why_unresolved_now / expected_payoff_family，
+    把强伏笔判断拆成更稳定的结构化字段，减少 validator 对自由文本的依赖。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 补充 is_strong_setup 显式布尔位，避免继续让“是否强 setup”只存在于隐式推断里。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 收紧正负例结构合同，避免 negative 结果继续夹带 strong setup 字段，
+    同时要求 positive 结果必须显式给出 setup_kind。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -171,17 +197,59 @@ class ForeshadowingResult(BaseModel):
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是单个 chunk 的存在性判断，不表示全书伏笔兑现程度。"
     )
-    foreshadowing_type: str | None = None
+    is_strong_setup: bool = False
+    foreshadowing_type: ForeshadowingType | None = None
+    setup_kind: ForeshadowingSetupKind | None = None
     anchor_text: str = ""
     anchor_reason: str = ""
-    confidence: str
+    why_unresolved_now: str = ""
+    expected_payoff_family: str = ""
+    confidence: ForeshadowingConfidence
+
+    @model_validator(mode="after")
+    def _validate_contract_consistency(self) -> "ForeshadowingResult":
+        """
+        校验 Phase2 强伏笔结果的正负例合同。
+
+        创建时间: 2026-04-26
+        任务: phase2-strong-foreshadowing
+        新建原因: 让结构化输出在进入 Phase2 热路径前就拒绝
+        “positive 缺正式字段”以及“negative 仍夹带 strong setup 状态”的脏结果。
+        """
+        if self.has_foreshadowing:
+            if not self.is_strong_setup:
+                raise ValueError("is_strong_setup must be true when has_foreshadowing=true")
+            if self.foreshadowing_type is None:
+                raise ValueError("foreshadowing_type is required when has_foreshadowing=true")
+            if self.setup_kind is None:
+                raise ValueError("setup_kind is required when has_foreshadowing=true")
+            return self
+
+        # 中文注释：negative 结果允许保留 anchor_reason 解释“为什么不是伏笔”，
+        # 但不能再夹带 strong setup 专属结构字段，否则后续 projector/storage
+        # 会把“否定判断”和“强伏笔标签”同时写进持久化视图。
+        if self.is_strong_setup:
+            raise ValueError("is_strong_setup must be false when has_foreshadowing=false")
+        if self.foreshadowing_type is not None:
+            raise ValueError("foreshadowing_type must be null when has_foreshadowing=false")
+        if self.setup_kind is not None:
+            raise ValueError("setup_kind must be null when has_foreshadowing=false")
+        if self.why_unresolved_now.strip():
+            raise ValueError("why_unresolved_now must be empty when has_foreshadowing=false")
+        if self.expected_payoff_family.strip():
+            raise ValueError("expected_payoff_family must be empty when has_foreshadowing=false")
+        return self
 
     def to_dict(self) -> dict:
         return {
             "has_foreshadowing": self.has_foreshadowing,
+            "is_strong_setup": self.is_strong_setup,
             "foreshadowing_type": self.foreshadowing_type,
+            "setup_kind": self.setup_kind,
             "anchor_text": self.anchor_text,
             "anchor_reason": self.anchor_reason,
+            "why_unresolved_now": self.why_unresolved_now,
+            "expected_payoff_family": self.expected_payoff_family,
             "confidence": self.confidence,
         }
 
@@ -515,6 +583,12 @@ class ChunkAnnotation(BaseModel):
     修改者: TraeAI
     任务: feature/chunk-summary-timeline-only
     修改内容: 恢复 chunk_summary 字段，仅用于 Timeline 展示，不参与消歧证据链
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 将 Phase2 强伏笔结构化字段补到 ChunkAnnotation 持久化视图，
+    便于 results API 和前端后续页面直接消费。
     """
 
     model_config = ConfigDict(frozen=False)
@@ -527,8 +601,12 @@ class ChunkAnnotation(BaseModel):
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
     )
-    foreshadowing_type: str | None = None
+    is_strong_setup: bool = False
+    foreshadowing_type: ForeshadowingType | None = None
+    setup_kind: ForeshadowingSetupKind | None = None
     foreshadowing_desc: str = ""
+    why_unresolved_now: str = ""
+    expected_payoff_family: str = ""
     characters: list[CharacterSnapshot] = Field(default_factory=list)
     dialogues: list[DialogueSnapshot] = Field(default_factory=list)
     location_appearances: list[LocationAppearance] = Field(default_factory=list)
@@ -542,8 +620,12 @@ class ChunkAnnotation(BaseModel):
             "cliffhanger": self.cliffhanger,
             "chunk_summary": self.chunk_summary,
             "has_foreshadowing": self.has_foreshadowing,
+            "is_strong_setup": self.is_strong_setup,
             "foreshadowing_type": self.foreshadowing_type,
             "foreshadowing_desc": self.foreshadowing_desc,
+            "setup_kind": self.setup_kind,
+            "why_unresolved_now": self.why_unresolved_now,
+            "expected_payoff_family": self.expected_payoff_family,
             "characters": [
                 {
                     "name": c.name,

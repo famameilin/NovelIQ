@@ -35,9 +35,13 @@ async def test_execute_phase_call_records_thinking_and_reasoning_tokens() -> Non
     client = _make_client()
     parsed = ForeshadowingResult(
         has_foreshadowing=True,
-        foreshadowing_type="causal",
+        is_strong_setup=True,
+        foreshadowing_type="物件",
+        setup_kind="异常物件",
         anchor_text="铜铃",
         anchor_reason="反复出现但用途未明",
+        why_unresolved_now="当前还没有解释铜铃为何反复出现。",
+        expected_payoff_family="能力触发",
         confidence="high",
     )
     response = SimpleNamespace(
@@ -78,9 +82,12 @@ async def test_execute_phase_call_uses_structured_fallback_without_choices() -> 
     client = _make_client()
     parsed = ForeshadowingResult(
         has_foreshadowing=False,
+        is_strong_setup=False,
         foreshadowing_type=None,
         anchor_text="",
         anchor_reason="",
+        why_unresolved_now="",
+        expected_payoff_family="",
         confidence="low",
     )
     response = SimpleNamespace(thinking_content="direct thinking")
@@ -110,9 +117,12 @@ async def test_execute_phase_call_records_response_usage_when_processing_fails()
     client = _make_client()
     parsed = ForeshadowingResult(
         has_foreshadowing=False,
+        is_strong_setup=False,
         foreshadowing_type=None,
         anchor_text="",
         anchor_reason="",
+        why_unresolved_now="",
+        expected_payoff_family="",
         confidence="low",
     )
     response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="{}", reasoning_content=None))])

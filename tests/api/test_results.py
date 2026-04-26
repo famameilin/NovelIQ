@@ -12,7 +12,11 @@
 修改内容: 使用 api_client fixture 确保测试使用测试数据库
 """
 
+import tempfile
+
 from fastapi.testclient import TestClient
+
+from src.api.main import app
 
 
 class TestResults:
@@ -58,3 +62,52 @@ class TestResults:
         """测试获取不存在任务的诊断结果 - 返回404"""
         response = api_client.get("/api/novels/nonexistent/diagnosis?task_id=nonexistent")
         assert response.status_code == 404
+
+    def test_get_chunk_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
+        """测试 chunk_annotations 不接受属于其他小说的 task_id。"""
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as first_file:
+            first_file.write(b"First novel content\n" * 100)
+            first_file.flush()
+            with open(first_file.name, "rb") as file:
+                upload_response = api_client.post(
+                    "/api/novels/upload",
+                    files={"file": ("results_route_owner_a.txt", file, "text/plain")},
+                )
+        assert upload_response.status_code == 200
+        first_novel_id = upload_response.json()["novel_id"]
+
+        create_response = api_client.post(f"/api/novels/{first_novel_id}/tasks")
+        assert create_response.status_code == 200
+        first_task_id = create_response.json()["task_id"]
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as second_file:
+            second_file.write(b"Second novel content\n" * 100)
+            second_file.flush()
+            with open(second_file.name, "rb") as file:
+                second_upload_response = api_client.post(
+                    "/api/novels/upload",
+                    files={"file": ("results_route_owner_b.txt", file, "text/plain")},
+                )
+        assert second_upload_response.status_code == 200
+        second_novel_id = second_upload_response.json()["novel_id"]
+
+        response = api_client.get(
+            f"/api/novels/{second_novel_id}/chunk-annotations?task_id={first_task_id}"
+        )
+        assert response.status_code == 404
+        assert "不属于小说" in response.json()["detail"]
+
+    def test_get_chunk_annotations_openapi_declares_typed_response(self):
+        """
+        创建时间: 2026-04-26
+        创建者: Codex
+        任务: phase2-strong-foreshadowing
+        说明: 新增结果接口不仅要能返回数据，也要在 OpenAPI 中发布正式响应合同，
+        避免前端和自动化工具只能看到 `items: {}` 的匿名数组。
+        """
+        schema = app.openapi()
+        response_schema = schema["paths"]["/api/novels/{novel_id}/chunk-annotations"]["get"]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]
+        assert response_schema["type"] == "array"
+        assert response_schema["items"]["$ref"] == "#/components/schemas/ChunkAnnotation"

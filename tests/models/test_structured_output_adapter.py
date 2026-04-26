@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from src.config import TaskModelConfig, settings
 from src.config.schemas.model import _parse_structured_output_settings
 from src.models.local.base import BaseModelClient
+from src.models.local.schema import ForeshadowingResult
 from src.models.structured_output import (
     StructuredOutputError,
     StructuredOutputRequest,
@@ -264,3 +265,46 @@ async def test_structured_output_schema_validation_error_is_not_swallowed(
         )
 
     assert '"score":"bad"' in exc_info.value.response_text
+
+
+@pytest.mark.asyncio
+async def test_phase2_weak_positive_payload_degrades_to_negative_in_structured_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    说明: Phase2 热路径遇到 `has_foreshadowing=true` 但 `is_strong_setup=false` 的弱阳性时，
+          应直接降级成 negative，而不是在结构化解析阶段抛错后触发重试。
+    """
+    monkeypatch.setattr(settings.structured_output, "level3_rerank", "json_schema")
+    fake_create = AsyncMock(
+        return_value=_make_response(
+            (
+                '{"has_foreshadowing":true,"is_strong_setup":false,"confidence":"medium",'
+                '"foreshadowing_type":"场景","setup_kind":"其他","anchor_text":"这句话像有点暗示",'
+                '"anchor_reason":"具体钩子：这句话像有点暗示。未闭合原因：后面可能有影响。",'
+                '"why_unresolved_now":"后面可能有影响。","expected_payoff_family":"主题展开"}'
+            )
+        )
+    )
+    client = _make_client(fake_create)
+
+    result = await call_structured_output(
+        client,
+        StructuredOutputRequest(
+            messages=[{"role": "user", "content": "return json"}],
+            response_model=ForeshadowingResult,
+            call_type="level3_rerank",
+            enable_thinking=False,
+        ),
+    )
+
+    assert result.parsed.has_foreshadowing is False
+    assert result.parsed.is_strong_setup is False
+    assert result.parsed.foreshadowing_type is None
+    assert result.parsed.setup_kind is None
+    assert result.parsed.why_unresolved_now == ""
+    assert result.parsed.expected_payoff_family == ""
+    assert result.parsed.confidence == "low"
