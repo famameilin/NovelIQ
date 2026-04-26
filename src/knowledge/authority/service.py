@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from src.api.exceptions import GraphReadinessError
 from src.storage.repositories import GraphRepository
 from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, ParticipantEntityRow, RelationEventRow
 
@@ -58,6 +59,14 @@ class KnowledgeGraphAuthorityService:
         endpoints must belong to that same character set.
         """
 
+        participant_entities = self._graph_repo.fetch_participant_entities(run_id)
+        self._assert_participant_projection_consistency(
+            run_id,
+            relation_events=[],
+            confirmed_relations=[],
+            participant_entities=participant_entities,
+            relation_endpoint_ids=self._graph_repo.fetch_relation_endpoint_entity_ids(run_id),
+        )
         character_entities = self._build_canonical_entities(
             self._graph_repo.fetch_entities(run_id, entity_type="character")
         )
@@ -344,7 +353,7 @@ class KnowledgeGraphAuthorityService:
 
         if not expected_participant_ids:
             if participant_entity_ids:
-                raise RuntimeError(
+                raise GraphReadinessError(
                     "graph participant projection is stale while graph relation tables are empty; "
                     f"re-run analysis for run_id={run_id} to rebuild graph_entity_participants."
                 )
@@ -353,7 +362,7 @@ class KnowledgeGraphAuthorityService:
         missing_entity_ids = expected_participant_ids - participant_entity_ids
         stale_entity_ids = participant_entity_ids - expected_participant_ids
         if missing_entity_ids or stale_entity_ids:
-            raise RuntimeError(
+            raise GraphReadinessError(
                 "graph participant projection is stale or incomplete for the current relation graph; "
                 f"re-run analysis for run_id={run_id} to rebuild graph_entity_participants."
             )
