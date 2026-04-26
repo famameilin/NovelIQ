@@ -43,18 +43,24 @@ class CloudAnalysis(BaseModel):
     修改者: TraeAI
     任务: 新增角色相关字段
     修改内容: 新增 protagonist、main_characters、core_cast 字段，更新 to_dict() 方法
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: remove-foreshadow-rate-contract
+    修改内容: 移除旧 `foreshadow_rate` 兼容字段，统一改为 `foreshadow_expectation`
+    单一合同，并承接 diagnosis 阶段对 setup ledger 的正式消费。
     """
 
     model_config = ConfigDict(frozen=True)
 
     novel_id: str | None = None
-    foreshadow_rate: float | None = Field(
+    foreshadow_expectation: float | None = Field(
         default=None,
         ge=0,
         le=1,
         description=(
-            "伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示。"
-            "该值来自 diagnosis 阶段的整体评估，不等于含伏笔 chunk 的占比。"
+            "伏笔回收预期。该值在 diagnosis 阶段基于 setup thread ledger 语义生成，"
+            "并作为对外与持久化的单一正式字段。"
         ),
     )
     arc_scores: list[float] | dict[str, float] = Field(default_factory=list)
@@ -110,7 +116,7 @@ class CloudAnalysis(BaseModel):
 
         return {
             "novel_id": self.novel_id,
-            "foreshadow_rate": self.foreshadow_rate,
+            "foreshadow_expectation": self.foreshadow_expectation,
             "arc_scores": arc_scores_value,
             "narrative_type": self.narrative_type,
             "topic_labels": list(self.topic_labels),

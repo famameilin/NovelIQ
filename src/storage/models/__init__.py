@@ -37,6 +37,7 @@ from src.storage.models.base import Base
 from src.storage.models.chunk import Chunk, ChunkStyle, ChunkTopic
 from src.storage.models.chunk_embedding import EMBEDDING_DIM, ChunkEmbedding, ParagraphEmbedding
 from src.storage.models.core import AnalysisRun, DisambigCheckpoint
+from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingThreadHit
 from src.storage.models.graph import (
     GraphEntity,
     GraphEntityAlias,
@@ -52,6 +53,8 @@ __all__ = [
     "Base",
     "AnalysisRun",
     "DisambigCheckpoint",
+    "ForeshadowingThread",
+    "ForeshadowingThreadHit",
     "Chunk",
     "ChunkStyle",
     "ChunkTopic",

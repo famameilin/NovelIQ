@@ -506,6 +506,12 @@ class AnalysisService:
         - 扫描 DB 中的 pending 任务并重新调度
         - 对已经带 cancel_requested 的 pending 任务直接收口为 cancelled
 
+        修改时间: 2026-04-26
+        修改者: Codex
+        任务: fix-diagnosis-review-findings
+        修改原因: startup recovery 需要按任务级隔离异常；
+        单个 pending 恢复失败不能把后续 pending 任务整轮拦死。
+
         Returns:
             tuple[int, int]: (scheduled_count, cancelled_count)
         """
@@ -521,21 +527,23 @@ class AnalysisService:
 
             for run in pending_runs:
                 task_id = run["run_id"][:8] if len(run["run_id"]) >= 8 else run["run_id"]
-                if run.get("cancel_requested", False):
-                    db_session = self.session_factory.get_session()
-                    with db_session:
-                        RunRepository(db_session.connection).cancel_unclaimed_pending_run(
-                            run["run_id"],
-                            message="任务在启动恢复前已取消",
-                        )
-                    cancelled_count += 1
-                    continue
-
                 try:
+                    if run.get("cancel_requested", False):
+                        db_session = self.session_factory.get_session()
+                        with db_session:
+                            RunRepository(db_session.connection).cancel_unclaimed_pending_run(
+                                run["run_id"],
+                                message="任务在启动恢复前已取消",
+                            )
+                        cancelled_count += 1
+                        continue
+
                     await self.resume_task(run["novel_id"], task_id)
                     scheduled_count += 1
                 except (ValueError, NovelNotFoundError) as exc:
                     logger.warning(f"Skip pending task {task_id} during startup recovery: {exc}")
+                except Exception as exc:
+                    logger.exception(f"Failed to recover pending task {task_id} during startup recovery: {exc}")
         except Exception as exc:
             logger.error(f"Failed to recover pending tasks on startup: {exc}")
             raise

@@ -164,7 +164,7 @@ def make_empty_analysis() -> CloudAnalysis:
     """创建空的分析结果"""
     analysis = CloudAnalysis(
         novel_id=None,
-        foreshadow_rate=None,
+        foreshadow_expectation=None,
         arc_scores=[],
         narrative_type=None,
         topic_labels=[],

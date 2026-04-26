@@ -113,25 +113,48 @@ def _persist_annotation_repositories(
     from src.storage.repositories import AnnotationRepository
 
     ann_repo = AnnotationRepository(conn)
-    ann_repo.insert_chunk_annotation(run_id, chunk_id, annotation)
+    try:
+        thread_projection = None
+        if foreshadowing is not None and foreshadowing.has_foreshadowing:
+            thread_projection = ann_repo.sync_foreshadowing_thread(
+                run_id,
+                chunk_id=chunk_id,
+                result=foreshadowing,
+            )
 
-    if annotation.characters:
-        ann_repo.insert_chunk_characters(run_id, chunk_id, annotation.characters)
+        merged_annotation = merge_annotation_foreshadowing(
+            annotation,
+            foreshadowing,
+            resolved_setup_id=thread_projection.setup_id if thread_projection is not None else None,
+            resolved_setup_summary=thread_projection.setup_summary if thread_projection is not None else None,
+            resolved_payoff_likelihood=(
+                thread_projection.payoff_likelihood if thread_projection is not None else None
+            ),
+        )
+        ann_repo.insert_chunk_annotation(run_id, chunk_id, merged_annotation, commit=False)
 
-    if dialogue_snapshots and dialogue_lengths:
-        ann_repo.insert_chunk_dialogues(run_id, chunk_id, dialogue_snapshots, dialogue_lengths)
+        if merged_annotation.characters:
+            ann_repo.insert_chunk_characters(run_id, chunk_id, merged_annotation.characters, commit=False)
 
-    if relations:
-        ann_repo.insert_chunk_relations(run_id, chunk_id, relations)
+        if dialogue_snapshots and dialogue_lengths:
+            ann_repo.insert_chunk_dialogues(run_id, chunk_id, dialogue_snapshots, dialogue_lengths, commit=False)
 
-    if annotation.chunk_summary:
-        from src.storage.repositories import StatsRepository
+        if relations:
+            ann_repo.insert_chunk_relations(run_id, chunk_id, relations, commit=False)
 
-        stats_repo = StatsRepository(conn)
-        stats_repo.insert_chunk_summary(run_id, chunk_id, annotation.chunk_summary)
+        if merged_annotation.chunk_summary:
+            from src.storage.repositories import StatsRepository
 
-    if foreshadowing is not None:
-        ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing)
+            stats_repo = StatsRepository(conn)
+            stats_repo.insert_chunk_summary(run_id, chunk_id, merged_annotation.chunk_summary, commit=False)
+
+        if foreshadowing is not None:
+            ann_repo.insert_foreshadowing(run_id, chunk_id, foreshadowing, commit=False)
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def _store_annotation_results(
@@ -205,7 +228,6 @@ def _store_annotation_results(
     任务: p2-store-annotation-results-split
     修改内容: 改为编排 helper，主函数只负责组织伏笔合并、对话快照转换与 repository 写入。
     """
-    merged_annotation = _merge_annotation_foreshadowing(annotation, foreshadowing)
     dialogue_snapshots, dialogue_lengths = _build_dialogue_snapshots(
         dialogues,
         dialogue_speakers=dialogue_speakers,
@@ -216,7 +238,7 @@ def _store_annotation_results(
         conn,
         run_id=run_id,
         chunk_id=chunk_id,
-        annotation=merged_annotation,
+        annotation=annotation,
         foreshadowing=foreshadowing,
         dialogue_snapshots=dialogue_snapshots,
         dialogue_lengths=dialogue_lengths,

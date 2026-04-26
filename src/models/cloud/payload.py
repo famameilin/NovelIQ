@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from loguru import logger
@@ -138,19 +139,9 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         )
     logger.info("[云端模型] 获取relation_changes: count=%d", len(relations))
 
-    foreshadowing: list[dict[str, Any]] = []
-    for chunk_id, chunk_text, fs_type, fs_desc in repo.fetch_foreshadowing_chunks(
-        effective_run_id, limit=settings.diagnosis.foreshadowing_limit
-    ):
-        foreshadowing.append(
-            {
-                "chunk_id": chunk_id,
-                "text": chunk_text[: settings.diagnosis.text_limits.foreshadowing] if chunk_text else "",
-                "type": fs_type,
-                "description": fs_desc,
-            }
-        )
-    logger.info("[云端模型] 获取foreshadowing: count=%d", len(foreshadowing))
+    foreshadowing_threads = [asdict(thread) for thread in repo.fetch_foreshadowing_threads(effective_run_id)]
+    foreshadow_expectation = repo.calculate_foreshadow_expectation(effective_run_id)
+    logger.info("[云端模型] 获取foreshadowing_threads: count=%d", len(foreshadowing_threads))
 
     stage_summaries = repo.fetch_stage_summaries(effective_run_id)
     logger.info("[云端模型] 获取阶段性摘要: count=%d", len(stage_summaries))
@@ -182,7 +173,8 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
         "pivot_moments": pivot_moments,
         "high_tension_paragraphs": high_tension,
         "character_relations": relations,
-        "foreshadowing_list": foreshadowing,
+        "foreshadow_expectation": foreshadow_expectation,
+        "foreshadowing_threads": foreshadowing_threads,
         "summaries": stage_summaries,
         "topic_words": topic_words,
         "total_topics": total_topics,
@@ -195,13 +187,13 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
     logger.info(
         "[云端模型] 诊断payload构建完成: "
         "pivot_blocks=%d pivot_moments=%d high_tension=%d "
-        "relations=%d foreshadowing=%d summaries=%d topic_words=%d "
+        "relations=%d foreshadowing_threads=%d summaries=%d topic_words=%d "
         "known_characters=%d alias_merges=%d graph_nodes=%d",
         len(pivot_blocks),
         len(pivot_moments),
         len(high_tension),
         len(relations),
-        len(foreshadowing),
+        len(foreshadowing_threads),
         len(stage_summaries),
         len(topic_words),
         len(known_characters),

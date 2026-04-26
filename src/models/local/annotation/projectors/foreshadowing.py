@@ -41,6 +41,10 @@ def normalize_foreshadowing_result(
 def merge_annotation_foreshadowing(
     annotation: ChunkAnnotation,
     foreshadowing: ForeshadowingResult | None,
+    *,
+    resolved_setup_id: str | None = None,
+    resolved_setup_summary: str | None = None,
+    resolved_payoff_likelihood: str | None = None,
 ) -> ChunkAnnotation:
     """
     将 Phase2 伏笔结果投影回 ChunkAnnotation 写入视图。
@@ -71,8 +75,15 @@ def merge_annotation_foreshadowing(
         foreshadowing_desc=(
             f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}" if has_foreshadowing else ""
         ),
+        setup_summary=(resolved_setup_summary or foreshadowing.setup_summary) if has_foreshadowing else "",
         why_unresolved_now=foreshadowing.why_unresolved_now if has_foreshadowing else "",
         expected_payoff_family=foreshadowing.expected_payoff_family if has_foreshadowing else "",
+        payoff_likelihood=(
+            resolved_payoff_likelihood or foreshadowing.payoff_likelihood
+            if has_foreshadowing
+            else None
+        ),
+        linked_setup_id=resolved_setup_id if has_foreshadowing else None,
         characters=annotation.characters,
         dialogues=annotation.dialogues,
         location_appearances=annotation.location_appearances,

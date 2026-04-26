@@ -172,7 +172,11 @@ class ChunkAnnotation(BaseModel):
     cliffhanger: bool | None = None
     has_foreshadowing: bool | None = Field(
         default=None,
-        description="当前 chunk 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔兑现率。",
+        description=(
+            "当前 chunk 是否包含伏笔元素。"
+            "这是分块级存在性标记，不等于全书伏笔回收预期，"
+            "更不是严格全文事实回收率。"
+        ),
     )
     is_strong_setup: bool | None = Field(
         default=None,
@@ -181,11 +185,39 @@ class ChunkAnnotation(BaseModel):
     foreshadowing_type: str | None = None
     setup_kind: str | None = None
     foreshadowing_desc: str | None = None
+    setup_summary: str | None = None
     why_unresolved_now: str | None = None
     expected_payoff_family: str | None = None
+    payoff_likelihood: str | None = None
+    linked_setup_id: str | None = None
     characters: list[ChunkCharacter] = []
     relations: list[ChunkRelation] = []
     dialogues: list[ChunkDialogue] = []
+
+
+class ForeshadowingThreadResponse(BaseModel):
+    """
+    Setup thread 结果视图。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-setup-pool
+    说明: 提供 setup ledger 的稳定 API 响应模型，供诊断 drill-down 和结果导出复用。
+    """
+
+    setup_id: str
+    first_chunk_id: int
+    last_chunk_id: int
+    anchor_chunk_ids: list[int] = []
+    setup_summary: str
+    setup_kind: str
+    expected_payoff_family: str
+    payoff_likelihood: str
+    strength: str
+    status: str
+    active: bool
+    latest_reason: str | None = None
+    latest_why_unresolved_now: str | None = None
 
 
 class CharacterRelation(BaseModel):
@@ -290,15 +322,14 @@ class TopicInfo(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
-    foreshadow_rate: float | None = Field(
+    foreshadow_expectation: float | None = Field(
         default=None,
         description=(
-            "伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示，"
-            "取值范围 0-1。该值由 diagnosis 阶段整体评估，"
-            "不应与 chunk_annotations.has_foreshadowing 的占比直接比较。"
+            "伏笔回收预期，基于 setup thread ledger 加权估算的近似值，"
+            "取值范围 0-1，不是严格全文事实回收率。"
         ),
     )
-    arc_scores: list[float] | dict[str, float] | None = None
+    arc_scores: dict[str, float] | None = None
     narrative_type: str | None = None
     topic_labels: list[str] | None = None
     diagnosis: str | None = None

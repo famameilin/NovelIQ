@@ -9,7 +9,21 @@ EmotionScore = EmotionalValence
 EventType = Literal["冲突", "铺垫", "转折"]
 ForeshadowingType = Literal["物件", "对话", "场景", "人物行为", "其他"]
 ForeshadowingConfidence = Literal["high", "medium", "low"]
-ForeshadowingSetupKind = Literal["异常物件", "异常规则", "隐藏身份", "明确承诺", "明确威胁", "倒计时", "未解释能力", "因果引线", "其他"]
+ForeshadowingSetupKind = Literal[
+    "异常物件",
+    "异常规则",
+    "隐藏身份",
+    "明确承诺",
+    "明确威胁",
+    "倒计时",
+    "未解释能力",
+    "因果引线",
+    "其他",
+]
+ForeshadowingPayoffLikelihood = Literal["high", "medium", "low"]
+ForeshadowingSetupStatus = Literal["open", "reinforced", "likely_paid_off"]
+ForeshadowingThreadStatus = Literal["open", "reinforced", "likely_paid_off", "archived", "false_positive"]
+ForeshadowingThreadStrength = Literal["high", "medium"]
 DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
@@ -190,6 +204,17 @@ class ForeshadowingResult(BaseModel):
     任务: phase2-strong-foreshadowing
     修改内容: 收紧正负例结构合同，避免 negative 结果继续夹带 strong setup 字段，
     同时要求 positive 结果必须显式给出 setup_kind。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-setup-pool
+    修改内容: 扩展为 setup 池感知合同，要求 positive 结果显式声明 setup_summary /
+    payoff_likelihood / is_new_setup / linked_setup_id / setup_status，支撑跨 chunk thread 状态更新。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: positive 结果不再接受 payoff_likelihood=low，避免与 prompt 合同冲突的弱阳性进入 ledger。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -202,12 +227,17 @@ class ForeshadowingResult(BaseModel):
     setup_kind: ForeshadowingSetupKind | None = None
     anchor_text: str = ""
     anchor_reason: str = ""
+    setup_summary: str = ""
     why_unresolved_now: str = ""
     expected_payoff_family: str = ""
+    payoff_likelihood: ForeshadowingPayoffLikelihood | None = None
+    is_new_setup: bool = False
+    linked_setup_id: str | None = None
+    setup_status: ForeshadowingSetupStatus | None = None
     confidence: ForeshadowingConfidence
 
     @model_validator(mode="after")
-    def _validate_contract_consistency(self) -> "ForeshadowingResult":
+    def _validate_contract_consistency(self) -> ForeshadowingResult:
         """
         校验 Phase2 强伏笔结果的正负例合同。
 
@@ -223,6 +253,24 @@ class ForeshadowingResult(BaseModel):
                 raise ValueError("foreshadowing_type is required when has_foreshadowing=true")
             if self.setup_kind is None:
                 raise ValueError("setup_kind is required when has_foreshadowing=true")
+            if len(self.setup_summary.strip()) < 4:
+                raise ValueError("setup_summary is required when has_foreshadowing=true")
+            if self.payoff_likelihood is None:
+                raise ValueError("payoff_likelihood is required when has_foreshadowing=true")
+            if self.payoff_likelihood == "low":
+                raise ValueError("payoff_likelihood must not be low when has_foreshadowing=true")
+            if self.setup_status is None:
+                raise ValueError("setup_status is required when has_foreshadowing=true")
+            if self.is_new_setup:
+                if self.linked_setup_id is not None:
+                    raise ValueError("linked_setup_id must be null when is_new_setup=true")
+                if self.setup_status != "open":
+                    raise ValueError("setup_status must be open when is_new_setup=true")
+            else:
+                if not self.linked_setup_id or not self.linked_setup_id.strip():
+                    raise ValueError("linked_setup_id is required when is_new_setup=false")
+                if self.setup_status == "open":
+                    raise ValueError("setup_status must not be open when is_new_setup=false")
             return self
 
         # 中文注释：negative 结果允许保留 anchor_reason 解释“为什么不是伏笔”，
@@ -234,10 +282,20 @@ class ForeshadowingResult(BaseModel):
             raise ValueError("foreshadowing_type must be null when has_foreshadowing=false")
         if self.setup_kind is not None:
             raise ValueError("setup_kind must be null when has_foreshadowing=false")
+        if self.setup_summary.strip():
+            raise ValueError("setup_summary must be empty when has_foreshadowing=false")
         if self.why_unresolved_now.strip():
             raise ValueError("why_unresolved_now must be empty when has_foreshadowing=false")
         if self.expected_payoff_family.strip():
             raise ValueError("expected_payoff_family must be empty when has_foreshadowing=false")
+        if self.payoff_likelihood is not None:
+            raise ValueError("payoff_likelihood must be null when has_foreshadowing=false")
+        if self.is_new_setup:
+            raise ValueError("is_new_setup must be false when has_foreshadowing=false")
+        if self.linked_setup_id is not None:
+            raise ValueError("linked_setup_id must be null when has_foreshadowing=false")
+        if self.setup_status is not None:
+            raise ValueError("setup_status must be null when has_foreshadowing=false")
         return self
 
     def to_dict(self) -> dict:
@@ -248,8 +306,13 @@ class ForeshadowingResult(BaseModel):
             "setup_kind": self.setup_kind,
             "anchor_text": self.anchor_text,
             "anchor_reason": self.anchor_reason,
+            "setup_summary": self.setup_summary,
             "why_unresolved_now": self.why_unresolved_now,
             "expected_payoff_family": self.expected_payoff_family,
+            "payoff_likelihood": self.payoff_likelihood,
+            "is_new_setup": self.is_new_setup,
+            "linked_setup_id": self.linked_setup_id,
+            "setup_status": self.setup_status,
             "confidence": self.confidence,
         }
 
@@ -589,6 +652,12 @@ class ChunkAnnotation(BaseModel):
     任务: phase2-strong-foreshadowing
     修改内容: 将 Phase2 强伏笔结构化字段补到 ChunkAnnotation 持久化视图，
     便于 results API 和前端后续页面直接消费。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-setup-pool
+    修改内容: 新增 thread 定位字段 setup_summary / linked_setup_id / payoff_likelihood，
+    让 chunk 视图能直接定位到 setup ledger。
     """
 
     model_config = ConfigDict(frozen=False)
@@ -599,14 +668,17 @@ class ChunkAnnotation(BaseModel):
     cliffhanger: bool
     chunk_summary: str = Field(default="", description="核心事件摘要，30-50字，用于 Timeline 展示。不参与消歧证据链。")
     has_foreshadowing: bool = Field(
-        description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
+        description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_expectation。"
     )
     is_strong_setup: bool = False
     foreshadowing_type: ForeshadowingType | None = None
     setup_kind: ForeshadowingSetupKind | None = None
     foreshadowing_desc: str = ""
+    setup_summary: str = ""
     why_unresolved_now: str = ""
     expected_payoff_family: str = ""
+    payoff_likelihood: ForeshadowingPayoffLikelihood | None = None
+    linked_setup_id: str | None = None
     characters: list[CharacterSnapshot] = Field(default_factory=list)
     dialogues: list[DialogueSnapshot] = Field(default_factory=list)
     location_appearances: list[LocationAppearance] = Field(default_factory=list)
@@ -624,8 +696,11 @@ class ChunkAnnotation(BaseModel):
             "foreshadowing_type": self.foreshadowing_type,
             "foreshadowing_desc": self.foreshadowing_desc,
             "setup_kind": self.setup_kind,
+            "setup_summary": self.setup_summary,
             "why_unresolved_now": self.why_unresolved_now,
             "expected_payoff_family": self.expected_payoff_family,
+            "payoff_likelihood": self.payoff_likelihood,
+            "linked_setup_id": self.linked_setup_id,
             "characters": [
                 {
                     "name": c.name,
