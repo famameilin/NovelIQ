@@ -51,8 +51,11 @@ def test_merge_annotation_foreshadowing_overrides_phase2_fields() -> None:
         ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="铜铃",
             anchor_reason="反复出现但用途未明",
+            why_unresolved_now="当前还没有解释铜铃为何反复出现。",
+            expected_payoff_family="能力触发",
             confidence="high",
         ),
     )

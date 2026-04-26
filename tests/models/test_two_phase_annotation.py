@@ -15,6 +15,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.parser import (  # noqa: E402
@@ -72,27 +74,37 @@ class TestForeshadowingParsing(unittest.TestCase):
         data = {
             "has_foreshadowing": True,
             "foreshadowing_type": "物件",
+            "setup_kind": "异常物件",
             "anchor_text": "玉佩背面刻着一个归字",
             "anchor_reason": "具体钩子：玉佩出现异常纹样。未闭合原因：当前还没有解释玉佩的来历。",
+            "why_unresolved_now": "当前还没有解释玉佩的来历。",
+            "expected_payoff_family": "身份揭示",
             "confidence": "high",
         }
         result = parse_foreshadowing_result(data)
         self.assertTrue(result.has_foreshadowing)
         self.assertEqual(result.foreshadowing_type, "物件")
+        self.assertEqual(result.setup_kind, "异常物件")
         self.assertEqual(result.anchor_text, "玉佩背面刻着一个归字")
+        self.assertEqual(result.why_unresolved_now, "当前还没有解释玉佩的来历。")
+        self.assertEqual(result.expected_payoff_family, "身份揭示")
         self.assertEqual(result.confidence, "high")
 
     def test_parse_foreshadowing_with_scene_type(self) -> None:
         data = {
             "has_foreshadowing": True,
             "foreshadowing_type": "场景",
+            "setup_kind": "因果引线",
             "anchor_text": "风吹落叶",
             "anchor_reason": "具体钩子：场景里出现反常封锁线索。未闭合原因：当前还没有交代封锁线索会带来什么后果。",
+            "why_unresolved_now": "当前还没有交代封锁线索会带来什么后果。",
+            "expected_payoff_family": "规则兑现",
             "confidence": "medium",
         }
         result = parse_foreshadowing_result(data)
         self.assertTrue(result.has_foreshadowing)
         self.assertEqual(result.foreshadowing_type, "场景")
+        self.assertEqual(result.setup_kind, "因果引线")
         self.assertEqual(result.confidence, "medium")
 
     def test_parse_foreshadowing_without_type(self) -> None:
@@ -107,7 +119,7 @@ class TestForeshadowingParsing(unittest.TestCase):
         self.assertFalse(result.has_foreshadowing)
         self.assertIsNone(result.foreshadowing_type)
 
-    def test_parse_foreshadowing_invalid_type_defaults_to_none(self) -> None:
+    def test_parse_foreshadowing_invalid_type_raises_validation_error(self) -> None:
         data = {
             "has_foreshadowing": True,
             "foreshadowing_type": "invalid_type",
@@ -115,9 +127,8 @@ class TestForeshadowingParsing(unittest.TestCase):
             "anchor_reason": "some reason",
             "confidence": "high",
         }
-        result = parse_foreshadowing_result(data)
-        self.assertTrue(result.has_foreshadowing)
-        self.assertIsNone(result.foreshadowing_type)
+        with self.assertRaises(ValidationError):
+            parse_foreshadowing_result(data)
 
 
 class TestForeshadowingValidation(unittest.TestCase):
@@ -137,8 +148,11 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="some anchor text",
             anchor_reason="具体钩子：异常物件出现。未闭合原因：当前还没有解释它的用途。",
+            why_unresolved_now="当前还没有解释它的用途。",
+            expected_payoff_family="能力触发",
             confidence="low",
         )
         self.assertFalse(validate_foreshadowing_result(result, "some anchor text in context"))
@@ -147,18 +161,50 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="玉佩背面刻着一个归字",
             anchor_reason="具体钩子：玉佩出现异常纹样。未闭合原因：当前还没有解释玉佩的来历。",
+            why_unresolved_now="当前还没有解释玉佩的来历。",
+            expected_payoff_family="身份揭示",
             confidence="medium",
         )
         self.assertFalse(validate_foreshadowing_result(result, "他捡起一块玉佩，玉佩背面刻着一个归字。"))
+
+    def test_validate_positive_without_type_returns_false(self) -> None:
+        result = ForeshadowingResult.model_construct(
+            has_foreshadowing=True,
+            foreshadowing_type=None,
+            setup_kind="异常物件",
+            anchor_text="那枚玉佩在夜里自行发热。",
+            anchor_reason="具体钩子：玉佩在夜里自行发热，表现出非普通饰物特征。未闭合原因：当前只出现异象，还没有解释它为何会发热。",
+            why_unresolved_now="当前只出现异象，还没有解释它为何会发热。",
+            expected_payoff_family="能力触发",
+            confidence="high",
+        )
+        self.assertFalse(validate_foreshadowing_result(result, "那枚玉佩在夜里自行发热。"))
+
+    def test_validate_positive_without_structured_fields_returns_false(self) -> None:
+        result = ForeshadowingResult.model_construct(
+            has_foreshadowing=True,
+            foreshadowing_type="物件",
+            setup_kind=None,
+            anchor_text="那枚玉佩在夜里自行发热。",
+            anchor_reason="具体钩子：玉佩在夜里自行发热，表现出非普通饰物特征。未闭合原因：当前只出现异象，还没有解释它为何会发热。",
+            why_unresolved_now="",
+            expected_payoff_family="",
+            confidence="high",
+        )
+        self.assertFalse(validate_foreshadowing_result(result, "那枚玉佩在夜里自行发热。"))
 
     def test_validate_empty_anchor_text_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="",
             anchor_reason="具体钩子：异常物件出现。未闭合原因：当前还没有解释它的用途。",
+            why_unresolved_now="当前还没有解释它的用途。",
+            expected_payoff_family="能力触发",
             confidence="high",
         )
         self.assertFalse(validate_foreshadowing_result(result, "any text"))
@@ -167,8 +213,11 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="ab",
             anchor_reason="具体钩子：异常物件出现。未闭合原因：当前还没有解释它的用途。",
+            why_unresolved_now="当前还没有解释它的用途。",
+            expected_payoff_family="能力触发",
             confidence="high",
         )
         self.assertFalse(validate_foreshadowing_result(result, "ab"))
@@ -177,8 +226,11 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="玉佩背面刻着归字",
             anchor_reason="具体钩子：玉佩出现异常纹样。未闭合原因：当前还没有解释玉佩的来历。",
+            why_unresolved_now="当前还没有解释玉佩的来历。",
+            expected_payoff_family="身份揭示",
             confidence="high",
         )
         chunk_text = "他捡起一块石头，端详片刻后又随手丢开。"
@@ -188,8 +240,11 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="玉佩背面刻着一个归字",
             anchor_reason="玉佩很异常，后面应该会有用。",
+            why_unresolved_now="当前还没有解释玉佩的来历。",
+            expected_payoff_family="身份揭示",
             confidence="high",
         )
         chunk_text = "他捡起一块玉佩，玉佩背面刻着一个归字，随手塞进袖中。"
@@ -199,8 +254,11 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="场景",
+            setup_kind="其他",
             anchor_text="在中国，任何超脱飞扬的思想都会砰然坠地的，现实的引力太沉重了。",
             anchor_reason="具体钩子：这句话体现主题和时代压力。未闭合原因：后文可能继续展开这种悲剧氛围。",
+            why_unresolved_now="后文可能继续展开这种悲剧氛围。",
+            expected_payoff_family="主题展开",
             confidence="high",
         )
         chunk_text = "在中国，任何超脱飞扬的思想都会砰然坠地的，现实的引力太沉重了。"
@@ -210,8 +268,11 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="人物行为",
+            setup_kind="其他",
             anchor_text="她决定明天去镇上卖药。",
             anchor_reason="具体钩子：人物做出明天去镇上卖药的决定。未闭合原因：当前只是提出决定，尚未执行。",
+            why_unresolved_now="当前只是提出决定，尚未执行。",
+            expected_payoff_family="重大行动",
             confidence="high",
         )
         chunk_text = "她决定明天去镇上卖药。"
@@ -221,11 +282,14 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看。",
             anchor_reason=(
                 "具体钩子：玉佩出现异常红光并带有主动注视感，显示它不是普通饰物。"
                 "未闭合原因：当前只暴露了异常现象，还没有解释玉佩的来历，后续可能揭示其真正用途。"
             ),
+            why_unresolved_now="当前只暴露了异常现象，还没有解释玉佩的来历，后续可能揭示其真正用途。",
+            expected_payoff_family="能力触发",
             confidence="high",
         )
         chunk_text = "那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看。"
@@ -235,8 +299,11 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="那枚玉佩在夜里自行发热。",
             anchor_reason="具体钩子：玉佩在夜里自行发热，表现出非普通饰物特征。未闭合原因：当前只出现异象，还没有解释它为何会发热。",
+            why_unresolved_now="当前只出现异象，还没有解释它为何会发热。",
+            expected_payoff_family="能力触发",
             confidence="high",
         )
         chunk_text = "那枚玉佩在夜里自行发热。"
@@ -246,12 +313,15 @@ class TestForeshadowingValidation(unittest.TestCase):
         result = ForeshadowingResult(
             has_foreshadowing=True,
             foreshadowing_type="人物行为",
+            setup_kind="因果引线",
             anchor_text="人类真正的道德自觉是不可能的，就像他们不可能拔着自己的头发离开大地。要做到这一点，只有借助于人类之外的力量。",
             anchor_reason=(
                 "具体钩子：叶文洁把“借助于人类之外的力量”明确设定为解决人类道德困境的出路，"
                 "这构成后续重大行动的核心思想钩子。未闭合原因：当前文本只展示她形成这一判断的思想转折，"
                 "还没有揭示她会借助什么外部力量，也没有兑现这条判断将引出的后续行动。"
             ),
+            why_unresolved_now="当前文本只展示她形成这一判断的思想转折，还没有揭示她会借助什么外部力量，也没有兑现这条判断将引出的后续行动。",
+            expected_payoff_family="重大行动",
             confidence="high",
         )
         chunk_text = (

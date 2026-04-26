@@ -108,12 +108,12 @@ def _build_foreshadowing_messages(
     prev_chunk_summary: str | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
     evidence_bundle=None,
+    include_evidence_blocks: bool = True,
 ) -> list[dict]:
     """
     构建第二次调用（伏笔分析）的messages
@@ -121,6 +121,13 @@ def _build_foreshadowing_messages(
     创建时间: 2026-03-14
     创建者: TraeAI
     任务: Chunk 双次调用分析拆分
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容:
+    - 清理已废弃的 next_chunk_text 残留接口，避免 Phase2 继续携带不存在的后文输入
+    - 增加 include_evidence_blocks 开关，支持对共享 evidence 做 targeted ablation
     """
     messages = [{"role": "system", "content": FORESHADOWING_SYSTEM_PROMPT}]
 
@@ -134,10 +141,9 @@ def _build_foreshadowing_messages(
         prev_chunk_summary=prev_chunk_summary or "（无前文摘要）",
         prev_chunk_text=prev_chunk_text or "（无前文）",
         chunk_text=text,
-        next_chunk_text=next_chunk_text or "（无后文）",
     )
 
-    if evidence_bundle is not None:
+    if include_evidence_blocks and evidence_bundle is not None:
         # 中文注释：Phase 2 只被动复用共享 evidence block，
         # 不再引入 narrative 专用的二次渲染协议，避免这轮收口任务继续外扩。
         evidence_sections = render_annotation_evidence_blocks(evidence_bundle)

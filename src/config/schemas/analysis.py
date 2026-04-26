@@ -102,9 +102,16 @@ class MultiPhaseAnnotationSettings:
     修改者: TraeAI
     任务: rename-two-phase-to-multi-phase
     修改内容: 重命名为 MultiPhaseAnnotationSettings
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 新增 include_phase2_evidence 开关，支持对 Phase2 共享 evidence 做 targeted ablation，
+    默认保持现网行为不变。
     """
 
     parallel: bool = False
+    include_phase2_evidence: bool = True
 
 
 @dataclass
@@ -355,11 +362,17 @@ def _parse_multi_phase_annotation_settings(data: dict[str, Any] | None) -> Multi
     修改者: TraeAI
     任务: rename-two-phase-to-multi-phase
     修改内容: 重命名为 _parse_multi_phase_annotation_settings
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 解析 include_phase2_evidence，便于在配置层控制 Phase2 是否消费共享 evidence。
     """
     if not data:
         return MultiPhaseAnnotationSettings()
     return MultiPhaseAnnotationSettings(
         parallel=data.get("parallel", False),
+        include_phase2_evidence=data.get("include_phase2_evidence", True),
     )
 
 

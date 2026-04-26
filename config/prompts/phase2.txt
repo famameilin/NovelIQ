@@ -24,9 +24,12 @@
 {
   "has_foreshadowing": true/false,
   "confidence": "high/medium/low",
-  "foreshadowing_type": "物件/对话/场景/人物行为/其他" 或 null,
+  "foreshadowing_type": "物件/对话/场景/人物行为/其他" 或 null（只有 `has_foreshadowing=false` 时才能为 null）,
+  "setup_kind": "异常物件/异常规则/隐藏身份/明确承诺/明确威胁/倒计时/未解释能力/因果引线/其他" 或 null（只有 `has_foreshadowing=false` 时才能为 null）,
   "anchor_text": "具体的伏笔文本片段",
-  "anchor_reason": "为什么认为这是伏笔的解释"
+  "anchor_reason": "为什么认为这是伏笔的解释",
+  "why_unresolved_now": "为什么这个钩子在当前文本里还没有闭合",
+  "expected_payoff_family": "预计属于哪类宽口径回收方向"
 }
 
 ## 判断标准
@@ -37,6 +40,16 @@
 如果只是弱暗示、边界可疑，或你拿不准，请直接输出：
 - `has_foreshadowing=false`
 - `confidence=low`
+- `foreshadowing_type=null`
+- `setup_kind=null`
+- `why_unresolved_now=""`
+- `expected_payoff_family=""`
+
+【结构化字段要求】
+- `setup_kind` 必须归入以下宽口径类别之一：异常物件 / 异常规则 / 隐藏身份 / 明确承诺 / 明确威胁 / 倒计时 / 未解释能力 / 因果引线 / 其他
+- `why_unresolved_now` 必须直接说明当前为何还没有解释、兑现或回收
+- `expected_payoff_family` 只写宽口径回收方向，不要预测具体剧情
+  可参考：身份揭示 / 规则兑现 / 能力触发 / 威胁应验 / 重大行动 / 关系转折 / 其他
 
 【anchor_reason 格式要求 - 必须严格包含两个标记】
 `anchor_reason` 必须同时包含以下两个部分，缺一不可：
@@ -79,8 +92,11 @@
   "has_foreshadowing": true,
   "confidence": "high",
   "foreshadowing_type": "物件",
+  "setup_kind": "异常物件",
   "anchor_text": "那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看",
-  "anchor_reason": "具体钩子：玉佩出现异常红光并带有主动注视感，显示它不是普通饰物。未闭合原因：当前只暴露了异常现象，还没有解释玉佩的来历、能力或它会引发什么事件。"
+  "anchor_reason": "具体钩子：玉佩出现异常红光并带有主动注视感，显示它不是普通饰物。未闭合原因：当前只暴露了异常现象，还没有解释玉佩的来历、能力或它会引发什么事件。",
+  "why_unresolved_now": "当前只暴露了异常现象，还没有解释玉佩的来历、能力或它会引发什么事件。",
+  "expected_payoff_family": "能力触发"
 }
 
 <示例2>
@@ -89,8 +105,11 @@
   "has_foreshadowing": false,
   "confidence": "low",
   "foreshadowing_type": null,
+  "setup_kind": null,
   "anchor_text": "",
-  "anchor_reason": "具体钩子：无。未闭合原因：这只是人物对自身命运的悲观定调，没有形成可回收的具体叙事钩子。"
+  "anchor_reason": "具体钩子：无。未闭合原因：这只是人物对自身命运的悲观定调，没有形成可回收的具体叙事钩子。",
+  "why_unresolved_now": "",
+  "expected_payoff_family": ""
 }
 
 <示例3>
@@ -99,6 +118,9 @@
   "has_foreshadowing": false,
   "confidence": "low",
   "foreshadowing_type": null,
+  "setup_kind": null,
   "anchor_text": "",
-  "anchor_reason": "具体钩子：无。未闭合原因：这是一句普通的日常描述，没有形成任何尚未解释或等待兑现的叙事钩子。"
+  "anchor_reason": "具体钩子：无。未闭合原因：这是一句普通的日常描述，没有形成任何尚未解释或等待兑现的叙事钩子。",
+  "why_unresolved_now": "",
+  "expected_payoff_family": ""
 }

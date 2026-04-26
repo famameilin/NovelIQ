@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from typing import Any, get_args
 
-from ..schema import ForeshadowingConfidence, ForeshadowingResult, ForeshadowingType
+from ..schema import ForeshadowingConfidence, ForeshadowingResult, ForeshadowingSetupKind, ForeshadowingType
 
 _VALID_FORESHADOWING_TYPES = frozenset(get_args(ForeshadowingType))
 _VALID_CONFIDENCES = frozenset(get_args(ForeshadowingConfidence))
+_VALID_SETUP_KINDS = frozenset(get_args(ForeshadowingSetupKind))
 _HOOK_LABEL = "具体钩子："
 _UNRESOLVED_LABEL = "未闭合原因："
 _ANOMALY_HOOK_MARKERS = (
@@ -173,11 +174,18 @@ def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
     任务: phase2-strong-foreshadowing
     新建原因: 将“高精度强伏笔”门槛沉淀为显式规则，优先拒绝主题句、命运定调和模糊未来推测。
     """
-    hook_text, unresolved_text = _extract_reason_sections(result.anchor_reason)
-    if hook_text is None or unresolved_text is None:
+    hook_text, anchor_unresolved_text = _extract_reason_sections(result.anchor_reason)
+    if hook_text is None or anchor_unresolved_text is None:
         return False
 
     if _contains_any(hook_text, _GENERIC_HOOK_REJECTION_MARKERS):
+        return False
+
+    if _contains_any(anchor_unresolved_text, _GENERIC_HOOK_REJECTION_MARKERS):
+        return False
+
+    unresolved_text = result.why_unresolved_now.strip()
+    if not unresolved_text:
         return False
 
     if _contains_any(unresolved_text, _GENERIC_HOOK_REJECTION_MARKERS):
@@ -191,8 +199,14 @@ def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
     if _is_generic_future_speculation(hook_text):
         return False
 
+    if _is_generic_future_speculation(anchor_unresolved_text):
+        return False
+
     if _is_generic_future_speculation(unresolved_text):
         return False
+
+    if result.setup_kind is not None and result.setup_kind != "其他":
+        return True
 
     return _has_concrete_setup_signal(hook_text, unresolved_text)
 
@@ -217,14 +231,23 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     else:
         foreshadowing_type = None
 
+    setup_kind_raw = data.get("setup_kind")
+    if has_foreshadowing and setup_kind_raw in _VALID_SETUP_KINDS:
+        setup_kind: ForeshadowingSetupKind | None = setup_kind_raw
+    else:
+        setup_kind = None
+
     confidence_raw = data.get("confidence", "high")
     confidence: ForeshadowingConfidence = confidence_raw if confidence_raw in _VALID_CONFIDENCES else "high"
 
     return ForeshadowingResult(
         has_foreshadowing=has_foreshadowing,
         foreshadowing_type=foreshadowing_type,
+        setup_kind=setup_kind,
         anchor_text=data.get("anchor_text", ""),
         anchor_reason=data.get("anchor_reason", ""),
+        why_unresolved_now=data.get("why_unresolved_now", ""),
+        expected_payoff_family=data.get("expected_payoff_family", ""),
         confidence=confidence,
     )
 
@@ -241,6 +264,8 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     任务: phase2-strong-foreshadowing
     修改内容:
     - 只有 high 级 positive 才允许入强伏笔池
+    - positive 结果必须携带正式 foreshadowing_type
+    - positive 结果必须补齐结构化语义字段，减少仅凭 anchor_reason 猜意图
     - anchor_reason 必须同时给出“具体钩子/未闭合原因”
     - 显式拦截主题句、命运定调、情绪气氛类模糊推断
 
@@ -252,10 +277,22 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     if result.confidence != "high":
         return False
 
+    if result.foreshadowing_type is None:
+        return False
+
+    if result.setup_kind is None:
+        return False
+
     if not result.anchor_text or len(result.anchor_text.strip()) < 5:
         return False
 
     if result.anchor_text not in chunk_text:
+        return False
+
+    if not result.why_unresolved_now or len(result.why_unresolved_now.strip()) < 6:
+        return False
+
+    if not result.expected_payoff_family or len(result.expected_payoff_family.strip()) < 2:
         return False
 
     return _has_strong_hook_reason(result)

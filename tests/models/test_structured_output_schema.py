@@ -82,13 +82,22 @@ class TestStructuredOutputSchema(unittest.TestCase):
         """
         schema = self.annotation_client._build_json_schema(ForeshadowingResult)["json_schema"]["schema"]
         foreshadowing_type = schema["properties"]["foreshadowing_type"]
+        setup_kind = schema["properties"]["setup_kind"]
         confidence = schema["properties"]["confidence"]
+        why_unresolved_now = schema["properties"]["why_unresolved_now"]
+        expected_payoff_family = schema["properties"]["expected_payoff_family"]
 
         self.assertEqual(
             _extract_optional_literal_enum(foreshadowing_type),
             ["物件", "对话", "场景", "人物行为", "其他"],
         )
+        self.assertEqual(
+            _extract_optional_literal_enum(setup_kind),
+            ["异常物件", "异常规则", "隐藏身份", "明确承诺", "明确威胁", "倒计时", "未解释能力", "因果引线", "其他"],
+        )
         self.assertEqual(confidence["enum"], ["high", "medium", "low"])
+        self.assertEqual(why_unresolved_now["type"], "string")
+        self.assertEqual(expected_payoff_family["type"], "string")
 
     def test_nested_model_schema_forbids_unknown_fields(self) -> None:
         """
