@@ -530,6 +530,77 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
 
     @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
     @patch("src.models.local.annotation.phase3.settings")
+    async def test_batch_validation_rejects_cross_batch_indices_before_merge(
+        self,
+        mock_settings: MagicMock,
+        mock_execute_phase_call: AsyncMock,
+    ) -> None:
+        """每个 batch 都应先按自己的候选集合校验，避免跨 batch index 污染混进最终结果。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 2
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 1
+
+        async def _fake_execute_phase_call(
+            _client: _Phase3ParallelTestClient,
+            spec: object,
+        ) -> SimpleNamespace:
+            user_prompt = spec.messages[1]["content"]
+            if '1. content: "甲。"' in user_prompt:
+                return SimpleNamespace(
+                    parsed=DialogueAttributionResult(
+                        dialogues=[
+                            DialogueRecordSchema(
+                                index=3,
+                                is_dialogue=True,
+                                speaker=["张三"],
+                                tone=None,
+                                is_inner_monologue=False,
+                                identity_clue=None,
+                            )
+                        ]
+                    )
+                )
+            return SimpleNamespace(
+                parsed=DialogueAttributionResult(
+                    dialogues=[
+                        DialogueRecordSchema(
+                            index=3,
+                            is_dialogue=True,
+                            speaker=["李四"],
+                            tone=None,
+                            is_inner_monologue=False,
+                            identity_clue=None,
+                        ),
+                        DialogueRecordSchema(
+                            index=4,
+                            is_dialogue=True,
+                            speaker=["王五"],
+                            tone=None,
+                            is_inner_monologue=False,
+                            identity_clue=None,
+                        ),
+                    ]
+                )
+            )
+
+        mock_execute_phase_call.side_effect = _fake_execute_phase_call
+        mock_client = _Phase3ParallelTestClient()
+        text = "“甲。”\n“乙。”\n“丙。”\n“丁。”"
+        candidates = extract_dialogues_from_text(text)
+
+        result = await attribute_dialogues_with_llm(
+            mock_client,
+            text,
+            candidates,
+            known_characters=["张三"],
+        )
+
+        self.assertEqual([(record.index, record.speaker) for record in result], [(3, ["李四"]), (4, ["王五"])])
+
+    @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
+    @patch("src.models.local.annotation.phase3.settings")
     async def test_attempt_number_tracks_real_retry_attempts_instead_of_batch_index(
         self,
         mock_settings: MagicMock,
@@ -587,6 +658,115 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([record.index for record in result], [1, 2, 3])
         self.assertEqual(attempts_by_first_index[1], [1])
         self.assertEqual(attempts_by_first_index[3], [1, 2])
+
+    @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_parallel_batches_respect_configured_concurrency_limit(
+        self,
+        mock_settings: MagicMock,
+        mock_execute_phase_call: AsyncMock,
+    ) -> None:
+        """受控并行应把同时运行的 batch 数限制在 `phase3_batch_parallelism` 以内。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 2
+        mock_settings.thinking.phase3_batch_parallelism = 2
+        mock_settings.runtime.annotation.phase3_max_retries = 3
+        current_concurrency = 0
+        max_concurrency = 0
+
+        async def _fake_execute_phase_call(
+            _client: _Phase3ParallelTestClient,
+            spec: object,
+        ) -> SimpleNamespace:
+            nonlocal current_concurrency, max_concurrency
+            user_prompt = spec.messages[1]["content"]
+            indices = [int(match) for match in re.findall(r"(\d+)\. content:", user_prompt)]
+            current_concurrency += 1
+            max_concurrency = max(max_concurrency, current_concurrency)
+            try:
+                await asyncio.sleep(0.03)
+                return SimpleNamespace(
+                    parsed=DialogueAttributionResult(
+                        dialogues=[
+                            DialogueRecordSchema(
+                                index=index,
+                                is_dialogue=True,
+                                speaker=["张三"],
+                                tone=None,
+                                is_inner_monologue=False,
+                                identity_clue=None,
+                            )
+                            for index in indices
+                        ]
+                    )
+                )
+            finally:
+                current_concurrency -= 1
+
+        mock_execute_phase_call.side_effect = _fake_execute_phase_call
+        mock_client = _Phase3ParallelTestClient()
+        text = "“甲。”\n“乙。”\n“丙。”\n“丁。”\n“戊。”\n“己。”"
+        candidates = extract_dialogues_from_text(text)
+
+        result = await attribute_dialogues_with_llm(
+            mock_client,
+            text,
+            candidates,
+            known_characters=["张三"],
+        )
+
+        self.assertEqual([record.index for record in result], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(mock_execute_phase_call.await_count, 3)
+        self.assertEqual(max_concurrency, 2)
+
+    @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_metadata_request_disables_fastpath_short_circuit(
+        self,
+        mock_settings: MagicMock,
+        mock_execute_phase_call: AsyncMock,
+    ) -> None:
+        """请求 tone / identity clue 时，不应让 fastpath 直接短路掉 LLM 元数据提取。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 10
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 1
+
+        async def _fake_execute_phase_call(
+            _client: _Phase3ParallelTestClient,
+            _spec: object,
+        ) -> SimpleNamespace:
+            return SimpleNamespace(
+                parsed=DialogueAttributionResult(
+                    dialogues=[
+                        DialogueRecordSchema(
+                            index=1,
+                            is_dialogue=True,
+                            speaker=["张三"],
+                            tone="温和",
+                            is_inner_monologue=False,
+                            identity_clue="张三自称名为白芷",
+                        )
+                    ]
+                )
+            )
+
+        mock_execute_phase_call.side_effect = _fake_execute_phase_call
+        mock_client = _Phase3ParallelTestClient()
+        result = await attribute_dialogues_with_llm(
+            mock_client,
+            "张三说：“我叫白芷。”",
+            [QuoteCandidate(index=1, content="我叫白芷。")],
+            known_characters=["张三"],
+            require_tones=True,
+            require_identity_clues=True,
+        )
+
+        self.assertEqual(mock_execute_phase_call.await_count, 1)
+        self.assertEqual(result[0].tone, "温和")
+        self.assertEqual(result[0].identity_clue, "张三自称名为白芷")
 
     @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
     @patch("src.models.local.annotation.phase3.settings")
