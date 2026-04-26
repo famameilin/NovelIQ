@@ -325,15 +325,8 @@ class DiagnosisResult(BaseModel):
     foreshadow_expectation: float | None = Field(
         default=None,
         description=(
-            "伏笔回收预期，基于 Phase2 强 setup thread 状态估算的近似值，"
+            "伏笔回收预期，基于 setup thread ledger 加权估算的近似值，"
             "取值范围 0-1，不是严格全文事实回收率。"
-        ),
-    )
-    foreshadow_rate: float | None = Field(
-        default=None,
-        description=(
-            "兼容字段：新 run 下与 foreshadow_expectation 返回同值。"
-            "旧 run 若尚无 setup ledger，则回退为历史 diagnosis.foreshadow_rate。"
         ),
     )
     arc_scores: list[float] | dict[str, float] | None = None

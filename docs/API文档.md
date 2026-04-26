@@ -86,7 +86,7 @@ python -m src.api.main --port 8001
 | GET | `/api/novels/{novel_id}/rhythm-curve?task_id={task_id}` | 获取节奏曲线 |
 | GET | `/api/novels/{novel_id}/characters?task_id={task_id}` | 获取人物统计 |
 | GET | `/api/novels/{novel_id}/topics?task_id={task_id}` | 获取主题分布 |
-| GET | `/api/novels/{novel_id}/diagnosis?task_id={task_id}` | 获取云端诊断 |
+| GET | `/api/novels/{novel_id}/diagnosis?task_id={task_id}` | 获取诊断结果 |
 | GET | `/api/novels/{novel_id}/graph?task_id={task_id}` | 获取知识图谱快照 |
 
 ### 2.4 叙事时间轴接口
@@ -695,7 +695,7 @@ GET /api/novels/10960c77/topics?task_id=a1b2c3d4
 
 #### GET /api/novels/{novel_id}/diagnosis
 
-获取云端诊断结果。
+获取诊断结果。
 
 **查询参数**:
 | 参数 | 类型 | 必填 | 说明 |
@@ -716,7 +716,7 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
   "narrative_type": "寓言",
   "topic_labels": ["抗争", "宿命"],
   "diagnosis": "该叙事以寓言形式探索人类面对困境的成长历程...",
-  "value_logic_type": "价值冲突",
+  "value_logic_type": "善义有价值",
   "value_logic_reason": "...",
   "power_stance_score": 3,
   "power_stance_reason": "...",
@@ -724,18 +724,19 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
   "dignity_reason": "...",
   "cultural_depth_score": 4,
   "cultural_depth_reason": "传统文化词汇深度参与叙事，儒家伦理观念推动主角行为选择...",
-  "narrative_arc_type": "成长型",
+  "narrative_arc_type": "白手起家",
   "protagonist": "主角名",
   "main_characters": ["主角A", "主角B", "配角C"],
-  "core_cast": ["主角A", "主角B"]
+  "core_cast": ["主角A", "主角B"],
+  "theme_color": "#4A90D9"
 }
 ```
 
 **字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| foreshadow_expectation | float | 伏笔回收预期（0-1，基于 Phase2 强 setup thread 的近似估计） |
-| foreshadow_rate | float | 兼容字段：当前与 foreshadow_expectation 同义 |
+| foreshadow_expectation | float | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值） |
+| foreshadow_rate | float | 兼容字段：新 run 下一般与 foreshadow_expectation 同值；旧 run 若无 setup ledger，则回退为历史 diagnosis 值 |
 | arc_scores | dict[str, float] | 各角色弧线得分 |
 | narrative_type | str | 叙事类型 |
 | topic_labels | list[str] | 主题标签 |
@@ -752,6 +753,11 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 | protagonist | str | 主角名称 |
 | main_characters | list[str] | 主要角色列表 |
 | core_cast | list[str] | 核心演员列表 |
+| theme_color | str | 小说主题色，十六进制格式，如 `#4A90D9` |
+
+**兼容说明**:
+- 新 run 且 setup ledger 已存在时，`foreshadow_expectation` 是正式展示值，`foreshadow_rate` 仅作兼容镜像。
+- 旧 run 或尚未生成 setup ledger 时，`foreshadow_expectation` 可能为 `null`，而 `foreshadow_rate` 会回退为历史 diagnosis 存储值。
 
 **实体关系数据**:
 

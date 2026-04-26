@@ -177,7 +177,7 @@ def test_insert_cloud_analysis(db_session) -> None:
     _insert_test_novel(db_session, novel_id)
     analysis = CloudAnalysis(
         novel_id=novel_id,
-        foreshadow_rate=0.5,
+        foreshadow_expectation=0.5,
         arc_scores=[0.2, 0.4],
         narrative_type="三幕",
         topic_labels=["成长"],
@@ -191,7 +191,7 @@ def test_insert_cloud_analysis(db_session) -> None:
     stats_repo = StatsRepository(db_session)
     stats_repo.insert_cloud_analysis(run_id, analysis)
     row = db_session.execute(
-        text("SELECT novel_id, foreshadow_rate, narrative_arc_type FROM cloud_analysis WHERE run_id = :run_id"),
+        text("SELECT novel_id, foreshadow_expectation, narrative_arc_type FROM cloud_analysis WHERE run_id = :run_id"),
         {"run_id": run_id},
     ).fetchone()
     assert row[0] == novel_id

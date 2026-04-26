@@ -181,7 +181,6 @@ export interface Topic {
 export interface DiagnosisResult {
   narrative_type?: string;
   foreshadow_expectation?: number;
-  foreshadow_rate?: number;
   protagonist?: string;
   narrative_arc_type?: string;
   arc_scores?: Record<string, number>;
