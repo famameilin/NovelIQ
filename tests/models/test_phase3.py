@@ -722,6 +722,68 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
 
     @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
     @patch("src.models.local.annotation.phase3.settings")
+    async def test_parallel_batches_cancel_siblings_after_first_failure(
+        self,
+        mock_settings: MagicMock,
+        mock_execute_phase_call: AsyncMock,
+    ) -> None:
+        """任一 batch 失败后，应取消其余已启动 sibling batch，避免继续消耗 token 和落审计。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 2
+        mock_settings.thinking.phase3_batch_parallelism = 2
+        mock_settings.runtime.annotation.phase3_max_retries = 1
+        started_batches: list[int] = []
+        completed_batches: list[int] = []
+
+        async def _fake_execute_phase_call(
+            _client: _Phase3ParallelTestClient,
+            spec: object,
+        ) -> SimpleNamespace:
+            user_prompt = spec.messages[1]["content"]
+            indices = [int(match) for match in re.findall(r"(\d+)\. content:", user_prompt)]
+            first_index = indices[0]
+            started_batches.append(first_index)
+            if first_index == 1:
+                await asyncio.sleep(0.01)
+                raise ConnectionError("batch one failed")
+            await asyncio.sleep(0.05)
+            completed_batches.append(first_index)
+            return SimpleNamespace(
+                parsed=DialogueAttributionResult(
+                    dialogues=[
+                        DialogueRecordSchema(
+                            index=index,
+                            is_dialogue=True,
+                            speaker=["张三"],
+                            tone=None,
+                            is_inner_monologue=False,
+                            identity_clue=None,
+                        )
+                        for index in indices
+                    ]
+                )
+            )
+
+        mock_execute_phase_call.side_effect = _fake_execute_phase_call
+        mock_client = _Phase3ParallelTestClient()
+        text = "“甲。”\n“乙。”\n“丙。”\n“丁。”"
+        candidates = extract_dialogues_from_text(text)
+
+        with self.assertRaises(DialogueAttributionError):
+            await attribute_dialogues_with_llm(
+                mock_client,
+                text,
+                candidates,
+                known_characters=["张三"],
+            )
+
+        await asyncio.sleep(0.08)
+        self.assertEqual(set(started_batches), {1, 3})
+        self.assertEqual(completed_batches, [])
+
+    @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
+    @patch("src.models.local.annotation.phase3.settings")
     async def test_metadata_request_keeps_fastpath_speaker_and_metadata(
         self,
         mock_settings: MagicMock,

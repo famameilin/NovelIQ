@@ -264,7 +264,7 @@ def log_annotation_start(
         )
 
 
-def should_use_stream(config: Any) -> bool:
+def should_use_stream(config: Any, is_cloud: bool) -> bool:
     """
     判断是否应该使用流式响应模式
 
@@ -277,8 +277,15 @@ def should_use_stream(config: Any) -> bool:
     创建者: TraeAI
     任务: code-quality-refactor - Task 9 拆分annotation_client
     修改内容: 从 AnnotationClient 类方法提取为独立函数
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: fix-phase3-followup-review-findings
+    修改内容: 接入 stream_cloud_only 语义，避免结构化主链继续把 streaming 配置当作死开关。
     """
     if not config.stream_enabled:
+        return False
+    if config.stream_cloud_only and not is_cloud:
         return False
 
     return True
