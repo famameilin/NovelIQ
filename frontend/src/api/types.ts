@@ -103,6 +103,54 @@ export interface ChunkCurvePoint {
   surface_tension?: number | null;
 }
 
+export interface ChunkCharacter {
+  name: string;
+  role_function?: string | null;
+  action?: string | null;
+  emotion_score?: string | null;
+}
+
+export interface ChunkRelation {
+  from_char: string;
+  to_char: string;
+  type: string;
+  change: string;
+}
+
+export interface ChunkDialogue {
+  speaker: string[];
+  length?: number | null;
+}
+
+export type ForeshadowingSetupKind =
+  | "异常物件"
+  | "异常规则"
+  | "隐藏身份"
+  | "明确承诺"
+  | "明确威胁"
+  | "倒计时"
+  | "未解释能力"
+  | "因果引线"
+  | "其他";
+
+export interface ChunkAnnotation {
+  chunk_id: number;
+  emotional_valence?: string | null;
+  event_type?: string | null;
+  pivot_moment?: boolean | null;
+  cliffhanger?: boolean | null;
+  has_foreshadowing?: boolean | null;
+  is_strong_setup?: boolean | null;
+  foreshadowing_type?: string | null;
+  setup_kind?: ForeshadowingSetupKind | null;
+  foreshadowing_desc?: string | null;
+  why_unresolved_now?: string | null;
+  expected_payoff_family?: string | null;
+  characters: ChunkCharacter[];
+  relations: ChunkRelation[];
+  dialogues: ChunkDialogue[];
+}
+
 // ============================================================
 // Topics
 // ============================================================

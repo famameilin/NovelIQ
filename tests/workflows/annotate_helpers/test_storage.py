@@ -50,6 +50,7 @@ def test_merge_annotation_foreshadowing_overrides_phase2_fields() -> None:
         _make_annotation(),
         ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="铜铃",
@@ -61,8 +62,12 @@ def test_merge_annotation_foreshadowing_overrides_phase2_fields() -> None:
     )
 
     assert merged.has_foreshadowing is True
+    assert merged.is_strong_setup is True
     assert merged.foreshadowing_type == "物件"
+    assert merged.setup_kind == "异常物件"
     assert merged.foreshadowing_desc == "铜铃 - 反复出现但用途未明"
+    assert merged.why_unresolved_now == "当前还没有解释铜铃为何反复出现。"
+    assert merged.expected_payoff_family == "能力触发"
 
 
 def test_strong_foreshadowing_projection_only_merges_validated_cases() -> None:
@@ -72,7 +77,7 @@ def test_strong_foreshadowing_projection_only_merges_validated_cases() -> None:
     chunk12 = next(case for case in PHASE2_STRONG_FORESHADOWING_CASES if case["chunk_id"] == 12)
 
     rejected = normalize_foreshadowing_result(
-        ForeshadowingResult(**chunk2["result"]),
+        ForeshadowingResult.model_construct(**chunk2["result"]),
         chunk2["chunk_text"],
         chunk2["chunk_id"],
     )
@@ -87,10 +92,13 @@ def test_strong_foreshadowing_projection_only_merges_validated_cases() -> None:
 
     assert rejected is None
     assert merged_rejected.has_foreshadowing is False
+    assert merged_rejected.is_strong_setup is False
     assert merged_rejected.foreshadowing_type is None
     assert accepted is not None
     assert merged_accepted.has_foreshadowing is True
+    assert merged_accepted.is_strong_setup is True
     assert merged_accepted.foreshadowing_type == "人物行为"
+    assert merged_accepted.setup_kind == "因果引线"
     assert "借助于人类之外的力量" in merged_accepted.foreshadowing_desc
 
 

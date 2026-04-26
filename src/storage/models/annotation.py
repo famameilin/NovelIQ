@@ -50,8 +50,12 @@ class ChunkAnnotation(Base):
     event_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     cliffhanger: Mapped[int | None] = mapped_column(Integer, nullable=True)
     has_foreshadowing: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_strong_setup: Mapped[int | None] = mapped_column(Integer, nullable=True)
     foreshadowing_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    setup_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
     foreshadowing_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    why_unresolved_now: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_payoff_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -232,9 +236,13 @@ class ChunkForeshadowing(Base):
 
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    is_strong_setup: Mapped[int | None] = mapped_column(Integer, nullable=True)
     foreshadowing_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    setup_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
     anchor_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     anchor_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    why_unresolved_now: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_payoff_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
     confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

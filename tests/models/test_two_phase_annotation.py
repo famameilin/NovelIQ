@@ -73,6 +73,7 @@ class TestForeshadowingParsing(unittest.TestCase):
     def test_parse_foreshadowing_with_object_type(self) -> None:
         data = {
             "has_foreshadowing": True,
+            "is_strong_setup": True,
             "foreshadowing_type": "物件",
             "setup_kind": "异常物件",
             "anchor_text": "玉佩背面刻着一个归字",
@@ -83,6 +84,7 @@ class TestForeshadowingParsing(unittest.TestCase):
         }
         result = parse_foreshadowing_result(data)
         self.assertTrue(result.has_foreshadowing)
+        self.assertTrue(result.is_strong_setup)
         self.assertEqual(result.foreshadowing_type, "物件")
         self.assertEqual(result.setup_kind, "异常物件")
         self.assertEqual(result.anchor_text, "玉佩背面刻着一个归字")
@@ -93,6 +95,7 @@ class TestForeshadowingParsing(unittest.TestCase):
     def test_parse_foreshadowing_with_scene_type(self) -> None:
         data = {
             "has_foreshadowing": True,
+            "is_strong_setup": True,
             "foreshadowing_type": "场景",
             "setup_kind": "因果引线",
             "anchor_text": "风吹落叶",
@@ -103,6 +106,7 @@ class TestForeshadowingParsing(unittest.TestCase):
         }
         result = parse_foreshadowing_result(data)
         self.assertTrue(result.has_foreshadowing)
+        self.assertTrue(result.is_strong_setup)
         self.assertEqual(result.foreshadowing_type, "场景")
         self.assertEqual(result.setup_kind, "因果引线")
         self.assertEqual(result.confidence, "medium")
@@ -110,6 +114,7 @@ class TestForeshadowingParsing(unittest.TestCase):
     def test_parse_foreshadowing_without_type(self) -> None:
         data = {
             "has_foreshadowing": False,
+            "is_strong_setup": False,
             "foreshadowing_type": None,
             "anchor_text": "",
             "anchor_reason": "",
@@ -117,11 +122,13 @@ class TestForeshadowingParsing(unittest.TestCase):
         }
         result = parse_foreshadowing_result(data)
         self.assertFalse(result.has_foreshadowing)
+        self.assertFalse(result.is_strong_setup)
         self.assertIsNone(result.foreshadowing_type)
 
     def test_parse_foreshadowing_invalid_type_raises_validation_error(self) -> None:
         data = {
             "has_foreshadowing": True,
+            "is_strong_setup": True,
             "foreshadowing_type": "invalid_type",
             "anchor_text": "some text",
             "anchor_reason": "some reason",
@@ -137,6 +144,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_no_foreshadowing_returns_true(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=False,
+            is_strong_setup=False,
             foreshadowing_type=None,
             anchor_text="",
             anchor_reason="",
@@ -147,6 +155,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_low_confidence_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="some anchor text",
@@ -160,6 +169,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_medium_confidence_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="玉佩背面刻着一个归字",
@@ -173,6 +183,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_positive_without_type_returns_false(self) -> None:
         result = ForeshadowingResult.model_construct(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type=None,
             setup_kind="异常物件",
             anchor_text="那枚玉佩在夜里自行发热。",
@@ -186,6 +197,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_positive_without_structured_fields_returns_false(self) -> None:
         result = ForeshadowingResult.model_construct(
             has_foreshadowing=True,
+            is_strong_setup=False,
             foreshadowing_type="物件",
             setup_kind=None,
             anchor_text="那枚玉佩在夜里自行发热。",
@@ -199,6 +211,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_empty_anchor_text_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="",
@@ -212,6 +225,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_short_anchor_text_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="ab",
@@ -225,6 +239,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_anchor_text_not_in_chunk_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="玉佩背面刻着归字",
@@ -239,6 +254,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_reason_without_required_sections_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="玉佩背面刻着一个归字",
@@ -253,6 +269,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_generic_theme_reason_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="场景",
             setup_kind="其他",
             anchor_text="在中国，任何超脱飞扬的思想都会砰然坠地的，现实的引力太沉重了。",
@@ -267,6 +284,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_everyday_decision_returns_false(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="人物行为",
             setup_kind="其他",
             anchor_text="她决定明天去镇上卖药。",
@@ -281,6 +299,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_concrete_future_wording_with_specific_target_returns_true(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看。",
@@ -298,6 +317,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_anomalous_object_without_legacy_whitelist_keyword_returns_true(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
             setup_kind="异常物件",
             anchor_text="那枚玉佩在夜里自行发热。",
@@ -312,6 +332,7 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_validate_anchor_text_in_chunk_returns_true(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="人物行为",
             setup_kind="因果引线",
             anchor_text="人类真正的道德自觉是不可能的，就像他们不可能拔着自己的头发离开大地。要做到这一点，只有借助于人类之外的力量。",
@@ -334,7 +355,13 @@ class TestForeshadowingValidation(unittest.TestCase):
     def test_real_phase2_regression_cases_follow_strong_setup_gate(self) -> None:
         for case in PHASE2_STRONG_FORESHADOWING_CASES:
             with self.subTest(case_id=case["case_id"]):
-                result = ForeshadowingResult(**case["result"])
+                if case["expected_is_strong_setup"]:
+                    result = ForeshadowingResult(**case["result"])
+                else:
+                    # 中文注释：这些样例代表“旧 prompt/旧模型可能给出的脏 positive 输出”，
+                    # 现在真实热路径会在结构化校验阶段前置拒绝；这里仍保留 model_construct，
+                    # 继续覆盖 projector/validator 的兜底拒绝语义。
+                    result = ForeshadowingResult.model_construct(**case["result"])
                 self.assertEqual(
                     validate_foreshadowing_result(result, case["chunk_text"]),
                     case["expected_is_strong_setup"],

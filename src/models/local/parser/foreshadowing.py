@@ -224,6 +224,7 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     修改内容: 伏笔类型枚举改为当前中文合同，不再兼容历史 causal/thematic 残留。
     """
     has_foreshadowing = data.get("has_foreshadowing", False)
+    is_strong_setup = bool(data.get("is_strong_setup", False))
 
     foreshadowing_type_raw = data.get("foreshadowing_type")
     if has_foreshadowing and foreshadowing_type_raw in _VALID_FORESHADOWING_TYPES:
@@ -242,6 +243,7 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
 
     return ForeshadowingResult(
         has_foreshadowing=has_foreshadowing,
+        is_strong_setup=is_strong_setup,
         foreshadowing_type=foreshadowing_type,
         setup_kind=setup_kind,
         anchor_text=data.get("anchor_text", ""),
@@ -273,6 +275,9 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     """
     if not result.has_foreshadowing:
         return True
+
+    if not result.is_strong_setup:
+        return False
 
     if result.confidence != "high":
         return False

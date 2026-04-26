@@ -39,6 +39,7 @@ from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ResultsWriteResponse
 from src.api.routes.results_fetchers import (
     _fetch_characters,
+    _fetch_chunk_annotations,
     _fetch_chunk_curves,
     _fetch_diagnosis,
     _fetch_graph_events_page,
@@ -82,6 +83,7 @@ GRAPH_PAGE_EVENT_LIMIT = 200
 
 **生产环境数据获取请使用专用接口：**
 - `GET /{novel_id}/chunk-curves` - 获取分块曲线（情绪 + 节奏）
+- `GET /{novel_id}/chunk-annotations` - 获取分块标注与伏笔详情
 - `GET /{novel_id}/characters` - 获取人物统计
 - `GET /{novel_id}/topics` - 获取主题分布
 - `GET /{novel_id}/diagnosis` - 获取云端诊断
@@ -221,6 +223,25 @@ async def get_chunk_curves(
     return _fetch_chunk_curves(run_id, stats_repo, annotation_repo, chunk_repo)
 
 
+@router.get("/{novel_id}/chunk-annotations")
+async def get_chunk_annotations(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> list:
+    """
+    获取分块标注与伏笔详情数据。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 暴露 chunk_annotations 结果接口，便于前端后续新增伏笔展示页直接消费强伏笔结构化字段。
+    """
+    annotation_repo = AnnotationRepository(session)
+    alias_map = annotation_repo.fetch_alias_map(run_id)
+    return _fetch_chunk_annotations(run_id, annotation_repo, alias_map)
+
+
 @router.get("/{novel_id}/characters")
 async def get_characters(
     novel_id: str,
@@ -350,4 +371,3 @@ async def get_style_stats(
 ) -> Any:
     """获取风格统计指标"""
     return metrics_service.get_style_stats(run_id, session)
-

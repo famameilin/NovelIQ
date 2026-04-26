@@ -59,10 +59,14 @@ def merge_annotation_foreshadowing(
         cliffhanger=annotation.cliffhanger,
         chunk_summary=annotation.chunk_summary,
         has_foreshadowing=foreshadowing.has_foreshadowing,
+        is_strong_setup=foreshadowing.is_strong_setup,
         foreshadowing_type=foreshadowing.foreshadowing_type,
+        setup_kind=foreshadowing.setup_kind,
         foreshadowing_desc=(
             f"{foreshadowing.anchor_text} - {foreshadowing.anchor_reason}" if foreshadowing.has_foreshadowing else ""
         ),
+        why_unresolved_now=foreshadowing.why_unresolved_now,
+        expected_payoff_family=foreshadowing.expected_payoff_family,
         characters=annotation.characters,
         dialogues=annotation.dialogues,
     )

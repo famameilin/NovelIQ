@@ -45,8 +45,12 @@ def insert_chunk_annotation(session: Session, run_id: str, chunk_id: int, annota
         event_type=annotation.event_type,
         cliffhanger=int(annotation.cliffhanger) if annotation.cliffhanger is not None else None,
         has_foreshadowing=int(annotation.has_foreshadowing) if annotation.has_foreshadowing is not None else None,
+        is_strong_setup=int(annotation.is_strong_setup) if annotation.is_strong_setup is not None else None,
         foreshadowing_type=annotation.foreshadowing_type,
+        setup_kind=annotation.setup_kind,
         foreshadowing_desc=annotation.foreshadowing_desc,
+        why_unresolved_now=annotation.why_unresolved_now,
+        expected_payoff_family=annotation.expected_payoff_family,
         run_id=run_id,
     )
     session.add(record)
@@ -188,9 +192,13 @@ def insert_foreshadowing(session: Session, run_id: str, chunk_id: int, result: F
         return
     record = ChunkForeshadowing(
         chunk_id=chunk_id,
+        is_strong_setup=int(result.is_strong_setup) if result.is_strong_setup is not None else None,
         foreshadowing_type=result.foreshadowing_type,
+        setup_kind=result.setup_kind,
         anchor_text=result.anchor_text,
         anchor_reason=result.anchor_reason,
+        why_unresolved_now=result.why_unresolved_now,
+        expected_payoff_family=result.expected_payoff_family,
         confidence=result.confidence,
         created_at=datetime.now().isoformat(),
         run_id=run_id,

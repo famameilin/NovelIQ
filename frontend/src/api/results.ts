@@ -1,6 +1,7 @@
 import { apiClient } from "./client";
 import type {
   Character,
+  ChunkAnnotation,
   ChunkCurvePoint,
   Topic,
   DiagnosisResult,
@@ -49,6 +50,19 @@ export async function getChunkCurves(
         ...(options?.page_size != null && { page_size: options.page_size }),
       },
     }
+  );
+  return data;
+}
+
+// ---- Chunk Annotations ----
+
+export async function getChunkAnnotations(
+  novelId: string,
+  taskId: string
+): Promise<ChunkAnnotation[]> {
+  const { data } = await apiClient.get<ChunkAnnotation[]>(
+    `/api/novels/${novelId}/chunk-annotations`,
+    { params: { task_id: taskId } }
   );
   return data;
 }

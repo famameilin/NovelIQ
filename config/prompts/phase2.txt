@@ -23,6 +23,7 @@
 请严格按以下JSON格式输出：
 {
   "has_foreshadowing": true/false,
+  "is_strong_setup": true/false,
   "confidence": "high/medium/low",
   "foreshadowing_type": "物件/对话/场景/人物行为/其他" 或 null（只有 `has_foreshadowing=false` 时才能为 null）,
   "setup_kind": "异常物件/异常规则/隐藏身份/明确承诺/明确威胁/倒计时/未解释能力/因果引线/其他" 或 null（只有 `has_foreshadowing=false` 时才能为 null）,
@@ -39,6 +40,7 @@
 
 如果只是弱暗示、边界可疑，或你拿不准，请直接输出：
 - `has_foreshadowing=false`
+- `is_strong_setup=false`
 - `confidence=low`
 - `foreshadowing_type=null`
 - `setup_kind=null`
@@ -90,6 +92,7 @@
 输入："那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看。"
 输出：{
   "has_foreshadowing": true,
+  "is_strong_setup": true,
   "confidence": "high",
   "foreshadowing_type": "物件",
   "setup_kind": "异常物件",
@@ -103,6 +106,7 @@
 输入："他知道自己这样的人，后面不会有什么好下场。"
 输出:{
   "has_foreshadowing": false,
+  "is_strong_setup": false,
   "confidence": "low",
   "foreshadowing_type": null,
   "setup_kind": null,
@@ -116,6 +120,7 @@
 输入："今天天气真好，适合出去走走。"
 输出:{
   "has_foreshadowing": false,
+  "is_strong_setup": false,
   "confidence": "low",
   "foreshadowing_type": null,
   "setup_kind": null,

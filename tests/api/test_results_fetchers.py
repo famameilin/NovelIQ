@@ -467,8 +467,12 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
                     pivot_moment=True,
                     cliffhanger=False,
                     has_foreshadowing=False,
+                    is_strong_setup=False,
                     foreshadowing_type=None,
+                    setup_kind=None,
                     foreshadowing_desc=None,
+                    why_unresolved_now=None,
+                    expected_payoff_family=None,
                 )
             ]
 
@@ -503,6 +507,10 @@ def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
     )
 
     assert len(result) == 1
+    assert result[0].is_strong_setup is False
+    assert result[0].setup_kind is None
+    assert result[0].why_unresolved_now is None
+    assert result[0].expected_payoff_family is None
     assert len(result[0].relations) == 1
     assert result[0].relations[0].from_char == "贺铮"
     assert result[0].relations[0].to_char == "伯安"

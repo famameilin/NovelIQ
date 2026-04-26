@@ -174,8 +174,15 @@ class ChunkAnnotation(BaseModel):
         default=None,
         description="当前 chunk 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔兑现率。",
     )
+    is_strong_setup: bool | None = Field(
+        default=None,
+        description="当前伏笔判断是否已经通过强伏笔门槛筛选，用于前端后续展示高精度 setup。",
+    )
     foreshadowing_type: str | None = None
+    setup_kind: str | None = None
     foreshadowing_desc: str | None = None
+    why_unresolved_now: str | None = None
+    expected_payoff_family: str | None = None
     characters: list[ChunkCharacter] = []
     relations: list[ChunkRelation] = []
     dialogues: list[ChunkDialogue] = []

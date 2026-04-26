@@ -14,6 +14,7 @@ PHASE2_STRONG_FORESHADOWING_CASES = [
         "chunk_text": """别的批判对象戴的高帽子都是用竹条扎的框架，而他戴的这顶却是用一指粗的钢筋焊成的，还有他挂在胸前的那块牌子，也不是别人挂的木板，而是从实验室的一个烤箱上拆下的铁门，上面用黑色醒目地写着他的名字，并沿对角线画上了一个红色的大叉。""",
         "result": {
             "has_foreshadowing": True,
+            "is_strong_setup": False,
             "confidence": "medium",
             "foreshadowing_type": "物件",
             "setup_kind": "其他",
@@ -59,6 +60,7 @@ PHASE2_STRONG_FORESHADOWING_CASES = [
  “是哲学指引实验还是实验指引哲学？”叶哲泰问道，他这突然的反击令批判者们一时不知所措。""",
         "result": {
             "has_foreshadowing": True,
+            "is_strong_setup": False,
             "confidence": "medium",
             "foreshadowing_type": "场景",
             "setup_kind": "其他",
@@ -86,6 +88,7 @@ PHASE2_STRONG_FORESHADOWING_CASES = [
  再想下去，一个推论令她不寒而栗，陷入恐惧的深渊：也许，人类和邪恶的关系，就是大洋与漂浮于其上的冰山的关系，它们其实是同一种物质组成的巨大水体，冰山之所以被醒目地认出来，只是由于其形态不同而已，而它实质上只不过是这整个巨大水体中极小的一部分……人类真正的道德自觉是不可能的，就像他们不可能拔着自己的头发离开大地。要做到这一点，只有借助于人类之外的力量。""",
         "result": {
             "has_foreshadowing": True,
+            "is_strong_setup": True,
             "confidence": "high",
             "foreshadowing_type": "人物行为",
             "setup_kind": "因果引线",
@@ -135,6 +138,7 @@ PHASE2_STRONG_FORESHADOWING_CASES = [
  “还是慎重些吧，你想清楚这意味着什么。”""",
         "result": {
             "has_foreshadowing": True,
+            "is_strong_setup": False,
             "confidence": "medium",
             "foreshadowing_type": "人物行为",
             "setup_kind": "其他",
