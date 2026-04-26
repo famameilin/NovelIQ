@@ -45,8 +45,6 @@ class TaskModelConfig:
     timeout_s: float | None = None
     temperature: float = 0.7
     top_p: float = 0.8
-    top_k: int = 20
-    presence_penalty: float = 1.5
     thinking_enabled: bool = False
     thinking_budget_tokens: int | None = None
     stream_enabled: bool = False
@@ -93,6 +91,11 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
     修改者: Codex
     任务: 清理无效模型配置项
     修改内容: 不再向运行时配置对象透传 provider 和模型级 max_retries
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: fix-phase3-followup-review-findings
+    修改内容: 删除未被任何调用链消费的 top_k / presence_penalty 伪配置入口，避免继续误导调参。
     """
     task_settings = getattr(settings.models, task_type, None)
     if task_settings is None:
@@ -110,8 +113,6 @@ def load_task_config(task_type: TaskType) -> TaskModelConfig:
         timeout_s=task_settings.timeout_s,
         temperature=task_settings.temperature,
         top_p=task_settings.top_p,
-        top_k=task_settings.top_k,
-        presence_penalty=task_settings.presence_penalty,
         thinking_enabled=thinking_enabled,
         thinking_budget_tokens=None,
         stream_enabled=stream_enabled,

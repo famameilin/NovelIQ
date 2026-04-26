@@ -56,8 +56,6 @@ class TaskModelSettings:
     timeout_s: float | None = None
     temperature: float = 0.7
     top_p: float = 0.8
-    top_k: int = 20
-    presence_penalty: float = 1.5
 
 
 @dataclass
@@ -297,8 +295,6 @@ def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = ""
         timeout_s=timeout_val,
         temperature=json_data.get("temperature", 0.7),
         top_p=json_data.get("top_p", 0.8),
-        top_k=json_data.get("top_k", 20),
-        presence_penalty=json_data.get("presence_penalty", 1.5),
     )
 
 
