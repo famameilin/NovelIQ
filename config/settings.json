@@ -105,7 +105,8 @@
     "full_disambig": true,
     "level3_rerank": true,
     "diagnosis": true,
-    "phase3_candidates_per_batch": 5
+    "phase3_candidates_per_batch": 10,
+    "phase3_batch_parallelism": 2
   },
   "streaming": {
     "annotation": true,
