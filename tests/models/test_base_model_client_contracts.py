@@ -187,11 +187,15 @@ def test_parse_thinking_settings_reads_phase3_batch_controls() -> None:
         ("phase3_candidates_per_batch", 10.0, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
         ("phase3_candidates_per_batch", "10", "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
         ("phase3_candidates_per_batch", None, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", True, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", False, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
         ("phase3_batch_parallelism", 0, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
         ("phase3_batch_parallelism", -2, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
         ("phase3_batch_parallelism", 2.0, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
         ("phase3_batch_parallelism", "2", "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
         ("phase3_batch_parallelism", None, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", True, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", False, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
     ],
 )
 def test_parse_thinking_settings_rejects_non_positive_phase3_batch_controls(
