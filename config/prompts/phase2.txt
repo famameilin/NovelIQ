@@ -79,6 +79,8 @@
 - `linked_setup_id`
   - 只有 `is_new_setup=false` 时填写
   - 只能从 `<Active_Setup_Pool>` 中选一个已有 `setup_id`
+  - 一旦选择了某个已有 `setup_id`，`setup_summary`、`setup_kind`、`expected_payoff_family`
+    必须原样复用该 pool 项的值，不允许改写、同义改述或重新归类
 - `setup_status`
   - `open`: 仅用于 `is_new_setup=true`
   - `reinforced`: 当前 chunk 在强化已有 setup

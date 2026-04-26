@@ -406,7 +406,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
 
     cloud_analysis = CloudAnalysis(
         novel_id=analysis.novel_id,
-        foreshadow_rate=analysis.foreshadow_rate,
+        foreshadow_expectation=analysis.foreshadow_expectation,
         arc_scores=arc_scores_json,
         narrative_type=analysis.narrative_type,
         topic_labels=topic_labels_json,
@@ -456,10 +456,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
     if result is None:
         stmt = (
             select(CloudAnalysis)
-            .where(
-                CloudAnalysis.foreshadow_rate.isnot(None),
-                CloudAnalysis.run_id == run_id,
-            )
+            .where(CloudAnalysis.run_id == run_id)
             .order_by(CloudAnalysis.id.desc())
             .limit(1)
         )
@@ -470,7 +467,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
 
     return {
         "novel_id": result.novel_id,
-        "foreshadow_rate": result.foreshadow_rate,
+        "foreshadow_expectation": result.foreshadow_expectation,
         "arc_scores": result.arc_scores,
         "narrative_type": result.narrative_type,
         "topic_labels": result.topic_labels,

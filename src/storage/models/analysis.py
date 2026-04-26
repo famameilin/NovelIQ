@@ -51,7 +51,7 @@ class CloudAnalysis(Base):
         ForeignKey("novels.novel_id", ondelete="RESTRICT", name="cloud_analysis_novel_id_fkey"),
         nullable=True,
     )
-    foreshadow_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    foreshadow_expectation: Mapped[float | None] = mapped_column(Float, nullable=True)
     arc_scores: Mapped[str | None] = mapped_column(Text, nullable=True)
     narrative_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     topic_labels: Mapped[str | None] = mapped_column(Text, nullable=True)

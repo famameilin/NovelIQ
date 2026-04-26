@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from src.api.models.responses import DiagnosisResult
-from src.storage.repositories import AnnotationRepository, StatsRepository
+from src.storage.repositories import StatsRepository
 
 from .common import (
     _normalize_arc_scores,
@@ -27,12 +27,10 @@ def _fetch_diagnosis(
     novel_id: str,
     stats_repo: StatsRepository,
     alias_map: dict[str, str] | None = None,
-    annotation_repo: AnnotationRepository | None = None,
 ) -> DiagnosisResult | None:
     """从数据库获取诊断结果。"""
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
-    foreshadow_expectation = annotation_repo.calculate_foreshadow_expectation(run_id) if annotation_repo else None
-    if not data and foreshadow_expectation is None:
+    if not data:
         return None
 
     arc_scores_raw = _parse_json_field(data.get("arc_scores")) if data else None
@@ -57,15 +55,8 @@ def _fetch_diagnosis(
         _normalize_name_list(core_cast_raw, alias_map) if isinstance(core_cast_raw, list) else core_cast_raw
     )
 
-    foreshadow_rate = (
-        foreshadow_expectation
-        if foreshadow_expectation is not None
-        else (data.get("foreshadow_rate") if data else None)
-    )
-
     return DiagnosisResult(
-        foreshadow_expectation=foreshadow_expectation,
-        foreshadow_rate=foreshadow_rate,
+        foreshadow_expectation=data.get("foreshadow_expectation") if data else None,
         arc_scores=arc_scores_normalized,
         narrative_type=data.get("narrative_type") if data else None,
         topic_labels=topic_labels_normalized,

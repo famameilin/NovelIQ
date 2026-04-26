@@ -73,10 +73,9 @@ class _DummyCurveStatsRepo:
 
 
 class _DummyAnnotationRepo:
-    def __init__(self, alias_map, rows, foreshadow_expectation=None):
+    def __init__(self, alias_map, rows):
         self._alias_map = alias_map
         self._rows = rows
-        self._foreshadow_expectation = foreshadow_expectation
         self.session = MagicMock()
 
     def fetch_alias_map(self, run_id):
@@ -94,11 +93,6 @@ class _DummyAnnotationRepo:
     def fetch_chunk_dialogues_full(self, run_id):
         assert run_id == "run-1"
         return []
-
-    def calculate_foreshadow_expectation(self, run_id):
-        assert run_id == "run-1"
-        return self._foreshadow_expectation
-
 
 class _DummyChunkRepo:
     def __init__(self, style_rows):
@@ -175,7 +169,7 @@ def test_normalize_text_by_alias_map_rewrites_standalone_title_aliases():
 def test_fetch_diagnosis_normalizes_all_character_name_fields():
     stats_repo = _DummyStatsRepo(
         {
-            "foreshadow_rate": 0.3,
+            "foreshadow_expectation": 0.3,
             "arc_scores": '{"\\u7334\\u5b50": 6.5, "\\u7b97\\u76d8": 6.0}',
             "narrative_type": "\u6210\u957f",
             "topic_labels": '["\\u4e8c\\u5988\\u5988", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
@@ -216,40 +210,34 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     assert result.protagonist == "\u4faf\u98de\u767d"
     assert result.main_characters == ["\u4faf\u98de\u767d", "\u67f3\u5a49\u513f"]
     assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c", "\u67f3\u5a49\u513f"]
+    assert result.foreshadow_expectation == 0.3
 
 
-def test_fetch_diagnosis_preserves_legacy_foreshadow_rate_when_expectation_missing():
-    stats_repo = _DummyStatsRepo({"foreshadow_rate": 0.3})
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[], foreshadow_expectation=None)
+def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
+    stats_repo = _DummyStatsRepo(None)
 
     result = _fetch_diagnosis(
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
         alias_map={},
-        annotation_repo=annotation_repo,
     )
 
-    assert result is not None
-    assert result.foreshadow_expectation is None
-    assert result.foreshadow_rate == 0.3
+    assert result is None
 
 
-def test_fetch_diagnosis_uses_thread_ledger_when_cloud_diagnosis_missing():
-    stats_repo = _DummyStatsRepo(None)
-    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[], foreshadow_expectation=0.42)
+def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
+    stats_repo = _DummyStatsRepo({"foreshadow_expectation": 0.42})
 
     result = _fetch_diagnosis(
         run_id="run-1",
         novel_id="novel-1",
         stats_repo=stats_repo,
         alias_map={},
-        annotation_repo=annotation_repo,
     )
 
     assert result is not None
     assert result.foreshadow_expectation == 0.42
-    assert result.foreshadow_rate == 0.42
 
 
 def test_fetch_characters_marks_highest_fusion_score_as_protagonist():

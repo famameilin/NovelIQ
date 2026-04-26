@@ -471,6 +471,7 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
         "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
+        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",

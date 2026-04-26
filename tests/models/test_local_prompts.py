@@ -44,6 +44,15 @@ class TestLocalPrompts(unittest.TestCase):
         self.assertIn("当前文本里明确出现的说话动作、称呼关系、自报身份", phase3_prompt)
         self.assertIn("关系 evidence 必须落在当前文本原句上", phase4_prompt)
 
+    def test_phase2_and_diagnose_prompts_declare_new_contract_edges(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        phase2_prompt = (repo_root / "config" / "prompts" / "phase2.txt").read_text(encoding="utf-8")
+        diagnose_prompt = (repo_root / "config" / "prompts" / "diagnose.txt").read_text(encoding="utf-8")
+
+        self.assertIn("必须原样复用该 pool 项的值", phase2_prompt)
+        self.assertIn("setup thread ledger 的加权计算为准", diagnose_prompt)
+        self.assertIn("诊断阶段给出的“伏笔回收预期”粗略估计", diagnose_prompt)
+
     def test_annotation_client_initialization(self) -> None:
         """测试标注客户端能正确初始化"""
         config = TaskModelConfig(
