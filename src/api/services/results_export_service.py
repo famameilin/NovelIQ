@@ -22,6 +22,7 @@ from src.api.services.results_queries import (
     _fetch_chunk_annotations,
     _fetch_chunk_styles,
     _fetch_diagnosis,
+    _fetch_foreshadowing_threads,
     _fetch_global_stats,
     _fetch_hierarchical_relations,
     _fetch_novel_name,
@@ -94,12 +95,18 @@ def load_character_bundle(
     """
     加载角色相关数据
 
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: diagnosis 缺失判断改为复用 annotation_repo fallback，避免导出 payload 已有 diagnosis
+              但 missing_fields 仍把它标成缺失。
+
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
     """
     missing_fields: list[str] = []
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
     if not diagnosis:
         missing_fields.append("diagnosis")
 
@@ -322,6 +329,7 @@ def build_export_payload(
     global_stats: Any,
     aggregate_metrics: dict[str, Any],
     token_usage_stats: Any,
+    foreshadowing_threads: list | None = None,
     graph_summary: dict[str, Any] | None = None,
     graph_quality_report: dict[str, Any] | None = None,
     timeline_data: dict[str, Any] | None = None,
@@ -344,6 +352,9 @@ def build_export_payload(
         "diagnosis": diagnosis.model_dump(exclude_none=True) if diagnosis else None,
         "chunk_styles": [s.model_dump(exclude_none=True) for s in chunk_styles],
         "chunk_annotations": [a.model_dump(exclude_none=True) for a in chunk_annotations],
+        "foreshadowing_threads": [
+            thread.model_dump(exclude_none=True) for thread in (foreshadowing_threads or [])
+        ],
         "character_relations": [r.model_dump(exclude_none=True) for r in character_relations],
         "hierarchical_relations": [r.model_dump(exclude_none=True) for r in hierarchical_relations],
         "global_stats": global_stats.model_dump(exclude_none=True) if global_stats else None,
@@ -365,6 +376,12 @@ def fetch_all_results_data(
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-diagnosis-followup-review-findings
+    修改原因: export 的 missing_fields 是集合语义；
+    diagnosis 等字段若被多段 bundle 链路重复判缺，不应在返回值里出现重复项。
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
@@ -379,7 +396,7 @@ def fetch_all_results_data(
     )
     missing_fields.extend(char_missing)
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
     if not diagnosis:
         missing_fields.append("diagnosis")
 
@@ -392,6 +409,7 @@ def fetch_all_results_data(
         export_graph_view,
     )
     missing_fields.extend(chunk_missing)
+    foreshadowing_threads = _fetch_foreshadowing_threads(run_id, annotation_repo)
 
     (
         character_relations,
@@ -426,6 +444,10 @@ def fetch_all_results_data(
     if not timeline_data:
         missing_fields.append("timeline")
 
+    # 中文注释：missing_fields 对外语义是“缺哪些字段”，不是“缺了几次”；
+    # 这里在最终返回前按插入顺序去重，避免 diagnosis 被重复追加。
+    missing_fields = list(dict.fromkeys(missing_fields))
+
     results_data = build_export_payload(
         task_id=task_id,
         novel_id=novel_id,
@@ -436,6 +458,7 @@ def fetch_all_results_data(
         diagnosis=diagnosis,
         chunk_styles=chunk_styles,
         chunk_annotations=chunk_annotations,
+        foreshadowing_threads=foreshadowing_threads,
         character_relations=character_relations,
         hierarchical_relations=hierarchical_relations,
         global_stats=global_stats,

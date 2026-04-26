@@ -42,13 +42,13 @@ class TestCloudStub(unittest.TestCase):
         client = NullCloudModelClient()
         analysis = asyncio.run(client.diagnose({"summary": "test"}))
         payload = analysis.to_dict()
-        self.assertIn("foreshadow_rate", payload)
+        self.assertIn("foreshadow_expectation", payload)
 
     def test_diagnosis_client(self) -> None:
         content = json.dumps(
             {
                 "novel_id": "n1",
-                "foreshadow_rate": 0.5,
+                "foreshadow_expectation": 0.5,
                 "arc_scores": [0.1],
                 "narrative_type": "three-act",
                 "topic_labels": ["growth"],
@@ -67,7 +67,7 @@ class TestCloudStub(unittest.TestCase):
         analysis = asyncio.run(client.diagnose({"novel_id": "n1", "summary": "test"}))
 
         self.assertEqual(analysis.novel_id, "n1")
-        self.assertEqual(analysis.foreshadow_rate, 0.5)
+        self.assertEqual(analysis.foreshadow_expectation, 0.5)
         self.assertEqual(analysis.topic_labels, ["growth"])
 
     def test_diagnosis_failed_parse_still_records_token_usage(self) -> None:

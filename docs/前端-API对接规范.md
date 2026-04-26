@@ -156,8 +156,8 @@ export interface TopicInfo {
 // ========== 诊断数据 ==========
 
 export interface DiagnosisResult {
-  foreshadow_rate?: number;
-  arc_scores?: number[] | Record<string, number>;
+  foreshadow_expectation?: number | null;
+  arc_scores?: Record<string, number>;
   narrative_type?: string;
   topic_labels?: string[];
   diagnosis?: string;
@@ -485,7 +485,7 @@ export async function fetchTopics(
 export async function fetchDiagnosis(
   novelId: string,
   taskId: string
-): Promise<DiagnosisResult> {
+): Promise<DiagnosisResult | null> {
   const { data } = await apiClient.get(`/api/novels/${novelId}/diagnosis`, {
     params: { task_id: taskId },
   });
@@ -702,7 +702,7 @@ export function useDiagnosis(novelId: string, taskId: string) {
   │     └─▶ 填充 TaskSelector
   │
   ├─▶ useDiagnosis() ───────── fetchDiagnosis() ─── GET .../diagnosis
-  │     ├─▶ 提取 theme_color → useThemeStore.setSeedColor()  ★ 触发主题色变更
+  │     ├─▶ 若 `theme_color` 合法，则切入任务主题
   │     └─▶ DiagnosisSummaryCard 渲染
   │
   ├─▶ useQuery(narrative) ──── fetchNarrativeStructure() ─── GET .../metrics/narrative-structure
@@ -724,12 +724,14 @@ export function useDiagnosis(novelId: string, taskId: string) {
 
 ```
 diagnosis 请求返回
-  └─▶ response.theme_color 存在且合法
-        └─▶ themeStore.setSeedColor(response.theme_color)
-              └─▶ useNovelTheme() effect 触发
-                    └─▶ generateThemePalette() 生成色板
-                          └─▶ 写入 CSS 变量到 :root
-                                └─▶ 全页面颜色自动更新
+  ├─▶ response.theme_color 存在且合法
+  │     └─▶ themeStore.setSeedColor(response.theme_color)
+  │           └─▶ useNovelTheme() effect 触发
+  │                 └─▶ generateThemePalette() 生成色板
+  │                       └─▶ 写入 CSS 变量到 :root
+  │                             └─▶ 全页面颜色自动更新
+  └─▶ response.theme_color 缺失 / 非法
+        └─▶ 保持 neutral palette，不切到默认紫色任务主题
 ```
 
 ### 5.3 CurvesPage 数据流

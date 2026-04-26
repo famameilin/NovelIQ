@@ -34,15 +34,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_db_session, get_metrics_service, get_novel_service, resolve_run_id
+from src.api.dependencies import (
+    get_db_session,
+    get_metrics_service,
+    get_novel_service,
+    resolve_run_id,
+)
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
-from src.api.models.responses import ChunkAnnotation as ChunkAnnotationResponse
-from src.api.models.responses import ResultsWriteResponse
+from src.api.models.responses import (
+    ChunkAnnotation as ChunkAnnotationResponse,
+)
+from src.api.models.responses import (
+    DiagnosisResult,
+    ForeshadowingThreadResponse,
+    ResultsWriteResponse,
+)
 from src.api.routes.results_fetchers import (
     _fetch_characters,
     _fetch_chunk_annotations,
     _fetch_chunk_curves,
     _fetch_diagnosis,
+    _fetch_foreshadowing_threads,
     _fetch_graph_events_page,
     _fetch_graph_snapshot,
     _fetch_topics,
@@ -287,7 +299,7 @@ async def get_characters(
     stats_repo = StatsRepository(session)
 
     alias_map = annotation_repo.fetch_alias_map(run_id)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
 
     arc_scores: dict[str, float] | None = None
     main_characters: list[str] | None = None
@@ -312,18 +324,40 @@ async def get_topics(
     return _fetch_topics(run_id, chunk_repo, alias_map)
 
 
-@router.get("/{novel_id}/diagnosis")
+@router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult | None)
 async def get_diagnosis(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> Any:
-    """获取云端诊断数据"""
+) -> DiagnosisResult | None:
+    """获取诊断数据"""
     _require_run_for_novel(session, novel_id, run_id)
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
-    return _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    return _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+
+
+@router.get(
+    "/{novel_id}/foreshadowing-threads",
+    response_model=list[ForeshadowingThreadResponse],
+)
+async def get_foreshadowing_threads(
+    novel_id: str,
+    run_id: Annotated[str, Depends(resolve_run_id)],
+    session: Annotated[Session, Depends(get_db_session)],
+) -> list[ForeshadowingThreadResponse]:
+    """
+    获取跨 chunk 的 setup thread 台账。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-setup-pool
+    说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用。
+    """
+    _require_run_for_novel(session, novel_id, run_id)
+    annotation_repo = AnnotationRepository(session)
+    return _fetch_foreshadowing_threads(run_id, annotation_repo)
 
 
 @router.get("/{novel_id}/graph")

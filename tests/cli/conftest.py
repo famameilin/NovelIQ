@@ -32,7 +32,7 @@ class FakeClient(CloudModelClient):
     async def diagnose(self, payload: dict) -> CloudAnalysis:
         return CloudAnalysis(
             novel_id=payload.get("novel_id"),
-            foreshadow_rate=0.1,
+            foreshadow_expectation=0.1,
             arc_scores={"角色0": 8.5, "角色1": 7.0},
             narrative_type="三幕",
             topic_labels=["成长"],

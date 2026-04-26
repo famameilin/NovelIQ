@@ -150,3 +150,39 @@ async def test_recover_pending_tasks_schedules_pending_and_cancels_requested(db_
     assert refreshed_cancelled is not None
     assert refreshed_cancelled["status"] == "cancelled"
     assert refreshed_cancelled["cancel_requested"] is False
+
+
+@pytest.mark.asyncio
+async def test_recover_pending_tasks_continues_after_unexpected_resume_failure(db_session) -> None:
+    """
+    创建时间: 2026-04-26
+    创建者: Codex
+    任务: fix-diagnosis-review-findings
+    说明: startup recovery 必须按任务级隔离异常；
+    单个 pending 恢复时报错时，后续 pending 仍应继续恢复。
+    """
+
+    _insert_novel(db_session, "svcrcv02")
+    run_repo = RunRepository(db_session)
+    first_run_id = run_repo.create_run(novel_id="svcrcv02")
+    failing_run_id = run_repo.create_run(novel_id="svcrcv02")
+    third_run_id = run_repo.create_run(novel_id="svcrcv02")
+    service = _make_service(db_session)
+
+    async def _resume_task(_novel_id: str, task_id: str) -> str:
+        if task_id == failing_run_id[:8]:
+            raise RuntimeError("resume boom")
+        return task_id
+
+    service.resume_task = AsyncMock(side_effect=_resume_task)
+
+    pending_runs = [run_repo.get_run(first_run_id), run_repo.get_run(failing_run_id), run_repo.get_run(third_run_id)]
+    pending_runs = [run for run in pending_runs if run is not None]
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(RunRepository, "get_pending_tasks", lambda self: pending_runs)
+        scheduled_count, cancelled_count = await service.recover_pending_tasks()
+
+    assert scheduled_count == 2
+    assert cancelled_count == 0
+    assert service.resume_task.await_count == 3

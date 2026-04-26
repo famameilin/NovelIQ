@@ -343,7 +343,7 @@ class TestStageCompleteChecks:
         stats_repo = StatsRepository(db_session)
         analysis = CloudAnalysis(
             novel_id=novel_id,
-            foreshadow_rate=0.5,
+            foreshadow_expectation=0.5,
             arc_scores=[0.2, 0.4],
             narrative_type="三幕",
             topic_labels=["成长"],

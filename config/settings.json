@@ -221,7 +221,8 @@
     "annotation_fallback_enabled": true,
     "multi_phase_annotation": {
       "parallel": false,
-      "include_phase2_evidence": false
+      "include_phase2_evidence": false,
+      "active_setup_pool_limit": 30
     },
     "progress": {
       "preprocess": { "start": 0, "end": 10 },

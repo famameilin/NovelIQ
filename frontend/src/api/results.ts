@@ -5,6 +5,7 @@ import type {
   ChunkCurvePoint,
   Topic,
   DiagnosisResult,
+  ForeshadowingThread,
   GraphData,
   GraphEventsPageResponse,
   TimelineResponse,
@@ -85,9 +86,20 @@ export async function getTopics(
 export async function getDiagnosis(
   novelId: string,
   taskId: string
-): Promise<DiagnosisResult> {
-  const { data } = await apiClient.get<DiagnosisResult>(
+): Promise<DiagnosisResult | null> {
+  const { data } = await apiClient.get<DiagnosisResult | null>(
     `/api/novels/${novelId}/diagnosis`,
+    { params: { task_id: taskId } }
+  );
+  return data;
+}
+
+export async function getForeshadowingThreads(
+  novelId: string,
+  taskId: string
+): Promise<ForeshadowingThread[]> {
+  const { data } = await apiClient.get<ForeshadowingThread[]>(
+    `/api/novels/${novelId}/foreshadowing-threads`,
     { params: { task_id: taskId } }
   );
   return data;
