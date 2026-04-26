@@ -299,7 +299,7 @@ async def get_characters(
     stats_repo = StatsRepository(session)
 
     alias_map = annotation_repo.fetch_alias_map(run_id)
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
 
     arc_scores: dict[str, float] | None = None
     main_characters: list[str] | None = None
@@ -335,7 +335,7 @@ async def get_diagnosis(
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
-    return _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    return _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
 
 
 @router.get(
