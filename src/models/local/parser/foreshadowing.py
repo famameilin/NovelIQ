@@ -251,9 +251,22 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     修改时间: 2026-04-26
     任务: phase2-strong-foreshadowing
     修改内容: 伏笔类型枚举改为当前中文合同，不再兼容历史 causal/thematic 残留。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 弱阳性结果在解析阶段直接降级为合法 negative，避免热路径把
+    `has_foreshadowing=true && is_strong_setup=false` 当成结构化异常反复重试。
     """
-    has_foreshadowing = data.get("has_foreshadowing", False)
-    is_strong_setup = bool(data.get("is_strong_setup", False)) if has_foreshadowing else False
+    raw_has_foreshadowing = bool(data.get("has_foreshadowing", False))
+    raw_is_strong_setup = bool(data.get("is_strong_setup", False))
+    degrade_to_negative = raw_has_foreshadowing and not raw_is_strong_setup
+
+    # 中文注释：弱阳性是当前 Phase2 最常见的脏输出之一。
+    # 这里先把它归一化成 negative，再交给 validator/projector 做后续筛除，
+    # 避免 schema 校验把“应丢弃的边缘样本”升级成整次 phase 失败。
+    has_foreshadowing = raw_has_foreshadowing and not degrade_to_negative
+    is_strong_setup = raw_is_strong_setup if has_foreshadowing else False
 
     foreshadowing_type_raw = data.get("foreshadowing_type")
     if has_foreshadowing and foreshadowing_type_raw in _VALID_FORESHADOWING_TYPES:
@@ -269,6 +282,8 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
 
     confidence_raw = data.get("confidence", "high")
     confidence: ForeshadowingConfidence = confidence_raw if confidence_raw in _VALID_CONFIDENCES else "low"
+    if degrade_to_negative:
+        confidence = "low"
 
     return ForeshadowingResult(
         has_foreshadowing=has_foreshadowing,

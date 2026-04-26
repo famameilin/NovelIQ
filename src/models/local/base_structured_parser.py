@@ -16,7 +16,9 @@ from loguru import logger
 from pydantic import BaseModel
 
 from src.models.local.parser import try_parse_json
+from src.models.local.parser.foreshadowing import parse_foreshadowing_result
 from src.models.local.parser.thinking import extract_thinking_unified
+from src.models.local.schema import ForeshadowingResult
 
 
 def parse_structured_response[T: BaseModel](response: Any, response_model: type[T]) -> T:
@@ -42,6 +44,11 @@ def parse_structured_response[T: BaseModel](response: Any, response_model: type[
         raise ValueError(f"Failed to parse JSON from response: {content[:200]}")
 
     try:
+        if response_model is ForeshadowingResult:
+            # 中文注释：Phase2 需要先经过专用归一化，
+            # 把“弱阳性但非强 setup”的热路径脏输出降级成合法 negative，
+            # 避免通用 model_validate 直接抛错后触发整轮重试。
+            return parse_foreshadowing_result(json_data)  # type: ignore[return-value]
         return response_model.model_validate(json_data)
     except Exception as exc:
         logger.error(
