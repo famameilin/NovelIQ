@@ -140,6 +140,20 @@ class TestForeshadowingParsing(unittest.TestCase):
         result = parse_foreshadowing_result(data)
         self.assertEqual(result.confidence, "low")
 
+    def test_parse_foreshadowing_missing_confidence_defaults_to_low(self) -> None:
+        data = {
+            "has_foreshadowing": True,
+            "is_strong_setup": True,
+            "foreshadowing_type": "物件",
+            "setup_kind": "异常物件",
+            "anchor_text": "那枚玉佩在夜里自行发热。",
+            "anchor_reason": "具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+            "why_unresolved_now": "当前还没有解释它为何会发热。",
+            "expected_payoff_family": "能力触发",
+        }
+        result = parse_foreshadowing_result(data)
+        self.assertEqual(result.confidence, "low")
+
     def test_parse_foreshadowing_string_false_bools_stay_negative(self) -> None:
         """测试字符串 false 不会再被误判成强伏笔正例。"""
         data = {
