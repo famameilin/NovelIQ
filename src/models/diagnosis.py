@@ -325,15 +325,29 @@ class DiagnosisClient(BaseModelClient):
         任务: remove-foreshadow-rate-contract
         新建原因: `foreshadow_expectation` 现在以 payload 中的 setup-ledger 真相源为准；
         即便 LLM 返回了别的值，这里也要在落库前强制对齐，避免同一次 diagnosis 出现双真相。
+
+        修改时间: 2026-04-26
+        修改者: Codex
+        任务: fix-diagnosis-review-findings
+        修改原因: 当 setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
+        此时也必须覆写掉 LLM 猜测值，继续保持 setup ledger 单一真相源。
         """
 
         updates: dict[str, Any] = {}
         if isinstance(novel_id, str) and result.novel_id != novel_id:
             updates["novel_id"] = novel_id
 
-        payload_expectation = payload.get("foreshadow_expectation")
-        if isinstance(payload_expectation, (int, float)):
-            updates["foreshadow_expectation"] = float(payload_expectation)
+        if "foreshadow_expectation" in payload:
+            payload_expectation = payload.get("foreshadow_expectation")
+            if payload_expectation is None:
+                updates["foreshadow_expectation"] = None
+            elif isinstance(payload_expectation, (int, float)) and not isinstance(payload_expectation, bool):
+                updates["foreshadow_expectation"] = float(payload_expectation)
+            else:
+                raise TypeError(
+                    "payload.foreshadow_expectation must be float or None, "
+                    f"got {type(payload_expectation).__name__}"
+                )
 
         if updates:
             return result.model_copy(update=updates)
