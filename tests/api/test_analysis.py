@@ -25,6 +25,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.exceptions import NovelNotFoundError
+from src.api.main import app
 from src.api.models.requests import ReanalyzeRequest
 from src.api.routes import analysis as analysis_mod
 from src.api.services import task_application_service as task_application_mod
@@ -72,6 +73,25 @@ class TestAnalysis:
         assert response.status_code == 400
         data = response.json()
         assert "task_id" in data["detail"]
+
+    def test_app_shutdown_does_not_cancel_runtime_task_manager(self) -> None:
+        """测试应用 shutdown 只回收 SSE 清理协程，不再把运行中分析收口成用户取消。"""
+        fake_task_manager = MagicMock()
+        fake_task_manager.shutdown = AsyncMock()
+
+        from src.api.services.event_manager import event_manager
+
+        with (
+            patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
+            patch("src.api.main._resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
+            patch("src.api.dependencies.get_task_manager", return_value=fake_task_manager),
+            patch.object(event_manager, "shutdown", new=AsyncMock()) as mocked_event_shutdown,
+            TestClient(app) as _client,
+        ):
+            pass
+
+        fake_task_manager.shutdown.assert_not_called()
+        mocked_event_shutdown.assert_awaited_once()
 
     def test_get_task_status_not_found(self, api_client: TestClient):
         """测试单任务状态接口在任务不存在时返回 404"""

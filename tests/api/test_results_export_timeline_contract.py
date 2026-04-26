@@ -192,6 +192,54 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
+def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fallback_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    characters = [SimpleNamespace(name="沈砚")]
+    annotation_repo = MagicMock()
+
+    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _alias_map, provided_annotation_repo=None):
+        if provided_annotation_repo is annotation_repo:
+            return diagnosis
+        return None
+
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        _fake_fetch_diagnosis,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_characters",
+        lambda *_args, **_kwargs: characters,
+    )
+
+    export_graph_view = ExportGraphAuthorityView(
+        canonical_entities=[
+            CanonicalEntity(name="沈砚"),
+        ]
+    )
+
+    (
+        _fetched_characters,
+        arc_scores,
+        main_characters,
+        valid_character_names,
+        missing_fields,
+    ) = load_character_bundle(
+        run_id="run-export-bundle",
+        novel_id="novel-1",
+        stats_repo=MagicMock(),
+        annotation_repo=annotation_repo,
+        alias_map={},
+        export_graph_view=export_graph_view,
+    )
+
+    assert arc_scores == {"沈砚": 8.0}
+    assert main_characters == ["沈砚"]
+    assert valid_character_names == {"沈砚"}
+    assert missing_fields == []
+
+
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
