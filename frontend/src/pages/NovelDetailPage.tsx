@@ -411,7 +411,9 @@ export function NovelDetailPage() {
             )}
 
             <ScoreOverviewCard
-              foreshadowExpectation={diagnosisQuery.data?.foreshadow_expectation}
+              foreshadowExpectation={
+                diagnosisQuery.data?.foreshadow_expectation ?? diagnosisQuery.data?.foreshadow_rate
+              }
               powerStance={diagnosisQuery.data?.power_stance_score}
               civilianDignity={diagnosisQuery.data?.common_people_dignity}
               culturalDepth={diagnosisQuery.data?.cultural_depth_score}
