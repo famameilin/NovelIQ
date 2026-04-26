@@ -710,6 +710,7 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 **响应示例**:
 ```json
 {
+  "foreshadow_expectation": 0.6,
   "foreshadow_rate": 0.6,
   "arc_scores": {"主角A": 8.0, "主角B": 7.0},
   "narrative_type": "寓言",
@@ -733,7 +734,8 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 **字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| foreshadow_rate | float | 伏笔兑现率（0-1） |
+| foreshadow_expectation | float | 伏笔回收预期（0-1，基于 Phase2 强 setup thread 的近似估计） |
+| foreshadow_rate | float | 兼容字段：当前与 foreshadow_expectation 同义 |
 | arc_scores | dict[str, float] | 各角色弧线得分 |
 | narrative_type | str | 叙事类型 |
 | topic_labels | list[str] | 主题标签 |
