@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from src.models.local.schema import ForeshadowingResult
 from src.storage.models import ForeshadowingThread
-from src.storage.repositories import RunRepository
+from src.storage.repositories import AnnotationRepository, RunRepository
 from src.storage.repositories.annotation.foreshadowing_threads import (
     ACTIVE_SETUP_POOL_LIMIT,
     _archive_overflow_threads,
@@ -217,3 +217,41 @@ def test_sync_foreshadowing_thread_rejects_linked_setup_payload_mismatch(db_sess
             chunk_id=6,
             result=result,
         )
+
+
+def test_annotation_repository_delegates_prompt_pool_limit_as_runtime_none(db_session) -> None:
+    """
+    创建时间: 2026-04-26
+    创建者: Codex
+    任务: fix-diagnosis-followup-findings
+    说明: AnnotationRepository wrapper 不应再把 active setup pool limit 固化为模块常量；
+    未显式传 limit 时，必须把 None 透传给底层 helper，由其运行时读取 settings。
+    """
+
+    captured: dict[str, object] = {}
+
+    def _fake_fetch(session, run_id: str, *, max_chunk_id: int, limit: int | None = None):
+        captured["session"] = session
+        captured["run_id"] = run_id
+        captured["max_chunk_id"] = max_chunk_id
+        captured["limit"] = limit
+        return []
+
+    repository = AnnotationRepository(db_session)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "src.storage.repositories.annotation.foreshadowing_threads.fetch_active_foreshadowing_threads_for_prompt",
+        _fake_fetch,
+    )
+    try:
+        result = repository.fetch_active_foreshadowing_threads_for_prompt("run-1", max_chunk_id=9)
+    finally:
+        monkeypatch.undo()
+
+    assert result == []
+    assert captured == {
+        "session": db_session,
+        "run_id": "run-1",
+        "max_chunk_id": 9,
+        "limit": None,
+    }
