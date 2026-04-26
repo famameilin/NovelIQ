@@ -25,6 +25,13 @@ import { AlertCircle, GitBranch, Tags } from "lucide-react";
 
 const STALE_TIME = 5 * 60 * 1000;
 
+/**
+ * 修改时间: 2026-04-26
+ * 修改者: Codex
+ * 任务: fix-diagnosis-review-findings
+ * 修改原因: diagnosis 页现在会同时展示 thread ledger，
+ * 需要把状态标签集中到一个 helper，避免页面分支和展示语义漂移。
+ */
 function getThreadStatusMeta(status: string) {
   switch (status) {
     case "likely_paid_off":
@@ -39,9 +46,57 @@ function getThreadStatusMeta(status: string) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Skeleton                                                          */
+/*  State Cards                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 创建时间: 2026-04-26
+ * 创建者: Codex
+ * 任务: fix-diagnosis-review-findings
+ * 说明: 诊断页在 `200 null` 场景下需要稳定空态，避免用户看到空白成功页。
+ */
+function EmptyDiagnosisState() {
+  return (
+    <DashboardCardShell
+      title="诊断报告暂未生成"
+      icon={<AlertCircle className="h-4 w-4" />}
+      accent="chart-2"
+      className="min-h-[240px]"
+      bodyClassName="items-center justify-center gap-3 text-center"
+    >
+      <p className="text-sm text-text-muted">当前任务暂时还没有可展示的诊断结果。</p>
+    </DashboardCardShell>
+  );
+}
+
+/**
+ * 创建时间: 2026-04-26
+ * 创建者: Codex
+ * 任务: fix-diagnosis-review-findings
+ * 说明: setup thread 台账是独立查询，失败时必须显式告警，而不是静默吞掉。
+ */
+function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
+  return (
+    <DashboardCardShell
+      title="Setup 台账加载失败"
+      icon={<AlertCircle className="h-4 w-4" />}
+      accent="chart-5"
+      bodyClassName="items-center justify-center gap-3 text-center"
+    >
+      <p className="text-sm text-text-muted">伏笔 setup 台账暂时无法读取，请稍后重试。</p>
+      <Button variant="outline" size="sm" onClick={props.onRetry}>
+        重试台账
+      </Button>
+    </DashboardCardShell>
+  );
+}
+
+/**
+ * 修改时间: 2026-04-26
+ * 修改者: Codex
+ * 任务: fix-diagnosis-review-findings
+ * 修改原因: 诊断页新增空态与台账错误分支后，仍保留独立 skeleton 以避免首屏闪烁。
+ */
 function SkeletonGrid() {
   return (
     <div className="space-y-6">
@@ -130,9 +185,21 @@ export function DiagnosisPage() {
   });
 
   const isLoading = enabled && diagnosisQuery.isLoading;
-  const isError = enabled && diagnosisQuery.isError;
+  const isDiagnosisError = enabled && diagnosisQuery.isError;
+  const isThreadsError = enabled && foreshadowingThreadsQuery.isError;
+  const hasNullDiagnosis =
+    enabled &&
+    diagnosisQuery.isFetched &&
+    !diagnosisQuery.isLoading &&
+    !diagnosisQuery.isError &&
+    diagnosisQuery.data === null;
 
-  const retry = () => diagnosisQuery.refetch();
+  const retryDiagnosis = () => {
+    void diagnosisQuery.refetch();
+  };
+  const retryThreads = () => {
+    void foreshadowingThreadsQuery.refetch();
+  };
 
   const { data: diagnosis } = diagnosisQuery;
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
@@ -152,7 +219,7 @@ export function DiagnosisPage() {
       {isLoading && <SkeletonGrid />}
 
       {/* Error state */}
-      {isError && !isLoading && (
+      {isDiagnosisError && !isLoading && (
         <DashboardCardShell
           title="诊断报告加载失败"
           icon={<AlertCircle className="h-4 w-4" />}
@@ -161,11 +228,14 @@ export function DiagnosisPage() {
           bodyClassName="items-center justify-center gap-3 text-center"
         >
           <p className="text-sm text-text-muted">当前任务的诊断数据暂时无法读取。</p>
-          <Button variant="outline" size="sm" onClick={retry}>
+          <Button variant="outline" size="sm" onClick={retryDiagnosis}>
             重试
           </Button>
         </DashboardCardShell>
       )}
+
+      {/* Empty state */}
+      {hasNullDiagnosis && !isLoading && <EmptyDiagnosisState />}
 
       {/* Main content */}
       {diagnosis && !isLoading && (
@@ -208,6 +278,8 @@ export function DiagnosisPage() {
               reason={diagnosis.cultural_depth_reason}
             />
           </div>
+
+          {isThreadsError && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
 
           {foreshadowingThreads.length > 0 && (
             <DashboardCardShell
