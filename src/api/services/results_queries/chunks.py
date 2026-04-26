@@ -102,8 +102,18 @@ def _fetch_chunk_annotations(
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
+    require_graph_projection: bool = True,
 ) -> list:
-    """获取分块标注数据。"""
+    """
+    获取分块标注数据。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 新增 require_graph_projection 开关，让 `chunk-annotations`
+    这类只关心 Phase2 结果的 consumer 可以在 graph projection 未完成时降级返回，
+    同时保留 export 链路对 relation events 完整性的严格要求。
+    """
     annotations_raw = annotation_repo.fetch_chunk_annotations_full(run_id)
     characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
@@ -113,7 +123,7 @@ def _fetch_chunk_annotations(
             run_id
         )
 
-    if not export_graph_view.relation_events:
+    if require_graph_projection and not export_graph_view.relation_events:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
             raise RuntimeError(
@@ -200,7 +210,9 @@ def _fetch_chunk_annotations(
                 pivot_moment=bool(row.pivot_moment) if row.pivot_moment is not None else None,
                 cliffhanger=bool(row.cliffhanger) if row.cliffhanger is not None else None,
                 has_foreshadowing=bool(row.has_foreshadowing) if row.has_foreshadowing is not None else None,
-                is_strong_setup=bool(row.is_strong_setup) if getattr(row, "is_strong_setup", None) is not None else None,
+                is_strong_setup=(
+                    bool(row.is_strong_setup) if getattr(row, "is_strong_setup", None) is not None else None
+                ),
                 foreshadowing_type=str(row.foreshadowing_type) if row.foreshadowing_type else None,
                 setup_kind=str(row.setup_kind) if getattr(row, "setup_kind", None) else None,
                 foreshadowing_desc=str(row.foreshadowing_desc) if row.foreshadowing_desc else None,

@@ -77,7 +77,7 @@ def build_phase2_messages(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     evidence_bundle=None,
-    include_evidence_blocks: bool = True,
+    include_evidence_blocks: bool = False,
 ) -> list[dict]:
     """
     构建Phase2消息
@@ -89,7 +89,8 @@ def build_phase2_messages(
     修改时间: 2026-04-26
     修改者: Codex
     任务: phase2-strong-foreshadowing
-    修改内容: 与 Phase2 主链保持一致，移除 next_chunk_text 残留参数并支持 evidence ablation 开关。
+    修改内容: 与 Phase2 主链保持一致，默认走 current-text-only 输入边界；
+    共享 evidence 仅在显式 opt-in 时注入。
     """
     return _build_foreshadowing_messages(
         text=text,
