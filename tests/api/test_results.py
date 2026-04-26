@@ -125,7 +125,5 @@ class TestResults:
         properties = diagnosis_schema["properties"]
 
         assert "foreshadow_expectation" in properties
-        assert "foreshadow_rate" in properties
         assert "theme_color" in properties
         assert "setup thread ledger" in properties["foreshadow_expectation"]["description"]
-        assert "旧 run" in properties["foreshadow_rate"]["description"]

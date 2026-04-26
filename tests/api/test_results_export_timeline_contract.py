@@ -199,10 +199,8 @@ def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fall
     characters = [SimpleNamespace(name="沈砚")]
     annotation_repo = MagicMock()
 
-    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _alias_map, provided_annotation_repo=None):
-        if provided_annotation_repo is annotation_repo:
-            return diagnosis
-        return None
+    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _alias_map):
+        return diagnosis
 
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_diagnosis",

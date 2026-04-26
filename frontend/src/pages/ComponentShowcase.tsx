@@ -223,7 +223,7 @@ export function ComponentShowcase() {
             format="percent"
             icon={<Zap className="h-5 w-5" />}
             accent="chart-2"
-            description="基于 Phase2 强 setup thread 状态估算的近似回收预期"
+            description="基于 setup thread ledger 加权估算的近似回收预期"
           />
           <MetricCard
             label="文化深度"
@@ -596,7 +596,7 @@ export function ComponentShowcase() {
               </Badge>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              <p>基于 Phase2 强 setup thread 状态估算的近似回收预期，60% 以上表示关键线索较可能得到较充分回收。</p>
+              <p>基于 setup thread ledger 加权估算的近似回收预期，60% 以上表示关键线索较可能得到较充分回收。</p>
             </TooltipContent>
           </Tooltip>
         </div>
