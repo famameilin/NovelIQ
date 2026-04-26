@@ -172,7 +172,7 @@ class TestCloudDiagnose:
                 pivot_moment=(i in [1, 2]),
                 cliffhanger=(i == chunk_count - 1),
                 has_foreshadowing=(i == 0),
-                foreshadowing_type="causal" if i == 0 else None,
+                foreshadowing_type="场景" if i == 0 else None,
                 foreshadowing_desc="测试伏笔" if i == 0 else "",
                 characters=[
                     CharacterSnapshot(

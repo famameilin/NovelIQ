@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
 EmotionScore = EmotionalValence
 EventType = Literal["冲突", "铺垫", "转折"]
-ForeshadowingType = Literal["causal", "thematic"]
+ForeshadowingType = Literal["物件", "对话", "场景", "人物行为", "其他"]
 ForeshadowingConfidence = Literal["high", "medium", "low"]
 DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
@@ -164,6 +164,10 @@ class ForeshadowingResult(BaseModel):
     修改者: TraeAI
     任务: 迁移数据模型至 Pydantic
     修改内容: 从 dataclass 迁移至 Pydantic BaseModel
+
+    修改时间: 2026-04-26
+    任务: phase2-strong-foreshadowing
+    修改内容: 伏笔类型与置信度字段收紧为正式 Literal 合同，避免继续接受任意字符串。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -171,10 +175,10 @@ class ForeshadowingResult(BaseModel):
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是单个 chunk 的存在性判断，不表示全书伏笔兑现程度。"
     )
-    foreshadowing_type: str | None = None
+    foreshadowing_type: ForeshadowingType | None = None
     anchor_text: str = ""
     anchor_reason: str = ""
-    confidence: str
+    confidence: ForeshadowingConfidence
 
     def to_dict(self) -> dict:
         return {
@@ -527,7 +531,7 @@ class ChunkAnnotation(BaseModel):
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
     )
-    foreshadowing_type: str | None = None
+    foreshadowing_type: ForeshadowingType | None = None
     foreshadowing_desc: str = ""
     characters: list[CharacterSnapshot] = Field(default_factory=list)
     dialogues: list[DialogueSnapshot] = Field(default_factory=list)
