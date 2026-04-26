@@ -58,8 +58,13 @@ class TestForeshadowingMerge(unittest.TestCase):
             setup_kind="异常物件",
             anchor_text="玉佩背面刻着归字",
             anchor_reason="暗示后文身份揭示",
+            setup_summary="玉佩上的归字暗示其真实身份线索仍待揭示",
             why_unresolved_now="当前还没有解释归字与身份之间的关系。",
             expected_payoff_family="身份揭示",
+            payoff_likelihood="high",
+            is_new_setup=True,
+            linked_setup_id=None,
+            setup_status="open",
             confidence="high",
         )
 
@@ -130,8 +135,13 @@ class TestForeshadowingMerge(unittest.TestCase):
             setup_kind="因果引线",
             anchor_text="测试锚点",
             anchor_reason="测试原因",
+            setup_summary="测试锚点对应的后续因果仍待揭示",
             why_unresolved_now="当前还没有解释这句测试锚点会引出什么后果。",
             expected_payoff_family="其他",
+            payoff_likelihood="medium",
+            is_new_setup=True,
+            linked_setup_id=None,
+            setup_status="open",
             confidence="medium",
         )
 
