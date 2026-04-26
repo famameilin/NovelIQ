@@ -211,7 +211,7 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         self,
         mock_settings: MagicMock,
     ) -> None:
-        """即使文本形状可命中 fastpath，显式请求 identity clue 时仍应保留 LLM 元数据。"""
+        """即使文本形状可命中 fastpath，主链仍应保留 fastpath speaker 并补齐 LLM 元数据。"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
@@ -232,7 +232,7 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
                     index=1,
                     content="我叫白芷。",
                     is_dialogue=True,
-                    speaker=["张三"],
+                    speaker=["李四"],
                     identity_clue="张三自称名为白芷",
                 ),
             ],
@@ -243,7 +243,7 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         result = await compute_dialogue_lengths_with_llm(
             mock_annotation_client,
             "张三说：“我叫白芷。”",
-            known_characters=["张三"],
+            known_characters=["张三", "李四"],
             return_identity_clues=True,
         )
 

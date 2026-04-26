@@ -722,12 +722,12 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
 
     @patch("src.models.local.annotation.phase3.execute_phase_call", new_callable=AsyncMock)
     @patch("src.models.local.annotation.phase3.settings")
-    async def test_metadata_request_disables_fastpath_short_circuit(
+    async def test_metadata_request_keeps_fastpath_speaker_and_metadata(
         self,
         mock_settings: MagicMock,
         mock_execute_phase_call: AsyncMock,
     ) -> None:
-        """请求 tone / identity clue 时，不应让 fastpath 直接短路掉 LLM 元数据提取。"""
+        """请求 metadata 时，fastpath 仍应保留 speaker 权威，并通过轻量 batch 补充元数据。"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 10
@@ -736,15 +736,18 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
 
         async def _fake_execute_phase_call(
             _client: _Phase3ParallelTestClient,
-            _spec: object,
+            spec: object,
         ) -> SimpleNamespace:
+            user_prompt = spec.messages[1]["content"]
+            self.assertIn("张三", user_prompt)
+            self.assertNotIn("张三、李四", user_prompt)
             return SimpleNamespace(
                 parsed=DialogueAttributionResult(
                     dialogues=[
                         DialogueRecordSchema(
                             index=1,
                             is_dialogue=True,
-                            speaker=["张三"],
+                            speaker=["李四"],
                             tone="温和",
                             is_inner_monologue=False,
                             identity_clue="张三自称名为白芷",
@@ -759,12 +762,13 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
             mock_client,
             "张三说：“我叫白芷。”",
             [QuoteCandidate(index=1, content="我叫白芷。")],
-            known_characters=["张三"],
+            known_characters=["张三", "李四"],
             require_tones=True,
             require_identity_clues=True,
         )
 
         self.assertEqual(mock_execute_phase_call.await_count, 1)
+        self.assertEqual(result[0].speaker, ["张三"])
         self.assertEqual(result[0].tone, "温和")
         self.assertEqual(result[0].identity_clue, "张三自称名为白芷")
 
@@ -863,7 +867,7 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
     async def test_fallback_client_used_after_primary_retries(
         self,
         mock_settings: MagicMock,
-        _mock_record_model_interaction: MagicMock,
+        mock_record_model_interaction: MagicMock,
     ) -> None:
         """Phase3 主客户端失败后会切到 fallback_client。"""
         mock_settings.prompts.phase3.system = "system"
@@ -921,6 +925,7 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(primary_calls, 3)
         self.assertEqual(fallback_calls, 1)
         self.assertEqual(result[0].speaker, ["张三"])
+        self.assertEqual(mock_record_model_interaction.call_args.kwargs["attempt_number"], 4)
 
     @patch("src.models.local.annotation.phase3.settings")
     async def test_fallback_client_failure_raises_dialogue_attribution_error(self, mock_settings: MagicMock) -> None:
