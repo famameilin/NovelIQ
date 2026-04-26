@@ -74,8 +74,13 @@ def create_mock_foreshadowing() -> ForeshadowingResult:
         setup_kind="其他",
         anchor_text="测试锚点文本",
         anchor_reason="测试锚点原因",
+        setup_summary="测试锚点对应的 setup thread 仍待后续兑现",
         why_unresolved_now="当前只是给出测试锚点，还没有兑现这个测试钩子。",
         expected_payoff_family="其他",
+        payoff_likelihood="high",
+        is_new_setup=True,
+        linked_setup_id=None,
+        setup_status="open",
         confidence="high",
     )
 
