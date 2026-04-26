@@ -668,7 +668,7 @@ class ChunkAnnotation(BaseModel):
     cliffhanger: bool
     chunk_summary: str = Field(default="", description="核心事件摘要，30-50字，用于 Timeline 展示。不参与消歧证据链。")
     has_foreshadowing: bool = Field(
-        description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
+        description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_expectation。"
     )
     is_strong_setup: bool = False
     foreshadowing_type: ForeshadowingType | None = None
