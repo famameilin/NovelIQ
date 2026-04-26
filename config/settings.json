@@ -6,11 +6,7 @@
       "api_key": null,
       "timeout_s": null,
       "temperature": 0.7,
-      "top_p": 0.8,
-      "top_k": 20,
-      "min_p": 0.0,
-      "presence_penalty": 1.5,
-      "repetition_penalty": 1.0
+      "top_p": 0.8
     },
     "annotation_fallback": {
       "base_url": null,
@@ -18,11 +14,7 @@
       "api_key": null,
       "timeout_s": null,
       "temperature": 0.7,
-      "top_p": 0.8,
-      "top_k": 20,
-      "min_p": 0.0,
-      "presence_penalty": 1.5,
-      "repetition_penalty": 1.0
+      "top_p": 0.8
     },
     "incremental_disambig": {
       "base_url": null,
@@ -30,9 +22,7 @@
       "api_key": null,
       "timeout_s": null,
       "temperature": 1.0,
-      "top_p": 0.95,
-      "top_k": 20,
-      "presence_penalty": 1.5
+      "top_p": 0.95
     },
     "mention_extraction": {
       "base_url": null,
@@ -40,9 +30,7 @@
       "api_key": null,
       "timeout_s": null,
       "temperature": 0.2,
-      "top_p": 0.8,
-      "top_k": 20,
-      "presence_penalty": 0.0
+      "top_p": 0.8
     },
     "semantic_chunking": {
       "base_url": null,
@@ -58,9 +46,7 @@
       "api_key": null,
       "timeout_s": null,
       "temperature": 1.0,
-      "top_p": 0.95,
-      "top_k": 20,
-      "presence_penalty": 1.5
+      "top_p": 0.95
     },
     "level3_rerank": {
       "base_url": null,
@@ -68,9 +54,7 @@
       "api_key": null,
       "timeout_s": null,
       "temperature": 0.0,
-      "top_p": 0.8,
-      "top_k": 20,
-      "presence_penalty": 0.0
+      "top_p": 0.8
     },
     "diagnosis": {
       "base_url": null,
@@ -78,9 +62,7 @@
       "api_key": null,
       "timeout_s": null,
       "temperature": 1.0,
-      "top_p": 0.95,
-      "top_k": 20,
-      "presence_penalty": 1.5
+      "top_p": 0.95
     }
   },
   "runtime": {

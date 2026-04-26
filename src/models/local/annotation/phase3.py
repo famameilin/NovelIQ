@@ -471,6 +471,47 @@ def _merge_fastpath_metadata_records(
     return merged_records
 
 
+async def _gather_batch_tasks_or_cancel(
+    tasks: list[asyncio.Task[tuple[str, int, list[DialogueRecord]]]],
+) -> list[tuple[str, int, list[DialogueRecord]]]:
+    """
+    收集并行 batch 结果，并在首个失败时取消其余任务。
+
+    创建时间: 2026-04-27
+    任务: fix-phase3-followup-review-findings
+    新建原因: 避免某个 batch 已经失败返回后，其他 sibling batch 继续消耗 token 并落审计记录。
+    """
+    if not tasks:
+        return []
+
+    pending: set[asyncio.Task[tuple[str, int, list[DialogueRecord]]]] = set(tasks)
+    completed_results: list[tuple[str, int, list[DialogueRecord]]] = []
+
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_EXCEPTION)
+            failure: BaseException | None = None
+            for task in done:
+                try:
+                    completed_results.append(task.result())
+                except BaseException as exc:  # noqa: BLE001
+                    failure = exc
+                    break
+
+            if failure is not None:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise failure
+
+        return completed_results
+    except BaseException:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        raise
+
+
 def _clone_annotation_client_for_parallel(client: AnnotationClient) -> AnnotationClient:
     """
     为并行 batch 构造无共享 session 的轻量客户端副本。
@@ -819,7 +860,7 @@ async def attribute_dialogues_with_llm(
             )
             for i in range(0, len(metadata_candidates), batch_size)
         ]
-        completed_batches = await asyncio.gather(*(metadata_tasks + llm_tasks))
+        completed_batches = await _gather_batch_tasks_or_cancel(metadata_tasks + llm_tasks)
 
         metadata_records: list[DialogueRecord] = []
         llm_records: list[DialogueRecord] = []

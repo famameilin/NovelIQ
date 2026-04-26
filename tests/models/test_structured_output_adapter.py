@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from src.config import TaskModelConfig, settings
 from src.config.schemas.model import _parse_structured_output_settings
+from src.models.annotation import AnnotationClient
 from src.models.local.base import BaseModelClient
 from src.models.local.schema import ForeshadowingResult
 from src.models.structured_output import (
@@ -55,6 +56,28 @@ def _make_response(content: object) -> SimpleNamespace:
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
+class _AsyncChunkStream:
+    """
+    创建时间: 2026-04-27
+    任务: fix-phase3-followup-review-findings
+    说明: 为 structured-output 流式 transport 提供最小异步 chunk stream 替身。
+    """
+
+    def __init__(self, chunks: list[object]) -> None:
+        self._chunks = chunks
+        self._index = 0
+
+    def __aiter__(self) -> _AsyncChunkStream:
+        return self
+
+    async def __anext__(self) -> object:
+        if self._index >= len(self._chunks):
+            raise StopAsyncIteration
+        chunk = self._chunks[self._index]
+        self._index += 1
+        return chunk
+
+
 def _make_client(
     fake_create: AsyncMock,
     *,
@@ -71,6 +94,24 @@ def _make_client(
         task_type=task_type,  # type: ignore[arg-type]
         config=TaskModelConfig(base_url=base_url, model="test-model", api_key="test-key"),
         client=fake_sdk_client,
+    )
+
+
+def _make_phase_result() -> ForeshadowingResult:
+    """
+    创建时间: 2026-04-27
+    任务: fix-phase3-followup-review-findings
+    说明: 结构化主链测试使用的最小合法结构化结果。
+    """
+    return ForeshadowingResult(
+        has_foreshadowing=False,
+        is_strong_setup=False,
+        foreshadowing_type=None,
+        anchor_text="",
+        anchor_reason="",
+        why_unresolved_now="",
+        expected_payoff_family="",
+        confidence="low",
     )
 
 
@@ -241,6 +282,96 @@ async def test_structured_output_invalid_json_raises_with_response_text(
 
 
 @pytest.mark.asyncio
+async def test_structured_output_stream_omits_thinking_fields_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    创建时间: 2026-04-27
+    任务: fix-phase3-followup-review-findings
+    说明: 结构化流式 transport 在 think 关闭时也应保持请求体最小化。
+    """
+    monkeypatch.setattr(settings.structured_output, "level3_rerank", "json_schema")
+    fake_create = AsyncMock(
+        return_value=_AsyncChunkStream(
+            [
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(content='{"name":"白芷","score":7}', reasoning_content=None)
+                        )
+                    ],
+                    usage=None,
+                )
+            ]
+        )
+    )
+    client = _make_client(fake_create)
+
+    await call_structured_output(
+        client,
+        StructuredOutputRequest(
+            messages=[{"role": "user", "content": "return json"}],
+            response_model=_AdapterPayload,
+            call_type="level3_rerank",
+            enable_thinking=False,
+            stream=True,
+        ),
+    )
+
+    assert "reasoning_effort" not in fake_create.await_args.kwargs
+    assert "extra_body" not in fake_create.await_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("base_url", "stream_enabled", "stream_cloud_only", "expected_stream"),
+    [
+        ("http://127.0.0.1:8000/v1", False, False, False),
+        ("http://127.0.0.1:8000/v1", True, True, False),
+        ("https://api.example.com/v1", True, True, True),
+    ],
+)
+async def test_annotation_client_structured_call_respects_stream_config(
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+    stream_enabled: bool,
+    stream_cloud_only: bool,
+    expected_stream: bool,
+) -> None:
+    """
+    创建时间: 2026-04-27
+    任务: fix-phase3-followup-review-findings
+    说明: Phase2/3/4 结构化主链应真实消费 stream_enabled / stream_cloud_only 配置。
+    """
+    mock_call_structured_output = AsyncMock(
+        return_value=SimpleNamespace(parsed=_make_phase_result(), raw_response=_make_response("{}"))
+    )
+    monkeypatch.setattr("src.models.annotation.call_structured_output", mock_call_structured_output)
+    client = AnnotationClient(
+        task_type="annotation",
+        config=TaskModelConfig(
+            base_url=base_url,
+            model="test-model",
+            api_key="test-key",
+            stream_enabled=stream_enabled,
+            stream_cloud_only=stream_cloud_only,
+        ),
+        client=SimpleNamespace(),
+    )
+
+    await client._call_annotation_api(
+        messages=[{"role": "user", "content": "return json"}],
+        enable_thinking=False,
+        chunk_id=1,
+        response_model=ForeshadowingResult,
+        call_type="phase3",
+    )
+
+    request = mock_call_structured_output.await_args.args[1]
+    assert request.stream is expected_stream
+
+
+@pytest.mark.asyncio
 async def test_structured_output_schema_validation_error_is_not_swallowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -281,12 +412,10 @@ async def test_phase2_weak_positive_payload_degrades_to_negative_in_structured_p
     monkeypatch.setattr(settings.structured_output, "level3_rerank", "json_schema")
     fake_create = AsyncMock(
         return_value=_make_response(
-            (
-                '{"has_foreshadowing":true,"is_strong_setup":false,"confidence":"medium",'
-                '"foreshadowing_type":"场景","setup_kind":"其他","anchor_text":"这句话像有点暗示",'
-                '"anchor_reason":"具体钩子：这句话像有点暗示。未闭合原因：后面可能有影响。",'
-                '"why_unresolved_now":"后面可能有影响。","expected_payoff_family":"主题展开"}'
-            )
+            '{"has_foreshadowing":true,"is_strong_setup":false,"confidence":"medium",'
+            '"foreshadowing_type":"场景","setup_kind":"其他","anchor_text":"这句话像有点暗示",'
+            '"anchor_reason":"具体钩子：这句话像有点暗示。未闭合原因：后面可能有影响。",'
+            '"why_unresolved_now":"后面可能有影响。","expected_payoff_family":"主题展开"}'
         )
     )
     client = _make_client(fake_create)
