@@ -70,8 +70,11 @@ def create_mock_foreshadowing() -> ForeshadowingResult:
     return ForeshadowingResult(
         has_foreshadowing=True,
         foreshadowing_type="其他",
+        setup_kind="其他",
         anchor_text="测试锚点文本",
         anchor_reason="测试锚点原因",
+        why_unresolved_now="当前只是给出测试锚点，还没有兑现这个测试钩子。",
+        expected_payoff_family="其他",
         confidence="high",
     )
 
@@ -589,6 +592,33 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, ForeshadowingResult)
         self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
+        self.assertIs(mock_build_messages.call_args.kwargs["include_evidence_blocks"], True)
+
+    async def test_phase2_can_disable_shared_evidence_blocks_via_settings(self):
+        """Phase2 支持通过配置关闭共享 evidence 注入，便于做 targeted ablation。"""
+        client = MockAnnotationClient()
+        evidence_bundle = MagicMock(name="phase2_evidence_bundle")
+
+        with (
+            patch("src.models.local.annotation.phase2.settings") as mock_settings,
+            patch(
+                "src.models.local.annotation.phase2._build_foreshadowing_messages",
+                return_value=[{"role": "system", "content": "test"}, {"role": "user", "content": "test"}],
+            ) as mock_build_messages,
+        ):
+            mock_settings.runtime.annotation.phase_max_retries = settings.runtime.annotation.phase_max_retries
+            mock_settings.analysis.multi_phase_annotation.include_phase2_evidence = False
+
+            result = await annotate_chunk_phase2(
+                client=client,
+                text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
+                chunk_id=12,
+                evidence_bundle=evidence_bundle,
+            )
+
+        self.assertIsInstance(result, ForeshadowingResult)
+        self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
+        self.assertIs(mock_build_messages.call_args.kwargs["include_evidence_blocks"], False)
 
 
 class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):

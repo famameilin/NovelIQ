@@ -15,12 +15,15 @@ import sys
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.models.local.schema import (
     CharacterSnapshot,
     ChunkAnnotation,
     DialogueSnapshot,
+    ForeshadowingResult,
 )
 
 
@@ -75,6 +78,16 @@ class TestLocalSchema(unittest.TestCase):
             ],
         )
         self.assertIsNotNone(annotation)
+
+    def test_positive_foreshadowing_requires_formal_type(self) -> None:
+        with self.assertRaises(ValidationError):
+            ForeshadowingResult(
+                has_foreshadowing=True,
+                foreshadowing_type=None,
+                anchor_text="玉佩在夜里自行发热。",
+                anchor_reason="具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+                confidence="high",
+            )
 
 
 if __name__ == "__main__":

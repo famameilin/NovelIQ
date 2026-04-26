@@ -297,7 +297,6 @@ def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
     messages = _build_foreshadowing_messages(
         text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
         prev_chunk_text="前文提到他刚从旧宅出来。",
-        next_chunk_text="后文写他在夜里被人追杀。",
         novel_title="归藏",
         main_characters="阿七、沈青禾",
         evidence_bundle=bundle,
@@ -305,6 +304,9 @@ def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
 
     assert "强伏笔识别" in messages[0]["content"]
     assert "默认判定为 `false`" in messages[0]["content"]
+    assert "只有 `has_foreshadowing=false` 时才能为 null" in messages[0]["content"]
+    assert "\"setup_kind\"" in messages[0]["content"]
+    assert "\"expected_payoff_family\"" in messages[0]["content"]
     user_content = messages[-1]["content"]
     assert "<后文片段>" not in user_content
     assert "后文写他在夜里被人追杀。" not in user_content
@@ -379,7 +381,6 @@ def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> Non
     messages = _build_foreshadowing_messages(
         text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
         prev_chunk_text="前文提到他刚从旧宅出来。",
-        next_chunk_text="后文写他在夜里被人追杀。",
     )
 
     user_content = messages[-1]["content"]
@@ -388,6 +389,22 @@ def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> Non
     assert "<Structured_Evidence>" not in user_content
     assert "<Disambig_Candidates>" not in user_content
     assert "<Vector_Evidence>" not in user_content
+
+
+def test_build_foreshadowing_messages_can_disable_shared_evidence_blocks() -> None:
+    bundle = _build_foreshadowing_bundle()
+
+    messages = _build_foreshadowing_messages(
+        text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
+        evidence_bundle=bundle,
+        include_evidence_blocks=False,
+    )
+
+    user_content = messages[-1]["content"]
+    assert "<Structured_Evidence>" not in user_content
+    assert "<Disambig_Candidates>" not in user_content
+    assert "<Vector_Evidence>" not in user_content
+    assert "【近期活跃角色】" not in user_content
 
 
 def test_build_foreshadowing_messages_with_empty_bundle_sections_keeps_prompt_clean() -> None:
