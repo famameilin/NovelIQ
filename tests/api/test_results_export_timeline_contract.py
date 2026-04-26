@@ -153,6 +153,26 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
         )
 
 
+def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunk_repo = MagicMock()
+    annotation_repo = MagicMock()
+    stats_repo = MagicMock()
+
+    def _raise_runtime_error(*_args, **_kwargs):
+        raise RuntimeError("timeline boom")
+
+    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_candidates", _raise_runtime_error)
+
+    with pytest.raises(RuntimeError, match="timeline boom"):
+        _fetch_timeline_data(
+            run_id="run-1",
+            chunk_repo=chunk_repo,
+            annotation_repo=annotation_repo,
+            stats_repo=stats_repo,
+            timeline_view=MagicMock(),
+        )
+
+
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
     diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
     characters = [SimpleNamespace(name="沈砚")]
@@ -454,6 +474,16 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 first_seen_chunk=2,
                 last_seen_chunk=5,
             )
+            ,
+            ExportRelationSnapshot(
+                relation_id=23,
+                from_name="苏镜",
+                to_name="旧友",
+                relation_type="spouse_of",
+                first_seen_chunk=1,
+                last_seen_chunk=4,
+                is_active=False,
+            ),
         ],
         relation_events=[
             RelationEvent(
