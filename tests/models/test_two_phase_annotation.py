@@ -206,6 +206,42 @@ class TestForeshadowingValidation(unittest.TestCase):
         chunk_text = "在中国，任何超脱飞扬的思想都会砰然坠地的，现实的引力太沉重了。"
         self.assertFalse(validate_foreshadowing_result(result, chunk_text))
 
+    def test_validate_everyday_decision_returns_false(self) -> None:
+        result = ForeshadowingResult(
+            has_foreshadowing=True,
+            foreshadowing_type="人物行为",
+            anchor_text="她决定明天去镇上卖药。",
+            anchor_reason="具体钩子：人物做出明天去镇上卖药的决定。未闭合原因：当前只是提出决定，尚未执行。",
+            confidence="high",
+        )
+        chunk_text = "她决定明天去镇上卖药。"
+        self.assertFalse(validate_foreshadowing_result(result, chunk_text))
+
+    def test_validate_concrete_future_wording_with_specific_target_returns_true(self) -> None:
+        result = ForeshadowingResult(
+            has_foreshadowing=True,
+            foreshadowing_type="物件",
+            anchor_text="那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看。",
+            anchor_reason=(
+                "具体钩子：玉佩出现异常红光并带有主动注视感，显示它不是普通饰物。"
+                "未闭合原因：当前只暴露了异常现象，还没有解释玉佩的来历，后续可能揭示其真正用途。"
+            ),
+            confidence="high",
+        )
+        chunk_text = "那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看。"
+        self.assertTrue(validate_foreshadowing_result(result, chunk_text))
+
+    def test_validate_anomalous_object_without_legacy_whitelist_keyword_returns_true(self) -> None:
+        result = ForeshadowingResult(
+            has_foreshadowing=True,
+            foreshadowing_type="物件",
+            anchor_text="那枚玉佩在夜里自行发热。",
+            anchor_reason="具体钩子：玉佩在夜里自行发热，表现出非普通饰物特征。未闭合原因：当前只出现异象，还没有解释它为何会发热。",
+            confidence="high",
+        )
+        chunk_text = "那枚玉佩在夜里自行发热。"
+        self.assertTrue(validate_foreshadowing_result(result, chunk_text))
+
     def test_validate_anchor_text_in_chunk_returns_true(self) -> None:
         result = ForeshadowingResult(
             has_foreshadowing=True,
