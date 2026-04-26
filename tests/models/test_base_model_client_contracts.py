@@ -13,6 +13,7 @@ BaseModelClient 契约测试。
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -23,6 +24,7 @@ from pydantic import BaseModel
 
 from src.config import TaskModelConfig
 from src.config.schemas.model import _parse_thinking_settings
+from src.config.settings import Settings
 from src.models.local.base import BaseModelClient
 
 
@@ -177,6 +179,14 @@ def test_parse_thinking_settings_reads_phase3_batch_controls() -> None:
 
     assert settings.phase3_candidates_per_batch == 10
     assert settings.phase3_batch_parallelism == 2
+
+
+def test_repo_settings_json_keeps_phase3_batch_defaults() -> None:
+    """仓库 settings.json 中已签入的 Phase3 默认值应保持为 10 / 2。"""
+    repo_settings = Settings.from_json(Path("config/settings.json"))
+
+    assert repo_settings.thinking.phase3_candidates_per_batch == 10
+    assert repo_settings.thinking.phase3_batch_parallelism == 2
 
 
 @pytest.mark.parametrize(
