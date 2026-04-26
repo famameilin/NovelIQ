@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from src.storage.repositories import GraphRepository
-from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, RelationEventRow
+from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, ParticipantEntityRow, RelationEventRow
 
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
 from .types import (
@@ -19,8 +19,8 @@ from .types import (
     GraphAuthorityReport,
     GraphAuthorityView,
     Level1AuthoritySnapshot,
+    ParticipantState,
     RelationEvent,
-    StableState,
     TimelineAuthorityView,
 )
 
@@ -98,13 +98,19 @@ class KnowledgeGraphAuthorityService:
         of treating this report as the final diagnosis layer.
         """
 
-        entities = self._graph_repo.fetch_entities(run_id)
+        participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
             self._graph_repo.fetch_current_relations(run_id, active_only=True)
         )
         relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
-        stable_states = self._build_stable_states(entities)
-        return self._assemble_graph_report(stable_states, confirmed_relations, relation_events)
+        self._assert_participant_projection_consistency(
+            run_id,
+            relation_events,
+            confirmed_relations,
+            participant_entities,
+        )
+        participant_states = self._build_participant_states(participant_entities)
+        return self._assemble_graph_report(participant_states, confirmed_relations, relation_events)
 
     def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
         """Return the authority surface used by graph-derived export payloads."""
@@ -124,17 +130,20 @@ class KnowledgeGraphAuthorityService:
     def build_graph_view(self, run_id: str) -> GraphAuthorityView:
         """Return graph authority facts with full relation history for downstream product assembly."""
 
-        entities = self._graph_repo.fetch_entities(run_id)
+        participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
             self._graph_repo.fetch_current_relations(run_id, active_only=True)
         )
         relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
-        stable_states = self._build_stable_states(entities)
+        self._assert_participant_projection_consistency(
+            run_id, relation_events, confirmed_relations, participant_entities
+        )
+        participant_states = self._build_participant_states(participant_entities)
         return GraphAuthorityView(
-            canonical_entities=self._build_canonical_entities(entities),
+            canonical_entities=self._build_canonical_entities(participant_entities),
             confirmed_relations=confirmed_relations,
             relation_events=relation_events,
-            stable_states=stable_states,
+            participant_states=participant_states,
         )
 
     def build_graph_relation_event_page(
@@ -151,6 +160,14 @@ class KnowledgeGraphAuthorityService:
         不应该每次都重建完整 GraphAuthorityView 再在内存里切片。
         """
 
+        participant_entities = self._graph_repo.fetch_participant_entities(run_id)
+        self._assert_participant_projection_consistency(
+            run_id,
+            relation_events=[],
+            confirmed_relations=[],
+            participant_entities=participant_entities,
+            relation_endpoint_ids=self._graph_repo.fetch_relation_endpoint_entity_ids(run_id),
+        )
         total = self._graph_repo.count_relation_events(run_id)
         relation_events = self._build_relation_events(
             self._graph_repo.fetch_relation_events(run_id, limit=limit, offset=offset)
@@ -165,10 +182,11 @@ class KnowledgeGraphAuthorityService:
 
     def _build_canonical_entities(self, entities: Iterable[Any]) -> list[CanonicalEntity]:
         canonical_entities: list[CanonicalEntity] = []
-        for entity in sorted(entities, key=lambda row: row.canonical_name):
+        for entity in sorted(entities, key=lambda row: getattr(row, "canonical_name", getattr(row, "name", ""))):
+            canonical_name = getattr(entity, "canonical_name", getattr(entity, "name", ""))
             canonical_entities.append(
                 CanonicalEntity(
-                    name=entity.canonical_name,
+                    name=canonical_name,
                     entity_type=entity.entity_type or "character",
                     entity_id=entity.entity_id,
                     first_seen_chunk=entity.first_seen_chunk,
@@ -289,30 +307,90 @@ class KnowledgeGraphAuthorityService:
             )
         return active_entities
 
-    def _build_stable_states(self, entities: Iterable[Any]) -> list[StableState]:
-        stable_states: list[StableState] = []
-        for entity in sorted(entities, key=lambda row: row.canonical_name):
-            stable_states.append(
-                StableState(
-                    entity_id=entity.entity_id,
-                    name=entity.canonical_name,
-                    entity_type=entity.entity_type or "character",
-                    status=entity.status or "active",
-                    primary_role_function=entity.primary_role_function,
-                    first_seen_chunk=entity.first_seen_chunk,
-                    last_seen_chunk=entity.last_seen_chunk,
-                    source_confidence=entity.source_confidence,
+    def _build_participant_states(self, participants: Iterable[ParticipantEntityRow]) -> list[ParticipantState]:
+        participant_states: list[ParticipantState] = []
+        for participant in sorted(participants, key=lambda row: row.name):
+            participant_states.append(
+                ParticipantState(
+                    entity_id=participant.entity_id,
+                    name=participant.name,
+                    entity_type=participant.entity_type or "character",
+                    status=participant.status or "active",
+                    primary_role_function=participant.primary_role_function,
+                    first_seen_chunk=participant.first_seen_chunk,
+                    last_seen_chunk=participant.last_seen_chunk,
+                    source_confidence=participant.source_confidence,
                 )
             )
-        return stable_states
+        return participant_states
+
+    def _assert_participant_projection_consistency(
+        self,
+        run_id: str,
+        relation_events: list[RelationEvent],
+        confirmed_relations: list[ConfirmedRelation],
+        participant_entities: list[ParticipantEntityRow],
+        relation_endpoint_ids: set[int] | None = None,
+    ) -> None:
+        """
+        2026-04-26，任务：图谱参与者层落地
+        新建原因：旧 run 若只有关系表、却缺少参与者投影，必须显式失败并要求重跑，不能静默回退到全量人物。
+        """
+        participant_entity_ids = {participant.entity_id for participant in participant_entities}
+        expected_participant_ids = relation_endpoint_ids or self._collect_relation_endpoint_ids(
+            relation_events,
+            confirmed_relations,
+        )
+
+        if not expected_participant_ids:
+            if participant_entity_ids:
+                raise RuntimeError(
+                    "graph participant projection is stale while graph relation tables are empty; "
+                    f"re-run analysis for run_id={run_id} to rebuild graph_entity_participants."
+                )
+            return
+
+        missing_entity_ids = expected_participant_ids - participant_entity_ids
+        stale_entity_ids = participant_entity_ids - expected_participant_ids
+        if missing_entity_ids or stale_entity_ids:
+            raise RuntimeError(
+                "graph participant projection is stale or incomplete for the current relation graph; "
+                f"re-run analysis for run_id={run_id} to rebuild graph_entity_participants."
+            )
+
+    def _collect_relation_endpoint_ids(
+        self,
+        relation_events: Iterable[RelationEvent],
+        confirmed_relations: Iterable[ConfirmedRelation],
+    ) -> set[int]:
+        endpoint_ids = {
+            relation_event.from_entity_id
+            for relation_event in relation_events
+            if relation_event.from_entity_id is not None
+        } | {
+            relation_event.to_entity_id
+            for relation_event in relation_events
+            if relation_event.to_entity_id is not None
+        }
+        endpoint_ids |= {
+            relation.from_entity_id
+            for relation in confirmed_relations
+            if relation.from_entity_id is not None
+        }
+        endpoint_ids |= {
+            relation.to_entity_id
+            for relation in confirmed_relations
+            if relation.to_entity_id is not None
+        }
+        return endpoint_ids
 
     def _assemble_graph_report(
         self,
-        stable_states: list[StableState],
+        participant_states: list[ParticipantState],
         confirmed_relations: list[ConfirmedRelation],
         relation_events: list[RelationEvent],
     ) -> GraphAuthorityReport:
         return GraphAuthorityReport(
-            summary=build_graph_shared_summary(stable_states, confirmed_relations),
+            summary=build_graph_shared_summary(participant_states, confirmed_relations),
             quality=build_graph_quality_report(confirmed_relations, relation_events),
         )

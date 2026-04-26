@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from src.storage.models import (
     GraphEntity,
     GraphEntityAlias,
+    GraphEntityParticipant,
     GraphRelationCurrent,
     GraphRelationEvent,
 )
@@ -111,6 +113,26 @@ class RelationConflictRow:
     relation_ids: list[int | None]
 
 
+@dataclass(frozen=True)
+class ParticipantEntityRow:
+    """GraphRepository 图谱参与者查询 DTO。"""
+
+    entity_id: int
+    name: str
+    entity_type: str
+    status: str
+    primary_role_function: str | None
+    first_seen_chunk: int | None
+    last_seen_chunk: int | None
+    source_confidence: float | None
+    relation_event_count: int
+    current_degree: int
+    historical_degree: int
+    first_relation_chunk: int | None
+    last_relation_chunk: int | None
+    latest_relation_event_id: int | None
+
+
 class GraphRepository(BaseRepository["GraphRepository"]):
     def reset_graph_tables(self, run_id: str) -> None:
         """
@@ -118,6 +140,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
 
         用于在别名归一化规则发生显著变化后执行全量重建，避免旧投影残留。
         """
+        self.session.execute(delete(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id))
         self.session.execute(delete(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id))
         self.session.execute(delete(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id))
         self.session.execute(delete(GraphEntityAlias).where(GraphEntityAlias.run_id == run_id))
@@ -331,6 +354,136 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             existing.updated_at = datetime.now(UTC)
         self.session.flush()
 
+    def refresh_relation_projections(
+        self,
+        run_id: str,
+        entity_pairs: Iterable[tuple[int, int]],
+    ) -> None:
+        """
+        2026-04-27，任务：graph participant projection consistency fixes
+        新建原因：关系写入后必须把 current relation 和 participant projection 一起刷新，
+        避免调用方只补其中一层导致图谱节点与关系历史失配。
+        """
+        normalized_pairs = sorted(
+            {
+                (int(from_entity_id), int(to_entity_id))
+                for from_entity_id, to_entity_id in entity_pairs
+                if from_entity_id is not None and to_entity_id is not None
+            }
+        )
+        if not normalized_pairs:
+            return
+
+        affected_entity_ids: set[int] = set()
+        for from_entity_id, to_entity_id in normalized_pairs:
+            self.refresh_current_relation(run_id, from_entity_id, to_entity_id)
+            affected_entity_ids.add(from_entity_id)
+            affected_entity_ids.add(to_entity_id)
+
+        self.refresh_entity_participants(run_id, affected_entity_ids)
+
+    def refresh_entity_participants(self, run_id: str, entity_ids: Iterable[int]) -> None:
+        """
+        2026-04-26，任务：图谱参与者层落地
+        新建原因：图谱参与者表是最终人物图谱节点资格的持久投影，必须在关系投影后按受影响实体增量刷新。
+        """
+        normalized_entity_ids = sorted({int(entity_id) for entity_id in entity_ids if entity_id is not None})
+        if not normalized_entity_ids:
+            return
+
+        for entity_id in normalized_entity_ids:
+            event_rows = list(
+                self.session.execute(
+                    select(GraphRelationEvent)
+                    .where(
+                        GraphRelationEvent.run_id == run_id,
+                        or_(
+                            GraphRelationEvent.from_entity_id == entity_id,
+                            GraphRelationEvent.to_entity_id == entity_id,
+                        ),
+                    )
+                    .order_by(GraphRelationEvent.chunk_id.asc(), GraphRelationEvent.relation_event_id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            current_rows = list(
+                self.session.execute(
+                    select(GraphRelationCurrent)
+                    .where(
+                        GraphRelationCurrent.run_id == run_id,
+                        GraphRelationCurrent.is_active.is_(True),
+                        or_(
+                            GraphRelationCurrent.from_entity_id == entity_id,
+                            GraphRelationCurrent.to_entity_id == entity_id,
+                        ),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            if not event_rows and not current_rows:
+                self.session.execute(
+                    delete(GraphEntityParticipant).where(
+                        GraphEntityParticipant.run_id == run_id,
+                        GraphEntityParticipant.entity_id == entity_id,
+                    )
+                )
+                continue
+
+            historical_counterpart_ids = {
+                event.to_entity_id if event.from_entity_id == entity_id else event.from_entity_id
+                for event in event_rows
+            }
+            current_counterpart_ids = {
+                relation.to_entity_id if relation.from_entity_id == entity_id else relation.from_entity_id
+                for relation in current_rows
+            }
+            first_relation_chunk = min(
+                [event.chunk_id for event in event_rows]
+                + [relation.first_seen_chunk for relation in current_rows if relation.first_seen_chunk is not None],
+                default=None,
+            )
+            last_relation_chunk = max(
+                [event.chunk_id for event in event_rows]
+                + [relation.last_seen_chunk for relation in current_rows if relation.last_seen_chunk is not None],
+                default=None,
+            )
+            latest_event_candidates = [event.relation_event_id for event in event_rows] + [
+                relation.latest_event_id for relation in current_rows if relation.latest_event_id is not None
+            ]
+            latest_relation_event_id = max(latest_event_candidates, default=None)
+
+            stmt = (
+                insert(GraphEntityParticipant)
+                .values(
+                    run_id=run_id,
+                    entity_id=entity_id,
+                    relation_event_count=len(event_rows),
+                    current_degree=len(current_counterpart_ids),
+                    historical_degree=len(historical_counterpart_ids),
+                    first_relation_chunk=first_relation_chunk,
+                    last_relation_chunk=last_relation_chunk,
+                    latest_relation_event_id=latest_relation_event_id,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_graph_entity_participants_run_entity",
+                    set_={
+                        "relation_event_count": len(event_rows),
+                        "current_degree": len(current_counterpart_ids),
+                        "historical_degree": len(historical_counterpart_ids),
+                        "first_relation_chunk": first_relation_chunk,
+                        "last_relation_chunk": last_relation_chunk,
+                        "latest_relation_event_id": latest_relation_event_id,
+                        "updated_at": datetime.now(UTC),
+                    },
+                )
+            )
+            self.session.execute(stmt)
+
+        self.session.flush()
+
     def fetch_alias_map(self, run_id: str) -> dict[str, str]:
         rows = self.session.execute(
             select(GraphEntityAlias.alias, GraphEntity.canonical_name)
@@ -433,6 +586,54 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 )
             )
         return result
+
+    def count_current_relations(self, run_id: str, active_only: bool | None = None) -> int:
+        """返回指定运行的当前关系总数。"""
+        stmt = select(func.count()).select_from(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
+        if active_only is True:
+            stmt = stmt.where(GraphRelationCurrent.is_active.is_(True))
+        elif active_only is False:
+            stmt = stmt.where(GraphRelationCurrent.is_active.is_(False))
+        return int(self.session.execute(stmt).scalar() or 0)
+
+    def count_entity_participants(self, run_id: str) -> int:
+        """返回指定运行的图谱参与者总数。"""
+        return int(
+            self.session.execute(
+                select(func.count()).select_from(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id)
+            ).scalar()
+            or 0
+        )
+
+    def fetch_relation_endpoint_entity_ids(self, run_id: str) -> set[int]:
+        """返回关系历史和当前关系中涉及到的全部实体 ID。"""
+        event_ids = {
+            int(entity_id)
+            for entity_id in self.session.execute(
+                select(GraphRelationEvent.from_entity_id).where(GraphRelationEvent.run_id == run_id)
+            ).scalars()
+            if entity_id is not None
+        } | {
+            int(entity_id)
+            for entity_id in self.session.execute(
+                select(GraphRelationEvent.to_entity_id).where(GraphRelationEvent.run_id == run_id)
+            ).scalars()
+            if entity_id is not None
+        }
+        current_ids = {
+            int(entity_id)
+            for entity_id in self.session.execute(
+                select(GraphRelationCurrent.from_entity_id).where(GraphRelationCurrent.run_id == run_id)
+            ).scalars()
+            if entity_id is not None
+        } | {
+            int(entity_id)
+            for entity_id in self.session.execute(
+                select(GraphRelationCurrent.to_entity_id).where(GraphRelationCurrent.run_id == run_id)
+            ).scalars()
+            if entity_id is not None
+        }
+        return event_ids | current_ids
 
     def count_relation_events(self, run_id: str) -> int:
         """返回指定运行的关系事件总数。"""
@@ -580,6 +781,52 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         if status is not None:
             stmt = stmt.where(GraphEntity.status == status)
         return list(self.session.execute(stmt).scalars().all())
+
+    def fetch_participant_entities(
+        self,
+        run_id: str,
+        entity_type: str | None = None,
+        status: str | None = None,
+    ) -> list[ParticipantEntityRow]:
+        """
+        2026-04-26，任务：图谱参与者层落地
+        新建原因：最终人物图谱、graph authority report 等 consumer
+        需要稳定读取“有关系资格”的参与者集合，而不是全量人物。
+        """
+        stmt = (
+            select(GraphEntityParticipant, GraphEntity)
+            .join(GraphEntity, GraphEntityParticipant.entity_id == GraphEntity.entity_id)
+            .where(
+                GraphEntityParticipant.run_id == run_id,
+                GraphEntity.run_id == run_id,
+            )
+            .order_by(GraphEntity.canonical_name.asc(), GraphEntity.entity_id.asc())
+        )
+        if entity_type is not None:
+            stmt = stmt.where(GraphEntity.entity_type == entity_type)
+        if status is not None:
+            stmt = stmt.where(GraphEntity.status == status)
+
+        rows = self.session.execute(stmt).all()
+        return [
+            ParticipantEntityRow(
+                entity_id=entity.entity_id,
+                name=entity.canonical_name,
+                entity_type=entity.entity_type,
+                status=entity.status,
+                primary_role_function=entity.primary_role_function,
+                first_seen_chunk=entity.first_seen_chunk,
+                last_seen_chunk=entity.last_seen_chunk,
+                source_confidence=entity.source_confidence,
+                relation_event_count=participant.relation_event_count,
+                current_degree=participant.current_degree,
+                historical_degree=participant.historical_degree,
+                first_relation_chunk=participant.first_relation_chunk,
+                last_relation_chunk=participant.last_relation_chunk,
+                latest_relation_event_id=participant.latest_relation_event_id,
+            )
+            for participant, entity in rows
+        ]
 
     def fetch_relation_event_models(self, run_id: str) -> list[GraphRelationEvent]:
         """

@@ -135,3 +135,29 @@ class GraphRelationCurrent(Base):
         UniqueConstraint("run_id", "from_entity_id", "to_entity_id", name="uq_graph_relations_current_pair"),
         Index("idx_graph_relations_current_active", "run_id", "is_active"),
     )
+
+
+class GraphEntityParticipant(Base):
+    __tablename__ = "graph_entity_participants"
+
+    participant_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("analysis_runs.run_id", ondelete="CASCADE"), index=True)
+    entity_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("graph_entities.entity_id", ondelete="CASCADE"), index=True
+    )
+    relation_event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_degree: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    historical_degree: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    first_relation_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_relation_chunk: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latest_relation_event_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("graph_relation_events.relation_event_id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "entity_id", name="uq_graph_entity_participants_run_entity"),
+        Index("idx_graph_entity_participants_run_entity", "run_id", "entity_id"),
+    )

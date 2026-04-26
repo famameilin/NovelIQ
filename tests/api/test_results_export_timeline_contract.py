@@ -199,7 +199,7 @@ def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fall
     characters = [SimpleNamespace(name="沈砚")]
     annotation_repo = MagicMock()
 
-    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _alias_map):
+    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _annotation_repo, _alias_map):
         return diagnosis
 
     monkeypatch.setattr(
@@ -284,6 +284,21 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     monkeypatch.setattr(
         "src.api.services.results_export_service.build_export_payload",
         lambda **kwargs: kwargs,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
+            build_graph_report=lambda _run_id: GraphAuthorityReport(
+                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
+            ),
+            build_timeline_view=lambda _run_id: SimpleNamespace(
+                character_entities=[],
+                entity_lifecycles=[],
+                relation_events=[],
+            ),
+        ),
     )
 
     results_data, missing_fields, novel_name = fetch_all_results_data(
@@ -469,7 +484,7 @@ def test_shared_graph_signal_serializer_rejects_non_report_consumers() -> None:
                 canonical_entities=[],
                 confirmed_relations=[],
                 relation_events=[],
-                stable_states=[],
+                participant_states=[],
             )
         )
 
