@@ -31,6 +31,8 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
             mock_settings.prompts.phase3.system = "system"
             mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
             mock_settings.thinking.phase3_candidates_per_batch = 8
+            mock_settings.thinking.phase3_batch_parallelism = 1
+            mock_settings.runtime.annotation.phase3_max_retries = 3
 
             mock_annotation_client = MagicMock()
             mock_annotation_client._config.model = "test-model"
@@ -76,6 +78,8 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"

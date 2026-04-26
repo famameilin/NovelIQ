@@ -4,6 +4,11 @@ Phase3 对话长度与后处理验证测试
 创建时间: 2026-04-23
 任务: 复杂度与耦合审查 P2 - 测试工程化
 说明: 从 test_phase3.py 拆出长度聚合、thinking 参数和 speaker 后处理场景。
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: phase3-proof-only-fastpath-batch10
+修改内容: 补齐 Phase3 新批处理实现需要的 mock 配置，避免旧测试因 settings 桩不完整而失真。
 """
 
 import unittest
@@ -72,6 +77,8 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"
@@ -205,6 +212,8 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"
@@ -238,6 +247,8 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"
