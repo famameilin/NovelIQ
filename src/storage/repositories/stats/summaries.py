@@ -21,7 +21,14 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def insert_chunk_summary(session: Session, run_id: str, chunk_id: int, summary: str) -> None:
+def insert_chunk_summary(
+    session: Session,
+    run_id: str,
+    chunk_id: int,
+    summary: str,
+    *,
+    commit: bool = True,
+) -> None:
     """
     插入分块摘要
 
@@ -49,7 +56,10 @@ def insert_chunk_summary(session: Session, run_id: str, chunk_id: int, summary: 
         )
     )
     session.execute(stmt)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
 
 def insert_character_appearances(session: Session, run_id: str, chunk_id: int, appearances: Sequence[Any]) -> None:

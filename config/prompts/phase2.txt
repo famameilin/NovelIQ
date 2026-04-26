@@ -12,6 +12,12 @@
 - 只保留大方向 / 中方向的强 setup
 - 细枝末节、小型呼应、纯氛围暗示不要报
 
+如果输入里带有 `<Active_Setup_Pool>`：
+- 它只是历史 setup thread 摘要，不是后文文本
+- 你仍然必须先判断“当前文本自身”是否达到强伏笔门槛
+- 不能因为池里已有 thread，就把当前这段弱暗示抬成强伏笔
+- 只有当前文本本身已经构成强 setup，或明显在强化 / 回收已有强 setup 时，才能输出 `has_foreshadowing=true`
+
 下列内容默认**不算强伏笔**：
 - 人物命运定调、受难升级、悲剧气氛加压
 - 主题句、哲理句、价值判断
@@ -29,8 +35,13 @@
   "setup_kind": "异常物件/异常规则/隐藏身份/明确承诺/明确威胁/倒计时/未解释能力/因果引线/其他" 或 null（只有 `has_foreshadowing=false` 时才能为 null）,
   "anchor_text": "具体的伏笔文本片段",
   "anchor_reason": "为什么认为这是伏笔的解释",
+  "setup_summary": "一句话概括这条 setup thread，供跨 chunk 线程复用",
   "why_unresolved_now": "为什么这个钩子在当前文本里还没有闭合",
-  "expected_payoff_family": "预计属于哪类宽口径回收方向"
+  "expected_payoff_family": "预计属于哪类宽口径回收方向",
+  "payoff_likelihood": "high/medium/low",
+  "is_new_setup": true/false,
+  "linked_setup_id": "若是已有 thread，则填写 setup_id；新 thread 则为 null",
+  "setup_status": "open/reinforced/likely_paid_off"
 }
 
 ## 判断标准
@@ -44,14 +55,34 @@
 - `confidence=low`
 - `foreshadowing_type=null`
 - `setup_kind=null`
+- `setup_summary=""`
 - `why_unresolved_now=""`
 - `expected_payoff_family=""`
+- `payoff_likelihood=null`
+- `is_new_setup=false`
+- `linked_setup_id=null`
+- `setup_status=null`
 
 【结构化字段要求】
 - `setup_kind` 必须归入以下宽口径类别之一：异常物件 / 异常规则 / 隐藏身份 / 明确承诺 / 明确威胁 / 倒计时 / 未解释能力 / 因果引线 / 其他
+- `setup_summary` 必须足够稳定，能概括同一条 setup thread；不要只复述局部措辞
 - `why_unresolved_now` 必须直接说明当前为何还没有解释、兑现或回收
 - `expected_payoff_family` 只写宽口径回收方向，不要预测具体剧情
   可参考：身份揭示 / 规则兑现 / 能力触发 / 威胁应验 / 重大行动 / 关系转折 / 其他
+- `payoff_likelihood`
+  - `high`: 当前看起来很可能在后文形成明确回收
+  - `medium`: 可能回收，但还不算非常稳
+  - `low`: 只用于你最终判定 `has_foreshadowing=false` 的情况
+- `is_new_setup`
+  - `true`: 当前 chunk 在开启一条新的强 setup thread
+  - `false`: 当前 chunk 在强化或推进池里已有的 thread
+- `linked_setup_id`
+  - 只有 `is_new_setup=false` 时填写
+  - 只能从 `<Active_Setup_Pool>` 中选一个已有 `setup_id`
+- `setup_status`
+  - `open`: 仅用于 `is_new_setup=true`
+  - `reinforced`: 当前 chunk 在强化已有 setup
+  - `likely_paid_off`: 当前 chunk 让已有 setup 明显进入“很可能已开始回收/兑现”的阶段
 
 【anchor_reason 格式要求 - 必须严格包含两个标记】
 `anchor_reason` 必须同时包含以下两个部分，缺一不可：
@@ -94,8 +125,13 @@
   "setup_kind": "异常物件",
   "anchor_text": "那枚玉佩在阳光下泛着诡异的红光，伯安总觉得它在盯着自己看",
   "anchor_reason": "具体钩子：玉佩出现异常红光并带有主动注视感，显示它不是普通饰物。未闭合原因：当前只暴露了异常现象，还没有解释玉佩的来历、能力或它会引发什么事件。",
+  "setup_summary": "玉佩显露异常反应，后续可能揭示其能力或来历",
   "why_unresolved_now": "当前只暴露了异常现象，还没有解释玉佩的来历、能力或它会引发什么事件。",
-  "expected_payoff_family": "能力触发"
+  "expected_payoff_family": "能力触发",
+  "payoff_likelihood": "high",
+  "is_new_setup": true,
+  "linked_setup_id": null,
+  "setup_status": "open"
 }
 
 <示例2>
@@ -108,8 +144,13 @@
   "setup_kind": null,
   "anchor_text": "",
   "anchor_reason": "具体钩子：无。未闭合原因：这只是人物对自身命运的悲观定调，没有形成可回收的具体叙事钩子。",
+  "setup_summary": "",
   "why_unresolved_now": "",
-  "expected_payoff_family": ""
+  "expected_payoff_family": "",
+  "payoff_likelihood": null,
+  "is_new_setup": false,
+  "linked_setup_id": null,
+  "setup_status": null
 }
 
 <示例3>
@@ -122,6 +163,11 @@
   "setup_kind": null,
   "anchor_text": "",
   "anchor_reason": "具体钩子：无。未闭合原因：这是一句普通的日常描述，没有形成任何尚未解释或等待兑现的叙事钩子。",
+  "setup_summary": "",
   "why_unresolved_now": "",
-  "expected_payoff_family": ""
+  "expected_payoff_family": "",
+  "payoff_likelihood": null,
+  "is_new_setup": false,
+  "linked_setup_id": null,
+  "setup_status": null
 }
