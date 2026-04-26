@@ -17,6 +17,7 @@ import tempfile
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.api.models.responses import DiagnosisResult
 
 
 class TestResults:
@@ -111,3 +112,20 @@ class TestResults:
         ]["application/json"]["schema"]
         assert response_schema["type"] == "array"
         assert response_schema["items"]["$ref"] == "#/components/schemas/ChunkAnnotation"
+
+    def test_get_diagnosis_openapi_declares_expectation_fallback_and_theme_color(self):
+        """
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: fix-phase2-setup-pool-followup-findings
+        说明: diagnosis 对外合同需要明确 expectation/fallback 语义，并保留 theme_color，
+              避免手写文档和响应模型再次漂移。
+        """
+        diagnosis_schema = DiagnosisResult.model_json_schema()
+        properties = diagnosis_schema["properties"]
+
+        assert "foreshadow_expectation" in properties
+        assert "foreshadow_rate" in properties
+        assert "theme_color" in properties
+        assert "setup thread ledger" in properties["foreshadow_expectation"]["description"]
+        assert "旧 run" in properties["foreshadow_rate"]["description"]

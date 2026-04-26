@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { getDiagnosis } from "@/api/results";
+import { getDiagnosis, getForeshadowingThreads } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
@@ -14,15 +14,29 @@ import { ValueLogicCard } from "@/components/diagnosis/ValueLogicCard";
 import { TopicLabels } from "@/components/diagnosis/TopicLabels";
 import { CharacterCastCard } from "@/components/diagnosis/CharacterCastCard";
 import { ArcScoresChart } from "@/components/charts/ArcScoresChart";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, Tags } from "lucide-react";
+import { AlertCircle, GitBranch, Tags } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
 /* ------------------------------------------------------------------ */
 
 const STALE_TIME = 5 * 60 * 1000;
+
+function getThreadStatusMeta(status: string) {
+  switch (status) {
+    case "likely_paid_off":
+      return { label: "可能已回收", variant: "success" as const };
+    case "reinforced":
+      return { label: "已强化", variant: "secondary" as const };
+    case "archived":
+      return { label: "已归档", variant: "outline" as const };
+    default:
+      return { label: "进行中", variant: "outline" as const };
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /*  Skeleton                                                          */
@@ -108,6 +122,12 @@ export function DiagnosisPage() {
     enabled,
     staleTime: STALE_TIME,
   });
+  const foreshadowingThreadsQuery = useQuery({
+    queryKey: ["results", novelId, currentTaskId, "foreshadowing-threads"],
+    queryFn: () => getForeshadowingThreads(novelId!, currentTaskId!),
+    enabled,
+    staleTime: STALE_TIME,
+  });
 
   const isLoading = enabled && diagnosisQuery.isLoading;
   const isError = enabled && diagnosisQuery.isError;
@@ -115,8 +135,8 @@ export function DiagnosisPage() {
   const retry = () => diagnosisQuery.refetch();
 
   const { data: diagnosis } = diagnosisQuery;
-  const foreshadowMetric =
-    diagnosis?.foreshadow_expectation ?? diagnosis?.foreshadow_rate ?? null;
+  const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
+  const foreshadowingThreads = foreshadowingThreadsQuery.data ?? [];
 
   // ---------- Render ----------
 
@@ -167,7 +187,7 @@ export function DiagnosisPage() {
               title="伏笔回收预期"
               type="percent"
               value={foreshadowMetric != null ? foreshadowMetric * 100 : null}
-              reason="基于 Phase2 强 setup 与 thread 状态的近似估计，不是严格全文事实回收率。"
+              reason="基于 setup thread ledger 的加权估计，不是严格全文事实回收率。"
             />
             <ScoreCard
               title="权力立场"
@@ -188,6 +208,59 @@ export function DiagnosisPage() {
               reason={diagnosis.cultural_depth_reason}
             />
           </div>
+
+          {foreshadowingThreads.length > 0 && (
+            <DashboardCardShell
+              title="Setup 台账"
+              icon={<GitBranch className="h-4 w-4" />}
+              accent="chart-2"
+              bodyClassName="gap-3"
+            >
+              <div className="grid grid-cols-1 gap-3">
+                {foreshadowingThreads.map((thread) => {
+                  const statusMeta = getThreadStatusMeta(thread.status);
+                  return (
+                    <div
+                      key={thread.setup_id}
+                      className="rounded-2xl border border-border/70 bg-surface/75 p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                            <Badge variant="outline">{thread.setup_kind}</Badge>
+                            <Badge variant="outline">{thread.expected_payoff_family}</Badge>
+                          </div>
+                          <p className="text-sm font-semibold text-text">{thread.setup_summary}</p>
+                        </div>
+                        <div className="text-right text-xs text-text-muted">
+                          <div>首次出现 Chunk {thread.first_chunk_id}</div>
+                          <div>最近命中 Chunk {thread.last_chunk_id}</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-text-muted md:grid-cols-3">
+                        <div>
+                          <span className="font-medium text-text">回收预期：</span>
+                          {thread.payoff_likelihood}
+                        </div>
+                        <div>
+                          <span className="font-medium text-text">强度：</span>
+                          {thread.strength}
+                        </div>
+                        <div>
+                          <span className="font-medium text-text">锚点 Chunk：</span>
+                          {thread.anchor_chunk_ids.join(", ")}
+                        </div>
+                      </div>
+                      {thread.latest_reason && (
+                        <p className="mt-3 text-sm text-text-muted">{thread.latest_reason}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </DashboardCardShell>
+          )}
 
           {/* 预留诊断文本区域 */}
           {diagnosis.diagnosis && <DiagnosisText diagnosisText={diagnosis.diagnosis} />}

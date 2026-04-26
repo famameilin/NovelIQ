@@ -202,7 +202,6 @@ export function createDiagnosis(): DiagnosisResult {
   return {
     narrative_type: "英雄之旅",
     foreshadow_expectation: foreshadowExpectation,
-    foreshadow_rate: foreshadowExpectation,
     protagonist: "萧炎",
     narrative_arc_type: "三幕式 + 多重高潮",
     arc_scores: {
