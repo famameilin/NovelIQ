@@ -78,6 +78,25 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         """插入分块关系数据"""
         return inserts.insert_chunk_relations(self.session, run_id, chunk_id, relations, commit=commit)
 
+    def replace_chunk_relations_for_source_model(
+        self,
+        run_id: str,
+        chunk_id: int,
+        relations: Sequence[RelationChangeSnapshot],
+        *,
+        source_model: str,
+        commit: bool = True,
+    ) -> None:
+        """替换指定 source_model 生成的分块关系数据。"""
+        return inserts.replace_chunk_relations_for_source_model(
+            self.session,
+            run_id,
+            chunk_id,
+            relations,
+            source_model=source_model,
+            commit=commit,
+        )
+
     def insert_chunk_dialogues(
         self,
         run_id: str,

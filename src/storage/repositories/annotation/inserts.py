@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import update
+from sqlalchemy import delete, update
 
 from src.models.local.schema import (
     CharacterSnapshot,
@@ -136,6 +136,53 @@ def insert_chunk_relations(
     if not records:
         return
     session.add_all(records)
+    if commit:
+        session.commit()
+    else:
+        session.flush()
+
+
+def replace_chunk_relations_for_source_model(
+    session: Session,
+    run_id: str,
+    chunk_id: int,
+    relations: Sequence[RelationChangeSnapshot],
+    *,
+    source_model: str,
+    commit: bool = True,
+) -> None:
+    """
+    2026-04-27，任务：graph final-disambiguation rebuild fixes
+    新建原因：终消歧生成的层级关系需要先稳定回写到 chunk_relations，再交给后续 rebuild 统一投影，
+    否则直接写进 graph_* 表的结果会在 reset_graph_tables() 后丢失。
+    """
+    session.execute(
+        delete(ChunkRelation).where(
+            ChunkRelation.run_id == run_id,
+            ChunkRelation.source_model == source_model,
+        )
+    )
+    if relations:
+        records = [
+            ChunkRelation(
+                chunk_id=chunk_id,
+                from_char=relation.from_name,
+                to_char=relation.to_name,
+                type=relation.type,
+                change=relation.change,
+                directionality=relation.directionality,
+                evidence=relation.evidence,
+                confidence=relation.confidence,
+                source_model=source_model,
+                projection_status=relation.projection_status,
+                projected_at=datetime.fromisoformat(relation.projected_at) if relation.projected_at else None,
+                projection_error=relation.projection_error,
+                run_id=run_id,
+            )
+            for relation in relations
+            if relation.from_name != relation.to_name
+        ]
+        session.add_all(records)
     if commit:
         session.commit()
     else:

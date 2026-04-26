@@ -290,7 +290,7 @@ def _fetch_timeline_data(
         raise
     except Exception as e:
         logger.error(f"Unexpected error building timeline for run {run_id}: {e}")
-        return None
+        raise
 
     selected_nodes = select_timeline_nodes(
         candidates=timeline_build.candidates,

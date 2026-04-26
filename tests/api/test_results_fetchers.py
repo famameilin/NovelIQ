@@ -376,6 +376,40 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     assert rel2.type == "盟友"
 
 
+def test_fetch_character_relations_skips_inactive_current_relations():
+    annotation_repo = _DummyAnnotationRepo2()
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(
+                from_name="贺伯安",
+                to_name="二妈妈",
+                relation_type="家族",
+                last_seen_chunk=3,
+                is_active=False,
+            ),
+            ExportRelationSnapshot(
+                from_name="贺伯安",
+                to_name="林立果",
+                relation_type="盟友",
+                last_seen_chunk=5,
+                is_active=True,
+            ),
+        ]
+    )
+
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=export_graph_view,
+        )
+
+    assert [(item.from_char, item.to_char) for item in result] == [("贺伯安", "林立果")]
+
+
 def test_fetch_chunk_curves_adds_surface_tension_without_rewriting_raw_proxy():
     stats_repo = _DummyCurveStatsRepo(
         [
@@ -553,6 +587,40 @@ def test_fetch_hierarchical_relations_filters_unknown_after_normalization():
     )
 
     assert result == []
+
+
+def test_fetch_hierarchical_relations_skips_inactive_current_relations():
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(
+                relation_id=1,
+                from_name="老贺",
+                to_name="伯安",
+                relation_type="father_of",
+                first_seen_chunk=2,
+                last_seen_chunk=9,
+                is_active=False,
+            ),
+            ExportRelationSnapshot(
+                relation_id=2,
+                from_name="老贺",
+                to_name="阿明",
+                relation_type="father_of",
+                first_seen_chunk=3,
+                last_seen_chunk=10,
+                is_active=True,
+            ),
+        ]
+    )
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        export_graph_view=export_graph_view,
+        alias_map={},
+        valid_character_names={"老贺", "伯安", "阿明"},
+    )
+
+    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [(2, "老贺", "阿明")]
 
 
 def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
