@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_db_session, get_metrics_service, get_novel_service, resolve_run_id
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
+from src.api.models.responses import ChunkAnnotation as ChunkAnnotationResponse
 from src.api.models.responses import ResultsWriteResponse
 from src.api.routes.results_fetchers import (
     _fetch_characters,
@@ -239,12 +240,15 @@ async def get_chunk_curves(
     return _fetch_chunk_curves(run_id, stats_repo, annotation_repo, chunk_repo)
 
 
-@router.get("/{novel_id}/chunk-annotations")
+@router.get(
+    "/{novel_id}/chunk-annotations",
+    response_model=list[ChunkAnnotationResponse],
+)
 async def get_chunk_annotations(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> list:
+) -> list[ChunkAnnotationResponse]:
     """
     获取分块标注与伏笔详情数据。
 
