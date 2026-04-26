@@ -30,17 +30,25 @@ class _DummyAnnotationRepo:
         return self._emotion_rows
 
 
-def test_fetch_character_data_consumes_authority_stable_states():
+def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_participants():
     annotation_repo = _DummyAnnotationRepo()
     mock_service = MagicMock()
     mock_service.build_graph_view.return_value = SimpleNamespace(
-        stable_states=[
+        participant_states=[
             SimpleNamespace(name="主角", status="active", primary_role_function="主体"),
             SimpleNamespace(name="同伴", status="active", primary_role_function="助手"),
-            SimpleNamespace(name="旧敌", status="inactive", primary_role_function="反对者"),
         ]
     )
-    mock_service.build_level1_snapshot.return_value = SimpleNamespace(alias_mappings=[])
+    mock_service.build_level1_snapshot.return_value = SimpleNamespace(
+        alias_mappings=[],
+        canonical_entities=[
+            SimpleNamespace(name="主角", entity_type="character", status="active", primary_role_function="主体"),
+            SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
+            SimpleNamespace(name="路人甲", entity_type="character", status="active", primary_role_function=None),
+            SimpleNamespace(name="旧敌", entity_type="character", status="inactive", primary_role_function="反对者"),
+            SimpleNamespace(name="古槐", entity_type="location", status="active", primary_role_function=None),
+        ],
+    )
 
     with patch(
         "src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session",
@@ -49,17 +57,18 @@ def test_fetch_character_data_consumes_authority_stable_states():
         data = fetch_character_data(annotation_repo, "run-1")
 
     from_session.assert_called_once_with(annotation_repo.session)
-    mock_service.build_graph_view.assert_called_once_with("run-1")
     mock_service.build_level1_snapshot.assert_called_once_with("run-1")
     assert data.characters == [
         ("主角", "主体", 1),
         ("同伴", "助手", 0),
+        ("路人甲", "其他", 0),
     ]
     assert data.char_emotion_scores == [
         ("主角", [1.0, -1.0]),
         ("同伴", [1.0]),
     ]
     assert data.protagonist_name == "主角"
+    mock_service.build_graph_view.assert_not_called()
 
 
 def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
@@ -76,7 +85,7 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
     )
     mock_service = MagicMock()
     mock_service.build_graph_view.return_value = SimpleNamespace(
-        stable_states=[
+        participant_states=[
             SimpleNamespace(name="白芷", status="active", primary_role_function="主体"),
             SimpleNamespace(name="同伴", status="active", primary_role_function="助手"),
         ]
@@ -84,7 +93,11 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
     mock_service.build_level1_snapshot.return_value = SimpleNamespace(
         alias_mappings=[
             SimpleNamespace(alias="灰衣人", canonical="白芷"),
-        ]
+        ],
+        canonical_entities=[
+            SimpleNamespace(name="白芷", entity_type="character", status="active", primary_role_function="主体"),
+            SimpleNamespace(name="同伴", entity_type="character", status="active", primary_role_function="助手"),
+        ],
     )
 
     with patch(
@@ -102,6 +115,7 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
         ("同伴", [1.0]),
     ]
     assert data.protagonist_name == "白芷"
+    mock_service.build_graph_view.assert_not_called()
 
 
 def test_fetch_relation_data_raises_when_pending_exists_and_graph_empty():

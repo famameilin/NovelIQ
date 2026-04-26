@@ -415,14 +415,12 @@ def project_graph_tables(
             continue
 
         affected_pairs.add((from_entity.entity_id, to_entity.entity_id))
-
         relation.projection_status = "projected"
         relation.projected_at = datetime.now(UTC)
         relation.projection_error = None
         projected_count += 1
 
-    for from_entity_id, to_entity_id in affected_pairs:
-        graph_repo.refresh_current_relation(run_id, from_entity_id, to_entity_id)
+    graph_repo.refresh_relation_projections(run_id, affected_pairs)
 
     session.commit()
     logger.info(

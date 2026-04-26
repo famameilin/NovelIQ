@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from src.knowledge.authority import GraphAuthorityView, RelationEvent
+from src.knowledge.authority import GraphAuthorityView, ParticipantState, RelationEvent
 from src.storage.models import Chunk as ChunkModel
 from src.storage.models import Novel
 
@@ -90,6 +90,63 @@ def relation_event(
     )
 
 
+def participant_state(
+    entity_id: int,
+    *,
+    name: str,
+    entity_type: str = "character",
+    status: str = "active",
+    primary_role_function: str | None = None,
+    first_seen_chunk: int | None = None,
+    last_seen_chunk: int | None = None,
+    source_confidence: float | None = None,
+) -> ParticipantState:
+    """
+    创建时间: 2026-04-26
+    任务: graph participant contract tests
+    说明: 统一构造 ParticipantState，避免测试继续散落旧 StableState 语义。
+    """
+    return ParticipantState(
+        entity_id=entity_id,
+        name=name,
+        entity_type=entity_type,
+        status=status,
+        primary_role_function=primary_role_function,
+        first_seen_chunk=first_seen_chunk,
+        last_seen_chunk=last_seen_chunk,
+        source_confidence=source_confidence,
+    )
+
+
+def build_graph_authority_view(
+    *,
+    participant_states: Sequence[ParticipantState] | None = None,
+    confirmed_relations: Sequence[object] | None = None,
+    relation_events: Sequence[RelationEvent] | None = None,
+    canonical_entities: Sequence[object] | None = None,
+) -> GraphAuthorityView:
+    """
+    创建时间: 2026-04-26
+    任务: graph participant contract tests
+    说明: 统一按 participant_states 构造 GraphAuthorityView，降低测试重构噪音。
+    """
+    return GraphAuthorityView(
+        canonical_entities=list(canonical_entities or []),
+        participant_states=list(participant_states or []),
+        confirmed_relations=list(confirmed_relations or []),
+        relation_events=list(relation_events or []),
+    )
+
+
+def get_graph_participant_states(view: GraphAuthorityView | SimpleNamespace) -> list[object]:
+    """
+    创建时间: 2026-04-26
+    任务: graph participant contract tests
+    说明: 统一读取 graph participant slice，避免测试里散落直接属性访问。
+    """
+    return list(getattr(view, "participant_states", []))
+
+
 class StaticGraphAuthorityService:
     """
     创建时间: 2026-04-23
@@ -144,8 +201,10 @@ class PaginatedGraphAuthorityService:
         if self.forbid_view:
             raise AssertionError("graph events pagination should not rebuild the full graph view")
         assert run_id == self.expected_run_id
-        return self.view or GraphAuthorityView(
-            stable_states=[], confirmed_relations=[], relation_events=self._relation_events
+        return self.view or build_graph_authority_view(
+            participant_states=[],
+            confirmed_relations=[],
+            relation_events=self._relation_events,
         )
 
     def build_graph_report(self, *_args, **_kwargs):

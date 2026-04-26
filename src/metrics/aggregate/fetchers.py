@@ -34,6 +34,7 @@ from .types import (
 )
 
 if TYPE_CHECKING:
+    from src.knowledge.authority.types import Level1AuthoritySnapshot
     from src.storage.repositories import (
         AnnotationRepository,
         ChunkRepository,
@@ -55,19 +56,15 @@ def _build_aggregate_graph_view(
     return KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_graph_view(run_id)
 
 
-def _build_aggregate_alias_lookup(
-    authority_service: KnowledgeGraphAuthorityService,
-    run_id: str,
-) -> dict[str, str]:
+def _build_aggregate_alias_lookup(snapshot: Level1AuthoritySnapshot) -> dict[str, str]:
     """
     构建 aggregate 可复用的 alias -> canonical 映射。
 
     中文注释：chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
-    stable state 消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
+    Level1 规范实体消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
     和情绪序列时因为名称漂移被静默归零。
     """
 
-    snapshot = authority_service.build_level1_snapshot(run_id)
     return {
         mapping.alias: mapping.canonical for mapping in snapshot.alias_mappings if mapping.alias and mapping.canonical
     }
@@ -134,15 +131,19 @@ def fetch_character_data(
     """
     提取角色数据。
 
-    修改时间: 2026-04-02
-    修改者: TraeAI
-    任务: P2.1-downstream-switch
-    修改内容: 从 graph_entities 读取权威角色列表，补充 chunk_characters 的情感分数
+    修改时间: 2026-04-26
+    任务: graph-participant-refactor Worker 2
+    修改内容: 改为从 Level1 snapshot.canonical_entities 读取完整角色种子，
+    避免 aggregate character stats 依赖 graph participant state 过滤结果。
     """
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
-    graph_view = authority_service.build_graph_view(run_id)
-    alias_lookup = _build_aggregate_alias_lookup(authority_service, run_id)
-    active_states = [state for state in graph_view.stable_states if state.status == "active"]
+    snapshot = authority_service.build_level1_snapshot(run_id)
+    alias_lookup = _build_aggregate_alias_lookup(snapshot)
+    active_characters = [
+        entity
+        for entity in snapshot.canonical_entities
+        if entity.entity_type == "character" and entity.status == "active"
+    ]
 
     # 2. 从 chunk_characters 聚合情感分数（用于补充）
     rows = annotation_repo.fetch_characters_with_scores(run_id)
@@ -152,11 +153,11 @@ def fetch_character_data(
         canonical_name = _canonicalize_aggregate_character_name(name, alias_lookup)
         emotion_map[canonical_name] = map_emotion_score(emotion_score_raw)
 
-    # 3. 构建角色列表（使用 authority stable state 作为正式输入）
+    # 3. 构建角色列表（使用 Level1 canonical entity 作为完整角色种子）
     characters = []
-    for state in active_states:
-        emotion_score = emotion_map.get(state.name, 0)
-        characters.append((state.name, state.primary_role_function or "其他", emotion_score))
+    for entity in active_characters:
+        emotion_score = emotion_map.get(entity.name, 0)
+        characters.append((entity.name, entity.primary_role_function or "其他", emotion_score))
 
     # 4. 构建情感序列（仍从 chunk_characters 获取）
     char_emotion_rows = annotation_repo.fetch_character_emotion_sequence(run_id)
@@ -169,11 +170,11 @@ def fetch_character_data(
         char_emotion_map[canonical_name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 
-    # 5. 确定主角（从 authority stable state 中找 role_function 为"主体"的）
+    # 5. 确定主角（从 Level1 canonical entity 中找 role_function 为"主体"的）
     protagonist_name = None
-    for state in active_states:
-        if state.primary_role_function == "主体":
-            protagonist_name = state.name
+    for entity in active_characters:
+        if entity.primary_role_function == "主体":
+            protagonist_name = entity.name
             break
 
     return CharacterData(

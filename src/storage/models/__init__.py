@@ -41,6 +41,7 @@ from src.storage.models.foreshadowing import ForeshadowingThread, ForeshadowingT
 from src.storage.models.graph import (
     GraphEntity,
     GraphEntityAlias,
+    GraphEntityParticipant,
     GraphRelationCurrent,
     GraphRelationEvent,
 )
@@ -69,6 +70,7 @@ __all__ = [
     "CharacterAppearance",
     "GraphEntity",
     "GraphEntityAlias",
+    "GraphEntityParticipant",
     "GraphRelationEvent",
     "GraphRelationCurrent",
     "CloudAnalysis",
