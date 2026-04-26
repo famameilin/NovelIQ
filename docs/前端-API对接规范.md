@@ -156,7 +156,7 @@ export interface TopicInfo {
 // ========== 诊断数据 ==========
 
 export interface DiagnosisResult {
-  foreshadow_rate?: number;
+  foreshadow_expectation?: number | null;
   arc_scores?: number[] | Record<string, number>;
   narrative_type?: string;
   topic_labels?: string[];
@@ -485,7 +485,7 @@ export async function fetchTopics(
 export async function fetchDiagnosis(
   novelId: string,
   taskId: string
-): Promise<DiagnosisResult> {
+): Promise<DiagnosisResult | null> {
   const { data } = await apiClient.get(`/api/novels/${novelId}/diagnosis`, {
     params: { task_id: taskId },
   });

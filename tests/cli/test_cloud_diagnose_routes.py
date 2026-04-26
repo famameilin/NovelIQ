@@ -446,6 +446,34 @@ class TestCloudDiagnose:
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
 
+    def test_finalize_result_resets_expectation_to_none_when_payload_has_no_ledger_value(self) -> None:
+        """
+        创建时间: 2026-04-26
+        创建者: Codex
+        任务: fix-diagnosis-review-findings
+        说明: setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
+        此时必须覆写掉 LLM 自行猜测的数值，继续保持单一真相源。
+        """
+
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_expectation=0.27,
+            arc_scores={"角色0": 8.5},
+            narrative_type="三幕",
+            topic_labels=["成长"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            protagonist="角色0",
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
+        )
+
+        finalized = client._finalize_result(result, "fixed-novel", payload={"foreshadow_expectation": None})
+
+        assert finalized.novel_id == "fixed-novel"
+        assert finalized.foreshadow_expectation is None
+
     def test_build_messages_uses_alias_merges(self) -> None:
         client = object.__new__(DiagnosisClient)
 

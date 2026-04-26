@@ -564,9 +564,9 @@ GET /api/novels/10960c77/results?task_id=a1b2c3d4
 
 ---
 
-#### GET /api/novels/{novel_id}/emotion-curve
+#### GET /api/novels/{novel_id}/chunk-curves
 
-获取情感曲线数据。
+获取分块曲线数据（情绪 + 节奏）。
 
 **查询参数**:
 | 参数 | 类型 | 必填 | 说明 |
@@ -575,7 +575,7 @@ GET /api/novels/10960c77/results?task_id=a1b2c3d4
 
 **请求示例**:
 ```
-GET /api/novels/10960c77/emotion-curve?task_id=a1b2c3d4
+GET /api/novels/10960c77/chunk-curves?task_id=a1b2c3d4
 ```
 
 **响应示例**:
@@ -586,37 +586,25 @@ GET /api/novels/10960c77/emotion-curve?task_id=a1b2c3d4
     "pos_density": 0.0,
     "neg_density": 0.002638,
     "net_density": -0.002638,
-    "smoothed_density": -0.002638
-  }
-]
-```
-
----
-
-#### GET /api/novels/{novel_id}/rhythm-curve
-
-获取节奏曲线数据。
-
-**查询参数**:
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| task_id | str | 是 | 分析任务ID |
-
-**请求示例**:
-```
-GET /api/novels/10960c77/rhythm-curve?task_id=a1b2c3d4
-```
-
-**响应示例**:
-```json
-[
-  {
-    "chunk_id": 0,
+    "smoothed_density": -0.002638,
     "tension_proxy": 5.578,
-    "tension_composite": 0.21
+    "tension_composite": 0.21,
+    "surface_tension": 0.18
   }
 ]
 ```
+
+**字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| chunk_id | int | 分块编号 |
+| pos_density | float | 正向情绪密度 |
+| neg_density | float | 负向情绪密度 |
+| net_density | float | 情绪净密度 |
+| smoothed_density | float | 平滑后的情绪曲线值 |
+| tension_proxy | float | 张力代理值 |
+| tension_composite | float | 融合张力值 |
+| surface_tension | float | 展示层 surface tension 值 |
 
 ---
 
@@ -708,11 +696,10 @@ GET /api/novels/10960c77/topics?task_id=a1b2c3d4
 GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 ```
 
-**响应示例**:
+**响应示例（有数据）**:
 ```json
 {
   "foreshadow_expectation": 0.6,
-  "foreshadow_rate": 0.6,
   "arc_scores": {"主角A": 8.0, "主角B": 7.0},
   "narrative_type": "寓言",
   "topic_labels": ["抗争", "宿命"],
@@ -733,11 +720,15 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 }
 ```
 
+**响应示例（暂无 diagnosis）**:
+```json
+null
+```
+
 **字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| foreshadow_expectation | float | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值） |
-| foreshadow_rate | float | 兼容字段：新 run 下一般与 foreshadow_expectation 同值；旧 run 若无 setup ledger，则回退为历史 diagnosis 值 |
+| foreshadow_expectation | float \| null | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值）；若当前 run 尚无可展示 diagnosis，可返回 `null` |
 | arc_scores | dict[str, float] | 各角色弧线得分 |
 | narrative_type | str | 叙事类型 |
 | topic_labels | list[str] | 主题标签 |
@@ -755,10 +746,6 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 | main_characters | list[str] | 主要角色列表 |
 | core_cast | list[str] | 核心演员列表 |
 | theme_color | str | 小说主题色，十六进制格式，如 `#4A90D9` |
-
-**兼容说明**:
-- 新 run 且 setup ledger 已存在时，`foreshadow_expectation` 是正式展示值，`foreshadow_rate` 仅作兼容镜像。
-- 旧 run 或尚未生成 setup ledger 时，`foreshadow_expectation` 可能为 `null`，而 `foreshadow_rate` 会回退为历史 diagnosis 存储值。
 
 **实体关系数据**:
 
@@ -778,6 +765,60 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 | character | 具体人物角色 | 伯安、贺重明 |
 | group | 群体/队伍统称 | 赤甲卫、禁军 |
 | organization | 组织/门派/家族 | 贺家、玄天道宗 |
+
+---
+
+#### GET /api/novels/{novel_id}/foreshadowing-threads
+
+获取 setup thread 台账数据。
+
+**查询参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| task_id | str | 是 | 分析任务ID |
+
+**请求示例**:
+```
+GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
+```
+
+**响应示例**:
+```json
+[
+  {
+    "setup_id": "setup-001",
+    "first_chunk_id": 3,
+    "last_chunk_id": 18,
+    "anchor_chunk_ids": [3, 8, 18],
+    "setup_summary": "铜铃异响反复指向山门旧案",
+    "setup_kind": "mystery",
+    "expected_payoff_family": "revelation",
+    "payoff_likelihood": "high",
+    "strength": "strong",
+    "status": "reinforced",
+    "active": true,
+    "latest_reason": "第18块再次强化铜铃与旧案的隐含关联",
+    "latest_why_unresolved_now": "真相尚未揭露"
+  }
+]
+```
+
+**字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| setup_id | str | setup thread 唯一 ID |
+| first_chunk_id | int | 首次出现的 chunk |
+| last_chunk_id | int | 最近一次命中的 chunk |
+| anchor_chunk_ids | list[int] | 支撑该 thread 的锚点 chunk 列表 |
+| setup_summary | str | setup 摘要 |
+| setup_kind | str | setup 类型 |
+| expected_payoff_family | str | 预期回收家族 |
+| payoff_likelihood | str | 回收预期强度（如 `high/medium/low`） |
+| strength | str | 当前 thread 强度 |
+| status | str | thread 状态（如 `open/reinforced/likely_paid_off/archived`） |
+| active | bool | 是否仍在 active setup pool 中 |
+| latest_reason | str | 最近一次命中的说明 |
+| latest_why_unresolved_now | str | 当前仍未完全回收的原因 |
 
 ---
 
@@ -1169,8 +1210,8 @@ curl -X DELETE http://localhost:8000/api/novels/{novel_id}/tasks/{task_id}
 # 导出完整结果（必须指定 task_id）
 curl "http://localhost:8000/api/novels/{novel_id}/results?task_id={task_id}"
 
-# 获取情感曲线
-curl "http://localhost:8000/api/novels/{novel_id}/emotion-curve?task_id={task_id}"
+# 获取分块曲线（情绪 + 节奏）
+curl "http://localhost:8000/api/novels/{novel_id}/chunk-curves?task_id={task_id}"
 
 # 获取叙事时间轴
 curl "http://localhost:8000/api/novels/{novel_id}/timeline?task_id={task_id}"
@@ -1223,9 +1264,9 @@ result = requests.get(
 ).json()
 print(f"文件路径: {result['file_path']}")
 
-# 获取情感曲线
-emotion_curve = requests.get(
-    f"{BASE_URL}/novels/{novel_id}/emotion-curve",
+# 获取分块曲线（情绪 + 节奏）
+chunk_curves = requests.get(
+    f"{BASE_URL}/novels/{novel_id}/chunk-curves",
     params={"task_id": task_id}
 ).json()
 
