@@ -16,6 +16,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.api.exceptions import GraphReadinessError
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
 from src.knowledge.authority import (
     GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
@@ -211,7 +212,7 @@ def _fetch_character_relations(
     if not export_graph_view.current_relations:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
         if pending_relations:
-            raise RuntimeError(
+            raise GraphReadinessError(
                 "graph current relations are empty while pending relations still exist; "
                 "run graph projection before reading character relations."
             )
@@ -293,7 +294,7 @@ def _fetch_graph_snapshot(
     """获取知识图谱快照（nodes/edges/events/summary）。"""
     pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
     if pending_relations:
-        raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
+        raise GraphReadinessError("graph projection is still pending; finish projection before reading graph snapshot.")
 
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     graph_view = authority_service.build_graph_view(run_id)
@@ -354,7 +355,7 @@ def _fetch_graph_events_page(
     """获取 graph page relation events 的增量分页结果。"""
     pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
     if pending_relations:
-        raise RuntimeError("graph projection is still pending; finish projection before reading graph events.")
+        raise GraphReadinessError("graph projection is still pending; finish projection before reading graph events.")
 
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     start = _decode_graph_events_cursor(events_cursor)

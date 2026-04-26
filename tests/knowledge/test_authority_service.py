@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 
+from src.api.exceptions import GraphReadinessError
 from src.knowledge.authority import (
     EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS,
     GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
@@ -102,6 +103,7 @@ def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db
         source_relation_row_id=12002,
         directionality="directed",
     )
+    graph_repo.refresh_entity_participants(run_id, [protagonist.entity_id, rival.entity_id, sect.entity_id])
     db_session.commit()
 
     view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(run_id)
@@ -262,6 +264,31 @@ def test_build_graph_view_rejects_partial_participant_projection_when_relations_
 
     with pytest.raises(RuntimeError, match="graph participant projection is stale or incomplete"):
         KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+
+
+def test_build_timeline_view_requires_participant_projection_when_relation_tables_exist(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Timeline Participant Consistency")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13043,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    with pytest.raises(GraphReadinessError, match="graph participant projection is stale or incomplete"):
+        KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(run_id)
 
 
 def test_graph_authority_report_rejects_graph_page_contracts() -> None:

@@ -4,8 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
+from src.storage.models import GraphEntityParticipant
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
     index_by_chunk_id,
@@ -188,3 +190,17 @@ def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_pa
 
     assert response.status_code == 500
     assert response.json()["error_type"] == "InternalServerError"
+
+
+def test_get_timeline_stale_participant_projection_returns_409(api_client: TestClient, db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+    db_session.execute(delete(GraphEntityParticipant).where(GraphEntityParticipant.run_id == scenario.run_id))
+    db_session.commit()
+
+    response = api_client.get(
+        f"/api/novels/{scenario.novel_id}/timeline",
+        params={"task_id": scenario.task_id, "include_curve": "true"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"

@@ -17,6 +17,7 @@ from src.knowledge.authority import (
     GraphPageQualityDetails,
     GraphPageSummary,
 )
+from src.storage.models import ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.graph_snapshot_helpers import (
     PaginatedGraphAuthorityService,
@@ -30,6 +31,36 @@ from tests.support.graph_snapshot_helpers import (
     relation_event,
 )
 from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
+
+
+def _create_stale_graph_run(db_session) -> tuple[str, str, str]:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Stale Participant Contract",
+    )
+    insert_graph_test_chunks(db_session, run_id, range(1, 5))
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=3)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="柳婉儿", first_seen_chunk=1, last_seen_chunk=3)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="共同应敌",
+        confidence=0.91,
+        source_relation_row_id=9499,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+    return novel_id, run_id, run_id[:8]
 
 
 def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
@@ -559,37 +590,69 @@ def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> Non
 
 
 def test_fetch_graph_events_page_rejects_missing_participant_projection(db_session) -> None:
-    novel_id = f"g{uuid.uuid4().hex[:7]}"
-    insert_graph_test_novel(db_session, novel_id)
-    run_id = RunRepository(db_session).create_run(
-        novel_id=novel_id,
-        source_path="test",
-        title="Graph Events Missing Participants",
-    )
-    insert_graph_test_chunks(db_session, run_id, range(1, 5))
-
-    graph_repo = GraphRepository(db_session)
-    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=3)
-    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="柳婉儿", first_seen_chunk=1, last_seen_chunk=3)
-    graph_repo.insert_relation_event(
-        run_id=run_id,
-        from_entity_id=hero.entity_id,
-        to_entity_id=ally.entity_id,
-        relation_type="盟友",
-        change_type="新建",
-        chunk_id=3,
-        evidence="共同应敌",
-        confidence=0.91,
-        source_relation_row_id=9401,
-        directionality="directed",
-    )
-    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
-    db_session.commit()
+    _novel_id, run_id, _task_id = _create_stale_graph_run(db_session)
 
     annotation_repo = create_graph_annotation_repo(db_session)
 
     with pytest.raises(RuntimeError, match="graph participant projection is stale or incomplete"):
         _fetch_graph_events_page(run_id, annotation_repo)
+
+
+def test_get_graph_stale_participant_projection_returns_409(api_client, db_session) -> None:
+    novel_id, _run_id, task_id = _create_stale_graph_run(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph",
+        params={"task_id": task_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"
+
+
+def test_get_graph_events_stale_participant_projection_returns_409(api_client, db_session) -> None:
+    novel_id, _run_id, task_id = _create_stale_graph_run(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph/events",
+        params={"task_id": task_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"
+
+
+def test_get_graph_pending_projection_returns_409(api_client, db_session) -> None:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_id = RunRepository(db_session).create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Pending Projection",
+    )
+    insert_graph_test_chunks(db_session, run_id, range(1, 3))
+    db_session.add(
+        ChunkRelation(
+            chunk_id=1,
+            run_id=run_id,
+            from_char="贺伯安",
+            to_char="柳婉儿",
+            type="盟友",
+            change="新建",
+            evidence="共同应敌",
+            confidence=0.91,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph",
+        params={"task_id": run_id[:8]},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"
 
 
 @pytest.mark.parametrize(
