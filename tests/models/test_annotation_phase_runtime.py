@@ -35,7 +35,7 @@ async def test_execute_phase_call_records_thinking_and_reasoning_tokens() -> Non
     client = _make_client()
     parsed = ForeshadowingResult(
         has_foreshadowing=True,
-        foreshadowing_type="causal",
+        foreshadowing_type="物件",
         anchor_text="铜铃",
         anchor_reason="反复出现但用途未明",
         confidence="high",
