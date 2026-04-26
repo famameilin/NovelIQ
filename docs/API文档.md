@@ -725,10 +725,17 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
 null
 ```
 
+**响应示例（仅 setup ledger 可用）**:
+```json
+{
+  "foreshadow_expectation": 0.58
+}
+```
+
 **字段说明**:
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| foreshadow_expectation | float \| null | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值）；若当前 run 尚无可展示 diagnosis，可返回 `null` |
+| foreshadow_expectation | float \| null | 伏笔回收预期（0-1，基于 setup thread ledger 加权估算的近似值）；若云端 diagnosis 缺失但 ledger 已可用，可单独返回该字段 |
 | arc_scores | dict[str, float] | 各角色弧线得分 |
 | narrative_type | str | 叙事类型 |
 | topic_labels | list[str] | 主题标签 |

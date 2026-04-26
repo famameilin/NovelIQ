@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from src.api.models.responses import DiagnosisResult
-from src.storage.repositories import StatsRepository
+from src.storage.repositories import AnnotationRepository, StatsRepository
 
 from .common import (
     _normalize_arc_scores,
@@ -26,6 +26,7 @@ def _fetch_diagnosis(
     run_id: str,
     novel_id: str,
     stats_repo: StatsRepository,
+    annotation_repo: AnnotationRepository | None = None,
     alias_map: dict[str, str] | None = None,
 ) -> DiagnosisResult | None:
     """
@@ -39,7 +40,12 @@ def _fetch_diagnosis(
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
     if not data:
-        return None
+        if annotation_repo is None:
+            return None
+        foreshadow_expectation = annotation_repo.calculate_foreshadow_expectation(run_id)
+        if foreshadow_expectation is None:
+            return None
+        return DiagnosisResult(foreshadow_expectation=foreshadow_expectation)
 
     main_characters_raw = _parse_json_field(data.get("main_characters")) if data else None
     main_characters_normalized = (

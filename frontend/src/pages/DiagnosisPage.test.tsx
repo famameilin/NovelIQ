@@ -152,6 +152,32 @@ describe("DiagnosisPage", () => {
     expect(screen.getByText("当前任务暂时还没有可展示的诊断结果。")).toBeInTheDocument();
   });
 
+  it("still renders setup ledger when diagnosis returns null but threads are available", async () => {
+    getDiagnosisMock.mockResolvedValue(null);
+    getForeshadowingThreadsMock.mockResolvedValue([
+      {
+        setup_id: "setup-1",
+        first_chunk_id: 3,
+        last_chunk_id: 8,
+        anchor_chunk_ids: [3, 8],
+        setup_summary: "铜铃异响反复指向山门旧案",
+        setup_kind: "异常物件",
+        expected_payoff_family: "真相揭露",
+        payoff_likelihood: "high",
+        strength: "high",
+        status: "reinforced",
+        active: true,
+        latest_reason: "再次强化旧案关联",
+      },
+    ]);
+
+    renderDiagnosisPage();
+
+    expect(await screen.findByText("诊断报告暂未生成")).toBeInTheDocument();
+    expect(await screen.findByText("Setup 台账")).toBeInTheDocument();
+    expect(screen.getByText("铜铃异响反复指向山门旧案")).toBeInTheDocument();
+  });
+
   it("shows a visible warning when foreshadowing thread drill-down fails", async () => {
     getDiagnosisMock.mockResolvedValue({
       narrative_type: "寓言",
