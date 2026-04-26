@@ -92,6 +92,82 @@ function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
 }
 
 /**
+ * 创建时间: 2026-04-26
+ * 创建者: Codex
+ * 任务: fix-diagnosis-ledger-fallback
+ * 说明: setup 台账是独立于云端 diagnosis 的主链结果；
+ * 即便 diagnosis 为空，只要 ledger 已可用，也应该继续对用户可见。
+ */
+function ForeshadowingThreadsSection(props: {
+  foreshadowingThreads: Array<{
+    setup_id: string;
+    first_chunk_id: number;
+    last_chunk_id: number;
+    anchor_chunk_ids: number[];
+    setup_summary: string;
+    setup_kind: string;
+    expected_payoff_family: string;
+    payoff_likelihood: string;
+    strength: string;
+    status: string;
+    latest_reason?: string | null;
+  }>;
+}) {
+  return (
+    <DashboardCardShell
+      title="Setup 台账"
+      icon={<GitBranch className="h-4 w-4" />}
+      accent="chart-2"
+      bodyClassName="gap-3"
+    >
+      <div className="grid grid-cols-1 gap-3">
+        {props.foreshadowingThreads.map((thread) => {
+          const statusMeta = getThreadStatusMeta(thread.status);
+          return (
+            <div
+              key={thread.setup_id}
+              className="rounded-2xl border border-border/70 bg-surface/75 p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                    <Badge variant="outline">{thread.setup_kind}</Badge>
+                    <Badge variant="outline">{thread.expected_payoff_family}</Badge>
+                  </div>
+                  <p className="text-sm font-semibold text-text">{thread.setup_summary}</p>
+                </div>
+                <div className="text-right text-xs text-text-muted">
+                  <div>首次出现 Chunk {thread.first_chunk_id}</div>
+                  <div>最近命中 Chunk {thread.last_chunk_id}</div>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-text-muted md:grid-cols-3">
+                <div>
+                  <span className="font-medium text-text">回收预期：</span>
+                  {thread.payoff_likelihood}
+                </div>
+                <div>
+                  <span className="font-medium text-text">强度：</span>
+                  {thread.strength}
+                </div>
+                <div>
+                  <span className="font-medium text-text">锚点 Chunk：</span>
+                  {thread.anchor_chunk_ids.join(", ")}
+                </div>
+              </div>
+              {thread.latest_reason && (
+                <p className="mt-3 text-sm text-text-muted">{thread.latest_reason}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </DashboardCardShell>
+  );
+}
+
+/**
  * 修改时间: 2026-04-26
  * 修改者: Codex
  * 任务: fix-diagnosis-review-findings
@@ -237,6 +313,10 @@ export function DiagnosisPage() {
       {/* Empty state */}
       {hasNullDiagnosis && !isLoading && <EmptyDiagnosisState />}
 
+      {/* Ledger fallback */}
+      {isThreadsError && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
+      {foreshadowingThreads.length > 0 && !isLoading && <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />}
+
       {/* Main content */}
       {diagnosis && !isLoading && (
         <motion.div
@@ -278,61 +358,6 @@ export function DiagnosisPage() {
               reason={diagnosis.cultural_depth_reason}
             />
           </div>
-
-          {isThreadsError && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
-
-          {foreshadowingThreads.length > 0 && (
-            <DashboardCardShell
-              title="Setup 台账"
-              icon={<GitBranch className="h-4 w-4" />}
-              accent="chart-2"
-              bodyClassName="gap-3"
-            >
-              <div className="grid grid-cols-1 gap-3">
-                {foreshadowingThreads.map((thread) => {
-                  const statusMeta = getThreadStatusMeta(thread.status);
-                  return (
-                    <div
-                      key={thread.setup_id}
-                      className="rounded-2xl border border-border/70 bg-surface/75 p-4"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
-                            <Badge variant="outline">{thread.setup_kind}</Badge>
-                            <Badge variant="outline">{thread.expected_payoff_family}</Badge>
-                          </div>
-                          <p className="text-sm font-semibold text-text">{thread.setup_summary}</p>
-                        </div>
-                        <div className="text-right text-xs text-text-muted">
-                          <div>首次出现 Chunk {thread.first_chunk_id}</div>
-                          <div>最近命中 Chunk {thread.last_chunk_id}</div>
-                        </div>
-                      </div>
-                      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-text-muted md:grid-cols-3">
-                        <div>
-                          <span className="font-medium text-text">回收预期：</span>
-                          {thread.payoff_likelihood}
-                        </div>
-                        <div>
-                          <span className="font-medium text-text">强度：</span>
-                          {thread.strength}
-                        </div>
-                        <div>
-                          <span className="font-medium text-text">锚点 Chunk：</span>
-                          {thread.anchor_chunk_ids.join(", ")}
-                        </div>
-                      </div>
-                      {thread.latest_reason && (
-                        <p className="mt-3 text-sm text-text-muted">{thread.latest_reason}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </DashboardCardShell>
-          )}
 
           {/* 预留诊断文本区域 */}
           {diagnosis.diagnosis && <DiagnosisText diagnosisText={diagnosis.diagnosis} />}

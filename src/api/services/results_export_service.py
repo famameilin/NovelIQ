@@ -106,7 +106,7 @@ def load_character_bundle(
     """
     missing_fields: list[str] = []
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
     if not diagnosis:
         missing_fields.append("diagnosis")
 
@@ -396,7 +396,7 @@ def fetch_all_results_data(
     )
     missing_fields.extend(char_missing)
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
     if not diagnosis:
         missing_fields.append("diagnosis")
 
