@@ -22,6 +22,7 @@ from src.api.services.results_queries import (
     _fetch_chunk_annotations,
     _fetch_chunk_styles,
     _fetch_diagnosis,
+    _fetch_foreshadowing_threads,
     _fetch_global_stats,
     _fetch_hierarchical_relations,
     _fetch_novel_name,
@@ -322,6 +323,7 @@ def build_export_payload(
     global_stats: Any,
     aggregate_metrics: dict[str, Any],
     token_usage_stats: Any,
+    foreshadowing_threads: list | None = None,
     graph_summary: dict[str, Any] | None = None,
     graph_quality_report: dict[str, Any] | None = None,
     timeline_data: dict[str, Any] | None = None,
@@ -344,6 +346,9 @@ def build_export_payload(
         "diagnosis": diagnosis.model_dump(exclude_none=True) if diagnosis else None,
         "chunk_styles": [s.model_dump(exclude_none=True) for s in chunk_styles],
         "chunk_annotations": [a.model_dump(exclude_none=True) for a in chunk_annotations],
+        "foreshadowing_threads": [
+            thread.model_dump(exclude_none=True) for thread in (foreshadowing_threads or [])
+        ],
         "character_relations": [r.model_dump(exclude_none=True) for r in character_relations],
         "hierarchical_relations": [r.model_dump(exclude_none=True) for r in hierarchical_relations],
         "global_stats": global_stats.model_dump(exclude_none=True) if global_stats else None,
@@ -379,7 +384,7 @@ def fetch_all_results_data(
     )
     missing_fields.extend(char_missing)
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map, annotation_repo)
     if not diagnosis:
         missing_fields.append("diagnosis")
 
@@ -392,6 +397,7 @@ def fetch_all_results_data(
         export_graph_view,
     )
     missing_fields.extend(chunk_missing)
+    foreshadowing_threads = _fetch_foreshadowing_threads(run_id, annotation_repo)
 
     (
         character_relations,
@@ -436,6 +442,7 @@ def fetch_all_results_data(
         diagnosis=diagnosis,
         chunk_styles=chunk_styles,
         chunk_annotations=chunk_annotations,
+        foreshadowing_threads=foreshadowing_threads,
         character_relations=character_relations,
         hierarchical_relations=hierarchical_relations,
         global_stats=global_stats,

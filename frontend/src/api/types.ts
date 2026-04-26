@@ -133,6 +133,8 @@ export type ForeshadowingSetupKind =
   | "因果引线"
   | "其他";
 
+export type ForeshadowingPayoffLikelihood = "high" | "medium" | "low";
+
 export interface ChunkAnnotation {
   chunk_id: number;
   emotional_valence?: string | null;
@@ -144,8 +146,11 @@ export interface ChunkAnnotation {
   foreshadowing_type?: string | null;
   setup_kind?: ForeshadowingSetupKind | null;
   foreshadowing_desc?: string | null;
+  setup_summary?: string | null;
   why_unresolved_now?: string | null;
   expected_payoff_family?: string | null;
+  payoff_likelihood?: ForeshadowingPayoffLikelihood | null;
+  linked_setup_id?: string | null;
   characters: ChunkCharacter[];
   relations: ChunkRelation[];
   dialogues: ChunkDialogue[];
@@ -175,6 +180,7 @@ export interface Topic {
 
 export interface DiagnosisResult {
   narrative_type?: string;
+  foreshadow_expectation?: number;
   foreshadow_rate?: number;
   protagonist?: string;
   narrative_arc_type?: string;
@@ -192,6 +198,22 @@ export interface DiagnosisResult {
   core_cast?: string[];
   main_characters?: string[];
   theme_color?: string;
+}
+
+export interface ForeshadowingThread {
+  setup_id: string;
+  first_chunk_id: number;
+  last_chunk_id: number;
+  anchor_chunk_ids: number[];
+  setup_summary: string;
+  setup_kind: ForeshadowingSetupKind | string;
+  expected_payoff_family: string;
+  payoff_likelihood: ForeshadowingPayoffLikelihood;
+  strength: "high" | "medium" | string;
+  status: "open" | "reinforced" | "likely_paid_off" | "archived" | string;
+  active: boolean;
+  latest_reason?: string | null;
+  latest_why_unresolved_now?: string | null;
 }
 
 // ============================================================

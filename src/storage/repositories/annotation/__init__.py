@@ -9,12 +9,13 @@
 
 from __future__ import annotations
 
-from . import characters, inserts, locations, queries
+from . import characters, foreshadowing_threads, inserts, locations, queries
 from .repository import AnnotationRepository
 
 __all__ = [
     "AnnotationRepository",
     "characters",
+    "foreshadowing_threads",
     "inserts",
     "locations",
     "queries",

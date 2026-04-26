@@ -181,11 +181,39 @@ class ChunkAnnotation(BaseModel):
     foreshadowing_type: str | None = None
     setup_kind: str | None = None
     foreshadowing_desc: str | None = None
+    setup_summary: str | None = None
     why_unresolved_now: str | None = None
     expected_payoff_family: str | None = None
+    payoff_likelihood: str | None = None
+    linked_setup_id: str | None = None
     characters: list[ChunkCharacter] = []
     relations: list[ChunkRelation] = []
     dialogues: list[ChunkDialogue] = []
+
+
+class ForeshadowingThreadResponse(BaseModel):
+    """
+    Setup thread 结果视图。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-setup-pool
+    说明: 提供 setup ledger 的稳定 API 响应模型，供诊断 drill-down 和结果导出复用。
+    """
+
+    setup_id: str
+    first_chunk_id: int
+    last_chunk_id: int
+    anchor_chunk_ids: list[int] = []
+    setup_summary: str
+    setup_kind: str
+    expected_payoff_family: str
+    payoff_likelihood: str
+    strength: str
+    status: str
+    active: bool
+    latest_reason: str | None = None
+    latest_why_unresolved_now: str | None = None
 
 
 class CharacterRelation(BaseModel):
@@ -290,12 +318,18 @@ class TopicInfo(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
+    foreshadow_expectation: float | None = Field(
+        default=None,
+        description=(
+            "伏笔回收预期，基于 Phase2 强 setup thread 状态估算的近似值，"
+            "取值范围 0-1，不是严格全文事实回收率。"
+        ),
+    )
     foreshadow_rate: float | None = Field(
         default=None,
         description=(
-            "伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示，"
-            "取值范围 0-1。该值由 diagnosis 阶段整体评估，"
-            "不应与 chunk_annotations.has_foreshadowing 的占比直接比较。"
+            "兼容字段：新 run 下与 foreshadow_expectation 返回同值。"
+            "旧 run 若尚无 setup ledger，则回退为历史 diagnosis.foreshadow_rate。"
         ),
     )
     arc_scores: list[float] | dict[str, float] | None = None
