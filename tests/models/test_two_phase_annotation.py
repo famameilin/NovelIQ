@@ -140,6 +140,60 @@ class TestForeshadowingParsing(unittest.TestCase):
         result = parse_foreshadowing_result(data)
         self.assertEqual(result.confidence, "low")
 
+    def test_parse_foreshadowing_string_false_bools_stay_negative(self) -> None:
+        """测试字符串 false 不会再被误判成强伏笔正例。"""
+        data = {
+            "has_foreshadowing": "false",
+            "is_strong_setup": "false",
+            "foreshadowing_type": None,
+            "setup_kind": None,
+            "anchor_text": "",
+            "anchor_reason": "",
+            "why_unresolved_now": "",
+            "expected_payoff_family": "",
+            "confidence": "low",
+        }
+        result = parse_foreshadowing_result(data)
+        self.assertFalse(result.has_foreshadowing)
+        self.assertFalse(result.is_strong_setup)
+        self.assertIsNone(result.foreshadowing_type)
+        self.assertIsNone(result.setup_kind)
+
+    def test_parse_foreshadowing_string_true_bools_stay_positive(self) -> None:
+        """测试字符串 true 仍能被归一化成合法强伏笔正例。"""
+        data = {
+            "has_foreshadowing": "true",
+            "is_strong_setup": "true",
+            "foreshadowing_type": "物件",
+            "setup_kind": "异常物件",
+            "anchor_text": "那枚玉佩在夜里自行发热。",
+            "anchor_reason": "具体钩子：玉佩在夜里自行发热。未闭合原因：当前还没有解释它为何会发热。",
+            "why_unresolved_now": "当前还没有解释它为何会发热。",
+            "expected_payoff_family": "能力触发",
+            "confidence": "high",
+        }
+        result = parse_foreshadowing_result(data)
+        self.assertTrue(result.has_foreshadowing)
+        self.assertTrue(result.is_strong_setup)
+        self.assertEqual(result.foreshadowing_type, "物件")
+        self.assertEqual(result.setup_kind, "异常物件")
+
+    def test_parse_foreshadowing_invalid_boolean_string_raises_value_error(self) -> None:
+        """测试未知布尔字符串不会被静默吞掉。"""
+        data = {
+            "has_foreshadowing": "maybe",
+            "is_strong_setup": False,
+            "foreshadowing_type": None,
+            "setup_kind": None,
+            "anchor_text": "",
+            "anchor_reason": "",
+            "why_unresolved_now": "",
+            "expected_payoff_family": "",
+            "confidence": "low",
+        }
+        with self.assertRaises(ValueError):
+            parse_foreshadowing_result(data)
+
     def test_parse_foreshadowing_invalid_type_raises_validation_error(self) -> None:
         data = {
             "has_foreshadowing": True,

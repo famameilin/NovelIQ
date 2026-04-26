@@ -18,6 +18,8 @@ _VALID_CONFIDENCES = frozenset(get_args(ForeshadowingConfidence))
 _VALID_SETUP_KINDS = frozenset(get_args(ForeshadowingSetupKind))
 _HOOK_LABEL = "具体钩子："
 _UNRESOLVED_LABEL = "未闭合原因："
+_TRUE_BOOL_MARKERS = frozenset({"true", "1", "yes", "y", "on"})
+_FALSE_BOOL_MARKERS = frozenset({"false", "0", "no", "n", "off"})
 _ANOMALY_HOOK_MARKERS = (
     "异常",
     "异样",
@@ -125,6 +127,41 @@ def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     新建原因: 将强伏笔语义过滤收口成显式 helper，避免 validate_foreshadowing_result 内散落硬编码判断。
     """
     return any(marker in text for marker in markers)
+
+
+def _coerce_boolean_field(field_name: str, value: Any, default: bool = False) -> bool:
+    """
+    严格归一化结构化输出里的布尔字段。
+
+    创建时间: 2026-04-26
+    任务: phase2-strong-foreshadowing
+    新建原因: Phase2 现在会在 `json_object` 模式下接收 provider 返回的原始 JSON；
+    某些 provider 会把 true/false 序列化成字符串，不能再直接用 `bool(...)`
+    否则 `"false"` 会被误判成 True。
+    """
+    if value is None:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        if value in (0, 0.0):
+            return False
+        if value in (1, 1.0):
+            return True
+        raise ValueError(f"{field_name} must be a boolean-compatible 0/1, got {value!r}")
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return default
+        if normalized in _TRUE_BOOL_MARKERS:
+            return True
+        if normalized in _FALSE_BOOL_MARKERS:
+            return False
+
+    raise ValueError(f"{field_name} must be a boolean, got {value!r}")
 
 
 def _extract_reason_sections(reason: str) -> tuple[str | None, str | None]:
@@ -257,9 +294,23 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     任务: phase2-strong-foreshadowing
     修改内容: 弱阳性结果在解析阶段直接降级为合法 negative，避免热路径把
     `has_foreshadowing=true && is_strong_setup=false` 当成结构化异常反复重试。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 布尔字段改成严格归一化，避免 `json_object` 模式下 `"false"`
+    被 Python `bool(...)` 误判成真值。
     """
-    raw_has_foreshadowing = bool(data.get("has_foreshadowing", False))
-    raw_is_strong_setup = bool(data.get("is_strong_setup", False))
+    raw_has_foreshadowing = _coerce_boolean_field(
+        "has_foreshadowing",
+        data.get("has_foreshadowing", False),
+        default=False,
+    )
+    raw_is_strong_setup = _coerce_boolean_field(
+        "is_strong_setup",
+        data.get("is_strong_setup", False),
+        default=False,
+    )
     degrade_to_negative = raw_has_foreshadowing and not raw_is_strong_setup
 
     # 中文注释：弱阳性是当前 Phase2 最常见的脏输出之一。
