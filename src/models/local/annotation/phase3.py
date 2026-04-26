@@ -499,6 +499,8 @@ async def attribute_dialogues_with_llm(
     run_id: str | None = None,
     active_entities: str | None = None,
     fallback_client: AnnotationClient | None = None,
+    require_tones: bool = False,
+    require_identity_clues: bool = False,
 ) -> list[DialogueRecord]:
     """
     使用 LLM 判断对话候选是否是对话，并识别说话者和语气
@@ -527,6 +529,11 @@ async def attribute_dialogues_with_llm(
     修改者: Codex
     任务: phase3-proof-only-fastpath-batch10
     修改内容: 新增 proof-only fastpath、batch 内受控并行与 shadow 统计，并为并发 worker 去掉共享 session。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: fix-phase3-proof-only-fastpath-followup-review-findings
+    修改内容: 请求 tone / identity clue 时禁用 fastpath 短路，并恢复按 batch 校验返回 index。
     """
     if not candidates:
         return []
@@ -605,12 +612,22 @@ async def attribute_dialogues_with_llm(
     async def _execute_all_batches(
         current_client: AnnotationClient,
     ) -> list[DialogueRecord]:
-        fastpath_records, llm_candidates, hit_types, reject_reasons = _resolve_phase3_fastpath_candidates(
-            chunk_text=chunk_text,
-            candidates=candidates,
-            known_characters=known_characters,
-            alias_map=alias_map,
-        )
+        if require_tones or require_identity_clues:
+            fastpath_records = []
+            llm_candidates = list(candidates)
+            hit_types: Counter[str] = Counter()
+            reject_reasons: Counter[str] = Counter(
+                {
+                    "metadata_requested": len(candidates),
+                }
+            )
+        else:
+            fastpath_records, llm_candidates, hit_types, reject_reasons = _resolve_phase3_fastpath_candidates(
+                chunk_text=chunk_text,
+                candidates=candidates,
+                known_characters=known_characters,
+                alias_map=alias_map,
+            )
         logger.info(
             "phase3_fastpath summary: chunk_id={} hits={} fallbacks={} hit_types={} reject_reasons={}",
             chunk_id,
@@ -629,7 +646,7 @@ async def attribute_dialogues_with_llm(
         async def _run_single_batched_retry(
             batch_idx: int,
             batch_candidates: list[QuoteCandidate],
-        ) -> tuple[int, list[DialogueRecordSchema]]:
+        ) -> tuple[int, list[DialogueRecord]]:
             async with semaphore:
                 phase3_max_retries = settings.runtime.annotation.phase3_max_retries
                 if not isinstance(phase3_max_retries, int) or phase3_max_retries < 1:
@@ -663,9 +680,18 @@ async def attribute_dialogues_with_llm(
                     return await _execute_single_batch(working_client, bc, bi, tb, retry_handler.state.attempt)
 
                 batch_results = await retry_handler.execute(batch_operation)
-                return batch_idx, batch_results or []
+                # 中文注释：每个 batch 都必须先按自己的候选集合校验返回 index，
+                # 避免跨 batch 的全局合法 index 在最终汇总时混进错误结果。
+                batch_records = _post_process_validation(
+                    batch_results or [],
+                    batch_candidates,
+                    known_characters,
+                    alias_map,
+                    chunk_id,
+                )
+                return batch_idx, batch_records
 
-        batch_tasks = [
+        batch_tasks: list[asyncio.Task[tuple[int, list[DialogueRecord]]]] = [
             asyncio.create_task(
                 _run_single_batched_retry(
                     batch_idx=i // batch_size,
@@ -676,13 +702,19 @@ async def attribute_dialogues_with_llm(
         ]
         completed_batches = await asyncio.gather(*batch_tasks)
 
-        ordered_records: list[DialogueRecordSchema] = list(fastpath_records)
+        ordered_records: list[DialogueRecord] = _post_process_validation(
+            fastpath_records,
+            candidates,
+            known_characters,
+            alias_map,
+            chunk_id,
+        )
         for _, batch_results in sorted(completed_batches, key=lambda item: item[0]):
             ordered_records.extend(batch_results)
-        # 中文注释：最终仍按全局候选 index 排序后再统一做 post-process，
+        # 中文注释：各 batch 已各自完成 index 校验，这里只按全局 index 排序，
         # 保证 fastpath 与 LLM 混合结果对 projector 来说仍是稳定的原文顺序。
         ordered_records.sort(key=lambda record: record.index)
-        return _post_process_validation(ordered_records, candidates, known_characters, alias_map, chunk_id)
+        return ordered_records
 
     try:
         result = await _execute_all_batches(client)
@@ -800,6 +832,8 @@ async def compute_dialogue_lengths_with_llm(
         run_id=run_id,
         active_entities=active_entities,
         fallback_client=fallback_client,
+        require_tones=return_tones,
+        require_identity_clues=return_identity_clues,
     )
     logger.info(f"compute_dialogue_lengths_with_llm: got {len(records)} records")
 
