@@ -106,9 +106,17 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         run_id: str,
         *,
         max_chunk_id: int,
-        limit: int = foreshadowing_threads.ACTIVE_SETUP_POOL_LIMIT,
+        limit: int | None = None,
     ) -> list[foreshadowing_threads.ActiveSetupPoolEntry]:
-        """获取当前 chunk 可见的活跃 setup 池摘要。"""
+        """
+        获取当前 chunk 可见的活跃 setup 池摘要。
+
+        修改时间: 2026-04-26
+        修改者: Codex
+        任务: fix-diagnosis-followup-findings
+        修改原因: active setup pool limit 已改为运行时读取 settings；
+        wrapper 不能再用默认参数把模块导入时的旧值固化回 30。
+        """
         return foreshadowing_threads.fetch_active_foreshadowing_threads_for_prompt(
             self.session,
             run_id,
