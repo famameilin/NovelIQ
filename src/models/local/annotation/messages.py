@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from src.models.local.annotation.evidence_renderer import (
     render_annotation_alias_map_text,
     render_annotation_evidence_blocks,
@@ -26,6 +28,44 @@ from src.models.local.prompts import (
     SYSTEM_PROMPT_V2,
     USER_TEMPLATE_V2,
 )
+
+
+def _render_active_setup_pool_block(active_setup_pool: Sequence[object] | None) -> str:
+    """
+    渲染 Phase2 活跃 setup 池摘要块。
+
+    创建时间: 2026-04-26
+    任务: phase2-setup-pool
+    新建原因: Prompt 只需要压缩后的 thread 摘要，不应直接吃 ORM 全对象，
+    这样既能控制 token，也能明确“历史 thread 只是辅助归属，不是放宽强伏笔门槛”的边界。
+    """
+    if not active_setup_pool:
+        return ""
+
+    lines = ["<Active_Setup_Pool>"]
+    for item in active_setup_pool:
+        setup_id = str(getattr(item, "setup_id", ""))
+        setup_summary = str(getattr(item, "setup_summary", "")).strip()
+        setup_kind = str(getattr(item, "setup_kind", "")).strip()
+        expected_payoff_family = str(getattr(item, "expected_payoff_family", "")).strip()
+        payoff_likelihood = str(getattr(item, "payoff_likelihood", "")).strip()
+        strength = str(getattr(item, "strength", "")).strip()
+        status = str(getattr(item, "status", "")).strip()
+        lines.append(
+            "- [{setup_id}] {summary}；类型：{kind}；预期回收：{payoff}；"
+            "回收预期：{likelihood}；强度：{strength}；当前状态：{status}".format(
+                setup_id=setup_id or "unknown_setup",
+                summary=setup_summary or "（缺少摘要）",
+                kind=setup_kind or "其他",
+                payoff=expected_payoff_family or "其他",
+                likelihood=payoff_likelihood or "medium",
+                strength=strength or "medium",
+                status=status or "open",
+            )
+        )
+    lines.append("</Active_Setup_Pool>")
+    lines.append("如果当前文本没有形成新的强钩子，也没有明显强化/推进上面某条 thread，请直接判 false。")
+    return "\n".join(lines)
 
 
 def _build_annotation_messages_v2(
@@ -114,6 +154,7 @@ def _build_foreshadowing_messages(
     chapter_id: int | None = None,
     evidence_bundle=None,
     include_evidence_blocks: bool = False,
+    active_setup_pool: Sequence[object] | None = None,
 ) -> list[dict]:
     """
     构建第二次调用（伏笔分析）的messages
@@ -142,6 +183,10 @@ def _build_foreshadowing_messages(
         prev_chunk_summary=prev_chunk_summary or "（无前文摘要）",
         chunk_text=text,
     )
+
+    active_setup_pool_block = _render_active_setup_pool_block(active_setup_pool)
+    if active_setup_pool_block:
+        user_content += "\n\n" + active_setup_pool_block
 
     if include_evidence_blocks and evidence_bundle is not None:
         # 中文注释：Phase 2 只被动复用共享 evidence block，

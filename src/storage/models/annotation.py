@@ -54,8 +54,11 @@ class ChunkAnnotation(Base):
     foreshadowing_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     setup_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
     foreshadowing_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    setup_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     why_unresolved_now: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_payoff_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payoff_likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    linked_setup_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -241,8 +244,13 @@ class ChunkForeshadowing(Base):
     setup_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
     anchor_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     anchor_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    setup_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     why_unresolved_now: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_payoff_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    payoff_likelihood: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_new_setup: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    linked_setup_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    setup_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

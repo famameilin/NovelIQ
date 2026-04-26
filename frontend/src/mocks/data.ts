@@ -198,9 +198,11 @@ export function createTopics(count = 8): Topic[] {
 /* ------------------------------------------------------------------ */
 
 export function createDiagnosis(): DiagnosisResult {
+  const foreshadowExpectation = +(Math.random() * 0.3 + 0.5).toFixed(2);
   return {
     narrative_type: "英雄之旅",
-    foreshadow_rate: +(Math.random() * 0.3 + 0.5).toFixed(2),
+    foreshadow_expectation: foreshadowExpectation,
+    foreshadow_rate: foreshadowExpectation,
     protagonist: "萧炎",
     narrative_arc_type: "三幕式 + 多重高潮",
     arc_scores: {

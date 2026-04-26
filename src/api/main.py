@@ -136,8 +136,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to clean up zombie tasks on startup: {e}")
 
-    yield
-    logger.info("FastAPI application shutting down...")
+    try:
+        yield
+    finally:
+        logger.info("FastAPI application shutting down...")
+        try:
+            from src.api.dependencies import get_task_manager
+            from src.api.services.event_manager import event_manager
+
+            await get_task_manager().shutdown()
+            await event_manager.shutdown()
+        except Exception as exc:
+            logger.warning(f"Failed to cleanly shut down runtime singletons: {exc}")
 
 
 app = FastAPI(

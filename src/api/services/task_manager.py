@@ -446,3 +446,59 @@ class TaskManager:
             logger.debug(f"Runtime heartbeat stopped for task {task_id}")
         except Exception as exc:
             logger.error(f"Runtime heartbeat crashed for task {task_id}: {exc}")
+
+    async def shutdown(self) -> None:
+        """
+        回收当前进程 TaskManager 持有的执行缓存与后台任务。
+
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: investigate-slow-test-lifecycle
+        新建原因: TaskManager 是模块级单例；若测试或应用关闭时不显式停止 heartbeat /
+        asyncio_task，残留协程会跨 TestClient 生命周期泄漏并拖慢后续 shutdown。
+        """
+
+        task_ids = list(self._tasks.keys())
+        running_tasks: list[asyncio.Task] = []
+        for task_id in task_ids:
+            task_info = self._tasks.get(task_id)
+            if task_info is None:
+                continue
+
+            if task_info.cancel_event is not None and not task_info.cancel_event.is_set():
+                task_info.cancel_event.set()
+            self._stop_runtime_heartbeat(task_id)
+
+            if task_info.asyncio_task is not None and not task_info.asyncio_task.done():
+                task_info.asyncio_task.cancel()
+                running_tasks.append(task_info.asyncio_task)
+
+        if running_tasks:
+            await asyncio.gather(*running_tasks, return_exceptions=True)
+
+        self._tasks.clear()
+
+    def reset_for_testing(self) -> None:
+        """
+        为测试夹具同步清空执行缓存。
+
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: investigate-slow-test-lifecycle
+        新建原因: 部分 API 测试不会触发完整 app shutdown，但模块级 TaskManager
+        仍会跨测试保留缓存与已取消任务引用，需要一个无需 await 的快速重置入口。
+        """
+
+        task_ids = list(self._tasks.keys())
+        for task_id in task_ids:
+            task_info = self._tasks.get(task_id)
+            if task_info is None:
+                continue
+
+            if task_info.cancel_event is not None and not task_info.cancel_event.is_set():
+                task_info.cancel_event.set()
+            self._stop_runtime_heartbeat(task_id)
+            if task_info.asyncio_task is not None and not task_info.asyncio_task.done():
+                task_info.asyncio_task.cancel()
+
+        self._tasks.clear()

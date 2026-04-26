@@ -24,6 +24,7 @@ from .common import (
     _parse_json_field,
 )
 from .diagnosis import _fetch_diagnosis
+from .foreshadowing_threads import _fetch_foreshadowing_threads
 from .graph import (
     GRAPH_PAGE_EVENT_LIMIT,
     _fetch_character_relations,
@@ -55,6 +56,7 @@ __all__ = [
     "_calculate_protagonist_scores",
     "_fetch_topics",
     "_fetch_diagnosis",
+    "_fetch_foreshadowing_threads",
     "_fetch_graph_events_page",
     "_fetch_graph_snapshot",
     "_normalize_arc_scores",

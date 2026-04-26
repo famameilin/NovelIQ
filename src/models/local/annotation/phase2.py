@@ -141,6 +141,7 @@ async def annotate_chunk_phase2(
     - 增加共享 evidence 开关，支持在不改默认行为的前提下做 targeted ablation
     """
     from src.models.local.schema import ForeshadowingResult
+    from src.storage.repositories import AnnotationRepository
 
     phase_max_retries = settings.runtime.annotation.phase_max_retries
     config = RetryConfig(
@@ -154,6 +155,15 @@ async def annotate_chunk_phase2(
         fallback_client=fallback_client,
         exception_type=Phase2MaxRetriesExceededError,
     )
+
+    active_setup_pool = []
+    if run_id and chunk_id is not None and getattr(client, "_session", None) is not None and chunk_id > 0:
+        # 中文注释：活跃池只允许看到当前 chunk 之前已经落库的 thread，
+        # 这里固定读取 chunk_id-1 可见状态，避免 Phase2 因同 chunk 内的其他副作用“偷看现在”。
+        active_setup_pool = AnnotationRepository(client._session).fetch_active_foreshadowing_threads_for_prompt(
+            run_id,
+            max_chunk_id=chunk_id - 1,
+        )
 
     # 中文注释：Phase2 只消费调用方已经准备好的 evidence_bundle，
     # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界。
@@ -171,6 +181,7 @@ async def annotate_chunk_phase2(
         chapter_id=chapter_id,
         evidence_bundle=evidence_bundle,
         include_evidence_blocks=include_evidence_blocks,
+        active_setup_pool=active_setup_pool,
     )
 
     async def operation(
@@ -179,7 +190,7 @@ async def annotate_chunk_phase2(
     ) -> ForeshadowingResult:
         """执行单次Phase2调用"""
         msgs = retry_messages if retry_messages else messages
-        return await _do_phase2(
+        result = await _do_phase2(
             primary_client,
             msgs,
             text,
@@ -188,5 +199,27 @@ async def annotate_chunk_phase2(
             run_id,
             handler.state.attempt,
         )
+        _validate_phase2_active_setup_link(result, active_setup_pool)
+        return result
 
     return await handler.execute(operation)
+
+
+def _validate_phase2_active_setup_link(
+    result: ForeshadowingResult,
+    active_setup_pool,
+) -> None:
+    """
+    校验 Phase2 返回的 linked_setup_id 是否来自当前可见活跃池。
+
+    创建时间: 2026-04-26
+    任务: phase2-setup-pool
+    新建原因: 无效 linked id 应该在 Phase2 重试阶段被显式打回，而不是拖到落库时才暴露。
+    """
+
+    if not result.has_foreshadowing or result.is_new_setup:
+        return
+
+    visible_setup_ids = {entry.setup_id for entry in active_setup_pool}
+    if result.linked_setup_id not in visible_setup_ids:
+        raise ValueError(f"linked_setup_id is not in active setup pool: {result.linked_setup_id}")

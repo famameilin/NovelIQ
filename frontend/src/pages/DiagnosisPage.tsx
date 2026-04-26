@@ -162,10 +162,10 @@ export function DiagnosisPage() {
           {/* Score Cards Row */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <ScoreCard
-              title="伏笔兑现率"
+              title="伏笔回收预期"
               type="percent"
-              value={diagnosis.foreshadow_rate != null ? diagnosis.foreshadow_rate * 100 : null}
-              reason={null}
+              value={diagnosis.foreshadow_expectation != null ? diagnosis.foreshadow_expectation * 100 : null}
+              reason="基于 Phase2 强 setup 与 thread 状态的近似估计，不是严格全文事实回收率。"
             />
             <ScoreCard
               title="权力立场"

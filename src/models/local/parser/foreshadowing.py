@@ -9,13 +9,23 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, get_args
 
-from ..schema import ForeshadowingConfidence, ForeshadowingResult, ForeshadowingSetupKind, ForeshadowingType
+from ..schema import (
+    ForeshadowingConfidence,
+    ForeshadowingPayoffLikelihood,
+    ForeshadowingResult,
+    ForeshadowingSetupKind,
+    ForeshadowingSetupStatus,
+    ForeshadowingType,
+)
 
 _VALID_FORESHADOWING_TYPES = frozenset(get_args(ForeshadowingType))
 _VALID_CONFIDENCES = frozenset(get_args(ForeshadowingConfidence))
 _VALID_SETUP_KINDS = frozenset(get_args(ForeshadowingSetupKind))
+_VALID_PAYOFF_LIKELIHOODS = frozenset(get_args(ForeshadowingPayoffLikelihood))
+_VALID_SETUP_STATUSES = frozenset(get_args(ForeshadowingSetupStatus))
 _HOOK_LABEL = "具体钩子："
 _UNRESOLVED_LABEL = "未闭合原因："
 _TRUE_BOOL_MARKERS = frozenset({"true", "1", "yes", "y", "on"})
@@ -116,6 +126,18 @@ _SETUP_KIND_HOOK_MARKERS: dict[str, tuple[str, ...]] = {
     "未解释能力": ("能力", "力量", "术法", "本领"),
     "因果引线": ("原因", "线索", "真相", "力量", "代价", "后果"),
 }
+
+
+def _normalize_setup_summary_text(value: str) -> str:
+    """
+    归一化 setup_summary 文本，用于 exact-match 去重。
+
+    创建时间: 2026-04-26
+    任务: phase2-setup-pool
+    新建原因: setup 池 v1 只接受“标准化 summary 完全一致”的精确并线，
+    这里把空白和常见标点去掉，避免同一句 summary 因格式差异重复建 thread。
+    """
+    return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
@@ -336,6 +358,32 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     else:
         setup_kind = None
 
+    setup_summary = data.get("setup_summary", "") if has_foreshadowing else ""
+
+    payoff_likelihood_raw = data.get("payoff_likelihood")
+    if has_foreshadowing and payoff_likelihood_raw in _VALID_PAYOFF_LIKELIHOODS:
+        payoff_likelihood: ForeshadowingPayoffLikelihood | None = payoff_likelihood_raw
+    else:
+        payoff_likelihood = None
+
+    setup_status_raw = data.get("setup_status")
+    if has_foreshadowing and setup_status_raw in _VALID_SETUP_STATUSES:
+        setup_status: ForeshadowingSetupStatus | None = setup_status_raw
+    else:
+        setup_status = None
+
+    is_new_setup = (
+        _coerce_boolean_field(
+            "is_new_setup",
+            data.get("is_new_setup", False),
+            default=False,
+        )
+        if has_foreshadowing
+        else False
+    )
+    linked_setup_id_raw = data.get("linked_setup_id")
+    linked_setup_id = str(linked_setup_id_raw).strip() if has_foreshadowing and linked_setup_id_raw else None
+
     # 中文注释：强伏笔池只接受显式 high。
     # provider 如果漏掉 confidence，宁可降为 low 丢弃，也不能静默补成 high 放行。
     confidence_raw = data.get("confidence", "low")
@@ -350,8 +398,13 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
         setup_kind=setup_kind,
         anchor_text=data.get("anchor_text", ""),
         anchor_reason=data.get("anchor_reason", ""),
+        setup_summary=setup_summary if has_foreshadowing else "",
         why_unresolved_now=data.get("why_unresolved_now", "") if has_foreshadowing else "",
         expected_payoff_family=data.get("expected_payoff_family", "") if has_foreshadowing else "",
+        payoff_likelihood=payoff_likelihood,
+        is_new_setup=is_new_setup,
+        linked_setup_id=linked_setup_id,
+        setup_status=setup_status,
         confidence=confidence,
     )
 
@@ -401,6 +454,15 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     if result.setup_kind is None:
         return False
 
+    if not result.setup_summary or len(result.setup_summary.strip()) < 4:
+        return False
+
+    if result.payoff_likelihood is None:
+        return False
+
+    if result.setup_status is None:
+        return False
+
     if not result.anchor_text or len(result.anchor_text.strip()) < 5:
         return False
 
@@ -411,6 +473,22 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
         return False
 
     if not result.expected_payoff_family or len(result.expected_payoff_family.strip()) < 2:
+        return False
+
+    if result.is_new_setup:
+        if result.linked_setup_id is not None:
+            return False
+        if result.setup_status != "open":
+            return False
+    else:
+        if not result.linked_setup_id or len(result.linked_setup_id.strip()) < 4:
+            return False
+        if result.setup_status not in {"reinforced", "likely_paid_off"}:
+            return False
+
+    # 中文注释：setup 池的 exact-match 去重要依赖标准化 summary；
+    # 如果归一化后为空，说明模型没有给出真正可池化的 thread 摘要。
+    if not _normalize_setup_summary_text(result.setup_summary):
         return False
 
     return _has_strong_hook_reason(result)

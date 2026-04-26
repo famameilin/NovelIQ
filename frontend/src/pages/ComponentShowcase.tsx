@@ -218,12 +218,12 @@ export function ComponentShowcase() {
             }
           />
           <MetricCard
-            label="伏笔兑现率"
+            label="伏笔回收预期"
             value={0.62}
             format="percent"
             icon={<Zap className="h-5 w-5" />}
             accent="chart-2"
-            description="已兑现伏笔占已设置伏笔的比率"
+            description="基于 Phase2 强 setup thread 状态估算的近似回收预期"
           />
           <MetricCard
             label="文化深度"

@@ -216,11 +216,18 @@ def _fetch_chunk_annotations(
                 foreshadowing_type=str(row.foreshadowing_type) if row.foreshadowing_type else None,
                 setup_kind=str(row.setup_kind) if getattr(row, "setup_kind", None) else None,
                 foreshadowing_desc=str(row.foreshadowing_desc) if row.foreshadowing_desc else None,
+                setup_summary=str(row.setup_summary) if getattr(row, "setup_summary", None) else None,
                 why_unresolved_now=(
                     str(row.why_unresolved_now) if getattr(row, "why_unresolved_now", None) else None
                 ),
                 expected_payoff_family=(
                     str(row.expected_payoff_family) if getattr(row, "expected_payoff_family", None) else None
+                ),
+                payoff_likelihood=(
+                    str(row.payoff_likelihood) if getattr(row, "payoff_likelihood", None) else None
+                ),
+                linked_setup_id=(
+                    str(row.linked_setup_id) if getattr(row, "linked_setup_id", None) else None
                 ),
                 characters=characters_by_chunk.get(chunk_id, []),
                 relations=relations_by_chunk.get(chunk_id, []),

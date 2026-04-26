@@ -121,5 +121,50 @@ class EventManager:
         for queue in self._connections[task_id]:
             await queue.put(message)
 
+    async def shutdown(self) -> None:
+        """
+        停止事件管理器后台任务并清空连接状态。
+
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: investigate-slow-test-lifecycle
+        新建原因: EventManager 是模块级单例，测试或应用 shutdown 时若不显式回收，
+        清理协程可能跨用例残留并拖慢后续 TestClient 关闭。
+        """
+
+        cleanup_task = self._cleanup_task
+        self._cleanup_task = None
+        if cleanup_task is not None and not cleanup_task.done():
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        self._connections.clear()
+        self._locks.clear()
+        self._last_activity.clear()
+        self._buffers.clear()
+
+    def reset_for_testing(self) -> None:
+        """
+        为测试夹具同步清空单例状态。
+
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: investigate-slow-test-lifecycle
+        新建原因: API 测试并不总是走完整 lifespan；测试前后需要一个无需 await 的快速重置入口。
+        """
+
+        cleanup_task = self._cleanup_task
+        self._cleanup_task = None
+        if cleanup_task is not None and not cleanup_task.done():
+            cleanup_task.cancel()
+
+        self._connections.clear()
+        self._locks.clear()
+        self._last_activity.clear()
+        self._buffers.clear()
+
 
 event_manager = EventManager()

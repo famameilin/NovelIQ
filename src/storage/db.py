@@ -217,6 +217,33 @@ def _constraint_exists(connection: Connection, table_name: str, constraint_name:
     )
 
 
+def _table_exists(connection: Connection, table_name: str) -> bool:
+    """
+    检查当前 schema 下是否存在指定表。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-setup-pool
+    新建原因: 运行时 schema 修复需要区分“旧库缺少可选表”和“表已存在但缺索引/缺列”，
+    不能对未创建的可选表直接执行 DDL。
+    """
+
+    return bool(
+        connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name
+                LIMIT 1
+                """
+            ),
+            {"table_name": table_name},
+        ).scalar_one_or_none()
+    )
+
+
 def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> None:
     """
     在补外键前校验目标子表没有孤儿数据。
@@ -444,13 +471,30 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
         "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
+        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
+        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
+        "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
+        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS setup_summary TEXT",
+        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
+        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS is_new_setup INTEGER",
+        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
+        "ALTER TABLE chunk_foreshadowing ADD COLUMN IF NOT EXISTS setup_status VARCHAR(30)",
         "CREATE INDEX IF NOT EXISTS idx_chunk_curves_run_id ON chunk_curves (run_id)",
-        "CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)",
+        (
+            "CREATE INDEX IF NOT EXISTS idx_foreshadowing_threads_run_active_last_chunk "
+            "ON foreshadowing_threads (run_id, active, last_chunk_id)"
+        ),
+        (
+            "CREATE INDEX IF NOT EXISTS idx_foreshadowing_thread_hits_run_chunk "
+            "ON foreshadowing_thread_hits (run_id, chunk_id)"
+        ),
     ]
 
     with engine.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))
+        if _table_exists(conn, "chunk_embeddings"):
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)"))
         _ensure_analysis_related_foreign_keys(conn)
 
 
