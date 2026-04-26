@@ -36,3 +36,9 @@ class FileStorageError(Exception):
         self.filename = filename
         self.message = message or f"File storage error: {filename}" if filename else "File storage error"
         super().__init__(self.message)
+
+
+class GraphReadinessError(RuntimeError):
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
