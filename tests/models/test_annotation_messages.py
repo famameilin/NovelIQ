@@ -296,7 +296,6 @@ def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
 
     messages = _build_foreshadowing_messages(
         text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
-        prev_chunk_text="前文提到他刚从旧宅出来。",
         novel_title="归藏",
         main_characters="阿七、沈青禾",
         evidence_bundle=bundle,
@@ -384,7 +383,6 @@ def test_render_annotation_prompt_blocks_trims_phase1_shared_evidence_context() 
 def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> None:
     messages = _build_foreshadowing_messages(
         text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
-        prev_chunk_text="前文提到他刚从旧宅出来。",
     )
 
     user_content = messages[-1]["content"]
@@ -431,7 +429,6 @@ def test_build_foreshadowing_messages_defaults_to_current_text_only_even_with_bu
 
     messages = _build_foreshadowing_messages(
         text="阿七摸到袖中发烫的玉佩，心里莫名发紧。",
-        prev_chunk_text="前文提到他刚从旧宅出来。",
         evidence_bundle=bundle,
     )
 

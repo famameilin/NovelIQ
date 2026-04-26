@@ -19,7 +19,6 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
-from src.storage.repositories.annotation import foreshadowing_threads as foreshadowing_thread_repo
 from src.storage.models import (
     Chunk,
     ChunkAnnotation,
@@ -30,6 +29,7 @@ from src.storage.models import (
     StageSummary,
 )
 from src.storage.models.core import DisambigCheckpoint
+from src.storage.repositories.annotation import foreshadowing_threads as foreshadowing_thread_repo
 from src.storage.repositories.base import BaseRepository
 
 

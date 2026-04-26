@@ -82,11 +82,12 @@ python -m src.api.main --port 8001
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | GET | `/api/novels/{novel_id}/results?task_id={task_id}` | 导出完整结果（复盘/测试用） |
-| GET | `/api/novels/{novel_id}/emotion-curve?task_id={task_id}` | 获取情感曲线 |
-| GET | `/api/novels/{novel_id}/rhythm-curve?task_id={task_id}` | 获取节奏曲线 |
+| GET | `/api/novels/{novel_id}/chunk-curves?task_id={task_id}` | 获取分块曲线（情绪 + 节奏） |
+| GET | `/api/novels/{novel_id}/chunk-annotations?task_id={task_id}` | 获取分块标注与伏笔详情 |
 | GET | `/api/novels/{novel_id}/characters?task_id={task_id}` | 获取人物统计 |
 | GET | `/api/novels/{novel_id}/topics?task_id={task_id}` | 获取主题分布 |
 | GET | `/api/novels/{novel_id}/diagnosis?task_id={task_id}` | 获取诊断结果 |
+| GET | `/api/novels/{novel_id}/foreshadowing-threads?task_id={task_id}` | 获取 setup thread 台账 |
 | GET | `/api/novels/{novel_id}/graph?task_id={task_id}` | 获取知识图谱快照 |
 
 ### 2.4 叙事时间轴接口
@@ -1102,17 +1103,16 @@ outputs/
   "novel_name": "重明传",
   "generated_at": "2024-03-08T10:30:00",
   "total_chunks": 42,
-  "emotion_curve": [...],
-  "rhythm_curve": [...],
+  "chunk_curves": [...],
   "characters": [...],
   "topics": [...],
   "diagnosis": {...},
   "chunk_styles": [...],
   "chunk_annotations": [...],
+  "foreshadowing_threads": [...],
   "character_relations": [...],
   "hierarchical_relations": [...],
   "global_stats": {...},
-  "chunk_cultures": [...],
   "aggregate_metrics": {
     "narrative_structure": {...},
     "emotion_stats": {...},

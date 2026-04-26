@@ -147,7 +147,6 @@ def _build_foreshadowing_messages(
     text: str,
     prev_chunk_summary: str | None = None,
     chunk_id: int | None = None,
-    prev_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -169,7 +168,7 @@ def _build_foreshadowing_messages(
     修改内容:
     - 清理已废弃的 next_chunk_text 残留接口，避免 Phase2 继续携带不存在的后文输入
     - 当前文本优先：默认不再注入共享 evidence block，只有显式 opt-in 才参与 targeted ablation
-    - 保留 prev_chunk_text 形参作为兼容壳层，但不再把前文片段写入 prompt
+    - 删除 prev_chunk_text 兼容形参，保持消息构建函数只暴露真实会进入 prompt 的字段
     """
     messages = [{"role": "system", "content": FORESHADOWING_SYSTEM_PROMPT}]
 

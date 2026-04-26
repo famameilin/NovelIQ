@@ -50,8 +50,8 @@ class TestLocalPrompts(unittest.TestCase):
         diagnose_prompt = (repo_root / "config" / "prompts" / "diagnose.txt").read_text(encoding="utf-8")
 
         self.assertIn("必须原样复用该 pool 项的值", phase2_prompt)
-        self.assertIn("setup thread ledger 的加权计算为准", diagnose_prompt)
-        self.assertIn("诊断阶段给出的“伏笔回收预期”粗略估计", diagnose_prompt)
+        self.assertIn("setup thread ledger 驱动的正式字段", diagnose_prompt)
+        self.assertIn("你必须直接沿用该数值", diagnose_prompt)
 
     def test_annotation_client_initialization(self) -> None:
         """测试标注客户端能正确初始化"""

@@ -16,8 +16,10 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
     db_session.commit()
     db_session.execute(
         text(
-            "INSERT INTO analysis_runs (run_id, novel_id, source_path, title, status, progress, current, total, task_kind, cancel_requested, created_at, updated_at) "
-            "VALUES (:run_id, :novel_id, 'test', 'Test', 'pending', 0, 0, 100, 'analysis', false, NOW(), NOW())"
+            "INSERT INTO analysis_runs ("
+            "run_id, novel_id, source_path, title, status, progress, current, total, "
+            "task_kind, cancel_requested, created_at, updated_at"
+            ") VALUES (:run_id, :novel_id, 'test', 'Test', 'pending', 0, 0, 100, 'analysis', false, NOW(), NOW())"
         ),
         {"run_id": run_id, "novel_id": novel_id},
     )
@@ -56,6 +58,8 @@ def test_build_diagnosis_payload_reads_three_layer_checkpoint(db_session):
         "masked_person": "bai_zhi",
         "monkey": "hou_fei_bai",
     }
+    assert "foreshadow_expectation" in payload
+    assert "foreshadowing_threads" in payload
     assert "graph_summary" in payload
     assert "graph_quality_report" in payload
     assert set(payload["graph_summary"].keys()) == {"node_count", "edge_count", "density"}
@@ -78,8 +82,11 @@ def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: p
         def fetch_relation_changes(self, *_args, **_kwargs):
             return []
 
-        def fetch_foreshadowing_chunks(self, *_args, **_kwargs):
+        def fetch_foreshadowing_threads(self, *_args, **_kwargs):
             return []
+
+        def calculate_foreshadow_expectation(self, *_args, **_kwargs):
+            return 0.42
 
         def fetch_stage_summaries(self, *_args, **_kwargs):
             return []
@@ -112,6 +119,8 @@ def test_build_diagnosis_payload_uses_summary_quality_report_view(monkeypatch: p
 
     assert payload["known_characters"] == ["白芷"]
     assert payload["alias_merges"] == {"蒙面人": "白芷"}
+    assert payload["foreshadow_expectation"] == 0.42
+    assert payload["foreshadowing_threads"] == []
     assert payload["graph_summary"] == {"node_count": 2, "edge_count": 1, "density": 0.5}
     assert payload["graph_quality_report"] == {"conflict_count": 0, "low_confidence_count": 1}
 
@@ -135,8 +144,11 @@ def test_build_diagnosis_payload_rejects_full_graph_view_from_shared_signal_entr
         def fetch_relation_changes(self, *_args, **_kwargs):
             return []
 
-        def fetch_foreshadowing_chunks(self, *_args, **_kwargs):
+        def fetch_foreshadowing_threads(self, *_args, **_kwargs):
             return []
+
+        def calculate_foreshadow_expectation(self, *_args, **_kwargs):
+            return None
 
         def fetch_stage_summaries(self, *_args, **_kwargs):
             return []
