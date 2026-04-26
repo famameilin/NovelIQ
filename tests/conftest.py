@@ -315,11 +315,20 @@ def api_client(setup_test_database: None) -> Generator[TestClient, None, None]:
     """
     _reset_backend_db_singletons()
 
+    from src.api.dependencies import get_task_manager
     from src.api.main import app
+    from src.api.services.event_manager import event_manager
+
+    get_task_manager().reset_for_testing()
+    event_manager.reset_for_testing()
 
     client = TestClient(app)
-
     try:
         yield client
     finally:
-        _reset_backend_db_singletons()
+        try:
+            client.close()
+        finally:
+            get_task_manager().reset_for_testing()
+            event_manager.reset_for_testing()
+            _reset_backend_db_singletons()

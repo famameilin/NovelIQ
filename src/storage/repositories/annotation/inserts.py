@@ -36,7 +36,14 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def insert_chunk_annotation(session: Session, run_id: str, chunk_id: int, annotation: ChunkAnnotationSchema) -> None:
+def insert_chunk_annotation(
+    session: Session,
+    run_id: str,
+    chunk_id: int,
+    annotation: ChunkAnnotationSchema,
+    *,
+    commit: bool = True,
+) -> None:
     """插入分块标注"""
     record = ChunkAnnotation(
         chunk_id=chunk_id,
@@ -49,16 +56,27 @@ def insert_chunk_annotation(session: Session, run_id: str, chunk_id: int, annota
         foreshadowing_type=annotation.foreshadowing_type,
         setup_kind=annotation.setup_kind,
         foreshadowing_desc=annotation.foreshadowing_desc,
+        setup_summary=annotation.setup_summary,
         why_unresolved_now=annotation.why_unresolved_now,
         expected_payoff_family=annotation.expected_payoff_family,
+        payoff_likelihood=annotation.payoff_likelihood,
+        linked_setup_id=annotation.linked_setup_id,
         run_id=run_id,
     )
     session.add(record)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
 
 def insert_chunk_characters(
-    session: Session, run_id: str, chunk_id: int, characters: Sequence[CharacterSnapshot]
+    session: Session,
+    run_id: str,
+    chunk_id: int,
+    characters: Sequence[CharacterSnapshot],
+    *,
+    commit: bool = True,
 ) -> None:
     """插入分块角色数据"""
     records = [
@@ -74,11 +92,19 @@ def insert_chunk_characters(
         for c in characters
     ]
     session.add_all(records)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
 
 def insert_chunk_relations(
-    session: Session, run_id: str, chunk_id: int, relations: Sequence[RelationChangeSnapshot]
+    session: Session,
+    run_id: str,
+    chunk_id: int,
+    relations: Sequence[RelationChangeSnapshot],
+    *,
+    commit: bool = True,
 ) -> None:
     """
     插入分块关系数据
@@ -110,7 +136,10 @@ def insert_chunk_relations(
     if not records:
         return
     session.add_all(records)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
 
 def update_relation_projection_status(
@@ -139,6 +168,8 @@ def insert_chunk_dialogues(
     chunk_id: int,
     dialogues: Sequence[DialogueSnapshot],
     lengths: Sequence[int] | None = None,
+    *,
+    commit: bool = True,
 ) -> None:
     """插入分块对话数据
 
@@ -183,10 +214,20 @@ def insert_chunk_dialogues(
             )
         )
     session.add_all(records)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
 
-def insert_foreshadowing(session: Session, run_id: str, chunk_id: int, result: ForeshadowingResult) -> None:
+def insert_foreshadowing(
+    session: Session,
+    run_id: str,
+    chunk_id: int,
+    result: ForeshadowingResult,
+    *,
+    commit: bool = True,
+) -> None:
     """插入伏笔分析结果"""
     if not result.has_foreshadowing:
         return
@@ -197,11 +238,19 @@ def insert_foreshadowing(session: Session, run_id: str, chunk_id: int, result: F
         setup_kind=result.setup_kind,
         anchor_text=result.anchor_text,
         anchor_reason=result.anchor_reason,
+        setup_summary=result.setup_summary,
         why_unresolved_now=result.why_unresolved_now,
         expected_payoff_family=result.expected_payoff_family,
+        payoff_likelihood=result.payoff_likelihood,
+        is_new_setup=int(result.is_new_setup),
+        linked_setup_id=result.linked_setup_id,
+        setup_status=result.setup_status,
         confidence=result.confidence,
         created_at=datetime.now().isoformat(),
         run_id=run_id,
     )
     session.add(record)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()

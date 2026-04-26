@@ -24,7 +24,7 @@ class TestReportSchema(unittest.TestCase):
         ]
         cloud = CloudAnalysis(
             novel_id="n1",
-            foreshadow_rate=0.5,
+            foreshadow_expectation=0.5,
             arc_scores=[0.2, 0.4],
             narrative_type="三幕",
             topic_labels=["成长"],

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -174,7 +176,11 @@ def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_pa
 
     monkeypatch.setattr("src.api.routes.timeline.build_timeline_candidates", _raise_contract_error)
 
-    with TestClient(api_client.app, raise_server_exceptions=False) as relaxed_client:
+    with (
+        patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
+        patch("src.api.main._resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
+        TestClient(api_client.app, raise_server_exceptions=False) as relaxed_client,
+    ):
         response = relaxed_client.get(
             f"/api/novels/{scenario.novel_id}/timeline",
             params={"task_id": scenario.task_id, "include_curve": "true"},

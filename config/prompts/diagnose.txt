@@ -3,7 +3,7 @@
 
 输出格式示例：
 {
-  "foreshadow_rate": 0.0,
+  "foreshadow_expectation": 0.0,
   "arc_scores": {"人物名1": 8.0, "人物名2": 7.0, "人物名3": 6.0},
   "narrative_type": "寓言",
   "topic_labels": ["困境求生", "少年成长", "师徒情谊", "家族传承", "...共N个（每个主题一个）"],
@@ -24,7 +24,9 @@
 }
 
 字段说明：
-- foreshadow_rate: 伏笔兑现率(0-1之间的小数)
+- foreshadow_expectation: 伏笔回收预期（0-1之间的小数）
+  这是 setup thread ledger 驱动的正式字段；如果输入 payload 已经给出 `foreshadow_expectation`，
+  你必须直接沿用该数值，不允许自行改写或重新估算
 - arc_scores: 人物弧度评分字典，Key为人物名称，Value为评分(每个0-10分)，必须使用人物名称作为Key，而非纯数值数组
 - narrative_type: 叙事类型(如：寓言、爽文、虐文等)
 - topic_labels: 主题标签列表

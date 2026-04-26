@@ -12,7 +12,7 @@ import {
 import { cn } from "@/lib/cn";
 
 export interface ScoreOverviewCardProps {
-  foreshadowRate?: number | null;
+  foreshadowExpectation?: number | null;
   powerStance?: number | null;
   civilianDignity?: number | null;
   culturalDepth?: number | null;
@@ -52,7 +52,7 @@ function MiniProgressRing({
       aria-valuenow={Math.round(clampedProgress)}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-label={`伏笔兑现率 ${Math.round(clampedProgress)}%`}
+      aria-label={`伏笔回收预期 ${Math.round(clampedProgress)}%`}
     >
       <svg
         width={size}
@@ -185,7 +185,7 @@ function ScoreRow({
  * 修改原因：让评分速览卡复用共享卡片壳，和展示页中的强调色、图标色块、hover 反馈保持一致。
  */
 export function ScoreOverviewCard({
-  foreshadowRate,
+  foreshadowExpectation,
   powerStance,
   civilianDignity,
   culturalDepth,
@@ -196,7 +196,7 @@ export function ScoreOverviewCard({
   const accent: MetricAccent = "chart-2";
 
   const foreshadowPct =
-    foreshadowRate != null ? Math.round(foreshadowRate * 100) : null;
+    foreshadowExpectation != null ? Math.round(foreshadowExpectation * 100) : null;
 
   return (
     <DashboardCardShell
@@ -227,8 +227,11 @@ export function ScoreOverviewCard({
             <>
               <MiniProgressRing progress={foreshadowPct} accent={accent} />
               <div>
-                <p className="text-xs uppercase tracking-wide text-text-muted">伏笔兑现率</p>
+                <p className="text-xs uppercase tracking-wide text-text-muted">伏笔回收预期</p>
                 <p className="text-lg font-semibold tabular-nums text-text">{foreshadowPct}%</p>
+                <p className="mt-1 text-[11px] leading-4 text-text-muted">
+                  基于 setup thread ledger 的加权估计
+                </p>
               </div>
             </>
           ) : (
@@ -243,7 +246,7 @@ export function ScoreOverviewCard({
                 <span className="text-xs text-text-muted">—</span>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-wide text-text-muted">伏笔兑现率</p>
+                <p className="text-xs uppercase tracking-wide text-text-muted">伏笔回收预期</p>
                 <p className="text-sm text-text-muted">暂无数据</p>
               </div>
             </div>

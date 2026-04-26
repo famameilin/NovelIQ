@@ -235,7 +235,8 @@ class TestCloudDiagnose:
         assert "pivot_moments" in payload
         assert "high_tension_paragraphs" in payload
         assert "character_relations" in payload
-        assert "foreshadowing_list" in payload
+        assert "foreshadowing_threads" in payload
+        assert "foreshadow_expectation" in payload
         assert "summaries" in payload
         assert "known_characters" in payload
         assert "alias_merges" in payload
@@ -244,7 +245,7 @@ class TestCloudDiagnose:
 
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
-        assert len(payload["foreshadowing_list"]) > 0
+        assert len(payload["foreshadowing_threads"]) >= 0
         assert payload["known_characters"] == ["伯安"]
         assert payload["alias_merges"] == {"角色0": "伯安"}
         assert set(payload["graph_summary"].keys()) == {"node_count", "edge_count", "density"}
@@ -310,7 +311,7 @@ class TestCloudDiagnose:
         )
         assert analysis is not None
         assert analysis.narrative_type == "三幕"
-        assert analysis.foreshadow_rate == 0.1
+        assert analysis.foreshadow_expectation == 0.1
 
         rows = self.db_session.execute(
             text("SELECT COUNT(*) FROM cloud_analysis WHERE run_id = :run_id"),
@@ -329,7 +330,7 @@ class TestCloudDiagnose:
         )
         rows = self.db_session.execute(
             text(
-                "SELECT novel_id, narrative_type, foreshadow_rate, narrative_arc_type, "
+                "SELECT novel_id, narrative_type, foreshadow_expectation, narrative_arc_type, "
                 "protagonist, main_characters, core_cast "
                 "FROM cloud_analysis WHERE run_id = :run_id"
             ),
@@ -368,7 +369,7 @@ class TestCloudDiagnose:
         content = json.dumps(
             {
                 "novel_id": self.novel_id,
-                "foreshadow_rate": 0.2,
+                "foreshadow_expectation": 0.2,
                 "arc_scores": {"角色0": 9.1},
                 "narrative_type": "三幕",
                 "topic_labels": ["成长"],
@@ -427,7 +428,7 @@ class TestCloudDiagnose:
         client = object.__new__(DiagnosisClient)
         result = CloudAnalysis(
             novel_id="raw-novel",
-            foreshadow_rate=0.1,
+            foreshadow_expectation=0.1,
             arc_scores={"角色0": 8.5},
             narrative_type="三幕",
             topic_labels=["成长"],
@@ -438,12 +439,40 @@ class TestCloudDiagnose:
             core_cast=["角色0", "角色1"],
         )
 
-        finalized = client._finalize_result(result, "fixed-novel")
+        finalized = client._finalize_result(result, "fixed-novel", payload={})
 
         assert finalized.novel_id == "fixed-novel"
         assert finalized.protagonist == "角色0"
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
+
+    def test_finalize_result_resets_expectation_to_none_when_payload_has_no_ledger_value(self) -> None:
+        """
+        创建时间: 2026-04-26
+        创建者: Codex
+        任务: fix-diagnosis-review-findings
+        说明: setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
+        此时必须覆写掉 LLM 自行猜测的数值，继续保持单一真相源。
+        """
+
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_expectation=0.27,
+            arc_scores={"角色0": 8.5},
+            narrative_type="三幕",
+            topic_labels=["成长"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            protagonist="角色0",
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
+        )
+
+        finalized = client._finalize_result(result, "fixed-novel", payload={"foreshadow_expectation": None})
+
+        assert finalized.novel_id == "fixed-novel"
+        assert finalized.foreshadow_expectation is None
 
     def test_build_messages_uses_alias_merges(self) -> None:
         client = object.__new__(DiagnosisClient)

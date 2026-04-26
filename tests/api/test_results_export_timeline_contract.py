@@ -192,6 +192,114 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
+def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fallback_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    characters = [SimpleNamespace(name="沈砚")]
+    annotation_repo = MagicMock()
+
+    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _alias_map):
+        return diagnosis
+
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        _fake_fetch_diagnosis,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_characters",
+        lambda *_args, **_kwargs: characters,
+    )
+
+    export_graph_view = ExportGraphAuthorityView(
+        canonical_entities=[
+            CanonicalEntity(name="沈砚"),
+        ]
+    )
+
+    (
+        _fetched_characters,
+        arc_scores,
+        main_characters,
+        valid_character_names,
+        missing_fields,
+    ) = load_character_bundle(
+        run_id="run-export-bundle",
+        novel_id="novel-1",
+        stats_repo=MagicMock(),
+        annotation_repo=annotation_repo,
+        alias_map={},
+        export_graph_view=export_graph_view,
+    )
+
+    assert arc_scores == {"沈砚": 8.0}
+    assert main_characters == ["沈砚"]
+    assert valid_character_names == {"沈砚"}
+    assert missing_fields == []
+
+
+def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    创建时间: 2026-04-26
+    创建者: Codex
+    任务: fix-diagnosis-followup-review-findings
+    说明: diagnosis 缺失可能在多个 bundle 链路里被检测到；
+    export 返回前必须去重，避免 `missing_fields` 出现重复 diagnosis 条目。
+    """
+
+    from src.api.services.results_export_service import fetch_all_results_data
+
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_core_results",
+        lambda *_args, **_kwargs: ([], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_character_bundle",
+        lambda *_args, **_kwargs: ([], None, None, set(), ["diagnosis"]),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_chunk_bundle",
+        lambda *_args, **_kwargs: ([], [], [], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_foreshadowing_threads",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_export_relation_bundle",
+        lambda *_args, **_kwargs: ([], [], None, SimpleNamespace(model_dump=lambda **_kw: {}), {}, {}, {}),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_novel_name",
+        lambda *_args, **_kwargs: "Test Novel",
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_timeline_data",
+        lambda *_args, **_kwargs: {"nodes": [], "phases": [], "tension_curve": [], "total_chunks": 0},
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.build_export_payload",
+        lambda **kwargs: kwargs,
+    )
+
+    results_data, missing_fields, novel_name = fetch_all_results_data(
+        novel_id="novel-1",
+        task_id="task-1",
+        run_id="run-1",
+        stats_repo=MagicMock(session=MagicMock()),
+        annotation_repo=MagicMock(fetch_alias_map=lambda _run_id: {}),
+        chunk_repo=MagicMock(),
+    )
+
+    assert results_data["diagnosis"] is None
+    assert missing_fields.count("diagnosis") == 1
+    assert novel_name == "Test Novel"
+
+
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

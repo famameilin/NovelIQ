@@ -34,6 +34,11 @@
 修改者: Codex
 任务: count-failed-llm-calls
 修改内容: 诊断响应已返回但 JSON 解析失败时，仍补记本次请求的 token 成本
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: remove-foreshadow-rate-contract
+修改内容: 诊断主链统一切到 `foreshadow_expectation`，不再在 summary 和结果模型里保留旧字段
 """
 
 from __future__ import annotations
@@ -296,7 +301,7 @@ class DiagnosisClient(BaseModelClient):
                 metadata=log_metadata,
             )
 
-        final_result = self._finalize_result(result, novel_id)
+        final_result = self._finalize_result(result, novel_id, payload=payload)
 
         if response:
             self._record_estimated_token_usage_from_messages(messages, content_clean, "diagnosis", chunk_id=None)
@@ -311,28 +316,41 @@ class DiagnosisClient(BaseModelClient):
             )
         return final_result
 
-    def _finalize_result(self, result: CloudAnalysis, novel_id: Any) -> CloudAnalysis:
+    def _finalize_result(self, result: CloudAnalysis, novel_id: Any, *, payload: dict[str, Any]) -> CloudAnalysis:
+        """
+        统一收口 diagnosis 结果的持久化前终态。
+
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: remove-foreshadow-rate-contract
+        新建原因: `foreshadow_expectation` 现在以 payload 中的 setup-ledger 真相源为准；
+        即便 LLM 返回了别的值，这里也要在落库前强制对齐，避免同一次 diagnosis 出现双真相。
+
+        修改时间: 2026-04-26
+        修改者: Codex
+        任务: fix-diagnosis-review-findings
+        修改原因: 当 setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
+        此时也必须覆写掉 LLM 猜测值，继续保持 setup ledger 单一真相源。
+        """
+
+        updates: dict[str, Any] = {}
         if isinstance(novel_id, str) and result.novel_id != novel_id:
-            return CloudAnalysis(
-                novel_id=novel_id,
-                foreshadow_rate=result.foreshadow_rate,
-                arc_scores=result.arc_scores,
-                narrative_type=result.narrative_type,
-                topic_labels=result.topic_labels,
-                diagnosis=result.diagnosis,
-                value_logic_type=result.value_logic_type,
-                value_logic_reason=result.value_logic_reason,
-                power_stance_score=result.power_stance_score,
-                power_stance_reason=result.power_stance_reason,
-                common_people_dignity=result.common_people_dignity,
-                dignity_reason=result.dignity_reason,
-                cultural_depth_score=result.cultural_depth_score,
-                cultural_depth_reason=result.cultural_depth_reason,
-                narrative_arc_type=result.narrative_arc_type,
-                protagonist=result.protagonist,
-                main_characters=result.main_characters,
-                core_cast=result.core_cast,
-            )
+            updates["novel_id"] = novel_id
+
+        if "foreshadow_expectation" in payload:
+            payload_expectation = payload.get("foreshadow_expectation")
+            if payload_expectation is None:
+                updates["foreshadow_expectation"] = None
+            elif isinstance(payload_expectation, (int, float)) and not isinstance(payload_expectation, bool):
+                updates["foreshadow_expectation"] = float(payload_expectation)
+            else:
+                raise TypeError(
+                    "payload.foreshadow_expectation must be float or None, "
+                    f"got {type(payload_expectation).__name__}"
+                )
+
+        if updates:
+            return result.model_copy(update=updates)
         return result
 
     def _build_messages(self, payload: dict) -> list[dict[str, str]]:

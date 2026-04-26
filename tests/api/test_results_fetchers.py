@@ -77,6 +77,7 @@ class _DummyAnnotationRepo:
         self._alias_map = alias_map
         self._rows = rows
         self.session = MagicMock()
+        self.foreshadow_expectation = None
 
     def fetch_alias_map(self, run_id):
         assert run_id == "run-1"
@@ -94,6 +95,9 @@ class _DummyAnnotationRepo:
         assert run_id == "run-1"
         return []
 
+    def calculate_foreshadow_expectation(self, run_id):
+        assert run_id == "run-1"
+        return self.foreshadow_expectation
 
 class _DummyChunkRepo:
     def __init__(self, style_rows):
@@ -170,7 +174,7 @@ def test_normalize_text_by_alias_map_rewrites_standalone_title_aliases():
 def test_fetch_diagnosis_normalizes_all_character_name_fields():
     stats_repo = _DummyStatsRepo(
         {
-            "foreshadow_rate": 0.3,
+            "foreshadow_expectation": 0.3,
             "arc_scores": '{"\\u7334\\u5b50": 6.5, "\\u7b97\\u76d8": 6.0}',
             "narrative_type": "\u6210\u957f",
             "topic_labels": '["\\u4e8c\\u5988\\u5988", "\\u67f3\\u5a49\\u513f", "\\u767d\\u82b7"]',
@@ -211,6 +215,75 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     assert result.protagonist == "\u4faf\u98de\u767d"
     assert result.main_characters == ["\u4faf\u98de\u767d", "\u67f3\u5a49\u513f"]
     assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c", "\u67f3\u5a49\u513f"]
+    assert result.foreshadow_expectation == 0.3
+
+
+def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
+    stats_repo = _DummyStatsRepo(None)
+    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        annotation_repo=annotation_repo,
+        alias_map={},
+    )
+
+    assert result is None
+
+
+def test_fetch_diagnosis_returns_ledger_only_payload_when_cloud_diagnosis_missing():
+    stats_repo = _DummyStatsRepo(None)
+    annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
+    annotation_repo.foreshadow_expectation = 0.58
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        annotation_repo=annotation_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.foreshadow_expectation == 0.58
+    assert result.diagnosis is None
+    assert result.topic_labels is None
+
+
+def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
+    stats_repo = _DummyStatsRepo({"foreshadow_expectation": 0.42})
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.foreshadow_expectation == 0.42
+
+
+def test_fetch_diagnosis_converts_legacy_arc_score_list_to_named_mapping():
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": "[8.2, 6.1]",
+            "main_characters": '["沈砚", "陆明"]',
+            "core_cast": '["沈砚", "陆明"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.arc_scores == {"沈砚": 8.2, "陆明": 6.1}
 
 
 def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
@@ -264,6 +337,10 @@ def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
         "hou_fei_bai": 8.0,
         "lin_li_guo": 4.0,
     }
+
+
+def test_normalize_arc_scores_returns_none_when_list_lacks_character_names():
+    assert _normalize_arc_scores([8.0, 6.0], alias_map={}, character_order=None) is None
 
 
 def test_fetch_character_relations_deduplicates_across_chunks():

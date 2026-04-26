@@ -94,8 +94,13 @@ PHASE2_STRONG_FORESHADOWING_CASES = [
             "setup_kind": "因果引线",
             "anchor_text": "人类真正的道德自觉是不可能的，就像他们不可能拔着自己的头发离开大地。要做到这一点，只有借助于人类之外的力量。",
             "anchor_reason": "具体钩子：叶文洁把“借助于人类之外的力量”明确设定为解决人类道德困境的出路，这构成后续重大行动的核心思想钩子。未闭合原因：当前文本只展示她形成这一判断的思想转折，还没有揭示她会借助什么外部力量，也没有兑现这条判断将引出的后续行动。",
+            "setup_summary": "叶文洁认定必须借助人类之外的力量改变人类道德困境",
             "why_unresolved_now": "当前文本只展示她形成这一判断的思想转折，还没有揭示她会借助什么外部力量，也没有兑现这条判断将引出的后续行动。",
             "expected_payoff_family": "重大行动",
+            "payoff_likelihood": "high",
+            "is_new_setup": True,
+            "linked_setup_id": None,
+            "setup_status": "open",
         },
     },
     {

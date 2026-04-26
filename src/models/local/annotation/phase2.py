@@ -22,10 +22,16 @@
 修改时间: 2026-04-23
 任务: annotation-projector-runtime-landing
 修改内容: Phase2 单次结构化调用改为复用薄 phase runtime，避免重复维护交互记录与 token 估算。
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: fix-phase2-setup-pool-review-findings
+修改内容: linked_setup_id 校验收紧为“池内存在且身份字段一致”，避免模型选错可见 thread 时静默污染 ledger
 """
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from src.config import settings
@@ -38,6 +44,20 @@ from .runtime import AnnotationPhaseCallSpec, execute_phase_call
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+
+
+def _normalize_setup_summary_for_link_check(value: str) -> str:
+    """
+    标准化 setup_summary，用于 linked_setup_id 身份一致性校验。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    新建原因: Phase2 只要在可见池里选错 setup_id，就会把命中记到错误 thread；
+    这里用和仓储层一致的保守归一化规则先挡掉明显错链。
+    """
+
+    return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
 
 
 async def _do_phase2(
@@ -112,7 +132,6 @@ async def annotate_chunk_phase2(
     text: str,
     prev_chunk_summary: str | None = None,
     chunk_id: int | None = None,
-    prev_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -139,8 +158,10 @@ async def annotate_chunk_phase2(
     修改内容:
     - 删除 next_chunk_text 残留透传，避免 Phase2 接口继续暗示存在后文输入
     - 增加共享 evidence 开关，支持在不改默认行为的前提下做 targeted ablation
+    - 删除 prev_chunk_text 兼容壳层，保持接口签名与真实 prompt 输入完全一致
     """
     from src.models.local.schema import ForeshadowingResult
+    from src.storage.repositories import AnnotationRepository
 
     phase_max_retries = settings.runtime.annotation.phase_max_retries
     config = RetryConfig(
@@ -155,6 +176,15 @@ async def annotate_chunk_phase2(
         exception_type=Phase2MaxRetriesExceededError,
     )
 
+    active_setup_pool = []
+    if run_id and chunk_id is not None and getattr(client, "_session", None) is not None and chunk_id > 0:
+        # 中文注释：活跃池只允许看到当前 chunk 之前已经落库的 thread，
+        # 这里固定读取 chunk_id-1 可见状态，避免 Phase2 因同 chunk 内的其他副作用“偷看现在”。
+        active_setup_pool = AnnotationRepository(client._session).fetch_active_foreshadowing_threads_for_prompt(
+            run_id,
+            max_chunk_id=chunk_id - 1,
+        )
+
     # 中文注释：Phase2 只消费调用方已经准备好的 evidence_bundle，
     # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界。
     # include_phase2_evidence=False 时只关闭 prompt 注入，不改上游取证与调度路径，
@@ -164,13 +194,13 @@ async def annotate_chunk_phase2(
         text=text,
         prev_chunk_summary=prev_chunk_summary,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
         evidence_bundle=evidence_bundle,
         include_evidence_blocks=include_evidence_blocks,
+        active_setup_pool=active_setup_pool,
     )
 
     async def operation(
@@ -179,7 +209,7 @@ async def annotate_chunk_phase2(
     ) -> ForeshadowingResult:
         """执行单次Phase2调用"""
         msgs = retry_messages if retry_messages else messages
-        return await _do_phase2(
+        result = await _do_phase2(
             primary_client,
             msgs,
             text,
@@ -188,5 +218,46 @@ async def annotate_chunk_phase2(
             run_id,
             handler.state.attempt,
         )
+        _validate_phase2_active_setup_link(result, active_setup_pool)
+        return result
 
     return await handler.execute(operation)
+
+
+def _validate_phase2_active_setup_link(
+    result: ForeshadowingResult,
+    active_setup_pool,
+) -> None:
+    """
+    校验 Phase2 返回的 linked_setup_id 是否来自当前可见活跃池。
+
+    创建时间: 2026-04-26
+    任务: phase2-setup-pool
+    新建原因: 无效 linked id 应该在 Phase2 重试阶段被显式打回，而不是拖到落库时才暴露。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: 除了检查 linked id 是否可见，还要校验返回的 summary/kind/payoff family
+    是否与目标 thread 一致，避免模型在多个可见 setup 之间串线。
+    """
+
+    if not result.has_foreshadowing or result.is_new_setup:
+        return
+
+    matched_entry = next(
+        (entry for entry in active_setup_pool if entry.setup_id == result.linked_setup_id),
+        None,
+    )
+    if matched_entry is None:
+        raise ValueError(f"linked_setup_id is not in active setup pool: {result.linked_setup_id}")
+    if _normalize_setup_summary_for_link_check(result.setup_summary) != _normalize_setup_summary_for_link_check(
+        str(getattr(matched_entry, "setup_summary", ""))
+    ):
+        raise ValueError(f"linked_setup_id summary does not match active setup pool: {result.linked_setup_id}")
+    if (result.setup_kind or "其他") != str(getattr(matched_entry, "setup_kind", "其他")):
+        raise ValueError(f"linked_setup_id setup_kind does not match active setup pool: {result.linked_setup_id}")
+    if result.expected_payoff_family.strip() != str(getattr(matched_entry, "expected_payoff_family", "")).strip():
+        raise ValueError(
+            f"linked_setup_id expected_payoff_family does not match active setup pool: {result.linked_setup_id}"
+        )

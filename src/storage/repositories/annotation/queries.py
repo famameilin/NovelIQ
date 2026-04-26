@@ -48,7 +48,8 @@ def fetch_chunk_annotations_full(session: Session, run_id: str) -> list[Any]:
     Returns:
         (chunk_id, emotional_valence, event_type, pivot_moment, cliffhanger,
          has_foreshadowing, is_strong_setup, foreshadowing_type, setup_kind,
-         foreshadowing_desc, why_unresolved_now, expected_payoff_family) 元组列表
+         foreshadowing_desc, setup_summary, why_unresolved_now,
+         expected_payoff_family, payoff_likelihood, linked_setup_id) 元组列表
     """
     stmt = (
         select(
@@ -62,8 +63,11 @@ def fetch_chunk_annotations_full(session: Session, run_id: str) -> list[Any]:
             ChunkAnnotation.foreshadowing_type,
             ChunkAnnotation.setup_kind,
             ChunkAnnotation.foreshadowing_desc,
+            ChunkAnnotation.setup_summary,
             ChunkAnnotation.why_unresolved_now,
             ChunkAnnotation.expected_payoff_family,
+            ChunkAnnotation.payoff_likelihood,
+            ChunkAnnotation.linked_setup_id,
         )
         .where(ChunkAnnotation.run_id == run_id)
         .order_by(ChunkAnnotation.chunk_id)

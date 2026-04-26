@@ -24,7 +24,7 @@ from src.models.local.schema import (
 from src.storage.repositories.base import BaseRepository
 
 # 导入各模块函数
-from . import characters, inserts, queries
+from . import characters, foreshadowing_threads, inserts, queries
 
 
 class AnnotationRepository(BaseRepository[dict[str, Any]]):
@@ -45,17 +45,38 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
 
     # ==================== inserts 模块方法 ====================
 
-    def insert_chunk_annotation(self, run_id: str, chunk_id: int, annotation: ChunkAnnotationSchema) -> None:
+    def insert_chunk_annotation(
+        self,
+        run_id: str,
+        chunk_id: int,
+        annotation: ChunkAnnotationSchema,
+        *,
+        commit: bool = True,
+    ) -> None:
         """插入分块标注"""
-        return inserts.insert_chunk_annotation(self.session, run_id, chunk_id, annotation)
+        return inserts.insert_chunk_annotation(self.session, run_id, chunk_id, annotation, commit=commit)
 
-    def insert_chunk_characters(self, run_id: str, chunk_id: int, characters: Sequence[CharacterSnapshot]) -> None:
+    def insert_chunk_characters(
+        self,
+        run_id: str,
+        chunk_id: int,
+        characters: Sequence[CharacterSnapshot],
+        *,
+        commit: bool = True,
+    ) -> None:
         """插入分块角色数据"""
-        return inserts.insert_chunk_characters(self.session, run_id, chunk_id, characters)
+        return inserts.insert_chunk_characters(self.session, run_id, chunk_id, characters, commit=commit)
 
-    def insert_chunk_relations(self, run_id: str, chunk_id: int, relations: Sequence[RelationChangeSnapshot]) -> None:
+    def insert_chunk_relations(
+        self,
+        run_id: str,
+        chunk_id: int,
+        relations: Sequence[RelationChangeSnapshot],
+        *,
+        commit: bool = True,
+    ) -> None:
         """插入分块关系数据"""
-        return inserts.insert_chunk_relations(self.session, run_id, chunk_id, relations)
+        return inserts.insert_chunk_relations(self.session, run_id, chunk_id, relations, commit=commit)
 
     def insert_chunk_dialogues(
         self,
@@ -63,13 +84,68 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         chunk_id: int,
         dialogues: Sequence[DialogueSnapshot],
         lengths: Sequence[int] | None = None,
+        *,
+        commit: bool = True,
     ) -> None:
         """插入分块对话数据"""
-        return inserts.insert_chunk_dialogues(self.session, run_id, chunk_id, dialogues, lengths)
+        return inserts.insert_chunk_dialogues(self.session, run_id, chunk_id, dialogues, lengths, commit=commit)
 
-    def insert_foreshadowing(self, run_id: str, chunk_id: int, result: ForeshadowingResult) -> None:
+    def insert_foreshadowing(
+        self,
+        run_id: str,
+        chunk_id: int,
+        result: ForeshadowingResult,
+        *,
+        commit: bool = True,
+    ) -> None:
         """插入伏笔分析结果"""
-        return inserts.insert_foreshadowing(self.session, run_id, chunk_id, result)
+        return inserts.insert_foreshadowing(self.session, run_id, chunk_id, result, commit=commit)
+
+    def fetch_active_foreshadowing_threads_for_prompt(
+        self,
+        run_id: str,
+        *,
+        max_chunk_id: int,
+        limit: int | None = None,
+    ) -> list[foreshadowing_threads.ActiveSetupPoolEntry]:
+        """
+        获取当前 chunk 可见的活跃 setup 池摘要。
+
+        修改时间: 2026-04-26
+        修改者: Codex
+        任务: fix-diagnosis-followup-findings
+        修改原因: active setup pool limit 已改为运行时读取 settings；
+        wrapper 不能再用默认参数把模块导入时的旧值固化回 30。
+        """
+        return foreshadowing_threads.fetch_active_foreshadowing_threads_for_prompt(
+            self.session,
+            run_id,
+            max_chunk_id=max_chunk_id,
+            limit=limit,
+        )
+
+    def sync_foreshadowing_thread(
+        self,
+        run_id: str,
+        *,
+        chunk_id: int,
+        result: ForeshadowingResult,
+    ) -> foreshadowing_threads.ForeshadowingThreadProjection:
+        """同步一条 positive 伏笔结果到 thread ledger。"""
+        return foreshadowing_threads.sync_foreshadowing_thread(
+            self.session,
+            run_id=run_id,
+            chunk_id=chunk_id,
+            result=result,
+        )
+
+    def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
+        """基于 setup ledger 计算伏笔回收预期。"""
+        return foreshadowing_threads.calculate_foreshadow_expectation(self.session, run_id)
+
+    def fetch_foreshadowing_threads(self, run_id: str) -> list[foreshadowing_threads.ForeshadowingThreadView]:
+        """获取完整的 setup thread 汇总视图。"""
+        return foreshadowing_threads.fetch_foreshadowing_threads(self.session, run_id)
 
     # ==================== queries 模块方法 ====================
 

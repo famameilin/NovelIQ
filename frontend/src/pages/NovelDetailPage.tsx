@@ -308,13 +308,15 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
+  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError;
+
   const allMetricsLoaded =
     narrativeQuery.data &&
     emotionQuery.data &&
     characterQuery.data &&
     styleQuery.data &&
     topicsQuery.data &&
-    diagnosisQuery.data;
+    hasDiagnosisLoaded;
 
   const isLoading =
     enabled &&
@@ -411,7 +413,7 @@ export function NovelDetailPage() {
             )}
 
             <ScoreOverviewCard
-              foreshadowRate={diagnosisQuery.data?.foreshadow_rate}
+              foreshadowExpectation={diagnosisQuery.data?.foreshadow_expectation}
               powerStance={diagnosisQuery.data?.power_stance_score}
               civilianDignity={diagnosisQuery.data?.common_people_dignity}
               culturalDepth={diagnosisQuery.data?.cultural_depth_score}

@@ -29,6 +29,7 @@ from src.storage.models import (
     StageSummary,
 )
 from src.storage.models.core import DisambigCheckpoint
+from src.storage.repositories.annotation import foreshadowing_threads as foreshadowing_thread_repo
 from src.storage.repositories.base import BaseRepository
 
 
@@ -219,6 +220,30 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
         result = self.session.execute(stmt)
         return [(row.chunk_id, row.text, row.foreshadowing_type, row.foreshadowing_desc) for row in result]
+
+    def fetch_foreshadowing_threads(self, run_id: str) -> list[foreshadowing_thread_repo.ForeshadowingThreadView]:
+        """
+        获取 setup thread ledger 视图。
+
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: remove-foreshadow-rate-contract
+        新建原因: diagnosis 主链改为直接消费 setup ledger，不能继续停留在 chunk 级 foreshadowing_list。
+        """
+
+        return foreshadowing_thread_repo.fetch_foreshadowing_threads(self.session, run_id)
+
+    def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
+        """
+        基于 setup thread ledger 计算伏笔回收预期。
+
+        创建时间: 2026-04-26
+        修改者: Codex
+        任务: remove-foreshadow-rate-contract
+        新建原因: diagnosis payload 现在要把 ledger 的正式 expectation 作为单一真相源传入模型。
+        """
+
+        return foreshadowing_thread_repo.calculate_foreshadow_expectation(self.session, run_id)
 
     def fetch_pivot_moments(self, run_id: str, limit: int | None = None) -> list[tuple[int, str]]:
         """
