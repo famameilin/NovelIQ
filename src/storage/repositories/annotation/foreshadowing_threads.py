@@ -3,17 +3,24 @@
 修改者: Codex
 任务: phase2-setup-pool
 说明: setup 池 / thread ledger 相关仓储操作。
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: fix-phase2-setup-pool-review-findings
+修改内容: 收紧 active 池可见性边界与 linked thread 一致性校验，避免 invisible thread merge
+          和 setup 误链接污染 ledger
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import func, select
 
+from src.config import settings
 from src.models.local.schema import (
     ForeshadowingPayoffLikelihood,
     ForeshadowingResult,
@@ -22,9 +29,23 @@ from src.models.local.schema import (
 )
 from src.storage.models import ForeshadowingThread, ForeshadowingThreadHit
 
-ACTIVE_SETUP_POOL_LIMIT = 30
+ACTIVE_SETUP_POOL_LIMIT = settings.analysis.multi_phase_annotation.active_setup_pool_limit
 _VALID_PAYOFF_LIKELIHOODS = {"high", "medium", "low"}
 _VALID_RUNTIME_SETUP_STATUSES = {"open", "reinforced", "likely_paid_off"}
+
+
+def _get_active_setup_pool_limit() -> int:
+    """
+    读取当前 setup 池上限配置。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    新建原因: active pool limit 现在来自 settings，不能再让默认参数在模块导入时把旧值固化。
+    """
+
+    configured_limit = settings.analysis.multi_phase_annotation.active_setup_pool_limit
+    return configured_limit if configured_limit > 0 else ACTIVE_SETUP_POOL_LIMIT
 
 
 @dataclass(frozen=True)
@@ -102,6 +123,20 @@ def _normalize_setup_summary(value: str) -> str:
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
 
 
+def _utcnow_naive() -> datetime:
+    """
+    返回用于当前无时区列的 UTC 时间戳。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    新建原因: Python 已弃用 datetime.utcnow()；这里统一生成“语义上是 UTC、落库仍保持 naive”的时间值，
+    避免 warning 并保持现有表结构兼容。
+    """
+
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 def _derive_thread_strength(
     *,
     payoff_likelihood: str,
@@ -154,7 +189,7 @@ def _insert_thread_hit(
             anchor_reason=result.anchor_reason,
             why_unresolved_now=result.why_unresolved_now,
             is_new_setup=is_new_setup,
-            created_at=datetime.utcnow(),
+            created_at=_utcnow_naive(),
         )
     )
 
@@ -172,6 +207,61 @@ def _count_thread_hits(session, setup_id: str) -> int:
     return int(session.execute(stmt).scalar_one())
 
 
+def _select_visible_active_threads(
+    session,
+    *,
+    run_id: str,
+    max_chunk_id: int,
+    limit: int | None = None,
+) -> list[ForeshadowingThread]:
+    """
+    读取当前 chunk 真正“可见”的 active setup 集合。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    新建原因: prompt 侧和仓储侧 exact-match 必须共享同一套可见性边界，
+    不能一边只看前 30 条、一边扫描所有 active thread。
+    """
+
+    pool_limit = limit if limit is not None else _get_active_setup_pool_limit()
+    stmt = (
+        select(ForeshadowingThread)
+        .where(
+            ForeshadowingThread.run_id == run_id,
+            ForeshadowingThread.active.is_(True),
+            ForeshadowingThread.last_chunk_id <= max_chunk_id,
+        )
+        .order_by(ForeshadowingThread.last_chunk_id.desc(), ForeshadowingThread.updated_at.desc())
+        .limit(pool_limit)
+    )
+    return session.execute(stmt).scalars().all()
+
+
+def _result_matches_thread_identity(
+    result: ForeshadowingResult,
+    *,
+    setup_summary: str,
+    setup_kind: str,
+    expected_payoff_family: str,
+) -> bool:
+    """
+    判断 Phase2 返回结果是否与目标 thread 身份一致。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    新建原因: linked_setup_id 不能只验证“存在于可见池”，还要确认模型返回的稳定字段
+    与目标 thread 摘要一致，避免误把命中记到错误 setup 上。
+    """
+
+    if _normalize_setup_summary(result.setup_summary) != _normalize_setup_summary(setup_summary):
+        return False
+    if (result.setup_kind or "其他").strip() != (setup_kind or "其他").strip():
+        return False
+    return result.expected_payoff_family.strip() == expected_payoff_family.strip()
+
+
 def _find_exact_matching_active_thread(
     session,
     *,
@@ -187,25 +277,22 @@ def _find_exact_matching_active_thread(
     新建原因: v1 只允许 exact-match 去重，防止 setup 池在没有明确证据时发生过度合并。
     """
 
-    stmt = (
-        select(ForeshadowingThread)
-        .where(
-            ForeshadowingThread.run_id == run_id,
-            ForeshadowingThread.active.is_(True),
-            ForeshadowingThread.last_chunk_id <= chunk_id - 1,
-            ForeshadowingThread.setup_kind == result.setup_kind,
-            ForeshadowingThread.expected_payoff_family == result.expected_payoff_family,
-        )
-        .order_by(ForeshadowingThread.last_chunk_id.desc(), ForeshadowingThread.updated_at.desc())
-    )
     normalized_summary = _normalize_setup_summary(result.setup_summary)
-    for thread in session.execute(stmt).scalars().all():
+    for thread in _select_visible_active_threads(
+        session,
+        run_id=run_id,
+        max_chunk_id=chunk_id - 1,
+    ):
+        if thread.setup_kind != result.setup_kind:
+            continue
+        if thread.expected_payoff_family != result.expected_payoff_family:
+            continue
         if _normalize_setup_summary(thread.setup_summary) == normalized_summary:
             return thread
     return None
 
 
-def _archive_overflow_threads(session, *, run_id: str, limit: int = ACTIVE_SETUP_POOL_LIMIT) -> None:
+def _archive_overflow_threads(session, *, run_id: str, limit: int | None = None) -> None:
     """
     按 last_chunk_id 从近到远保留 active 池，超限部分归档。
 
@@ -214,19 +301,24 @@ def _archive_overflow_threads(session, *, run_id: str, limit: int = ACTIVE_SETUP
     新建原因: 活跃池上限是固定工程口径，归档规则必须统一收口到仓储层。
     """
 
+    pool_limit = limit if limit is not None else _get_active_setup_pool_limit()
+    # 中文注释：仓库 session 显式关闭了 autoflush；
+    # 这里必须先 flush，后面的 active 查询才能看到刚刚插入/更新的 thread，
+    # 否则 overflow 判断会基于旧快照，留下“prompt 不可见但 active=true”的脏 thread。
+    session.flush()
     stmt = (
         select(ForeshadowingThread)
         .where(ForeshadowingThread.run_id == run_id, ForeshadowingThread.active.is_(True))
         .order_by(ForeshadowingThread.last_chunk_id.desc(), ForeshadowingThread.updated_at.desc())
     )
     active_threads = session.execute(stmt).scalars().all()
-    if len(active_threads) <= limit:
+    if len(active_threads) <= pool_limit:
         return
 
-    for thread in active_threads[limit:]:
+    for thread in active_threads[pool_limit:]:
         thread.active = False
         thread.status = "archived"
-        thread.updated_at = datetime.utcnow()
+        thread.updated_at = _utcnow_naive()
 
 
 def fetch_active_foreshadowing_threads_for_prompt(
@@ -234,7 +326,7 @@ def fetch_active_foreshadowing_threads_for_prompt(
     run_id: str,
     *,
     max_chunk_id: int,
-    limit: int = ACTIVE_SETUP_POOL_LIMIT,
+    limit: int | None = None,
 ) -> list[ActiveSetupPoolEntry]:
     """
     查询当前 chunk 可见的活跃 setup 池。
@@ -244,17 +336,12 @@ def fetch_active_foreshadowing_threads_for_prompt(
     新建原因: Phase2 在调用前必须读取“截至 chunk_id-1 可见”的活跃池，不能偷看当前或后文状态。
     """
 
-    stmt = (
-        select(ForeshadowingThread)
-        .where(
-            ForeshadowingThread.run_id == run_id,
-            ForeshadowingThread.active.is_(True),
-            ForeshadowingThread.last_chunk_id <= max_chunk_id,
-        )
-        .order_by(ForeshadowingThread.last_chunk_id.desc(), ForeshadowingThread.updated_at.desc())
-        .limit(limit)
+    rows = _select_visible_active_threads(
+        session,
+        run_id=run_id,
+        max_chunk_id=max_chunk_id,
+        limit=limit,
     )
-    rows = session.execute(stmt).scalars().all()
     return [
         ActiveSetupPoolEntry(
             setup_id=row.setup_id,
@@ -288,7 +375,7 @@ def sync_foreshadowing_thread(
     if not result.has_foreshadowing:
         raise ValueError("sync_foreshadowing_thread only accepts positive foreshadowing results")
 
-    now = datetime.utcnow()
+    now = _utcnow_naive()
 
     if result.is_new_setup:
         matched_thread = _find_exact_matching_active_thread(
@@ -375,6 +462,13 @@ def sync_foreshadowing_thread(
     thread = session.get(ForeshadowingThread, result.linked_setup_id)
     if thread is None or thread.run_id != run_id:
         raise ValueError(f"Unknown setup thread: {result.linked_setup_id}")
+    if not _result_matches_thread_identity(
+        result,
+        setup_summary=thread.setup_summary,
+        setup_kind=thread.setup_kind,
+        expected_payoff_family=thread.expected_payoff_family,
+    ):
+        raise ValueError(f"linked_setup_id payload does not match setup thread identity: {result.linked_setup_id}")
 
     hit_count = _count_thread_hits(session, thread.setup_id) + 1
     thread.last_chunk_id = chunk_id

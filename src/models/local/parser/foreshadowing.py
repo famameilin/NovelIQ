@@ -424,6 +424,7 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
     - 只有 high 级 positive 才允许入强伏笔池
     - positive 结果必须携带正式 foreshadowing_type
     - positive 结果必须补齐结构化语义字段，减少仅凭 anchor_reason 猜意图
+    - positive 结果拒绝 payoff_likelihood=low，和 prompt 合同保持一致
     - anchor_reason 必须同时给出“具体钩子/未闭合原因”
     - 显式拦截主题句、命运定调、情绪气氛类模糊推断
 
@@ -458,6 +459,8 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
         return False
 
     if result.payoff_likelihood is None:
+        return False
+    if result.payoff_likelihood == "low":
         return False
 
     if result.setup_status is None:
