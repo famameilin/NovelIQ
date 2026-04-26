@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.api.exceptions import GraphReadinessError
 from src.metrics.aggregate.fetchers import fetch_character_data, fetch_relation_data
 
 
@@ -121,16 +122,22 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
 def test_fetch_relation_data_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo(pending=[object()])
     mock_service = MagicMock()
+    mock_service.assert_graph_projection_ready = MagicMock(
+        side_effect=GraphReadinessError(
+            "graph projection is still pending; finish projection before reading graph-derived authority views."
+        )
+    )
     mock_service.build_graph_view.return_value = SimpleNamespace(confirmed_relations=[], relation_events=[])
 
     with patch("src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
-        with pytest.raises(RuntimeError, match="pending relations"):
+        with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
             fetch_relation_data(annotation_repo, "run-1")
 
 
 def test_fetch_relation_data_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo(pending=[])
     mock_service = MagicMock()
+    mock_service.assert_graph_projection_ready = MagicMock()
     mock_service.build_graph_view.return_value = SimpleNamespace(confirmed_relations=[], relation_events=[])
 
     with patch("src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
@@ -143,6 +150,7 @@ def test_fetch_relation_data_allows_empty_graph_when_no_pending():
 def test_fetch_relation_data_consumes_authority_view():
     annotation_repo = _DummyAnnotationRepo(pending=[])
     mock_service = MagicMock()
+    mock_service.assert_graph_projection_ready = MagicMock()
     mock_service.build_graph_view.return_value = SimpleNamespace(
         confirmed_relations=[
             SimpleNamespace(from_name="主角", to_name="反派"),
@@ -166,3 +174,21 @@ def test_fetch_relation_data_consumes_authority_view():
         ("主角", "反派", "敌对", "强化"),
         ("主角", "同伴", "盟友", "新建"),
     ]
+
+
+def test_fetch_relation_data_rejects_partial_pending_graph_even_when_view_is_non_empty():
+    annotation_repo = _DummyAnnotationRepo(pending=[object()])
+    mock_service = MagicMock()
+    mock_service.assert_graph_projection_ready = MagicMock(
+        side_effect=GraphReadinessError(
+            "graph projection is still pending; finish projection before reading graph-derived authority views."
+        )
+    )
+    mock_service.build_graph_view.return_value = SimpleNamespace(
+        confirmed_relations=[SimpleNamespace(from_name="主角", to_name="反派")],
+        relation_events=[SimpleNamespace(from_name="主角", to_name="反派", relation_type="敌对", change_type="强化")],
+    )
+
+    with patch("src.metrics.aggregate.fetchers.KnowledgeGraphAuthorityService.from_session", return_value=mock_service):
+        with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+            fetch_relation_data(annotation_repo, "run-partial")
