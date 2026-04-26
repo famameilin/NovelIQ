@@ -376,6 +376,12 @@ def fetch_all_results_data(
 ) -> tuple[dict[str, Any], list[str], str | None]:
     """
     获取所有分析结果数据
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-diagnosis-followup-review-findings
+    修改原因: export 的 missing_fields 是集合语义；
+    diagnosis 等字段若被多段 bundle 链路重复判缺，不应在返回值里出现重复项。
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
@@ -437,6 +443,10 @@ def fetch_all_results_data(
     )
     if not timeline_data:
         missing_fields.append("timeline")
+
+    # 中文注释：missing_fields 对外语义是“缺哪些字段”，不是“缺了几次”；
+    # 这里在最终返回前按插入顺序去重，避免 diagnosis 被重复追加。
+    missing_fields = list(dict.fromkeys(missing_fields))
 
     results_data = build_export_payload(
         task_id=task_id,
