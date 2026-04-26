@@ -298,15 +298,12 @@ def test_collect_requested_names_promotes_direct_canonical_mentions_only_when_ex
     assert requested_names == ["程霜"]
 
 
-class FakeChunkRepository:
+class FailOnChunkRepository:
     def __init__(self, _conn) -> None:
-        pass
-
-    def fetch_prev_chunk_text(self, run_id: str, chunk_id: int) -> str:
-        return f"prev:{run_id}:{chunk_id}"
-
-    def fetch_next_chunk_text(self, run_id: str, chunk_id: int) -> str:
-        return f"next:{run_id}:{chunk_id}"
+        raise AssertionError(
+            "Phase2 current-text-only path should not instantiate "
+            "ChunkRepository for prev/next chunk text"
+        )
 
 
 def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_bundle_has_none(monkeypatch):
@@ -323,7 +320,7 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
     provider = Mock()
     provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle()])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -349,15 +346,15 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
         run_id="run-1",
     )
 
-    assert context.prev_chunk_text == "prev:run-1:12"
-    assert context.next_chunk_text == "next:run-1:12"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
     assert context.prompt_active_entities == "【近期活跃角色】\n- 白芷（helper）：观察 [chunk=12]"
     assert context.evidence_bundle is bundle
+    assert context.phase2_bundle is None
     assert context.prompt_disambig_context is not None
     assert "「蒙面人」可能是：白芷" in context.prompt_disambig_context
-    assert provider.collect.await_count == 2
+    assert provider.collect.await_count == 1
     assert provider.collect.await_args_list[0].args[0].consumer == "annotation_phase1"
-    assert provider.collect.await_args_list[1].args[0].consumer == "annotation_phase2"
     assert context.phase4_request_template is not None
     assert context.phase4_request_template.requested_names == []
     assert context.phase4_request_template.seed_entities == []
@@ -383,7 +380,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
     provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle()])
     expected_active_entities = render_annotation_prompt_blocks(bundle).active_entities
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -411,9 +408,72 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
 
     assert expected_active_entities is not None
     assert context.prompt_active_entities == expected_active_entities
-    assert context.prev_chunk_text == "prev:run-override:20"
-    assert context.next_chunk_text == "next:run-override:20"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
+    assert provider.collect.await_count == 1
+
+
+def test_prepare_chunk_context_can_collect_phase2_evidence_when_opted_in(monkeypatch):
+    """
+    创建时间: 2026-04-26
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 补充 targeted ablation 回归，确认显式打开 include_phase2_evidence 后，
+    同步上下文构建仍会恢复 Phase2 evidence 收集。
+    """
+    phase1_bundle = EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content="「蒙面人」可能是：白芷",
+            )
+        ]
+    )
+    phase2_bundle = EvidenceBundle(
+        local_evidence=[
+            EvidenceItem(
+                evidence_type="disambig_candidate",
+                source="level2",
+                content="「黑衣人」可能是：陆明",
+            )
+        ]
+    )
+    provider = Mock()
+    provider.collect = AsyncMock(side_effect=[phase1_bundle, phase2_bundle])
+
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
+    monkeypatch.setattr(
+        context_module,
+        "_build_active_entity_contexts_from_authority",
+        lambda *_args, **_kwargs: [
+            ActiveEntityContext(
+                name="白芷",
+                entity_id=7,
+                role="helper",
+                recent_action="观察",
+                recent_emotion=None,
+                last_seen_chunk=12,
+            )
+        ],
+    )
+    monkeypatch.setattr(settings.analysis.multi_phase_annotation, "include_phase2_evidence", True)
+
+    context = _prepare_chunk_context(
+        conn=object(),
+        chunk_id=12,
+        chunk_text="蒙面人出现了",
+        alias_map={},
+        use_context_enhancement=True,
+        evidence_service=provider,
+        run_id="run-1",
+    )
+
+    assert context.phase1_bundle is phase1_bundle
+    assert context.phase2_bundle is phase2_bundle
     assert provider.collect.await_count == 2
+    assert provider.collect.await_args_list[1].args[0].consumer == "annotation_phase2"
 
 
 def test_prepare_chunk_context_skips_context_loading_when_disabled(monkeypatch):
@@ -459,7 +519,7 @@ def test_prepare_chunk_context_skips_context_loading_when_run_id_missing(monkeyp
 
 
 def test_prepare_chunk_context_without_disambig_provider_keeps_authority_context(monkeypatch):
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -485,8 +545,8 @@ def test_prepare_chunk_context_without_disambig_provider_keeps_authority_context
         run_id="run-authority-only",
     )
 
-    assert context.prev_chunk_text == "prev:run-authority-only:9"
-    assert context.next_chunk_text == "next:run-authority-only:9"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
     assert context.prompt_active_entities == "【近期活跃角色】\n- 苏镜（protagonist）：思考 [chunk=9]"
     assert context.evidence_bundle is None
     assert context.prompt_disambig_context is None
@@ -508,9 +568,9 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
         requested_names=["黑衣人"],
     )
     provider = Mock()
-    provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle(), bundle])
+    provider.collect = AsyncMock(side_effect=[bundle, bundle])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -536,17 +596,20 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
         run_id="run-async",
     )
 
-    assert context.prev_chunk_text == "prev:run-async:18"
-    assert context.next_chunk_text == "next:run-async:18"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
     assert context.prompt_active_entities == "【近期活跃角色】\n- 陆明（helper）：巡查 [chunk=18]"
     assert context.evidence_bundle is bundle
+    assert context.phase2_bundle is None
     assert context.prompt_disambig_context is not None
     assert "「黑衣人」可能是：陆明" in context.prompt_disambig_context
-    assert provider.collect.await_count == 3
+    assert provider.collect.await_count == 2
     phase1_request = provider.collect.await_args_list[0].args[0]
     assert phase1_request.consumer == "annotation_phase1"
     assert phase1_request.requested_names == []
     assert phase1_request.seed_entities == ["陆明"]
+    phase3_request = provider.collect.await_args_list[1].args[0]
+    assert phase3_request.consumer == "annotation_phase3"
 
 
 @pytest.mark.asyncio
@@ -592,7 +655,6 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
             },
         )
     )
-    phase2_bundle = EvidenceBundle()
     phase3_bundle = EvidenceBundle(
         semantic_evidence=[
             EvidenceItem(
@@ -606,9 +668,9 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         ],
     )
     provider = Mock()
-    provider.collect = AsyncMock(side_effect=[phase1_bundle, phase2_bundle, phase3_bundle])
+    provider.collect = AsyncMock(side_effect=[phase1_bundle, phase3_bundle])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -634,22 +696,18 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
         run_id="run-level3-available",
     )
 
-    assert provider.collect.await_count == 3
+    assert provider.collect.await_count == 2
     phase1_request = provider.collect.await_args_list[0].args[0]
-    phase2_request = provider.collect.await_args_list[1].args[0]
-    phase3_request = provider.collect.await_args_list[2].args[0]
+    phase3_request = provider.collect.await_args_list[1].args[0]
     assert phase1_request.consumer == "annotation_phase1"
     assert phase1_request.objective == "identity"
     assert phase1_request.requested_names == ["程霜"]
     assert phase1_request.seed_entities == ["程霜", "旧值"]
-    assert phase2_request.consumer == "annotation_phase2"
-    assert phase2_request.requested_names == ["旧值"]
-    assert phase2_request.seed_entities == ["旧值"]
     assert phase3_request.consumer == "annotation_phase3"
     assert phase3_request.requested_names == ["程霜"]
     assert phase3_request.seed_entities == ["程霜", "旧值"]
     assert context.phase1_bundle is phase1_bundle
-    assert context.phase2_bundle is phase2_bundle
+    assert context.phase2_bundle is None
     assert context.phase3_bundle is phase3_bundle
     assert any(item.evidence_type == "emotion_exemplar" for item in context.phase1_bundle.semantic_evidence)
     assert context.phase4_request_template is not None
@@ -670,14 +728,16 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
 async def test_prepare_chunk_context_with_level3_promotes_direct_canonical_mentions_into_requested_names(monkeypatch):
     """
     创建时间: 2026-04-26
+    修改时间: 2026-04-26
+    修改者: Codex
     任务: fix-direct-canonical-requested-names
     说明: 当正文直接出现 canonical 名且它来自可信 active-entity 上下文时，
           Phase1/Phase3 request 都应把它写入 requested_names，而不是只留在 seed_entities。
     """
     provider = Mock()
-    provider.collect = AsyncMock(side_effect=[EvidenceBundle(), EvidenceBundle(), EvidenceBundle()])
+    provider.collect = AsyncMock(side_effect=[EvidenceBundle(), EvidenceBundle()])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -703,9 +763,9 @@ async def test_prepare_chunk_context_with_level3_promotes_direct_canonical_menti
         run_id="run-canonical-name",
     )
 
-    assert provider.collect.await_count == 3
+    assert provider.collect.await_count == 2
     phase1_request = provider.collect.await_args_list[0].args[0]
-    phase3_request = provider.collect.await_args_list[2].args[0]
+    phase3_request = provider.collect.await_args_list[1].args[0]
     assert phase1_request.requested_names == ["程霜"]
     assert phase1_request.seed_entities == ["程霜"]
     assert phase3_request.requested_names == ["程霜"]
