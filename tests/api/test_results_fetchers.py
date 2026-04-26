@@ -240,6 +240,26 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
     assert result.foreshadow_expectation == 0.42
 
 
+def test_fetch_diagnosis_converts_legacy_arc_score_list_to_named_mapping():
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": "[8.2, 6.1]",
+            "main_characters": '["沈砚", "陆明"]',
+            "core_cast": '["沈砚", "陆明"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.arc_scores == {"沈砚": 8.2, "陆明": 6.1}
+
+
 def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
     rows = []
     rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score="neutral")] * 20)
@@ -291,6 +311,10 @@ def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
         "hou_fei_bai": 8.0,
         "lin_li_guo": 4.0,
     }
+
+
+def test_normalize_arc_scores_returns_none_when_list_lacks_character_names():
+    assert _normalize_arc_scores([8.0, 6.0], alias_map={}, character_order=None) is None
 
 
 def test_fetch_character_relations_deduplicates_across_chunks():

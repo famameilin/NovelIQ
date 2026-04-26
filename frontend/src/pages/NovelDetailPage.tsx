@@ -308,13 +308,15 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
+  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError;
+
   const allMetricsLoaded =
     narrativeQuery.data &&
     emotionQuery.data &&
     characterQuery.data &&
     styleQuery.data &&
     topicsQuery.data &&
-    diagnosisQuery.data;
+    hasDiagnosisLoaded;
 
   const isLoading =
     enabled &&

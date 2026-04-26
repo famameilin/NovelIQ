@@ -329,7 +329,7 @@ class DiagnosisResult(BaseModel):
             "取值范围 0-1，不是严格全文事实回收率。"
         ),
     )
-    arc_scores: list[float] | dict[str, float] | None = None
+    arc_scores: dict[str, float] | None = None
     narrative_type: str | None = None
     topic_labels: list[str] | None = None
     diagnosis: str | None = None

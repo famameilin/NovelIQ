@@ -189,27 +189,46 @@ def _calculate_protagonist_scores(
     return characters
 
 
-def _normalize_arc_scores(arc_scores: Any, alias_map: dict[str, str] | None) -> dict[str, float] | list[float]:
-    """对 arc_scores 的人物名称进行归一化。"""
+def _normalize_arc_scores(
+    arc_scores: Any,
+    alias_map: dict[str, str] | None,
+    *,
+    character_order: list[str] | None = None,
+) -> dict[str, float] | None:
+    """
+    对 arc_scores 的人物名称进行归一化，并收口为命名字典。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-diagnosis-followup-review-findings
+    修改原因: 结果 API 与前端页面都按“角色名 -> 分数”消费 arc_scores；
+    旧 run 若仍存数组形态，这里要优先按人物顺序还原成命名字典，
+    无法可靠还原时返回 None，避免把 `0/1/2` 这种索引误当成角色名对外暴露。
+    """
     if not arc_scores:
-        return arc_scores
-    if isinstance(arc_scores, list):
-        return arc_scores
-    if not isinstance(arc_scores, dict):
-        return arc_scores
-    if not alias_map:
-        return arc_scores
+        return None
 
     normalized: dict[str, float] = {}
-    for name, score in arc_scores.items():
-        if not isinstance(name, str):
+
+    if isinstance(arc_scores, list):
+        if not character_order:
+            return None
+        source_items = zip(character_order, arc_scores, strict=False)
+    elif isinstance(arc_scores, dict):
+        source_items = arc_scores.items()
+    else:
+        return None
+
+    for raw_name, score in source_items:
+        if not isinstance(raw_name, str) or not raw_name.strip():
             continue
         try:
             normalized_score = float(score)
         except (TypeError, ValueError):
             continue
-        canonical_name = alias_map.get(name, name)
+
+        canonical_name = alias_map.get(raw_name, raw_name) if alias_map else raw_name
         previous = normalized.get(canonical_name)
         normalized[canonical_name] = normalized_score if previous is None else max(previous, normalized_score)
 
-    return normalized
+    return normalized or None

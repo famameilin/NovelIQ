@@ -791,10 +791,10 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
     "last_chunk_id": 18,
     "anchor_chunk_ids": [3, 8, 18],
     "setup_summary": "铜铃异响反复指向山门旧案",
-    "setup_kind": "mystery",
-    "expected_payoff_family": "revelation",
+    "setup_kind": "异常物件",
+    "expected_payoff_family": "真相揭露",
     "payoff_likelihood": "high",
-    "strength": "strong",
+    "strength": "high",
     "status": "reinforced",
     "active": true,
     "latest_reason": "第18块再次强化铜铃与旧案的隐含关联",
@@ -815,8 +815,8 @@ GET /api/novels/10960c77/foreshadowing-threads?task_id=a1b2c3d4
 | expected_payoff_family | str | 预期回收家族 |
 | payoff_likelihood | str | 回收预期强度（如 `high/medium/low`） |
 | strength | str | 当前 thread 强度 |
-| status | str | thread 状态（如 `open/reinforced/likely_paid_off/archived`） |
-| active | bool | 是否仍在 active setup pool 中 |
+| status | str | thread 语义状态（如 `open/reinforced/likely_paid_off`） |
+| active | bool | 是否仍在 active setup pool 中；出池后为 `false` |
 | latest_reason | str | 最近一次命中的说明 |
 | latest_why_unresolved_now | str | 当前仍未完全回收的原因 |
 
