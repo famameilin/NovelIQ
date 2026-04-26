@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from src.api.exceptions import GraphReadinessError
-from src.storage.repositories import GraphRepository
+from src.storage.repositories import AnnotationRepository, GraphRepository
 from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, ParticipantEntityRow, RelationEventRow
 
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
@@ -29,12 +29,13 @@ from .types import (
 class KnowledgeGraphAuthorityService:
     """Single authority facade for graph consumers outside the repository layer."""
 
-    def __init__(self, graph_repo: GraphRepository) -> None:
+    def __init__(self, graph_repo: GraphRepository, annotation_repo: AnnotationRepository | None = None) -> None:
         self._graph_repo = graph_repo
+        self._annotation_repo = annotation_repo or AnnotationRepository(graph_repo.session)
 
     @classmethod
     def from_session(cls, session: Any) -> KnowledgeGraphAuthorityService:
-        return cls(graph_repo=GraphRepository(session))
+        return cls(graph_repo=GraphRepository(session), annotation_repo=AnnotationRepository(session))
 
     def build_level1_snapshot(self, run_id: str) -> Level1AuthoritySnapshot:
         """Level 1 stays intentionally minimal for evidence consumers."""
@@ -59,6 +60,7 @@ class KnowledgeGraphAuthorityService:
         endpoints must belong to that same character set.
         """
 
+        self.assert_graph_projection_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         self._assert_participant_projection_consistency(
             run_id,
@@ -107,6 +109,7 @@ class KnowledgeGraphAuthorityService:
         of treating this report as the final diagnosis layer.
         """
 
+        self.assert_graph_projection_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
             self._graph_repo.fetch_current_relations(run_id, active_only=True)
@@ -139,6 +142,7 @@ class KnowledgeGraphAuthorityService:
     def build_graph_view(self, run_id: str) -> GraphAuthorityView:
         """Return graph authority facts with full relation history for downstream product assembly."""
 
+        self.assert_graph_projection_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         confirmed_relations = self._build_confirmed_relations(
             self._graph_repo.fetch_current_relations(run_id, active_only=True)
@@ -169,6 +173,7 @@ class KnowledgeGraphAuthorityService:
         不应该每次都重建完整 GraphAuthorityView 再在内存里切片。
         """
 
+        self.assert_graph_projection_ready(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         self._assert_participant_projection_consistency(
             run_id,
@@ -182,6 +187,18 @@ class KnowledgeGraphAuthorityService:
             self._graph_repo.fetch_relation_events(run_id, limit=limit, offset=offset)
         )
         return relation_events, total
+
+    def assert_graph_projection_ready(self, run_id: str) -> None:
+        """
+        2026-04-27，任务：graph readiness consistency fixes
+        新建原因：graph-derived authority consumer 必须共用同一套 pending 判定，
+        不能只让 `/graph` 路由做局部检查，否则 timeline / aggregate / export 会静默读取半投影图谱。
+        """
+        pending_relations = self._annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
+        if pending_relations:
+            raise GraphReadinessError(
+                "graph projection is still pending; finish projection before reading graph-derived authority views."
+            )
 
     def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
         return [

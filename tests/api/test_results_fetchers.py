@@ -1,7 +1,9 @@
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.api.exceptions import GraphReadinessError
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
@@ -352,11 +354,15 @@ def test_fetch_character_relations_deduplicates_across_chunks():
         ]
     )
 
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        export_graph_view=export_graph_view,
-    )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=export_graph_view,
+        )
 
     assert len(result) == 2
 
@@ -440,11 +446,15 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
         ]
     )
 
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        export_graph_view=export_graph_view,
-    )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=export_graph_view,
+        )
 
     assert len(result) == 1
     assert result[0].chunk_id == 15
@@ -453,23 +463,35 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
 
 def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo2()
-    annotation_repo._pending = [object()]
-    with pytest.raises(RuntimeError, match="pending relations"):
-        _fetch_character_relations(
-            run_id="run-1",
-            annotation_repo=annotation_repo,
-            export_graph_view=ExportGraphAuthorityView(),
-        )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(
+            assert_graph_projection_ready=lambda _run_id: (_ for _ in ()).throw(
+                GraphReadinessError(
+                    "graph projection is still pending; finish projection before reading graph-derived authority views."
+                )
+            )
+        ),
+    ):
+        with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+            _fetch_character_relations(
+                run_id="run-1",
+                annotation_repo=annotation_repo,
+                export_graph_view=ExportGraphAuthorityView(),
+            )
 
 
 def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
-    annotation_repo._pending = []
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        export_graph_view=ExportGraphAuthorityView(),
-    )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=ExportGraphAuthorityView(),
+        )
 
     assert result == []
 

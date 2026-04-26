@@ -169,6 +169,9 @@ class StaticGraphAuthorityService:
         assert run_id == self.expected_run_id
         return self.view
 
+    def assert_graph_projection_ready(self, run_id: str) -> None:
+        assert run_id == self.expected_run_id
+
     def build_graph_report(self, *_args, **_kwargs):
         if self.forbid_report:
             raise AssertionError("/graph page should not consume diagnosis/export graph report")
@@ -206,6 +209,9 @@ class PaginatedGraphAuthorityService:
             confirmed_relations=[],
             relation_events=self._relation_events,
         )
+
+    def assert_graph_projection_ready(self, run_id: str) -> None:
+        assert run_id == self.expected_run_id
 
     def build_graph_report(self, *_args, **_kwargs):
         if self.forbid_report:

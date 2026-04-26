@@ -5,9 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.api.exceptions import GraphReadinessError
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
+    fetch_all_results_data,
     load_aggregate_metrics_bundle,
     load_character_bundle,
     load_core_results,
@@ -29,6 +31,7 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
+from src.storage.models import ChunkRelation
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
@@ -288,6 +291,7 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     monkeypatch.setattr(
         "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
         lambda *_args, **_kwargs: SimpleNamespace(
+            assert_graph_projection_ready=lambda _run_id: None,
             build_export_view=lambda _run_id: ExportGraphAuthorityView(),
             build_graph_report=lambda _run_id: GraphAuthorityReport(
                 summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
@@ -313,6 +317,38 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     assert results_data["diagnosis"] is None
     assert missing_fields.count("diagnosis") == 1
     assert novel_name == "Test Novel"
+
+
+def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=scenario.run_id,
+            from_char=scenario.hero_name,
+            to_char=scenario.rival_name,
+            type="盟友",
+            change="强化",
+            evidence="尚未投影的新关系变化",
+            confidence=0.66,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    stats_repo = StatsRepository(db_session)
+    annotation_repo = AnnotationRepository(db_session)
+    chunk_repo = ChunkRepository(db_session)
+
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        fetch_all_results_data(
+            novel_id=scenario.novel_id,
+            task_id=scenario.task_id,
+            run_id=scenario.run_id,
+            stats_repo=stats_repo,
+            annotation_repo=annotation_repo,
+            chunk_repo=chunk_repo,
+        )
 
 
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
