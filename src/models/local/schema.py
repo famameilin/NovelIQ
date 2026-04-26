@@ -184,6 +184,12 @@ class ForeshadowingResult(BaseModel):
     修改者: Codex
     任务: phase2-strong-foreshadowing
     修改内容: 补充 is_strong_setup 显式布尔位，避免继续让“是否强 setup”只存在于隐式推断里。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 收紧正负例结构合同，避免 negative 结果继续夹带 strong setup 字段，
+    同时要求 positive 结果必须显式给出 setup_kind。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -201,18 +207,37 @@ class ForeshadowingResult(BaseModel):
     confidence: ForeshadowingConfidence
 
     @model_validator(mode="after")
-    def _validate_positive_type_contract(self) -> "ForeshadowingResult":
+    def _validate_contract_consistency(self) -> "ForeshadowingResult":
         """
-        校验 positive 伏笔结果的类型合同。
+        校验 Phase2 强伏笔结果的正负例合同。
 
         创建时间: 2026-04-26
         任务: phase2-strong-foreshadowing
-        新建原因: 让结构化输出在进入 Phase2 热路径前就拒绝“has_foreshadowing=true 但没有正式类型”的脏结果。
+        新建原因: 让结构化输出在进入 Phase2 热路径前就拒绝
+        “positive 缺正式字段”以及“negative 仍夹带 strong setup 状态”的脏结果。
         """
-        if self.has_foreshadowing and not self.is_strong_setup:
-            raise ValueError("is_strong_setup must be true when has_foreshadowing=true")
-        if self.has_foreshadowing and self.foreshadowing_type is None:
-            raise ValueError("foreshadowing_type is required when has_foreshadowing=true")
+        if self.has_foreshadowing:
+            if not self.is_strong_setup:
+                raise ValueError("is_strong_setup must be true when has_foreshadowing=true")
+            if self.foreshadowing_type is None:
+                raise ValueError("foreshadowing_type is required when has_foreshadowing=true")
+            if self.setup_kind is None:
+                raise ValueError("setup_kind is required when has_foreshadowing=true")
+            return self
+
+        # 中文注释：negative 结果允许保留 anchor_reason 解释“为什么不是伏笔”，
+        # 但不能再夹带 strong setup 专属结构字段，否则后续 projector/storage
+        # 会把“否定判断”和“强伏笔标签”同时写进持久化视图。
+        if self.is_strong_setup:
+            raise ValueError("is_strong_setup must be false when has_foreshadowing=false")
+        if self.foreshadowing_type is not None:
+            raise ValueError("foreshadowing_type must be null when has_foreshadowing=false")
+        if self.setup_kind is not None:
+            raise ValueError("setup_kind must be null when has_foreshadowing=false")
+        if self.why_unresolved_now.strip():
+            raise ValueError("why_unresolved_now must be empty when has_foreshadowing=false")
+        if self.expected_payoff_family.strip():
+            raise ValueError("expected_payoff_family must be empty when has_foreshadowing=false")
         return self
 
     def to_dict(self) -> dict:

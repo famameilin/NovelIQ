@@ -12,7 +12,7 @@ import runpy
 from pathlib import Path
 
 from src.models.local.annotation.projectors.foreshadowing import normalize_foreshadowing_result
-from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, ForeshadowingResult
+from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, ForeshadowingResult, LocationAppearance
 from src.workflows.annotate_helpers.storage import _build_dialogue_snapshots, _merge_annotation_foreshadowing
 
 _FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "phase2_strong_foreshadowing_cases.py"
@@ -100,6 +100,47 @@ def test_strong_foreshadowing_projection_only_merges_validated_cases() -> None:
     assert merged_accepted.foreshadowing_type == "人物行为"
     assert merged_accepted.setup_kind == "因果引线"
     assert "借助于人类之外的力量" in merged_accepted.foreshadowing_desc
+
+
+def test_merge_annotation_foreshadowing_clears_negative_state_and_preserves_non_phase2_fields() -> None:
+    """negative 结果不应把 strong setup 脏字段写回 annotation，同时要保留其他上下文字段。"""
+    annotation = ChunkAnnotation(
+        emotional_valence="neutral",
+        event_type="铺垫",
+        pivot_moment=False,
+        cliffhanger=False,
+        chunk_summary="白芷察觉异样。",
+        has_foreshadowing=False,
+        foreshadowing_type=None,
+        foreshadowing_desc="",
+        characters=[],
+        dialogues=[],
+        location_appearances=[LocationAppearance(raw_name="旧宅", location_type="building")],
+        dialogue_lengths=[4],
+    )
+    merged = _merge_annotation_foreshadowing(
+        annotation,
+        ForeshadowingResult.model_construct(
+            has_foreshadowing=False,
+            is_strong_setup=True,
+            foreshadowing_type=None,
+            setup_kind="异常物件",
+            anchor_text="",
+            anchor_reason="具体钩子：无。未闭合原因：这里只是在解释为什么不是伏笔。",
+            why_unresolved_now="",
+            expected_payoff_family="",
+            confidence="low",
+        ),
+    )
+
+    assert merged.has_foreshadowing is False
+    assert merged.is_strong_setup is False
+    assert merged.foreshadowing_type is None
+    assert merged.setup_kind is None
+    assert merged.why_unresolved_now == ""
+    assert merged.expected_payoff_family == ""
+    assert merged.location_appearances == annotation.location_appearances
+    assert merged.dialogue_lengths == annotation.dialogue_lengths
 
 
 def test_build_dialogue_snapshots_keeps_speaker_tone_and_identity_clue_alignment() -> None:
