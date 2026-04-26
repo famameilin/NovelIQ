@@ -353,4 +353,23 @@ describe("NovelDetailPage", () => {
       );
     });
   });
+
+  it("diagnosis 合法为 null 时仍应渲染主内容而不是空白主体区", async () => {
+    currentSearchParams = "task_id=task-ready";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getDiagnosisMock.mockResolvedValue(null);
+    getNarrativeStructureMock.mockResolvedValue({});
+    getEmotionStatsMock.mockResolvedValue({});
+    getCharacterStatsMock.mockResolvedValue({});
+    getStyleStatsMock.mockResolvedValue({});
+    getTopicsMock.mockResolvedValue([]);
+    getChunkCurvesMock.mockResolvedValue([]);
+
+    renderNovelDetailPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("暂无诊断数据")).toBeInTheDocument();
+      expect(screen.getByTestId("score-overview-card")).toBeInTheDocument();
+    });
+  });
 });

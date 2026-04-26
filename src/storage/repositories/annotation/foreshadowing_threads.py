@@ -299,6 +299,12 @@ def _archive_overflow_threads(session, *, run_id: str, limit: int | None = None)
     创建时间: 2026-04-26
     任务: phase2-setup-pool
     新建原因: 活跃池上限是固定工程口径，归档规则必须统一收口到仓储层。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-diagnosis-followup-review-findings
+    修改原因: `active` 已经足够表达“是否仍在 prompt 可见池”；
+    出池时不能再覆盖 thread 语义状态，否则 diagnosis 的 expectation 会误读 lifecycle。
     """
 
     pool_limit = limit if limit is not None else _get_active_setup_pool_limit()
@@ -317,7 +323,6 @@ def _archive_overflow_threads(session, *, run_id: str, limit: int | None = None)
 
     for thread in active_threads[pool_limit:]:
         thread.active = False
-        thread.status = "archived"
         thread.updated_at = _utcnow_naive()
 
 

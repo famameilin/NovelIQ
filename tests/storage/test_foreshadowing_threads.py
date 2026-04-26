@@ -133,8 +133,48 @@ def test_archive_overflow_threads_flushes_pending_insert_before_limit_check(db_s
 
     assert len(active_threads) == ACTIVE_SETUP_POOL_LIMIT
     assert oldest_thread is not None and oldest_thread.active is False
-    assert oldest_thread.status == "archived"
+    assert oldest_thread.status == "open"
     assert newest_thread is not None and newest_thread.active is True
+
+
+def test_archive_overflow_threads_preserves_semantic_status_when_evicted(db_session, insert_test_novel) -> None:
+    """
+    创建时间: 2026-04-26
+    创建者: Codex
+    任务: fix-diagnosis-followup-review-findings
+    说明: active pool eviction 只应改变可见性，不应覆盖 thread 语义状态；
+    否则 diagnosis 的 foreshadow_expectation 会把 `likely_paid_off` / `reinforced` 误降级。
+    """
+
+    run_id = _create_run(db_session, insert_test_novel, "fst004")
+
+    evicted_thread = _make_thread(
+        run_id=run_id,
+        setup_id="evicted-paid-off",
+        chunk_id=1,
+        summary="旧 setup",
+    )
+    evicted_thread.status = "likely_paid_off"
+    db_session.add(evicted_thread)
+    db_session.add_all(
+        [
+                _make_thread(
+                    run_id=run_id,
+                    setup_id=f"overflow-{index:02d}",
+                    chunk_id=index,
+                    summary=f"已有 setup {index}",
+                )
+            for index in range(2, ACTIVE_SETUP_POOL_LIMIT + 2)
+        ]
+    )
+    db_session.commit()
+
+    _archive_overflow_threads(db_session, run_id=run_id)
+
+    refreshed = db_session.get(ForeshadowingThread, "evicted-paid-off")
+    assert refreshed is not None
+    assert refreshed.active is False
+    assert refreshed.status == "likely_paid_off"
 
 
 def test_find_exact_matching_active_thread_ignores_invisible_active_threads_outside_pool_limit(
