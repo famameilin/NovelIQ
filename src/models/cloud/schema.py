@@ -53,8 +53,8 @@ class CloudAnalysis(BaseModel):
         ge=0,
         le=1,
         description=(
-            "伏笔兑现率，表示已埋下伏笔中有多少已经兑现/揭示。"
-            "该值来自 diagnosis 阶段的整体评估，不等于含伏笔 chunk 的占比。"
+            "兼容字段名，对应 diagnosis 阶段给出的伏笔回收预期。"
+            "该值是整体诊断的近似估计，不等于含伏笔 chunk 的占比，也不是严格全文事实回收率。"
         ),
     )
     arc_scores: list[float] | dict[str, float] = Field(default_factory=list)

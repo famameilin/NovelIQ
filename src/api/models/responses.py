@@ -172,7 +172,11 @@ class ChunkAnnotation(BaseModel):
     cliffhanger: bool | None = None
     has_foreshadowing: bool | None = Field(
         default=None,
-        description="当前 chunk 是否包含伏笔元素。这是分块级存在性标记，不等于全书伏笔兑现率。",
+        description=(
+            "当前 chunk 是否包含伏笔元素。"
+            "这是分块级存在性标记，不等于全书伏笔回收预期，"
+            "更不是严格全文事实回收率。"
+        ),
     )
     is_strong_setup: bool | None = Field(
         default=None,
