@@ -567,7 +567,7 @@ def _prepare_chunk_context(
     if evidence_service:
         active_entity_names = _extract_active_entity_names(active_entity_contexts)
         phase1_seed_entities = _collect_seed_entities(alias_map, active_entity_names, query_text=chunk_text)
-        phase2_seed_entities = _collect_seed_entities(None, active_entity_names)
+        include_phase2_evidence = settings.analysis.multi_phase_annotation.include_phase2_evidence
 
         phase1_request = _build_evidence_request(
             consumer="annotation_phase1",
@@ -585,21 +585,26 @@ def _prepare_chunk_context(
             allow_llm_query_expansion=False,
             need_level3=False,
         )
-        phase2_request = _build_evidence_request(
-            consumer="annotation_phase2",
-            objective="foreshadowing",
-            query_text=chunk_text,
-            requested_names=list(active_entity_names),
-            seed_entities=phase2_seed_entities,
-            background_entities=[],
-            chunk_id=chunk_id,
-            max_chunk_id=chunk_id - 1,
-            allow_llm_query_expansion=False,
-            need_level3=False,
-        )
 
         context.phase1_bundle = _collect_evidence_sync(evidence_service, phase1_request)
-        context.phase2_bundle = _collect_evidence_sync(evidence_service, phase2_request)
+        # 中文注释：默认强伏笔路径已经切到 current-text-only，
+        # 因此只有显式打开 include_phase2_evidence 时才为 Phase2 额外收集共享 evidence，
+        # 避免在默认热路径上继续支付无效检索成本。
+        if include_phase2_evidence:
+            phase2_seed_entities = _collect_seed_entities(None, active_entity_names)
+            phase2_request = _build_evidence_request(
+                consumer="annotation_phase2",
+                objective="foreshadowing",
+                query_text=chunk_text,
+                requested_names=list(active_entity_names),
+                seed_entities=phase2_seed_entities,
+                background_entities=[],
+                chunk_id=chunk_id,
+                max_chunk_id=chunk_id - 1,
+                allow_llm_query_expansion=False,
+                need_level3=False,
+            )
+            context.phase2_bundle = _collect_evidence_sync(evidence_service, phase2_request)
         context.phase3_bundle = context.phase1_bundle
         # 中文注释：Phase4 的 consumer target 只能由当前 chunk 的 Phase1 known_characters 决定；
         # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities。
@@ -681,6 +686,7 @@ async def _prepare_chunk_context_with_level3(
 
     if evidence_service:
         active_entity_names = _extract_active_entity_names(active_entity_contexts)
+        include_phase2_evidence = settings.analysis.multi_phase_annotation.include_phase2_evidence
         phase1_request = _build_evidence_request(
             consumer="annotation_phase1",
             objective="identity",
@@ -695,17 +701,6 @@ async def _prepare_chunk_context_with_level3(
             chunk_id=chunk_id,
             max_chunk_id=chunk_id - 1,
             allow_llm_query_expansion=True,
-        )
-        phase2_request = _build_evidence_request(
-            consumer="annotation_phase2",
-            objective="foreshadowing",
-            query_text=chunk_text,
-            requested_names=list(active_entity_names),
-            seed_entities=_collect_seed_entities(None, active_entity_names),
-            background_entities=[],
-            chunk_id=chunk_id,
-            max_chunk_id=chunk_id - 1,
-            allow_llm_query_expansion=False,
         )
         phase3_request = _build_evidence_request(
             consumer="annotation_phase3",
@@ -723,7 +718,21 @@ async def _prepare_chunk_context_with_level3(
             allow_llm_query_expansion=True,
         )
         context.phase1_bundle = await evidence_service.collect(phase1_request)
-        context.phase2_bundle = await evidence_service.collect(phase2_request)
+        # 中文注释：异步 Level3 路径与同步路径保持同一语义边界；
+        # 默认不为 Phase2 收集共享 evidence，只有 targeted ablation 时才显式打开。
+        if include_phase2_evidence:
+            phase2_request = _build_evidence_request(
+                consumer="annotation_phase2",
+                objective="foreshadowing",
+                query_text=chunk_text,
+                requested_names=list(active_entity_names),
+                seed_entities=_collect_seed_entities(None, active_entity_names),
+                background_entities=[],
+                chunk_id=chunk_id,
+                max_chunk_id=chunk_id - 1,
+                allow_llm_query_expansion=False,
+            )
+            context.phase2_bundle = await evidence_service.collect(phase2_request)
         context.phase3_bundle = await evidence_service.collect(phase3_request)
         # 中文注释：Phase4 的 consumer target 只能由当前 chunk 的 Phase1 known_characters 决定；
         # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities。

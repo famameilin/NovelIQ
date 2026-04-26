@@ -16,6 +16,8 @@ import tempfile
 
 from fastapi.testclient import TestClient
 
+from src.api.main import app
+
 
 class TestResults:
     """测试结果端点"""
@@ -94,3 +96,18 @@ class TestResults:
         )
         assert response.status_code == 404
         assert "不属于小说" in response.json()["detail"]
+
+    def test_get_chunk_annotations_openapi_declares_typed_response(self):
+        """
+        创建时间: 2026-04-26
+        创建者: Codex
+        任务: phase2-strong-foreshadowing
+        说明: 新增结果接口不仅要能返回数据，也要在 OpenAPI 中发布正式响应合同，
+        避免前端和自动化工具只能看到 `items: {}` 的匿名数组。
+        """
+        schema = app.openapi()
+        response_schema = schema["paths"]["/api/novels/{novel_id}/chunk-annotations"]["get"]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]
+        assert response_schema["type"] == "array"
+        assert response_schema["items"]["$ref"] == "#/components/schemas/ChunkAnnotation"
