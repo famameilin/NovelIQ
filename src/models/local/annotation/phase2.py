@@ -22,10 +22,16 @@
 修改时间: 2026-04-23
 任务: annotation-projector-runtime-landing
 修改内容: Phase2 单次结构化调用改为复用薄 phase runtime，避免重复维护交互记录与 token 估算。
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: fix-phase2-setup-pool-review-findings
+修改内容: linked_setup_id 校验收紧为“池内存在且身份字段一致”，避免模型选错可见 thread 时静默污染 ledger
 """
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from src.config import settings
@@ -38,6 +44,20 @@ from .runtime import AnnotationPhaseCallSpec, execute_phase_call
 
 if TYPE_CHECKING:
     from src.models.annotation import AnnotationClient
+
+
+def _normalize_setup_summary_for_link_check(value: str) -> str:
+    """
+    标准化 setup_summary，用于 linked_setup_id 身份一致性校验。
+
+    创建时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    新建原因: Phase2 只要在可见池里选错 setup_id，就会把命中记到错误 thread；
+    这里用和仓储层一致的保守归一化规则先挡掉明显错链。
+    """
+
+    return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
 
 
 async def _do_phase2(
@@ -215,11 +235,30 @@ def _validate_phase2_active_setup_link(
     创建时间: 2026-04-26
     任务: phase2-setup-pool
     新建原因: 无效 linked id 应该在 Phase2 重试阶段被显式打回，而不是拖到落库时才暴露。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: 除了检查 linked id 是否可见，还要校验返回的 summary/kind/payoff family
+    是否与目标 thread 一致，避免模型在多个可见 setup 之间串线。
     """
 
     if not result.has_foreshadowing or result.is_new_setup:
         return
 
-    visible_setup_ids = {entry.setup_id for entry in active_setup_pool}
-    if result.linked_setup_id not in visible_setup_ids:
+    matched_entry = next(
+        (entry for entry in active_setup_pool if entry.setup_id == result.linked_setup_id),
+        None,
+    )
+    if matched_entry is None:
         raise ValueError(f"linked_setup_id is not in active setup pool: {result.linked_setup_id}")
+    if _normalize_setup_summary_for_link_check(result.setup_summary) != _normalize_setup_summary_for_link_check(
+        str(getattr(matched_entry, "setup_summary", ""))
+    ):
+        raise ValueError(f"linked_setup_id summary does not match active setup pool: {result.linked_setup_id}")
+    if (result.setup_kind or "其他") != str(getattr(matched_entry, "setup_kind", "其他")):
+        raise ValueError(f"linked_setup_id setup_kind does not match active setup pool: {result.linked_setup_id}")
+    if result.expected_payoff_family.strip() != str(getattr(matched_entry, "expected_payoff_family", "")).strip():
+        raise ValueError(
+            f"linked_setup_id expected_payoff_family does not match active setup pool: {result.linked_setup_id}"
+        )

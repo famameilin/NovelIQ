@@ -115,6 +115,8 @@ export function DiagnosisPage() {
   const retry = () => diagnosisQuery.refetch();
 
   const { data: diagnosis } = diagnosisQuery;
+  const foreshadowMetric =
+    diagnosis?.foreshadow_expectation ?? diagnosis?.foreshadow_rate ?? null;
 
   // ---------- Render ----------
 
@@ -164,7 +166,7 @@ export function DiagnosisPage() {
             <ScoreCard
               title="伏笔回收预期"
               type="percent"
-              value={diagnosis.foreshadow_expectation != null ? diagnosis.foreshadow_expectation * 100 : null}
+              value={foreshadowMetric != null ? foreshadowMetric * 100 : null}
               reason="基于 Phase2 强 setup 与 thread 状态的近似估计，不是严格全文事实回收率。"
             />
             <ScoreCard

@@ -108,10 +108,16 @@ class MultiPhaseAnnotationSettings:
     任务: phase2-strong-foreshadowing
     修改内容: 新增 include_phase2_evidence 开关，支持对 Phase2 共享 evidence 做 targeted ablation，
     默认关闭，确保热路径先满足 current-text-only 的强伏笔边界。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: 新增 active_setup_pool_limit，让 setup 池上限改为 settings 可配置项。
     """
 
     parallel: bool = False
     include_phase2_evidence: bool = False
+    active_setup_pool_limit: int = 30
 
 
 @dataclass
@@ -368,12 +374,25 @@ def _parse_multi_phase_annotation_settings(data: dict[str, Any] | None) -> Multi
     任务: phase2-strong-foreshadowing
     修改内容: 解析 include_phase2_evidence，默认关闭共享 evidence 注入，
     只在显式配置时启用 targeted ablation。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: 解析 active_setup_pool_limit，并对非法非正值回退到默认 30。
     """
     if not data:
         return MultiPhaseAnnotationSettings()
+    active_setup_pool_limit_raw = data.get("active_setup_pool_limit", 30)
+    try:
+        active_setup_pool_limit = int(active_setup_pool_limit_raw)
+    except (TypeError, ValueError):
+        active_setup_pool_limit = 30
+    if active_setup_pool_limit <= 0:
+        active_setup_pool_limit = 30
     return MultiPhaseAnnotationSettings(
         parallel=data.get("parallel", False),
         include_phase2_evidence=data.get("include_phase2_evidence", False),
+        active_setup_pool_limit=active_setup_pool_limit,
     )
 
 

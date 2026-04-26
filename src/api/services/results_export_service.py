@@ -95,12 +95,18 @@ def load_character_bundle(
     """
     加载角色相关数据
 
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: diagnosis 缺失判断改为复用 annotation_repo fallback，避免导出 payload 已有 diagnosis
+              但 missing_fields 仍把它标成缺失。
+
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
     """
     missing_fields: list[str] = []
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, alias_map, annotation_repo)
     if not diagnosis:
         missing_fields.append("diagnosis")
 

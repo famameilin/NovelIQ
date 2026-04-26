@@ -210,6 +210,11 @@ class ForeshadowingResult(BaseModel):
     任务: phase2-setup-pool
     修改内容: 扩展为 setup 池感知合同，要求 positive 结果显式声明 setup_summary /
     payoff_likelihood / is_new_setup / linked_setup_id / setup_status，支撑跨 chunk thread 状态更新。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: fix-phase2-setup-pool-review-findings
+    修改内容: positive 结果不再接受 payoff_likelihood=low，避免与 prompt 合同冲突的弱阳性进入 ledger。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -252,6 +257,8 @@ class ForeshadowingResult(BaseModel):
                 raise ValueError("setup_summary is required when has_foreshadowing=true")
             if self.payoff_likelihood is None:
                 raise ValueError("payoff_likelihood is required when has_foreshadowing=true")
+            if self.payoff_likelihood == "low":
+                raise ValueError("payoff_likelihood must not be low when has_foreshadowing=true")
             if self.setup_status is None:
                 raise ValueError("setup_status is required when has_foreshadowing=true")
             if self.is_new_setup:

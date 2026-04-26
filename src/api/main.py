@@ -40,6 +40,11 @@ FastAPI 应用入口模块
 修改者: TraeAI
 任务: Task 7 - 实现启动时任务恢复逻辑
 修改内容: 完善孤儿任务清理日志,记录清理的任务数量
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: fix-phase2-setup-pool-review-findings
+修改内容: shutdown 时不再取消运行中的分析任务，避免正常停服被误记为“用户取消”
 """
 
 from __future__ import annotations
@@ -141,10 +146,11 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("FastAPI application shutting down...")
         try:
-            from src.api.dependencies import get_task_manager
             from src.api.services.event_manager import event_manager
 
-            await get_task_manager().shutdown()
+            # 中文注释：正常应用 shutdown 不能把仍在运行的分析任务收口成“用户取消”。
+            # TaskManager 的运行态缓存仅供当前进程使用，生产停服时由进程退出自然结束；
+            # 测试里的单例清理由 fixture 显式调用 reset_for_testing() 处理。
             await event_manager.shutdown()
         except Exception as exc:
             logger.warning(f"Failed to cleanly shut down runtime singletons: {exc}")
