@@ -210,6 +210,8 @@ def _fetch_character_relations(
 
     result: list[CharacterRelation] = []
     for relation in export_graph_view.current_relations:
+        if not relation.is_active:
+            continue
         from_char = _normalize_name(relation.from_name, alias_map) or relation.from_name
         to_char = _normalize_name(relation.to_name, alias_map) or relation.to_name
         if valid_character_names is not None and (
@@ -248,6 +250,8 @@ def _fetch_hierarchical_relations(
     hierarchical_types = {"child_of", "parent_of", "father_of", "son_of", "sibling_of", "spouse_of"}
     result = []
     for relation in export_graph_view.current_relations:
+        if not relation.is_active:
+            continue
         rel_type = relation.relation_type
         if rel_type not in hierarchical_types:
             continue

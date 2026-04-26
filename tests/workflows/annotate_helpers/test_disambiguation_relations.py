@@ -3,9 +3,12 @@ from __future__ import annotations
 import uuid
 
 from src.chunking.chunker import Chunk
+from src.models.local.disambiguation import DisambiguationState, ExtendedDisambigResult
 from src.storage.models import Novel
-from src.storage.repositories import ChunkRepository, GraphRepository, RunRepository
+from src.storage.repositories import AnnotationRepository, ChunkRepository, GraphRepository, RunRepository
+from src.workflows.annotate_helpers.disambiguation.pipeline_stages import persist_final_disambiguation
 from src.workflows.annotate_helpers.disambiguation.relations import _process_entity_relations
+from src.workflows.annotate_helpers.graph_projection import project_graph_tables
 
 
 def _create_relation_write_test_run(db_session) -> str:
@@ -87,3 +90,48 @@ def test_process_entity_relations_uses_shared_change_type_and_refreshes_projecti
     assert set(participants.keys()) == {"顾霜", "苏镜"}
     assert participants["顾霜"].current_degree == 1
     assert participants["苏镜"].current_degree == 1
+
+
+def test_persist_final_disambiguation_relations_survive_graph_rebuild(db_session) -> None:
+    run_id = _create_relation_write_test_run(db_session)
+
+    ann_repo = AnnotationRepository(db_session)
+    ann_repo.ensure_canonical_entities(
+        run_id,
+        frozenset({"顾霜", "苏镜"}),
+        novel_id="novel-1",
+        entity_types={"顾霜": "character", "苏镜": "character"},
+    )
+
+    state = DisambiguationState(
+        known_canonical_names=frozenset({"顾霜", "苏镜"}),
+    )
+    result = ExtendedDisambigResult(
+        canonical_decisions={},
+        entity_types={"顾霜": "character", "苏镜": "character"},
+        entity_relations=[{"from": "阿顾", "to": "苏镜", "type": "盟友"}],
+        alias_confidence={},
+    )
+    persisted_state = persist_final_disambiguation(
+        db_session,
+        novel_id="novel-1",
+        run_id=run_id,
+        previous_state=state,
+        new_state=state.with_updates(alias_merges=frozenset({("阿顾", "顾霜")})),
+        pending_relations=[],
+        result=result,
+    )
+    assert persisted_state.pending_relations == ()
+
+    project_graph_tables(run_id=run_id, to_chunk=0, session=db_session, rebuild=True)
+
+    graph_repo = GraphRepository(db_session)
+    current_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
+    relation_events = graph_repo.fetch_relation_events(run_id)
+
+    assert len(current_relations) == 1
+    assert current_relations[0].from_name == "顾霜"
+    assert current_relations[0].to_name == "苏镜"
+    assert len(relation_events) == 1
+    assert relation_events[0].from_name == "顾霜"
+    assert relation_events[0].to_name == "苏镜"
