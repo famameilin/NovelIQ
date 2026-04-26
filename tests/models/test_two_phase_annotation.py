@@ -14,11 +14,13 @@ import runpy
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from pydantic import ValidationError
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.models.local.annotation.phase2 import _validate_phase2_active_setup_link  # noqa: E402
 from src.models.local.parser import (  # noqa: E402
     build_annotation,
     parse_foreshadowing_result,
@@ -257,6 +259,12 @@ class TestForeshadowingParsing(unittest.TestCase):
         with self.assertRaises(ValidationError):
             parse_foreshadowing_result(data)
 
+    def test_parse_positive_with_low_payoff_likelihood_raises_validation_error(self) -> None:
+        data = _valid_positive_payload(payoff_likelihood="low")
+
+        with self.assertRaises(ValidationError):
+            parse_foreshadowing_result(data)
+
 
 class TestForeshadowingValidation(unittest.TestCase):
     """测试伏笔结果验证。"""
@@ -334,6 +342,11 @@ class TestForeshadowingValidation(unittest.TestCase):
             expected_payoff_family="",
             confidence="high",
         )
+        self.assertFalse(validate_foreshadowing_result(result, "那枚玉佩在夜里自行发热。"))
+
+    def test_validate_positive_with_low_payoff_likelihood_returns_false(self) -> None:
+        result = _malformed_positive_result(payoff_likelihood="low")
+
         self.assertFalse(validate_foreshadowing_result(result, "那枚玉佩在夜里自行发热。"))
 
     def test_validate_empty_anchor_text_returns_false(self) -> None:
@@ -486,6 +499,51 @@ class TestForeshadowingValidation(unittest.TestCase):
                     validate_foreshadowing_result(result, case["chunk_text"]),
                     case["expected_is_strong_setup"],
                 )
+
+
+class TestPhase2SetupPoolLinkValidation(unittest.TestCase):
+    """测试 Phase2 setup 池链接校验。"""
+
+    def test_validate_phase2_active_setup_link_rejects_mismatched_visible_thread(self) -> None:
+        result = _valid_positive_result(
+            is_new_setup=False,
+            linked_setup_id="setup-1",
+            setup_status="reinforced",
+            setup_summary="玉佩出现异常红光，后续可能揭示其能力或来历",
+            setup_kind="异常物件",
+            expected_payoff_family="能力触发",
+        )
+        active_setup_pool = [
+            SimpleNamespace(
+                setup_id="setup-1",
+                setup_summary="铜铃在雨夜自行作响，后续可能暴露禁制规则",
+                setup_kind="异常规则",
+                expected_payoff_family="规则兑现",
+            )
+        ]
+
+        with self.assertRaises(ValueError):
+            _validate_phase2_active_setup_link(result, active_setup_pool)
+
+    def test_validate_phase2_active_setup_link_accepts_matching_visible_thread(self) -> None:
+        result = _valid_positive_result(
+            is_new_setup=False,
+            linked_setup_id="setup-1",
+            setup_status="reinforced",
+            setup_summary="玉佩出现异常红光，后续可能揭示其能力或来历",
+            setup_kind="异常物件",
+            expected_payoff_family="能力触发",
+        )
+        active_setup_pool = [
+            SimpleNamespace(
+                setup_id="setup-1",
+                setup_summary="玉佩出现异常红光，后续可能揭示其能力或来历。",
+                setup_kind="异常物件",
+                expected_payoff_family="能力触发",
+            )
+        ]
+
+        _validate_phase2_active_setup_link(result, active_setup_pool)
 
 
 if __name__ == "__main__":
