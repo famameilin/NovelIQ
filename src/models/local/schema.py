@@ -179,6 +179,11 @@ class ForeshadowingResult(BaseModel):
     任务: phase2-strong-foreshadowing
     修改内容: 增加 setup_kind / why_unresolved_now / expected_payoff_family，
     把强伏笔判断拆成更稳定的结构化字段，减少 validator 对自由文本的依赖。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 补充 is_strong_setup 显式布尔位，避免继续让“是否强 setup”只存在于隐式推断里。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -186,6 +191,7 @@ class ForeshadowingResult(BaseModel):
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是单个 chunk 的存在性判断，不表示全书伏笔兑现程度。"
     )
+    is_strong_setup: bool = False
     foreshadowing_type: ForeshadowingType | None = None
     setup_kind: ForeshadowingSetupKind | None = None
     anchor_text: str = ""
@@ -203,6 +209,8 @@ class ForeshadowingResult(BaseModel):
         任务: phase2-strong-foreshadowing
         新建原因: 让结构化输出在进入 Phase2 热路径前就拒绝“has_foreshadowing=true 但没有正式类型”的脏结果。
         """
+        if self.has_foreshadowing and not self.is_strong_setup:
+            raise ValueError("is_strong_setup must be true when has_foreshadowing=true")
         if self.has_foreshadowing and self.foreshadowing_type is None:
             raise ValueError("foreshadowing_type is required when has_foreshadowing=true")
         return self
@@ -210,6 +218,7 @@ class ForeshadowingResult(BaseModel):
     def to_dict(self) -> dict:
         return {
             "has_foreshadowing": self.has_foreshadowing,
+            "is_strong_setup": self.is_strong_setup,
             "foreshadowing_type": self.foreshadowing_type,
             "setup_kind": self.setup_kind,
             "anchor_text": self.anchor_text,
@@ -549,6 +558,12 @@ class ChunkAnnotation(BaseModel):
     修改者: TraeAI
     任务: feature/chunk-summary-timeline-only
     修改内容: 恢复 chunk_summary 字段，仅用于 Timeline 展示，不参与消歧证据链
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 将 Phase2 强伏笔结构化字段补到 ChunkAnnotation 持久化视图，
+    便于 results API 和前端后续页面直接消费。
     """
 
     model_config = ConfigDict(frozen=False)
@@ -561,8 +576,12 @@ class ChunkAnnotation(BaseModel):
     has_foreshadowing: bool = Field(
         description="当前文本块是否存在伏笔元素。这是分块级标记，不等于 diagnosis.foreshadow_rate。"
     )
+    is_strong_setup: bool = False
     foreshadowing_type: ForeshadowingType | None = None
+    setup_kind: ForeshadowingSetupKind | None = None
     foreshadowing_desc: str = ""
+    why_unresolved_now: str = ""
+    expected_payoff_family: str = ""
     characters: list[CharacterSnapshot] = Field(default_factory=list)
     dialogues: list[DialogueSnapshot] = Field(default_factory=list)
     location_appearances: list[LocationAppearance] = Field(default_factory=list)
@@ -576,8 +595,12 @@ class ChunkAnnotation(BaseModel):
             "cliffhanger": self.cliffhanger,
             "chunk_summary": self.chunk_summary,
             "has_foreshadowing": self.has_foreshadowing,
+            "is_strong_setup": self.is_strong_setup,
             "foreshadowing_type": self.foreshadowing_type,
             "foreshadowing_desc": self.foreshadowing_desc,
+            "setup_kind": self.setup_kind,
+            "why_unresolved_now": self.why_unresolved_now,
+            "expected_payoff_family": self.expected_payoff_family,
             "characters": [
                 {
                     "name": c.name,

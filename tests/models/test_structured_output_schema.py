@@ -81,6 +81,7 @@ class TestStructuredOutputSchema(unittest.TestCase):
         说明: 锁定 Phase2 当前公开合同已经切换到中文伏笔类型枚举，不再回退到 causal/thematic。
         """
         schema = self.annotation_client._build_json_schema(ForeshadowingResult)["json_schema"]["schema"]
+        is_strong_setup = schema["properties"]["is_strong_setup"]
         foreshadowing_type = schema["properties"]["foreshadowing_type"]
         setup_kind = schema["properties"]["setup_kind"]
         confidence = schema["properties"]["confidence"]
@@ -91,6 +92,7 @@ class TestStructuredOutputSchema(unittest.TestCase):
             _extract_optional_literal_enum(foreshadowing_type),
             ["物件", "对话", "场景", "人物行为", "其他"],
         )
+        self.assertEqual(is_strong_setup["type"], "boolean")
         self.assertEqual(
             _extract_optional_literal_enum(setup_kind),
             ["异常物件", "异常规则", "隐藏身份", "明确承诺", "明确威胁", "倒计时", "未解释能力", "因果引线", "其他"],

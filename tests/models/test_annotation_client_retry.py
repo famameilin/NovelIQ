@@ -69,6 +69,7 @@ def create_mock_annotation(character_names: list[str] | None = None) -> ChunkAnn
 def create_mock_foreshadowing() -> ForeshadowingResult:
     return ForeshadowingResult(
         has_foreshadowing=True,
+        is_strong_setup=True,
         foreshadowing_type="其他",
         setup_kind="其他",
         anchor_text="测试锚点文本",

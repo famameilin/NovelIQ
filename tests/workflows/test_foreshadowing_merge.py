@@ -53,9 +53,13 @@ class TestForeshadowingMerge(unittest.TestCase):
         annotation = self._create_base_annotation()
         foreshadowing = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="物件",
+            setup_kind="异常物件",
             anchor_text="玉佩背面刻着归字",
             anchor_reason="暗示后文身份揭示",
+            why_unresolved_now="当前还没有解释归字与身份之间的关系。",
+            expected_payoff_family="身份揭示",
             confidence="high",
         )
 
@@ -87,9 +91,12 @@ class TestForeshadowingMerge(unittest.TestCase):
         annotation = self._create_base_annotation()
         foreshadowing = ForeshadowingResult(
             has_foreshadowing=False,
+            is_strong_setup=False,
             foreshadowing_type=None,
             anchor_text="",
             anchor_reason="",
+            why_unresolved_now="",
+            expected_payoff_family="",
             confidence="low",
         )
 
@@ -118,9 +125,13 @@ class TestForeshadowingMerge(unittest.TestCase):
         annotation = self._create_base_annotation()
         foreshadowing = ForeshadowingResult(
             has_foreshadowing=True,
+            is_strong_setup=True,
             foreshadowing_type="对话",
+            setup_kind="因果引线",
             anchor_text="测试锚点",
             anchor_reason="测试原因",
+            why_unresolved_now="当前还没有解释这句测试锚点会引出什么后果。",
+            expected_payoff_family="其他",
             confidence="medium",
         )
 

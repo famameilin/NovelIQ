@@ -200,8 +200,16 @@ def _fetch_chunk_annotations(
                 pivot_moment=bool(row.pivot_moment) if row.pivot_moment is not None else None,
                 cliffhanger=bool(row.cliffhanger) if row.cliffhanger is not None else None,
                 has_foreshadowing=bool(row.has_foreshadowing) if row.has_foreshadowing is not None else None,
+                is_strong_setup=bool(row.is_strong_setup) if getattr(row, "is_strong_setup", None) is not None else None,
                 foreshadowing_type=str(row.foreshadowing_type) if row.foreshadowing_type else None,
+                setup_kind=str(row.setup_kind) if getattr(row, "setup_kind", None) else None,
                 foreshadowing_desc=str(row.foreshadowing_desc) if row.foreshadowing_desc else None,
+                why_unresolved_now=(
+                    str(row.why_unresolved_now) if getattr(row, "why_unresolved_now", None) else None
+                ),
+                expected_payoff_family=(
+                    str(row.expected_payoff_family) if getattr(row, "expected_payoff_family", None) else None
+                ),
                 characters=characters_by_chunk.get(chunk_id, []),
                 relations=relations_by_chunk.get(chunk_id, []),
                 dialogues=dialogues_by_chunk.get(chunk_id, []),
