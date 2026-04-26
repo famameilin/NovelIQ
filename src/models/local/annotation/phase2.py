@@ -132,7 +132,6 @@ async def annotate_chunk_phase2(
     text: str,
     prev_chunk_summary: str | None = None,
     chunk_id: int | None = None,
-    prev_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -159,6 +158,7 @@ async def annotate_chunk_phase2(
     修改内容:
     - 删除 next_chunk_text 残留透传，避免 Phase2 接口继续暗示存在后文输入
     - 增加共享 evidence 开关，支持在不改默认行为的前提下做 targeted ablation
+    - 删除 prev_chunk_text 兼容壳层，保持接口签名与真实 prompt 输入完全一致
     """
     from src.models.local.schema import ForeshadowingResult
     from src.storage.repositories import AnnotationRepository
@@ -194,7 +194,6 @@ async def annotate_chunk_phase2(
         text=text,
         prev_chunk_summary=prev_chunk_summary,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,

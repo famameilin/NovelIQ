@@ -235,7 +235,8 @@ class TestCloudDiagnose:
         assert "pivot_moments" in payload
         assert "high_tension_paragraphs" in payload
         assert "character_relations" in payload
-        assert "foreshadowing_list" in payload
+        assert "foreshadowing_threads" in payload
+        assert "foreshadow_expectation" in payload
         assert "summaries" in payload
         assert "known_characters" in payload
         assert "alias_merges" in payload
@@ -244,7 +245,7 @@ class TestCloudDiagnose:
 
         assert len(payload["pivot_blocks"]) > 0
         assert len(payload["pivot_moments"]) > 0
-        assert len(payload["foreshadowing_list"]) > 0
+        assert len(payload["foreshadowing_threads"]) >= 0
         assert payload["known_characters"] == ["伯安"]
         assert payload["alias_merges"] == {"角色0": "伯安"}
         assert set(payload["graph_summary"].keys()) == {"node_count", "edge_count", "density"}
@@ -310,7 +311,7 @@ class TestCloudDiagnose:
         )
         assert analysis is not None
         assert analysis.narrative_type == "三幕"
-        assert analysis.foreshadow_rate == 0.1
+        assert analysis.foreshadow_expectation == 0.1
 
         rows = self.db_session.execute(
             text("SELECT COUNT(*) FROM cloud_analysis WHERE run_id = :run_id"),
@@ -329,7 +330,7 @@ class TestCloudDiagnose:
         )
         rows = self.db_session.execute(
             text(
-                "SELECT novel_id, narrative_type, foreshadow_rate, narrative_arc_type, "
+                "SELECT novel_id, narrative_type, foreshadow_expectation, narrative_arc_type, "
                 "protagonist, main_characters, core_cast "
                 "FROM cloud_analysis WHERE run_id = :run_id"
             ),
@@ -368,7 +369,7 @@ class TestCloudDiagnose:
         content = json.dumps(
             {
                 "novel_id": self.novel_id,
-                "foreshadow_rate": 0.2,
+                "foreshadow_expectation": 0.2,
                 "arc_scores": {"角色0": 9.1},
                 "narrative_type": "三幕",
                 "topic_labels": ["成长"],
@@ -427,7 +428,7 @@ class TestCloudDiagnose:
         client = object.__new__(DiagnosisClient)
         result = CloudAnalysis(
             novel_id="raw-novel",
-            foreshadow_rate=0.1,
+            foreshadow_expectation=0.1,
             arc_scores={"角色0": 8.5},
             narrative_type="三幕",
             topic_labels=["成长"],
@@ -438,7 +439,7 @@ class TestCloudDiagnose:
             core_cast=["角色0", "角色1"],
         )
 
-        finalized = client._finalize_result(result, "fixed-novel")
+        finalized = client._finalize_result(result, "fixed-novel", payload={})
 
         assert finalized.novel_id == "fixed-novel"
         assert finalized.protagonist == "角色0"

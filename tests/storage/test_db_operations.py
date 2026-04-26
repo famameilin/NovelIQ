@@ -41,6 +41,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.chunking.chunker import chunk_text
 from src.models.cloud.schema import CloudAnalysis
 from src.models.local.schema import CharacterSnapshot, ChunkAnnotation
+from src.storage.models import Novel
 from src.storage.repositories import (
     AnnotationRepository,
     ChunkRepository,
@@ -48,7 +49,6 @@ from src.storage.repositories import (
     RunRepository,
     StatsRepository,
 )
-from src.storage.models import Novel
 
 
 def _insert_test_novel(db_session, novel_id: str) -> None:

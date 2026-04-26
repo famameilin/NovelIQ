@@ -121,7 +121,6 @@ class _MultiPhaseExecutionContext:
     text: str
     alias_map: dict[str, str] | None = None
     chunk_id: int | None = None
-    prev_chunk_text: str | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None
@@ -204,7 +203,6 @@ async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> Fore
         client=context.client,
         text=context.text,
         chunk_id=context.chunk_id,
-        prev_chunk_text=context.prev_chunk_text,
         novel_title=context.novel_title,
         main_characters=context.main_characters,
         position_pct=context.position_pct,
@@ -388,7 +386,6 @@ async def _run_phase2(
     client: AnnotationClient,
     text: str,
     chunk_id: int | None,
-    prev_chunk_text: str | None,
     novel_title: str | None,
     main_characters: str | None,
     position_pct: float | None,
@@ -417,7 +414,6 @@ async def _run_phase2(
         client=client,
         text=text,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
@@ -575,7 +571,6 @@ async def annotate_chunk_multi_phase(
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     global_context: str | None = None,
-    prev_chunk_text: str | None = None,
     active_entities: str | None = None,
     evidence_bundle: EvidenceBundle | None = None,
     phase1_bundle: EvidenceBundle | None = None,
@@ -618,7 +613,6 @@ async def annotate_chunk_multi_phase(
             text=text,
             alias_map=alias_map,
             chunk_id=chunk_id,
-            prev_chunk_text=prev_chunk_text,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
@@ -641,7 +635,6 @@ async def annotate_chunk_multi_phase(
             text=text,
             alias_map=alias_map,
             chunk_id=chunk_id,
-            prev_chunk_text=prev_chunk_text,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
@@ -665,7 +658,6 @@ async def annotate_chunk_parallel(
     text: str,
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
-    prev_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -708,7 +700,6 @@ async def annotate_chunk_parallel(
         text=text,
         alias_map=alias_map,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
@@ -765,7 +756,6 @@ async def annotate_chunk_serial(
     text: str,
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
-    prev_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -806,7 +796,6 @@ async def annotate_chunk_serial(
         text=text,
         alias_map=alias_map,
         chunk_id=chunk_id,
-        prev_chunk_text=prev_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
