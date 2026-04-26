@@ -576,7 +576,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_phase2_passes_supplied_evidence_bundle_to_message_builder(self):
-        """Phase2 只消费上游 evidence_bundle，不再自行触发新的取证分支。"""
+        """Phase2 只消费上游 evidence_bundle，且默认保持 current-text-only 输入边界。"""
         client = MockAnnotationClient()
         evidence_bundle = MagicMock(name="phase2_evidence_bundle")
 
@@ -593,10 +593,10 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, ForeshadowingResult)
         self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
-        self.assertIs(mock_build_messages.call_args.kwargs["include_evidence_blocks"], True)
+        self.assertIs(mock_build_messages.call_args.kwargs["include_evidence_blocks"], False)
 
-    async def test_phase2_can_disable_shared_evidence_blocks_via_settings(self):
-        """Phase2 支持通过配置关闭共享 evidence 注入，便于做 targeted ablation。"""
+    async def test_phase2_can_enable_shared_evidence_blocks_via_settings(self):
+        """Phase2 支持通过配置显式打开共享 evidence 注入，便于做 targeted ablation。"""
         client = MockAnnotationClient()
         evidence_bundle = MagicMock(name="phase2_evidence_bundle")
 
@@ -608,7 +608,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
             ) as mock_build_messages,
         ):
             mock_settings.runtime.annotation.phase_max_retries = settings.runtime.annotation.phase_max_retries
-            mock_settings.analysis.multi_phase_annotation.include_phase2_evidence = False
+            mock_settings.analysis.multi_phase_annotation.include_phase2_evidence = True
 
             result = await annotate_chunk_phase2(
                 client=client,
@@ -619,7 +619,7 @@ class TestPhase2Retry(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, ForeshadowingResult)
         self.assertIs(mock_build_messages.call_args.kwargs["evidence_bundle"], evidence_bundle)
-        self.assertIs(mock_build_messages.call_args.kwargs["include_evidence_blocks"], False)
+        self.assertIs(mock_build_messages.call_args.kwargs["include_evidence_blocks"], True)
 
 
 class TestTwoPhaseIntegration(unittest.IsolatedAsyncioTestCase):

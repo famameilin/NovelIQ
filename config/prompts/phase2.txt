@@ -77,10 +77,6 @@
 当前位置：全书第 {position_pct}%（第 {chapter_id} 章）
 </小说信息>
 
-<前文片段>
-{prev_chunk_text}
-</前文片段>
-
 <当前文本>
 {chunk_text}
 </当前文本>

@@ -113,7 +113,7 @@ def _build_foreshadowing_messages(
     position_pct: float | None = None,
     chapter_id: int | None = None,
     evidence_bundle=None,
-    include_evidence_blocks: bool = True,
+    include_evidence_blocks: bool = False,
 ) -> list[dict]:
     """
     构建第二次调用（伏笔分析）的messages
@@ -127,7 +127,8 @@ def _build_foreshadowing_messages(
     任务: phase2-strong-foreshadowing
     修改内容:
     - 清理已废弃的 next_chunk_text 残留接口，避免 Phase2 继续携带不存在的后文输入
-    - 增加 include_evidence_blocks 开关，支持对共享 evidence 做 targeted ablation
+    - 当前文本优先：默认不再注入共享 evidence block，只有显式 opt-in 才参与 targeted ablation
+    - 保留 prev_chunk_text 形参作为兼容壳层，但不再把前文片段写入 prompt
     """
     messages = [{"role": "system", "content": FORESHADOWING_SYSTEM_PROMPT}]
 
@@ -139,7 +140,6 @@ def _build_foreshadowing_messages(
         position_pct=position_pct or 0.0,
         chapter_id=chapter_id or 0,
         prev_chunk_summary=prev_chunk_summary or "（无前文摘要）",
-        prev_chunk_text=prev_chunk_text or "（无前文）",
         chunk_text=text,
     )
 
