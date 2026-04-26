@@ -55,8 +55,13 @@ def test_merge_annotation_foreshadowing_overrides_phase2_fields() -> None:
             setup_kind="异常物件",
             anchor_text="铜铃",
             anchor_reason="反复出现但用途未明",
+            setup_summary="铜铃反复出现且用途未明，后续可能触发异常能力",
             why_unresolved_now="当前还没有解释铜铃为何反复出现。",
             expected_payoff_family="能力触发",
+            payoff_likelihood="high",
+            is_new_setup=True,
+            linked_setup_id=None,
+            setup_status="open",
             confidence="high",
         ),
     )
@@ -66,8 +71,10 @@ def test_merge_annotation_foreshadowing_overrides_phase2_fields() -> None:
     assert merged.foreshadowing_type == "物件"
     assert merged.setup_kind == "异常物件"
     assert merged.foreshadowing_desc == "铜铃 - 反复出现但用途未明"
+    assert merged.setup_summary == "铜铃反复出现且用途未明，后续可能触发异常能力"
     assert merged.why_unresolved_now == "当前还没有解释铜铃为何反复出现。"
     assert merged.expected_payoff_family == "能力触发"
+    assert merged.payoff_likelihood == "high"
 
 
 def test_strong_foreshadowing_projection_only_merges_validated_cases() -> None:

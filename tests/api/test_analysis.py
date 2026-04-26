@@ -19,7 +19,7 @@ import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -89,7 +89,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        create_response = api_client.post(f"/api/novels/{novel_id}/tasks")
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
+            create_response = api_client.post(f"/api/novels/{novel_id}/tasks")
         assert create_response.status_code == 200
         task_id = create_response.json()["task_id"]
         status_response = api_client.get(f"/api/novels/{novel_id}/tasks/{task_id}/status")
@@ -109,7 +110,8 @@ class TestAnalysis:
                 )
         assert upload_response.status_code == 200
         novel_id = upload_response.json()["novel_id"]
-        create_response = api_client.post(f"/api/novels/{novel_id}/tasks")
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
+            create_response = api_client.post(f"/api/novels/{novel_id}/tasks")
         assert create_response.status_code == 200
         task_id = create_response.json()["task_id"]
         list_response = api_client.get(f"/api/novels/{novel_id}/tasks")
@@ -141,8 +143,12 @@ class TestAnalysis:
 
         api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: BrokenNovelService()
         try:
-            client = TestClient(api_client.app, raise_server_exceptions=False)
-            response = client.get("/api/novels/novel-1/tasks/broken123/status")
+            with (
+                patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
+                patch("src.api.main._resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
+                TestClient(api_client.app, raise_server_exceptions=False) as client,
+            ):
+                response = client.get("/api/novels/novel-1/tasks/broken123/status")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
         assert response.status_code == 500
@@ -156,8 +162,12 @@ class TestAnalysis:
 
         api_client.app.dependency_overrides[analysis_mod.get_novel_service] = lambda: BrokenNovelService()
         try:
-            client = TestClient(api_client.app, raise_server_exceptions=False)
-            response = client.get("/api/novels/novel-1/tasks")
+            with (
+                patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
+                patch("src.api.main._resume_pending_tasks", new=AsyncMock(return_value=(0, 0))),
+                TestClient(api_client.app, raise_server_exceptions=False) as client,
+            ):
+                response = client.get("/api/novels/novel-1/tasks")
         finally:
             api_client.app.dependency_overrides.pop(analysis_mod.get_novel_service, None)
         assert response.status_code == 500
@@ -178,7 +188,8 @@ class TestAnalysis:
 
         service = get_novel_service()
         task_id = service.create_task(novel_id)
-        resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
+        with patch.object(analysis_mod.AnalysisService, "_schedule_task_execution", return_value=None):
+            resume_response = api_client.post(f"/api/novels/{novel_id}/tasks/{task_id}/resume")
         assert resume_response.status_code == 200
         data = resume_response.json()
         assert data["novel_id"] == novel_id
