@@ -132,12 +132,12 @@ def _validate_authority_dependency_items(
 
 
 def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], list[Any], list[Any]]:
-    stable_states = list(getattr(graph_view, "stable_states", []))
+    participant_states = list(getattr(graph_view, "participant_states", []))
     confirmed_relations = list(getattr(graph_view, "confirmed_relations", []))
     relation_events = list(getattr(graph_view, "relation_events", []))
 
     required_slices = {
-        "stable_states": stable_states,
+        "participant_states": participant_states,
         "confirmed_relations": confirmed_relations,
         "relation_events": relation_events,
     }
@@ -150,7 +150,7 @@ def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], 
             contract_name=f"graph page authority contract.{slice_name}",
         )
 
-    return stable_states, confirmed_relations, relation_events
+    return participant_states, confirmed_relations, relation_events
 
 
 def _paginate_graph_relation_events(
@@ -297,7 +297,7 @@ def _fetch_graph_snapshot(
 
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     graph_view = authority_service.build_graph_view(run_id)
-    stable_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
+    participant_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
 
     nodes = [
         {
@@ -309,7 +309,7 @@ def _fetch_graph_snapshot(
             "role": row.primary_role_function,
             "status": row.status,
         }
-        for row in stable_states
+        for row in participant_states
     ]
     edges = [
         {
@@ -331,7 +331,7 @@ def _fetch_graph_snapshot(
         limit=events_limit,
     )
     events = [_serialize_graph_event(event) for event in paged_relation_events]
-    summary = _serialize_graph_page_summary(build_graph_page_summary(stable_states, confirmed_relations))
+    summary = _serialize_graph_page_summary(build_graph_page_summary(participant_states, confirmed_relations))
     quality = _serialize_graph_page_quality(build_graph_page_quality(confirmed_relations, relation_events))
 
     return {

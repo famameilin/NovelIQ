@@ -259,6 +259,7 @@ def _process_entity_relations(
 
     success_count = 0
     skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
+    affected_pairs: set[tuple[int, int]] = set()
 
     valid_relation_types = set(settings.analysis.valid_relation_types)
 
@@ -314,7 +315,7 @@ def _process_entity_relations(
                 source_relation_row_id=None,
                 directionality=None,
             )
-            graph_repo.refresh_current_relation(run_id, from_entity_obj.entity_id, to_entity_obj.entity_id)
+            affected_pairs.add((from_entity_obj.entity_id, to_entity_obj.entity_id))
             success_count += 1
         except Exception as e:
             logger.error(f"插入关系失败: {rel}, 错误: {e}")
@@ -324,6 +325,8 @@ def _process_entity_relations(
                     "reason": f"insert_error: {str(e)}",
                 }
             )
+
+    graph_repo.refresh_relation_projections(run_id, affected_pairs)
 
     if skipped_relations:
         logger.warning(

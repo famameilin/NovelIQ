@@ -166,7 +166,7 @@ def test_build_diagnosis_payload_rejects_full_graph_view_from_shared_signal_entr
                 canonical_entities=[],
                 confirmed_relations=[],
                 relation_events=[],
-                stable_states=[],
+                participant_states=[],
             )
 
     monkeypatch.setattr("src.models.cloud.payload.DiagnosisRepository", FakeDiagnosisRepository)
