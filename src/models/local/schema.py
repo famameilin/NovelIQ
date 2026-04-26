@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EmotionalValence = Literal["strong_positive", "mild_positive", "neutral", "mild_negative", "strong_negative"]
 EmotionScore = EmotionalValence
 EventType = Literal["冲突", "铺垫", "转折"]
 ForeshadowingType = Literal["物件", "对话", "场景", "人物行为", "其他"]
 ForeshadowingConfidence = Literal["high", "medium", "low"]
+ForeshadowingSetupKind = Literal["异常物件", "异常规则", "隐藏身份", "明确承诺", "明确威胁", "倒计时", "未解释能力", "因果引线", "其他"]
 DisambigConfidence = Literal["low", "medium", "high"]
 RoleFunction = Literal["主体", "客体", "发送者", "接收者", "帮助者", "反对者"]
 RelationType = Literal["师徒", "敌对", "盟友", "爱慕", "家族", "利益", "主从", "友情"]
@@ -168,6 +169,16 @@ class ForeshadowingResult(BaseModel):
     修改时间: 2026-04-26
     任务: phase2-strong-foreshadowing
     修改内容: 伏笔类型与置信度字段收紧为正式 Literal 合同，避免继续接受任意字符串。
+
+    修改时间: 2026-04-26
+    任务: phase2-strong-foreshadowing
+    修改内容: positive 结果必须携带正式伏笔类型，避免无类型强伏笔继续进入热路径。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 增加 setup_kind / why_unresolved_now / expected_payoff_family，
+    把强伏笔判断拆成更稳定的结构化字段，减少 validator 对自由文本的依赖。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -176,16 +187,35 @@ class ForeshadowingResult(BaseModel):
         description="当前文本块是否存在伏笔元素。这是单个 chunk 的存在性判断，不表示全书伏笔兑现程度。"
     )
     foreshadowing_type: ForeshadowingType | None = None
+    setup_kind: ForeshadowingSetupKind | None = None
     anchor_text: str = ""
     anchor_reason: str = ""
+    why_unresolved_now: str = ""
+    expected_payoff_family: str = ""
     confidence: ForeshadowingConfidence
+
+    @model_validator(mode="after")
+    def _validate_positive_type_contract(self) -> "ForeshadowingResult":
+        """
+        校验 positive 伏笔结果的类型合同。
+
+        创建时间: 2026-04-26
+        任务: phase2-strong-foreshadowing
+        新建原因: 让结构化输出在进入 Phase2 热路径前就拒绝“has_foreshadowing=true 但没有正式类型”的脏结果。
+        """
+        if self.has_foreshadowing and self.foreshadowing_type is None:
+            raise ValueError("foreshadowing_type is required when has_foreshadowing=true")
+        return self
 
     def to_dict(self) -> dict:
         return {
             "has_foreshadowing": self.has_foreshadowing,
             "foreshadowing_type": self.foreshadowing_type,
+            "setup_kind": self.setup_kind,
             "anchor_text": self.anchor_text,
             "anchor_reason": self.anchor_reason,
+            "why_unresolved_now": self.why_unresolved_now,
+            "expected_payoff_family": self.expected_payoff_family,
             "confidence": self.confidence,
         }
 

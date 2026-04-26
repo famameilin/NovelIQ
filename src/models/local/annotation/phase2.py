@@ -113,7 +113,6 @@ async def annotate_chunk_phase2(
     prev_chunk_summary: str | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -133,6 +132,13 @@ async def annotate_chunk_phase2(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容:
+    - 删除 next_chunk_text 残留透传，避免 Phase2 接口继续暗示存在后文输入
+    - 增加共享 evidence 开关，支持在不改默认行为的前提下做 targeted ablation
     """
     from src.models.local.schema import ForeshadowingResult
 
@@ -151,17 +157,20 @@ async def annotate_chunk_phase2(
 
     # 中文注释：Phase2 只消费调用方已经准备好的 evidence_bundle，
     # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界。
+    # include_phase2_evidence=False 时只关闭 prompt 注入，不改上游取证与调度路径，
+    # 方便做方案文档要求的 targeted ablation。
+    include_evidence_blocks = settings.analysis.multi_phase_annotation.include_phase2_evidence
     messages = _build_foreshadowing_messages(
         text=text,
         prev_chunk_summary=prev_chunk_summary,
         chunk_id=chunk_id,
         prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
         evidence_bundle=evidence_bundle,
+        include_evidence_blocks=include_evidence_blocks,
     )
 
     async def operation(

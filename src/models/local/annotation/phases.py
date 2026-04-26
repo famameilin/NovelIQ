@@ -72,12 +72,12 @@ def build_phase2_messages(
     prev_chunk_summary: str | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
     chapter_id: int | None = None,
     evidence_bundle=None,
+    include_evidence_blocks: bool = True,
 ) -> list[dict]:
     """
     构建Phase2消息
@@ -85,18 +85,23 @@ def build_phase2_messages(
     创建时间: 2026-03-18
     创建者: TraeAI
     任务: code-quality-refactor - Task 8 拆分annotation_client
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 与 Phase2 主链保持一致，移除 next_chunk_text 残留参数并支持 evidence ablation 开关。
     """
     return _build_foreshadowing_messages(
         text=text,
         prev_chunk_summary=prev_chunk_summary,
         chunk_id=chunk_id,
         prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
         evidence_bundle=evidence_bundle,
+        include_evidence_blocks=include_evidence_blocks,
     )
 
 

@@ -110,6 +110,11 @@ class _MultiPhaseExecutionContext:
     创建时间: 2026-04-23
     任务: p2-multi-phase-shared-context
     新建原因: 将并行/串行路径重复透传的 phase 参数集中管理，避免两侧调用签名漂移。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 从 Phase2 共享上下文中移除 next_chunk_text 残留字段，避免再暗示存在后文输入。
     """
 
     client: AnnotationClient
@@ -117,7 +122,6 @@ class _MultiPhaseExecutionContext:
     alias_map: dict[str, str] | None = None
     chunk_id: int | None = None
     prev_chunk_text: str | None = None
-    next_chunk_text: str | None = None
     novel_title: str | None = None
     main_characters: str | None = None
     position_pct: float | None = None
@@ -194,14 +198,13 @@ async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> Fore
 
     创建时间: 2026-04-23
     任务: p2-multi-phase-shared-context
-    新建原因: 统一 Phase2 参数透传，避免 chunk 前后文在 parallel/serial 中重复拼接。
+    新建原因: 统一 Phase2 参数透传，避免 parallel/serial 两条路径继续携带已废弃的后文字段。
     """
     return await _run_phase2(
         client=context.client,
         text=context.text,
         chunk_id=context.chunk_id,
         prev_chunk_text=context.prev_chunk_text,
-        next_chunk_text=context.next_chunk_text,
         novel_title=context.novel_title,
         main_characters=context.main_characters,
         position_pct=context.position_pct,
@@ -386,7 +389,6 @@ async def _run_phase2(
     text: str,
     chunk_id: int | None,
     prev_chunk_text: str | None,
-    next_chunk_text: str | None,
     novel_title: str | None,
     main_characters: str | None,
     position_pct: float | None,
@@ -405,13 +407,17 @@ async def _run_phase2(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 删除 next_chunk_text 残留透传，保持 multi_phase 与真实 Phase2 输入边界一致。
     """
     return await annotate_chunk_phase2(
         client=client,
         text=text,
         chunk_id=chunk_id,
         prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
@@ -579,7 +585,6 @@ async def annotate_chunk_multi_phase(
     phase4_request_template: EvidenceRequest | None = None,
     evidence_service: NarrativeEvidenceService | None = None,
     disambig_context: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -599,6 +604,11 @@ async def annotate_chunk_multi_phase(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def，使用 asyncio.gather 并行执行
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 删除已废弃的 next_chunk_text 参数，避免 multi_phase 对外继续暴露不存在的 Phase2 后文输入。
     """
     parallel = settings.analysis.multi_phase_annotation.parallel
 
@@ -609,7 +619,6 @@ async def annotate_chunk_multi_phase(
             alias_map=alias_map,
             chunk_id=chunk_id,
             prev_chunk_text=prev_chunk_text,
-            next_chunk_text=next_chunk_text,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
@@ -633,7 +642,6 @@ async def annotate_chunk_multi_phase(
             alias_map=alias_map,
             chunk_id=chunk_id,
             prev_chunk_text=prev_chunk_text,
-            next_chunk_text=next_chunk_text,
             novel_title=novel_title,
             main_characters=main_characters,
             position_pct=position_pct,
@@ -658,7 +666,6 @@ async def annotate_chunk_parallel(
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -687,6 +694,11 @@ async def annotate_chunk_parallel(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def，使用 asyncio.gather 替代 ThreadPoolExecutor
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 清理 next_chunk_text 残留，保持并行调度与当前 Phase2 热路径一致。
     """
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
     import asyncio
@@ -697,7 +709,6 @@ async def annotate_chunk_parallel(
         alias_map=alias_map,
         chunk_id=chunk_id,
         prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
@@ -755,7 +766,6 @@ async def annotate_chunk_serial(
     alias_map: dict[str, str] | None = None,
     chunk_id: int | None = None,
     prev_chunk_text: str | None = None,
-    next_chunk_text: str | None = None,
     novel_title: str | None = None,
     main_characters: str | None = None,
     position_pct: float | None = None,
@@ -784,6 +794,11 @@ async def annotate_chunk_serial(
     修改者: TraeAI
     任务: 重构 AnnotationClient 使用 async
     修改内容: 改为 async def
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 清理 next_chunk_text 残留，避免串行路径继续携带无效后文字段。
     """
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
     context = _MultiPhaseExecutionContext(
@@ -792,7 +807,6 @@ async def annotate_chunk_serial(
         alias_map=alias_map,
         chunk_id=chunk_id,
         prev_chunk_text=prev_chunk_text,
-        next_chunk_text=next_chunk_text,
         novel_title=novel_title,
         main_characters=main_characters,
         position_pct=position_pct,
