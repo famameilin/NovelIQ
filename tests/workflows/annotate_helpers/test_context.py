@@ -298,15 +298,9 @@ def test_collect_requested_names_promotes_direct_canonical_mentions_only_when_ex
     assert requested_names == ["程霜"]
 
 
-class FakeChunkRepository:
+class FailOnChunkRepository:
     def __init__(self, _conn) -> None:
-        pass
-
-    def fetch_prev_chunk_text(self, run_id: str, chunk_id: int) -> str:
-        return f"prev:{run_id}:{chunk_id}"
-
-    def fetch_next_chunk_text(self, run_id: str, chunk_id: int) -> str:
-        return f"next:{run_id}:{chunk_id}"
+        raise AssertionError("Phase2 current-text-only path should not instantiate ChunkRepository for prev/next chunk text")
 
 
 def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_bundle_has_none(monkeypatch):
@@ -323,7 +317,7 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
     provider = Mock()
     provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle()])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -349,8 +343,8 @@ def test_prepare_chunk_context_preserves_authority_active_entities_when_level2_b
         run_id="run-1",
     )
 
-    assert context.prev_chunk_text == "prev:run-1:12"
-    assert context.next_chunk_text == "next:run-1:12"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
     assert context.prompt_active_entities == "【近期活跃角色】\n- 白芷（helper）：观察 [chunk=12]"
     assert context.evidence_bundle is bundle
     assert context.prompt_disambig_context is not None
@@ -383,7 +377,7 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
     provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle()])
     expected_active_entities = render_annotation_prompt_blocks(bundle).active_entities
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -411,8 +405,8 @@ def test_prepare_chunk_context_overrides_authority_active_entities_when_level2_b
 
     assert expected_active_entities is not None
     assert context.prompt_active_entities == expected_active_entities
-    assert context.prev_chunk_text == "prev:run-override:20"
-    assert context.next_chunk_text == "next:run-override:20"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
     assert provider.collect.await_count == 2
 
 
@@ -459,7 +453,7 @@ def test_prepare_chunk_context_skips_context_loading_when_run_id_missing(monkeyp
 
 
 def test_prepare_chunk_context_without_disambig_provider_keeps_authority_context(monkeypatch):
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -485,8 +479,8 @@ def test_prepare_chunk_context_without_disambig_provider_keeps_authority_context
         run_id="run-authority-only",
     )
 
-    assert context.prev_chunk_text == "prev:run-authority-only:9"
-    assert context.next_chunk_text == "next:run-authority-only:9"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
     assert context.prompt_active_entities == "【近期活跃角色】\n- 苏镜（protagonist）：思考 [chunk=9]"
     assert context.evidence_bundle is None
     assert context.prompt_disambig_context is None
@@ -510,7 +504,7 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
     provider = Mock()
     provider.collect = AsyncMock(side_effect=[bundle, EvidenceBundle(), bundle])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -536,8 +530,8 @@ async def test_prepare_chunk_context_with_level3_preserves_authority_active_enti
         run_id="run-async",
     )
 
-    assert context.prev_chunk_text == "prev:run-async:18"
-    assert context.next_chunk_text == "next:run-async:18"
+    assert context.prev_chunk_text is None
+    assert context.next_chunk_text is None
     assert context.prompt_active_entities == "【近期活跃角色】\n- 陆明（helper）：巡查 [chunk=18]"
     assert context.evidence_bundle is bundle
     assert context.prompt_disambig_context is not None
@@ -608,7 +602,7 @@ async def test_prepare_chunk_context_with_level3_uses_semantic_collection_when_a
     provider = Mock()
     provider.collect = AsyncMock(side_effect=[phase1_bundle, phase2_bundle, phase3_bundle])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",
@@ -677,7 +671,7 @@ async def test_prepare_chunk_context_with_level3_promotes_direct_canonical_menti
     provider = Mock()
     provider.collect = AsyncMock(side_effect=[EvidenceBundle(), EvidenceBundle(), EvidenceBundle()])
 
-    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FakeChunkRepository)
+    monkeypatch.setattr("src.storage.repositories.ChunkRepository", FailOnChunkRepository)
     monkeypatch.setattr(
         context_module,
         "_build_active_entity_contexts_from_authority",

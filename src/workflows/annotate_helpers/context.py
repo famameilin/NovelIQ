@@ -534,8 +534,12 @@ def _prepare_chunk_context(
     任务: fix-phase4-request-scope
     修改内容: Phase4 request template 改为空占位；关系取证目标必须等 Phase1 产出 known_characters
               后再补齐，不能在上下文准备阶段先把历史 active entities 写进 consumer 名字边界。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 停止查询已不再消费的 prev/next chunk text，保持 Phase2 current-text-only 热路径干净。
     """
-    from src.storage.repositories import ChunkRepository
 
     context = ChunkContext()
     active_entity_contexts: list[ActiveEntityContext] = []
@@ -551,9 +555,6 @@ def _prepare_chunk_context(
             chunk_id,
         )
     else:
-        chunk_repo = ChunkRepository(conn)
-        context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
-        context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
         lookback = settings.runtime.annotation.lookback
         active_entity_contexts = _build_active_entity_contexts_from_authority(
             conn,
@@ -648,8 +649,12 @@ async def _prepare_chunk_context_with_level3(
     任务: fix-phase4-request-scope
     修改内容: Phase4 request template 改为空占位；关系取证目标必须等 Phase1 产出 known_characters
               后再补齐，不能在上下文准备阶段先把历史 active entities 写进 consumer 名字边界。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 停止查询已不再消费的 prev/next chunk text，避免 current-text-only 路径继续做无效 DB 读取。
     """
-    from src.storage.repositories import ChunkRepository
 
     context = ChunkContext()
     active_entity_contexts: list[ActiveEntityContext] = []
@@ -665,9 +670,6 @@ async def _prepare_chunk_context_with_level3(
             chunk_id,
         )
     else:
-        chunk_repo = ChunkRepository(conn)
-        context.prev_chunk_text = chunk_repo.fetch_prev_chunk_text(run_id, chunk_id)
-        context.next_chunk_text = chunk_repo.fetch_next_chunk_text(run_id, chunk_id)
         lookback = settings.runtime.annotation.lookback
         active_entity_contexts = _build_active_entity_contexts_from_authority(
             conn,

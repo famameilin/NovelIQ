@@ -300,6 +300,11 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     任务: phase2-strong-foreshadowing
     修改内容: 布尔字段改成严格归一化，避免 `json_object` 模式下 `"false"`
     被 Python `bool(...)` 误判成真值。
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase2-strong-foreshadowing
+    修改内容: 缺失 confidence 时默认降为 low，避免 provider 漏字段时被静默抬成 high 强伏笔。
     """
     raw_has_foreshadowing = _coerce_boolean_field(
         "has_foreshadowing",
@@ -331,7 +336,9 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     else:
         setup_kind = None
 
-    confidence_raw = data.get("confidence", "high")
+    # 中文注释：强伏笔池只接受显式 high。
+    # provider 如果漏掉 confidence，宁可降为 low 丢弃，也不能静默补成 high 放行。
+    confidence_raw = data.get("confidence", "low")
     confidence: ForeshadowingConfidence = confidence_raw if confidence_raw in _VALID_CONFIDENCES else "low"
     if degrade_to_negative:
         confidence = "low"
