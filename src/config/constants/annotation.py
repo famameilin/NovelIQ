@@ -45,7 +45,7 @@ VALID_CLUE_TYPES: tuple[str, ...] = (
     "naming_scene",
 )
 VALID_EVENT_TYPES: tuple[str, ...] = ("冲突", "铺垫", "转折")
-VALID_FORESHADOWING_TYPES: tuple[str, ...] = ("causal", "thematic")
+VALID_FORESHADOWING_TYPES: tuple[str, ...] = ("物件", "对话", "场景", "人物行为", "其他")
 
 SYMMETRIC_RELATION_TYPES: frozenset[str] = frozenset({"家族", "友情", "盟友"})
 

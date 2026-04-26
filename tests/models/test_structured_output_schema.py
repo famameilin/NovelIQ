@@ -30,6 +30,14 @@ from src.models.local.schema import (
 )
 
 
+def _extract_optional_literal_enum(property_schema: dict[str, Any]) -> list[str]:
+    """提取 Optional[Literal[...]] 字段中的枚举值。"""
+    for candidate in property_schema.get("anyOf", []):
+        if "enum" in candidate:
+            return list(candidate["enum"])
+    return list(property_schema.get("enum", []))
+
+
 class TestStructuredOutputSchema(unittest.TestCase):
     def setUp(self) -> None:
         """
@@ -65,6 +73,22 @@ class TestStructuredOutputSchema(unittest.TestCase):
         schema = self.annotation_client._build_json_schema(ForeshadowingResult)["json_schema"]["schema"]
         self.assertIs(schema["additionalProperties"], False)
         self.assertEqual(schema["required"], list(schema["properties"].keys()))
+
+    def test_foreshadowing_schema_uses_current_chinese_type_enum(self) -> None:
+        """
+        创建时间: 2026-04-26
+        任务: phase2-strong-foreshadowing
+        说明: 锁定 Phase2 当前公开合同已经切换到中文伏笔类型枚举，不再回退到 causal/thematic。
+        """
+        schema = self.annotation_client._build_json_schema(ForeshadowingResult)["json_schema"]["schema"]
+        foreshadowing_type = schema["properties"]["foreshadowing_type"]
+        confidence = schema["properties"]["confidence"]
+
+        self.assertEqual(
+            _extract_optional_literal_enum(foreshadowing_type),
+            ["物件", "对话", "场景", "人物行为", "其他"],
+        )
+        self.assertEqual(confidence["enum"], ["high", "medium", "low"])
 
     def test_nested_model_schema_forbids_unknown_fields(self) -> None:
         """

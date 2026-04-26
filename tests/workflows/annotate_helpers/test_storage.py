@@ -8,8 +8,16 @@ annotate_helpers.storage 单元测试。
 
 from __future__ import annotations
 
+import runpy
+from pathlib import Path
+
+from src.models.local.annotation.projectors.foreshadowing import normalize_foreshadowing_result
 from src.models.local.schema import CharacterSnapshot, ChunkAnnotation, ForeshadowingResult
 from src.workflows.annotate_helpers.storage import _build_dialogue_snapshots, _merge_annotation_foreshadowing
+
+_FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "phase2_strong_foreshadowing_cases.py"
+_FIXTURE_DATA = runpy.run_path(str(_FIXTURE_PATH))
+PHASE2_STRONG_FORESHADOWING_CASES = _FIXTURE_DATA["PHASE2_STRONG_FORESHADOWING_CASES"]
 
 
 def _make_annotation() -> ChunkAnnotation:
@@ -42,7 +50,7 @@ def test_merge_annotation_foreshadowing_overrides_phase2_fields() -> None:
         _make_annotation(),
         ForeshadowingResult(
             has_foreshadowing=True,
-            foreshadowing_type="causal",
+            foreshadowing_type="物件",
             anchor_text="铜铃",
             anchor_reason="反复出现但用途未明",
             confidence="high",
@@ -50,8 +58,37 @@ def test_merge_annotation_foreshadowing_overrides_phase2_fields() -> None:
     )
 
     assert merged.has_foreshadowing is True
-    assert merged.foreshadowing_type == "causal"
+    assert merged.foreshadowing_type == "物件"
     assert merged.foreshadowing_desc == "铜铃 - 反复出现但用途未明"
+
+
+def test_strong_foreshadowing_projection_only_merges_validated_cases() -> None:
+    """真实强伏笔回归样本应先经过 validator，再决定是否投影回 ChunkAnnotation。"""
+    base = _make_annotation()
+    chunk2 = next(case for case in PHASE2_STRONG_FORESHADOWING_CASES if case["chunk_id"] == 2)
+    chunk12 = next(case for case in PHASE2_STRONG_FORESHADOWING_CASES if case["chunk_id"] == 12)
+
+    rejected = normalize_foreshadowing_result(
+        ForeshadowingResult(**chunk2["result"]),
+        chunk2["chunk_text"],
+        chunk2["chunk_id"],
+    )
+    accepted = normalize_foreshadowing_result(
+        ForeshadowingResult(**chunk12["result"]),
+        chunk12["chunk_text"],
+        chunk12["chunk_id"],
+    )
+
+    merged_rejected = _merge_annotation_foreshadowing(base, rejected)
+    merged_accepted = _merge_annotation_foreshadowing(base, accepted)
+
+    assert rejected is None
+    assert merged_rejected.has_foreshadowing is False
+    assert merged_rejected.foreshadowing_type is None
+    assert accepted is not None
+    assert merged_accepted.has_foreshadowing is True
+    assert merged_accepted.foreshadowing_type == "人物行为"
+    assert "借助于人类之外的力量" in merged_accepted.foreshadowing_desc
 
 
 def test_build_dialogue_snapshots_keeps_speaker_tone_and_identity_clue_alignment() -> None:

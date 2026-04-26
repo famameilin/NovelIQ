@@ -303,7 +303,11 @@ def test_build_foreshadowing_messages_appends_shared_evidence_blocks() -> None:
         evidence_bundle=bundle,
     )
 
+    assert "强伏笔识别" in messages[0]["content"]
+    assert "默认判定为 `false`" in messages[0]["content"]
     user_content = messages[-1]["content"]
+    assert "<后文片段>" not in user_content
+    assert "后文写他在夜里被人追杀。" not in user_content
     assert "<Structured_Evidence>" in user_content
     assert "<Disambig_Candidates>" in user_content
     assert "<Vector_Evidence>" in user_content
@@ -379,6 +383,8 @@ def test_build_foreshadowing_messages_without_bundle_keeps_prompt_shape() -> Non
     )
 
     user_content = messages[-1]["content"]
+    assert "<后文片段>" not in user_content
+    assert "后文写他在夜里被人追杀。" not in user_content
     assert "<Structured_Evidence>" not in user_content
     assert "<Disambig_Candidates>" not in user_content
     assert "<Vector_Evidence>" not in user_content

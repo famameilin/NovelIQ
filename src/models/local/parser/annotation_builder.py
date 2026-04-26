@@ -213,6 +213,10 @@ def _parse_foreshadowing_type(
     创建时间: 2026-03-17
     创建者: TraeAI
     任务: code-quality-refactor - 提取build_annotation中的伏笔类型处理逻辑
+
+    修改时间: 2026-04-26
+    任务: phase2-strong-foreshadowing
+    修改内容: 伏笔类型合同改为中文正式枚举，build_annotation 与当前 Phase2 prompt 保持一致。
     """
     if has_foreshadowing and foreshadowing_type_raw in _VALID_FORESHADOWING_TYPES:
         return foreshadowing_type_raw
