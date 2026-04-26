@@ -256,7 +256,12 @@ async def get_chunk_annotations(
     _require_run_for_novel(session, novel_id, run_id)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
-    return _fetch_chunk_annotations(run_id, annotation_repo, alias_map)
+    return _fetch_chunk_annotations(
+        run_id,
+        annotation_repo,
+        alias_map,
+        require_graph_projection=False,
+    )
 
 
 @router.get("/{novel_id}/characters")
