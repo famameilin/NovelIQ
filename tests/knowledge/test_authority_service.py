@@ -17,7 +17,7 @@ from src.knowledge.authority import (
     KnowledgeGraphAuthorityService,
 )
 from src.storage.models import Chunk as ChunkModel
-from src.storage.models import Novel
+from src.storage.models import ChunkRelation, Novel
 from src.storage.repositories import GraphRepository, RunRepository
 
 
@@ -289,6 +289,52 @@ def test_build_timeline_view_requires_participant_projection_when_relation_table
 
     with pytest.raises(GraphReadinessError, match="graph participant projection is stale or incomplete"):
         KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(run_id)
+
+
+def test_graph_authority_views_fail_closed_when_graph_projection_is_still_pending(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Pending Readiness")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13044,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=run_id,
+            from_char="苏镜",
+            to_char="程霜",
+            type="盟友",
+            change="强化",
+            evidence="尚未投影的新关系变化",
+            confidence=0.77,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_timeline_view(run_id)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_graph_view(run_id)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_graph_report(run_id)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_graph_relation_event_page(run_id)
 
 
 def test_graph_authority_report_rejects_graph_page_contracts() -> None:

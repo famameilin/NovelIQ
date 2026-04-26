@@ -279,6 +279,15 @@ def _process_entity_relations(
             )
             continue
 
+        if from_name == to_name:
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "self_loop_after_alias_resolution",
+                }
+            )
+            continue
+
         if rel_type not in valid_relation_types:
             logger.warning(f"无效的关系类型: {rel_type}, 跳过关系 {rel}")
             skipped_relations.append(
@@ -308,7 +317,9 @@ def _process_entity_relations(
                 from_entity_id=from_entity_obj.entity_id,
                 to_entity_id=to_entity_obj.entity_id,
                 relation_type=rel_type,
-                change_type="established",
+                # 中文注释：终消歧补写的是“正式建立关系”，必须复用图谱共享的 change_type 语义，
+                # 不能写入孤立英文标签，否则下游统计会把这类事件静默漏掉。
+                change_type="新建",
                 chunk_id=0,
                 evidence=None,
                 confidence=1.0,

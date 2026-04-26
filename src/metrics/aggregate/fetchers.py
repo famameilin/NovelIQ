@@ -53,7 +53,9 @@ def _build_aggregate_graph_view(
     不能再直接依赖 GraphRepository 的原始 row 形状。
     """
 
-    return KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_graph_view(run_id)
+    service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    service.assert_graph_projection_ready(run_id)
+    return service.build_graph_view(run_id)
 
 
 def _build_aggregate_alias_lookup(snapshot: Level1AuthoritySnapshot) -> dict[str, str]:
@@ -192,13 +194,6 @@ def fetch_relation_data(
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
     current_relations = list(graph_view.confirmed_relations)
     relation_events = list(graph_view.relation_events)
-    if not current_relations and not relation_events:
-        pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-        if pending_relations:
-            raise RuntimeError(
-                "graph relation tables are empty while pending relations still exist; "
-                "run graph projection before aggregate metrics."
-            )
 
     return RelationData(
         relations=[(relation.from_name, relation.to_name) for relation in current_relations],

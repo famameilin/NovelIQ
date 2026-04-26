@@ -385,6 +385,7 @@ def fetch_all_results_data(
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
+    graph_authority_service.assert_graph_projection_ready(run_id)
     export_graph_view = graph_authority_service.build_export_view(run_id)
     graph_report = graph_authority_service.build_graph_report(run_id)
     timeline_view = graph_authority_service.build_timeline_view(run_id)

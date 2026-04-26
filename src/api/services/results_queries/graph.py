@@ -16,7 +16,6 @@ from typing import Any
 
 from loguru import logger
 
-from src.api.exceptions import GraphReadinessError
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
 from src.knowledge.authority import (
     GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
@@ -204,18 +203,10 @@ def _fetch_character_relations(
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """获取角色关系数据。"""
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    authority_service.assert_graph_projection_ready(run_id)
     if export_graph_view is None:
-        export_graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(
-            run_id
-        )
-
-    if not export_graph_view.current_relations:
-        pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-        if pending_relations:
-            raise GraphReadinessError(
-                "graph current relations are empty while pending relations still exist; "
-                "run graph projection before reading character relations."
-            )
+        export_graph_view = authority_service.build_export_view(run_id)
 
     result: list[CharacterRelation] = []
     for relation in export_graph_view.current_relations:
@@ -292,10 +283,6 @@ def _fetch_graph_snapshot(
     events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
     """获取知识图谱快照（nodes/edges/events/summary）。"""
-    pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-    if pending_relations:
-        raise GraphReadinessError("graph projection is still pending; finish projection before reading graph snapshot.")
-
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     graph_view = authority_service.build_graph_view(run_id)
     participant_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
@@ -353,10 +340,6 @@ def _fetch_graph_events_page(
     events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
     """获取 graph page relation events 的增量分页结果。"""
-    pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-    if pending_relations:
-        raise GraphReadinessError("graph projection is still pending; finish projection before reading graph events.")
-
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     start = _decode_graph_events_cursor(events_cursor)
     page_limit = max(1, min(events_limit, GRAPH_PAGE_EVENT_LIMIT))
