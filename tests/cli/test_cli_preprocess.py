@@ -57,7 +57,18 @@ class MockEmbeddingClient:
 
         return [random.random() for _ in range(1024)]
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        progress_callback=None,
+    ) -> list[list[float]]:
+        """
+        修改时间: 2026-04-27
+        任务: fix-preprocess-progress-callback-tests
+        修改内容: 对齐 EmbeddingClient.embed_texts 的 progress_callback 可选参数，
+        避免 preprocess 新增 SSE 进度透传后测试桩签名落后。
+        """
         import random
 
         return [[random.random() for _ in range(1024)] for _ in texts]
@@ -79,7 +90,18 @@ class MockEmbeddingClientPreprocess:
 
         return [random.random() for _ in range(1024)]
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(
+        self,
+        texts: list[str],
+        *,
+        progress_callback=None,
+    ) -> list[list[float]]:
+        """
+        修改时间: 2026-04-27
+        任务: fix-preprocess-progress-callback-tests
+        修改内容: 对齐 preprocess paragraph embedding 新增的 progress_callback 参数，
+        让 CLI 回归测试继续覆盖真实入口而不是被 mock 签名拦住。
+        """
         import random
 
         return [[random.random() for _ in range(1024)] for _ in texts]

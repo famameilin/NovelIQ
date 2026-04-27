@@ -210,6 +210,10 @@ async def test_final_pipeline_preserves_deferred_names_without_model_call() -> N
     创建者: Codex
     任务: preserve-deferred-disambig-candidates
     说明: 终消歧阶段即便某个低频正式名仍然暂无上下文，也必须保留在状态里，不能在最终入口蒸发。
+
+    修改时间: 2026-04-27
+    任务: fix-final-disambig-reselect-tests
+    修改内容: 去掉已被阶段拆分迁移走的过时 patch 目标，继续验证“无模型调用时保留 deferred 候选”的真实行为。
     """
 
     class _DummyAnnRepo:
@@ -240,7 +244,7 @@ async def test_final_pipeline_preserves_deferred_names_without_model_call() -> N
         ),
         patch.object(pipeline_stages_mod, "build_context_sentences", return_value={}),
         patch.object(pipeline_mod, "_retry_disambig") as retry_mock,
-        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_stages_mod, "_replace_final_disambiguation_chunk_relations") as replace_relations_mock,
         patch.object(pipeline_stages_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
@@ -257,6 +261,7 @@ async def test_final_pipeline_preserves_deferred_names_without_model_call() -> N
     assert review.status == disambig_mod.DISAMBIG_STATE_UNRESOLVED
     assert review.decision_source == "candidate_filter"
     retry_mock.assert_not_called()
+    replace_relations_mock.assert_called_once()
     save_checkpoint_mock.assert_called_once()
 
 
@@ -268,6 +273,10 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
     任务: reselect-disambig-cluster-canonical
     说明: 终消歧阶段即便这轮模型没有重新输出 `灰衣人/白芷`，也要能基于已有 cluster
           和全量频次把被旧逻辑翻反的 canonical 纠正回来，且不应额外查库/调模型。
+
+    修改时间: 2026-04-27
+    任务: fix-final-disambig-reselect-tests
+    修改内容: 去掉对旧 `_process_entity_relations` patch 的依赖，改为匹配现行 final persist 阶段实现。
     """
 
     class _DummyAnnRepo:
@@ -332,7 +341,7 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
         patch.object(pipeline_stages_mod, "_collect_final_disambiguation_candidates", return_value=[]),
         patch.object(pipeline_stages_mod, "build_context_sentences") as build_context_sentences_mock,
         patch.object(pipeline_mod, "_retry_canonical_reselect") as retry_reselect_mock,
-        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_stages_mod, "_replace_final_disambiguation_chunk_relations") as replace_relations_mock,
         patch.object(pipeline_stages_mod, "_save_disambig_checkpoint") as save_checkpoint_mock,
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
@@ -349,4 +358,5 @@ async def test_final_pipeline_reselects_existing_cluster_canonical_without_new_m
     assert client.received_reselect_clusters is None
     build_context_sentences_mock.assert_not_called()
     retry_reselect_mock.assert_not_called()
+    replace_relations_mock.assert_called_once()
     save_checkpoint_mock.assert_called_once()
