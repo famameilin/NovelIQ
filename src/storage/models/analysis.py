@@ -33,14 +33,16 @@ class CloudAnalysis(Base):
     任务: postgresql-migration
     说明: 存储云端模型的分析结果
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    修改内容: 新增 protagonist, main_characters, core_cast 三个字段用于存储角色信息
-
     修改时间: 2026-04-22
     修改者: Codex
     任务: fix-analysis-related-foreign-keys
     修改内容: 为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改内容: 废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
+    以持久化 single / dual / ensemble 三类叙事焦点结构。
     """
 
     __tablename__ = "cloud_analysis"
@@ -65,7 +67,8 @@ class CloudAnalysis(Base):
     cultural_depth_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cultural_depth_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     narrative_arc_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    protagonist: Mapped[str | None] = mapped_column(Text, nullable=True)
+    focus_structure: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    focus_characters: Mapped[str | None] = mapped_column(Text, nullable=True)
     main_characters: Mapped[str | None] = mapped_column(Text, nullable=True)
     core_cast: Mapped[str | None] = mapped_column(Text, nullable=True)
     theme_color: Mapped[str | None] = mapped_column(String(20), nullable=True)

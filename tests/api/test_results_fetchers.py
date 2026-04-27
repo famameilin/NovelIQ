@@ -185,7 +185,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
             "power_stance_reason": "\u7b97\u76d8\u538b\u5236\u4e86\u4e8c\u5988\u5988\u3002",
             "dignity_reason": "\u4e8c\u5988\u5988\u4fdd\u6301\u4f53\u9762\u3002",
             "cultural_depth_reason": "\u7334\u5b50\u548c\u4e8c\u5988\u5988\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002",
-            "protagonist": "\u7334\u5b50",
+            "focus_structure": "dual",
+            "focus_characters": '["\\u7334\\u5b50", "\\u7b97\\u76d8"]',
             "main_characters": '["\\u7334\\u5b50", "\\u4e8c\\u5988\\u5988"]',
             "core_cast": '["\\u7334\\u5b50", "\\u7b97\\u76d8", "\\u4e8c\\u5988\\u5988"]',
         }
@@ -214,9 +215,10 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     assert result.cultural_depth_reason == (
         "\u4faf\u98de\u767d\u548c\u67f3\u5a49\u513f\u7684\u79f0\u547c\u5f88\u5e02\u4e95\u3002"
     )
-    assert result.protagonist == "\u4faf\u98de\u767d"
-    assert result.main_characters == ["\u4faf\u98de\u767d", "\u67f3\u5a49\u513f"]
-    assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c", "\u67f3\u5a49\u513f"]
+    assert result.focus_structure == "dual"
+    assert result.focus_characters == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
+    assert result.main_characters == ["\u4faf\u98de\u767d"]
+    assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
     assert result.foreshadow_expectation == 0.3
 
 
@@ -232,10 +234,12 @@ def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
         alias_map={},
     )
 
-    assert result is None
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "diagnosis_missing_focus_contract"
 
 
-def test_fetch_diagnosis_returns_ledger_only_payload_when_cloud_diagnosis_missing():
+def test_fetch_diagnosis_marks_missing_row_as_rerun_required_even_if_ledger_exists():
     stats_repo = _DummyStatsRepo(None)
     annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
     annotation_repo.foreshadow_expectation = 0.58
@@ -249,13 +253,22 @@ def test_fetch_diagnosis_returns_ledger_only_payload_when_cloud_diagnosis_missin
     )
 
     assert result is not None
-    assert result.foreshadow_expectation == 0.58
-    assert result.diagnosis is None
-    assert result.topic_labels is None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "diagnosis_missing_focus_contract"
 
 
 def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
-    stats_repo = _DummyStatsRepo({"foreshadow_expectation": 0.42})
+    stats_repo = _DummyStatsRepo(
+        {
+            "foreshadow_expectation": 0.42,
+            "arc_scores": '{"沈砚": 8.2}',
+            "topic_labels": '["成长"]',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
 
     result = _fetch_diagnosis(
         run_id="run-1",
@@ -266,9 +279,56 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
 
     assert result is not None
     assert result.foreshadow_expectation == 0.42
+    assert result.focus_structure == "single"
+    assert result.focus_characters == ["沈砚"]
 
 
-def test_fetch_diagnosis_converts_legacy_arc_score_list_to_named_mapping():
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_arc_scores_missing():
+    stats_repo = _DummyStatsRepo(
+        {
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_topic_labels_missing():
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"沈砚": 8.2}',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
     stats_repo = _DummyStatsRepo(
         {
             "arc_scores": "[8.2, 6.1]",
@@ -285,10 +345,61 @@ def test_fetch_diagnosis_converts_legacy_arc_score_list_to_named_mapping():
     )
 
     assert result is not None
-    assert result.arc_scores == {"沈砚": 8.2, "陆明": 6.1}
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
 
 
-def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
+def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
+    stats_repo = _DummyStatsRepo(
+        {
+            "foreshadow_expectation": 0.42,
+            "arc_scores": '{"沈砚": 8.2, "陆明": 7.4}',
+            "main_characters": '["沈砚", "陆明"]',
+            "core_cast": '["沈砚", "陆明"]',
+            "diagnosis": "旧 diagnosis 行缺少 focus 字段",
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
+def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"伯安": 7.2, "贺伯安": 8.3}',
+            "topic_labels": '["成长"]',
+            "focus_structure": "dual",
+            "focus_characters": '["伯安", "贺伯安"]',
+            "main_characters": '["伯安", "贺伯安"]',
+            "core_cast": '["伯安", "贺伯安"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={"伯安": "贺伯安"},
+    )
+
+    assert result is not None
+    assert result.arc_scores == {"贺伯安": 8.3}
+    assert result.focus_structure == "single"
+    assert result.focus_characters == ["贺伯安"]
+    assert result.main_characters == ["贺伯安"]
+    assert result.core_cast == ["贺伯安"]
+
+
+def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
     rows = []
     rows.extend([_DummyRow(name="\u7532", role_function="\u5ba2\u4f53", emotion_score="neutral")] * 20)
     rows.extend([_DummyRow(name="\u4e59", role_function="\u4e3b\u4f53", emotion_score="neutral")] * 10)
@@ -299,16 +410,18 @@ def test_fetch_characters_marks_highest_fusion_score_as_protagonist():
         run_id="run-1",
         annotation_repo=annotation_repo,
         arc_scores={"\u7532": 1.0, "\u4e59": 10.0},
+        focus_characters=["\u4e59", "\u7532"],
         main_characters=["\u4e59"],
     )
 
-    protagonist = next(char for char in result if char.is_protagonist)
+    focus_character_names = {char.name for char in result if char.is_focus_character}
     support = next(char for char in result if char.name == "\u7532")
+    focal = next(char for char in result if char.name == "\u4e59")
 
-    assert protagonist.name == "\u4e59"
-    assert protagonist.protagonist_score is not None
-    assert support.protagonist_score is not None
-    assert protagonist.protagonist_score > support.protagonist_score
+    assert focus_character_names == {"\u4e59", "\u7532"}
+    assert focal.narrative_focus_score is not None
+    assert support.narrative_focus_score is not None
+    assert focal.narrative_focus_score > support.narrative_focus_score
 
 
 def test_fetch_characters_returns_all_items_when_limit_is_none():
@@ -341,8 +454,8 @@ def test_normalize_arc_scores_keeps_highest_score_when_aliases_collapse():
     }
 
 
-def test_normalize_arc_scores_returns_none_when_list_lacks_character_names():
-    assert _normalize_arc_scores([8.0, 6.0], alias_map={}, character_order=None) is None
+def test_normalize_arc_scores_returns_none_when_payload_is_not_named_mapping():
+    assert _normalize_arc_scores([8.0, 6.0], alias_map={}) is None
 
 
 def test_fetch_character_relations_deduplicates_across_chunks():

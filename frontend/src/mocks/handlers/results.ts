@@ -5,6 +5,7 @@ import { http, HttpResponse, delay } from "msw";
 import {
   createCharacters,
   createChunkCurves,
+  createForeshadowingThreads,
   createTopics,
   createDiagnosis,
   createGraph,
@@ -18,8 +19,9 @@ import {
 } from "../data";
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
+const READABLE_TASK_STATUSES = new Set(["completed", "aggregated", "diagnosed"]);
 
-/** 检查任务是否已完成，未完成时返回 202 等待 */
+/** 检查任务是否已进入可读终态；未完成时模拟真实后端的 AnalysisNotCompleteError。 */
 async function checkTaskReady(novelId: string, taskId: string): Promise<Response | null> {
   const tasks = taskDb.get(novelId) ?? [];
   const task = tasks.find((t) => t.task_id === taskId);
@@ -27,8 +29,15 @@ async function checkTaskReady(novelId: string, taskId: string): Promise<Response
   if (!task) {
     return HttpResponse.json({ detail: "任务不存在" }, { status: 404 });
   }
-  if (task.status !== "completed") {
-    return HttpResponse.json({ detail: "任务尚未完成", status: task.status }, { status: 202 });
+  if (!READABLE_TASK_STATUSES.has(task.status)) {
+    return HttpResponse.json(
+      {
+        detail: `分析未完成，当前状态: ${task.status}`,
+        error_type: "AnalysisNotCompleteError",
+        status_code: 400,
+      },
+      { status: 400 }
+    );
   }
   return null;
 }
@@ -90,6 +99,21 @@ export const diagnosisHandler = http.get(
 
     await delay(500);
     return HttpResponse.json(createDiagnosis());
+  }
+);
+
+// GET /api/novels/:novelId/foreshadowing-threads
+export const foreshadowingThreadsHandler = http.get(
+  `${BASE}/api/novels/:novelId/foreshadowing-threads`,
+  async ({ request, params }) => {
+    const { novelId } = params;
+    const taskId = new URL(request.url).searchParams.get("task_id") ?? "";
+
+    const err = await checkTaskReady(novelId as string, taskId);
+    if (err) return err;
+
+    await delay(250);
+    return HttpResponse.json(createForeshadowingThreads());
   }
 );
 

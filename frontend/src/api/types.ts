@@ -83,8 +83,8 @@ export interface Character {
   dominant_role_function: string;
   role_function_distribution?: Record<string, number>;
   dominant_role_ratio?: number;
-  protagonist_score?: number | null;
-  is_protagonist?: boolean | null;
+  narrative_focus_score?: number | null;
+  is_focus_character?: boolean;
   avg_emotion_score?: number | null;
 }
 
@@ -179,24 +179,27 @@ export interface Topic {
 // ============================================================
 
 export interface DiagnosisResult {
-  narrative_type?: string;
-  foreshadow_expectation?: number;
-  protagonist?: string;
-  narrative_arc_type?: string;
-  arc_scores?: Record<string, number>;
-  diagnosis?: string;
-  value_logic_type?: string;
-  value_logic_reason?: string;
-  power_stance_score?: number;
-  power_stance_reason?: string;
-  common_people_dignity?: number;
-  dignity_reason?: string;
-  cultural_depth_score?: number;
-  cultural_depth_reason?: string;
-  topic_labels?: string[];
-  core_cast?: string[];
-  main_characters?: string[];
-  theme_color?: string;
+  rerun_required?: boolean;
+  rerun_reason?: string | null;
+  narrative_type?: string | null;
+  foreshadow_expectation?: number | null;
+  narrative_arc_type?: string | null;
+  arc_scores?: Record<string, number> | null;
+  diagnosis?: string | null;
+  value_logic_type?: string | null;
+  value_logic_reason?: string | null;
+  power_stance_score?: number | null;
+  power_stance_reason?: string | null;
+  common_people_dignity?: number | null;
+  dignity_reason?: string | null;
+  cultural_depth_score?: number | null;
+  cultural_depth_reason?: string | null;
+  focus_structure?: "single" | "dual" | "ensemble" | null;
+  focus_characters?: string[] | null;
+  topic_labels?: string[] | null;
+  core_cast?: string[] | null;
+  main_characters?: string[] | null;
+  theme_color?: string | null;
 }
 
 export interface ForeshadowingThread {
@@ -426,10 +429,12 @@ export interface EmotionStatsMetrics {
 }
 
 export interface CharacterStatsMetrics {
-  total_characters: number;
-  protagonist_count: number;
-  network_density: number;
-  greimas_coverage: number;
+  network_density?: number | null;
+  greimas_coverage?: number | null;
+  function_coverage_distribution?: Record<string, number> | null;
+  antagonist_strength_gap?: number | null;
+  relation_change_freq?: number | null;
+  degree_centrality?: Record<string, number> | null;
 }
 
 export interface StyleStatsMetrics {

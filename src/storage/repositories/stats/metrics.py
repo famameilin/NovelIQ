@@ -389,18 +389,20 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
     """
     插入云端分析结果
 
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改原因: `cloud_analysis` 已切到焦点合同；这里需要落库
+    `focus_structure` / `focus_characters`，并彻底停止写入旧 `protagonist` 列。
+
     Args:
         session: 数据库会话
         run_id: 运行ID
         analysis: 云端分析数据
     """
-    arc_scores_json: str
-    if isinstance(analysis.arc_scores, dict):
-        arc_scores_json = json.dumps(analysis.arc_scores, ensure_ascii=False)
-    else:
-        arc_scores_json = json.dumps(list(analysis.arc_scores), ensure_ascii=False)
-
+    arc_scores_json = json.dumps(dict(analysis.arc_scores), ensure_ascii=False)
     topic_labels_json = json.dumps(list(analysis.topic_labels), ensure_ascii=False)
+    focus_characters_json = json.dumps(list(analysis.focus_characters), ensure_ascii=False)
     main_characters_json = json.dumps(list(analysis.main_characters), ensure_ascii=False)
     core_cast_json = json.dumps(list(analysis.core_cast), ensure_ascii=False)
 
@@ -420,7 +422,8 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
         cultural_depth_score=analysis.cultural_depth_score,
         cultural_depth_reason=analysis.cultural_depth_reason,
         narrative_arc_type=analysis.narrative_arc_type,
-        protagonist=analysis.protagonist,
+        focus_structure=analysis.focus_structure,
+        focus_characters=focus_characters_json,
         main_characters=main_characters_json,
         core_cast=core_cast_json,
         theme_color=analysis.theme_color,
@@ -433,6 +436,11 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
 def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
     """
     获取云端分析结果
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改原因: 结果读取链路现在只返回焦点合同字段，不再对外暴露旧单主角字段。
 
     Args:
         session: 数据库会话
@@ -448,6 +456,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
             CloudAnalysis.novel_id == novel_id,
             CloudAnalysis.run_id == run_id,
         )
+        .order_by(CloudAnalysis.id.desc())
         .limit(1)
     )
 
@@ -481,7 +490,8 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
         "cultural_depth_score": result.cultural_depth_score,
         "cultural_depth_reason": result.cultural_depth_reason,
         "narrative_arc_type": result.narrative_arc_type,
-        "protagonist": result.protagonist,
+        "focus_structure": result.focus_structure,
+        "focus_characters": result.focus_characters,
         "main_characters": result.main_characters,
         "core_cast": result.core_cast,
         "theme_color": result.theme_color,

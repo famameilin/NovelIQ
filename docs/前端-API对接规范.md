@@ -140,8 +140,8 @@ export interface CharacterStats {
   dominant_role_function: string;
   role_function_distribution: Record<string, number>;
   dominant_role_ratio: number;
-  protagonist_score?: number;
-  is_protagonist?: boolean;
+  narrative_focus_score?: number;
+  is_focus_character: boolean;
   avg_emotion_score?: number;
 }
 
@@ -170,7 +170,8 @@ export interface DiagnosisResult {
   cultural_depth_score?: number;
   cultural_depth_reason?: string;
   narrative_arc_type?: string;
-  protagonist?: string;
+  focus_structure?: "single" | "dual" | "ensemble";
+  focus_characters?: string[];
   main_characters?: string[];
   core_cast?: string[];
   theme_color?: string;              // 新增：主题色（十六进制）
@@ -269,7 +270,6 @@ export interface EmotionStats {
 
 export interface CharacterStatsAggregate {
   network_density?: number;
-  protagonist_betweenness?: number;
   greimas_coverage?: number;
   function_coverage_distribution?: Record<string, number>;
   antagonist_strength_gap?: number;
