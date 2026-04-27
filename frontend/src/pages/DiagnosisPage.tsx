@@ -14,6 +14,7 @@ import { ValueLogicCard } from "@/components/diagnosis/ValueLogicCard";
 import { TopicLabels } from "@/components/diagnosis/TopicLabels";
 import { CharacterCastCard } from "@/components/diagnosis/CharacterCastCard";
 import { ArcScoresChart } from "@/components/charts/ArcScoresChart";
+import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,29 @@ function EmptyDiagnosisState() {
       bodyClassName="items-center justify-center gap-3 text-center"
     >
       <p className="text-sm text-text-muted">当前任务暂时还没有可展示的诊断结果。</p>
+    </DashboardCardShell>
+  );
+}
+
+/**
+ * 创建时间: 2026-04-27
+ * 创建者: Codex
+ * 任务: protagonist-focus-contract-review-fixes
+ * 说明: diagnosis 页一旦拿到缺焦点合同的半成品 payload，就不能再按正常诊断报告渲染；
+ * 这里显式提示用户该任务需要重跑，同时允许下方 setup ledger 继续独立展示。
+ */
+function IncompleteDiagnosisContractState() {
+  return (
+    <DashboardCardShell
+      title="诊断结果需要重跑"
+      icon={<AlertCircle className="h-4 w-4" />}
+      accent="chart-5"
+      className="min-h-[240px]"
+      bodyClassName="items-center justify-center gap-3 text-center"
+    >
+      <p className="text-sm text-text-muted">
+        当前任务缺少完整的焦点结构 diagnosis，请重新分析该任务后再查看正式诊断报告。
+      </p>
     </DashboardCardShell>
   );
 }
@@ -282,8 +306,16 @@ export function DiagnosisPage() {
   };
 
   const { data: diagnosis } = diagnosisQuery;
+  const hasFocusContract = hasCompleteFocusContract(diagnosis);
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
   const foreshadowingThreads = foreshadowingThreadsQuery.data ?? [];
+  const hasIncompleteDiagnosisContract =
+    enabled &&
+    diagnosisQuery.isFetched &&
+    !diagnosisQuery.isLoading &&
+    !diagnosisQuery.isError &&
+    diagnosis != null &&
+    !hasFocusContract;
 
   // ---------- Render ----------
 
@@ -316,13 +348,14 @@ export function DiagnosisPage() {
 
       {/* Empty state */}
       {hasNullDiagnosis && !isLoading && <EmptyDiagnosisState />}
+      {hasIncompleteDiagnosisContract && !isLoading && <IncompleteDiagnosisContractState />}
 
       {/* Ledger fallback */}
       {isThreadsError && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
       {foreshadowingThreads.length > 0 && !isLoading && <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />}
 
       {/* Main content */}
-      {diagnosis && !isLoading && (
+      {diagnosis && hasFocusContract && !isLoading && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

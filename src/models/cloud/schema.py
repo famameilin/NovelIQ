@@ -158,6 +158,31 @@ class CloudAnalysis(BaseModel):
         修改原因: diagnosis 结果现在允许 single / dual / ensemble，
         必须在模型层阻止“结构标签”和“人物列表”彼此矛盾的脏结果进入数据库。
         """
+        # 中文注释：空云端桩和少量测试辅助对象仍可能构造“全空 diagnosis”，
+        # 这里允许这种空对象通过；但只要已经进入正式 diagnosis 结果形态，
+        # 就必须显式给出完整 focus contract，不能再靠默认值糊成半成品。
+        has_formal_diagnosis_payload = any(
+            (
+                self.foreshadow_expectation is not None,
+                bool(self.arc_scores),
+                self.narrative_type is not None,
+                bool(self.topic_labels),
+                self.diagnosis is not None,
+                self.value_logic_type is not None,
+                self.value_logic_reason is not None,
+                self.power_stance_score is not None,
+                self.power_stance_reason is not None,
+                self.common_people_dignity is not None,
+                self.dignity_reason is not None,
+                self.cultural_depth_score is not None,
+                self.cultural_depth_reason is not None,
+                self.narrative_arc_type is not None,
+                bool(self.main_characters),
+                bool(self.core_cast),
+                self.theme_color is not None,
+            )
+        )
+
         arc_score_names = set(self.arc_scores.keys())
 
         for label, values in (
@@ -168,6 +193,12 @@ class CloudAnalysis(BaseModel):
             invalid_names = [name for name in values if name not in arc_score_names]
             if invalid_names:
                 raise ValueError(f"{label} contains names missing from arc_scores: {invalid_names}")
+
+        if has_formal_diagnosis_payload:
+            if self.focus_structure is None:
+                raise ValueError("focus_structure is required for formal diagnosis payload")
+            if not self.focus_characters:
+                raise ValueError("focus_characters is required for formal diagnosis payload")
 
         if self.focus_structure is None:
             if self.focus_characters:

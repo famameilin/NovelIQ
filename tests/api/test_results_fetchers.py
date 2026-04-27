@@ -257,7 +257,16 @@ def test_fetch_diagnosis_returns_ledger_only_payload_when_cloud_diagnosis_missin
 
 
 def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
-    stats_repo = _DummyStatsRepo({"foreshadow_expectation": 0.42})
+    stats_repo = _DummyStatsRepo(
+        {
+            "foreshadow_expectation": 0.42,
+            "arc_scores": '{"沈砚": 8.2}',
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
 
     result = _fetch_diagnosis(
         run_id="run-1",
@@ -268,6 +277,8 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
 
     assert result is not None
     assert result.foreshadow_expectation == 0.42
+    assert result.focus_structure == "single"
+    assert result.focus_characters == ["沈砚"]
 
 
 def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
@@ -286,8 +297,28 @@ def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
         alias_map={},
     )
 
-    assert result is not None
-    assert result.arc_scores is None
+    assert result is None
+
+
+def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
+    stats_repo = _DummyStatsRepo(
+        {
+            "foreshadow_expectation": 0.42,
+            "arc_scores": '{"沈砚": 8.2, "陆明": 7.4}',
+            "main_characters": '["沈砚", "陆明"]',
+            "core_cast": '["沈砚", "陆明"]',
+            "diagnosis": "旧 diagnosis 行缺少 focus 字段",
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is None
 
 
 def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
