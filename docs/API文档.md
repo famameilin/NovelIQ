@@ -634,8 +634,8 @@ GET /api/novels/10960c77/characters?task_id=a1b2c3d4
       "helper": 5
     },
     "dominant_role_ratio": 0.86,
-    "protagonist_score": 0.95,
-    "is_protagonist": true,
+    "narrative_focus_score": 0.95,
+    "is_focus_character": true,
     "avg_emotion_score": -0.83
   }
 ]
@@ -649,8 +649,8 @@ GET /api/novels/10960c77/characters?task_id=a1b2c3d4
 | dominant_role_function | str | 主导角色功能（如 protagonist/antagonist/helper 等） |
 | role_function_distribution | dict | 角色功能分布统计 |
 | dominant_role_ratio | float | 主导角色占比 |
-| protagonist_score | float | 主角得分（综合评估） |
-| is_protagonist | bool | 是否为主角 |
+| narrative_focus_score | float | 叙事中心度得分（四因子融合） |
+| is_focus_character | bool | 是否属于 diagnosis 输出的焦点人物 |
 | avg_emotion_score | float | 平均情感得分 |
 
 ---
@@ -713,7 +713,8 @@ GET /api/novels/10960c77/diagnosis?task_id=a1b2c3d4
   "cultural_depth_score": 4,
   "cultural_depth_reason": "传统文化词汇深度参与叙事，儒家伦理观念推动主角行为选择...",
   "narrative_arc_type": "白手起家",
-  "protagonist": "主角名",
+  "focus_structure": "dual",
+  "focus_characters": ["主角A", "主角B"],
   "main_characters": ["主角A", "主角B", "配角C"],
   "core_cast": ["主角A", "主角B"],
   "theme_color": "#4A90D9"
@@ -749,7 +750,8 @@ null
 | cultural_depth_score | int | 文化内涵真实性评分（0-5分） |
 | cultural_depth_reason | str | 评分说明 |
 | narrative_arc_type | str | 叙事弧线类型 |
-| protagonist | str | 主角名称 |
+| focus_structure | str | 焦点结构，`single` / `dual` / `ensemble` |
+| focus_characters | list[str] | 焦点人物列表 |
 | main_characters | list[str] | 主要角色列表 |
 | core_cast | list[str] | 核心演员列表 |
 | theme_color | str | 小说主题色，十六进制格式，如 `#4A90D9` |

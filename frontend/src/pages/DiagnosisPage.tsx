@@ -227,6 +227,10 @@ function SkeletonGrid() {
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-27，任务：protagonist-focus-contract
+ * 修改原因：诊断页角色阵容展示改为焦点结构合同，允许单主角、双主角与群像三种结果稳定渲染。
+ */
 export function DiagnosisPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -374,7 +378,8 @@ export function DiagnosisPage() {
               valueLogicReason={diagnosis.value_logic_reason}
             />
             <CharacterCastCard
-              protagonist={diagnosis.protagonist}
+              focusStructure={diagnosis.focus_structure}
+              focusCharacters={diagnosis.focus_characters}
               coreCast={diagnosis.core_cast}
               majorCast={diagnosis.main_characters}
             />

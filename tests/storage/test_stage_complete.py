@@ -344,10 +344,12 @@ class TestStageCompleteChecks:
         analysis = CloudAnalysis(
             novel_id=novel_id,
             foreshadow_expectation=0.5,
-            arc_scores=[0.2, 0.4],
+            arc_scores={"角色0": 8.2, "角色1": 7.4},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
+            focus_structure="dual",
+            focus_characters=["角色0", "角色1"],
         )
         stats_repo.insert_cloud_analysis(run_id, analysis)
         assert stats_repo.has_diagnosis_data(run_id)

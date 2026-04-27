@@ -331,7 +331,7 @@ class TestCloudDiagnose:
         rows = self.db_session.execute(
             text(
                 "SELECT novel_id, narrative_type, foreshadow_expectation, narrative_arc_type, "
-                "protagonist, main_characters, core_cast "
+                "focus_structure, focus_characters, main_characters, core_cast "
                 "FROM cloud_analysis WHERE run_id = :run_id"
             ),
             {"run_id": self.run_id},
@@ -339,9 +339,10 @@ class TestCloudDiagnose:
         assert len(rows) > 0
         assert rows[0][0] == self.novel_id
         assert rows[0][3] == "白手起家"
-        assert rows[0][4] == "角色0"
+        assert rows[0][4] == "dual"
         assert "角色0" in rows[0][5]
-        assert "角色1" in rows[0][6]
+        assert "角色0" in rows[0][6]
+        assert "角色1" in rows[0][7]
 
         token_rows = self.db_session.execute(
             text("SELECT novel_id FROM token_usage WHERE run_id = :run_id"),
@@ -352,7 +353,8 @@ class TestCloudDiagnose:
         stats_repo = StatsRepository(self.db_session)
         fetched = stats_repo.fetch_cloud_analysis(self.novel_id, self.run_id)
         assert fetched is not None
-        assert fetched["protagonist"] == "角色0"
+        assert fetched["focus_structure"] == "dual"
+        assert fetched["focus_characters"] is not None
         assert fetched["main_characters"] is not None
         assert fetched["core_cast"] is not None
 
@@ -375,7 +377,8 @@ class TestCloudDiagnose:
                 "topic_labels": ["成长"],
                 "diagnosis": "诊断完成",
                 "narrative_arc_type": "白手起家",
-                "protagonist": "角色0",
+                "focus_structure": "single",
+                "focus_characters": ["角色0"],
                 "main_characters": ["角色0"],
                 "core_cast": ["角色0", "角色1"],
             },
@@ -434,7 +437,8 @@ class TestCloudDiagnose:
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
-            protagonist="角色0",
+            focus_structure="single",
+            focus_characters=["角色0"],
             main_characters=["角色0"],
             core_cast=["角色0", "角色1"],
         )
@@ -442,7 +446,8 @@ class TestCloudDiagnose:
         finalized = client._finalize_result(result, "fixed-novel", payload={})
 
         assert finalized.novel_id == "fixed-novel"
-        assert finalized.protagonist == "角色0"
+        assert finalized.focus_structure == "single"
+        assert finalized.focus_characters == ["角色0"]
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
 
@@ -464,7 +469,8 @@ class TestCloudDiagnose:
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
-            protagonist="角色0",
+            focus_structure="single",
+            focus_characters=["角色0"],
             main_characters=["角色0"],
             core_cast=["角色0", "角色1"],
         )

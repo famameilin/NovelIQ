@@ -25,10 +25,12 @@ class TestReportSchema(unittest.TestCase):
         cloud = CloudAnalysis(
             novel_id="n1",
             foreshadow_expectation=0.5,
-            arc_scores=[0.2, 0.4],
+            arc_scores={"角色0": 8.2, "角色1": 7.4},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
+            focus_structure="dual",
+            focus_characters=["角色0", "角色1"],
         )
         report = ReportPayload(meta=meta, dimensions=dimensions, charts=charts, cloud_analysis=cloud)
         report.validate()
