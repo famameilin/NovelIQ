@@ -231,7 +231,13 @@ describe("NovelDetailPage", () => {
     getCharacterStatsMock.mockResolvedValue({});
     getStyleStatsMock.mockResolvedValue({});
     getTopicsMock.mockResolvedValue([]);
-    getDiagnosisMock.mockResolvedValue({});
+    getDiagnosisMock.mockResolvedValue({
+      arc_scores: { 沈砚: 8.2 },
+      focus_structure: "single",
+      focus_characters: ["沈砚"],
+      main_characters: ["沈砚"],
+      core_cast: ["沈砚"],
+    });
     getChunkCurvesMock.mockResolvedValue([]);
     confirmSpy.mockReset();
     confirmSpy.mockReturnValue(true);
@@ -373,7 +379,7 @@ describe("NovelDetailPage", () => {
     });
   });
 
-  it("旧 diagnosis 合同被判重跑时应继续渲染诊断卡而不是回退到暂无数据", async () => {
+  it("旧 diagnosis 合同被判重跑时应显示统一重跑态", async () => {
     currentSearchParams = "task_id=task-ready";
     useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
     getDiagnosisMock.mockResolvedValue({
@@ -390,8 +396,8 @@ describe("NovelDetailPage", () => {
     renderNovelDetailPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId("diagnosis-summary-card")).toBeInTheDocument();
-      expect(screen.queryByText("暂无诊断数据")).not.toBeInTheDocument();
+      expect(screen.getByText("当前结果需要重新分析")).toBeInTheDocument();
+      expect(screen.queryByTestId("diagnosis-summary-card")).not.toBeInTheDocument();
     });
   });
 });
