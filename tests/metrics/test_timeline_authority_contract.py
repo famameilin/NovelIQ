@@ -39,7 +39,7 @@ def test_build_timeline_plan_consumes_authority_character_subgraph_only(db_sessi
     assert timeline_plan.tension_curve == [0.15, 0.3, 0.95, 0.45, 0.1]
     assert len(timeline_plan.phases) == 4
 
-    node_payloads = [
+    atomic_node_payloads = [
         {
             "node_id": node.node_id,
             "anchor_chunk_id": node.anchor_chunk_id,
@@ -48,9 +48,9 @@ def test_build_timeline_plan_consumes_authority_character_subgraph_only(db_sessi
             "relation_events": node.relation_events,
             "lifecycle_events": node.lifecycle_events,
         }
-        for node in timeline_plan.nodes
+        for node in timeline_plan.atomic_nodes
     ]
-    anchor_two_nodes = nodes_for_anchor_chunk(node_payloads, 2)
+    anchor_two_nodes = nodes_for_anchor_chunk(atomic_node_payloads, 2)
     relation_node = next(node for node in anchor_two_nodes if node["node_type"] == "relation")
 
     assert relation_event_tuples(relation_node["relation_events"]) == {
@@ -61,8 +61,9 @@ def test_build_timeline_plan_consumes_authority_character_subgraph_only(db_sessi
     assert any(node["node_type"] == "plot" for node in anchor_two_nodes)
     assert any(
         node["node_type"] == "lifecycle" and node["node_subtype"] == "entry"
-        for node in nodes_for_anchor_chunk(node_payloads, 0)
+        for node in nodes_for_anchor_chunk(atomic_node_payloads, 0)
     )
+    assert timeline_plan.composite_nodes
 
 
 def test_resolve_timeline_authority_contract_rejects_missing_lifecycle_for_character() -> None:

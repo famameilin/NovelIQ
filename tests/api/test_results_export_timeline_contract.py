@@ -64,7 +64,9 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     assert len(timeline_data["phases"]) == 4
 
     relation_node = next(
-        node for node in nodes_for_anchor_chunk(timeline_data["nodes"], 2) if node["node_type"] == "relation"
+        node
+        for node in nodes_for_anchor_chunk(timeline_data["atomic_nodes"], 2)
+        if node["node_type"] == "relation"
     )
     assert relation_event_tuples(relation_node["relation_events"]) == {
         (scenario.hero_name, scenario.rival_name, "新建")
@@ -98,6 +100,13 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
         "confidence",
         "directionality",
     }
+    assert timeline_data["composite_nodes"]
+    composite_relation_node = next(
+        node
+        for node in nodes_for_anchor_chunk(timeline_data["composite_nodes"], 2)
+        if node["node_type"] == "relation"
+    )
+    assert composite_relation_node["representative_node_id"].startswith("relation:")
 
 
 def test_build_export_payload_keeps_graph_summary_and_quality_report_separate() -> None:
@@ -310,7 +319,13 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     )
     monkeypatch.setattr(
         "src.api.services.results_export_service._fetch_timeline_data",
-        lambda *_args, **_kwargs: {"nodes": [], "phases": [], "tension_curve": [], "total_chunks": 0},
+        lambda *_args, **_kwargs: {
+            "atomic_nodes": [],
+            "composite_nodes": [],
+            "phases": [],
+            "tension_curve": [],
+            "total_chunks": 0,
+        },
     )
     monkeypatch.setattr(
         "src.api.services.results_export_service.build_export_payload",

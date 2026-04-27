@@ -3,10 +3,10 @@
 
 测试范围:
 - compute_importance_score: 重要性分数计算
-- compute_timeline_node_budget: 自适应预算
 - compute_four_phases: 四阶段划分算法
-- select_timeline_nodes: 节点筛选与去重逻辑
-- serialize_timeline_node: 新合同序列化
+- calculate_tension_percentile: 张力百分位
+- compose_composite_timeline_nodes: 第二轮复合节点分组
+- serialize_timeline_node / serialize_timeline_composite_node: v3 合同序列化
 """
 
 from __future__ import annotations
@@ -18,16 +18,53 @@ from src.metrics.timeline_metrics import (
     NarrativePhase,
     PlotFlagsDTO,
     RelationEventDTO,
-    TimelineBudget,
     TimelineNodeDTO,
     calculate_tension_percentile,
+    compose_composite_timeline_nodes,
     compute_four_phases,
     compute_importance_score,
-    compute_timeline_node_budget,
     convert_to_timeline_phases,
-    select_timeline_nodes,
+    serialize_timeline_composite_node,
     serialize_timeline_node,
 )
+
+
+# 2026-04-28，任务：时间轴合同重构第二轮
+# 新建原因：第二轮测试需要用稳定的原子节点工厂覆盖 relation / plot / lifecycle 三类复合分组语义，
+# 不能继续依赖已经删除的 budget/select 旧模型。
+def create_node(
+    *,
+    node_id: str,
+    anchor_chunk_id: int,
+    progress: float,
+    importance_score: float,
+    level: int = 2,
+    node_type: str = "plot",
+    node_subtype: str = "plot",
+    phase_name: str = "发展期",
+    plot_flags: PlotFlagsDTO | None = None,
+    relation_events: list[RelationEventDTO] | None = None,
+    lifecycle_events: list[LifecycleEventDTO] | None = None,
+    characters: list[str] | None = None,
+    composite_group_hint: tuple[str, ...] | None = None,
+) -> TimelineNodeDTO:
+    return TimelineNodeDTO(
+        node_id=node_id,
+        anchor_chunk_id=anchor_chunk_id,
+        progress=progress,
+        importance_score=importance_score,
+        level=level,
+        summary=node_id,
+        characters=characters or (["角色A", "角色B"] if node_type == "relation" else ["角色A"]),
+        phase_name=phase_name,  # type: ignore[arg-type]
+        node_type=node_type,  # type: ignore[arg-type]
+        node_subtype=node_subtype,  # type: ignore[arg-type]
+        score_breakdown={"score": importance_score},
+        plot_flags=plot_flags,
+        relation_events=relation_events,
+        lifecycle_events=lifecycle_events,
+        composite_group_hint=composite_group_hint,
+    )
 
 
 class TestComputeImportanceScore:
@@ -65,16 +102,6 @@ class TestComputeImportanceScore:
         assert level == 3
 
 
-class TestComputeTimelineNodeBudget:
-    def test_budget_for_short_story(self):
-        budget = compute_timeline_node_budget(37)
-        assert budget == TimelineBudget(min_nodes=8, target_nodes=12, max_nodes=16)
-
-    def test_budget_for_long_story(self):
-        budget = compute_timeline_node_budget(255)
-        assert budget == TimelineBudget(min_nodes=14, target_nodes=30, max_nodes=40)
-
-
 class TestComputeFourPhases:
     def test_short_novel_uses_fixed_ratio(self):
         tension_scores = [0.1] * 10
@@ -108,88 +135,8 @@ class TestCalculateTensionPercentile:
         assert calculate_tension_percentile(0.5, []) == 50
 
 
-class TestSelectTimelineNodes:
-    def create_node(
-        self,
-        *,
-        node_id: str,
-        anchor_chunk_id: int,
-        progress: float,
-        importance_score: float,
-        level: int = 2,
-        node_type: str = "plot",
-        node_subtype: str = "plot",
-        phase_name: str = "发展期",
-        plot_flags: PlotFlagsDTO | None = None,
-        relation_events: list[RelationEventDTO] | None = None,
-        lifecycle_events: list[LifecycleEventDTO] | None = None,
-    ) -> TimelineNodeDTO:
-        return TimelineNodeDTO(
-            node_id=node_id,
-            anchor_chunk_id=anchor_chunk_id,
-            progress=progress,
-            importance_score=importance_score,
-            level=level,
-            summary=node_id,
-            characters=["角色A", "角色B"] if node_type == "relation" else ["角色A"],
-            phase_name=phase_name,  # type: ignore[arg-type]
-            node_type=node_type,  # type: ignore[arg-type]
-            node_subtype=node_subtype,  # type: ignore[arg-type]
-            score_breakdown={"score": importance_score},
-            plot_flags=plot_flags,
-            relation_events=relation_events,
-            lifecycle_events=lifecycle_events,
-        )
-
-    def test_select_timeline_nodes_keeps_start_end_and_peak_plot_nodes(self):
-        phases = convert_to_timeline_phases(
-            [
-                NarrativePhase("引入期", 1, 3, 0.3),
-                NarrativePhase("发展期", 4, 6, 0.3),
-                NarrativePhase("高潮期", 7, 8, 0.2),
-                NarrativePhase("收束期", 9, 10, 0.2),
-            ]
-        )
-        nodes = [
-            self.create_node(
-                node_id="plot:1",
-                anchor_chunk_id=1,
-                progress=0.0,
-                importance_score=4.2,
-                phase_name="引入期",
-                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=20),
-            ),
-            self.create_node(
-                node_id="plot:7",
-                anchor_chunk_id=7,
-                progress=0.7,
-                importance_score=7.4,
-                level=1,
-                phase_name="高潮期",
-                plot_flags=PlotFlagsDTO(is_pivot=True, is_cliffhanger=False, tension_percentile=95),
-            ),
-            self.create_node(
-                node_id="plot:10",
-                anchor_chunk_id=10,
-                progress=1.0,
-                importance_score=4.1,
-                phase_name="收束期",
-                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=15),
-            ),
-        ]
-
-        selected = select_timeline_nodes(
-            nodes=nodes,
-            chunk_ids=list(range(1, 11)),
-            tension_scores=[0.1, 0.2, 0.25, 0.3, 0.4, 0.6, 0.95, 0.5, 0.2, 0.1],
-            phases=phases,
-            budget=TimelineBudget(min_nodes=3, target_nodes=4, max_nodes=6),
-        )
-
-        selected_ids = {node.node_id for node in selected}
-        assert {"plot:1", "plot:7", "plot:10"}.issubset(selected_ids)
-
-    def test_select_timeline_nodes_allows_distinct_relation_changes_for_same_pair(self):
+class TestComposeCompositeTimelineNodes:
+    def test_relation_composite_keeps_progressive_changes_but_splits_opposite_change(self):
         phases = convert_to_timeline_phases(
             [
                 NarrativePhase("引入期", 1, 2, 0.2),
@@ -199,15 +146,7 @@ class TestSelectTimelineNodes:
             ]
         )
         nodes = [
-            self.create_node(
-                node_id="plot:5",
-                anchor_chunk_id=5,
-                progress=0.5,
-                importance_score=6.1,
-                level=1,
-                plot_flags=PlotFlagsDTO(is_pivot=True, is_cliffhanger=True, tension_percentile=88),
-            ),
-            self.create_node(
+            create_node(
                 node_id="relation:101",
                 anchor_chunk_id=5,
                 progress=0.5,
@@ -222,10 +161,11 @@ class TestSelectTimelineNodes:
                         to_char="苏映雪",
                         relation_type="盟友",
                         change_type="新建",
+                        directionality="directed",
                     )
                 ],
             ),
-            self.create_node(
+            create_node(
                 node_id="relation:102",
                 anchor_chunk_id=6,
                 progress=0.6,
@@ -240,103 +180,138 @@ class TestSelectTimelineNodes:
                         to_char="苏映雪",
                         relation_type="盟友",
                         change_type="强化",
+                        directionality="directed",
                     )
                 ],
             ),
-            self.create_node(
+            create_node(
                 node_id="relation:103",
                 anchor_chunk_id=7,
                 progress=0.7,
                 importance_score=6.0,
                 level=1,
                 node_type="relation",
-                node_subtype="强化",
+                node_subtype="断裂",
+                phase_name="高潮期",
                 relation_events=[
                     RelationEventDTO(
                         relation_event_id=103,
                         from_char="顾承渊",
                         to_char="苏映雪",
                         relation_type="盟友",
-                        change_type="强化",
+                        change_type="断裂",
+                        directionality="directed",
                     )
                 ],
             ),
-            self.create_node(
-                node_id="lifecycle:entry:1:5",
-                anchor_chunk_id=5,
-                progress=0.5,
-                importance_score=5.1,
-                node_type="lifecycle",
-                node_subtype="entry",
-                lifecycle_events=[LifecycleEventDTO(entity_id=1, character_name="顾承渊", lifecycle_type="entry")],
+        ]
+
+        composite_nodes = compose_composite_timeline_nodes(nodes, phases)
+        relation_composites = [node for node in composite_nodes if node.node_type == "relation"]
+
+        assert len(relation_composites) == 2
+        assert relation_composites[0].child_node_ids == ["relation:101", "relation:102"]
+        assert relation_composites[0].node_subtypes == ["新建", "强化"]
+        assert relation_composites[1].child_node_ids == ["relation:103"]
+        assert relation_composites[1].node_subtypes == ["断裂"]
+
+    def test_plot_composite_groups_adjacent_nodes_with_same_hint(self):
+        phases = convert_to_timeline_phases(
+            [
+                NarrativePhase("引入期", 1, 3, 0.25),
+                NarrativePhase("发展期", 4, 6, 0.25),
+                NarrativePhase("高潮期", 7, 9, 0.25),
+                NarrativePhase("收束期", 10, 12, 0.25),
+            ]
+        )
+        shared_flags = PlotFlagsDTO(is_pivot=False, is_cliffhanger=True, tension_percentile=80)
+        nodes = [
+            create_node(
+                node_id="plot:7",
+                anchor_chunk_id=7,
+                progress=0.58,
+                importance_score=5.8,
+                level=2,
+                phase_name="高潮期",
+                plot_flags=shared_flags,
+                characters=["顾承渊", "苏映雪"],
+                composite_group_hint=("冲突", "strong_negative", "no-pivot", "cliffhanger"),
             ),
-            self.create_node(
-                node_id="plot:1",
-                anchor_chunk_id=1,
-                progress=0.0,
-                importance_score=4.2,
-                phase_name="引入期",
-                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=20),
+            create_node(
+                node_id="plot:8",
+                anchor_chunk_id=8,
+                progress=0.66,
+                importance_score=5.4,
+                level=2,
+                phase_name="高潮期",
+                plot_flags=shared_flags,
+                characters=["顾承渊", "苏映雪"],
+                composite_group_hint=("冲突", "strong_negative", "no-pivot", "cliffhanger"),
             ),
-            self.create_node(
+            create_node(
                 node_id="plot:10",
                 anchor_chunk_id=10,
-                progress=1.0,
-                importance_score=4.1,
+                progress=0.83,
+                importance_score=4.9,
+                level=2,
                 phase_name="收束期",
-                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=15),
+                plot_flags=shared_flags,
+                characters=["顾承渊"],
+                composite_group_hint=("冲突", "strong_negative", "no-pivot", "cliffhanger"),
             ),
         ]
 
-        selected = select_timeline_nodes(
-            nodes=nodes,
-            chunk_ids=list(range(1, 11)),
-            tension_scores=[0.1, 0.2, 0.25, 0.3, 0.88, 0.84, 0.4, 0.3, 0.2, 0.1],
-            phases=phases,
-            budget=TimelineBudget(min_nodes=5, target_nodes=6, max_nodes=8),
-        )
+        composite_nodes = compose_composite_timeline_nodes(nodes, phases)
+        plot_composites = [node for node in composite_nodes if node.node_type == "plot"]
 
-        selected_ids = {node.node_id for node in selected}
-        assert "plot:5" in selected_ids
-        assert "relation:101" in selected_ids
-        assert "relation:102" in selected_ids
-        assert "lifecycle:entry:1:5" in selected_ids
-        assert "relation:103" not in selected_ids
+        assert len(plot_composites) == 2
+        assert plot_composites[0].child_node_ids == ["plot:7", "plot:8"]
+        assert plot_composites[0].start_chunk_id == 7
+        assert plot_composites[0].end_chunk_id == 8
+        assert plot_composites[1].child_node_ids == ["plot:10"]
 
-    def test_select_timeline_nodes_respects_budget_ceiling(self):
+    def test_lifecycle_composite_keeps_one_event_per_node(self):
         phases = convert_to_timeline_phases(
             [
-                NarrativePhase("引入期", 1, 5, 0.25),
-                NarrativePhase("发展期", 6, 10, 0.25),
-                NarrativePhase("高潮期", 11, 15, 0.25),
-                NarrativePhase("收束期", 16, 20, 0.25),
+                NarrativePhase("引入期", 1, 3, 0.25),
+                NarrativePhase("发展期", 4, 6, 0.25),
+                NarrativePhase("高潮期", 7, 9, 0.25),
+                NarrativePhase("收束期", 10, 12, 0.25),
             ]
         )
         nodes = [
-            self.create_node(
-                node_id=f"plot:{chunk_id}",
-                anchor_chunk_id=chunk_id,
-                progress=(chunk_id - 1) / 19,
-                importance_score=float(chunk_id) / 2,
-                phase_name=phases[min((chunk_id - 1) // 5, 3)].name,
-                plot_flags=PlotFlagsDTO(is_pivot=chunk_id == 12, is_cliffhanger=False, tension_percentile=50),
-            )
-            for chunk_id in range(1, 21)
+            create_node(
+                node_id="lifecycle:entry:1:1",
+                anchor_chunk_id=1,
+                progress=0.0,
+                importance_score=4.4,
+                node_type="lifecycle",
+                node_subtype="entry",
+                phase_name="引入期",
+                lifecycle_events=[LifecycleEventDTO(entity_id=1, character_name="顾承渊", lifecycle_type="entry")],
+            ),
+            create_node(
+                node_id="lifecycle:exit:1:12",
+                anchor_chunk_id=12,
+                progress=1.0,
+                importance_score=4.2,
+                node_type="lifecycle",
+                node_subtype="exit",
+                phase_name="收束期",
+                lifecycle_events=[LifecycleEventDTO(entity_id=1, character_name="顾承渊", lifecycle_type="exit")],
+            ),
         ]
 
-        selected = select_timeline_nodes(
-            nodes=nodes,
-            chunk_ids=list(range(1, 21)),
-            tension_scores=[0.1] * 11 + [0.95] + [0.1] * 8,
-            phases=phases,
-            budget=TimelineBudget(min_nodes=8, target_nodes=10, max_nodes=12),
-        )
+        composite_nodes = compose_composite_timeline_nodes(nodes, phases)
+        lifecycle_composites = [node for node in composite_nodes if node.node_type == "lifecycle"]
 
-        assert len(selected) <= 12
+        assert len(lifecycle_composites) == 2
+        assert lifecycle_composites[0].child_node_ids == ["lifecycle:entry:1:1"]
+        assert lifecycle_composites[1].child_node_ids == ["lifecycle:exit:1:12"]
 
 
 class TestSerializeTimelineNode:
-    def test_serialize_timeline_node_uses_new_contract(self):
+    def test_serialize_timeline_node_uses_new_atomic_contract(self):
         node = TimelineNodeDTO(
             node_id="relation:101",
             anchor_chunk_id=8,
@@ -381,3 +356,61 @@ class TestSerializeTimelineNode:
             "lifecycle_events",
         }
         assert payload["relation_events"][0]["relation_event_id"] == 101
+
+    def test_serialize_timeline_composite_node_uses_v3_contract(self):
+        phases = convert_to_timeline_phases(
+            [
+                NarrativePhase("引入期", 1, 3, 0.25),
+                NarrativePhase("发展期", 4, 6, 0.25),
+                NarrativePhase("高潮期", 7, 9, 0.25),
+                NarrativePhase("收束期", 10, 12, 0.25),
+            ]
+        )
+        composite_node = compose_composite_timeline_nodes(
+            [
+                create_node(
+                    node_id="relation:101",
+                    anchor_chunk_id=8,
+                    progress=0.66,
+                    importance_score=6.7,
+                    level=1,
+                    node_type="relation",
+                    node_subtype="新建",
+                    phase_name="高潮期",
+                    relation_events=[
+                        RelationEventDTO(
+                            relation_event_id=101,
+                            from_char="顾承渊",
+                            to_char="苏映雪",
+                            relation_type="盟友",
+                            change_type="新建",
+                            directionality="directed",
+                        )
+                    ],
+                )
+            ],
+            phases,
+        )[0]
+
+        payload = serialize_timeline_composite_node(composite_node)
+
+        assert set(payload) == {
+            "node_id",
+            "anchor_chunk_id",
+            "start_chunk_id",
+            "end_chunk_id",
+            "progress",
+            "start_progress",
+            "end_progress",
+            "importance_score",
+            "level",
+            "summary",
+            "characters",
+            "phase_name",
+            "node_type",
+            "node_subtypes",
+            "representative_node_id",
+            "child_node_ids",
+        }
+        assert payload["representative_node_id"] == "relation:101"
+        assert payload["child_node_ids"] == ["relation:101"]

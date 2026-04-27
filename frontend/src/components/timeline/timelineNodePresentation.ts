@@ -14,8 +14,6 @@
 
 import { Link2, User, UserMinus, Zap, type LucideIcon } from "lucide-react";
 
-import type { TimelineNode } from "@/api/types";
-
 export interface TimelineNodePresentation {
   icon: LucideIcon;
   label: string;
@@ -68,8 +66,8 @@ const PRESENTATION_MAP: Record<string, TimelineNodePresentation> = {
  * 必须避免前端继续把 lifecycle 与 relation 节点硬压回旧的单字符串类型。
  */
 export function getTimelineNodePresentation(
-  nodeType: TimelineNode["node_type"],
-  nodeSubtype: TimelineNode["node_subtype"],
+  nodeType: "plot" | "relation" | "lifecycle",
+  nodeSubtype: string,
 ): TimelineNodePresentation {
   if (nodeType === "lifecycle") {
     return PRESENTATION_MAP[`lifecycle:${nodeSubtype}`] ?? DEFAULT_PLOT_PRESENTATION;

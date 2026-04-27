@@ -69,7 +69,7 @@
 import { motion } from "framer-motion";
 import { useCallback, useMemo } from "react";
 
-import type { TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 
@@ -92,12 +92,14 @@ import {
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
 import { buildTensionAreaPath, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
+type TimelineDisplayNode = TimelineNodeType | TimelineCompositeNode;
+
 export interface TimelineTrackProps {
-  nodes: TimelineNodeType[];
+  nodes: TimelineDisplayNode[];
   phases?: { name: string; start: number; end: number; ratio: number }[];
   activePhase?: string;
   selectedNodeId?: string;
-  onNodeClick?: (node: TimelineNodeType) => void;
+  onNodeClick?: (node: TimelineDisplayNode) => void;
   className?: string;
   tensionCurve?: number[];
   totalChunks?: number;
@@ -129,7 +131,7 @@ export function TimelineTrack({
   }, [activePhase, phases]);
 
   const isNodeInHighlight = useCallback(
-    (node: TimelineNodeType): boolean => {
+    (node: TimelineDisplayNode): boolean => {
       if (!highlightedRange) return false;
       return node.anchor_chunk_id >= highlightedRange[0] && node.anchor_chunk_id <= highlightedRange[1];
     },
@@ -171,7 +173,7 @@ export function TimelineTrack({
         <div className="flex flex-wrap items-center justify-between gap-3 px-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-border/70 bg-background/85 text-text">
-              {sortedNodes.length} 个关键节点
+              {sortedNodes.length} 个可见节点
             </Badge>
             <Badge variant="outline" className="border-border/70 bg-background/85 text-text-muted">
               曲线表示叙事主轴
@@ -251,9 +253,14 @@ export function TimelineTrack({
                   const labelTop = getLabelTopPx(anchorY, lane);
                   const labelLeft = getClampedLabelLeftPx(anchorX, labelWidth, canvasMinWidth);
                   const labelAnchorY = lane < 0 ? labelTop + LABEL_HEIGHT_PX : labelTop;
-                  const presentation = getTimelineNodePresentation(node.node_type, node.node_subtype);
+                  const presentationSubtype = "node_subtype" in node ? node.node_subtype : (node.node_subtypes[0] ?? "plot");
+                  const presentation = getTimelineNodePresentation(node.node_type, presentationSubtype);
                   const isSelected = selectedNodeId === node.node_id;
                   const isHighlighted = isNodeInHighlight(node);
+                  const chunkLabel =
+                    "start_chunk_id" in node && node.start_chunk_id !== node.end_chunk_id
+                      ? `Chunk ${node.start_chunk_id}-${node.end_chunk_id}`
+                      : `Chunk ${node.anchor_chunk_id}`;
 
                   return (
                     <div key={node.node_id}>
@@ -301,9 +308,14 @@ export function TimelineTrack({
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="text-[11px] font-semibold text-text">{presentation.label}</span>
-                            <span className="text-[11px] text-text-muted">Chunk {node.anchor_chunk_id}</span>
+                            <span className="text-[11px] text-text-muted">{chunkLabel}</span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-text">{node.summary}</p>
+                          {"child_node_ids" in node && node.child_node_ids.length > 1 ? (
+                            <p className="mt-1 text-[11px] text-text-muted">
+                              聚合 {node.child_node_ids.length} 个原子节点
+                            </p>
+                          ) : null}
                         </div>
                       </motion.button>
 

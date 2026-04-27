@@ -24,6 +24,14 @@
  * 修改内容:
  *   - 仅压缩时间轴页顶部三张统计卡的内边距与说明区，避免影响其他页面的 MetricCard
  *   - 保留原有视觉风格，只降低这组三卡的纵向占用
+ *
+ * 修改时间: 2026-04-28
+ * 修改者: Codex
+ * 任务: 时间轴合同重构第二轮
+ * 修改内容:
+ *   - 页面改为消费 `composite_nodes + atomic_nodes` 双层合同
+ *   - `max_level` 改为前端本地筛选状态，不再触发后端裁剪
+ *   - 新增 `view=composite|atomic` 视图切换，并保持深链稳定
  */
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -44,7 +52,7 @@ import {
   TimelineNodeDetail,
   TimelineControls,
 } from "@/components/timeline";
-import type { TimelineNode, TimelinePhase } from "@/api/types";
+import type { TimelineCompositeNode, TimelineNode, TimelinePhase } from "@/api/types";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -52,11 +60,15 @@ import type { TimelineNode, TimelinePhase } from "@/api/types";
 
 const STALE_TIME = 5 * 60 * 1000;
 
+type TimelineViewMode = "composite" | "atomic";
+type TimelineDisplayNode = TimelineNode | TimelineCompositeNode;
+
 function buildTimelinePageUrl(
   novelId: string,
   taskId: string,
   options: {
     maxLevel: 1 | 2 | 3;
+    viewMode: TimelineViewMode;
     selectedNodeId?: string | null;
     selectedChunk?: number | null;
     relationEventId?: number | null;
@@ -65,6 +77,7 @@ function buildTimelinePageUrl(
   const params = new URLSearchParams({
     task_id: taskId,
     max_level: String(options.maxLevel),
+    view: options.viewMode,
   });
   if (options.selectedNodeId) {
     params.set("selected_node_id", options.selectedNodeId);
@@ -78,6 +91,14 @@ function buildTimelinePageUrl(
   return `/novels/${novelId}/timeline?${params.toString()}`;
 }
 
+function isAtomicTimelineNode(node: TimelineDisplayNode | null): node is TimelineNode {
+  return node != null && "node_subtype" in node;
+}
+
+function isCompositeTimelineNode(node: TimelineDisplayNode | null): node is TimelineCompositeNode {
+  return node != null && "child_node_ids" in node;
+}
+
 /**
  * 修改时间: 2026-04-27
  * 修改者: Codex
@@ -86,8 +107,8 @@ function buildTimelinePageUrl(
  *   - 只有当 relation_event_id 真正属于当前 selected node 时，才允许继续保留到详情面板与后续 URL。
  *   - 避免 selected_node_id 已胜出时，页面仍把别的节点 relation_event_id 带入 graph/timeline 深链。
  */
-function getSelectedNodeRelationEventId(node: TimelineNode | null, relationEventId: number | null): number | null {
-  if (node == null || relationEventId == null) {
+function getSelectedNodeRelationEventId(node: TimelineDisplayNode | null, relationEventId: number | null): number | null {
+  if (!isAtomicTimelineNode(node) || relationEventId == null) {
     return null;
   }
   const belongsToSelectedNode =
@@ -107,6 +128,7 @@ export function TimelinePage() {
 
   const urlTaskId = searchParams.get("task_id");
   const urlMaxLevel = searchParams.get("max_level");
+  const urlView = searchParams.get("view");
   const urlSelectedNodeId = searchParams.get("selected_node_id");
   const urlSelectedChunk = searchParams.get("selected_chunk");
   const urlRelationEventId = searchParams.get("relation_event_id");
@@ -116,6 +138,9 @@ export function TimelinePage() {
     const level = urlMaxLevel ? parseInt(urlMaxLevel, 10) : 3;
     return [1, 2, 3].includes(level) ? (level as 1 | 2 | 3) : 3;
   }, [urlMaxLevel]);
+  const viewMode = useMemo<TimelineViewMode>(() => {
+    return urlView === "atomic" ? "atomic" : "composite";
+  }, [urlView]);
   const showTension = true;
   const [activePhase, setActivePhase] = useState<string | undefined>();
   const storeTaskId = currentNovelId === novelId ? currentTaskId : null;
@@ -164,22 +189,22 @@ export function TimelinePage() {
 
     navigate(buildTimelinePageUrl(novelId, storeTaskId, {
         maxLevel,
+        viewMode,
         // 中文注释：时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
         // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮。
         selectedNodeId: null,
         selectedChunk: null,
         relationEventId: null,
       }), { replace: true });
-  }, [maxLevel, navigate, novelId, storeTaskId, urlTaskId]);
+  }, [maxLevel, navigate, novelId, storeTaskId, urlTaskId, viewMode]);
 
   const enabled = !!novelId && !!taskScopeId;
 
   const timelineQuery = useQuery({
-    queryKey: ["timeline", novelId, taskScopeId, maxLevel],
+    queryKey: ["timeline", novelId, taskScopeId],
     queryFn: () =>
       getTimeline(novelId!, taskScopeId!, {
         includeCurve: true,
-        maxLevel: maxLevel,
       }),
     enabled,
     staleTime: STALE_TIME,
@@ -194,27 +219,59 @@ export function TimelinePage() {
 
   const timelineData = timelineQuery.data;
   const phases = timelineData?.phases ?? [];
-  const nodes = useMemo(() => timelineData?.nodes ?? [], [timelineData?.nodes]);
+  const atomicNodes = useMemo(() => timelineData?.atomic_nodes ?? [], [timelineData?.atomic_nodes]);
+  const compositeNodes = useMemo(() => timelineData?.composite_nodes ?? [], [timelineData?.composite_nodes]);
   const tensionCurve = timelineData?.tension_curve;
   const totalChunks = timelineData?.meta?.total_chunks ?? 0;
+  const visibleAtomicNodes = useMemo(
+    () => atomicNodes.filter((node) => node.level <= maxLevel),
+    [atomicNodes, maxLevel],
+  );
+  const visibleCompositeNodes = useMemo(
+    () => compositeNodes.filter((node) => node.level <= maxLevel),
+    [compositeNodes, maxLevel],
+  );
+  const displayNodes = useMemo<TimelineDisplayNode[]>(
+    () => (viewMode === "atomic" ? visibleAtomicNodes : visibleCompositeNodes),
+    [viewMode, visibleAtomicNodes, visibleCompositeNodes],
+  );
+  const atomicNodeById = useMemo(
+    () => new Map(atomicNodes.map((node) => [node.node_id, node])),
+    [atomicNodes],
+  );
+  const compositeNodeById = useMemo(
+    () => new Map(compositeNodes.map((node) => [node.node_id, node])),
+    [compositeNodes],
+  );
+  const parentCompositeByChildId = useMemo(() => {
+    const parentMap = new Map<string, TimelineCompositeNode>();
+    compositeNodes.forEach((compositeNode) => {
+      compositeNode.child_node_ids.forEach((childNodeId) => {
+        if (!parentMap.has(childNodeId)) {
+          parentMap.set(childNodeId, compositeNode);
+        }
+      });
+    });
+    return parentMap;
+  }, [compositeNodes]);
   const matchedRelationEventNode = useMemo(() => {
     if (relationEventIdFromUrl == null) return null;
     return (
-      nodes.find((node) =>
+      atomicNodes.find((node) =>
         node.relation_events?.some((relationEvent) => relationEvent.relation_event_id === relationEventIdFromUrl)
       ) ?? null
     );
-  }, [nodes, relationEventIdFromUrl]);
-  const selectedNodeById = useMemo(() => {
+  }, [atomicNodes, relationEventIdFromUrl]);
+  const selectedNodeById = useMemo<TimelineDisplayNode | null>(() => {
     if (!urlSelectedNodeId) return null;
-    return nodes.find((node) => node.node_id === urlSelectedNodeId) ?? null;
-  }, [nodes, urlSelectedNodeId]);
+    return compositeNodeById.get(urlSelectedNodeId) ?? atomicNodeById.get(urlSelectedNodeId) ?? null;
+  }, [atomicNodeById, compositeNodeById, urlSelectedNodeId]);
   const selectedChunkCandidates = useMemo(() => {
     if (selectedChunkFromUrl == null) return [];
-    return nodes.filter((node) => node.anchor_chunk_id === selectedChunkFromUrl);
-  }, [nodes, selectedChunkFromUrl]);
-  const selectedNode = useMemo(() => {
-    if (nodes.length === 0) return null;
+    return displayNodes.filter((node) => node.anchor_chunk_id === selectedChunkFromUrl);
+  }, [displayNodes, selectedChunkFromUrl]);
+  const selectedDetailNode = useMemo<TimelineDisplayNode | null>(() => {
+    if (atomicNodes.length === 0 && compositeNodes.length === 0) return null;
     if (selectedNodeById) {
       return selectedNodeById;
     }
@@ -225,32 +282,32 @@ export function TimelinePage() {
       return selectedChunkCandidates.length === 1 ? selectedChunkCandidates[0] ?? null : null;
     }
     return null;
-  }, [matchedRelationEventNode, nodes, selectedChunkCandidates, selectedChunkFromUrl, selectedNodeById]);
+  }, [atomicNodes.length, compositeNodes.length, matchedRelationEventNode, selectedChunkCandidates, selectedChunkFromUrl, selectedNodeById]);
   const resolvedRelationEventId = useMemo(
-    () => getSelectedNodeRelationEventId(selectedNode, relationEventIdFromUrl),
-    [relationEventIdFromUrl, selectedNode]
+    () => getSelectedNodeRelationEventId(selectedDetailNode, relationEventIdFromUrl),
+    [relationEventIdFromUrl, selectedDetailNode]
   );
   const pivotCount = useMemo(
-    () => nodes.filter((node) => node.plot_flags?.is_pivot).length,
-    [nodes]
+    () => visibleAtomicNodes.filter((node) => node.plot_flags?.is_pivot).length,
+    [visibleAtomicNodes]
   );
   const relationChangeCount = useMemo(
-    () => nodes.filter((node) => node.node_type === "relation").length,
-    [nodes]
+    () => visibleAtomicNodes.filter((node) => node.node_type === "relation").length,
+    [visibleAtomicNodes]
   );
   const selectionHint = useMemo(() => {
     if (relationEventIdFromUrl == null) return null;
     if (matchedRelationEventNode) return null;
-    if (selectedChunkFromUrl != null && selectedNode) {
+    if (selectedChunkFromUrl != null && selectedDetailNode) {
       return "未定位到指定关系事件，已回退到对应时间节点。";
     }
     return "未定位到对应事件。";
-  }, [matchedRelationEventNode, relationEventIdFromUrl, selectedChunkFromUrl, selectedNode]);
+  }, [matchedRelationEventNode, relationEventIdFromUrl, selectedChunkFromUrl, selectedDetailNode]);
   const chunkSelectionHint = useMemo(() => {
     if (relationEventIdFromUrl != null || selectedChunkFromUrl == null) {
       return null;
     }
-    if (selectedNode != null) {
+    if (selectedDetailNode != null) {
       return null;
     }
     if (selectedChunkCandidates.length > 1) {
@@ -260,36 +317,91 @@ export function TimelinePage() {
       return "未定位到对应时间节点。";
     }
     return null;
-  }, [relationEventIdFromUrl, selectedChunkCandidates, selectedChunkFromUrl, selectedNode]);
+  }, [relationEventIdFromUrl, selectedChunkCandidates, selectedChunkFromUrl, selectedDetailNode]);
+  const selectedTrackNodeId = useMemo(() => {
+    if (selectedDetailNode == null) {
+      return undefined;
+    }
+    if (viewMode === "atomic") {
+      if (isCompositeTimelineNode(selectedDetailNode)) {
+        return selectedDetailNode.representative_node_id;
+      }
+      return selectedDetailNode.node_id;
+    }
+    if (isCompositeTimelineNode(selectedDetailNode)) {
+      return selectedDetailNode.node_id;
+    }
+    return parentCompositeByChildId.get(selectedDetailNode.node_id)?.node_id;
+  }, [parentCompositeByChildId, selectedDetailNode, viewMode]);
 
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
       if (!novelId || !taskScopeId) return;
       navigate(buildTimelinePageUrl(novelId, taskScopeId, {
         maxLevel: level,
-        selectedNodeId: selectedNode?.node_id ?? null,
-        selectedChunk: selectedNode?.anchor_chunk_id ?? selectedChunkFromUrl,
+        viewMode,
+        selectedNodeId: selectedDetailNode?.node_id ?? null,
+        selectedChunk: selectedDetailNode?.anchor_chunk_id ?? selectedChunkFromUrl,
         // 中文注释：控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link。
         // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择。
         relationEventId: resolvedRelationEventId,
       }), { replace: true });
     },
-    [novelId, taskScopeId, navigate, resolvedRelationEventId, selectedNode, selectedChunkFromUrl]
+    [novelId, taskScopeId, navigate, resolvedRelationEventId, selectedDetailNode, selectedChunkFromUrl, viewMode]
   );
 
-  const handleNodeClick = useCallback((node: TimelineNode) => {
+  const handleViewModeChange = useCallback(
+    (nextViewMode: TimelineViewMode) => {
+      if (!novelId || !taskScopeId) return;
+      navigate(
+        buildTimelinePageUrl(novelId, taskScopeId, {
+          maxLevel,
+          viewMode: nextViewMode,
+          selectedNodeId: selectedDetailNode?.node_id ?? null,
+          selectedChunk: selectedDetailNode?.anchor_chunk_id ?? selectedChunkFromUrl,
+          relationEventId: resolvedRelationEventId,
+        }),
+        { replace: true }
+      );
+    },
+    [maxLevel, navigate, novelId, resolvedRelationEventId, selectedDetailNode, selectedChunkFromUrl, taskScopeId]
+  );
+
+  const handleNodeClick = useCallback((node: TimelineDisplayNode) => {
     if (!novelId || !taskScopeId) return;
-    const isSameNode = selectedNode?.node_id === node.node_id;
+    const isSameNode = selectedDetailNode?.node_id === node.node_id;
     navigate(
       buildTimelinePageUrl(novelId, taskScopeId, {
         maxLevel,
+        viewMode,
         selectedNodeId: isSameNode ? null : node.node_id,
         selectedChunk: isSameNode ? null : node.anchor_chunk_id,
         relationEventId: null,
       }),
       { replace: true }
     );
-  }, [taskScopeId, maxLevel, navigate, novelId, selectedNode]);
+  }, [taskScopeId, maxLevel, navigate, novelId, selectedDetailNode, viewMode]);
+
+  const handleSelectAtomicNode = useCallback(
+    (node: TimelineNode) => {
+      if (!novelId || !taskScopeId) return;
+      const relationEventId =
+        node.node_type === "relation" && (node.relation_events?.length ?? 0) === 1
+          ? node.relation_events?.[0]?.relation_event_id ?? null
+          : null;
+      navigate(
+        buildTimelinePageUrl(novelId, taskScopeId, {
+          maxLevel,
+          viewMode: "atomic",
+          selectedNodeId: node.node_id,
+          selectedChunk: node.anchor_chunk_id,
+          relationEventId,
+        }),
+        { replace: true }
+      );
+    },
+    [maxLevel, navigate, novelId, taskScopeId]
+  );
 
   const handlePhaseClick = useCallback((phase: TimelinePhase) => {
     setActivePhase((prev) => (prev === phase.name ? undefined : phase.name));
@@ -360,12 +472,12 @@ export function TimelinePage() {
               <div className="grid gap-3 md:grid-cols-3">
                 <MetricCard
                   label="Overview"
-                  value={nodes.length}
+                  value={displayNodes.length}
                   format="raw"
                   accent="chart-1"
                   icon={<TrendingUp className="h-4 w-4" />}
-                  description="当前筛选层级下保留下来的关键叙事节点数量。"
-                  footer={<p className="mt-2 text-xs text-text-muted">当前筛选下的关键叙事节点</p>}
+                  description="当前视图与筛选层级下可见的时间轴节点数量。"
+                  footer={<p className="mt-2 text-xs text-text-muted">当前视图下的可见节点</p>}
                   className="!p-4"
                   showOrb
                 />
@@ -414,7 +526,7 @@ export function TimelinePage() {
                     重试
                   </Button>
                 </div>
-              ) : nodes.length === 0 ? (
+              ) : displayNodes.length === 0 ? (
                 <div className="flex h-[360px] items-center justify-center rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
                   暂无时间轴节点
                 </div>
@@ -425,6 +537,8 @@ export function TimelinePage() {
                       variant="inline"
                       maxLevel={maxLevel}
                       onMaxLevelChange={handleMaxLevelChange}
+                      viewMode={viewMode}
+                      onViewModeChange={handleViewModeChange}
                     />
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -457,26 +571,29 @@ export function TimelinePage() {
                   </div>
 
                   <TimelineTrack
-                    nodes={nodes}
+                    nodes={displayNodes}
                     phases={phases}
                     activePhase={activePhase}
-                    selectedNodeId={selectedNode?.node_id}
+                    selectedNodeId={selectedTrackNodeId}
                     onNodeClick={handleNodeClick}
                     tensionCurve={tensionCurve}
                     totalChunks={totalChunks}
                     showTension={showTension}
                   />
 
-                  {selectedNode ? (
+                  {selectedDetailNode ? (
                     <TimelineNodeDetail
-                      node={selectedNode}
+                      node={selectedDetailNode}
+                      atomicNodes={atomicNodes}
                       novelId={novelId}
                       taskId={taskScopeId}
                       selectedRelationEventId={resolvedRelationEventId}
+                      onSelectAtomicNode={handleSelectAtomicNode}
                       onClose={() => {
                         navigate(
                           buildTimelinePageUrl(novelId, taskScopeId, {
                             maxLevel,
+                            viewMode,
                             selectedNodeId: null,
                             selectedChunk: null,
                             relationEventId: null,

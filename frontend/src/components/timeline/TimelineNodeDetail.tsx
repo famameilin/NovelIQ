@@ -12,6 +12,13 @@
  *   - 详情面板改为消费 node_id / anchor_chunk_id 新合同
  *   - 展示 score_breakdown、relation_events 与 lifecycle_events 新结构
  *   - 图谱回跳仅在 relation 节点具备稳定 relation_event_id 时附带图谱选择参数
+ *
+ * 修改时间: 2026-04-28
+ * 修改者: Codex
+ * 任务: 时间轴合同重构第二轮
+ * 修改内容:
+ *   - 支持复合节点详情与原子节点详情双模式
+ *   - 复合节点只提供稳定 child atomic node 入口，不再构造模糊 graph deep-link
  */
 
 import { useCallback, useMemo } from "react";
@@ -22,18 +29,27 @@ import { ArrowRight, HelpCircle, Link2, Users, User, UserMinus, X, Zap } from "l
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
-import type { TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
 import { cn } from "@/lib/cn";
 
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
+type TimelineDetailNode = TimelineNodeType | TimelineCompositeNode;
+
 export interface TimelineNodeDetailProps {
-  node: TimelineNodeType | null;
+  node: TimelineDetailNode | null;
+  atomicNodes: TimelineNodeType[];
   novelId: string;
   taskId: string;
   selectedRelationEventId?: number | null;
+  onSelectAtomicNode?: (node: TimelineNodeType) => void;
   onClose?: () => void;
   className?: string;
+}
+
+
+function isAtomicTimelineNode(node: TimelineDetailNode | null): node is TimelineNodeType {
+  return node != null && "node_subtype" in node;
 }
 
 /**
@@ -68,15 +84,19 @@ function resolveNodeGraphRelationEventId(
 
 export function TimelineNodeDetail({
   node,
+  atomicNodes,
   novelId,
   taskId,
   selectedRelationEventId = null,
+  onSelectAtomicNode,
   onClose,
   className,
 }: TimelineNodeDetailProps) {
   const navigate = useNavigate();
 
-  const presentation = node ? getTimelineNodePresentation(node.node_type, node.node_subtype) : null;
+  const presentationSubtype =
+    node == null ? "plot" : ("node_subtype" in node ? node.node_subtype : (node.node_subtypes[0] ?? "plot"));
+  const presentation = node ? getTimelineNodePresentation(node.node_type, presentationSubtype) : null;
   const Icon = presentation?.icon;
 
   const handleCharacterClick = useCallback(
@@ -87,10 +107,20 @@ export function TimelineNodeDetail({
   );
 
   const graphRelationEventId = useMemo(() => {
-    return resolveNodeGraphRelationEventId(node, selectedRelationEventId);
+    return resolveNodeGraphRelationEventId(isAtomicTimelineNode(node) ? node : null, selectedRelationEventId);
   }, [node, selectedRelationEventId]);
 
-  const shouldSelectGraphEvent = node?.node_type === "relation" && graphRelationEventId != null;
+  const shouldSelectGraphEvent = isAtomicTimelineNode(node) && node.node_type === "relation" && graphRelationEventId != null;
+
+  const childAtomicNodes = useMemo(() => {
+    if (node == null || isAtomicTimelineNode(node)) {
+      return [];
+    }
+    const atomicNodeById = new Map(atomicNodes.map((atomicNode) => [atomicNode.node_id, atomicNode]));
+    return node.child_node_ids
+      .map((childNodeId) => atomicNodeById.get(childNodeId) ?? null)
+      .filter((childNode): childNode is TimelineNodeType => childNode != null);
+  }, [atomicNodes, node]);
 
   const handleBackToGraph = useCallback(() => {
     if (!node) return;
@@ -131,7 +161,11 @@ export function TimelineNodeDetail({
               <p className="text-sm text-text">{node.summary}</p>
               <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
                 <span>节点 {node.node_id}</span>
-                <span>第 {node.anchor_chunk_id} 块</span>
+                {"start_chunk_id" in node && node.start_chunk_id !== node.end_chunk_id ? (
+                  <span>范围 {node.start_chunk_id}-{node.end_chunk_id}</span>
+                ) : (
+                  <span>第 {node.anchor_chunk_id} 块</span>
+                )}
                 <span>进度: {Math.round(node.progress * 100)}%</span>
                 <span>重要性: {node.importance_score.toFixed(1)}</span>
               </div>
@@ -164,7 +198,7 @@ export function TimelineNodeDetail({
               </div>
             ) : null}
 
-            {node.plot_flags ? (
+            {isAtomicTimelineNode(node) && node.plot_flags ? (
               <div className="flex gap-2">
                 {node.plot_flags.is_pivot ? (
                   <Badge variant="outline" className="gap-1 border-chart-negative text-chart-negative">
@@ -184,7 +218,7 @@ export function TimelineNodeDetail({
               </div>
             ) : null}
 
-            {Object.keys(node.score_breakdown).length > 0 ? (
+            {isAtomicTimelineNode(node) && Object.keys(node.score_breakdown).length > 0 ? (
               <div>
                 <div className="mb-2 text-xs font-medium text-text-muted">得分拆解</div>
                 <div className="flex flex-wrap gap-1.5">
@@ -197,7 +231,7 @@ export function TimelineNodeDetail({
               </div>
             ) : null}
 
-            {node.lifecycle_events && node.lifecycle_events.length > 0 ? (
+            {isAtomicTimelineNode(node) && node.lifecycle_events && node.lifecycle_events.length > 0 ? (
               <div>
                 <div
                   className={cn(
@@ -235,7 +269,7 @@ export function TimelineNodeDetail({
               </div>
             ) : null}
 
-            {node.relation_events && node.relation_events.length > 0 ? (
+            {isAtomicTimelineNode(node) && node.relation_events && node.relation_events.length > 0 ? (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-chart-2">
                   <Link2 className="h-3.5 w-3.5" />
@@ -279,6 +313,50 @@ export function TimelineNodeDetail({
                       {event.evidence ? <p className="mt-2 leading-5 text-text-muted">{event.evidence}</p> : null}
                     </div>
                   ))}
+                </div>
+              </div>
+            ) : null}
+
+            {!isAtomicTimelineNode(node) ? (
+              <div>
+                <div className="mb-2 text-xs font-medium text-text-muted">复合节点包含的原子节点</div>
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {node.node_subtypes.map((subtype) => (
+                    <Badge key={subtype} variant="outline" className="text-[10px]">
+                      {subtype}
+                    </Badge>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  {childAtomicNodes.length === 0 ? (
+                    <p className="text-xs text-text-muted">当前复合节点暂无可展开的原子节点。</p>
+                  ) : (
+                    childAtomicNodes.map((childNode) => {
+                      const childSubtype = childNode.node_subtype;
+                      const childPresentation = getTimelineNodePresentation(childNode.node_type, childSubtype);
+                      return (
+                        <div key={childNode.node_id} className="rounded-md bg-surface-hover p-3 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="text-[10px]">
+                              {childPresentation.label}
+                            </Badge>
+                            <span className="font-medium text-text">Chunk {childNode.anchor_chunk_id}</span>
+                            <span className="text-text-muted">重要性 {childNode.importance_score.toFixed(1)}</span>
+                          </div>
+                          <p className="mt-2 leading-5 text-text-muted">{childNode.summary}</p>
+                          <div className="mt-2 flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onSelectAtomicNode?.(childNode)}
+                            >
+                              查看原子节点
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             ) : null}

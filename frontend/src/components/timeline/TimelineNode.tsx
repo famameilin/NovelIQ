@@ -16,7 +16,7 @@
 
 import { motion } from "framer-motion";
 import { cn } from "@/lib/cn";
-import type { TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
 import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
 const NODE_SIZE_MIN = 12;
@@ -30,7 +30,7 @@ const IMPORTANCE_SCORE_MAX = 13;
 /* ------------------------------------------------------------------ */
 
 export interface TimelineNodeProps {
-  node: TimelineNodeType;
+  node: TimelineNodeType | TimelineCompositeNode;
   isSelected?: boolean;
   isHighlighted?: boolean;
   onClick?: () => void;
@@ -54,12 +54,14 @@ export function TimelineNode({
   position,
   verticalOffset,
 }: TimelineNodeProps) {
-  const presentation = getTimelineNodePresentation(node.node_type, node.node_subtype);
+  const presentationSubtype = "node_subtype" in node ? node.node_subtype : (node.node_subtypes[0] ?? "plot");
+  const presentation = getTimelineNodePresentation(node.node_type, presentationSubtype);
   const Icon = presentation.icon;
 
   const size = calculateNodeSize(node.importance_score);
+  const tensionPercentile = "plot_flags" in node ? node.plot_flags?.tension_percentile ?? 50 : 50;
   const resolvedVerticalOffset =
-    verticalOffset ?? calculateDefaultVerticalOffset(node.plot_flags?.tension_percentile ?? 50);
+    verticalOffset ?? calculateDefaultVerticalOffset(tensionPercentile);
 
   return (
     <motion.button
@@ -107,13 +109,13 @@ export function TimelineNode({
         </span>
       )}
 
-      {node.plot_flags?.is_pivot && (
+      {"plot_flags" in node && node.plot_flags?.is_pivot && (
         <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-chart-negative text-[8px] text-white">
           !
         </span>
       )}
 
-      {node.plot_flags?.is_cliffhanger && (
+      {"plot_flags" in node && node.plot_flags?.is_cliffhanger && (
         <span
           className={cn(
             "absolute flex h-3 w-3 items-center justify-center rounded-full bg-chart-3 text-[8px] text-white",
