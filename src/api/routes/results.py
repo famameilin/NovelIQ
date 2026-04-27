@@ -40,7 +40,7 @@ from src.api.dependencies import (
     get_novel_service,
     resolve_run_id,
 )
-from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
+from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
 from src.api.models.responses import (
     ChunkAnnotation as ChunkAnnotationResponse,
 )
@@ -216,9 +216,19 @@ async def get_results(
     annotation_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
 
-    results_data, missing_fields, novel_name = fetch_all_results_data(
-        novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo
-    )
+    try:
+        results_data, missing_fields, novel_name = fetch_all_results_data(
+            novel_id, task_id, run_id, stats_repo, annotation_repo, chunk_repo
+        )
+    except DiagnosisRerunRequiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "diagnosis_rerun_required",
+                "message": "当前任务的 diagnosis 焦点合同已失效，请重新分析。",
+                "reason": exc.reason,
+            },
+        ) from exc
 
     file_path = _write_results_to_file(task_id, results_data)
 

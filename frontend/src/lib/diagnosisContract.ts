@@ -11,6 +11,7 @@ import type { DiagnosisResult } from "@/api/types";
 export function hasCompleteFocusContract(
   diagnosis: DiagnosisResult | null | undefined,
 ): diagnosis is DiagnosisResult & {
+  arc_scores: Record<string, number>;
   focus_structure: "single" | "dual" | "ensemble";
   focus_characters: string[];
   main_characters: string[];
@@ -21,6 +22,8 @@ export function hasCompleteFocusContract(
   }
   if (
     !diagnosis?.focus_structure ||
+    !diagnosis.arc_scores ||
+    Object.keys(diagnosis.arc_scores).length === 0 ||
     !Array.isArray(diagnosis.focus_characters) ||
     !Array.isArray(diagnosis.main_characters) ||
     !Array.isArray(diagnosis.core_cast) ||

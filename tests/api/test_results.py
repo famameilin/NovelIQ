@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.main import app
 from src.api.models.responses import DiagnosisResult
 from src.storage.repositories import RunRepository
@@ -131,6 +132,35 @@ class TestResults:
         db_session.commit()
 
         response = api_client.get(f"/api/novels/{novel_id}/characters", params={"task_id": run_id[:8]})
+
+        assert response.status_code == 409
+        payload = response.json()["detail"]
+        assert payload["code"] == "diagnosis_rerun_required"
+        assert payload["reason"] == "focus_contract_incomplete"
+
+    def test_get_results_rejects_incomplete_focus_contract(
+        self,
+        api_client: TestClient,
+        db_session,
+        monkeypatch,
+    ) -> None:
+        novel_id = "r" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Results Incomplete Contract",
+        )
+        run_repo.update_run_status(run_id, "completed")
+        monkeypatch.setattr(
+            "src.api.routes.results.fetch_all_results_data",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                DiagnosisRerunRequiredError(reason="focus_contract_incomplete")
+            ),
+        )
+
+        response = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": run_id[:8]})
 
         assert response.status_code == 409
         payload = response.json()["detail"]

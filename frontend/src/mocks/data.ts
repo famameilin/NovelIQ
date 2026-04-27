@@ -451,10 +451,20 @@ export function createEmotionStats(): EmotionStatsMetrics {
 
 export function createCharacterStats(): CharacterStatsMetrics {
   return {
-    total_characters: 156,
-    protagonist_count: 1,
     network_density: 0.34,
     greimas_coverage: 0.85,
+    function_coverage_distribution: {
+      主体: 0.32,
+      客体: 0.18,
+      发送者: 0.12,
+    },
+    antagonist_strength_gap: 0.27,
+    relation_change_freq: 0.14,
+    degree_centrality: {
+      萧炎: 0.62,
+      药老: 0.51,
+      纳兰嫣然: 0.37,
+    },
   };
 }
 

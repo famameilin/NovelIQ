@@ -182,6 +182,7 @@ describe("DiagnosisPage", () => {
     getDiagnosisMock.mockResolvedValue({
       narrative_type: "寓言",
       foreshadow_expectation: 0.42,
+      arc_scores: { 沈砚: 8.2 },
       focus_structure: "single",
       focus_characters: ["沈砚"],
       main_characters: ["沈砚"],

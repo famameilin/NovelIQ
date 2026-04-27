@@ -15,14 +15,14 @@ import { cn } from "@/lib/cn";
 export type DimensionType = "narrative" | "emotion" | "character" | "style" | "topic";
 
 export interface DimensionData {
-  middle_collapse_index?: number;
-  pos_neg_ratio?: number;
-  positive_ratio?: number;
-  negative_ratio?: number;
-  network_density?: number;
-  vocab_breadth?: number;
-  dialogue_ratio?: number;
-  topic_count?: number;
+  middle_collapse_index?: number | null;
+  pos_neg_ratio?: number | null;
+  positive_ratio?: number | null;
+  negative_ratio?: number | null;
+  network_density?: number | null;
+  vocab_breadth?: number | null;
+  dialogue_ratio?: number | null;
+  topic_count?: number | null;
   top_topics?: Array<{ words: string[]; weight: number }>;
 }
 
@@ -88,7 +88,7 @@ function NarrativeVisualization({
   gradientId,
   accent = "chart-1",
 }: {
-  value: number | undefined;
+  value: number | null | undefined;
   gradientId: string;
   accent?: string;
 }) {
@@ -168,13 +168,13 @@ function EmotionVisualization({
   positiveRatio,
   negativeRatio,
 }: {
-  positiveRatio: number | undefined;
-  negativeRatio: number | undefined;
+  positiveRatio: number | null | undefined;
+  negativeRatio: number | null | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-30px" });
 
-  if (positiveRatio === undefined || negativeRatio === undefined) {
+  if (positiveRatio == null || negativeRatio == null) {
     return <EmptyState />;
   }
 
@@ -196,7 +196,7 @@ function EmotionVisualization({
           fill="hsl(var(--chart-positive))"
           rx="2"
           initial={{ scaleY: 0 }}
-          animate={{ scaleY: isInView ? positiveRatio : 0 }}
+          animate={{ scaleY: isInView ? (positiveRatio ?? 0) : 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
           style={{ transformOrigin: `${8 + barWidth / 2}px 44px` }}
         />
@@ -209,7 +209,7 @@ function EmotionVisualization({
           fill="hsl(var(--chart-negative))"
           rx="2"
           initial={{ scaleY: 0 }}
-          animate={{ scaleY: isInView ? negativeRatio : 0 }}
+          animate={{ scaleY: isInView ? (negativeRatio ?? 0) : 0 }}
           transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
           style={{ transformOrigin: `${26 + barWidth / 2}px 44px` }}
 
@@ -223,7 +223,7 @@ function EmotionVisualization({
 /*  Character Visualization (Mini Network Graph)                      */
 /* ------------------------------------------------------------------ */
 
-function CharacterVisualization({ density }: { density: number | undefined }) {
+function CharacterVisualization({ density }: { density: number | null | undefined }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-30px" });
 
@@ -286,13 +286,13 @@ function StyleVisualization({
   vocabBreadth,
   dialogueRatio,
 }: {
-  vocabBreadth: number | undefined;
-  dialogueRatio: number | undefined;
+  vocabBreadth: number | null | undefined;
+  dialogueRatio: number | null | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-30px" });
 
-  if (vocabBreadth === undefined || dialogueRatio === undefined) {
+  if (vocabBreadth == null || dialogueRatio == null) {
     return <EmptyState />;
   }
 
@@ -305,7 +305,7 @@ function StyleVisualization({
             <motion.div
               className="h-full rounded-full bg-chart-4"
               initial={{ scaleX: 0 }}
-              animate={{ scaleX: isInView ? Math.min(vocabBreadth, 1) : 0 }}
+              animate={{ scaleX: isInView ? Math.min(vocabBreadth ?? 0, 1) : 0 }}
               transition={{ duration: 0.6, ease: "easeOut" }}
               style={{ transformOrigin: "left" }}
             />
@@ -317,7 +317,7 @@ function StyleVisualization({
             <motion.div
               className="h-full rounded-full bg-chart-4/70"
               initial={{ scaleX: 0 }}
-              animate={{ scaleX: isInView ? Math.min(dialogueRatio, 1) : 0 }}
+              animate={{ scaleX: isInView ? Math.min(dialogueRatio ?? 0, 1) : 0 }}
               transition={{ duration: 0.6, ease: "easeOut", delay: 0.15 }}
               style={{ transformOrigin: "left" }}
             />
@@ -336,7 +336,7 @@ function TopicVisualization({
   topicCount,
   topTopics,
 }: {
-  topicCount: number | undefined;
+  topicCount: number | null | undefined;
   topTopics: Array<{ words: string[]; weight: number }> | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -452,7 +452,7 @@ export function DimensionMiniCard({
       case "character":
         return data.network_density?.toFixed(2) ?? "—";
       case "style":
-        return data.vocab_breadth !== undefined
+        return data.vocab_breadth != null
           ? `${(data.vocab_breadth * 100).toFixed(0)}%`
           : "—";
       case "topic":
