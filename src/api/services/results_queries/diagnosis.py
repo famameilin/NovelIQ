@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, TypeGuard
 
 from loguru import logger
 
@@ -85,7 +85,7 @@ def _has_complete_focus_contract(
     return _derive_focus_structure_from_characters(focus_characters) == focus_structure
 
 
-def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> bool:
+def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> TypeGuard[DiagnosisResult]:
     """
     创建时间: 2026-04-27
     创建者: Codex
@@ -122,7 +122,10 @@ def _fetch_diagnosis(
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
     if not data:
-        return None
+        return DiagnosisResult(
+            rerun_required=True,
+            rerun_reason="diagnosis_missing_focus_contract",
+        )
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (

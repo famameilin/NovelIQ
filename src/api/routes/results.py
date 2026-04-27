@@ -42,12 +42,13 @@ from src.api.dependencies import (
 )
 from src.api.exceptions import AnalysisNotCompleteError, DiagnosisRerunRequiredError, NovelNotFoundError
 from src.api.models.responses import (
-    ChunkAnnotation as ChunkAnnotationResponse,
-)
-from src.api.models.responses import (
+    CharacterStats,
     DiagnosisResult,
     ForeshadowingThreadResponse,
     ResultsWriteResponse,
+)
+from src.api.models.responses import (
+    ChunkAnnotation as ChunkAnnotationResponse,
 )
 from src.api.routes.results_fetchers import (
     _fetch_characters,
@@ -318,7 +319,7 @@ async def get_chunk_annotations(
     )
 
 
-@router.get("/{novel_id}/characters")
+@router.get("/{novel_id}/characters", response_model=list[CharacterStats])
 async def get_characters(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
@@ -338,7 +339,8 @@ async def get_characters(
     修改内容: 角色页改为消费 `focus_characters` + `narrative_focus_score`，
     不再从 diagnosis.protagonist 推导唯一主角。
     """
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
     stats_repo = StatsRepository(session)
 
@@ -379,7 +381,8 @@ async def get_diagnosis(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> DiagnosisResult | None:
     """获取诊断数据"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)

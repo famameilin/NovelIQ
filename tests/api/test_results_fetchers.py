@@ -234,10 +234,12 @@ def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
         alias_map={},
     )
 
-    assert result is None
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "diagnosis_missing_focus_contract"
 
 
-def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_row_missing_even_if_ledger_exists():
+def test_fetch_diagnosis_marks_missing_row_as_rerun_required_even_if_ledger_exists():
     stats_repo = _DummyStatsRepo(None)
     annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
     annotation_repo.foreshadow_expectation = 0.58
@@ -250,7 +252,9 @@ def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_row_missing_even_if_l
         alias_map={},
     )
 
-    assert result is None
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "diagnosis_missing_focus_contract"
 
 
 def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():

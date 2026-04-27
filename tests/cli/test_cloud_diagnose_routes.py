@@ -496,6 +496,38 @@ class TestCloudDiagnose:
                 focus_characters=["角色0"],
             )
 
+    def test_cloud_analysis_rejects_main_characters_over_limit(self) -> None:
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={f"角色{i}": 7.0 + i for i in range(6)},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+                main_characters=[f"角色{i}" for i in range(6)],
+                core_cast=[f"角色{i}" for i in range(6)],
+            )
+
+    def test_cloud_analysis_rejects_core_cast_over_limit(self) -> None:
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={f"角色{i}": 7.0 + i for i in range(11)},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+                main_characters=["角色0"],
+                core_cast=[f"角色{i}" for i in range(11)],
+            )
+
     def test_finalize_result_resets_expectation_to_none_when_payload_has_no_ledger_value(self) -> None:
         """
         创建时间: 2026-04-26

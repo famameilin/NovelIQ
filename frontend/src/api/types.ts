@@ -181,25 +181,25 @@ export interface Topic {
 export interface DiagnosisResult {
   rerun_required?: boolean;
   rerun_reason?: string | null;
-  narrative_type?: string;
-  foreshadow_expectation?: number;
-  narrative_arc_type?: string;
-  arc_scores?: Record<string, number>;
-  diagnosis?: string;
-  value_logic_type?: string;
-  value_logic_reason?: string;
-  power_stance_score?: number;
-  power_stance_reason?: string;
-  common_people_dignity?: number;
-  dignity_reason?: string;
-  cultural_depth_score?: number;
-  cultural_depth_reason?: string;
-  focus_structure?: "single" | "dual" | "ensemble";
-  focus_characters?: string[];
-  topic_labels?: string[];
-  core_cast?: string[];
-  main_characters?: string[];
-  theme_color?: string;
+  narrative_type?: string | null;
+  foreshadow_expectation?: number | null;
+  narrative_arc_type?: string | null;
+  arc_scores?: Record<string, number> | null;
+  diagnosis?: string | null;
+  value_logic_type?: string | null;
+  value_logic_reason?: string | null;
+  power_stance_score?: number | null;
+  power_stance_reason?: string | null;
+  common_people_dignity?: number | null;
+  dignity_reason?: string | null;
+  cultural_depth_score?: number | null;
+  cultural_depth_reason?: string | null;
+  focus_structure?: "single" | "dual" | "ensemble" | null;
+  focus_characters?: string[] | null;
+  topic_labels?: string[] | null;
+  core_cast?: string[] | null;
+  main_characters?: string[] | null;
+  theme_color?: string | null;
 }
 
 export interface ForeshadowingThread {

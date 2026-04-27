@@ -159,10 +159,12 @@ def has_diagnosis_data(session: Session, run_id: str) -> bool:
     Returns:
         是否有诊断数据
     """
-    rows = session.execute(
-        select(CloudAnalysis).where(CloudAnalysis.run_id == run_id).order_by(CloudAnalysis.id.desc())
-    ).scalars()
-    return any(_row_has_valid_diagnosis_contract(row) for row in rows)
+    latest_row = session.execute(
+        select(CloudAnalysis).where(CloudAnalysis.run_id == run_id).order_by(CloudAnalysis.id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if latest_row is None:
+        return False
+    return _row_has_valid_diagnosis_contract(latest_row)
 
 
 def is_aggregate_complete(session: Session, run_id: str) -> bool:
