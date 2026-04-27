@@ -486,10 +486,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     任务: full-global-offset-rollout
     修改内容: 为旧库补齐 chunks.char_end_offset，避免 ORM 已声明全文终点列而历史表仍缺列。
 
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-cloud-analysis-runtime-schema-drift
-    修改内容: 为旧库补齐 cloud_analysis 的角色与主题色相关列，避免 ORM 已声明字段但历史表缺列。
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -500,10 +496,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
         "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS protagonist TEXT",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS main_characters TEXT",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS core_cast TEXT",
-        "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS theme_color VARCHAR(20)",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS linked_setup_id VARCHAR(36)",
