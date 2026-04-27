@@ -160,6 +160,7 @@ export function useGraphDeepLinkSelection({
     }
     navigate(
       buildTimelineSelectionUrl(timelineUrl, {
+        selectedNodeId: selectedEvent ? `relation:${selectedEvent.relation_event_id}` : null,
         chunkId: selectedEvent?.chunk_id ?? initialSelectedChunk,
         relationEventId: selectedEvent?.relation_event_id,
       })
@@ -167,10 +168,11 @@ export function useGraphDeepLinkSelection({
   }, [initialSelectedChunk, navigate, selectedEvent, timelineUrl]);
 
   const handleOpenTimelineChunk = useCallback(
-    (chunkId?: number, relationEventId?: number | null) => {
+    (chunkId?: number, relationEventId?: number | null, selectedNodeId?: string | null) => {
       if (!timelineUrl || chunkId == null) return;
       navigate(
         buildTimelineSelectionUrl(timelineUrl, {
+          selectedNodeId,
           chunkId,
           relationEventId,
         })

@@ -192,6 +192,10 @@ export function TimelinePage() {
     if (!urlSelectedNodeId) return null;
     return nodes.find((node) => node.node_id === urlSelectedNodeId) ?? null;
   }, [nodes, urlSelectedNodeId]);
+  const selectedChunkCandidates = useMemo(() => {
+    if (selectedChunkFromUrl == null) return [];
+    return nodes.filter((node) => node.anchor_chunk_id === selectedChunkFromUrl);
+  }, [nodes, selectedChunkFromUrl]);
   const selectedNode = useMemo(() => {
     if (nodes.length === 0) return null;
     if (selectedNodeById) {
@@ -201,10 +205,10 @@ export function TimelinePage() {
       return matchedRelationEventNode;
     }
     if (selectedChunkFromUrl != null) {
-      return nodes.find((node) => node.anchor_chunk_id === selectedChunkFromUrl) ?? null;
+      return selectedChunkCandidates.length === 1 ? selectedChunkCandidates[0] ?? null : null;
     }
     return null;
-  }, [matchedRelationEventNode, nodes, selectedChunkFromUrl, selectedNodeById]);
+  }, [matchedRelationEventNode, nodes, selectedChunkCandidates, selectedChunkFromUrl, selectedNodeById]);
   const resolvedRelationEventId = matchedRelationEventNode ? relationEventIdFromUrl : null;
   const pivotCount = useMemo(
     () => nodes.filter((node) => node.plot_flags?.is_pivot).length,
@@ -222,6 +226,21 @@ export function TimelinePage() {
     }
     return "未定位到对应事件。";
   }, [matchedRelationEventNode, relationEventIdFromUrl, selectedChunkFromUrl, selectedNode]);
+  const chunkSelectionHint = useMemo(() => {
+    if (relationEventIdFromUrl != null || selectedChunkFromUrl == null) {
+      return null;
+    }
+    if (selectedNode != null) {
+      return null;
+    }
+    if (selectedChunkCandidates.length > 1) {
+      return "该时间块包含多个不同类型节点，请使用稳定节点链接重新定位。";
+    }
+    if (selectedChunkCandidates.length === 0) {
+      return "未定位到对应时间节点。";
+    }
+    return null;
+  }, [relationEventIdFromUrl, selectedChunkCandidates, selectedChunkFromUrl, selectedNode]);
 
   const handleMaxLevelChange = useCallback(
     (level: 1 | 2 | 3) => {
@@ -299,7 +318,7 @@ export function TimelinePage() {
       <NovelHeader title="叙事时间轴" />
 
       <div className="mt-3 space-y-5">
-        {selectionHint && (
+        {(selectionHint || chunkSelectionHint) && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -307,7 +326,7 @@ export function TimelinePage() {
           >
             <div className="flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
               <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
-              <p className="text-sm text-text-muted">{selectionHint}</p>
+              <p className="text-sm text-text-muted">{selectionHint ?? chunkSelectionHint}</p>
             </div>
           </motion.div>
         )}

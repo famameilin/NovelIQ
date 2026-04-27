@@ -252,6 +252,33 @@ function createEmptyTimelineResponse(): TimelineResponse {
   };
 }
 
+function createAmbiguousChunkTimelineResponse(): TimelineResponse {
+  return {
+    ...createTimelineResponse(),
+    nodes: [
+      ...createTimelineResponse().nodes,
+      {
+        node_id: "plot:12",
+        anchor_chunk_id: 12,
+        progress: 0.6,
+        importance_score: 6,
+        level: 2,
+        summary: "第十二块的剧情节点",
+        characters: ["顾承渊"],
+        phase_name: "高潮期",
+        node_type: "plot",
+        node_subtype: "plot",
+        score_breakdown: { tension: 1.4 },
+        plot_flags: {
+          is_pivot: false,
+          is_cliffhanger: true,
+          tension_percentile: 88,
+        },
+      },
+    ],
+  };
+}
+
 function renderPage() {
   const queryClient = createQueryClient();
   const view = render(
@@ -337,6 +364,17 @@ describe("TimelinePage deep links", () => {
     expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
     expect(screen.getByText("event-none")).toBeInTheDocument();
     expect(screen.getByText("未定位到指定关系事件，已回退到对应时间节点。")).toBeInTheDocument();
+  });
+
+  it("does not guess a node when selected_chunk maps to multiple timeline nodes", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12";
+    getTimelineMock.mockResolvedValue(createAmbiguousChunkTimelineResponse());
+
+    renderPage();
+
+    await screen.findByTestId("timeline-track");
+    expect(screen.queryByTestId("timeline-node-detail")).not.toBeInTheDocument();
+    expect(screen.getByText("该时间块包含多个不同类型节点，请使用稳定节点链接重新定位。")).toBeInTheDocument();
   });
 
   it("shows a no-match hint without keeping stale selection when neither relation event nor chunk exists", async () => {

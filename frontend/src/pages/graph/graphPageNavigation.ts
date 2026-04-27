@@ -26,9 +26,12 @@ export function buildTimelineUrl(novelId: string, taskId: string): string {
 // 新建原因：把时间轴联动参数拼装从页面组件中抽出，减少 UI 代码中的字符串拼接。
 export function buildTimelineSelectionUrl(
   baseUrl: string,
-  options?: { chunkId?: number | null; relationEventId?: number | null }
+  options?: { selectedNodeId?: string | null; chunkId?: number | null; relationEventId?: number | null }
 ): string {
   const params: string[] = [];
+  if (options?.selectedNodeId) {
+    params.push(`selected_node_id=${encodeURIComponent(options.selectedNodeId)}`);
+  }
   if (options?.chunkId != null) {
     params.push(`selected_chunk=${options.chunkId}`);
   }
