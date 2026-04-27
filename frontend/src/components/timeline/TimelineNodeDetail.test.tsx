@@ -134,6 +134,16 @@ describe("TimelineNodeDetail", () => {
     expect(screen.getAllByText("苏映雪").length).toBeGreaterThanOrEqual(2);
   });
 
+  it("does not send a chunk-only graph selection for lifecycle nodes", async () => {
+    const user = userEvent.setup();
+
+    render(<TimelineNodeDetail node={createLifecycleNode()} novelId="novel-1" taskId="task-a" />);
+
+    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
+  });
+
   it("highlights the selected relation event and can jump back to graph", async () => {
     const user = userEvent.setup();
 
@@ -158,14 +168,14 @@ describe("TimelineNodeDetail", () => {
     );
   });
 
-  it("does not fabricate a relation_event_id when the node contains multiple relation events", async () => {
+  it("does not send a graph auto-selection when the node contains multiple relation events", async () => {
     const user = userEvent.setup();
 
     render(<TimelineNodeDetail node={createMultiRelationNode()} novelId="novel-1" taskId="task-a" />);
 
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
-    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a&selected_chunk=18");
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
   });
 
   it("falls back to the node's only relation event when the url-level selection is absent", async () => {

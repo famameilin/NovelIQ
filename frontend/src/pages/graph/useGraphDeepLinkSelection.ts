@@ -16,6 +16,22 @@ interface UseGraphDeepLinkSelectionOptions {
   navigate: NavigateFunction;
 }
 
+/**
+ * 修改时间: 2026-04-27
+ * 修改者: Codex
+ * 任务: fix-graph-timeline-deeplink-fallback
+ * 修改内容:
+ *   - chunk-only deep-link 只在当前事件窗口里唯一命中时才允许自动选中
+ *   - 带稳定 relation_event_id 的 deep-link 一旦 miss，不再偷偷回退到同 chunk 其他事件
+ */
+function getUniqueChunkEvent(events: GraphEvent[], chunkId: number | null): GraphEvent | null {
+  if (chunkId == null) {
+    return null;
+  }
+  const chunkEvents = events.filter((event) => event.chunk_id === chunkId);
+  return chunkEvents.length === 1 ? chunkEvents[0] ?? null : null;
+}
+
 // 2026-04-23，任务：复杂度与耦合审查 P1
 // 新建原因：把 deep-link 解析、回退提示和 URL 同步独立出来，避免分页与跳转状态交叉耦合。
 export function useGraphDeepLinkSelection({
@@ -65,8 +81,12 @@ export function useGraphDeepLinkSelection({
       return;
     }
 
-    const fallbackEvent =
-      initialSelectedChunk != null ? loadedEvents.find((event) => event.chunk_id === initialSelectedChunk) ?? null : null;
+    if (initialRelationEventId != null) {
+      setSelectedEventId(null);
+      return;
+    }
+
+    const fallbackEvent = getUniqueChunkEvent(loadedEvents, initialSelectedChunk);
     if (fallbackEvent) {
       setSelectedEventId(fallbackEvent.relation_event_id);
       return;
@@ -91,15 +111,10 @@ export function useGraphDeepLinkSelection({
       if (matchedEvent) {
         return matchedEvent.relation_event_id;
       }
-      if (initialSelectedChunk != null) {
-        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
-        return fallbackEvent?.relation_event_id ?? null;
-      }
       return null;
     }
     if (initialSelectedChunk != null) {
-      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
-      return chunkMatchedEvent?.relation_event_id ?? null;
+      return getUniqueChunkEvent(sortedEvents, initialSelectedChunk)?.relation_event_id ?? null;
     }
     return null;
   }, [initialRelationEventId, initialSelectedChunk, sortedEvents]);
@@ -119,18 +134,15 @@ export function useGraphDeepLinkSelection({
       if (matchedEvent) {
         return null;
       }
-      if (initialSelectedChunk != null) {
-        const fallbackEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
-        if (fallbackEvent) {
-          return "未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。";
-        }
-      }
       return "未在当前图谱事件窗口定位到指定关系事件。";
     }
     if (initialSelectedChunk != null) {
-      const chunkMatchedEvent = sortedEvents.find((event) => event.chunk_id === initialSelectedChunk);
-      if (!chunkMatchedEvent) {
+      const chunkMatchedEvents = sortedEvents.filter((event) => event.chunk_id === initialSelectedChunk);
+      if (chunkMatchedEvents.length === 0) {
         return "未在当前事件窗口定位到指定时间节点的关系变化。";
+      }
+      if (chunkMatchedEvents.length > 1) {
+        return "该时间块包含多条关系变化，请手动选择具体事件。";
       }
     }
     return null;
