@@ -42,7 +42,7 @@ interface GraphWorkspaceSectionProps {
   onGoTimeline: () => void;
   timelineUrl: string | null;
   selectedNode: GraphNode | null;
-  onOpenTimelineChunk: (chunkId?: number, relationEventId?: number | null) => void;
+  onOpenTimelineChunk: (chunkId?: number, relationEventId?: number | null, selectedNodeId?: string | null) => void;
   selectedEvent: GraphEvent | null;
   pageSectionVariants: {
     hidden: { opacity: number; y: number };
@@ -236,7 +236,15 @@ export function GraphWorkspaceSection({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onOpenTimelineChunk(selectedNode.first_seen_chunk)}
+                  onClick={() =>
+                    onOpenTimelineChunk(
+                      selectedNode.first_seen_chunk,
+                      null,
+                      selectedNode.first_seen_chunk != null
+                        ? `lifecycle:entry:${selectedNode.entity_id}:${selectedNode.first_seen_chunk}`
+                        : null,
+                    )
+                  }
                   disabled={selectedNode.first_seen_chunk == null || !timelineUrl}
                 >
                   查看首次登场
@@ -245,7 +253,15 @@ export function GraphWorkspaceSection({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onOpenTimelineChunk(selectedNode.last_seen_chunk)}
+                  onClick={() =>
+                    onOpenTimelineChunk(
+                      selectedNode.last_seen_chunk,
+                      null,
+                      selectedNode.last_seen_chunk != null
+                        ? `lifecycle:exit:${selectedNode.entity_id}:${selectedNode.last_seen_chunk}`
+                        : null,
+                    )
+                  }
                   disabled={selectedNode.last_seen_chunk == null || !timelineUrl}
                 >
                   查看最后活跃

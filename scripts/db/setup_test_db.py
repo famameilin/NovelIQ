@@ -65,6 +65,12 @@ def create_tables():
     修改者: Codex (GPT-5)
     任务: fix-test-db-schema-bootstrap
     修改内容: 复用 src.storage.db.init_db(include_level3_tables=True) 统一测试库建表入口，避免脚本和应用 schema 漂移。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: timeline-contract-migration-call-chain-cleanup
+    修改内容: 不再在测试库初始化流程中主动调用 graph projection migration 脚本。
+              时间轴合同相关 schema 迁移改为显式手动入口，避免测试库建表继续挂在迁移脚本活调用链上。
     """
     sys.path.insert(0, str(project_root))
     from src.storage import db as db_module
