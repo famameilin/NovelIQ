@@ -39,6 +39,7 @@ export interface StreamEventData {
   stage: string;         // preprocess / annotate / aggregate / topic-model / diagnose
   sub_stage: string;     // phase1 / phase2 / phase3 / phase4
   chunk_id: number;      // 当前 chunk ID（annotate 阶段有效）
+  stream_id?: string | null; // 并行 LLM 流分组标识（Phase3 并行 batch 时使用）
   current: number;       // 当前 chunk 编号
   total: number;        // 总 chunk 数
   percent: number;      // 全局进度（stage 级别百分比）

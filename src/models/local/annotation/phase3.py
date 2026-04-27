@@ -62,11 +62,12 @@ from __future__ import annotations
 import asyncio
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from src.api.models.events import StreamEvent
 from src.config import settings
 from src.models.local.annotation.context import DialogueAttributionError
 from src.models.local.annotation.evidence_renderer import render_dialogue_attribution_evidence_sections
@@ -592,13 +593,33 @@ async def _gather_batch_tasks_or_cancel(
         raise
 
 
-def _clone_annotation_client_for_parallel(client: AnnotationClient) -> AnnotationClient:
+def _build_phase3_parallel_stream_id(chunk_id: int | None, batch_index: int) -> str:
+    """
+    为 Phase3 并行 batch 生成稳定的流分组标识。
+
+    创建时间: 2026-04-27
+    任务: phase3-multi-stream-ui
+    新建原因: 前端需要靠稳定 stream_id 区分同一 chunk 下的 sibling batch 流式输出，避免多流串到同一输出面板。
+    """
+    chunk_token = chunk_id if chunk_id is not None else "global"
+    return f"phase3-{chunk_token}-{batch_index + 1}"
+
+
+def _clone_annotation_client_for_parallel(
+    client: AnnotationClient,
+    stream_id: str | None = None,
+) -> AnnotationClient:
     """
     为并行 batch 构造无共享 session 的轻量客户端副本。
 
     创建时间: 2026-04-26
     任务: phase3-proof-only-fastpath-batch10
     新建原因: Phase3 并发时不能复用同一个 SQLAlchemy session，但仍要复用底层 SDK client 和运行时上下文。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: phase3-multi-stream-ui
+    修改内容: 并行 worker 不再共享父 emitter；对 output/thinking 事件补稳定 stream_id，避免 sibling batch 串流污染。
     """
     if client.__class__.__module__.startswith("unittest.mock"):
         return client
@@ -618,7 +639,17 @@ def _clone_annotation_client_for_parallel(client: AnnotationClient) -> Annotatio
         session=None,
     )
     if hasattr(client, "_emitter"):
-        cloned_client._emitter = getattr(client, "_emitter", None)
+        parent_emitter = getattr(client, "_emitter", None)
+        if callable(parent_emitter) and stream_id:
+            async def _emit_with_stream_id(event: StreamEvent) -> None:
+                # 中文注释：只有真正的 LLM 文本/思维片段才需要分流；阶段级进度事件仍保留原来的 chunk 级单流语义。
+                if event.action in {"output", "thinking"} and not event.stream_id:
+                    event = replace(event, stream_id=stream_id)
+                await parent_emitter(event)
+
+            cloned_client._emitter = _emit_with_stream_id
+        else:
+            cloned_client._emitter = parent_emitter
     return cloned_client
 
 
@@ -855,6 +886,7 @@ async def attribute_dialogues_with_llm(
             total_batches: int,
             batch_known_characters: list[str] | None = None,
             include_evidence: bool = True,
+            stream_id: str | None = None,
         ) -> tuple[str, int, list[DialogueRecord]]:
             async with semaphore:
                 phase3_max_retries = settings.runtime.annotation.phase3_max_retries
@@ -867,9 +899,11 @@ async def attribute_dialogues_with_llm(
                 )
                 # 中文注释：并行 worker 复用同一个 SDK client，但显式去掉 _session，
                 # 避免多个 batch 协程同时写同一个 SQLAlchemy session。
-                primary_worker = _clone_annotation_client_for_parallel(current_client)
+                primary_worker = _clone_annotation_client_for_parallel(current_client, stream_id=stream_id)
                 fallback_worker = (
-                    _clone_annotation_client_for_parallel(fallback_client) if fallback_client is not None else None
+                    _clone_annotation_client_for_parallel(fallback_client, stream_id=stream_id)
+                    if fallback_client is not None
+                    else None
                 )
                 retry_handler: AnnotationRetryHandler[list[DialogueRecordSchema]] = AnnotationRetryHandler(
                     config=retry_config,
@@ -919,6 +953,7 @@ async def attribute_dialogues_with_llm(
                     batch_candidates=llm_candidates[i : i + batch_size],
                     batch_label="phase3_dialogue_attribution",
                     total_batches=llm_total_batches,
+                    stream_id=_build_phase3_parallel_stream_id(chunk_id, i // batch_size),
                 )
             )
             for i in range(0, len(llm_candidates), batch_size)
@@ -936,6 +971,10 @@ async def attribute_dialogues_with_llm(
                         known_characters,
                     ),
                     include_evidence=False,
+                    stream_id=_build_phase3_parallel_stream_id(
+                        chunk_id,
+                        llm_total_batches + (i // batch_size),
+                    ),
                 )
             )
             for i in range(0, len(metadata_candidates), batch_size)

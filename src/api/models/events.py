@@ -71,6 +71,7 @@ class StreamEvent:
     stage: str = ""
     sub_stage: str = ""
     chunk_id: int | None = None
+    stream_id: str | None = None
     current: int | None = None
     total: int | None = None
     percent: float | None = None  # 全局进度（stage 级别）
@@ -84,6 +85,7 @@ class StreamEvent:
             "stage": self.stage,
             "sub_stage": self.sub_stage,
             "chunk_id": self.chunk_id or 0,
+            "stream_id": self.stream_id,
             "current": self.current or 0,
             "total": self.total or 0,
             "percent": self.percent or 0.0,
