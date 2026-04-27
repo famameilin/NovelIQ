@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -52,3 +53,35 @@ def test_create_test_database_recreates_existing_database() -> None:
     assert any(sql == f"DROP DATABASE {module.QUOTED_TEST_DB_NAME}" for sql, _ in executed_sql)
     assert any(sql == f"CREATE DATABASE {module.QUOTED_TEST_DB_NAME}" for sql, _ in executed_sql)
     engine.dispose.assert_called_once()
+
+
+def test_create_tables_bootstraps_test_db_via_init_db() -> None:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: tighten-setup-test-db-contract-regression
+    说明: 直接验证 setup_test_db.py 的 create_tables() 会切换到测试库，
+          并通过 src.storage.db.init_db(include_level3_tables=True) 拉起 fresh schema。
+          这条测试保护的是脚本引导链，而不是仅验证单个 SQL 片段。
+    """
+
+    module = _load_setup_test_db_module()
+    call_order: list[str] = []
+
+    def mark_dispose() -> None:
+        call_order.append("dispose")
+
+    def mark_init_db(*, include_level3_tables: bool) -> None:
+        call_order.append(f"init:{include_level3_tables}")
+
+    with (
+        patch.dict(os.environ, {}, clear=False),
+        patch("src.storage.db.dispose_engine", side_effect=mark_dispose) as mock_dispose_engine,
+        patch("src.storage.db.init_db", side_effect=mark_init_db) as mock_init_db,
+    ):
+        module.create_tables()
+
+    assert os.environ["DATABASE_URL"] == module.TEST_DB_URL
+    assert call_order == ["dispose", "init:True", "dispose"]
+    assert mock_dispose_engine.call_count == 2
+    mock_init_db.assert_called_once_with(include_level3_tables=True)
