@@ -11,6 +11,7 @@ import { CharacterRankingBar } from "@/components/charts/CharacterRankingBar";
 import { RoleFunctionPie } from "@/components/charts/RoleFunctionPie";
 import { CharacterTable } from "@/components/characters/CharacterTable";
 import { FocusCastCard } from "@/components/characters/FocusCastCard";
+import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Users } from "lucide-react";
@@ -62,6 +63,29 @@ function SkeletonGrid() {
         </Card>
       </div>
     </motion.div>
+  );
+}
+
+/**
+ * 创建时间: 2026-04-27
+ * 创建者: Codex
+ * 任务: protagonist-focus-contract-review-fixes
+ * 说明: 角色页依赖完整 focus contract 才能解释“焦点人物”和“叙事中心度”；
+ * 若 diagnosis 只有半成品焦点数据，就必须明确提示重跑，而不是继续渲染空焦点区。
+ */
+function IncompleteFocusContractState() {
+  return (
+    <DashboardCardShell
+      title="角色焦点结果需要重跑"
+      icon={<AlertCircle className="h-4 w-4" />}
+      accent="chart-5"
+      className="min-h-[240px]"
+      bodyClassName="items-center justify-center gap-3 text-center"
+    >
+      <p className="text-sm text-text-muted">
+        当前任务缺少完整的焦点结构合同，请重新分析后再查看角色焦点结果。
+      </p>
+    </DashboardCardShell>
   );
 }
 
@@ -118,7 +142,14 @@ export function CharactersPage() {
 
   const { data: characters } = charactersQuery;
   const { data: diagnosis } = diagnosisQuery;
-  const focusCharacters = diagnosis?.focus_characters ?? [];
+  const hasFocusContract = hasCompleteFocusContract(diagnosis);
+  const focusCharacters = hasFocusContract ? diagnosis.focus_characters : [];
+  const shouldShowIncompleteFocusContractState =
+    !!characters &&
+    characters.length > 0 &&
+    !isLoading &&
+    !isError &&
+    !hasFocusContract;
 
   // ---------- Render ----------
 
@@ -175,8 +206,11 @@ export function CharactersPage() {
         </DashboardCardShell>
       )}
 
+      {/* Contract-broken state */}
+      {shouldShowIncompleteFocusContractState && <IncompleteFocusContractState />}
+
       {/* Main content */}
-      {characters && characters.length > 0 && !isLoading && (
+      {characters && characters.length > 0 && !isLoading && !shouldShowIncompleteFocusContractState && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -194,7 +228,7 @@ export function CharactersPage() {
             <RoleFunctionPie characters={characters} />
             <FocusCastCard
               characters={characters}
-              focusStructure={diagnosis?.focus_structure}
+              focusStructure={hasFocusContract ? diagnosis.focus_structure : undefined}
               focusCharacters={focusCharacters}
               arcScores={diagnosis?.arc_scores}
             />

@@ -44,6 +44,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -450,6 +451,28 @@ class TestCloudDiagnose:
         assert finalized.focus_characters == ["角色0"]
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
+
+    def test_cloud_analysis_rejects_formal_diagnosis_missing_focus_contract(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: protagonist-focus-contract-review-fixes
+        说明: 当前分支已经硬切焦点合同；只要是正式 diagnosis 结果，
+        就不能再依赖默认值落出缺 `focus_structure` / `focus_characters` 的半成品对象。
+        """
+
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={"角色0": 8.5, "角色1": 7.1},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                main_characters=["角色0"],
+                core_cast=["角色0", "角色1"],
+            )
 
     def test_finalize_result_resets_expectation_to_none_when_payload_has_no_ledger_value(self) -> None:
         """

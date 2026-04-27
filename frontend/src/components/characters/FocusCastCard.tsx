@@ -44,11 +44,6 @@ export function FocusCastCard({
   const focusNames = useMemo(() => focusCharacters ?? [], [focusCharacters]);
   const focusCharacterSet = useMemo(() => new Set(focusNames), [focusNames]);
   const focusLabel = getFocusStructureLabel(focusStructure);
-
-  const focusRoster = useMemo(
-    () => characters.filter((character) => focusCharacterSet.has(character.name)),
-    [characters, focusCharacterSet]
-  );
   const topNarrativeCenterCharacter = useMemo(() => {
     return [...characters]
       .filter((character) => character.narrative_focus_score != null)
@@ -103,7 +98,7 @@ export function FocusCastCard({
           <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col items-center rounded-xl border border-border/60 bg-surface/70 p-3">
               <Star className="mb-1 h-4 w-4 text-chart-1" />
-              <span className="text-lg font-semibold text-text">{focusRoster.length || "—"}</span>
+              <span className="text-lg font-semibold text-text">{focusNames.length || "—"}</span>
               <span className="text-[10px] text-text-muted">焦点人数</span>
             </div>
 
