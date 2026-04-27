@@ -199,6 +199,10 @@ class CloudAnalysis(BaseModel):
                 raise ValueError("focus_structure is required for formal diagnosis payload")
             if not self.focus_characters:
                 raise ValueError("focus_characters is required for formal diagnosis payload")
+            if not self.main_characters:
+                raise ValueError("main_characters is required for formal diagnosis payload")
+            if not self.core_cast:
+                raise ValueError("core_cast is required for formal diagnosis payload")
 
         if self.focus_structure is None:
             if self.focus_characters:

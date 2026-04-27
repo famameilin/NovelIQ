@@ -55,6 +55,8 @@ class TestCloudStub(unittest.TestCase):
                 "diagnosis": "ok",
                 "focus_structure": "single",
                 "focus_characters": ["角色0"],
+                "main_characters": ["角色0"],
+                "core_cast": ["角色0"],
             }
         )
 

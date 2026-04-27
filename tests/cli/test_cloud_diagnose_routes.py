@@ -474,6 +474,28 @@ class TestCloudDiagnose:
                 core_cast=["角色0", "角色1"],
             )
 
+    def test_cloud_analysis_rejects_formal_diagnosis_missing_main_and_core_cast(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: protagonist-focus-contract-review-fixes-round2
+        说明: 新焦点合同不允许主要人物/核心角色静默缺失；
+        正式 diagnosis 缺这两个字段时，模型层必须直接拒绝。
+        """
+
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={"角色0": 8.5, "角色1": 7.1},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+            )
+
     def test_finalize_result_resets_expectation_to_none_when_payload_has_no_ledger_value(self) -> None:
         """
         创建时间: 2026-04-26

@@ -330,6 +330,8 @@ class TopicInfo(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
+    rerun_required: bool = False
+    rerun_reason: str | None = None
     foreshadow_expectation: float | None = Field(
         default=None,
         description=(
