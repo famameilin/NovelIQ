@@ -353,6 +353,32 @@ describe("GraphPage pagination", () => {
     expect(navigateMock).not.toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-b", { replace: true });
   });
 
+  it("renders rerun-required state when graph api rejects old diagnosis contract", async () => {
+    currentGraphSearchParams = "task_id=task-a";
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-a",
+      novelsCache: [],
+    });
+    getGraphMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: "diagnosis_rerun_required",
+            reason: "focus_contract_incomplete",
+          },
+        },
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("图谱结果需要重跑")).toBeInTheDocument();
+    expect(screen.getByText("当前任务的 diagnosis 焦点合同已失效，请重新分析后再查看图谱页面。")).toBeInTheDocument();
+  });
+
   it("reflects an in-page task switch back into the graph url", async () => {
     currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
     useNovelStore.setState({
