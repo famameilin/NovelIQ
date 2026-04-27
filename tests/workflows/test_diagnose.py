@@ -38,7 +38,8 @@ def test_log_diagnosis_results_labels_expectation(monkeypatch) -> None:
             diagnosis="ok",
             value_logic_type="善义有价值",
             narrative_arc_type="白手起家",
-            protagonist="沈砚",
+            focus_structure="single",
+            focus_characters=["沈砚"],
             main_characters=["沈砚"],
             core_cast=["沈砚"],
         )

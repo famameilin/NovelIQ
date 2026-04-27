@@ -19,8 +19,8 @@ echarts.use([GridComponent, TooltipComponent, BarChart, CanvasRenderer]);
 export interface CharacterRankingBarProps {
   /** 角色列表数据 */
   characters: Character[];
-  /** 主角名称，用于高亮 */
-  protagonist?: string | null;
+  /** 焦点人物名称列表，用于高亮 */
+  focusCharacters?: string[] | null;
   /** 最多显示数量 */
   limit?: number;
   className?: string;
@@ -29,15 +29,20 @@ export interface CharacterRankingBarProps {
 /**
  * 2026-04-21，任务：多页面卡片风格统一
  * 修改原因：统一人物页图表卡片的容器视觉，让排名图与其他业务卡片共享同一设计语言。
+ *
+ * 2026-04-27，任务：protagonist-focus-contract
+ * 修改原因：人物页现在支持多焦点高亮；排名图必须按 `focus_characters` 高亮，
+ * 不能再假定只有一个 protagonist。
  */
 export function CharacterRankingBar({
   characters,
-  protagonist,
+  focusCharacters,
   limit = 15,
   className,
 }: CharacterRankingBarProps) {
   const themeSignature = useChartThemeSignature();
   const primaryColor = getCSSColorVar("--primary");
+  const focusCharacterSet = useMemo(() => new Set(focusCharacters ?? []), [focusCharacters]);
 
   // 按出场次数排序，取前 N 个
   const sortedCharacters = useMemo(() => {
@@ -55,7 +60,7 @@ export function CharacterRankingBar({
 
     // 为每个角色计算颜色（主角高亮）
     const colors = [...sortedCharacters].reverse().map((c) => {
-      if (c.name === protagonist) {
+      if (focusCharacterSet.has(c.name)) {
         return primaryColor;
       }
       return hslToHsla(primaryColor, 0.5);
@@ -92,9 +97,9 @@ export function CharacterRankingBar({
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
-          color: (value: string) => (value === protagonist ? primaryColor : "hsl(var(--text))"),
+          color: (value: string) => (focusCharacterSet.has(value) ? primaryColor : "hsl(var(--text))"),
           fontSize: 12,
-          fontWeight: (value: string) => (value === protagonist ? 600 : 400),
+          fontWeight: (value: string) => (focusCharacterSet.has(value) ? 600 : 400),
         },
       },
       series: [
@@ -119,7 +124,7 @@ export function CharacterRankingBar({
         },
       ],
     };
-  }, [sortedCharacters, protagonist, primaryColor]);
+  }, [sortedCharacters, focusCharacterSet, primaryColor]);
 
   const hasData = sortedCharacters.length > 0;
 
