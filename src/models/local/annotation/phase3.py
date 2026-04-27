@@ -116,6 +116,7 @@ _FASTPATH_SPEECH_VERBS = (
 )
 _FASTPATH_COLLECTIVE_MARKERS = ("齐声", "异口同声", "众人", "大家", "两人", "三人", "几人", "人群")
 _FASTPATH_PRONOUN_MARKERS = ("他", "她", "它", "他们", "她们", "它们", "自己", "对方")
+_FASTPATH_DIRECTIONAL_MARKERS = ("对", "向", "跟", "朝", "冲着", "看着", "望着", "盯着", "瞧着")
 _SENTENCE_BOUNDARY_CHARS = "。！？!?；;\n"
 
 
@@ -287,6 +288,67 @@ def _collect_non_overlapping_name_spans(
     return spans
 
 
+def _collect_unique_names(text: str, name_hints: list[str]) -> set[str]:
+    """
+    收集文本中的唯一人名提示命中。
+
+    创建时间: 2026-04-27
+    任务: fix-phase3-fastpath-followup-review-findings
+    新建原因: fastpath 需要只在真正承担 speaker 证明责任的局部文本上计算竞争名字，避免把引号内容和无害尾叙述也算进去。
+    """
+    return {name for _, _, name in _collect_non_overlapping_name_spans(text, name_hints)}
+
+
+def _build_fastpath_speech_tag_matches(
+    context: _QuoteContext,
+    name_hints: list[str],
+) -> tuple[re.Match[str] | None, re.Match[str] | None]:
+    """
+    构造 prefix / suffix speech tag 匹配结果。
+
+    创建时间: 2026-04-27
+    任务: fix-phase3-fastpath-followup-review-findings
+    新建原因: 将 fastpath 的严格 speaker 证明限定在紧邻引号的 speech tag 上，
+    允许安全修饰语，但不把尾叙述误算成竞争上下文。
+    """
+    names_pattern = "|".join(re.escape(name) for name in name_hints)
+    verbs_pattern = "|".join(re.escape(verb) for verb in _FASTPATH_SPEECH_VERBS)
+    punctuation_tail_pattern = r"[：:，,\s。！？!?；;]*"
+    modifier_pattern = r"(?P<modifier>[\u4e00-\u9fff]{0,6}地)?"
+    prefix_match = re.fullmatch(
+        rf"\s*(?P<speaker>{names_pattern})\s*{modifier_pattern}\s*(?P<verb>{verbs_pattern}){punctuation_tail_pattern}",
+        context.prefix_text,
+    )
+    suffix_match = re.match(
+        rf"[：:，,\s]*(?P<speaker>{names_pattern})\s*{modifier_pattern}\s*(?P<verb>{verbs_pattern})"
+        rf"{punctuation_tail_pattern}",
+        context.suffix_text,
+    )
+    return prefix_match, suffix_match
+
+
+def _is_safe_fastpath_modifier(modifier_text: str, name_hints: list[str]) -> bool:
+    """
+    判断 speech tag 中名字与说话动词之间的修饰语是否安全。
+
+    创建时间: 2026-04-27
+    任务: fix-phase3-fastpath-followup-review-findings
+    新建原因: 允许“兴奋地喊道”这类高频修饰语命中 fastpath，同时拦住“对/向/朝某人说”这类会引入受话人的结构。
+    """
+    normalized = modifier_text.strip()
+    if not normalized:
+        return True
+    if any(marker in normalized for marker in _FASTPATH_DIRECTIONAL_MARKERS):
+        return False
+    if any(marker in normalized for marker in _FASTPATH_COLLECTIVE_MARKERS):
+        return False
+    if any(marker in normalized for marker in _FASTPATH_PRONOUN_MARKERS):
+        return False
+    if _collect_unique_names(normalized, name_hints):
+        return False
+    return True
+
+
 def _evaluate_proof_only_fastpath(
     context: _QuoteContext,
     name_hints: list[str],
@@ -297,46 +359,64 @@ def _evaluate_proof_only_fastpath(
     创建时间: 2026-04-26
     任务: phase3-proof-only-fastpath-batch10
     新建原因: 把“可证明才直返，否则回退 LLM”的规则收口在单点，避免主流程散落隐式启发式。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: fix-phase3-followup-review-findings
+    修改内容: 只在紧邻引号的 speech tag 上做 speaker 证明，
+    允许安全修饰语与无害尾叙述，避免 strict case 被过度回退到 LLM。
     """
     if not name_hints:
         return _FastpathEvaluation(record=None, reject_reason="no_name_hints")
 
-    around_quote_text = f"{context.prefix_text}{context.suffix_text}"
-    if any(marker in around_quote_text for marker in _FASTPATH_COLLECTIVE_MARKERS):
-        return _FastpathEvaluation(record=None, reject_reason="collective_speaker")
-    if any(marker in around_quote_text for marker in _FASTPATH_PRONOUN_MARKERS):
-        return _FastpathEvaluation(record=None, reject_reason="pronoun_context")
+    prefix_match, suffix_match = _build_fastpath_speech_tag_matches(context, name_hints)
 
-    name_spans = _collect_non_overlapping_name_spans(context.sentence_text, name_hints)
-    unique_names = {name for _, _, name in name_spans}
+    speaker: str | None = None
+    hit_type: str | None = None
+    proof_segment: str | None = None
+    modifier_text = ""
+    if prefix_match:
+        speaker = prefix_match.group("speaker")
+        hit_type = "prefix_speech_verb"
+        proof_segment = prefix_match.group(0)
+        modifier_text = prefix_match.group("modifier") or ""
+    elif suffix_match:
+        speaker = suffix_match.group("speaker")
+        hit_type = "suffix_speech_verb"
+        proof_segment = suffix_match.group(0)
+        modifier_text = suffix_match.group("modifier") or ""
+    else:
+        outside_quote_text = f"{context.prefix_text}{context.suffix_text}"
+        unique_names = _collect_unique_names(outside_quote_text, name_hints)
+        has_collective_marker = any(
+            marker in context.prefix_text or marker in context.suffix_text for marker in _FASTPATH_COLLECTIVE_MARKERS
+        )
+        if has_collective_marker:
+            return _FastpathEvaluation(record=None, reject_reason="collective_speaker")
+        has_pronoun_marker = any(
+            marker in context.prefix_text or marker in context.suffix_text for marker in _FASTPATH_PRONOUN_MARKERS
+        )
+        if has_pronoun_marker:
+            return _FastpathEvaluation(record=None, reject_reason="pronoun_context")
+        if not unique_names:
+            return _FastpathEvaluation(record=None, reject_reason="no_explicit_name")
+        if len(unique_names) > 1:
+            return _FastpathEvaluation(record=None, reject_reason="multiple_names")
+        return _FastpathEvaluation(record=None, reject_reason="no_strict_match")
+
+    if proof_segment is None:
+        return _FastpathEvaluation(record=None, reject_reason="no_strict_match")
+    if not _is_safe_fastpath_modifier(modifier_text, name_hints):
+        return _FastpathEvaluation(record=None, reject_reason="no_strict_match")
+    if any(marker in proof_segment for marker in _FASTPATH_COLLECTIVE_MARKERS):
+        return _FastpathEvaluation(record=None, reject_reason="collective_speaker")
+    if any(marker in proof_segment for marker in _FASTPATH_PRONOUN_MARKERS):
+        return _FastpathEvaluation(record=None, reject_reason="pronoun_context")
+    unique_names = _collect_unique_names(proof_segment, name_hints)
     if not unique_names:
         return _FastpathEvaluation(record=None, reject_reason="no_explicit_name")
     if len(unique_names) > 1:
         return _FastpathEvaluation(record=None, reject_reason="multiple_names")
-
-    names_pattern = "|".join(re.escape(name) for name in name_hints)
-    verbs_pattern = "|".join(re.escape(verb) for verb in _FASTPATH_SPEECH_VERBS)
-    punctuation_tail_pattern = r"[：:，,\s。！？!?；;]*"
-    prefix_match = re.fullmatch(
-        rf"\s*(?P<speaker>{names_pattern})(?P<verb>{verbs_pattern}){punctuation_tail_pattern}",
-        context.prefix_text,
-    )
-    suffix_match = re.fullmatch(
-        rf"[：:，,\s]*(?P<speaker>{names_pattern})(?P<verb>{verbs_pattern}){punctuation_tail_pattern}",
-        context.suffix_text,
-    )
-
-    speaker: str | None = None
-    hit_type: str | None = None
-    if prefix_match:
-        speaker = prefix_match.group("speaker")
-        hit_type = "prefix_speech_verb"
-    elif suffix_match:
-        speaker = suffix_match.group("speaker")
-        hit_type = "suffix_speech_verb"
-    else:
-        return _FastpathEvaluation(record=None, reject_reason="no_strict_match")
-
     if speaker in _FASTPATH_COLLECTIVE_MARKERS:
         return _FastpathEvaluation(record=None, reject_reason="collective_speaker")
     if speaker in _FASTPATH_PRONOUN_MARKERS:

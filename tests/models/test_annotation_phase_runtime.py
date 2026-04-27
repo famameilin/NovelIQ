@@ -149,3 +149,80 @@ async def test_execute_phase_call_records_response_usage_when_processing_fails()
 
     client._record_estimated_token_usage_from_response.assert_called_once()
     assert client._record_estimated_token_usage_from_response.call_args.kwargs["task_type"] == "annotation"
+
+
+@pytest.mark.asyncio
+async def test_execute_phase_call_records_response_usage_when_record_interaction_fails() -> None:
+    """record_model_interaction 失败时，也应按 response 兜底补记 token。"""
+    client = _make_client()
+    parsed = ForeshadowingResult(
+        has_foreshadowing=False,
+        is_strong_setup=False,
+        foreshadowing_type=None,
+        anchor_text="",
+        anchor_reason="",
+        why_unresolved_now="",
+        expected_payoff_family="",
+        confidence="low",
+    )
+    response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="{}", reasoning_content=None))])
+    client._call_annotation_api = AsyncMock(return_value=(parsed, response))
+    client._process_annotation_response.return_value = ("clean json", None, None)
+
+    with (
+        patch("src.models.local.annotation.runtime.record_model_interaction", side_effect=RuntimeError("db failed")),
+        pytest.raises(RuntimeError),
+    ):
+        await execute_phase_call(
+            client,
+            AnnotationPhaseCallSpec(
+                phase="phase4",
+                interaction_type="relation_extraction",
+                call_type="phase4",
+                messages=[{"role": "user", "content": "文本"}],
+                response_model=ForeshadowingResult,
+                chunk_id=10,
+            ),
+        )
+
+    client._record_estimated_token_usage_from_response.assert_called_once()
+    assert client._record_estimated_token_usage_from_response.call_args.kwargs["task_type"] == "annotation"
+
+
+@pytest.mark.asyncio
+async def test_execute_phase_call_records_response_usage_when_message_usage_write_fails() -> None:
+    """消息侧 token 估算写入失败时，也应按 response 兜底补记 token。"""
+    client = _make_client()
+    parsed = ForeshadowingResult(
+        has_foreshadowing=False,
+        is_strong_setup=False,
+        foreshadowing_type=None,
+        anchor_text="",
+        anchor_reason="",
+        why_unresolved_now="",
+        expected_payoff_family="",
+        confidence="low",
+    )
+    response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="{}", reasoning_content=None))])
+    client._call_annotation_api = AsyncMock(return_value=(parsed, response))
+    client._process_annotation_response.return_value = ("clean json", None, None)
+    client._record_estimated_token_usage_from_messages.side_effect = RuntimeError("usage write failed")
+
+    with (
+        patch("src.models.local.annotation.runtime.record_model_interaction"),
+        pytest.raises(RuntimeError),
+    ):
+        await execute_phase_call(
+            client,
+            AnnotationPhaseCallSpec(
+                phase="phase4",
+                interaction_type="relation_extraction",
+                call_type="phase4",
+                messages=[{"role": "user", "content": "文本"}],
+                response_model=ForeshadowingResult,
+                chunk_id=11,
+            ),
+        )
+
+    client._record_estimated_token_usage_from_response.assert_called_once()
+    assert client._record_estimated_token_usage_from_response.call_args.kwargs["task_type"] == "annotation"
