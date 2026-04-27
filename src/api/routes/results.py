@@ -323,7 +323,7 @@ async def get_characters(
         focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters
 
-    return _fetch_characters(run_id, annotation_repo, arc_scores, focus_characters, main_characters)
+    return _fetch_characters(run_id, annotation_repo, arc_scores, focus_characters, main_characters, limit=None)
 
 
 @router.get("/{novel_id}/topics")

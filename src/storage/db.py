@@ -544,13 +544,15 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
         if missing_columns:
             raise RuntimeError(
                 "cloud_analysis is missing focus contract columns: "
-                f"{missing_columns}. Please run `python scripts/db/migrate_focus_contract_schema.py` first."
+                f"{missing_columns}. Please apply the archived focus-contract migration "
+                "(`deprecated/scripts/db/migrate_focus_contract_schema.py`) first."
             )
 
         if "protagonist" in actual_columns:
             raise RuntimeError(
                 "cloud_analysis still contains legacy column `protagonist`. "
-                "Please run `python scripts/db/migrate_focus_contract_schema.py` before starting the service."
+                "Please apply the archived focus-contract migration "
+                "(`deprecated/scripts/db/migrate_focus_contract_schema.py`) before starting the service."
             )
 
 

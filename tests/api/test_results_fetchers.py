@@ -217,8 +217,8 @@ def test_fetch_diagnosis_normalizes_all_character_name_fields():
     )
     assert result.focus_structure == "dual"
     assert result.focus_characters == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
-    assert result.main_characters == ["\u4faf\u98de\u767d", "\u67f3\u5a49\u513f"]
-    assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c", "\u67f3\u5a49\u513f"]
+    assert result.main_characters == ["\u4faf\u98de\u767d"]
+    assert result.core_cast == ["\u4faf\u98de\u767d", "\u6797\u7acb\u679c"]
     assert result.foreshadow_expectation == 0.3
 
 
@@ -288,6 +288,32 @@ def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
 
     assert result is not None
     assert result.arc_scores is None
+
+
+def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():
+    stats_repo = _DummyStatsRepo(
+        {
+            "arc_scores": '{"伯安": 7.2, "贺伯安": 8.3}',
+            "focus_structure": "dual",
+            "focus_characters": '["伯安", "贺伯安"]',
+            "main_characters": '["伯安", "贺伯安"]',
+            "core_cast": '["伯安", "贺伯安"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={"伯安": "贺伯安"},
+    )
+
+    assert result is not None
+    assert result.arc_scores == {"贺伯安": 8.3}
+    assert result.focus_structure == "single"
+    assert result.focus_characters == ["贺伯安"]
+    assert result.main_characters == ["贺伯安"]
+    assert result.core_cast == ["贺伯安"]
 
 
 def test_fetch_characters_marks_focus_characters_and_keeps_center_scores():
