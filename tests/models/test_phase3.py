@@ -27,6 +27,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
+from src.api.models.events import StreamEvent
 from src.models.local.annotation.context import DialogueAttributionError
 from src.models.local.annotation.phase3 import (
     _resolve_phase3_fastpath_candidates,
@@ -947,6 +948,114 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_record_model_interaction.call_count, 2)
         self.assertTrue(all(call.kwargs["session"] is None for call in mock_record_model_interaction.call_args_list))
         self.assertIs(mock_client._session, parent_session)
+
+    @patch("src.models.local.annotation.runtime.record_model_interaction")
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_parallel_workers_emit_distinct_stream_ids(
+        self,
+        mock_settings: MagicMock,
+        mock_record_model_interaction: MagicMock,
+    ) -> None:
+        """并行 worker 的 output/thinking 事件应带独立 stream_id，且不复用父 emitter 包装。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 1
+        mock_settings.thinking.phase3_batch_parallelism = 2
+        mock_settings.runtime.annotation.phase3_max_retries = 1
+
+        emitted_events: list[StreamEvent] = []
+        worker_emitter_ids: list[int] = []
+
+        async def _capture_emitter(event: StreamEvent) -> None:
+            emitted_events.append(event)
+
+        async def _patched_call_annotation_api(
+            self: _Phase3ParallelTestClient,
+            *,
+            messages: list[dict],
+            enable_thinking: bool,
+            chunk_id: int | None,
+            response_model: type[DialogueAttributionResult],
+            call_type: str | None,
+        ) -> tuple[DialogueAttributionResult, SimpleNamespace]:
+            del enable_thinking, response_model, call_type
+            worker_emitter_ids.append(id(self._emitter))
+            user_prompt = messages[1]["content"]
+            indices = [int(match) for match in re.findall(r"(\d+)\. content:", user_prompt)]
+            first_index = indices[0]
+
+            await self._emitter(
+                StreamEvent(
+                    action="progress",
+                    stage="annotate",
+                    sub_stage="phase3",
+                    chunk_id=chunk_id,
+                    message=f"batch-{first_index}-progress",
+                )
+            )
+            await self._emitter(
+                StreamEvent(
+                    action="output",
+                    stage="annotate",
+                    sub_stage="phase3",
+                    chunk_id=chunk_id,
+                    content=f"output-{first_index}",
+                )
+            )
+            await self._emitter(
+                StreamEvent(
+                    action="thinking",
+                    stage="annotate",
+                    sub_stage="phase3",
+                    chunk_id=chunk_id,
+                    content=f"thinking-{first_index}",
+                )
+            )
+            return (
+                DialogueAttributionResult(
+                    dialogues=[
+                        DialogueRecordSchema(
+                            index=index,
+                            is_dialogue=True,
+                            speaker=["张三"],
+                            tone=None,
+                            is_inner_monologue=False,
+                            identity_clue=None,
+                        )
+                        for index in indices
+                    ]
+                ),
+                SimpleNamespace(),
+            )
+
+        mock_client = _Phase3ParallelTestClient(session=object())
+        mock_client._emitter = _capture_emitter
+        text = "“甲。”\n“乙。”"
+        candidates = extract_dialogues_from_text(text)
+
+        with patch.object(_Phase3ParallelTestClient, "_call_annotation_api", new=_patched_call_annotation_api):
+            result = await attribute_dialogues_with_llm(
+                mock_client,
+                text,
+                candidates,
+                known_characters=["张三"],
+            )
+
+        self.assertEqual([record.index for record in result], [1, 2])
+        self.assertEqual(mock_record_model_interaction.call_count, 2)
+        self.assertTrue(all(emitter_id != id(_capture_emitter) for emitter_id in worker_emitter_ids))
+
+        progress_events = [event for event in emitted_events if event.action == "progress"]
+        output_events = [event for event in emitted_events if event.action == "output"]
+        thinking_events = [event for event in emitted_events if event.action == "thinking"]
+
+        self.assertTrue(all(event.stream_id is None for event in progress_events))
+        self.assertEqual(len({event.stream_id for event in output_events}), 2)
+        self.assertEqual(
+            {event.stream_id for event in output_events},
+            {event.stream_id for event in thinking_events},
+        )
+        self.assertTrue(all(event.stream_id for event in output_events + thinking_events))
 
     @patch("src.models.local.annotation.runtime.record_model_interaction")
     @patch("src.models.local.annotation.phase3.settings")
