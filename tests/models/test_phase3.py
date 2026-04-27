@@ -1013,6 +1013,78 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].speaker, ["张三"])
         self.assertEqual(mock_record_model_interaction.call_args.kwargs["attempt_number"], 4)
 
+    @patch("src.models.local.annotation.runtime.record_model_interaction")
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_fallback_worker_does_not_share_fallback_parent_session(
+        self,
+        mock_settings: MagicMock,
+        mock_record_model_interaction: MagicMock,
+    ) -> None:
+        """fallback worker 写 interaction 时也不应透传 fallback 父 client 的 session。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 1
+
+        primary_session = object()
+        fallback_session = object()
+        primary_client = _Phase3ParallelTestClient(
+            config=SimpleNamespace(model="primary-model", thinking_enabled=False),
+            client=SimpleNamespace(),
+            session=primary_session,
+        )
+        fallback_client = _Phase3ParallelTestClient(
+            config=SimpleNamespace(model="fallback-model", thinking_enabled=False),
+            client=SimpleNamespace(),
+            session=fallback_session,
+        )
+
+        async def _patched_call_annotation_api(
+            self: _Phase3ParallelTestClient,
+            *,
+            messages: list[dict],
+            enable_thinking: bool,
+            chunk_id: int | None,
+            response_model: type[DialogueAttributionResult],
+            call_type: str | None,
+        ) -> tuple[DialogueAttributionResult, SimpleNamespace]:
+            del enable_thinking, chunk_id, response_model, call_type
+            if self._config.model == "primary-model":
+                raise ConnectionError("primary failed")
+
+            user_prompt = messages[1]["content"]
+            indices = [int(match) for match in re.findall(r"(\d+)\. content:", user_prompt)]
+            parsed = DialogueAttributionResult(
+                dialogues=[
+                    DialogueRecordSchema(
+                        index=index,
+                        is_dialogue=True,
+                        speaker=["张三"],
+                        tone=None,
+                        is_inner_monologue=False,
+                        identity_clue=None,
+                    )
+                    for index in indices
+                ]
+            )
+            return parsed, SimpleNamespace()
+
+        with patch.object(_Phase3ParallelTestClient, "_call_annotation_api", new=_patched_call_annotation_api):
+            result = await attribute_dialogues_with_llm(
+                primary_client,
+                "“你好”",
+                [QuoteCandidate(index=1, content="你好")],
+                known_characters=["张三"],
+                fallback_client=fallback_client,
+            )
+
+        self.assertEqual(result[0].speaker, ["张三"])
+        self.assertEqual(mock_record_model_interaction.call_count, 1)
+        self.assertIs(mock_record_model_interaction.call_args.kwargs["session"], None)
+        self.assertIs(primary_client._session, primary_session)
+        self.assertIs(fallback_client._session, fallback_session)
+
     @patch("src.models.local.annotation.phase3.settings")
     async def test_fallback_client_failure_raises_dialogue_attribution_error(self, mock_settings: MagicMock) -> None:
         """Phase3 主客户端与兜底客户端都失败时应抛错。"""

@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.models.local.annotation.phase3 import attribute_dialogues_with_llm, compute_dialogue_lengths_with_llm
+from src.models.local.annotation.projectors.dialogue import project_dialogue_lengths
 from src.models.local.schema import DialogueRecord, QuoteCandidate
 
 
@@ -361,6 +362,20 @@ class TestPostProcessValidationFix(unittest.TestCase):
         result = self._call_validation(records, known_characters=["侯飞白"], alias_map={"猴子": "侯飞白"})
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].speaker, ["侯飞白"])
+
+    def test_alias_normalization_deduplicates_same_canonical_speaker(self) -> None:
+        """别名归一化后若落成同一 canonical 名称，不应重复累计长度或保留重复 speaker。"""
+        records = [
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["猴子", "侯飞白"]),
+        ]
+        result = self._call_validation(records, known_characters=["侯飞白"], alias_map={"猴子": "侯飞白"})
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].speaker, ["侯飞白"])
+
+        projected = project_dialogue_lengths(result, [QuoteCandidate(index=1, content="你好")])
+        self.assertEqual(projected.speaker_lengths, {"侯飞白": len("你好")})
+        self.assertEqual(projected.canonical_attribution, {1: ["侯飞白"]})
 
     def test_no_known_characters_passes_through(self) -> None:
         """无 known_characters 时正常通过"""

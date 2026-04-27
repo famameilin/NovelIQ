@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import BaseModel
@@ -400,6 +400,45 @@ async def test_annotation_phase3_real_chain_uses_annotation_mode_mapping(
 
     assert parsed == _AdapterPayload(name="白芷", score=7)
     assert fake_sdk_client.chat.completions.create.await_args.kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_annotation_client_records_response_usage_when_structured_output_raises_with_raw_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    创建时间: 2026-04-27
+    任务: fix-phase3-followup-review-findings
+    说明: AnnotationClient 结构化解析失败且带 raw_response 时，应按 response 补记 token。
+    """
+    raw_response = _make_response("not-json")
+    client = AnnotationClient(
+        task_type="annotation_fallback",
+        config=TaskModelConfig(base_url="http://127.0.0.1:8000/v1", model="test-model", api_key="test-key"),
+        client=SimpleNamespace(),
+    )
+    client._record_estimated_token_usage_from_response = MagicMock()
+    monkeypatch.setattr(
+        "src.models.annotation.call_structured_output",
+        AsyncMock(side_effect=StructuredOutputError("bad structured output", raw_response=raw_response)),
+    )
+
+    with pytest.raises(StructuredOutputError, match="bad structured output"):
+        await client._call_annotation_api(
+            messages=[{"role": "user", "content": "请输出 json"}],
+            enable_thinking=False,
+            chunk_id=7,
+            response_model=ForeshadowingResult,
+            call_type="phase3",
+        )
+
+    client._record_estimated_token_usage_from_response.assert_called_once_with(
+        [{"role": "user", "content": "请输出 json"}],
+        raw_response,
+        "phase3",
+        7,
+        task_type="annotation",
+    )
 
 
 @pytest.mark.asyncio
