@@ -2,8 +2,10 @@ import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { isAnalysisNotCompleteError } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingThreads } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -289,8 +291,11 @@ export function DiagnosisPage() {
   });
 
   const isLoading = enabled && diagnosisQuery.isLoading;
-  const isDiagnosisError = enabled && diagnosisQuery.isError;
-  const isThreadsError = enabled && foreshadowingThreadsQuery.isError;
+  const isAnalysisNotComplete =
+    enabled &&
+    (isAnalysisNotCompleteError(diagnosisQuery.error) || isAnalysisNotCompleteError(foreshadowingThreadsQuery.error));
+  const isDiagnosisError = enabled && diagnosisQuery.isError && !isAnalysisNotComplete;
+  const isThreadsError = enabled && foreshadowingThreadsQuery.isError && !isAnalysisNotComplete;
   const hasNullDiagnosis =
     enabled &&
     diagnosisQuery.isFetched &&
@@ -331,6 +336,12 @@ export function DiagnosisPage() {
       {isLoading && <SkeletonGrid />}
 
       {/* Error state */}
+      {isAnalysisNotComplete && !isLoading && (
+        <AnalysisNotCompleteState
+          title="诊断结果尚未完成"
+          description="当前任务仍在分析中，诊断报告和 setup 台账暂时不可读，请等待任务进入完成态后再查看。"
+        />
+      )}
       {isDiagnosisError && !isLoading && (
         <DashboardCardShell
           title="诊断报告加载失败"
@@ -352,7 +363,9 @@ export function DiagnosisPage() {
 
       {/* Ledger fallback */}
       {isThreadsError && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
-      {foreshadowingThreads.length > 0 && !isLoading && <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />}
+      {foreshadowingThreads.length > 0 && !isLoading && !isAnalysisNotComplete && (
+        <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
+      )}
 
       {/* Main content */}
       {diagnosis && hasFocusContract && !isLoading && (

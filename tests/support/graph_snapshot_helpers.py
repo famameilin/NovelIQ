@@ -5,8 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from src.knowledge.authority import GraphAuthorityView, ParticipantState, RelationEvent
+from src.models.cloud.schema import CloudAnalysis
 from src.storage.models import Chunk as ChunkModel
 from src.storage.models import Novel
+from src.storage.repositories import StatsRepository
 
 
 def insert_graph_test_novel(db_session, novel_id: str) -> None:
@@ -46,6 +48,43 @@ def insert_graph_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
         ]
     )
     db_session.commit()
+
+
+def insert_focus_contract_cloud_analysis(
+    db_session,
+    *,
+    novel_id: str,
+    run_id: str,
+    focus_characters: Sequence[str],
+    main_characters: Sequence[str] | None = None,
+    core_cast: Sequence[str] | None = None,
+    topic_labels: Sequence[str] | None = None,
+) -> None:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract-review-fixes-round5
+    说明: graph/timeline 相关 API 测试现在也要经过 diagnosis 焦点合同 gate；
+    这里统一插入一条最小合法的 cloud_analysis 行，避免每个测试重复手写同一批字段。
+    """
+    focus_names = list(focus_characters)
+    main_names = list(main_characters or focus_names)
+    core_names = list(core_cast or main_names)
+    arc_names = list(dict.fromkeys([*focus_names, *main_names, *core_names]))
+    arc_scores = {name: float(9 - index * 0.5) for index, name in enumerate(arc_names)}
+
+    analysis = CloudAnalysis(
+        novel_id=novel_id,
+        foreshadow_expectation=0.42,
+        arc_scores=arc_scores,
+        topic_labels=list(topic_labels or ["关系命运"]),
+        diagnosis="测试用焦点合同 diagnosis",
+        focus_structure="single" if len(focus_names) == 1 else "dual" if len(focus_names) == 2 else "ensemble",
+        focus_characters=focus_names,
+        main_characters=main_names,
+        core_cast=core_names,
+    )
+    StatsRepository(db_session).insert_cloud_analysis(run_id, analysis)
 
 
 def create_graph_annotation_repo(session=object()) -> MagicMock:

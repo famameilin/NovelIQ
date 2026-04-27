@@ -496,6 +496,29 @@ class TestCloudDiagnose:
                 focus_characters=["角色0"],
             )
 
+    def test_cloud_analysis_rejects_formal_diagnosis_missing_topic_labels(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: protagonist-focus-contract-review-fixes-round5
+        说明: 正式 diagnosis 合同同样要求完整主题命名；
+        如果 topic_labels 缺失，模型层必须直接拒绝，不能落成“焦点合同完整但主题命名为空”的半成品。
+        """
+
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={"角色0": 8.5, "角色1": 7.1},
+                narrative_type="三幕",
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+                main_characters=["角色0"],
+                core_cast=["角色0", "角色1"],
+            )
+
     def test_cloud_analysis_rejects_main_characters_over_limit(self) -> None:
         with pytest.raises(ValidationError):
             CloudAnalysis(

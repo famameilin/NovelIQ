@@ -13,6 +13,7 @@ import {
   getDiagnosis,
   getChunkCurves,
 } from "@/api/results";
+import { isDiagnosisRerunRequiredError } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import { createAnalysisTask, resumeAnalysisTask, batchDeleteTasks, cancelAnalysisTask } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
@@ -325,6 +326,7 @@ export function NovelDetailPage() {
     diagnosisQuery.isSuccess &&
     diagnosis != null &&
     (diagnosis.rerun_required === true || !hasCompleteFocusContract(diagnosis));
+  const isTopicsRerunError = isDiagnosisRerunRequiredError(topicsQuery.error);
   const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError && !diagnosisRequiresRerun;
 
   const allMetricsLoaded =
@@ -345,12 +347,14 @@ export function NovelDetailPage() {
       diagnosisQuery.isLoading ||
       curvesQuery.isLoading);
 
+  // 中文注释：首页对 rerun-required diagnosis 采用“单一重跑态”；
+  // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败。
   const hasAnyError =
     narrativeQuery.isError ||
     emotionQuery.isError ||
     characterQuery.isError ||
     styleQuery.isError ||
-    topicsQuery.isError ||
+    (topicsQuery.isError && !(diagnosisRequiresRerun && isTopicsRerunError)) ||
     diagnosisQuery.isError ||
     curvesQuery.isError;
 

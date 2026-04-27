@@ -4,7 +4,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -12,9 +11,11 @@ import {
   Network,
   RefreshCw,
 } from "lucide-react";
+import { isAnalysisNotCompleteError, isDiagnosisRerunRequiredError } from "@/api/errorGuards";
 import { getCharacters, getGraph } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeDetailPanel";
@@ -115,28 +116,15 @@ export function GraphPage() {
     staleTime: STALE_TIME,
   });
 
-  const graphRerunRequired =
-    axios.isAxiosError(graphQuery.error) &&
-    graphQuery.error.response?.status === 409 &&
-    graphQuery.error.response?.data?.detail?.code === "diagnosis_rerun_required";
+  const graphRerunRequired = isDiagnosisRerunRequiredError(graphQuery.error);
 
   const charactersQuery = useQuery({
     queryKey: ["characters", novelId, taskScopeId],
-    queryFn: async () => {
-      try {
-        return await getCharacters(novelId!, taskScopeId!);
-      } catch (error) {
-        if (
-          axios.isAxiosError(error) &&
-          error.response?.status === 409 &&
-          error.response?.data?.detail?.code === "diagnosis_rerun_required"
-        ) {
-          return [];
-        }
-        throw error;
-      }
-    },
-    enabled: enabled && !graphRerunRequired,
+    queryFn: () => getCharacters(novelId!, taskScopeId!),
+    // 中文注释：appearanceCountMap 是图谱页面正式视觉语义的一部分；
+    // 这里只在 `/graph` 主查询成功后再请求 `/characters`，避免旧 run 或主查询失败时
+    // 并发打出第二条旁路状态链。
+    enabled: enabled && graphQuery.isSuccess && !graphRerunRequired,
     staleTime: STALE_TIME,
   });
 
@@ -318,8 +306,10 @@ export function GraphPage() {
     [graphData]
   );
 
-  const isLoading = graphQuery.isLoading;
-  const isError = graphQuery.isError;
+  const isAnalysisNotComplete =
+    isAnalysisNotCompleteError(graphQuery.error) || isAnalysisNotCompleteError(charactersQuery.error);
+  const isLoading = graphQuery.isLoading || charactersQuery.isLoading;
+  const isError = (graphQuery.isError || charactersQuery.isError) && !graphRerunRequired && !isAnalysisNotComplete;
   const isEmpty = !isLoading && !isError && (!graphData || graphData.nodes.length === 0);
 
   const handleZoomIn = useCallback(() => {
@@ -353,7 +343,8 @@ export function GraphPage() {
 
   const handleRetry = useCallback(() => {
     graphQuery.refetch();
-  }, [graphQuery]);
+    charactersQuery.refetch();
+  }, [charactersQuery, graphQuery]);
 
   const renderContractIssue = () => (
     <motion.section
@@ -518,6 +509,18 @@ export function GraphPage() {
                 </div>
               </CardContent>
             </Card>
+          </motion.section>
+        ) : isAnalysisNotComplete ? (
+          <motion.section
+            variants={pageSectionVariants}
+            initial="hidden"
+            animate="visible"
+            transition={{ duration: 0.28, delay: 0.05 }}
+          >
+            <AnalysisNotCompleteState
+              title="图谱结果尚未完成"
+              description="当前任务仍在分析中，人物关系图谱和关系变化记录暂时不可读，请等待任务进入完成态后再查看。"
+            />
           </motion.section>
         ) : isError ? (
           <motion.section

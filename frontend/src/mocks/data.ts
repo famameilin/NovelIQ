@@ -11,6 +11,7 @@ import type {
   ChunkCurvePoint,
   Topic,
   DiagnosisResult,
+  ForeshadowingThread,
   GraphData,
   GraphEvent,
   GraphEventsPageInfo,
@@ -226,6 +227,26 @@ export function createDiagnosis(): DiagnosisResult {
     main_characters: ["萧炎", "药老", "纳兰嫣然", "美杜莎"],
     theme_color: "#6366F1",
   };
+}
+
+export function createForeshadowingThreads(): ForeshadowingThread[] {
+  return [
+    {
+      setup_id: "setup-thread-1",
+      first_chunk_id: 3,
+      last_chunk_id: 12,
+      anchor_chunk_ids: [3, 7, 12],
+      setup_summary: "主角在旧山门发现一枚残缺令牌，后续多次被提及。",
+      setup_kind: "伏笔",
+      expected_payoff_family: "身份揭露",
+      payoff_likelihood: "high",
+      strength: "high",
+      status: "reinforced",
+      active: true,
+      latest_reason: "最新章节再次强调令牌与失踪长老有关。",
+      latest_why_unresolved_now: "当前任务尚未给出令牌来历的明确揭晓。",
+    },
+  ];
 }
 
 /* ------------------------------------------------------------------ */

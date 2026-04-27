@@ -140,6 +140,51 @@ class TestResults:
         assert payload["code"] == "diagnosis_rerun_required"
         assert payload["reason"] == "focus_contract_incomplete"
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/novels/{novel_id}/graph",
+            "/api/novels/{novel_id}/graph/events",
+        ],
+    )
+    def test_graph_routes_reject_incomplete_focus_contract(
+        self,
+        api_client: TestClient,
+        db_session,
+        path: str,
+    ) -> None:
+        novel_id = "g" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Graph Incomplete Contract",
+        )
+        run_repo.update_run_status(run_id, "completed")
+        db_session.execute(
+            text(
+                "INSERT INTO cloud_analysis "
+                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
+                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+            ),
+            {
+                "novel_id": novel_id,
+                "foreshadow_expectation": 0.42,
+                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
+                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "run_id": run_id,
+            },
+        )
+        db_session.commit()
+
+        response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+
+        assert response.status_code == 409
+        payload = response.json()["detail"]
+        assert payload["code"] == "diagnosis_rerun_required"
+        assert payload["reason"] == "focus_contract_incomplete"
+
     def test_get_results_rejects_incomplete_focus_contract(
         self,
         api_client: TestClient,

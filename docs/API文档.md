@@ -1004,7 +1004,6 @@ GET /api/novels/10960c77/metrics/character-stats?task_id=a1b2c3d4
 ```json
 {
   "network_density": 0.32,
-  "protagonist_betweenness": 0.23,
   "degree_centrality": {
     "贺重明": 0.85,
     "侯飞白": 0.72,

@@ -2,8 +2,10 @@ import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { isAnalysisNotCompleteError } from "@/api/errorGuards";
 import { getCharacters, getDiagnosis } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -163,9 +165,14 @@ export function CharactersPage() {
   const isLoading =
     enabled &&
     (diagnosisQuery.isLoading || (shouldFetchCharacters && charactersQuery.isLoading));
+  const isAnalysisNotComplete =
+    enabled &&
+    (isAnalysisNotCompleteError(diagnosisQuery.error) ||
+      (shouldFetchCharacters && isAnalysisNotCompleteError(charactersQuery.error)));
   const isError =
     enabled &&
-    (diagnosisQuery.isError || (shouldFetchCharacters && charactersQuery.isError));
+    (diagnosisQuery.isError || (shouldFetchCharacters && charactersQuery.isError)) &&
+    !isAnalysisNotComplete;
 
   const retry = () => {
     if (shouldFetchCharacters) {
@@ -216,6 +223,12 @@ export function CharactersPage() {
       {isLoading && <SkeletonGrid />}
 
       {/* Error state */}
+      {isAnalysisNotComplete && !isLoading && (
+        <AnalysisNotCompleteState
+          title="角色结果尚未完成"
+          description="当前任务仍在分析中，角色焦点结果暂时不可读，请等待任务进入完成态后再查看。"
+        />
+      )}
       {isError && !isLoading && (
         <DashboardCardShell
           title="角色数据加载失败"
