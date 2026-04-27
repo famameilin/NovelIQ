@@ -31,6 +31,8 @@ class TestReportSchema(unittest.TestCase):
             diagnosis="ok",
             focus_structure="dual",
             focus_characters=["角色0", "角色1"],
+            main_characters=["角色0", "角色1"],
+            core_cast=["角色0", "角色1"],
         )
         report = ReportPayload(meta=meta, dimensions=dimensions, charts=charts, cloud_analysis=cloud)
         report.validate()
