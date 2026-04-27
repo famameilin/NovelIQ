@@ -81,6 +81,12 @@ def project_graph_tables(
     session=None,
     rebuild: bool = False,
 ) -> None:
+    """
+    2026-04-27，任务：timeline-contract-graph-projection
+    修改内容：
+    - “无变化”关系不再写入 graph history
+    - 若某条已投影关系后来被修正为“无变化”，必须删除旧事件并回刷受影响 pair
+    """
     if session is None:
         raise ValueError("session is required for project_graph_tables")
 
@@ -388,6 +394,10 @@ def project_graph_tables(
             pending_count += 1
             continue
         if rel_change in {"", "无变化"}:
+            if relation.id is not None:
+                deleted_pair = graph_repo.delete_relation_event_by_source_row_id(run_id, relation.id)
+                if deleted_pair is not None:
+                    affected_pairs.add(deleted_pair)
             relation.projection_status = "projected"
             relation.projected_at = datetime.now(UTC)
             relation.projection_error = None
