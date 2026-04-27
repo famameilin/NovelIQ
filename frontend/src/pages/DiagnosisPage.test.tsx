@@ -182,6 +182,8 @@ describe("DiagnosisPage", () => {
     getDiagnosisMock.mockResolvedValue({
       narrative_type: "寓言",
       foreshadow_expectation: 0.42,
+      focus_structure: "single",
+      focus_characters: ["沈砚"],
       topic_labels: ["成长"],
     });
     getForeshadowingThreadsMock.mockRejectedValue(new Error("threads boom"));
@@ -191,5 +193,22 @@ describe("DiagnosisPage", () => {
     expect(await screen.findByText("伏笔回收预期")).toBeInTheDocument();
     expect(await screen.findByText("Setup 台账加载失败")).toBeInTheDocument();
     expect(screen.getByText("伏笔 setup 台账暂时无法读取，请稍后重试。")).toBeInTheDocument();
+  });
+
+  it("renders rerun-required state when diagnosis payload misses focus contract", async () => {
+    getDiagnosisMock.mockResolvedValue({
+      narrative_type: "寓言",
+      foreshadow_expectation: 0.42,
+      topic_labels: ["成长"],
+    });
+    getForeshadowingThreadsMock.mockResolvedValue([]);
+
+    renderDiagnosisPage();
+
+    expect(await screen.findByText("诊断结果需要重跑")).toBeInTheDocument();
+    expect(
+      screen.getByText("当前任务缺少完整的焦点结构 diagnosis，请重新分析该任务后再查看正式诊断报告。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("伏笔回收预期")).not.toBeInTheDocument();
   });
 });

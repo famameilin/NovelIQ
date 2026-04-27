@@ -65,6 +65,23 @@ def _derive_focus_structure_from_characters(
     return "ensemble"
 
 
+def _has_complete_focus_contract(
+    focus_structure: Literal["single", "dual", "ensemble"] | None,
+    focus_characters: list[str] | None,
+) -> bool:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract-review-fixes
+    说明: 当前分支已经明确“不兼容缺焦点合同的旧 diagnosis 行”；
+    结果读取层必须把缺 `focus_structure` / `focus_characters` 的数据视为无效，
+    统一走 rerun-required 分支，而不是继续向 API / export 暴露半成品对象。
+    """
+    if focus_structure is None or not focus_characters:
+        return False
+    return _derive_focus_structure_from_characters(focus_characters) == focus_structure
+
+
 def _fetch_diagnosis(
     run_id: str,
     novel_id: str,
@@ -150,6 +167,19 @@ def _fetch_diagnosis(
             focus_characters_normalized,
             focus_characters_filtered,
         )
+
+    if not _has_complete_focus_contract(normalized_focus_structure, focus_characters_filtered):
+        logger.warning(
+            "diagnosis focus contract incomplete after normalization: run_id={} novel_id={} raw_structure={} "
+            "normalized_structure={} raw_focus_characters={} normalized_focus_characters={}",
+            run_id,
+            novel_id,
+            focus_structure,
+            normalized_focus_structure,
+            focus_characters_normalized,
+            focus_characters_filtered,
+        )
+        return None
 
     return DiagnosisResult(
         foreshadow_expectation=data.get("foreshadow_expectation") if data else None,

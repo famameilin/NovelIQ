@@ -1,0 +1,39 @@
+import type { DiagnosisResult } from "@/api/types";
+
+/**
+ * 创建时间: 2026-04-27
+ * 创建者: Codex
+ * 任务: protagonist-focus-contract-review-fixes
+ * 说明: 前端多个页面都需要判断 diagnosis 是否具备完整的焦点合同；
+ * 如果只拿到了 ledger-only 或缺 focus 字段的半成品结果，页面必须显式提示重跑，
+ * 不能再静默降级成“正常页面但焦点区为空”。
+ */
+export function hasCompleteFocusContract(
+  diagnosis: DiagnosisResult | null | undefined,
+): diagnosis is DiagnosisResult & {
+  focus_structure: "single" | "dual" | "ensemble";
+  focus_characters: string[];
+} {
+  if (!diagnosis?.focus_structure || !Array.isArray(diagnosis.focus_characters)) {
+    return false;
+  }
+
+  const normalizedFocusCharacters = diagnosis.focus_characters
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+
+  if (normalizedFocusCharacters.length !== diagnosis.focus_characters.length) {
+    return false;
+  }
+
+  switch (diagnosis.focus_structure) {
+    case "single":
+      return normalizedFocusCharacters.length === 1;
+    case "dual":
+      return normalizedFocusCharacters.length === 2;
+    case "ensemble":
+      return normalizedFocusCharacters.length >= 3;
+    default:
+      return false;
+  }
+}
