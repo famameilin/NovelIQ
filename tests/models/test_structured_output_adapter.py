@@ -341,12 +341,40 @@ async def test_annotation_client_structured_call_respects_stream_config(
     """
     创建时间: 2026-04-27
     任务: fix-phase3-followup-review-findings
-    说明: Phase2/3/4 结构化主链应真实消费 stream_enabled / stream_cloud_only 配置。
+    说明: Phase2/3/4 结构化主链应真实消费 stream_enabled / stream_cloud_only 配置，
+          并真正经过 phase3 -> annotation 的 mode 映射与 json_object prompt 合同。
     """
-    mock_call_structured_output = AsyncMock(
-        return_value=SimpleNamespace(parsed=_make_phase_result(), raw_response=_make_response("{}"))
+    monkeypatch.setattr(settings.structured_output, "annotation", "json_object")
+    captured_kwargs: dict[str, object] = {}
+    response_text = '{"has_foreshadowing": false, "is_strong_setup": false, "confidence": "low"}'
+
+    async def _fake_create(**kwargs):
+        captured_kwargs.update(kwargs)
+        if kwargs.get("stream"):
+            return _AsyncChunkStream(
+                [
+                    SimpleNamespace(
+                        choices=[
+                            SimpleNamespace(
+                                delta=SimpleNamespace(
+                                    content=response_text,
+                                    reasoning_content=None,
+                                )
+                            )
+                        ],
+                        usage=None,
+                    )
+                ]
+            )
+        return _make_response(response_text)
+
+    fake_sdk_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=AsyncMock(side_effect=_fake_create),
+            )
+        )
     )
-    monkeypatch.setattr("src.models.annotation.call_structured_output", mock_call_structured_output)
     client = AnnotationClient(
         task_type="annotation",
         config=TaskModelConfig(
@@ -356,19 +384,20 @@ async def test_annotation_client_structured_call_respects_stream_config(
             stream_enabled=stream_enabled,
             stream_cloud_only=stream_cloud_only,
         ),
-        client=SimpleNamespace(),
+        client=fake_sdk_client,
     )
 
-    await client._call_annotation_api(
-        messages=[{"role": "user", "content": "return json"}],
+    parsed, _raw_response = await client._call_annotation_api(
+        messages=[{"role": "user", "content": "请输出 json"}],
         enable_thinking=False,
         chunk_id=1,
         response_model=ForeshadowingResult,
         call_type="phase3",
     )
 
-    request = mock_call_structured_output.await_args.args[1]
-    assert request.stream is expected_stream
+    assert parsed == _make_phase_result()
+    assert bool(captured_kwargs.get("stream", False)) is expected_stream
+    assert captured_kwargs["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.asyncio
