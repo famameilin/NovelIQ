@@ -17,7 +17,8 @@
   "cultural_depth_score": 3,
   "cultural_depth_reason": "判断依据...",
   "narrative_arc_type": "白手起家",
-  "protagonist": "人物名1",
+  "focus_structure": "single",
+  "focus_characters": ["人物名1"],
   "main_characters": ["人物名1", "人物名2", "人物名3"],
   "core_cast": ["人物名1", "人物名2", "人物名3"],
   "theme_color": "#4A90D9"
@@ -60,8 +61,12 @@
   5分：传统文化词汇作为核心叙事逻辑，是故事推进的关键要素
 - cultural_depth_reason: 评分说明(字符串，需引用具体段落或情节作为依据)
 
-主角判定（必须输出以下三个字段）：
-- protagonist: 主角姓名（单选，必须是 arc_scores 中得分最高的人物）
+焦点结构判定（必须输出以下四个字段）：
+- focus_structure: 叙事焦点结构，只能是 `single`、`dual`、`ensemble`
+  - `single`: 单主角结构，focus_characters 必须恰好 1 人
+  - `dual`: 双主角结构，focus_characters 必须恰好 2 人
+  - `ensemble`: 群像结构，focus_characters 必须至少 3 人
+- focus_characters: 焦点人物列表，必须与 focus_structure 匹配
 - main_characters: 主要人物列表（最多 5 人，按 arc_scores 降序排列）
 - core_cast: 核心角色列表（最多 10 人，包含所有有弧线的角色）
 
@@ -71,8 +76,8 @@
 3. 所有字段都必须输出，不能缺失
 4. narrative_arc_type 只能是六种原型之一，不允许其他值
 5. arc_scores 必须是字典格式，Key为人物名称
-6. protagonist 必须是 arc_scores 中存在的人物名
-7. main_characters 和 core_cast 中的人物名必须与 arc_scores 的 key 一致
+6. focus_characters、main_characters 和 core_cast 中的人物名必须与 arc_scores 的 key 一致
+7. `single` 时 focus_characters 长度必须为 1，`dual` 时必须为 2，`ensemble` 时必须大于等于 3
 8. **topic_labels 数组长度必须等于 total_topics 字段的值（单书模式通常25个），每个主题一个名称，不允许省略或只命名部分**
 
 主题命名规则：

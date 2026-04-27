@@ -331,6 +331,19 @@ class DiagnosisClient(BaseModelClient):
         任务: fix-diagnosis-review-findings
         修改原因: 当 setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
         此时也必须覆写掉 LLM 猜测值，继续保持 setup ledger 单一真相源。
+
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: protagonist-focus-contract
+        修改原因: 新 diagnosis 合同允许 single / dual / ensemble；
+        落库前必须重新走一遍 CloudAnalysis 校验，禁止把非法焦点结构静默写入数据库。
+
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: fix-diagnosis-topic-label-count-contract
+        修改原因: 当前 prompt 和前端主题页都把 `topic_labels` 当作按位置消费的完整命名结果；
+        这里必须显式校验“返回标签数 == 实际发给 LLM 的 topic_words 数”，
+        禁止部分命名结果落库后被误当成完整 diagnosis。
         """
 
         updates: dict[str, Any] = {}
@@ -349,9 +362,24 @@ class DiagnosisClient(BaseModelClient):
                     f"got {type(payload_expectation).__name__}"
                 )
 
+        topic_words = payload.get("topic_words")
+        if topic_words is not None:
+            if not isinstance(topic_words, list):
+                raise TypeError(f"payload.topic_words must be list when provided, got {type(topic_words).__name__}")
+            expected_topic_label_count = len(topic_words)
+            actual_topic_label_count = len(result.topic_labels)
+            # 中文注释：payload.topic_words 已经是本次真正发给 LLM 的主题头部列表，
+            # 所以这里校验的是“返回标签数 == 发送主题数”，而不是全文 total_topics。
+            if actual_topic_label_count != expected_topic_label_count:
+                raise ValueError(
+                    "topic_labels count must match payload.topic_words count: "
+                    f"expected {expected_topic_label_count}, got {actual_topic_label_count}"
+                )
+
+        final_payload = result.model_dump()
         if updates:
-            return result.model_copy(update=updates)
-        return result
+            final_payload.update(updates)
+        return CloudAnalysis.model_validate(final_payload)
 
     def _build_messages(self, payload: dict) -> list[dict[str, str]]:
         from src.config import settings
@@ -367,7 +395,7 @@ class DiagnosisClient(BaseModelClient):
                 "When alias_merges provides an alias mapping, "
                 "always rewrite the alias to its canonical character name "
                 "before reasoning or output.",
-                "Apply this consistently in arc_scores, topic_labels, "
+                "Apply this consistently in arc_scores, focus_characters, main_characters, core_cast, topic_labels, "
                 "diagnosis, value_logic_reason, power_stance_reason, "
                 "dignity_reason, and cultural_depth_reason.",
                 f"known_characters={json.dumps(known_characters, ensure_ascii=False)}",

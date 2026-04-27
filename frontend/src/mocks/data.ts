@@ -11,6 +11,7 @@ import type {
   ChunkCurvePoint,
   Topic,
   DiagnosisResult,
+  ForeshadowingThread,
   GraphData,
   GraphEvent,
   GraphEventsPageInfo,
@@ -140,8 +141,8 @@ export function createCharacters(count = 15): Character[] {
       ROLE_FUNCTIONS.map((rf) => [rf, Math.random()])
     ) as Record<string, number>,
     dominant_role_ratio: +(Math.random() * 0.6 + 0.3).toFixed(2),
-    protagonist_score: i === 0 ? 0.95 : +(Math.random() * 0.5).toFixed(2),
-    is_protagonist: i === 0,
+    narrative_focus_score: i === 0 ? 0.95 : +(Math.random() * 0.5).toFixed(2),
+    is_focus_character: i < 2,
     avg_emotion_score: +(Math.random() * 2 - 0.5).toFixed(2),
   }));
 }
@@ -202,29 +203,50 @@ export function createDiagnosis(): DiagnosisResult {
   return {
     narrative_type: "英雄之旅",
     foreshadow_expectation: foreshadowExpectation,
-    protagonist: "萧炎",
+    focus_structure: "dual",
+    focus_characters: ["萧炎", "药老"],
     narrative_arc_type: "三幕式 + 多重高潮",
     arc_scores: {
-      introduction: +(Math.random() * 0.4 + 0.5).toFixed(2),
-      development: +(Math.random() * 0.4 + 0.5).toFixed(2),
-      climax: +(Math.random() * 0.3 + 0.6).toFixed(2),
-      resolution: +(Math.random() * 0.4 + 0.5).toFixed(2),
+      萧炎: Number((Math.random() * 2 + 7).toFixed(1)),
+      药老: Number((Math.random() * 2 + 6).toFixed(1)),
+      纳兰嫣然: Number((Math.random() * 2 + 5).toFixed(1)),
+      美杜莎: Number((Math.random() * 2 + 5).toFixed(1)),
     },
     diagnosis:
-      "本作品采用经典英雄之旅叙事结构，主角从平凡少年成长为一代宗师。故事节奏把握得当，情节层层递进，伏笔铺垫自然。人物塑造丰满立体，情感线索贯穿始终。作品在传统修仙框架中融入了独特创新，世界观构建完整。建议在部分过渡段落可适当加快节奏，以保持读者的阅读兴趣。",
-    value_logic_type: "自强不息",
-    value_logic_reason: "主角通过不断修炼和突破自我，体现了自强不息的精神内核。",
-    power_stance_score: +(Math.random() * 0.4 + 0.5).toFixed(2),
+      "本作品采用双主角并行成长结构，萧炎承担行动与突破线，药老承担传承与命运牵引线。故事节奏把握得当，情节层层递进，伏笔铺垫自然。师徒互动与共同成长持续推动叙事升级，在传统修仙框架中形成更鲜明的双焦点张力。",
+    value_logic_type: "混合型",
+    value_logic_reason: "萧炎与药老通过共同历险、传承与自我突破，体现了互相成就的成长逻辑。",
+    power_stance_score: 4,
     power_stance_reason: "作品展现了对权力与力量的辩证思考，既有对强者的敬畏，也有对弱者尊严的关怀。",
-    common_people_dignity: +(Math.random() * 0.3 + 0.5).toFixed(2),
+    common_people_dignity: 4,
     dignity_reason: "通过多个配角视角，展现了普通人在强权世界中的尊严与价值。",
-    cultural_depth_score: +(Math.random() * 0.3 + 0.6).toFixed(2),
+    cultural_depth_score: 4,
     cultural_depth_reason: "融合了道家思想、中医理论等传统文化元素，文化底蕴较深。",
     topic_labels: ["修炼成长", "热血战斗", "情感纠葛", "势力博弈", "秘境探索", "友情义气"],
     core_cast: ["萧炎", "药老", "纳兰嫣然", "美杜莎", "小医仙", "薰儿"],
     main_characters: ["萧炎", "药老", "纳兰嫣然", "美杜莎"],
     theme_color: "#6366F1",
   };
+}
+
+export function createForeshadowingThreads(): ForeshadowingThread[] {
+  return [
+    {
+      setup_id: "setup-thread-1",
+      first_chunk_id: 3,
+      last_chunk_id: 12,
+      anchor_chunk_ids: [3, 7, 12],
+      setup_summary: "主角在旧山门发现一枚残缺令牌，后续多次被提及。",
+      setup_kind: "伏笔",
+      expected_payoff_family: "身份揭露",
+      payoff_likelihood: "high",
+      strength: "high",
+      status: "reinforced",
+      active: true,
+      latest_reason: "最新章节再次强调令牌与失踪长老有关。",
+      latest_why_unresolved_now: "当前任务尚未给出令牌来历的明确揭晓。",
+    },
+  ];
 }
 
 /* ------------------------------------------------------------------ */
@@ -461,10 +483,20 @@ export function createEmotionStats(): EmotionStatsMetrics {
 
 export function createCharacterStats(): CharacterStatsMetrics {
   return {
-    total_characters: 156,
-    protagonist_count: 1,
     network_density: 0.34,
     greimas_coverage: 0.85,
+    function_coverage_distribution: {
+      主体: 0.32,
+      客体: 0.18,
+      发送者: 0.12,
+    },
+    antagonist_strength_gap: 0.27,
+    relation_change_freq: 0.14,
+    degree_centrality: {
+      萧炎: 0.62,
+      药老: 0.51,
+      纳兰嫣然: 0.37,
+    },
   };
 }
 

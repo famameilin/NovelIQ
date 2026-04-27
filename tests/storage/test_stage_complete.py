@@ -18,6 +18,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
+from sqlalchemy import text
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.chunking.chunker import Chunk
@@ -344,10 +346,44 @@ class TestStageCompleteChecks:
         analysis = CloudAnalysis(
             novel_id=novel_id,
             foreshadow_expectation=0.5,
-            arc_scores=[0.2, 0.4],
+            arc_scores={"角色0": 8.2, "角色1": 7.4},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
+            focus_structure="dual",
+            focus_characters=["角色0", "角色1"],
+            main_characters=["角色0", "角色1"],
+            core_cast=["角色0", "角色1"],
         )
         stats_repo.insert_cloud_analysis(run_id, analysis)
         assert stats_repo.has_diagnosis_data(run_id)
+
+    def test_is_diagnose_complete_rejects_incomplete_focus_contract_row(self, db_session):
+        """旧/半成品 cloud_analysis 行不应再把 diagnose 阶段标成完成"""
+        run_repo = RunRepository(db_session)
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Test Novel",
+        )
+
+        db_session.execute(
+            text(
+                "INSERT INTO cloud_analysis "
+                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
+                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+            ),
+            {
+                "novel_id": novel_id,
+                "foreshadow_expectation": 0.5,
+                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
+                "diagnosis": "旧 row 缺少 focus contract",
+                "run_id": run_id,
+            },
+        )
+        db_session.commit()
+
+        stats_repo = StatsRepository(db_session)
+        assert not stats_repo.has_diagnosis_data(run_id)

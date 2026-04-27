@@ -38,7 +38,8 @@ class FakeClient(CloudModelClient):
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
-            protagonist="角色0",
+            focus_structure="dual",
+            focus_characters=["角色0", "角色1"],
             main_characters=["角色0", "角色1"],
             core_cast=["角色0", "角色1"],
         )
