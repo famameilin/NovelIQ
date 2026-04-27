@@ -139,8 +139,4 @@ def test_persist_final_disambiguation_relations_survive_graph_rebuild(db_session
     assert len(current_relations) == 1
     assert current_relations[0].from_name == "顾霜"
     assert current_relations[0].to_name == "贺家"
-    assert len(relation_events) == 1
-    assert relation_events[0].from_name == "顾霜"
-    assert relation_events[0].to_name == "贺家"
-    assert relation_events[0].relation_type == "belongs_to"
-    assert relation_events[0].chunk_id == 2
+    assert relation_events == []

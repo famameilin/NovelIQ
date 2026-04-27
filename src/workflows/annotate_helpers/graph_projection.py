@@ -19,6 +19,7 @@ from src.workflows.annotate_helpers.disambiguation.checkpoint import (
 )
 
 PENDING_RETRY_LIMIT = 200
+HIERARCHICAL_SYMMETRIC_RELATION_TYPES = frozenset({"spouse_of", "sibling_of"})
 
 
 def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases: dict[str, str]) -> str | None:
@@ -407,7 +408,11 @@ def project_graph_tables(
             evidence=relation.evidence,
             confidence=relation.confidence,
             source_relation_row_id=relation.id,
-            directionality="symmetric" if rel_type in SYMMETRIC_RELATION_TYPES else "directed",
+            directionality=(
+                "symmetric"
+                if rel_type in (SYMMETRIC_RELATION_TYPES | HIERARCHICAL_SYMMETRIC_RELATION_TYPES)
+                else "directed"
+            ),
         )
         if event is None:
             relation.projection_status = "failed"

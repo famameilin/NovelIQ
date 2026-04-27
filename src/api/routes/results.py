@@ -412,7 +412,8 @@ async def get_narrative_structure(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取叙事结构指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_narrative_structure(run_id, session)
 
 
@@ -424,7 +425,8 @@ async def get_emotion_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取情感统计指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_emotion_stats(run_id, session)
 
 
@@ -436,7 +438,8 @@ async def get_character_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取角色统计指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_character_stats(run_id, session)
 
 
@@ -448,5 +451,6 @@ async def get_style_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取风格统计指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_style_stats(run_id, session)

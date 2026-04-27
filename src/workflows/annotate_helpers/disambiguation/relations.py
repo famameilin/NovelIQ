@@ -292,7 +292,7 @@ def _process_entity_relations(
                 evidence=None,
                 confidence=1.0,
                 source_relation_row_id=None,
-                directionality=None,
+                directionality="symmetric" if rel_type in {"spouse_of", "sibling_of"} else "directed",
             )
             affected_pairs.add((from_entity_obj.entity_id, to_entity_obj.entity_id))
             success_count += 1

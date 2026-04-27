@@ -337,6 +337,88 @@ def test_graph_authority_views_fail_closed_when_graph_projection_is_still_pendin
         service.build_graph_relation_event_page(run_id)
 
 
+def test_graph_authority_views_fail_closed_when_graph_projection_has_blocking_failed_rows(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Failed Readiness")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13045,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=run_id,
+            from_char="苏镜",
+            to_char="程霜",
+            type="盟友",
+            change="强化",
+            evidence="投影失败的关系变化",
+            confidence=0.77,
+            projection_status="failed",
+            projection_error="event insert failed",
+        )
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    with pytest.raises(GraphReadinessError, match="graph projection has failed rows"):
+        service.build_graph_view(run_id)
+
+
+def test_graph_authority_views_ignore_benign_failed_self_relations(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Benign Failed Readiness")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13046,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=run_id,
+            from_char="苏镜",
+            to_char="苏镜",
+            type="盟友",
+            change="新建",
+            evidence="自环关系应被忽略",
+            confidence=0.40,
+            projection_status="failed",
+            projection_error="self relation",
+        )
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    view = service.build_graph_view(run_id)
+    assert [(relation.from_name, relation.to_name) for relation in view.confirmed_relations] == [("苏镜", "程霜")]
+
+
 def test_graph_authority_report_rejects_graph_page_contracts() -> None:
     # 中文注释：report 是 diagnosis/export 的共享边界，必须拒绝 graph page
     # contract，避免页面字段被错误地重新序列化进共享 payload。

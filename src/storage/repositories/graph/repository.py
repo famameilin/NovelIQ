@@ -4,10 +4,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from src.storage.models import (
+    ChunkRelation,
     GraphEntity,
     GraphEntityAlias,
     GraphEntityParticipant,
@@ -134,6 +135,32 @@ class ParticipantEntityRow:
 
 
 class GraphRepository(BaseRepository["GraphRepository"]):
+    _EXCLUDED_HISTORY_SOURCE_MODELS = frozenset({"final_disambiguation"})
+
+    def _relation_history_stmt(self, run_id: str):
+        """
+        2026-04-27，任务：graph final-disambiguation history semantics fixes
+        新建原因：终消歧补关系需要影响 current relation，但不能伪造成 chunk 级历史事件；
+        因此 graph history surface 要排除特定 source_model 的 synthetic relation rows。
+        """
+        return (
+            select(GraphRelationEvent)
+            .outerjoin(
+                ChunkRelation,
+                and_(
+                    ChunkRelation.run_id == GraphRelationEvent.run_id,
+                    ChunkRelation.id == GraphRelationEvent.source_relation_row_id,
+                ),
+            )
+            .where(GraphRelationEvent.run_id == run_id)
+            .where(
+                or_(
+                    ChunkRelation.id.is_(None),
+                    ~ChunkRelation.source_model.in_(self._EXCLUDED_HISTORY_SOURCE_MODELS),
+                )
+            )
+        )
+
     def reset_graph_tables(self, run_id: str) -> None:
         """
         清空指定 run 的 graph_* 权威表数据。
@@ -639,7 +666,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """返回指定运行的关系事件总数。"""
         return int(
             self.session.execute(
-                select(func.count()).select_from(GraphRelationEvent).where(GraphRelationEvent.run_id == run_id)
+                select(func.count()).select_from(self._relation_history_stmt(run_id).subquery())
             ).scalar()
             or 0
         )
@@ -663,13 +690,9 @@ class GraphRepository(BaseRepository["GraphRepository"]):
                 select(GraphEntity.entity_id, GraphEntity.canonical_name).where(GraphEntity.run_id == run_id)
             ).fetchall()
         }
-        stmt = (
-            select(GraphRelationEvent)
-            .where(GraphRelationEvent.run_id == run_id)
-            .order_by(
-                GraphRelationEvent.chunk_id.desc(),
-                GraphRelationEvent.relation_event_id.desc(),
-            )
+        stmt = self._relation_history_stmt(run_id).order_by(
+            GraphRelationEvent.chunk_id.desc(),
+            GraphRelationEvent.relation_event_id.desc(),
         )
         if offset > 0:
             stmt = stmt.offset(offset)
