@@ -4,10 +4,16 @@ BaseModelClient 契约测试。
 创建时间: 2026-04-23
 任务: P0-base-model-client-safety-net
 说明: 覆盖结构化解析、流式响应拼装、OpenAI SDK 异常映射，支撑后续拆分重构。
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: phase3-proof-only-fastpath-batch10
+修改内容: 补充 Phase3 thinking 批处理配置解析与非法值校验测试。
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -17,6 +23,8 @@ from openai import APIConnectionError, APITimeoutError, BadRequestError
 from pydantic import BaseModel
 
 from src.config import TaskModelConfig
+from src.config.schemas.model import _parse_thinking_settings
+from src.config.settings import Settings
 from src.models.local.base import BaseModelClient
 
 
@@ -157,6 +165,64 @@ def test_build_request_params_omits_thinking_fields_when_disabled_for_local() ->
 
     assert "reasoning_effort" not in params
     assert "extra_body" not in params
+
+
+def test_parse_thinking_settings_reads_phase3_batch_controls() -> None:
+    """Phase3 批处理配置应从 thinking 配置块中被正确解析。"""
+    settings = _parse_thinking_settings(
+        {
+            "annotation": False,
+            "phase3_candidates_per_batch": 10,
+            "phase3_batch_parallelism": 2,
+        }
+    )
+
+    assert settings.phase3_candidates_per_batch == 10
+    assert settings.phase3_batch_parallelism == 2
+
+
+def test_repo_settings_json_keeps_phase3_batch_defaults() -> None:
+    """仓库 settings.json 中已签入的 Phase3 默认值应保持为 10 / 2。"""
+    repo_settings = Settings.from_json(Path("config/settings.json"))
+
+    assert repo_settings.thinking.phase3_candidates_per_batch == 10
+    assert repo_settings.thinking.phase3_batch_parallelism == 2
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "error_message"),
+    [
+        ("phase3_candidates_per_batch", 0, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", -3, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", 10.0, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", "10", "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", None, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", True, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_candidates_per_batch", False, "thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", 0, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", -2, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", 2.0, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", "2", "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", None, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", True, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+        ("phase3_batch_parallelism", False, "thinking.phase3_batch_parallelism 必须是大于等于 1 的整数"),
+    ],
+)
+def test_parse_thinking_settings_rejects_non_positive_phase3_batch_controls(
+    field_name: str,
+    field_value: object,
+    error_message: str,
+) -> None:
+    """Phase3 批处理配置不是正整数时应在解析阶段明确报错。"""
+    config_data = {
+        "annotation": False,
+        "phase3_candidates_per_batch": 10,
+        "phase3_batch_parallelism": 2,
+    }
+    config_data[field_name] = field_value
+
+    with pytest.raises(ValueError, match=error_message):
+        _parse_thinking_settings(config_data)
 
 
 @pytest.mark.asyncio

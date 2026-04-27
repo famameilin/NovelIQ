@@ -44,6 +44,11 @@ def normalize_dialogue_records(
     创建时间: 2026-04-23
     任务: annotation-projector-runtime-landing
     新建原因: 将 Phase3 batch 后处理从调用层移出，避免 extractor 同时承担投影职责。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: fix-phase3-followup-review-findings
+    修改内容: 别名归一化后对 speaker 去重，避免同一 canonical 名称在长度统计和归属映射里被重复累计。
     """
     valid_records: list[DialogueRecord] = []
     candidate_indices = {c.index for c in candidates}
@@ -78,8 +83,12 @@ def normalize_dialogue_records(
             continue
 
         canonical_speakers: list[str] = []
+        seen_canonical_speakers: set[str] = set()
         for speaker in record.speaker:
             canonical = alias_map.get(speaker, speaker) if alias_map else speaker
+            if canonical in seen_canonical_speakers:
+                continue
+            seen_canonical_speakers.add(canonical)
             canonical_speakers.append(canonical)
 
         if known_set:

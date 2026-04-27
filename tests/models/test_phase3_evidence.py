@@ -31,6 +31,8 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
             mock_settings.prompts.phase3.system = "system"
             mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
             mock_settings.thinking.phase3_candidates_per_batch = 8
+            mock_settings.thinking.phase3_batch_parallelism = 1
+            mock_settings.runtime.annotation.phase3_max_retries = 3
 
             mock_annotation_client = MagicMock()
             mock_annotation_client._config.model = "test-model"
@@ -76,6 +78,8 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"
@@ -97,6 +101,46 @@ class TestPhase3EvidenceIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertLess(
             user_prompt.index("「别名三」可能是：人物一、人物二、人物三"),
             user_prompt.index("「别名一」可能是：人物一、人物二、人物三"),
+        )
+
+    @patch("src.models.local.annotation.phase3.settings")
+    async def test_attribute_dialogues_with_llm_recomputes_priority_names_per_batch(
+        self,
+        mock_settings: MagicMock,
+    ) -> None:
+        """跨 batch 时，每个 batch 都应按自己的候选内容重算 priority candidate names。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 1
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
+
+        mock_annotation_client = MagicMock()
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = False
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_response = MagicMock(dialogues=[], model_dump=MagicMock(return_value={}))
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
+
+        await attribute_dialogues_with_llm(
+            mock_annotation_client,
+            "“别名一，你来了。”\n“别名三，你终于开口了。”",
+            [
+                QuoteCandidate(index=1, content="别名一，你来了。"),
+                QuoteCandidate(index=2, content="别名三，你终于开口了。"),
+            ],
+            known_characters=["人物一", "人物二", "人物三"],
+            evidence_bundle=_build_phase3_priority_bundle(),
+        )
+
+        first_prompt = mock_annotation_client._call_annotation_api.await_args_list[0].kwargs["messages"][-1]["content"]
+        second_prompt = mock_annotation_client._call_annotation_api.await_args_list[1].kwargs["messages"][-1]["content"]
+        self.assertIn("「别名一」可能是：人物一、人物二、人物三", first_prompt)
+        self.assertNotIn("「别名三」可能是：人物一、人物二、人物三", first_prompt)
+        self.assertIn("「别名三」可能是：人物一、人物二、人物三", second_prompt)
+        self.assertLess(
+            second_prompt.index("「别名三」可能是：人物一、人物二、人物三"),
+            second_prompt.index("「别名一」可能是：人物一、人物二、人物三"),
         )
 
 

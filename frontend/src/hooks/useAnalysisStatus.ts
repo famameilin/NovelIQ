@@ -158,6 +158,7 @@ export function useAnalysisStatus(
             stage: eventData.stage,
             sub_stage: eventData.sub_stage,
             chunk_id: eventData.chunk_id,
+            stream_id: eventData.stream_id,
             current: eventData.current,
             total: eventData.total,
             percent: eventData.percent,

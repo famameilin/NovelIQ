@@ -56,8 +56,6 @@ class TaskModelSettings:
     timeout_s: float | None = None
     temperature: float = 0.7
     top_p: float = 0.8
-    top_k: int = 20
-    presence_penalty: float = 1.5
 
 
 @dataclass
@@ -106,6 +104,11 @@ class ThinkingSettings:
     创建者: TraeAI
     任务: fix-phase3-validation-error
     修改内容: 添加 phase3_candidates_per_batch 配置，控制每批处理的候选数量
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase3-proof-only-fastpath-batch10
+    修改内容: 新增 phase3_batch_parallelism 配置，并为 Phase3 批处理参数补显式校验。
     """
 
     annotation: bool = False
@@ -116,10 +119,29 @@ class ThinkingSettings:
     level3_rerank: bool = False
     diagnosis: bool = True
     phase3_candidates_per_batch: int = 5
+    phase3_batch_parallelism: int = 2
 
     def validate(self) -> None:
-        """验证配置"""
-        pass
+        """
+        验证配置。
+
+        创建时间: 2026-04-26
+        任务: phase3-proof-only-fastpath-batch10
+        新建原因: 收紧 Phase3 批处理配置契约，避免 0 或负数让运行时静默退化或直接崩溃。
+
+        修改时间: 2026-04-26
+        修改者: Codex
+        任务: fix-phase3-proof-only-fastpath-review-findings
+        修改内容: Phase3 批处理配置必须是正整数，避免字符串/None/float 落成不清晰异常或伪配置。
+        """
+        if not isinstance(self.phase3_candidates_per_batch, int) or isinstance(self.phase3_candidates_per_batch, bool):
+            raise ValueError("thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数")
+        if self.phase3_candidates_per_batch < 1:
+            raise ValueError("thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数")
+        if not isinstance(self.phase3_batch_parallelism, int) or isinstance(self.phase3_batch_parallelism, bool):
+            raise ValueError("thinking.phase3_batch_parallelism 必须是大于等于 1 的整数")
+        if self.phase3_batch_parallelism < 1:
+            raise ValueError("thinking.phase3_batch_parallelism 必须是大于等于 1 的整数")
 
 
 @dataclass
@@ -273,8 +295,6 @@ def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = ""
         timeout_s=timeout_val,
         temperature=json_data.get("temperature", 0.7),
         top_p=json_data.get("top_p", 0.8),
-        top_k=json_data.get("top_k", 20),
-        presence_penalty=json_data.get("presence_penalty", 1.5),
     )
 
 
@@ -390,10 +410,15 @@ def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
     修改者: TraeAI
     任务: 修复thinking参数传递方式
     修改内容: 配置加载失败时抛出错误，而非使用默认值
+
+    修改时间: 2026-04-26
+    修改者: Codex
+    任务: phase3-proof-only-fastpath-batch10
+    修改内容: 补齐 Phase3 批处理配置解析，避免 settings.json 中的值继续静默失效。
     """
     if not data:
         raise ValueError("thinking 配置不能为空，请检查 config/settings.json 中的 thinking 配置项")
-    return ThinkingSettings(
+    settings = ThinkingSettings(
         annotation=data.get("annotation", False),
         annotation_fallback=data.get("annotation_fallback", True),
         incremental_disambig=data.get("incremental_disambig", True),
@@ -401,7 +426,11 @@ def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
         full_disambig=data.get("full_disambig", True),
         level3_rerank=data.get("level3_rerank", False),
         diagnosis=data.get("diagnosis", True),
+        phase3_candidates_per_batch=data.get("phase3_candidates_per_batch", 5),
+        phase3_batch_parallelism=data.get("phase3_batch_parallelism", 2),
     )
+    settings.validate()
+    return settings
 
 
 def _parse_streaming_settings(data: dict[str, Any] | None) -> StreamingSettings:

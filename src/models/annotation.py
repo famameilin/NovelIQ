@@ -53,6 +53,9 @@ from .local.annotation import (
     parse_annotation as _parse_annotation_impl,
 )
 from .local.annotation import (
+    should_use_stream as _should_use_stream_impl,
+)
+from .local.annotation import (
     validate_annotation as _validate_annotation_impl,
 )
 from .local.annotation.multi_phase import annotate_chunk_multi_phase as _annotate_chunk_multi_phase_impl
@@ -220,7 +223,7 @@ class AnnotationClient(BaseModelClient):
                         call_type=call_type or "annotation",
                         enable_thinking=enable_thinking,
                         timeout=self._config.timeout_s,
-                        stream=True,
+                        stream=_should_use_stream_impl(self._config, is_cloud),
                         stream_emitter=active_emitter,
                     ),
                 )
