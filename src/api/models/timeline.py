@@ -1,7 +1,5 @@
 """
 叙事时间轴 API 响应模型。
-
-基于时间轴合同重构后的 v3 结构定义时间轴数据结构。
 """
 
 from __future__ import annotations
@@ -17,7 +15,6 @@ class TimelineMeta(BaseModel):
     novel_id: str = Field(description="小说 ID")
     novel_name: str = Field(description="小说名称")
     total_chunks: int = Field(ge=0, description="总 chunk 数量")
-    timeline_contract_version: int = Field(default=3, description="时间轴合同版本")
 
 
 class TimelinePhase(BaseModel):

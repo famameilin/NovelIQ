@@ -356,7 +356,6 @@ export interface TimelineMeta {
   novel_id: string;
   novel_name: string;
   total_chunks: number;
-  timeline_contract_version: number;
 }
 
 export interface TimelinePhase {

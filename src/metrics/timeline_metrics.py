@@ -20,7 +20,7 @@
 修改内容:
 - 删除识别层预算与固定选点主路径，改为“全量原子节点 + 复合节点概览”
 - 新增 TimelineCompositeNodeDTO 与复合节点分组逻辑
-- route / export 共享入口升级为 v3 contract，前端展示密度改由本地 level 筛选控制
+- route / export 共享入口升级为双层节点合同，前端展示密度改由本地 level 筛选控制
 """
 
 from __future__ import annotations
