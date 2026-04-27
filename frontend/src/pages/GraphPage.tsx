@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -11,7 +12,7 @@ import {
   Network,
   RefreshCw,
 } from "lucide-react";
-import { getGraph } from "@/api/results";
+import { getCharacters, getGraph } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -114,6 +115,31 @@ export function GraphPage() {
     staleTime: STALE_TIME,
   });
 
+  const graphRerunRequired =
+    axios.isAxiosError(graphQuery.error) &&
+    graphQuery.error.response?.status === 409 &&
+    graphQuery.error.response?.data?.detail?.code === "diagnosis_rerun_required";
+
+  const charactersQuery = useQuery({
+    queryKey: ["characters", novelId, taskScopeId],
+    queryFn: async () => {
+      try {
+        return await getCharacters(novelId!, taskScopeId!);
+      } catch (error) {
+        if (
+          axios.isAxiosError(error) &&
+          error.response?.status === 409 &&
+          error.response?.data?.detail?.code === "diagnosis_rerun_required"
+        ) {
+          return [];
+        }
+        throw error;
+      }
+    },
+    enabled: enabled && !graphRerunRequired,
+    staleTime: STALE_TIME,
+  });
+
   const novelQuery = useQuery({
     queryKey: ["novel", novelId],
     queryFn: () => getNovel(novelId!),
@@ -128,7 +154,14 @@ export function GraphPage() {
     !!graphData &&
     (graphData.summary == null || graphData.quality == null || graphData.events_page == null);
 
-  const appearanceCountMap = undefined;
+  const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
+    if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
+    const map = new Map<string, number>();
+    charactersQuery.data.forEach((character) => {
+      map.set(character.name, character.appearance_count);
+    });
+    return map;
+  }, [charactersQuery.data]);
 
   const nodeNameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -463,6 +496,25 @@ export function GraphPage() {
                       className="h-32 animate-pulse rounded-xl border border-border bg-surface-hover/60"
                     />
                   ))}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.section>
+        ) : graphRerunRequired ? (
+          <motion.section
+            variants={pageSectionVariants}
+            initial="hidden"
+            animate="visible"
+            transition={{ duration: 0.28, delay: 0.05 }}
+          >
+            <Card variant="elevated" className="rounded-2xl">
+              <CardContent className="flex flex-col items-center gap-4 p-10 text-center">
+                <AlertTriangle className="h-10 w-10 text-chart-negative" />
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-text">图谱结果需要重跑</p>
+                  <p className="text-sm text-text-muted">
+                    当前任务的 diagnosis 焦点合同已失效，请重新分析后再查看图谱页面。
+                  </p>
                 </div>
               </CardContent>
             </Card>

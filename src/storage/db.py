@@ -539,7 +539,12 @@ def _assert_focus_contract_schema(engine: Engine) -> None:
             return
 
         actual_columns = _get_table_columns(conn, "cloud_analysis")
-        required_columns = {"focus_structure", "focus_characters"}
+        required_columns = {
+            "focus_structure",
+            "focus_characters",
+            "main_characters",
+            "core_cast",
+        }
         missing_columns = sorted(required_columns - actual_columns)
         if missing_columns:
             raise RuntimeError(

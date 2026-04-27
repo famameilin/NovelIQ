@@ -86,8 +86,8 @@ export async function getTopics(
 export async function getDiagnosis(
   novelId: string,
   taskId: string
-): Promise<DiagnosisResult | null> {
-  const { data } = await apiClient.get<DiagnosisResult | null>(
+): Promise<DiagnosisResult> {
+  const { data } = await apiClient.get<DiagnosisResult>(
     `/api/novels/${novelId}/diagnosis`,
     { params: { task_id: taskId } }
   );

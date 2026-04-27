@@ -130,6 +130,41 @@ def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> None
     )
 
 
+def _fetch_and_require_valid_diagnosis(
+    *,
+    run_id: str,
+    novel_id: str,
+    stats_repo: StatsRepository,
+    annotation_repo: AnnotationRepository,
+    alias_map: dict[str, str] | None = None,
+) -> DiagnosisResult:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract-final-gates
+    说明: 部分结果接口虽然不直接返回 diagnosis，但它们的页面语义已经依赖
+    新焦点合同是否有效；这里统一在路由层短路旧 run，避免不同页面对同一 run
+    同时出现“需要重跑”和“还能继续看”的分裂状态。
+    """
+    diagnosis = _fetch_diagnosis(
+        run_id,
+        novel_id,
+        stats_repo,
+        annotation_repo,
+        alias_map,
+    )
+    if diagnosis is None:
+        _raise_rerun_required_for_focus_contract(
+            DiagnosisResult(
+                rerun_required=True,
+                rerun_reason="diagnosis_missing_focus_contract",
+            )
+        )
+    if diagnosis.rerun_required:
+        _raise_rerun_required_for_focus_contract(diagnosis)
+    return diagnosis
+
+
 @router.get(
     "/{novel_id}/results",
     response_model=ResultsWriteResponse,
@@ -284,7 +319,8 @@ async def get_chunk_curves(
     任务: fuse-display-emotion-curve
     修改内容: 返回展示层融合后的单曲线结果，保持前端仍只消费一个 chunk_curves 接口
     """
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
     chunk_repo = ChunkRepository(session)
@@ -308,7 +344,8 @@ async def get_chunk_annotations(
     任务: phase2-strong-foreshadowing
     修改内容: 暴露 chunk_annotations 结果接口，便于前端后续新增伏笔展示页直接消费强伏笔结构化字段。
     """
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
     return _fetch_chunk_annotations(
@@ -367,19 +404,28 @@ async def get_topics(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list:
     """获取主题分布数据"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     chunk_repo = ChunkRepository(session)
     annotation_repo = AnnotationRepository(session)
     alias_map = annotation_repo.fetch_alias_map(run_id)
+    stats_repo = StatsRepository(session)
+    _fetch_and_require_valid_diagnosis(
+        run_id=run_id,
+        novel_id=novel_id,
+        stats_repo=stats_repo,
+        annotation_repo=annotation_repo,
+        alias_map=alias_map,
+    )
     return _fetch_topics(run_id, chunk_repo, alias_map)
 
 
-@router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult | None)
+@router.get("/{novel_id}/diagnosis", response_model=DiagnosisResult)
 async def get_diagnosis(
     novel_id: str,
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
-) -> DiagnosisResult | None:
+) -> DiagnosisResult:
     """获取诊断数据"""
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -406,7 +452,8 @@ async def get_foreshadowing_threads(
     任务: phase2-setup-pool
     说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用。
     """
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
     return _fetch_foreshadowing_threads(run_id, annotation_repo)
 

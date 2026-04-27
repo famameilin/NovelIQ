@@ -245,13 +245,17 @@ class TestResults:
 @pytest.mark.parametrize(
     "path",
     [
+        "/api/novels/{novel_id}/chunk-curves",
+        "/api/novels/{novel_id}/chunk-annotations",
+        "/api/novels/{novel_id}/topics",
+        "/api/novels/{novel_id}/foreshadowing-threads",
         "/api/novels/{novel_id}/metrics/narrative-structure",
         "/api/novels/{novel_id}/metrics/emotion-stats",
         "/api/novels/{novel_id}/metrics/character-stats",
         "/api/novels/{novel_id}/metrics/style-stats",
     ],
 )
-def test_metrics_routes_reject_non_terminal_run_status(api_client: TestClient, db_session, path: str) -> None:
+def test_result_routes_reject_non_terminal_run_status(api_client: TestClient, db_session, path: str) -> None:
     novel_id = "m" + uuid.uuid4().hex[:7]
     insert_graph_test_novel(db_session, novel_id)
     run_repo = RunRepository(db_session)
