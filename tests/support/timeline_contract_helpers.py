@@ -255,6 +255,7 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
     graph_repo.refresh_current_relation(run_id, hero.entity_id, sect.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, rival.entity_id, sect.entity_id])
     db_session.commit()
 
     return TimelineContractScenario(

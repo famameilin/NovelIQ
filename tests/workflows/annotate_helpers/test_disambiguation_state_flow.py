@@ -57,7 +57,9 @@ async def test_run_final_disambiguation_with_state_persists_canonicals_before_re
     with (
         patch.object(pipeline_stages_mod, "AnnotationRepository", _DummyAnnRepo),
         patch.object(pipeline_stages_mod, "fetch_all_character_names", return_value=[]),
-        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(1, [])) as process_mock,
+        patch.object(
+            pipeline_stages_mod, "_replace_final_disambiguation_chunk_relations", return_value=None
+        ) as replace_mock,
         patch.object(pipeline_stages_mod, "_save_disambig_checkpoint", return_value=None),
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(
@@ -72,7 +74,7 @@ async def test_run_final_disambiguation_with_state_persists_canonicals_before_re
     assert new_state.known_canonical_names == state.known_canonical_names
     assert captured["ensure"] == ("run-1", {"bai_zhi", "hou_fei_bai"}, "novel-1", None)
     assert captured["cleanup"] == "run-1"
-    process_mock.assert_called_once()
+    replace_mock.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -94,7 +96,7 @@ async def test_run_final_disambiguation_with_state_skips_known_canonical_without
             return_value=[{"name": "hou_fei_bai", "count": 12}],
         ),
         patch.object(pipeline_mod, "_retry_disambig") as retry_mock,
-        patch.object(pipeline_stages_mod, "_process_entity_relations", return_value=(0, [])),
+        patch.object(pipeline_stages_mod, "_replace_final_disambiguation_chunk_relations", return_value=None),
         patch.object(pipeline_stages_mod, "_save_disambig_checkpoint", return_value=None),
     ):
         new_state = await disambig_mod._run_final_disambiguation_with_state(

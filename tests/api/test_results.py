@@ -13,11 +13,15 @@
 """
 
 import tempfile
+import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
 from src.api.models.responses import DiagnosisResult
+from src.storage.repositories import RunRepository
+from tests.support.graph_snapshot_helpers import insert_graph_test_novel
 
 
 class TestResults:
@@ -127,3 +131,29 @@ class TestResults:
         assert "foreshadow_expectation" in properties
         assert "theme_color" in properties
         assert "setup thread ledger" in properties["foreshadow_expectation"]["description"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/novels/{novel_id}/metrics/narrative-structure",
+        "/api/novels/{novel_id}/metrics/emotion-stats",
+        "/api/novels/{novel_id}/metrics/character-stats",
+        "/api/novels/{novel_id}/metrics/style-stats",
+    ],
+)
+def test_metrics_routes_reject_non_terminal_run_status(api_client: TestClient, db_session, path: str) -> None:
+    novel_id = "m" + uuid.uuid4().hex[:7]
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Metrics Non Terminal Run",
+    )
+    run_repo.update_run_status(run_id, "running")
+
+    response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "AnalysisNotCompleteError"

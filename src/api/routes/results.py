@@ -72,6 +72,7 @@ from src.storage.repositories import (
 
 router = APIRouter(prefix="/novels", tags=["results"])
 GRAPH_PAGE_EVENT_LIMIT = 200
+READABLE_RUN_STATUSES = ("completed", "aggregated", "diagnosed")
 
 
 def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
@@ -97,6 +98,15 @@ def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict
         )
 
     return run
+
+
+def _require_readable_run_status(run: dict[str, Any]) -> None:
+    """
+    2026-04-27，任务：graph run-state gate fixes
+    新建原因：graph 与 results/timeline 一样只允许读取终态 run，不能把未完成任务拆成另一套半图语义。
+    """
+    if run["status"] not in READABLE_RUN_STATUSES:
+        raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
 
 
 @router.get(
@@ -180,9 +190,7 @@ async def get_results(
     """
     run = _require_run_for_novel(session, novel_id, run_id)
 
-    VALID_EXPORT_STATUSES = ("completed", "aggregated", "diagnosed")
-    if run["status"] not in VALID_EXPORT_STATUSES:
-        raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
+    _require_readable_run_status(run)
 
     stats_repo = StatsRepository(session)
     annotation_repo = AnnotationRepository(session)
@@ -367,7 +375,8 @@ async def get_graph(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     """获取知识图谱快照"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
     return _fetch_graph_snapshot(run_id, annotation_repo)
 
@@ -381,7 +390,8 @@ async def get_graph_events(
     events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict:
     """获取 graph page relation events 的增量分页结果。"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
     try:
         return _fetch_graph_events_page(
@@ -402,7 +412,8 @@ async def get_narrative_structure(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取叙事结构指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_narrative_structure(run_id, session)
 
 
@@ -414,7 +425,8 @@ async def get_emotion_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取情感统计指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_emotion_stats(run_id, session)
 
 
@@ -426,7 +438,8 @@ async def get_character_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取角色统计指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_character_stats(run_id, session)
 
 
@@ -438,5 +451,6 @@ async def get_style_stats(
     metrics_service: Annotated[MetricsService, Depends(get_metrics_service)],
 ) -> Any:
     """获取风格统计指标"""
-    _require_run_for_novel(session, novel_id, run_id)
+    run = _require_run_for_novel(session, novel_id, run_id)
+    _require_readable_run_status(run)
     return metrics_service.get_style_stats(run_id, session)

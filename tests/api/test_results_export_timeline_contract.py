@@ -5,9 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.api.exceptions import GraphReadinessError
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
+    fetch_all_results_data,
     load_aggregate_metrics_bundle,
     load_character_bundle,
     load_core_results,
@@ -29,6 +31,7 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
+from src.storage.models import ChunkRelation
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
@@ -150,6 +153,26 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
         )
 
 
+def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunk_repo = MagicMock()
+    annotation_repo = MagicMock()
+    stats_repo = MagicMock()
+
+    def _raise_runtime_error(*_args, **_kwargs):
+        raise RuntimeError("timeline boom")
+
+    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_candidates", _raise_runtime_error)
+
+    with pytest.raises(RuntimeError, match="timeline boom"):
+        _fetch_timeline_data(
+            run_id="run-1",
+            chunk_repo=chunk_repo,
+            annotation_repo=annotation_repo,
+            stats_repo=stats_repo,
+            timeline_view=MagicMock(),
+        )
+
+
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
     diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
     characters = [SimpleNamespace(name="沈砚")]
@@ -199,7 +222,7 @@ def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fall
     characters = [SimpleNamespace(name="沈砚")]
     annotation_repo = MagicMock()
 
-    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _alias_map):
+    def _fake_fetch_diagnosis(_run_id, _novel_id, _stats_repo, _annotation_repo, _alias_map):
         return diagnosis
 
     monkeypatch.setattr(
@@ -285,6 +308,22 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
         "src.api.services.results_export_service.build_export_payload",
         lambda **kwargs: kwargs,
     )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            assert_graph_projection_ready=lambda _run_id: None,
+            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
+            build_graph_report=lambda _run_id: GraphAuthorityReport(
+                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
+            ),
+            build_timeline_view=lambda _run_id: SimpleNamespace(
+                character_entities=[],
+                entity_lifecycles=[],
+                relation_events=[],
+            ),
+        ),
+    )
 
     results_data, missing_fields, novel_name = fetch_all_results_data(
         novel_id="novel-1",
@@ -298,6 +337,38 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     assert results_data["diagnosis"] is None
     assert missing_fields.count("diagnosis") == 1
     assert novel_name == "Test Novel"
+
+
+def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=scenario.run_id,
+            from_char=scenario.hero_name,
+            to_char=scenario.rival_name,
+            type="盟友",
+            change="强化",
+            evidence="尚未投影的新关系变化",
+            confidence=0.66,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    stats_repo = StatsRepository(db_session)
+    annotation_repo = AnnotationRepository(db_session)
+    chunk_repo = ChunkRepository(db_session)
+
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        fetch_all_results_data(
+            novel_id=scenario.novel_id,
+            task_id=scenario.task_id,
+            run_id=scenario.run_id,
+            stats_repo=stats_repo,
+            annotation_repo=annotation_repo,
+            chunk_repo=chunk_repo,
+        )
 
 
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
@@ -403,6 +474,16 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 first_seen_chunk=2,
                 last_seen_chunk=5,
             )
+            ,
+            ExportRelationSnapshot(
+                relation_id=23,
+                from_name="苏镜",
+                to_name="旧友",
+                relation_type="spouse_of",
+                first_seen_chunk=1,
+                last_seen_chunk=4,
+                is_active=False,
+            ),
         ],
         relation_events=[
             RelationEvent(
@@ -469,7 +550,7 @@ def test_shared_graph_signal_serializer_rejects_non_report_consumers() -> None:
                 canonical_entities=[],
                 confirmed_relations=[],
                 relation_events=[],
-                stable_states=[],
+                participant_states=[],
             )
         )
 

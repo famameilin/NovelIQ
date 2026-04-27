@@ -148,7 +148,7 @@ class ActiveEntityContext:
 
 
 @dataclass(slots=True)
-class StableState:
+class ParticipantState:
     """
     Cross-chunk stable entity state.
 
@@ -163,7 +163,7 @@ class StableState:
     first_seen_chunk: int | None = None
     last_seen_chunk: int | None = None
     source_confidence: float | None = None
-    source: str = "graph_entities"
+    source: str = "graph_entity_participants"
 
 
 @dataclass(slots=True)
@@ -220,7 +220,7 @@ class TimelineAuthorityView:
 # 中文注释：graph page route assembler 只允许读取这三块 authority facts。
 # 页面 summary / quality / events_page 仍由 route/product 层自己组装。
 GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
-    "stable_states": (
+    "participant_states": (
         "entity_id",
         "name",
         "entity_type",
@@ -266,7 +266,7 @@ class GraphAuthorityView:
     - canonical entity identity
     - current confirmed relations
     - full immutable relation history events
-    - stable entity states
+    - participant entity states
 
     Product-layer summaries/quality cards belong to graph page assemblers,
     while diagnosis/aggregate conclusions belong to higher-level analysis.
@@ -278,7 +278,7 @@ class GraphAuthorityView:
     canonical_entities: list[CanonicalEntity] = field(default_factory=list)
     confirmed_relations: list[ConfirmedRelation] = field(default_factory=list)
     relation_events: list[RelationEvent] = field(default_factory=list)
-    stable_states: list[StableState] = field(default_factory=list)
+    participant_states: list[ParticipantState] = field(default_factory=list)
 
 
 @dataclass(slots=True)

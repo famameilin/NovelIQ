@@ -3,6 +3,7 @@ from .repository import (
     CurrentRelationRow,
     GraphRepository,
     LowConfidenceRelationEventRow,
+    ParticipantEntityRow,
     RelationConflictRow,
     RelationEventRow,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "CurrentRelationRow",
     "GraphRepository",
     "LowConfidenceRelationEventRow",
+    "ParticipantEntityRow",
     "RelationConflictRow",
     "RelationEventRow",
 ]
