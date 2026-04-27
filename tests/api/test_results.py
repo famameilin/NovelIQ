@@ -83,6 +83,7 @@ class TestResults:
             source_path="test",
             title="Diagnosis Incomplete Contract",
         )
+        run_repo.update_run_status(run_id, "completed")
         db_session.execute(
             text(
                 "INSERT INTO cloud_analysis "
@@ -115,6 +116,7 @@ class TestResults:
             source_path="test",
             title="Characters Incomplete Contract",
         )
+        run_repo.update_run_status(run_id, "completed")
         db_session.execute(
             text(
                 "INSERT INTO cloud_analysis "
@@ -231,6 +233,14 @@ class TestResults:
         assert "theme_color" in properties
         assert "setup thread ledger" in properties["foreshadow_expectation"]["description"]
 
+    def test_get_characters_openapi_declares_typed_response(self):
+        schema = app.openapi()
+        response_schema = schema["paths"]["/api/novels/{novel_id}/characters"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        assert response_schema["type"] == "array"
+        assert response_schema["items"]["$ref"] == "#/components/schemas/CharacterStats"
+
 
 @pytest.mark.parametrize(
     "path",
@@ -249,6 +259,34 @@ def test_metrics_routes_reject_non_terminal_run_status(api_client: TestClient, d
         novel_id=novel_id,
         source_path="test",
         title="Metrics Non Terminal Run",
+    )
+    run_repo.update_run_status(run_id, "running")
+
+    response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "AnalysisNotCompleteError"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/novels/{novel_id}/diagnosis",
+        "/api/novels/{novel_id}/characters",
+    ],
+)
+def test_diagnosis_and_characters_routes_reject_non_terminal_run_status(
+    api_client: TestClient,
+    db_session,
+    path: str,
+) -> None:
+    novel_id = "r" + uuid.uuid4().hex[:7]
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Results Non Terminal Run",
     )
     run_repo.update_run_status(run_id, "running")
 

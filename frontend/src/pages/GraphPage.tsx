@@ -11,7 +11,7 @@ import {
   Network,
   RefreshCw,
 } from "lucide-react";
-import { getCharacters, getGraph } from "@/api/results";
+import { getGraph } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -114,13 +114,6 @@ export function GraphPage() {
     staleTime: STALE_TIME,
   });
 
-  const charactersQuery = useQuery({
-    queryKey: ["characters", novelId, taskScopeId],
-    queryFn: () => getCharacters(novelId!, taskScopeId!),
-    enabled,
-    staleTime: STALE_TIME,
-  });
-
   const novelQuery = useQuery({
     queryKey: ["novel", novelId],
     queryFn: () => getNovel(novelId!),
@@ -135,14 +128,7 @@ export function GraphPage() {
     !!graphData &&
     (graphData.summary == null || graphData.quality == null || graphData.events_page == null);
 
-  const appearanceCountMap = useMemo((): Map<string, number> | undefined => {
-    if (!charactersQuery.data || charactersQuery.data.length === 0) return undefined;
-    const map = new Map<string, number>();
-    charactersQuery.data.forEach((character) => {
-      map.set(character.name, character.appearance_count);
-    });
-    return map;
-  }, [charactersQuery.data]);
+  const appearanceCountMap = undefined;
 
   const nodeNameMap = useMemo(() => {
     const map = new Map<string, string>();
