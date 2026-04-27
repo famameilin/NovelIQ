@@ -103,7 +103,6 @@ function createTimelineResponse(): TimelineResponse {
       novel_id: "novel-1",
       novel_name: "Timeline Integration Novel",
       total_chunks: 12,
-      timeline_contract_version: 3,
     },
     phases: [
       { name: "引入期", start: 1, end: 3, ratio: 0.25 },

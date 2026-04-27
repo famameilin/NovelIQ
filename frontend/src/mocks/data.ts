@@ -430,7 +430,6 @@ export function createTimeline(): TimelineResponse {
       novel_id: "",
       novel_name: "斗破苍穹",
       total_chunks: 120,
-      timeline_contract_version: 3,
     },
     phases: [
       { name: "引入期", start: 0, end: 30, ratio: 0.25 },

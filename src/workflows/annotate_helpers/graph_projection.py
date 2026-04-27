@@ -445,11 +445,6 @@ def project_graph_tables(
         projected_count += 1
 
     graph_repo.refresh_relation_projections(run_id, affected_pairs)
-    run_repo.set_graph_contract_versions(
-        run_id,
-        graph_projection_version=2,
-        timeline_contract_version=2,
-    )
 
     session.commit()
     logger.info(

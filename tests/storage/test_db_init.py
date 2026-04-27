@@ -125,21 +125,16 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
     assert set(rows) == expected_constraints
 
 
-def test_timeline_contract_runtime_schema_columns_and_constraints_exist() -> None:
+def test_timeline_contract_runtime_schema_no_longer_creates_version_columns() -> None:
     """
-    验证 pytest fresh schema 已具备时间轴合同重构所需的版本列与 change_type 约束。
+    验证 pytest fresh schema 不再创建 timeline / graph projection 版本列。
 
-    创建时间: 2026-04-27
+    创建时间: 2026-04-28
     修改者: Codex
-    任务: timeline-contract-db-migration
-    说明: 当前主线不再兼容旧库 runtime/migration 收口；
-          这里验证的是 pytest 会话下 freshly created 的测试 schema，必须与新 timeline contract 保持一致。
+    任务: remove-timeline-version-columns
+    说明: 当前主线不再依赖 run-level version 标签 gate；
+          fresh schema 下若还出现这两个列，说明旧兼容层又被带回来了。
     """
-
-    expected_columns = {
-        ("analysis_runs", "graph_projection_version"),
-        ("analysis_runs", "timeline_contract_version"),
-    }
 
     with get_session_factory()() as session:
         column_rows = session.execute(
@@ -148,12 +143,8 @@ def test_timeline_contract_runtime_schema_columns_and_constraints_exist() -> Non
                 SELECT table_name, column_name
                 FROM information_schema.columns
                 WHERE table_schema = current_schema()
-                  AND (
-                    (
-                        table_name = 'analysis_runs'
-                        AND column_name IN ('graph_projection_version', 'timeline_contract_version')
-                    )
-                  )
+                  AND table_name = 'analysis_runs'
+                  AND column_name IN ('graph_projection_version', 'timeline_contract_version')
                 """
             )
         ).all()
@@ -169,38 +160,8 @@ def test_timeline_contract_runtime_schema_columns_and_constraints_exist() -> Non
             )
         ).scalars().all()
 
-    assert {(row.table_name, row.column_name) for row in column_rows} == expected_columns
+    assert column_rows == []
     assert constraints == ["ck_graph_relation_events_change_type_v2"]
-
-
-def test_timeline_contract_version_columns_have_server_defaults() -> None:
-    """
-    验证 analysis_runs 的 timeline 重构版本列在数据库层具有默认值。
-
-    创建时间: 2026-04-27
-    修改者: Codex
-    任务: timeline-contract-db-migration
-    说明: 仅有 ORM 的 Python default 还不够；测试里有原生 SQL 直接写 analysis_runs，
-          若数据库列没有 server default，就会在未显式带版本字段时触发 NOT NULL 错误。
-    """
-
-    with get_session_factory()() as session:
-        rows = session.execute(
-            text(
-                """
-                SELECT column_name, column_default
-                FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name = 'analysis_runs'
-                  AND column_name IN ('graph_projection_version', 'timeline_contract_version')
-                ORDER BY column_name
-                """
-            )
-        ).all()
-
-    defaults = {row.column_name: str(row.column_default or "") for row in rows}
-    assert "2" in defaults["graph_projection_version"]
-    assert "2" in defaults["timeline_contract_version"]
 
 
 def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
