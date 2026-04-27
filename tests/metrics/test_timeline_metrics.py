@@ -189,7 +189,7 @@ class TestSelectTimelineNodes:
         selected_ids = {node.node_id for node in selected}
         assert {"plot:1", "plot:7", "plot:10"}.issubset(selected_ids)
 
-    def test_select_timeline_nodes_allows_same_chunk_multi_type_but_dedupes_same_relation_pair(self):
+    def test_select_timeline_nodes_allows_distinct_relation_changes_for_same_pair(self):
         phases = convert_to_timeline_phases(
             [
                 NarrativePhase("引入期", 1, 2, 0.2),
@@ -244,6 +244,24 @@ class TestSelectTimelineNodes:
                 ],
             ),
             self.create_node(
+                node_id="relation:103",
+                anchor_chunk_id=7,
+                progress=0.7,
+                importance_score=6.0,
+                level=1,
+                node_type="relation",
+                node_subtype="强化",
+                relation_events=[
+                    RelationEventDTO(
+                        relation_event_id=103,
+                        from_char="顾承渊",
+                        to_char="苏映雪",
+                        relation_type="盟友",
+                        change_type="强化",
+                    )
+                ],
+            ),
+            self.create_node(
                 node_id="lifecycle:entry:1:5",
                 anchor_chunk_id=5,
                 progress=0.5,
@@ -281,8 +299,9 @@ class TestSelectTimelineNodes:
         selected_ids = {node.node_id for node in selected}
         assert "plot:5" in selected_ids
         assert "relation:101" in selected_ids
+        assert "relation:102" in selected_ids
         assert "lifecycle:entry:1:5" in selected_ids
-        assert not {"relation:101", "relation:102"}.issubset(selected_ids)
+        assert "relation:103" not in selected_ids
 
     def test_select_timeline_nodes_respects_budget_ceiling(self):
         phases = convert_to_timeline_phases(

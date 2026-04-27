@@ -874,12 +874,26 @@ def _select_best_plot_node(nodes: list[TimelineNodeDTO], anchor_chunk_id: int) -
     return max(plot_nodes, key=lambda node: node.importance_score)
 
 
-def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str] | None:
+def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str, str] | None:
+    """
+    2026-04-27，任务：fix-timeline-relation-dedup-signature
+    修改原因：relation 节点的近邻去重既要压掉真正重复的同类事件，
+    也不能把同一对角色在短距离内发生的不同变化（如新建->断裂、双向 directed 事件）误吞掉。
+    """
     if not node.relation_events:
         return None
     event = node.relation_events[0]
-    name_pair = tuple(sorted((event.from_char, event.to_char)))
-    return (name_pair[0], name_pair[1], event.relation_type)
+    if event.directionality == "symmetric":
+        left_name, right_name = tuple(sorted((event.from_char, event.to_char)))
+    else:
+        left_name, right_name = event.from_char, event.to_char
+    return (
+        left_name,
+        right_name,
+        event.relation_type,
+        event.change_type,
+        event.directionality or "unknown",
+    )
 
 
 def _lifecycle_signature(node: TimelineNodeDTO) -> tuple[int, str] | None:
