@@ -150,16 +150,25 @@ def _normalize_text_by_alias_map(text: str | None, alias_map: dict[str, str] | N
     return "".join(segments)
 
 
-def _calculate_protagonist_scores(
+def _calculate_narrative_focus_scores(
     characters: list[CharacterStats],
     arc_scores: dict[str, float],
+    focus_characters: list[str],
     main_characters: list[str],
 ) -> list[CharacterStats]:
-    """计算主角评分并判定是否为主角。"""
+    """
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改原因: 旧 `protagonist_score` 语义会把“唯一主角判定”和“中心度融合分”混在一起；
+    现在保留原四因子公式，但只把它作为 `narrative_focus_score`，焦点身份改由
+    diagnosis 输出的 `focus_characters` 决定。
+    """
     if not characters:
         return characters
 
     max_appearance = max(c.appearance_count for c in characters)
+    focus_character_set = set(focus_characters)
 
     for char in characters:
         appearance_norm = char.appearance_count / max_appearance if max_appearance > 0 else 0.0
@@ -168,23 +177,9 @@ def _calculate_protagonist_scores(
         arc_score = arc_scores.get(char.name, 0.0)
         arc_norm = arc_score / 10.0 if arc_score > 0 else 0.0
         in_main_cast = 1.0 if char.name in main_characters else 0.0
-        protagonist_score = 0.25 * appearance_norm + 0.25 * subject_ratio + 0.25 * arc_norm + 0.25 * in_main_cast
-        char.protagonist_score = round(protagonist_score, 4)
-
-    top_character = max(
-        characters,
-        key=lambda item: (
-            item.protagonist_score if item.protagonist_score is not None else float("-inf"),
-            item.appearance_count,
-        ),
-    )
-    top_score = top_character.protagonist_score
-
-    for char in characters:
-        char.is_protagonist = False
-
-    if top_score is not None and top_score >= 0.6:
-        top_character.is_protagonist = True
+        narrative_focus_score = 0.25 * appearance_norm + 0.25 * subject_ratio + 0.25 * arc_norm + 0.25 * in_main_cast
+        char.narrative_focus_score = round(narrative_focus_score, 4)
+        char.is_focus_character = char.name in focus_character_set
 
     return characters
 
@@ -192,8 +187,6 @@ def _calculate_protagonist_scores(
 def _normalize_arc_scores(
     arc_scores: Any,
     alias_map: dict[str, str] | None,
-    *,
-    character_order: list[str] | None = None,
 ) -> dict[str, float] | None:
     """
     对 arc_scores 的人物名称进行归一化，并收口为命名字典。
@@ -201,25 +194,22 @@ def _normalize_arc_scores(
     修改时间: 2026-04-26
     修改者: Codex
     任务: fix-diagnosis-followup-review-findings
-    修改原因: 结果 API 与前端页面都按“角色名 -> 分数”消费 arc_scores；
-    旧 run 若仍存数组形态，这里要优先按人物顺序还原成命名字典，
-    无法可靠还原时返回 None，避免把 `0/1/2` 这种索引误当成角色名对外暴露。
+    修改原因: 结果 API 与前端页面都按“角色名 -> 分数”消费 arc_scores。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改原因: 焦点合同已经明确不兼容旧数据；这里不再接受匿名数组形态的旧弧线分，
+    只保留命名字典输入，避免继续在活链路里保留旧合同兼容分支。
     """
     if not arc_scores:
         return None
 
+    if not isinstance(arc_scores, dict):
+        return None
     normalized: dict[str, float] = {}
 
-    if isinstance(arc_scores, list):
-        if not character_order:
-            return None
-        source_items = zip(character_order, arc_scores, strict=False)
-    elif isinstance(arc_scores, dict):
-        source_items = arc_scores.items()
-    else:
-        return None
-
-    for raw_name, score in source_items:
+    for raw_name, score in arc_scores.items():
         if not isinstance(raw_name, str) or not raw_name.strip():
             continue
         try:

@@ -49,10 +49,14 @@ class TestCloudStub(unittest.TestCase):
             {
                 "novel_id": "n1",
                 "foreshadow_expectation": 0.5,
-                "arc_scores": [0.1],
+                "arc_scores": {"角色0": 8.0},
                 "narrative_type": "three-act",
                 "topic_labels": ["growth"],
                 "diagnosis": "ok",
+                "focus_structure": "single",
+                "focus_characters": ["角色0"],
+                "main_characters": ["角色0"],
+                "core_cast": ["角色0"],
             }
         )
 

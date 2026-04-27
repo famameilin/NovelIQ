@@ -244,6 +244,29 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
     )
 
 
+def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract
+    说明: 启动期需要对关键表做正式合同校验，这里统一读取当前 schema 下的列集合，
+    避免后续把“旧表还能跑”误当成可接受状态。
+    """
+
+    rows = connection.execute(
+        text(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = :table_name
+            """
+        ),
+        {"table_name": table_name},
+    ).fetchall()
+    return {str(row.column_name) for row in rows}
+
+
 def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> None:
     """
     在补外键前校验目标子表没有孤儿数据。
@@ -508,6 +531,45 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         _ensure_analysis_related_foreign_keys(conn)
 
 
+def _assert_focus_contract_schema(engine: Engine) -> None:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract
+    说明: 本次主角合同重构明确不兼容旧库，因此启动时必须显式检查
+    `cloud_analysis` 是否已切到焦点合同；若仍停留在旧 `protagonist` 结构，直接阻断启动。
+    """
+    dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
+    if dialect_name != "postgresql":
+        return
+
+    with engine.begin() as conn:
+        if not _table_exists(conn, "cloud_analysis"):
+            return
+
+        actual_columns = _get_table_columns(conn, "cloud_analysis")
+        required_columns = {
+            "focus_structure",
+            "focus_characters",
+            "main_characters",
+            "core_cast",
+        }
+        missing_columns = sorted(required_columns - actual_columns)
+        if missing_columns:
+            raise RuntimeError(
+                "cloud_analysis is missing focus contract columns: "
+                f"{missing_columns}. Please recreate or manually migrate the current database schema "
+                "so that `cloud_analysis` includes the full focus-contract column set before starting the service."
+            )
+
+        if "protagonist" in actual_columns:
+            raise RuntimeError(
+                "cloud_analysis still contains legacy column `protagonist`. "
+                "Please recreate or manually migrate the current database schema "
+                "to remove legacy protagonist-contract columns before starting the service."
+            )
+
+
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
     """
@@ -569,6 +631,7 @@ def init_db(include_level3_tables: bool = False) -> None:
         tables = [table for table in tables if table.name not in {"chunk_embeddings", "paragraph_embeddings"}]
     Base.metadata.create_all(bind=engine, tables=tables)
     _ensure_runtime_schema(engine)
+    _assert_focus_contract_schema(engine)
     logger.info("Database tables created successfully")
 
 

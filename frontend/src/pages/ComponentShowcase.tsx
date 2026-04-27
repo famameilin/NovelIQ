@@ -542,12 +542,12 @@ export function ComponentShowcase() {
                 <TableHead>角色</TableHead>
                 <TableHead>出场次数</TableHead>
                 <TableHead>角色功能</TableHead>
-                <TableHead className="text-right">主角分</TableHead>
+                <TableHead className="text-right">叙事中心度</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {[
-                { name: "李逍遥", count: 342, role: "protagonist", score: 0.95 },
+                { name: "李逍遥", count: 342, role: "focus", score: 0.95 },
                 { name: "赵灵儿", count: 287, role: "helper", score: 0.72 },
                 { name: "林月如", count: 198, role: "helper", score: 0.58 },
                 { name: "拜月教主", count: 76, role: "antagonist", score: 0.12 },
@@ -558,7 +558,7 @@ export function ComponentShowcase() {
                   <TableCell>
                     <Badge
                       variant={
-                        char.role === "protagonist"
+                        char.role === "focus"
                           ? "default"
                           : char.role === "antagonist"
                             ? "destructive"

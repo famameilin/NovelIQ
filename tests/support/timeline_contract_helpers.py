@@ -15,6 +15,7 @@ from src.storage.repositories import (
     RunRepository,
     StatsRepository,
 )
+from tests.support.graph_snapshot_helpers import insert_focus_contract_cloud_analysis
 
 
 @dataclass(frozen=True)
@@ -257,6 +258,16 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
     graph_repo.refresh_current_relation(run_id, hero.entity_id, sect.entity_id)
     graph_repo.refresh_entity_participants(run_id, [hero.entity_id, rival.entity_id, sect.entity_id])
     db_session.commit()
+
+    insert_focus_contract_cloud_analysis(
+        db_session,
+        novel_id=novel_id,
+        run_id=run_id,
+        focus_characters=[hero_name],
+        main_characters=[hero_name, rival_name],
+        core_cast=[hero_name, rival_name, organization_name],
+        topic_labels=["结盟与决裂"],
+    )
 
     return TimelineContractScenario(
         novel_id=novel_id,

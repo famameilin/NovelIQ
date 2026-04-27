@@ -21,7 +21,7 @@
 """
 
 from src.api.services.results_queries import (
-    _calculate_protagonist_scores,
+    _calculate_narrative_focus_scores,
     _fetch_alias_merges_only,
     _fetch_character_relations,
     _fetch_characters,
@@ -56,7 +56,7 @@ __all__ = [
     "_fetch_chunk_curves",
     "_fetch_raw_chunk_curves",
     "_fetch_characters",
-    "_calculate_protagonist_scores",
+    "_calculate_narrative_focus_scores",
     "_fetch_topics",
     "_fetch_diagnosis",
     "_fetch_foreshadowing_threads",

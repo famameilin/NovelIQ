@@ -161,11 +161,16 @@ class BaseCloudModelClient(BaseModelClient):
 
 
 def make_empty_analysis() -> CloudAnalysis:
-    """创建空的分析结果"""
+    """
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改原因: 空诊断结果也要对齐新的焦点合同字段，避免测试桩继续产出旧主角结构。
+    """
     analysis = CloudAnalysis(
         novel_id=None,
         foreshadow_expectation=None,
-        arc_scores=[],
+        arc_scores={},
         narrative_type=None,
         topic_labels=[],
         diagnosis=None,
@@ -177,5 +182,7 @@ def make_empty_analysis() -> CloudAnalysis:
         dignity_reason=None,
         cultural_depth_score=None,
         cultural_depth_reason=None,
+        focus_structure=None,
+        focus_characters=[],
     )
     return analysis

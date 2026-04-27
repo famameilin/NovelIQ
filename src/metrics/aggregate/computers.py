@@ -33,7 +33,6 @@ from ..character_metrics import (
     compute_greimas_coverage,
     compute_largest_component_size,
     compute_number_of_connected_components,
-    compute_protagonist_betweenness,
     compute_relation_change_frequency,
     compute_relation_network_density,
 )
@@ -167,11 +166,6 @@ def compute_character_relation_metrics(
         "largest_component_size": float(compute_largest_component_size(relation_input, graph=relation_graph)),
         **compute_relation_change_frequency(relation_data.full_relations, total_chunks),
     }
-
-    if char_data.protagonist_name:
-        result["protagonist_betweenness"] = compute_protagonist_betweenness(
-            relation_input, char_data.protagonist_name, graph=relation_graph
-        )
 
     degree_centrality = compute_character_degree_centrality(relation_input, graph=relation_graph)
     if degree_centrality:

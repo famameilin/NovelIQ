@@ -182,6 +182,11 @@ describe("DiagnosisPage", () => {
     getDiagnosisMock.mockResolvedValue({
       narrative_type: "寓言",
       foreshadow_expectation: 0.42,
+      arc_scores: { 沈砚: 8.2 },
+      focus_structure: "single",
+      focus_characters: ["沈砚"],
+      main_characters: ["沈砚"],
+      core_cast: ["沈砚"],
       topic_labels: ["成长"],
     });
     getForeshadowingThreadsMock.mockRejectedValue(new Error("threads boom"));
@@ -191,5 +196,52 @@ describe("DiagnosisPage", () => {
     expect(await screen.findByText("伏笔回收预期")).toBeInTheDocument();
     expect(await screen.findByText("Setup 台账加载失败")).toBeInTheDocument();
     expect(screen.getByText("伏笔 setup 台账暂时无法读取，请稍后重试。")).toBeInTheDocument();
+  });
+
+  it("renders rerun-required state when diagnosis payload misses focus contract", async () => {
+    getDiagnosisMock.mockResolvedValue({
+      narrative_type: "寓言",
+      foreshadow_expectation: 0.42,
+      topic_labels: ["成长"],
+    });
+    getForeshadowingThreadsMock.mockResolvedValue([]);
+
+    renderDiagnosisPage();
+
+    expect(await screen.findByText("诊断结果需要重跑")).toBeInTheDocument();
+    expect(
+      screen.getByText("当前任务缺少完整的焦点结构 diagnosis，请重新分析该任务后再查看正式诊断报告。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("伏笔回收预期")).not.toBeInTheDocument();
+  });
+
+  it("renders analysis-not-complete state for running tasks", async () => {
+    getDiagnosisMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+    getForeshadowingThreadsMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+
+    renderDiagnosisPage();
+
+    expect(await screen.findByText("诊断结果尚未完成")).toBeInTheDocument();
+    expect(screen.getByText("当前任务仍在分析中，诊断报告和 setup 台账暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
   });
 });

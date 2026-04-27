@@ -24,6 +24,7 @@ from tests.support.graph_snapshot_helpers import (
     StaticGraphAuthorityService,
     build_graph_authority_view,
     create_graph_annotation_repo,
+    insert_focus_contract_cloud_analysis,
     insert_graph_test_chunks,
     insert_graph_test_novel,
     participant_state,
@@ -62,6 +63,14 @@ def _create_stale_graph_run(db_session) -> tuple[str, str, str]:
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
     db_session.commit()
+    insert_focus_contract_cloud_analysis(
+        db_session,
+        novel_id=novel_id,
+        run_id=run_id,
+        focus_characters=["贺伯安"],
+        main_characters=["贺伯安", "柳婉儿"],
+        core_cast=["贺伯安", "柳婉儿"],
+    )
     return novel_id, run_id, run_id[:8]
 
 
@@ -635,6 +644,14 @@ def test_get_graph_pending_projection_returns_409(api_client, db_session) -> Non
     )
     run_repo.update_run_status(run_id, "completed")
     insert_graph_test_chunks(db_session, run_id, range(1, 3))
+    insert_focus_contract_cloud_analysis(
+        db_session,
+        novel_id=novel_id,
+        run_id=run_id,
+        focus_characters=["贺伯安"],
+        main_characters=["贺伯安", "柳婉儿"],
+        core_cast=["贺伯安", "柳婉儿"],
+    )
     db_session.add(
         ChunkRelation(
             chunk_id=1,
