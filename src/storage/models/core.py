@@ -25,7 +25,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -85,8 +85,18 @@ class AnalysisRun(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
-    graph_projection_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    timeline_contract_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    graph_projection_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=2,
+        server_default=text("2"),
+    )
+    timeline_contract_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=2,
+        server_default=text("2"),
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
 
