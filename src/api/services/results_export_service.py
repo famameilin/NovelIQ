@@ -93,6 +93,7 @@ def load_character_bundle(
     annotation_repo: AnnotationRepository,
     alias_map: dict[str, str],
     export_graph_view: ExportGraphAuthorityView,
+    diagnosis: Any | None = None,
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
     """
     加载角色相关数据
@@ -114,7 +115,8 @@ def load_character_bundle(
     """
     missing_fields: list[str] = []
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is None:
+        diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
     if diagnosis is not None and diagnosis.rerun_required:
         raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
     diagnosis_is_complete = _is_complete_diagnosis_result(diagnosis)
@@ -397,6 +399,10 @@ def fetch_all_results_data(
     diagnosis 等字段若被多段 bundle 链路重复判缺，不应在返回值里出现重复项。
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is not None and diagnosis.rerun_required:
+        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
+
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
     graph_authority_service.assert_graph_projection_ready(run_id)
     export_graph_view = graph_authority_service.build_export_view(run_id)
@@ -406,13 +412,10 @@ def fetch_all_results_data(
     chunk_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view
+        run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view, diagnosis=diagnosis
     )
     missing_fields.extend(char_missing)
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
-    if diagnosis is not None and diagnosis.rerun_required:
-        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
     if not _is_complete_diagnosis_result(diagnosis):
         missing_fields.append("diagnosis")
         diagnosis = None

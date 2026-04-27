@@ -203,6 +203,10 @@ class CloudAnalysis(BaseModel):
                 raise ValueError("main_characters is required for formal diagnosis payload")
             if not self.core_cast:
                 raise ValueError("core_cast is required for formal diagnosis payload")
+            if len(self.main_characters) > 5:
+                raise ValueError("main_characters cannot exceed 5 items")
+            if len(self.core_cast) > 10:
+                raise ValueError("core_cast cannot exceed 10 items")
 
         if self.focus_structure is None:
             if self.focus_characters:

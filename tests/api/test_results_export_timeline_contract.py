@@ -31,6 +31,7 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
+from src.models.cloud.schema import CloudAnalysis
 from src.storage.models import ChunkRelation
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
@@ -395,6 +396,25 @@ def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch:
 
 def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
+    StatsRepository(db_session).insert_cloud_analysis(
+        scenario.run_id,
+        CloudAnalysis(
+            novel_id=scenario.novel_id,
+            foreshadow_expectation=0.42,
+            arc_scores={
+                scenario.hero_name: 8.6,
+                scenario.rival_name: 7.8,
+            },
+            narrative_type="双线推进",
+            topic_labels=["冲突升级"],
+            diagnosis="有效 diagnosis",
+            narrative_arc_type="落坑爬出",
+            focus_structure="dual",
+            focus_characters=[scenario.hero_name, scenario.rival_name],
+            main_characters=[scenario.hero_name, scenario.rival_name],
+            core_cast=[scenario.hero_name, scenario.rival_name],
+        ),
+    )
     db_session.add(
         ChunkRelation(
             chunk_id=4,
