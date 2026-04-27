@@ -82,7 +82,7 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         self,
         run_id: str,
         chunk_id: int,
-        relations: Sequence[RelationChangeSnapshot],
+        relations: Sequence[RelationChangeSnapshot | dict[str, Any]],
         *,
         source_model: str,
         commit: bool = True,

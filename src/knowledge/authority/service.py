@@ -126,7 +126,16 @@ class KnowledgeGraphAuthorityService:
 
     def build_export_view(self, run_id: str) -> ExportGraphAuthorityView:
         """Return the authority surface used by graph-derived export payloads."""
-
+        self.assert_graph_projection_ready(run_id)
+        relation_events = self._build_relation_events(self._graph_repo.fetch_relation_events(run_id))
+        participant_entities = self._graph_repo.fetch_participant_entities(run_id)
+        self._assert_participant_projection_consistency(
+            run_id,
+            relation_events=relation_events,
+            confirmed_relations=[],
+            participant_entities=participant_entities,
+            relation_endpoint_ids=self._graph_repo.fetch_relation_endpoint_entity_ids(run_id),
+        )
         entities = self._graph_repo.fetch_entities(run_id)
         # 中文注释：export 仍保留部分历史 DTO，这里统一把“当前关系快照 + 关系事件历史”
         # 以及“允许导出的规范实体集合”一起收口成 authority view，避免导出层再直接
@@ -136,7 +145,7 @@ class KnowledgeGraphAuthorityService:
             current_relations=self._build_export_relation_snapshots(
                 self._graph_repo.fetch_current_relations(run_id, active_only=False)
             ),
-            relation_events=self._build_relation_events(self._graph_repo.fetch_relation_events(run_id)),
+            relation_events=relation_events,
         )
 
     def build_graph_view(self, run_id: str) -> GraphAuthorityView:

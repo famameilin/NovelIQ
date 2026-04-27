@@ -33,7 +33,14 @@ def _create_relation_write_test_run(db_session) -> str:
         source_path="test",
         title="Disambiguation Relations",
     )
-    ChunkRepository(db_session).insert_chunks(run_id, [Chunk(index=0, text="测试文本", start=0, end=4)])
+    ChunkRepository(db_session).insert_chunks(
+        run_id,
+        [
+            Chunk(index=0, text="测试文本-0", start=0, end=4),
+            Chunk(index=1, text="测试文本-1", start=5, end=9),
+            Chunk(index=2, text="测试文本-2", start=10, end=14),
+        ],
+    )
     return run_id
 
 
@@ -70,7 +77,7 @@ def test_process_entity_relations_uses_shared_change_type_and_refreshes_projecti
         db_session,
         novel_id="novel-1",
         run_id=run_id,
-        entity_relations=[{"from": "阿顾", "to": "苏镜", "type": "盟友"}],
+        entity_relations=[{"from": "阿顾", "to": "苏镜", "type": "father_of"}],
         entity_types={"顾霜": "character", "苏镜": "character", "阿顾": "character"},
         alias_map={"阿顾": "顾霜"},
     )
@@ -98,18 +105,18 @@ def test_persist_final_disambiguation_relations_survive_graph_rebuild(db_session
     ann_repo = AnnotationRepository(db_session)
     ann_repo.ensure_canonical_entities(
         run_id,
-        frozenset({"顾霜", "苏镜"}),
+        frozenset({"顾霜", "苏镜", "贺家"}),
         novel_id="novel-1",
-        entity_types={"顾霜": "character", "苏镜": "character"},
+        entity_types={"顾霜": "character", "苏镜": "character", "贺家": "organization"},
     )
 
     state = DisambiguationState(
-        known_canonical_names=frozenset({"顾霜", "苏镜"}),
+        known_canonical_names=frozenset({"顾霜", "苏镜", "贺家"}),
     )
     result = ExtendedDisambigResult(
         canonical_decisions={},
-        entity_types={"顾霜": "character", "苏镜": "character"},
-        entity_relations=[{"from": "阿顾", "to": "苏镜", "type": "盟友"}],
+        entity_types={"顾霜": "character", "苏镜": "character", "贺家": "organization"},
+        entity_relations=[{"from": "阿顾", "to": "贺家", "type": "belongs_to"}],
         alias_confidence={},
     )
     persisted_state = persist_final_disambiguation(
@@ -123,7 +130,7 @@ def test_persist_final_disambiguation_relations_survive_graph_rebuild(db_session
     )
     assert persisted_state.pending_relations == ()
 
-    project_graph_tables(run_id=run_id, to_chunk=0, session=db_session, rebuild=True)
+    project_graph_tables(run_id=run_id, to_chunk=2, session=db_session, rebuild=True)
 
     graph_repo = GraphRepository(db_session)
     current_relations = graph_repo.fetch_current_relations(run_id, active_only=False)
@@ -131,7 +138,9 @@ def test_persist_final_disambiguation_relations_survive_graph_rebuild(db_session
 
     assert len(current_relations) == 1
     assert current_relations[0].from_name == "顾霜"
-    assert current_relations[0].to_name == "苏镜"
+    assert current_relations[0].to_name == "贺家"
     assert len(relation_events) == 1
     assert relation_events[0].from_name == "顾霜"
-    assert relation_events[0].to_name == "苏镜"
+    assert relation_events[0].to_name == "贺家"
+    assert relation_events[0].relation_type == "belongs_to"
+    assert relation_events[0].chunk_id == 2

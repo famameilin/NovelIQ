@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete, update
 
@@ -34,6 +34,12 @@ from src.storage.models import (
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+
+def _relation_value(relation: RelationChangeSnapshot | dict[str, Any], field_name: str, default: Any = None) -> Any:
+    if isinstance(relation, dict):
+        return relation.get(field_name, default)
+    return getattr(relation, field_name, default)
 
 
 def insert_chunk_annotation(
@@ -146,7 +152,7 @@ def replace_chunk_relations_for_source_model(
     session: Session,
     run_id: str,
     chunk_id: int,
-    relations: Sequence[RelationChangeSnapshot],
+    relations: Sequence[RelationChangeSnapshot | dict[str, Any]],
     *,
     source_model: str,
     commit: bool = True,
@@ -166,21 +172,25 @@ def replace_chunk_relations_for_source_model(
         records = [
             ChunkRelation(
                 chunk_id=chunk_id,
-                from_char=relation.from_name,
-                to_char=relation.to_name,
-                type=relation.type,
-                change=relation.change,
-                directionality=relation.directionality,
-                evidence=relation.evidence,
-                confidence=relation.confidence,
+                from_char=_relation_value(relation, "from_name"),
+                to_char=_relation_value(relation, "to_name"),
+                type=_relation_value(relation, "type"),
+                change=_relation_value(relation, "change"),
+                directionality=_relation_value(relation, "directionality", "directed"),
+                evidence=_relation_value(relation, "evidence"),
+                confidence=_relation_value(relation, "confidence"),
                 source_model=source_model,
-                projection_status=relation.projection_status,
-                projected_at=datetime.fromisoformat(relation.projected_at) if relation.projected_at else None,
-                projection_error=relation.projection_error,
+                projection_status=_relation_value(relation, "projection_status", "pending"),
+                projected_at=(
+                    datetime.fromisoformat(_relation_value(relation, "projected_at"))
+                    if _relation_value(relation, "projected_at")
+                    else None
+                ),
+                projection_error=_relation_value(relation, "projection_error"),
                 run_id=run_id,
             )
             for relation in relations
-            if relation.from_name != relation.to_name
+            if _relation_value(relation, "from_name") != _relation_value(relation, "to_name")
         ]
         session.add_all(records)
     if commit:

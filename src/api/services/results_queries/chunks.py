@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 
+from src.api.exceptions import GraphReadinessError
 from src.api.models.responses import (
     ChunkAnnotation,
     ChunkCharacter,
@@ -119,9 +120,14 @@ def _fetch_chunk_annotations(
     dialogues_raw = annotation_repo.fetch_chunk_dialogues_full(run_id)
 
     if export_graph_view is None:
-        export_graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(
-            run_id
-        )
+        authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+        if require_graph_projection:
+            export_graph_view = authority_service.build_export_view(run_id)
+        else:
+            try:
+                export_graph_view = authority_service.build_export_view(run_id)
+            except GraphReadinessError:
+                export_graph_view = ExportGraphAuthorityView()
 
     if require_graph_projection and not export_graph_view.relation_events:
         pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)

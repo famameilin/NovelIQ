@@ -165,7 +165,7 @@ _ENTITY_TYPE_DESCRIPTIONS: dict[str, str] = {
 
 def _build_relation_types_section() -> str:
     """根据配置动态构建关系类型说明。"""
-    valid_types = settings.analysis.valid_relation_types
+    valid_types = settings.analysis.valid_hierarchical_relation_types
     lines = ["【关系类型说明】"]
     for rel_type in valid_types:
         desc = _RELATION_TYPE_DESCRIPTIONS.get(rel_type, f"{rel_type} 关系")
@@ -175,7 +175,7 @@ def _build_relation_types_section() -> str:
 
 def _build_relation_types_union() -> str:
     """构建关系类型联合字符串，用于 JSON 格式说明。"""
-    valid_types = settings.analysis.valid_relation_types
+    valid_types = settings.analysis.valid_hierarchical_relation_types
     return "|".join(valid_types)
 
 

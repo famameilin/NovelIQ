@@ -623,6 +623,48 @@ def test_fetch_hierarchical_relations_skips_inactive_current_relations():
     assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [(2, "老贺", "阿明")]
 
 
+def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
+    export_graph_view = ExportGraphAuthorityView(
+        canonical_entities=[
+            SimpleNamespace(name="伯安", entity_type="character"),
+            SimpleNamespace(name="贺家", entity_type="organization"),
+            SimpleNamespace(name="赵甲卫", entity_type="group"),
+        ],
+        current_relations=[
+            ExportRelationSnapshot(
+                relation_id=11,
+                from_name="伯安",
+                to_name="贺家",
+                relation_type="belongs_to",
+                first_seen_chunk=2,
+                last_seen_chunk=9,
+                is_active=True,
+            ),
+            ExportRelationSnapshot(
+                relation_id=12,
+                from_name="赵甲卫",
+                to_name="贺家",
+                relation_type="affiliated_with",
+                first_seen_chunk=3,
+                last_seen_chunk=10,
+                is_active=True,
+            ),
+        ],
+    )
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        export_graph_view=export_graph_view,
+        alias_map={},
+        valid_character_names={"伯安"},
+    )
+
+    assert [(item.rel_id, item.rel_type, item.from_entity, item.to_entity) for item in result] == [
+        (11, "belongs_to", "伯安", "贺家"),
+        (12, "affiliated_with", "赵甲卫", "贺家"),
+    ]
+
+
 def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
     class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
         def fetch_chunk_annotations_full(self, _run_id):
@@ -729,4 +771,52 @@ def test_fetch_chunk_annotations_allows_pending_graph_when_projection_not_requir
     assert result[0].chunk_id == 3
     assert result[0].is_strong_setup is True
     assert result[0].setup_kind == "异常物件"
+    assert result[0].relations == []
+
+
+def test_fetch_chunk_annotations_degrades_to_phase2_only_when_graph_view_is_not_ready(monkeypatch):
+    class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
+        def fetch_chunk_annotations_full(self, _run_id):
+            return [
+                _DummyRow(
+                    chunk_id=3,
+                    emotional_valence="正向",
+                    event_type="冲突",
+                    pivot_moment=True,
+                    cliffhanger=False,
+                    has_foreshadowing=False,
+                    is_strong_setup=False,
+                    foreshadowing_type=None,
+                    setup_kind=None,
+                    foreshadowing_desc=None,
+                    why_unresolved_now=None,
+                    expected_payoff_family=None,
+                )
+            ]
+
+        def fetch_chunk_characters_full(self, _run_id):
+            return []
+
+        def fetch_chunk_dialogues_full(self, _run_id):
+            return []
+
+    annotation_repo = _AnnotationRepoWithChunkRows()
+
+    class _GraphUnavailableService:
+        def build_export_view(self, _run_id):
+            raise GraphReadinessError("graph participant projection is stale or incomplete")
+
+    monkeypatch.setattr(
+        "src.api.services.results_queries.chunks.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: _GraphUnavailableService(),
+    )
+
+    result = _fetch_chunk_annotations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        alias_map={},
+        require_graph_projection=False,
+    )
+
+    assert len(result) == 1
     assert result[0].relations == []

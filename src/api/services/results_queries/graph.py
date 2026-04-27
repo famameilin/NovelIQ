@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
+from src.config import settings
 from src.knowledge.authority import (
     GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
     ExportGraphAuthorityView,
@@ -247,7 +248,10 @@ def _fetch_hierarchical_relations(
     valid_character_names: set[str] | None = None,
 ) -> list:
     """获取层级关系数据。"""
-    hierarchical_types = {"child_of", "parent_of", "father_of", "son_of", "sibling_of", "spouse_of"}
+    hierarchical_types = set(settings.analysis.valid_hierarchical_relation_types)
+    valid_entity_names = {
+        entity.name for entity in export_graph_view.canonical_entities if getattr(entity, "name", None)
+    }
     result = []
     for relation in export_graph_view.current_relations:
         if not relation.is_active:
@@ -259,8 +263,9 @@ def _fetch_hierarchical_relations(
         to_name_raw = relation.to_name
         from_entity = _normalize_name(from_name_raw, alias_map) or from_name_raw
         to_entity = _normalize_name(to_name_raw, alias_map) or to_name_raw
-        if valid_character_names is not None and (
-            from_entity not in valid_character_names or to_entity not in valid_character_names
+        allowed_names = valid_entity_names or valid_character_names
+        if allowed_names is not None and (
+            from_entity not in allowed_names or to_entity not in allowed_names
         ):
             continue
         rel_id = relation.relation_id

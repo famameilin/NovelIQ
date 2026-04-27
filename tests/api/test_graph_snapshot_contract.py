@@ -36,11 +36,13 @@ from tests.support.timeline_contract_helpers import create_timeline_contract_sce
 def _create_stale_graph_run(db_session) -> tuple[str, str, str]:
     novel_id = f"g{uuid.uuid4().hex[:7]}"
     insert_graph_test_novel(db_session, novel_id)
-    run_id = RunRepository(db_session).create_run(
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
         novel_id=novel_id,
         source_path="test",
         title="Graph Stale Participant Contract",
     )
+    run_repo.update_run_status(run_id, "completed")
     insert_graph_test_chunks(db_session, run_id, range(1, 5))
 
     graph_repo = GraphRepository(db_session)
@@ -625,11 +627,13 @@ def test_get_graph_events_stale_participant_projection_returns_409(api_client, d
 def test_get_graph_pending_projection_returns_409(api_client, db_session) -> None:
     novel_id = f"g{uuid.uuid4().hex[:7]}"
     insert_graph_test_novel(db_session, novel_id)
-    run_id = RunRepository(db_session).create_run(
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
         novel_id=novel_id,
         source_path="test",
         title="Graph Pending Projection",
     )
+    run_repo.update_run_status(run_id, "completed")
     insert_graph_test_chunks(db_session, run_id, range(1, 3))
     db_session.add(
         ChunkRelation(
@@ -653,6 +657,46 @@ def test_get_graph_pending_projection_returns_409(api_client, db_session) -> Non
 
     assert response.status_code == 409
     assert response.json()["error_type"] == "GraphReadinessError"
+
+
+def test_get_graph_rejects_non_terminal_run_status(api_client, db_session) -> None:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Non Terminal Run",
+    )
+    run_repo.update_run_status(run_id, "running")
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph",
+        params={"task_id": run_id[:8]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "AnalysisNotCompleteError"
+
+
+def test_get_graph_events_rejects_non_terminal_run_status(api_client, db_session) -> None:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Events Non Terminal Run",
+    )
+    run_repo.update_run_status(run_id, "running")
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph/events",
+        params={"task_id": run_id[:8]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "AnalysisNotCompleteError"
 
 
 @pytest.mark.parametrize(
