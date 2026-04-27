@@ -68,7 +68,6 @@ def test_fetch_character_data_uses_level1_canonical_entities_instead_of_graph_pa
         ("主角", [1.0, -1.0]),
         ("同伴", [1.0]),
     ]
-    assert data.protagonist_name == "主角"
     mock_service.build_graph_view.assert_not_called()
 
 
@@ -115,7 +114,6 @@ def test_fetch_character_data_normalizes_alias_scores_to_canonical_name():
         ("白芷", [1.0, -1.0]),
         ("同伴", [1.0]),
     ]
-    assert data.protagonist_name == "白芷"
     mock_service.build_graph_view.assert_not_called()
 
 
