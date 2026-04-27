@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 
+from src.api.exceptions import GraphReadinessError
 from src.knowledge.authority import (
     EXPORT_GRAPH_AUTHORITY_DEPENDENCY_FIELDS,
     GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
@@ -16,7 +17,7 @@ from src.knowledge.authority import (
     KnowledgeGraphAuthorityService,
 )
 from src.storage.models import Chunk as ChunkModel
-from src.storage.models import Novel
+from src.storage.models import ChunkRelation, Novel
 from src.storage.repositories import GraphRepository, RunRepository
 
 
@@ -102,6 +103,7 @@ def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db
         source_relation_row_id=12002,
         directionality="directed",
     )
+    graph_repo.refresh_entity_participants(run_id, [protagonist.entity_id, rival.entity_id, sect.entity_id])
     db_session.commit()
 
     view = KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(run_id)
@@ -126,7 +128,7 @@ def test_build_timeline_view_only_exposes_character_subgraph_and_break_events(db
     assert all(item.entity_id in character_ids for item in view.entity_lifecycles)
 
 
-def test_build_graph_view_exposes_stable_states_without_transient_local_context(db_session) -> None:
+def test_build_graph_view_exposes_participant_states_without_transient_local_context(db_session) -> None:
     novel_id, run_id = _create_run_with_novel(db_session, title="Graph Authority View")
 
     graph_repo = GraphRepository(db_session)
@@ -161,16 +163,17 @@ def test_build_graph_view_exposes_stable_states_without_transient_local_context(
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
     db_session.commit()
 
     view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
 
-    assert {(state.name, state.primary_role_function, state.status) for state in view.stable_states} == {
+    assert {(state.name, state.primary_role_function, state.status) for state in view.participant_states} == {
         ("周渡", "protagonist", "active"),
         ("顾霜", None, "active"),
     }
-    assert all(not hasattr(state, "last_action") for state in view.stable_states)
-    assert all(not hasattr(state, "last_emotion_score") for state in view.stable_states)
+    assert all(not hasattr(state, "last_action") for state in view.participant_states)
+    assert all(not hasattr(state, "last_emotion_score") for state in view.participant_states)
     assert not hasattr(view, "summary")
     assert not hasattr(view, "quality")
 
@@ -194,6 +197,7 @@ def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(d
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
     db_session.commit()
 
     report = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_report(run_id)
@@ -206,9 +210,213 @@ def test_build_graph_report_keeps_export_and_diagnosis_on_summary_quality_only(d
     assert not hasattr(report.summary, "key_relations")
     assert not hasattr(report.quality, "conflicts")
     assert not hasattr(report.quality, "low_confidence_samples")
-    assert not hasattr(report, "stable_states")
+    assert not hasattr(report, "participant_states")
     assert not hasattr(report, "confirmed_relations")
     assert not hasattr(report, "relation_events")
+
+
+def test_build_graph_view_requires_participant_projection_when_relation_tables_exist(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Participant Consistency")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13041,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="graph participant projection is stale or incomplete"):
+        KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+
+
+def test_build_graph_view_rejects_partial_participant_projection_when_relations_exist(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Participant Partial Consistency")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13042,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id])
+    db_session.commit()
+
+    with pytest.raises(RuntimeError, match="graph participant projection is stale or incomplete"):
+        KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
+
+
+def test_build_timeline_view_requires_participant_projection_when_relation_tables_exist(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Timeline Participant Consistency")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13043,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+
+    with pytest.raises(GraphReadinessError, match="graph participant projection is stale or incomplete"):
+        KnowledgeGraphAuthorityService.from_session(db_session).build_timeline_view(run_id)
+
+
+def test_graph_authority_views_fail_closed_when_graph_projection_is_still_pending(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Pending Readiness")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13044,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=run_id,
+            from_char="苏镜",
+            to_char="程霜",
+            type="盟友",
+            change="强化",
+            evidence="尚未投影的新关系变化",
+            confidence=0.77,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_timeline_view(run_id)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_graph_view(run_id)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_graph_report(run_id)
+    with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+        service.build_graph_relation_event_page(run_id)
+
+
+def test_graph_authority_views_fail_closed_when_graph_projection_has_blocking_failed_rows(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Failed Readiness")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13045,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=run_id,
+            from_char="苏镜",
+            to_char="程霜",
+            type="盟友",
+            change="强化",
+            evidence="投影失败的关系变化",
+            confidence=0.77,
+            projection_status="failed",
+            projection_error="event insert failed",
+        )
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    with pytest.raises(GraphReadinessError, match="graph projection has failed rows"):
+        service.build_graph_view(run_id)
+
+
+def test_graph_authority_views_ignore_benign_failed_self_relations(db_session) -> None:
+    novel_id, run_id = _create_run_with_novel(db_session, title="Graph Benign Failed Readiness")
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="苏镜", first_seen_chunk=1, last_seen_chunk=5)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="程霜", first_seen_chunk=2, last_seen_chunk=5)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="联手破局",
+        confidence=0.52,
+        source_relation_row_id=13046,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+    db_session.add(
+        ChunkRelation(
+            chunk_id=4,
+            run_id=run_id,
+            from_char="苏镜",
+            to_char="苏镜",
+            type="盟友",
+            change="新建",
+            evidence="自环关系应被忽略",
+            confidence=0.40,
+            projection_status="failed",
+            projection_error="self relation",
+        )
+    )
+    db_session.commit()
+
+    service = KnowledgeGraphAuthorityService.from_session(db_session)
+    view = service.build_graph_view(run_id)
+    assert [(relation.from_name, relation.to_name) for relation in view.confirmed_relations] == [("苏镜", "程霜")]
 
 
 def test_graph_authority_report_rejects_graph_page_contracts() -> None:
@@ -247,6 +455,7 @@ def test_build_export_view_keeps_export_graph_payloads_off_repository_shapes(db_
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
     db_session.commit()
 
     export_view = KnowledgeGraphAuthorityService.from_session(db_session).build_export_view(run_id)
@@ -317,7 +526,7 @@ def test_build_level1_snapshot_entities_exclude_transient_prompt_local_state(db_
     assert not hasattr(snapshot.canonical_entities[0], "last_action")
     assert not hasattr(snapshot.canonical_entities[0], "last_emotion_score")
     assert not hasattr(snapshot, "relation_events")
-    assert not hasattr(snapshot, "stable_states")
+    assert not hasattr(snapshot, "participant_states")
     assert not hasattr(snapshot, "summary")
     assert not hasattr(snapshot, "quality")
 
@@ -362,6 +571,7 @@ def test_build_level1_snapshot_keeps_inactive_relations_outside_confirmed_relati
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, han_li.entity_id, nan_gong.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [han_li.entity_id, nan_gong.entity_id])
     db_session.commit()
 
     service = KnowledgeGraphAuthorityService.from_session(db_session)
@@ -397,6 +607,7 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
 
     graph_repo.insert_relation_event(
         run_id=run_id,
@@ -423,6 +634,7 @@ def test_build_graph_view_summary_stays_consistent_with_inactive_edges(db_sessio
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, rival.entity_id])
     db_session.commit()
 
     service = KnowledgeGraphAuthorityService.from_session(db_session)
@@ -461,6 +673,7 @@ def test_build_graph_view_relation_events_are_full_history_not_page_window(db_se
         )
 
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
     db_session.commit()
 
     view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
@@ -492,6 +705,7 @@ def test_build_graph_report_caps_low_confidence_count_to_legacy_summary_limit(db
         )
 
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
     db_session.commit()
 
     report = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_report(run_id)
@@ -523,6 +737,7 @@ def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
 
     graph_repo.insert_relation_event(
         run_id=run_id,
@@ -537,6 +752,7 @@ def test_graph_report_counts_match_graph_page_shared_stats(db_session) -> None:
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, rival.entity_id])
     db_session.commit()
 
     service = KnowledgeGraphAuthorityService.from_session(db_session)
@@ -584,6 +800,7 @@ def test_build_graph_view_keeps_history_in_events_while_current_relations_stay_a
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, rival.entity_id])
     db_session.commit()
 
     view = KnowledgeGraphAuthorityService.from_session(db_session).build_graph_view(run_id)
@@ -608,7 +825,7 @@ def test_authority_dependency_matrix_constants_match_consumer_boundaries() -> No
         "relation_events",
     }
     assert set(GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS.keys()) == {
-        "stable_states",
+        "participant_states",
         "confirmed_relations",
         "relation_events",
     }
@@ -639,6 +856,7 @@ def test_authority_views_do_not_expose_other_consumers_shortcuts(db_session) -> 
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
     db_session.commit()
 
     service = KnowledgeGraphAuthorityService.from_session(db_session)
@@ -648,9 +866,9 @@ def test_authority_views_do_not_expose_other_consumers_shortcuts(db_session) -> 
     report = service.build_graph_report(run_id)
 
     assert not hasattr(level1, "relation_events")
-    assert not hasattr(level1, "stable_states")
+    assert not hasattr(level1, "participant_states")
     assert not hasattr(timeline, "confirmed_relations")
-    assert not hasattr(timeline, "stable_states")
+    assert not hasattr(timeline, "participant_states")
     assert not hasattr(graph_view, "entity_lifecycles")
     assert not hasattr(graph_view, "summary")
     assert not hasattr(graph_view, "quality")

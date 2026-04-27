@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import text
 
+from src.config import settings
 from src.config.constants.annotation import (
     SYMMETRIC_RELATION_TYPES,
     VALID_CHANGE_TYPES,
@@ -18,6 +19,7 @@ from src.workflows.annotate_helpers.disambiguation.checkpoint import (
 )
 
 PENDING_RETRY_LIMIT = 200
+HIERARCHICAL_SYMMETRIC_RELATION_TYPES = frozenset({"spouse_of", "sibling_of"})
 
 
 def _resolve_name(raw_name: str | None, alias_map: dict[str, str], graph_aliases: dict[str, str]) -> str | None:
@@ -268,6 +270,7 @@ def project_graph_tables(
     pending_count = 0
     failed_count = 0
     affected_pairs: set[tuple[int, int]] = set()
+    allowed_relation_types = VALID_RELATION_TYPES | set(settings.analysis.valid_hierarchical_relation_types)
 
     for relation in chunk_relations:
         resolved_from = _resolve_name(relation.from_char, alias_map, graph_alias_map)
@@ -372,7 +375,7 @@ def project_graph_tables(
         rel_change = relation.change or "无变化"
 
         # Validate relation_type and change_type before writing to graph
-        if rel_type not in VALID_RELATION_TYPES:
+        if rel_type not in allowed_relation_types:
             logger.warning(
                 "Skipping relation with invalid type '{}' (chunk={})",
                 rel_type,
@@ -405,7 +408,11 @@ def project_graph_tables(
             evidence=relation.evidence,
             confidence=relation.confidence,
             source_relation_row_id=relation.id,
-            directionality="symmetric" if rel_type in SYMMETRIC_RELATION_TYPES else "directed",
+            directionality=(
+                "symmetric"
+                if rel_type in (SYMMETRIC_RELATION_TYPES | HIERARCHICAL_SYMMETRIC_RELATION_TYPES)
+                else "directed"
+            ),
         )
         if event is None:
             relation.projection_status = "failed"
@@ -415,14 +422,12 @@ def project_graph_tables(
             continue
 
         affected_pairs.add((from_entity.entity_id, to_entity.entity_id))
-
         relation.projection_status = "projected"
         relation.projected_at = datetime.now(UTC)
         relation.projection_error = None
         projected_count += 1
 
-    for from_entity_id, to_entity_id in affected_pairs:
-        graph_repo.refresh_current_relation(run_id, from_entity_id, to_entity_id)
+    graph_repo.refresh_relation_projections(run_id, affected_pairs)
 
     session.commit()
     logger.info(

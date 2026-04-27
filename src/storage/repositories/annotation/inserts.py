@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import update
+from sqlalchemy import delete, update
 
 from src.models.local.schema import (
     CharacterSnapshot,
@@ -34,6 +34,12 @@ from src.storage.models import (
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+
+def _relation_value(relation: RelationChangeSnapshot | dict[str, Any], field_name: str, default: Any = None) -> Any:
+    if isinstance(relation, dict):
+        return relation.get(field_name, default)
+    return getattr(relation, field_name, default)
 
 
 def insert_chunk_annotation(
@@ -136,6 +142,57 @@ def insert_chunk_relations(
     if not records:
         return
     session.add_all(records)
+    if commit:
+        session.commit()
+    else:
+        session.flush()
+
+
+def replace_chunk_relations_for_source_model(
+    session: Session,
+    run_id: str,
+    chunk_id: int,
+    relations: Sequence[RelationChangeSnapshot | dict[str, Any]],
+    *,
+    source_model: str,
+    commit: bool = True,
+) -> None:
+    """
+    2026-04-27，任务：graph final-disambiguation rebuild fixes
+    新建原因：终消歧生成的层级关系需要先稳定回写到 chunk_relations，再交给后续 rebuild 统一投影，
+    否则直接写进 graph_* 表的结果会在 reset_graph_tables() 后丢失。
+    """
+    session.execute(
+        delete(ChunkRelation).where(
+            ChunkRelation.run_id == run_id,
+            ChunkRelation.source_model == source_model,
+        )
+    )
+    if relations:
+        records = [
+            ChunkRelation(
+                chunk_id=chunk_id,
+                from_char=_relation_value(relation, "from_name"),
+                to_char=_relation_value(relation, "to_name"),
+                type=_relation_value(relation, "type"),
+                change=_relation_value(relation, "change"),
+                directionality=_relation_value(relation, "directionality", "directed"),
+                evidence=_relation_value(relation, "evidence"),
+                confidence=_relation_value(relation, "confidence"),
+                source_model=source_model,
+                projection_status=_relation_value(relation, "projection_status", "pending"),
+                projected_at=(
+                    datetime.fromisoformat(_relation_value(relation, "projected_at"))
+                    if _relation_value(relation, "projected_at")
+                    else None
+                ),
+                projection_error=_relation_value(relation, "projection_error"),
+                run_id=run_id,
+            )
+            for relation in relations
+            if _relation_value(relation, "from_name") != _relation_value(relation, "to_name")
+        ]
+        session.add_all(records)
     if commit:
         session.commit()
     else:

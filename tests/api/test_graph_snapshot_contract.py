@@ -11,25 +11,58 @@ from src.api.routes.results_fetchers import _fetch_graph_events_page, _fetch_gra
 from src.api.routes.results_fetchers.fetchers import _serialize_graph_page_quality, _serialize_graph_page_summary
 from src.knowledge.authority import (
     ConfirmedRelation,
-    GraphAuthorityView,
     GraphConflictSample,
     GraphKeyRelationHighlight,
     GraphLowConfidenceSample,
     GraphPageQualityDetails,
     GraphPageSummary,
-    StableState,
 )
+from src.storage.models import ChunkRelation
 from src.storage.repositories import GraphRepository, RunRepository
 from tests.support.graph_snapshot_helpers import (
     PaginatedGraphAuthorityService,
     StaticGraphAuthorityService,
+    build_graph_authority_view,
     create_graph_annotation_repo,
     insert_graph_test_chunks,
     insert_graph_test_novel,
+    participant_state,
     patch_graph_authority_service,
     relation_event,
 )
 from tests.support.timeline_contract_helpers import create_timeline_contract_scenario
+
+
+def _create_stale_graph_run(db_session) -> tuple[str, str, str]:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Stale Participant Contract",
+    )
+    run_repo.update_run_status(run_id, "completed")
+    insert_graph_test_chunks(db_session, run_id, range(1, 5))
+
+    graph_repo = GraphRepository(db_session)
+    hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="贺伯安", first_seen_chunk=1, last_seen_chunk=3)
+    ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="柳婉儿", first_seen_chunk=1, last_seen_chunk=3)
+    graph_repo.insert_relation_event(
+        run_id=run_id,
+        from_entity_id=hero.entity_id,
+        to_entity_id=ally.entity_id,
+        relation_type="盟友",
+        change_type="新建",
+        chunk_id=3,
+        evidence="共同应敌",
+        confidence=0.91,
+        source_relation_row_id=9499,
+        directionality="directed",
+    )
+    graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+    db_session.commit()
+    return novel_id, run_id, run_id[:8]
 
 
 def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
@@ -58,6 +91,7 @@ def test_fetch_graph_snapshot_preserves_contract_shape(db_session) -> None:
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, bo_an.entity_id, liu_wan.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [bo_an.entity_id, liu_wan.entity_id])
     db_session.commit()
 
     annotation_repo = create_graph_annotation_repo(db_session)
@@ -116,7 +150,7 @@ def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_
 
     snapshot = _fetch_graph_snapshot(run_id, annotation_repo)
 
-    assert snapshot["nodes"]
+    assert snapshot["nodes"] == []
     assert snapshot["edges"] == []
     assert snapshot["events"] == []
     assert snapshot["events_page"] == {
@@ -127,10 +161,10 @@ def test_fetch_graph_snapshot_returns_complete_empty_contract_without_events(db_
         "next_cursor": None,
     }
     assert snapshot["summary"] == {
-        "node_count": 2,
+        "node_count": 0,
         "edge_count": 0,
         "density": 0.0,
-        "core_characters": ["柳婉儿", "贺伯安"],
+        "core_characters": [],
         "key_relations": [],
     }
     assert snapshot["quality"] == {
@@ -179,6 +213,7 @@ def test_fetch_graph_snapshot_summary_counts_only_reflect_active_edges(db_sessio
         directionality="directed",
     )
     graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+    graph_repo.refresh_entity_participants(run_id, [hero.entity_id, rival.entity_id])
     db_session.commit()
 
     annotation_repo = create_graph_annotation_repo(db_session)
@@ -200,10 +235,10 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
         StaticGraphAuthorityService(
             expected_run_id="run-graph-page",
             forbid_report=True,
-            view=GraphAuthorityView(
-                stable_states=[
-                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
-                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
+            view=build_graph_authority_view(
+                participant_states=[
+                    participant_state(entity_id=1, name="沈砚", last_seen_chunk=8),
+                    participant_state(entity_id=2, name="陆明", last_seen_chunk=6),
                 ],
                 confirmed_relations=[
                     ConfirmedRelation(
@@ -256,11 +291,11 @@ def test_fetch_graph_snapshot_core_characters_excludes_non_character_nodes(monke
         monkeypatch,
         StaticGraphAuthorityService(
             expected_run_id="run-graph-page-character-only",
-            view=GraphAuthorityView(
-                stable_states=[
-                    StableState(entity_id=10, name="天工阁", entity_type="organization", last_seen_chunk=10),
-                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
-                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
+            view=build_graph_authority_view(
+                participant_states=[
+                    participant_state(entity_id=10, name="天工阁", entity_type="organization", last_seen_chunk=10),
+                    participant_state(entity_id=1, name="沈砚", last_seen_chunk=8),
+                    participant_state(entity_id=2, name="陆明", last_seen_chunk=6),
                 ],
                 confirmed_relations=[
                     ConfirmedRelation(
@@ -291,11 +326,8 @@ def test_fetch_graph_snapshot_core_characters_is_empty_without_character_nodes(m
         monkeypatch,
         StaticGraphAuthorityService(
             expected_run_id="run-graph-page-no-character",
-            view=GraphAuthorityView(
-                stable_states=[
-                    StableState(entity_id=10, name="天工阁", entity_type="organization", last_seen_chunk=10),
-                    StableState(entity_id=11, name="黑水城", entity_type="location", last_seen_chunk=8),
-                ],
+            view=build_graph_authority_view(
+                participant_states=[],
                 confirmed_relations=[],
                 relation_events=[],
             ),
@@ -306,7 +338,8 @@ def test_fetch_graph_snapshot_core_characters_is_empty_without_character_nodes(m
 
     snapshot = _fetch_graph_snapshot("run-graph-page-no-character", annotation_repo)
 
-    assert snapshot["summary"]["node_count"] == 2
+    assert snapshot["nodes"] == []
+    assert snapshot["summary"]["node_count"] == 0
     assert snapshot["summary"]["core_characters"] == []
 
 
@@ -318,9 +351,9 @@ def test_fetch_graph_snapshot_accepts_graph_page_allowlist_without_full_graph_vi
             # 中文注释：route assembler 只应该依赖 graph page allowlist；
             # 这里故意不给 canonical_entities，防止测试重新把它当必需依赖。
             view=SimpleNamespace(
-                stable_states=[
-                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=8),
-                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=6),
+                participant_states=[
+                    participant_state(entity_id=1, name="沈砚", last_seen_chunk=8),
+                    participant_state(entity_id=2, name="陆明", last_seen_chunk=6),
                 ],
                 confirmed_relations=[
                     ConfirmedRelation(
@@ -448,10 +481,10 @@ def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(m
         StaticGraphAuthorityService(
             expected_run_id="run-graph-quality",
             forbid_report=True,
-            view=GraphAuthorityView(
-                stable_states=[
-                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=500),
-                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=499),
+            view=build_graph_authority_view(
+                participant_states=[
+                    participant_state(entity_id=1, name="沈砚", last_seen_chunk=500),
+                    participant_state(entity_id=2, name="陆明", last_seen_chunk=499),
                 ],
                 confirmed_relations=[
                     ConfirmedRelation(
@@ -495,8 +528,8 @@ def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch
             expected_run_id="run-graph-events-page",
             relation_events=relation_events,
             forbid_report=True,
-            view=GraphAuthorityView(
-                stable_states=[],
+            view=build_graph_authority_view(
+                participant_states=[],
                 confirmed_relations=[],
                 relation_events=relation_events,
             ),
@@ -530,9 +563,9 @@ def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> Non
         PaginatedGraphAuthorityService(
             expected_run_id="run-empty-graph-events-page",
             relation_events=[],
-            view=GraphAuthorityView(
+            view=build_graph_authority_view(
                 canonical_entities=[],
-                stable_states=[],
+                participant_states=[],
                 confirmed_relations=[],
                 relation_events=[],
             ),
@@ -558,6 +591,114 @@ def test_fetch_graph_events_page_returns_complete_empty_page(monkeypatch) -> Non
     }
 
 
+def test_fetch_graph_events_page_rejects_missing_participant_projection(db_session) -> None:
+    _novel_id, run_id, _task_id = _create_stale_graph_run(db_session)
+
+    annotation_repo = create_graph_annotation_repo(db_session)
+
+    with pytest.raises(RuntimeError, match="graph participant projection is stale or incomplete"):
+        _fetch_graph_events_page(run_id, annotation_repo)
+
+
+def test_get_graph_stale_participant_projection_returns_409(api_client, db_session) -> None:
+    novel_id, _run_id, task_id = _create_stale_graph_run(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph",
+        params={"task_id": task_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"
+
+
+def test_get_graph_events_stale_participant_projection_returns_409(api_client, db_session) -> None:
+    novel_id, _run_id, task_id = _create_stale_graph_run(db_session)
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph/events",
+        params={"task_id": task_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"
+
+
+def test_get_graph_pending_projection_returns_409(api_client, db_session) -> None:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Pending Projection",
+    )
+    run_repo.update_run_status(run_id, "completed")
+    insert_graph_test_chunks(db_session, run_id, range(1, 3))
+    db_session.add(
+        ChunkRelation(
+            chunk_id=1,
+            run_id=run_id,
+            from_char="贺伯安",
+            to_char="柳婉儿",
+            type="盟友",
+            change="新建",
+            evidence="共同应敌",
+            confidence=0.91,
+            projection_status="pending",
+        )
+    )
+    db_session.commit()
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph",
+        params={"task_id": run_id[:8]},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"
+
+
+def test_get_graph_rejects_non_terminal_run_status(api_client, db_session) -> None:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Non Terminal Run",
+    )
+    run_repo.update_run_status(run_id, "running")
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph",
+        params={"task_id": run_id[:8]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "AnalysisNotCompleteError"
+
+
+def test_get_graph_events_rejects_non_terminal_run_status(api_client, db_session) -> None:
+    novel_id = f"g{uuid.uuid4().hex[:7]}"
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Graph Events Non Terminal Run",
+    )
+    run_repo.update_run_status(run_id, "running")
+
+    response = api_client.get(
+        f"/api/novels/{novel_id}/graph/events",
+        params={"task_id": run_id[:8]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "AnalysisNotCompleteError"
+
+
 @pytest.mark.parametrize(
     "cursor",
     [
@@ -574,8 +715,8 @@ def test_fetch_graph_events_page_rejects_invalid_cursor_payloads(monkeypatch, cu
         PaginatedGraphAuthorityService(
             expected_run_id="run-invalid-graph-cursor",
             relation_events=events,
-            view=GraphAuthorityView(
-                stable_states=[],
+            view=build_graph_authority_view(
+                participant_states=[],
                 confirmed_relations=[],
                 relation_events=events,
             ),
@@ -697,11 +838,11 @@ def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monk
         monkeypatch,
         StaticGraphAuthorityService(
             expected_run_id="run-graph-shared-counts",
-            view=GraphAuthorityView(
-                stable_states=[
-                    StableState(entity_id=1, name="沈砚", entity_type="character", last_seen_chunk=9),
-                    StableState(entity_id=2, name="陆明", entity_type="character", last_seen_chunk=8),
-                    StableState(entity_id=3, name="秦昭", entity_type="character", last_seen_chunk=7),
+            view=build_graph_authority_view(
+                participant_states=[
+                    participant_state(entity_id=1, name="沈砚", last_seen_chunk=9),
+                    participant_state(entity_id=2, name="陆明", last_seen_chunk=8),
+                    participant_state(entity_id=3, name="秦昭", last_seen_chunk=7),
                 ],
                 confirmed_relations=[
                     ConfirmedRelation(

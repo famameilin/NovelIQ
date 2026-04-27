@@ -191,3 +191,108 @@ class TestFetchEntitiesWithStatus:
 
         all_entities = graph_repo.fetch_entities(run_id)
         assert len(all_entities) == 2
+
+
+class TestGraphParticipants:
+    def test_refresh_entity_participants_tracks_relation_metrics(self, db_session) -> None:
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Participant Metrics",
+        )
+        chunk_repo = ChunkRepository(db_session)
+        chunk_repo.insert_chunks(
+            run_id,
+            [
+                Chunk(index=3, text="测试3", start=300, end=400),
+                Chunk(index=4, text="测试4", start=400, end=500),
+            ],
+        )
+
+        graph_repo = GraphRepository(db_session)
+        hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
+        ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=8)
+        rival = graph_repo.upsert_entity(run_id=run_id, canonical_name="谢危", first_seen_chunk=2, last_seen_chunk=8)
+
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="盟友",
+            change_type="新建",
+            chunk_id=3,
+            evidence="并肩迎敌",
+            confidence=0.92,
+            source_relation_row_id=3001,
+            directionality="directed",
+        )
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=rival.entity_id,
+            relation_type="敌对",
+            change_type="新建",
+            chunk_id=4,
+            evidence="结下仇怨",
+            confidence=0.58,
+            source_relation_row_id=3002,
+            directionality="directed",
+        )
+        graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+        graph_repo.refresh_current_relation(run_id, hero.entity_id, rival.entity_id)
+        graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id, rival.entity_id])
+        db_session.commit()
+
+        participants = {item.name: item for item in graph_repo.fetch_participant_entities(run_id)}
+
+        assert set(participants.keys()) == {"林渡", "顾霜", "谢危"}
+        assert participants["林渡"].relation_event_count == 2
+        assert participants["林渡"].current_degree == 2
+        assert participants["林渡"].historical_degree == 2
+        assert participants["林渡"].first_relation_chunk == 3
+        assert participants["林渡"].last_relation_chunk == 4
+        assert participants["林渡"].latest_relation_event_id is not None
+        assert participants["顾霜"].relation_event_count == 1
+        assert participants["顾霜"].current_degree == 1
+        assert participants["顾霜"].historical_degree == 1
+
+    def test_reset_graph_tables_clears_participant_projection(self, db_session) -> None:
+        novel_id = uuid.uuid4().hex[:8]
+        _insert_test_novel(db_session, novel_id)
+        run_id = RunRepository(db_session).create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Participant Reset",
+        )
+        chunk_repo = ChunkRepository(db_session)
+        chunk_repo.insert_chunks(run_id, [Chunk(index=5, text="测试5", start=500, end=600)])
+
+        graph_repo = GraphRepository(db_session)
+        hero = graph_repo.upsert_entity(run_id=run_id, canonical_name="林渡", first_seen_chunk=1, last_seen_chunk=8)
+        ally = graph_repo.upsert_entity(run_id=run_id, canonical_name="顾霜", first_seen_chunk=1, last_seen_chunk=8)
+        graph_repo.insert_relation_event(
+            run_id=run_id,
+            from_entity_id=hero.entity_id,
+            to_entity_id=ally.entity_id,
+            relation_type="盟友",
+            change_type="新建",
+            chunk_id=5,
+            evidence="并肩迎敌",
+            confidence=0.92,
+            source_relation_row_id=5001,
+            directionality="directed",
+        )
+        graph_repo.refresh_current_relation(run_id, hero.entity_id, ally.entity_id)
+        graph_repo.refresh_entity_participants(run_id, [hero.entity_id, ally.entity_id])
+        db_session.commit()
+
+        assert graph_repo.count_entity_participants(run_id) == 2
+
+        graph_repo.reset_graph_tables(run_id)
+        db_session.commit()
+
+        assert graph_repo.count_entity_participants(run_id) == 0
+        assert graph_repo.fetch_entities(run_id) == []
+        assert graph_repo.count_relation_events(run_id) == 0

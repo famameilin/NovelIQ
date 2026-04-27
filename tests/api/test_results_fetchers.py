@@ -1,7 +1,9 @@
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.api.exceptions import GraphReadinessError
 from src.api.routes.results_fetchers import (
     _fetch_character_relations,
     _fetch_characters,
@@ -352,11 +354,15 @@ def test_fetch_character_relations_deduplicates_across_chunks():
         ]
     )
 
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        export_graph_view=export_graph_view,
-    )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=export_graph_view,
+        )
 
     assert len(result) == 2
 
@@ -368,6 +374,40 @@ def test_fetch_character_relations_deduplicates_across_chunks():
     rel2 = next(r for r in result if r.from_char == "贺伯安" and r.to_char == "林立果")
     assert rel2.chunk_id == 5
     assert rel2.type == "盟友"
+
+
+def test_fetch_character_relations_skips_inactive_current_relations():
+    annotation_repo = _DummyAnnotationRepo2()
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(
+                from_name="贺伯安",
+                to_name="二妈妈",
+                relation_type="家族",
+                last_seen_chunk=3,
+                is_active=False,
+            ),
+            ExportRelationSnapshot(
+                from_name="贺伯安",
+                to_name="林立果",
+                relation_type="盟友",
+                last_seen_chunk=5,
+                is_active=True,
+            ),
+        ]
+    )
+
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=export_graph_view,
+        )
+
+    assert [(item.from_char, item.to_char) for item in result] == [("贺伯安", "林立果")]
 
 
 def test_fetch_chunk_curves_adds_surface_tension_without_rewriting_raw_proxy():
@@ -440,11 +480,15 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
         ]
     )
 
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        export_graph_view=export_graph_view,
-    )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=export_graph_view,
+        )
 
     assert len(result) == 1
     assert result[0].chunk_id == 15
@@ -453,23 +497,35 @@ def test_fetch_character_relations_uses_last_seen_chunk_id():
 
 def test_fetch_character_relations_raises_when_pending_exists_and_graph_empty():
     annotation_repo = _DummyAnnotationRepo2()
-    annotation_repo._pending = [object()]
-    with pytest.raises(RuntimeError, match="pending relations"):
-        _fetch_character_relations(
-            run_id="run-1",
-            annotation_repo=annotation_repo,
-            export_graph_view=ExportGraphAuthorityView(),
-        )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(
+            assert_graph_projection_ready=lambda _run_id: (_ for _ in ()).throw(
+                GraphReadinessError(
+                    "graph projection is still pending; finish projection before reading graph-derived authority views."
+                )
+            )
+        ),
+    ):
+        with pytest.raises(GraphReadinessError, match="graph projection is still pending"):
+            _fetch_character_relations(
+                run_id="run-1",
+                annotation_repo=annotation_repo,
+                export_graph_view=ExportGraphAuthorityView(),
+            )
 
 
 def test_fetch_character_relations_allows_empty_graph_when_no_pending():
     annotation_repo = _DummyAnnotationRepo2()
-    annotation_repo._pending = []
-    result = _fetch_character_relations(
-        run_id="run-1",
-        annotation_repo=annotation_repo,
-        export_graph_view=ExportGraphAuthorityView(),
-    )
+    with patch(
+        "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
+        return_value=SimpleNamespace(assert_graph_projection_ready=lambda _run_id: None),
+    ):
+        result = _fetch_character_relations(
+            run_id="run-1",
+            annotation_repo=annotation_repo,
+            export_graph_view=ExportGraphAuthorityView(),
+        )
 
     assert result == []
 
@@ -531,6 +587,82 @@ def test_fetch_hierarchical_relations_filters_unknown_after_normalization():
     )
 
     assert result == []
+
+
+def test_fetch_hierarchical_relations_skips_inactive_current_relations():
+    export_graph_view = ExportGraphAuthorityView(
+        current_relations=[
+            ExportRelationSnapshot(
+                relation_id=1,
+                from_name="老贺",
+                to_name="伯安",
+                relation_type="father_of",
+                first_seen_chunk=2,
+                last_seen_chunk=9,
+                is_active=False,
+            ),
+            ExportRelationSnapshot(
+                relation_id=2,
+                from_name="老贺",
+                to_name="阿明",
+                relation_type="father_of",
+                first_seen_chunk=3,
+                last_seen_chunk=10,
+                is_active=True,
+            ),
+        ]
+    )
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        export_graph_view=export_graph_view,
+        alias_map={},
+        valid_character_names={"老贺", "伯安", "阿明"},
+    )
+
+    assert [(item.rel_id, item.from_entity, item.to_entity) for item in result] == [(2, "老贺", "阿明")]
+
+
+def test_fetch_hierarchical_relations_keeps_supported_non_character_hierarchy():
+    export_graph_view = ExportGraphAuthorityView(
+        canonical_entities=[
+            SimpleNamespace(name="伯安", entity_type="character"),
+            SimpleNamespace(name="贺家", entity_type="organization"),
+            SimpleNamespace(name="赵甲卫", entity_type="group"),
+        ],
+        current_relations=[
+            ExportRelationSnapshot(
+                relation_id=11,
+                from_name="伯安",
+                to_name="贺家",
+                relation_type="belongs_to",
+                first_seen_chunk=2,
+                last_seen_chunk=9,
+                is_active=True,
+            ),
+            ExportRelationSnapshot(
+                relation_id=12,
+                from_name="赵甲卫",
+                to_name="贺家",
+                relation_type="affiliated_with",
+                first_seen_chunk=3,
+                last_seen_chunk=10,
+                is_active=True,
+            ),
+        ],
+    )
+
+    result = _fetch_hierarchical_relations(
+        run_id="run-1",
+        export_graph_view=export_graph_view,
+        alias_map={},
+        valid_character_names={"伯安"},
+    )
+
+    assert [(item.rel_id, item.rel_type, item.from_entity, item.to_entity) for item in result] == [
+        (11, "belongs_to", "伯安", "贺家"),
+        (12, "affiliated_with", "赵甲卫", "贺家"),
+    ]
 
 
 def test_fetch_chunk_annotations_builds_relations_from_export_authority_view():
@@ -639,4 +771,52 @@ def test_fetch_chunk_annotations_allows_pending_graph_when_projection_not_requir
     assert result[0].chunk_id == 3
     assert result[0].is_strong_setup is True
     assert result[0].setup_kind == "异常物件"
+    assert result[0].relations == []
+
+
+def test_fetch_chunk_annotations_degrades_to_phase2_only_when_graph_view_is_not_ready(monkeypatch):
+    class _AnnotationRepoWithChunkRows(_DummyAnnotationRepo2):
+        def fetch_chunk_annotations_full(self, _run_id):
+            return [
+                _DummyRow(
+                    chunk_id=3,
+                    emotional_valence="正向",
+                    event_type="冲突",
+                    pivot_moment=True,
+                    cliffhanger=False,
+                    has_foreshadowing=False,
+                    is_strong_setup=False,
+                    foreshadowing_type=None,
+                    setup_kind=None,
+                    foreshadowing_desc=None,
+                    why_unresolved_now=None,
+                    expected_payoff_family=None,
+                )
+            ]
+
+        def fetch_chunk_characters_full(self, _run_id):
+            return []
+
+        def fetch_chunk_dialogues_full(self, _run_id):
+            return []
+
+    annotation_repo = _AnnotationRepoWithChunkRows()
+
+    class _GraphUnavailableService:
+        def build_export_view(self, _run_id):
+            raise GraphReadinessError("graph participant projection is stale or incomplete")
+
+    monkeypatch.setattr(
+        "src.api.services.results_queries.chunks.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: _GraphUnavailableService(),
+    )
+
+    result = _fetch_chunk_annotations(
+        run_id="run-1",
+        annotation_repo=annotation_repo,
+        alias_map={},
+        require_graph_projection=False,
+    )
+
+    assert len(result) == 1
     assert result[0].relations == []

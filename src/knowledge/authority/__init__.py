@@ -24,8 +24,8 @@ from .types import (
     GraphQualitySignals,
     GraphSharedSummary,
     Level1AuthoritySnapshot,
+    ParticipantState,
     RelationEvent,
-    StableState,
     TimelineAuthorityView,
 )
 
@@ -53,9 +53,9 @@ __all__ = [
     "KnowledgeGraphAuthorityService",
     "LEVEL1_AUTHORITY_DEPENDENCY_FIELDS",
     "Level1AuthoritySnapshot",
+    "ParticipantState",
     "RelationEvent",
     "serialize_graph_report_signals",
-    "StableState",
     "TIMELINE_AUTHORITY_DEPENDENCY_FIELDS",
     "TimelineAuthorityView",
 ]
