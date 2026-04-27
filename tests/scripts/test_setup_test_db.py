@@ -25,6 +25,23 @@ def _load_setup_test_db_module() -> ModuleType:
     return module
 
 
+def test_default_db_url_keeps_real_password_when_switching_to_postgres_database() -> None:
+    """
+    创建时间: 2026-04-28
+    创建者: Codex
+    任务: fix-setup-test-db-maintenance-url-password-mask
+    说明: SQLAlchemy URL 在 `str(url)` 时默认会把密码掩码成 `***`；
+          setup_test_db.py 若直接把该字符串拿去 create_engine，会导致维护库连接永远密码错误。
+    """
+
+    module = _load_setup_test_db_module()
+
+    assert module.DEFAULT_DB_URL.database == "postgres"
+    assert module.DEFAULT_DB_URL.render_as_string(hide_password=False) == (
+        "postgresql+psycopg://postgres:sr20031109ZY@localhost:5432/postgres"
+    )
+
+
 def test_create_test_database_recreates_existing_database() -> None:
     module = _load_setup_test_db_module()
     engine = MagicMock()
@@ -46,12 +63,13 @@ def test_create_test_database_recreates_existing_database() -> None:
     connection.execute.side_effect = execute_side_effect
 
     with patch.object(module, "create_engine", return_value=engine):
-        module.create_test_database()
+        recreated = module.create_test_database()
 
     assert any("SELECT 1 FROM pg_database" in sql for sql, _ in executed_sql)
     assert any("SELECT pg_terminate_backend(pid)" in sql for sql, _ in executed_sql)
     assert any(sql == f"DROP DATABASE {module.QUOTED_TEST_DB_NAME}" for sql, _ in executed_sql)
     assert any(sql == f"CREATE DATABASE {module.QUOTED_TEST_DB_NAME}" for sql, _ in executed_sql)
+    assert recreated is True
     engine.dispose.assert_called_once()
 
 
@@ -85,3 +103,27 @@ def test_create_tables_bootstraps_test_db_via_init_db() -> None:
     assert call_order == ["dispose", "init:True", "dispose"]
     assert mock_dispose_engine.call_count == 2
     mock_init_db.assert_called_once_with(include_level3_tables=True)
+
+
+def test_main_falls_back_to_in_place_table_reset_when_maintenance_db_is_unavailable() -> None:
+    """
+    创建时间: 2026-04-28
+    创建者: Codex
+    任务: fix-setup-test-db-fallback-and-console-errors
+    说明: 当前环境里维护库 `postgres` 可能因认证或权限不可用；
+          只要目标测试库本身仍可连接，脚本就应显式降级到“原地重建表结构”，而不是直接失败退出。
+    """
+
+    module = _load_setup_test_db_module()
+
+    with (
+        patch.object(module, "create_test_database", side_effect=RuntimeError("maintenance db denied")),
+        patch.object(module, "_can_connect", return_value=(True, None)),
+        patch.object(module, "setup_pgvector") as mock_setup_pgvector,
+        patch.object(module, "create_tables") as mock_create_tables,
+    ):
+        exit_code = module.main()
+
+    assert exit_code == 0
+    mock_setup_pgvector.assert_called_once_with()
+    mock_create_tables.assert_called_once_with(reset_existing_tables=True)
