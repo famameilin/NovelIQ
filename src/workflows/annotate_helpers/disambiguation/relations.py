@@ -99,6 +99,14 @@ _INVERSE_RELATION_PAIRS: dict[str, str] = {
 _PARENT_CHILD_GROUP = {"child_of", "parent_of", "son_of", "father_of"}
 
 
+def _get_valid_hierarchical_relation_types() -> set[str]:
+    """
+    2026-04-27，任务：graph hierarchical relation contract fixes
+    新建原因：终消歧 `entity_relations` 使用英文层级关系类型，不能继续复用 phase4 中文关系枚举。
+    """
+    return set(settings.analysis.valid_hierarchical_relation_types)
+
+
 def _is_valid_inverse_pair(relations: list[dict[str, str]], from_node: str, to_node: str) -> bool:
     """
     检查两个节点之间的双向关系是否是合法的互逆关系对
@@ -329,7 +337,7 @@ def _prepare_entity_relations_for_projection(
             skipped_count=len(cycle_skipped),
         )
 
-    valid_relation_types = set(settings.analysis.valid_relation_types)
+    valid_relation_types = _get_valid_hierarchical_relation_types()
     prepared_relations: list[dict[str, str]] = []
     skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
 

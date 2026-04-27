@@ -31,7 +31,6 @@ from src.models.local.disambiguation import (
 )
 from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
-from src.models.local.schema import RelationChangeSnapshot
 from src.rag import EvidenceRequest
 from src.storage.models import Chunk as ChunkModel
 from src.storage.repositories import AnnotationRepository
@@ -849,27 +848,27 @@ def _replace_final_disambiguation_chunk_relations(
     新建原因：annotate 末尾会对 graph_* 执行 rebuild，因此终消歧层级关系必须先落回 chunk_relations，
     才能在 reset_graph_tables() 之后被统一重新投影出来。
     """
-    anchor_chunk_id = conn.execute(
-        select(func.min(ChunkModel.chunk_id)).where(ChunkModel.run_id == run_id)
+    final_chunk_id = conn.execute(
+        select(func.max(ChunkModel.chunk_id)).where(ChunkModel.run_id == run_id)
     ).scalar_one_or_none()
-    if anchor_chunk_id is None:
+    if final_chunk_id is None:
         raise RuntimeError(f"cannot stage final disambiguation relations without chunks for run_id={run_id}")
 
     ann_repo = AnnotationRepository(conn)
     ann_repo.replace_chunk_relations_for_source_model(
         run_id,
-        int(anchor_chunk_id),
+        int(final_chunk_id),
         [
-            RelationChangeSnapshot(
-                from_name=relation["from"],
-                to_name=relation["to"],
-                type=relation["type"],
-                change="新建",
-                evidence="终消歧层级关系",
-                confidence=1.0,
-                source_model="final_disambiguation",
-                projection_status="pending",
-            )
+            {
+                "from_name": relation["from"],
+                "to_name": relation["to"],
+                "type": relation["type"],
+                "change": "新建",
+                "evidence": "终消歧层级关系（最终阶段补写）",
+                "confidence": 1.0,
+                "directionality": "directed",
+                "projection_status": "pending",
+            }
             for relation in prepared_relations
         ],
         source_model="final_disambiguation",

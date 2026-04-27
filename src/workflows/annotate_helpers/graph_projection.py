@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import text
 
+from src.config import settings
 from src.config.constants.annotation import (
     SYMMETRIC_RELATION_TYPES,
     VALID_CHANGE_TYPES,
@@ -268,6 +269,7 @@ def project_graph_tables(
     pending_count = 0
     failed_count = 0
     affected_pairs: set[tuple[int, int]] = set()
+    allowed_relation_types = VALID_RELATION_TYPES | set(settings.analysis.valid_hierarchical_relation_types)
 
     for relation in chunk_relations:
         resolved_from = _resolve_name(relation.from_char, alias_map, graph_alias_map)
@@ -372,7 +374,7 @@ def project_graph_tables(
         rel_change = relation.change or "无变化"
 
         # Validate relation_type and change_type before writing to graph
-        if rel_type not in VALID_RELATION_TYPES:
+        if rel_type not in allowed_relation_types:
             logger.warning(
                 "Skipping relation with invalid type '{}' (chunk={})",
                 rel_type,
