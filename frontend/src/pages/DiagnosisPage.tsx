@@ -2,8 +2,10 @@ import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { isAnalysisNotCompleteError } from "@/api/errorGuards";
 import { getDiagnosis, getForeshadowingThreads } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -14,6 +16,7 @@ import { ValueLogicCard } from "@/components/diagnosis/ValueLogicCard";
 import { TopicLabels } from "@/components/diagnosis/TopicLabels";
 import { CharacterCastCard } from "@/components/diagnosis/CharacterCastCard";
 import { ArcScoresChart } from "@/components/charts/ArcScoresChart";
+import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,6 +68,29 @@ function EmptyDiagnosisState() {
       bodyClassName="items-center justify-center gap-3 text-center"
     >
       <p className="text-sm text-text-muted">当前任务暂时还没有可展示的诊断结果。</p>
+    </DashboardCardShell>
+  );
+}
+
+/**
+ * 创建时间: 2026-04-27
+ * 创建者: Codex
+ * 任务: protagonist-focus-contract-review-fixes
+ * 说明: diagnosis 页一旦拿到缺焦点合同的半成品 payload，就不能再按正常诊断报告渲染；
+ * 这里显式提示用户该任务需要重跑，同时允许下方 setup ledger 继续独立展示。
+ */
+function IncompleteDiagnosisContractState() {
+  return (
+    <DashboardCardShell
+      title="诊断结果需要重跑"
+      icon={<AlertCircle className="h-4 w-4" />}
+      accent="chart-5"
+      className="min-h-[240px]"
+      bodyClassName="items-center justify-center gap-3 text-center"
+    >
+      <p className="text-sm text-text-muted">
+        当前任务缺少完整的焦点结构 diagnosis，请重新分析该任务后再查看正式诊断报告。
+      </p>
     </DashboardCardShell>
   );
 }
@@ -227,6 +253,10 @@ function SkeletonGrid() {
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-27，任务：protagonist-focus-contract
+ * 修改原因：诊断页角色阵容展示改为焦点结构合同，允许单主角、双主角与群像三种结果稳定渲染。
+ */
 export function DiagnosisPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -261,8 +291,11 @@ export function DiagnosisPage() {
   });
 
   const isLoading = enabled && diagnosisQuery.isLoading;
-  const isDiagnosisError = enabled && diagnosisQuery.isError;
-  const isThreadsError = enabled && foreshadowingThreadsQuery.isError;
+  const isAnalysisNotComplete =
+    enabled &&
+    (isAnalysisNotCompleteError(diagnosisQuery.error) || isAnalysisNotCompleteError(foreshadowingThreadsQuery.error));
+  const isDiagnosisError = enabled && diagnosisQuery.isError && !isAnalysisNotComplete;
+  const isThreadsError = enabled && foreshadowingThreadsQuery.isError && !isAnalysisNotComplete;
   const hasNullDiagnosis =
     enabled &&
     diagnosisQuery.isFetched &&
@@ -278,8 +311,16 @@ export function DiagnosisPage() {
   };
 
   const { data: diagnosis } = diagnosisQuery;
+  const hasFocusContract = hasCompleteFocusContract(diagnosis);
   const foreshadowMetric = diagnosis?.foreshadow_expectation ?? null;
   const foreshadowingThreads = foreshadowingThreadsQuery.data ?? [];
+  const hasIncompleteDiagnosisContract =
+    enabled &&
+    diagnosisQuery.isFetched &&
+    !diagnosisQuery.isLoading &&
+    !diagnosisQuery.isError &&
+    diagnosis != null &&
+    !hasFocusContract;
 
   // ---------- Render ----------
 
@@ -295,6 +336,12 @@ export function DiagnosisPage() {
       {isLoading && <SkeletonGrid />}
 
       {/* Error state */}
+      {isAnalysisNotComplete && !isLoading && (
+        <AnalysisNotCompleteState
+          title="诊断结果尚未完成"
+          description="当前任务仍在分析中，诊断报告和 setup 台账暂时不可读，请等待任务进入完成态后再查看。"
+        />
+      )}
       {isDiagnosisError && !isLoading && (
         <DashboardCardShell
           title="诊断报告加载失败"
@@ -312,13 +359,16 @@ export function DiagnosisPage() {
 
       {/* Empty state */}
       {hasNullDiagnosis && !isLoading && <EmptyDiagnosisState />}
+      {hasIncompleteDiagnosisContract && !isLoading && <IncompleteDiagnosisContractState />}
 
       {/* Ledger fallback */}
       {isThreadsError && !isLoading && <ForeshadowingThreadsErrorCard onRetry={retryThreads} />}
-      {foreshadowingThreads.length > 0 && !isLoading && <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />}
+      {foreshadowingThreads.length > 0 && !isLoading && !isAnalysisNotComplete && (
+        <ForeshadowingThreadsSection foreshadowingThreads={foreshadowingThreads} />
+      )}
 
       {/* Main content */}
-      {diagnosis && !isLoading && (
+      {diagnosis && hasFocusContract && !isLoading && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -374,7 +424,8 @@ export function DiagnosisPage() {
               valueLogicReason={diagnosis.value_logic_reason}
             />
             <CharacterCastCard
-              protagonist={diagnosis.protagonist}
+              focusStructure={diagnosis.focus_structure}
+              focusCharacters={diagnosis.focus_characters}
               coreCast={diagnosis.core_cast}
               majorCast={diagnosis.main_characters}
             />

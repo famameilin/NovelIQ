@@ -119,7 +119,6 @@ def _convert_character_stats(
 
     return CharacterStatsAggregate(
         network_density=result.character_relations.get("network_density"),
-        protagonist_betweenness=result.character_relations.get("protagonist_betweenness"),
         greimas_coverage=greimas_coverage_value,
         function_coverage_distribution=function_coverage_distribution if function_coverage_distribution else None,
         antagonist_strength_gap=result.character_relations.get("antagonist_strength_gap"),

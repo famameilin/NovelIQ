@@ -172,17 +172,9 @@ def fetch_character_data(
         char_emotion_map[canonical_name].append(score)
     char_emotion_scores = list(char_emotion_map.items())
 
-    # 5. 确定主角（从 Level1 canonical entity 中找 role_function 为"主体"的）
-    protagonist_name = None
-    for entity in active_characters:
-        if entity.primary_role_function == "主体":
-            protagonist_name = entity.name
-            break
-
     return CharacterData(
         characters=characters,
         char_emotion_scores=char_emotion_scores,
-        protagonist_name=protagonist_name,
     )
 
 
