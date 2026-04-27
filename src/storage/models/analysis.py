@@ -235,6 +235,12 @@ class StageSummary(Base):
     修改时间: 2026-04-08
     修改者: TraeAI
     修改内容: 修正主键为 stage_id 以匹配数据库实际结构
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: fix-stage-summary-orm-duplicate-fk
+    修改内容: 删除与列级 ForeignKey 重复的同义 ForeignKeyConstraint，
+    避免 ORM 元数据重复声明同一条 run_id -> analysis_runs.run_id 外键。
     """
 
     __tablename__ = "stage_summaries"
@@ -248,14 +254,7 @@ class StageSummary(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["run_id"],
-            ["analysis_runs.run_id"],
-            ondelete="CASCADE",
-        ),
-        Index("idx_stage_summaries_run_id", "run_id"),
-    )
+    __table_args__ = (Index("idx_stage_summaries_run_id", "run_id"),)
 
     def __repr__(self) -> str:
         return f"<StageSummary(stage_id={self.stage_id}, run_id={self.run_id})>"
