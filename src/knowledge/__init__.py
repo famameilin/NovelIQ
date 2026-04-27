@@ -11,8 +11,8 @@ from .authority import (
     GraphAuthorityView,
     KnowledgeGraphAuthorityService,
     Level1AuthoritySnapshot,
+    ParticipantState,
     RelationEvent,
-    StableState,
     TimelineAuthorityView,
 )
 from .graph import build_networkx_from_graph_tables
@@ -30,8 +30,8 @@ __all__ = [
     "GraphAuthorityView",
     "KnowledgeGraphAuthorityService",
     "Level1AuthoritySnapshot",
+    "ParticipantState",
     "RelationEvent",
-    "StableState",
     "TimelineAuthorityView",
     "build_networkx_from_graph_tables",
 ]

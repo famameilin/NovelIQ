@@ -161,6 +161,20 @@ class AnalysisSettings:
             "友情",
         ]
     )
+    valid_hierarchical_relation_types: list[str] = field(
+        default_factory=lambda: [
+            "belongs_to",
+            "member_of",
+            "leader_of",
+            "affiliated_with",
+            "father_of",
+            "son_of",
+            "parent_of",
+            "child_of",
+            "sibling_of",
+            "spouse_of",
+        ]
+    )
 
 
 @dataclass
@@ -437,6 +451,21 @@ def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
                 "利益",
                 "主从",
                 "友情",
+            ],
+        ),
+        valid_hierarchical_relation_types=data.get(
+            "valid_hierarchical_relation_types",
+            [
+                "belongs_to",
+                "member_of",
+                "leader_of",
+                "affiliated_with",
+                "father_of",
+                "son_of",
+                "parent_of",
+                "child_of",
+                "sibling_of",
+                "spouse_of",
             ],
         ),
     )
