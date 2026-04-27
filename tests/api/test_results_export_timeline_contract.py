@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.api.exceptions import GraphReadinessError
+from src.api.exceptions import DiagnosisRerunRequiredError, GraphReadinessError
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
@@ -222,7 +222,7 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
-def test_load_character_bundle_marks_ledger_only_diagnosis_as_missing(
+def test_load_character_bundle_rejects_rerun_required_diagnosis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     diagnosis = SimpleNamespace(
@@ -256,25 +256,17 @@ def test_load_character_bundle_marks_ledger_only_diagnosis_as_missing(
         ]
     )
 
-    (
-        _fetched_characters,
-        arc_scores,
-        main_characters,
-        valid_character_names,
-        missing_fields,
-    ) = load_character_bundle(
-        run_id="run-export-bundle",
-        novel_id="novel-1",
-        stats_repo=MagicMock(),
-        annotation_repo=annotation_repo,
-        alias_map={},
-        export_graph_view=export_graph_view,
-    )
+    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
+        load_character_bundle(
+            run_id="run-export-bundle",
+            novel_id="novel-1",
+            stats_repo=MagicMock(),
+            annotation_repo=annotation_repo,
+            alias_map={},
+            export_graph_view=export_graph_view,
+        )
 
-    assert arc_scores is None
-    assert main_characters is None
-    assert valid_character_names == {"沈砚"}
-    assert missing_fields == ["diagnosis"]
+    assert exc_info.value.reason == "diagnosis_missing_focus_contract"
 
 
 def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -353,6 +345,52 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     assert results_data["diagnosis"] is None
     assert missing_fields.count("diagnosis") == 1
     assert novel_name == "Test Novel"
+
+
+def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_core_results",
+        lambda *_args, **_kwargs: ([], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_character_bundle",
+        lambda *_args, **_kwargs: ([], None, None, set(), []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            rerun_required=True,
+            rerun_reason="focus_contract_incomplete",
+        ),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            assert_graph_projection_ready=lambda _run_id: None,
+            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
+            build_graph_report=lambda _run_id: GraphAuthorityReport(
+                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
+            ),
+            build_timeline_view=lambda _run_id: SimpleNamespace(
+                character_entities=[],
+                entity_lifecycles=[],
+                relation_events=[],
+            ),
+        ),
+    )
+
+    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
+        fetch_all_results_data(
+            novel_id="novel-1",
+            task_id="task-1",
+            run_id="run-1",
+            stats_repo=MagicMock(session=MagicMock()),
+            annotation_repo=MagicMock(fetch_alias_map=lambda _run_id: {}),
+            chunk_repo=MagicMock(),
+        )
+
+    assert exc_info.value.reason == "focus_contract_incomplete"
 
 
 def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_session) -> None:

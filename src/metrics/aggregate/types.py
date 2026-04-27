@@ -59,7 +59,6 @@ class CharacterData:
 
     characters: list[tuple[str, str, int]]
     char_emotion_scores: list[tuple[str, list[float]]]
-    protagonist_name: str | None
 
 
 @dataclass
