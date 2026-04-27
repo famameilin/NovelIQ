@@ -244,22 +244,6 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
     )
 
 
-def _drop_constraint_if_exists(connection: Connection, table_name: str, constraint_name: str) -> None:
-    """
-    在当前 schema 下删除指定约束（若存在）。
-
-    创建时间: 2026-04-27
-    修改者: Codex
-    任务: timeline-contract-db-migration
-    说明: graph relation event 的 change_type 合同已破坏性收紧；
-          对旧库要先移除同名或冲突旧约束，再补新版本约束，避免启动期重复 DDL 或残留旧白名单。
-    """
-
-    if not _constraint_exists(connection, table_name, constraint_name):
-        return
-    connection.execute(text(f"ALTER TABLE {table_name} DROP CONSTRAINT {constraint_name}"))
-
-
 def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> None:
     """
     在补外键前校验目标子表没有孤儿数据。
@@ -460,64 +444,6 @@ def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
         connection.execute(text(spec["ddl"]))
 
 
-def _ensure_graph_projection_contract_schema(connection: Connection) -> None:
-    """
-    为图谱投影主合同补齐 timeline 重构所需 schema。
-
-    创建时间: 2026-04-27
-    修改者: Codex
-    任务: timeline-contract-db-migration
-    说明:
-    - analysis_runs 需要 graph/timeline 合同版本列，旧 run 默认标记为 v1
-    - graph_relation_events 需要新的 change_type v2 约束，只允许真正的关系变化事件
-    - 运行时显式回填旧库中的无变化/波动等历史值，确保新增约束可以落地
-    """
-
-    if not _table_exists(connection, "analysis_runs") or not _table_exists(connection, "graph_relation_events"):
-        return
-
-    connection.execute(
-        text(
-            "ALTER TABLE analysis_runs "
-            "ADD COLUMN IF NOT EXISTS graph_projection_version INTEGER NOT NULL DEFAULT 1"
-        )
-    )
-    connection.execute(
-        text(
-            "ALTER TABLE analysis_runs "
-            "ADD COLUMN IF NOT EXISTS timeline_contract_version INTEGER NOT NULL DEFAULT 1"
-        )
-    )
-    connection.execute(text("ALTER TABLE analysis_runs ALTER COLUMN graph_projection_version SET DEFAULT 2"))
-    connection.execute(text("ALTER TABLE analysis_runs ALTER COLUMN timeline_contract_version SET DEFAULT 2"))
-
-    # 中文注释：旧库里可能残留“无变化/波动”等历史 change_type。
-    # 本轮时间轴合同不再接受它们进入 graph history，因此在补约束前统一规范化。
-    connection.execute(
-        text(
-            """
-            UPDATE graph_relation_events
-            SET change_type = CASE
-                WHEN change_type = '无变化' THEN '强化'
-                WHEN change_type = '波动' THEN '强化'
-                ELSE change_type
-            END
-            WHERE change_type IN ('无变化', '波动')
-            """
-        )
-    )
-
-    _drop_constraint_if_exists(connection, "graph_relation_events", "ck_graph_relation_events_change_type")
-    _drop_constraint_if_exists(connection, "graph_relation_events", "ck_graph_relation_events_change_type_v2")
-    connection.execute(
-        text(
-            "ALTER TABLE graph_relation_events "
-            "ADD CONSTRAINT ck_graph_relation_events_change_type_v2 "
-            "CHECK (change_type IN ('新建', '强化', '弱化', '断裂'))"
-        )
-    )
-
-
 def _ensure_runtime_schema(engine: Engine) -> None:
     """
     为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema。
@@ -545,14 +471,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER",
         "ALTER TABLE model_interactions ADD COLUMN IF NOT EXISTS thinking_state VARCHAR(20) NOT NULL DEFAULT 'unknown'",
         "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS char_end_offset INTEGER",
-        (
-            "ALTER TABLE analysis_runs "
-            "ADD COLUMN IF NOT EXISTS graph_projection_version INTEGER NOT NULL DEFAULT 1"
-        ),
-        (
-            "ALTER TABLE analysis_runs "
-            "ADD COLUMN IF NOT EXISTS timeline_contract_version INTEGER NOT NULL DEFAULT 1"
-        ),
         "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation DOUBLE PRECISION",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS setup_summary TEXT",
         "ALTER TABLE chunk_annotation ADD COLUMN IF NOT EXISTS payoff_likelihood VARCHAR(20)",
@@ -579,7 +497,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
         if _table_exists(conn, "chunk_embeddings"):
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_run_id ON chunk_embeddings (run_id)"))
         _ensure_analysis_related_foreign_keys(conn)
-        _ensure_graph_projection_contract_schema(conn)
 
 
 @contextmanager
