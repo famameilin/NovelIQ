@@ -11,7 +11,7 @@
  * 修改内容:
  *   - 详情面板改为消费 node_id / anchor_chunk_id 新合同
  *   - 展示 score_breakdown、relation_events 与 lifecycle_events 新结构
- *   - 图谱回跳统一使用 anchor_chunk_id，并在单一关系事件时附带 relation_event_id
+ *   - 图谱回跳仅在 relation 节点具备稳定 relation_event_id 时附带图谱选择参数
  */
 
 import { useCallback, useMemo } from "react";
@@ -70,15 +70,17 @@ export function TimelineNodeDetail({
     return uniqueRelationEventIds.length === 1 ? uniqueRelationEventIds[0] : null;
   }, [node?.relation_events, selectedRelationEventId]);
 
+  const shouldSelectGraphEvent = node?.node_type === "relation" && graphRelationEventId != null;
+
   const handleBackToGraph = useCallback(() => {
     if (!node) return;
     const params = new URLSearchParams({ task_id: taskId });
-    params.set("selected_chunk", String(node.anchor_chunk_id));
-    if (graphRelationEventId != null) {
+    if (shouldSelectGraphEvent) {
+      params.set("selected_chunk", String(node.anchor_chunk_id));
       params.set("relation_event_id", String(graphRelationEventId));
     }
     navigate(`/novels/${novelId}/graph?${params.toString()}`);
-  }, [graphRelationEventId, navigate, node, novelId, taskId]);
+  }, [graphRelationEventId, navigate, node, novelId, shouldSelectGraphEvent, taskId]);
 
   return (
     <AnimatePresence mode="wait">

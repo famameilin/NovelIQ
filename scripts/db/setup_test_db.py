@@ -10,6 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 
 project_root = Path(__file__).resolve().parents[2]
 load_dotenv(project_root / ".env")
@@ -18,13 +19,28 @@ TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL",
     "postgresql+psycopg://postgres:sr20031109ZY@localhost:5432/novel_analysis_test"
 )
+TEST_DB_NAME = make_url(TEST_DB_URL).database
+if not TEST_DB_NAME:
+    raise RuntimeError("TEST_DATABASE_URL 必须包含数据库名")
+if TEST_DB_NAME in {"postgres", "template0", "template1"}:
+    raise RuntimeError(f"拒绝使用保留数据库名作为测试库: {TEST_DB_NAME}")
+QUOTED_TEST_DB_NAME = f'"{TEST_DB_NAME.replace("\"", "\"\"")}"'
 
 # 连接到默认的 postgres 数据库来创建测试数据库
-DEFAULT_DB_URL = TEST_DB_URL.replace("/novel_analysis_test", "/postgres")
+DEFAULT_DB_URL = str(make_url(TEST_DB_URL).set(database="postgres"))
 
 
 def create_test_database():
-    """创建测试数据库"""
+    """
+    创建测试数据库
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: fix-test-db-timeline-contract-bootstrap
+    修改内容: 测试库若已存在则直接重建，而不是复用旧库。
+              这次时间轴合同重构不再依赖运行时或手动迁移脚本兜底，
+              因此测试库初始化必须显式确保得到全新的 schema。
+    """
     engine = create_engine(DEFAULT_DB_URL, echo=False)
 
     with engine.connect() as conn:
@@ -32,15 +48,29 @@ def create_test_database():
 
         # 检查数据库是否已存在
         result = conn.execute(
-            text("SELECT 1 FROM pg_database WHERE datname = 'novel_analysis_test'")
+            text("SELECT 1 FROM pg_database WHERE datname = :database_name"),
+            {"database_name": TEST_DB_NAME},
         )
         exists = result.fetchone()
 
         if exists:
-            print("[OK] 数据库 novel_analysis_test 已存在")
+            conn.execute(
+                text(
+                    """
+                    SELECT pg_terminate_backend(pid)
+                    FROM pg_stat_activity
+                    WHERE datname = :database_name
+                      AND pid <> pg_backend_pid()
+                    """
+                ),
+                {"database_name": TEST_DB_NAME},
+            )
+            conn.execute(text(f"DROP DATABASE {QUOTED_TEST_DB_NAME}"))
+            conn.execute(text(f"CREATE DATABASE {QUOTED_TEST_DB_NAME}"))
+            print(f"[OK] 数据库 {TEST_DB_NAME} 已重建")
         else:
-            conn.execute(text("CREATE DATABASE novel_analysis_test"))
-            print("[OK] 数据库 novel_analysis_test 创建成功")
+            conn.execute(text(f"CREATE DATABASE {QUOTED_TEST_DB_NAME}"))
+            print(f"[OK] 数据库 {TEST_DB_NAME} 创建成功")
 
     engine.dispose()
 
@@ -70,7 +100,8 @@ def create_tables():
     修改者: Codex
     任务: timeline-contract-migration-call-chain-cleanup
     修改内容: 不再在测试库初始化流程中主动调用 graph projection migration 脚本。
-              时间轴合同相关 schema 迁移改为显式手动入口，避免测试库建表继续挂在迁移脚本活调用链上。
+              当前测试库通过“先重建数据库，再按 ORM 建表”拿到最新时间轴合同，
+              不再依赖旧的一次性迁移脚本继续补旧 schema。
     """
     sys.path.insert(0, str(project_root))
     from src.storage import db as db_module
