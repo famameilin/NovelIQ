@@ -372,7 +372,7 @@ class TestCloudDiagnose:
             {
                 "novel_id": self.novel_id,
                 "foreshadow_expectation": 0.2,
-                "arc_scores": {"角色0": 9.1},
+                "arc_scores": {"角色0": 9.1, "角色1": 7.8},
                 "narrative_type": "三幕",
                 "topic_labels": ["成长"],
                 "diagnosis": "诊断完成",
@@ -432,7 +432,7 @@ class TestCloudDiagnose:
         result = CloudAnalysis(
             novel_id="raw-novel",
             foreshadow_expectation=0.1,
-            arc_scores={"角色0": 8.5},
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
@@ -464,7 +464,7 @@ class TestCloudDiagnose:
         result = CloudAnalysis(
             novel_id="raw-novel",
             foreshadow_expectation=0.27,
-            arc_scores={"角色0": 8.5},
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
