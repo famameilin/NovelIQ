@@ -231,7 +231,14 @@ describe("NovelDetailPage", () => {
     getCharacterStatsMock.mockResolvedValue({});
     getStyleStatsMock.mockResolvedValue({});
     getTopicsMock.mockResolvedValue([]);
-    getDiagnosisMock.mockResolvedValue({});
+    getDiagnosisMock.mockResolvedValue({
+      arc_scores: { 沈砚: 8.2 },
+      focus_structure: "single",
+      focus_characters: ["沈砚"],
+      topic_labels: ["成长"],
+      main_characters: ["沈砚"],
+      core_cast: ["沈砚"],
+    });
     getChunkCurvesMock.mockResolvedValue([]);
     confirmSpy.mockReset();
     confirmSpy.mockReturnValue(true);
@@ -370,6 +377,40 @@ describe("NovelDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("暂无诊断数据")).toBeInTheDocument();
       expect(screen.getByTestId("score-overview-card")).toBeInTheDocument();
+    });
+  });
+
+  it("旧 diagnosis 合同被判重跑时应显示统一重跑态", async () => {
+    currentSearchParams = "task_id=task-ready";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getDiagnosisMock.mockResolvedValue({
+      rerun_required: true,
+      rerun_reason: "focus_contract_incomplete",
+    });
+    getNarrativeStructureMock.mockResolvedValue({});
+    getEmotionStatsMock.mockResolvedValue({});
+    getCharacterStatsMock.mockResolvedValue({});
+    getStyleStatsMock.mockResolvedValue({});
+    getTopicsMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: "diagnosis_rerun_required",
+            reason: "focus_contract_incomplete",
+          },
+        },
+      },
+    });
+    getChunkCurvesMock.mockResolvedValue([]);
+
+    renderNovelDetailPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("当前结果需要重新分析")).toBeInTheDocument();
+      expect(screen.queryByTestId("diagnosis-summary-card")).not.toBeInTheDocument();
+      expect(screen.queryByText("数据加载失败")).not.toBeInTheDocument();
     });
   });
 });

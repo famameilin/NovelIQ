@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.api.exceptions import GraphReadinessError
+from src.api.exceptions import DiagnosisRerunRequiredError, GraphReadinessError
 from src.api.services.results_export_service import (
     _fetch_timeline_data,
     build_export_payload,
@@ -31,6 +31,7 @@ from src.knowledge.authority import (
     serialize_graph_report_signals,
 )
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
+from src.models.cloud.schema import CloudAnalysis
 from src.storage.models import ChunkRelation
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
@@ -174,7 +175,14 @@ def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.M
 
 
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    diagnosis = SimpleNamespace(
+        rerun_required=False,
+        arc_scores={"沈砚": 8.0},
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
+    )
     characters = [SimpleNamespace(name="沈砚")]
 
     monkeypatch.setattr(
@@ -215,10 +223,19 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
-def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fallback_hits(
+def test_load_character_bundle_rejects_rerun_required_diagnosis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    diagnosis = SimpleNamespace(
+        rerun_required=True,
+        rerun_reason="diagnosis_missing_focus_contract",
+        foreshadow_expectation=0.58,
+        arc_scores=None,
+        focus_structure=None,
+        focus_characters=None,
+        main_characters=None,
+        core_cast=None,
+    )
     characters = [SimpleNamespace(name="沈砚")]
     annotation_repo = MagicMock()
 
@@ -240,25 +257,17 @@ def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fall
         ]
     )
 
-    (
-        _fetched_characters,
-        arc_scores,
-        main_characters,
-        valid_character_names,
-        missing_fields,
-    ) = load_character_bundle(
-        run_id="run-export-bundle",
-        novel_id="novel-1",
-        stats_repo=MagicMock(),
-        annotation_repo=annotation_repo,
-        alias_map={},
-        export_graph_view=export_graph_view,
-    )
+    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
+        load_character_bundle(
+            run_id="run-export-bundle",
+            novel_id="novel-1",
+            stats_repo=MagicMock(),
+            annotation_repo=annotation_repo,
+            alias_map={},
+            export_graph_view=export_graph_view,
+        )
 
-    assert arc_scores == {"沈砚": 8.0}
-    assert main_characters == ["沈砚"]
-    assert valid_character_names == {"沈砚"}
-    assert missing_fields == []
+    assert exc_info.value.reason == "diagnosis_missing_focus_contract"
 
 
 def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,8 +348,73 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     assert novel_name == "Test Novel"
 
 
+def test_fetch_all_results_data_raises_for_rerun_required_diagnosis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_core_results",
+        lambda *_args, **_kwargs: ([], []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.load_character_bundle",
+        lambda *_args, **_kwargs: ([], None, None, set(), []),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service._fetch_diagnosis",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            rerun_required=True,
+            rerun_reason="focus_contract_incomplete",
+        ),
+    )
+    monkeypatch.setattr(
+        "src.api.services.results_export_service.KnowledgeGraphAuthorityService.from_session",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            assert_graph_projection_ready=lambda _run_id: None,
+            build_export_view=lambda _run_id: ExportGraphAuthorityView(),
+            build_graph_report=lambda _run_id: GraphAuthorityReport(
+                summary=GraphSharedSummary(node_count=0, edge_count=0, density=0.0),
+                quality=GraphQualitySignals(conflict_count=0, low_confidence_count=0),
+            ),
+            build_timeline_view=lambda _run_id: SimpleNamespace(
+                character_entities=[],
+                entity_lifecycles=[],
+                relation_events=[],
+            ),
+        ),
+    )
+
+    with pytest.raises(DiagnosisRerunRequiredError) as exc_info:
+        fetch_all_results_data(
+            novel_id="novel-1",
+            task_id="task-1",
+            run_id="run-1",
+            stats_repo=MagicMock(session=MagicMock()),
+            annotation_repo=MagicMock(fetch_alias_map=lambda _run_id: {}),
+            chunk_repo=MagicMock(),
+        )
+
+    assert exc_info.value.reason == "focus_contract_incomplete"
+
+
 def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
+    StatsRepository(db_session).insert_cloud_analysis(
+        scenario.run_id,
+        CloudAnalysis(
+            novel_id=scenario.novel_id,
+            foreshadow_expectation=0.42,
+            arc_scores={
+                scenario.hero_name: 8.6,
+                scenario.rival_name: 7.8,
+            },
+            narrative_type="双线推进",
+            topic_labels=["冲突升级"],
+            diagnosis="有效 diagnosis",
+            narrative_arc_type="落坑爬出",
+            focus_structure="dual",
+            focus_characters=[scenario.hero_name, scenario.rival_name],
+            main_characters=[scenario.hero_name, scenario.rival_name],
+            core_cast=[scenario.hero_name, scenario.rival_name],
+        ),
+    )
     db_session.add(
         ChunkRelation(
             chunk_id=4,
@@ -374,7 +448,14 @@ def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_sess
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    diagnosis = SimpleNamespace(
+        rerun_required=False,
+        arc_scores={"沈砚": 8.0},
+        focus_structure="single",
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+        core_cast=["沈砚"],
+    )
     characters = [SimpleNamespace(name="沈砚")]
 
     monkeypatch.setattr(
