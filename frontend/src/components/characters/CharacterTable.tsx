@@ -9,12 +9,10 @@ import type { Character } from "@/api/types";
 export interface CharacterTableProps {
   /** 角色列表数据 */
   characters: Character[];
-  /** 主角名称 */
-  protagonist?: string | null;
   className?: string;
 }
 
-type SortKey = "name" | "appearance_count" | "dominant_role_function" | "protagonist_score" | "avg_emotion_score";
+type SortKey = "name" | "appearance_count" | "dominant_role_function" | "narrative_focus_score" | "avg_emotion_score";
 type SortDirection = "asc" | "desc";
 
 function SortIcon({
@@ -37,10 +35,13 @@ function SortIcon({
 /**
  * 2026-04-21，任务：多页面卡片风格统一
  * 修改原因：统一人物页表格容器样式，减少页面上普通 Card 与新卡片壳并存的割裂感。
+ *
+ * 2026-04-27，任务：protagonist-focus-contract
+ * 修改原因：表格列和高亮逻辑统一切到焦点合同，展示 `narrative_focus_score`，
+ * 并直接消费角色结果里的 `is_focus_character`，不再依赖额外的名称列表高亮。
  */
 export function CharacterTable({
   characters,
-  protagonist,
   className,
 }: CharacterTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("appearance_count");
@@ -64,9 +65,9 @@ export function CharacterTable({
           aVal = a.dominant_role_function || "";
           bVal = b.dominant_role_function || "";
           break;
-        case "protagonist_score":
-          aVal = a.protagonist_score ?? 0;
-          bVal = b.protagonist_score ?? 0;
+        case "narrative_focus_score":
+          aVal = a.narrative_focus_score ?? 0;
+          bVal = b.narrative_focus_score ?? 0;
           break;
         case "avg_emotion_score":
           aVal = a.avg_emotion_score ?? 0;
@@ -125,10 +126,10 @@ export function CharacterTable({
                   <SortIcon column="dominant_role_function" sortKey={sortKey} sortDirection={sortDirection} />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer" onClick={() => handleSort("protagonist_score")}>
+              <TableHead className="cursor-pointer" onClick={() => handleSort("narrative_focus_score")}>
                 <div className="flex items-center gap-1">
-                  主角分
-                  <SortIcon column="protagonist_score" sortKey={sortKey} sortDirection={sortDirection} />
+                  叙事中心度
+                  <SortIcon column="narrative_focus_score" sortKey={sortKey} sortDirection={sortDirection} />
                 </div>
               </TableHead>
               <TableHead className="cursor-pointer" onClick={() => handleSort("avg_emotion_score")}>
@@ -152,15 +153,15 @@ export function CharacterTable({
                   key={char.name}
                   className={cn(
                     "cursor-pointer transition-colors hover:bg-surface-hover",
-                    char.name === protagonist && "bg-primary/5"
+                    char.is_focus_character && "bg-primary/5"
                   )}
                 >
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
-                      {char.name === protagonist && (
+                      {char.is_focus_character && (
                         <User className="h-3 w-3 text-primary" />
                       )}
-                      <span className={char.name === protagonist ? "text-primary font-semibold" : ""}>
+                      <span className={char.is_focus_character ? "text-primary font-semibold" : ""}>
                         {char.name}
                       </span>
                     </div>
@@ -176,8 +177,8 @@ export function CharacterTable({
                     )}
                   </TableCell>
                   <TableCell>
-                    {char.protagonist_score != null ? (
-                      <span className="tabular-nums">{char.protagonist_score.toFixed(1)}</span>
+                    {char.narrative_focus_score != null ? (
+                      <span className="tabular-nums">{char.narrative_focus_score.toFixed(1)}</span>
                     ) : (
                       <span className="text-text-muted">—</span>
                     )}

@@ -331,6 +331,12 @@ class DiagnosisClient(BaseModelClient):
         任务: fix-diagnosis-review-findings
         修改原因: 当 setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
         此时也必须覆写掉 LLM 猜测值，继续保持 setup ledger 单一真相源。
+
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: protagonist-focus-contract
+        修改原因: 新 diagnosis 合同允许 single / dual / ensemble；
+        落库前必须重新走一遍 CloudAnalysis 校验，禁止把非法焦点结构静默写入数据库。
         """
 
         updates: dict[str, Any] = {}
@@ -349,9 +355,10 @@ class DiagnosisClient(BaseModelClient):
                     f"got {type(payload_expectation).__name__}"
                 )
 
+        final_payload = result.model_dump()
         if updates:
-            return result.model_copy(update=updates)
-        return result
+            final_payload.update(updates)
+        return CloudAnalysis.model_validate(final_payload)
 
     def _build_messages(self, payload: dict) -> list[dict[str, str]]:
         from src.config import settings
@@ -367,7 +374,7 @@ class DiagnosisClient(BaseModelClient):
                 "When alias_merges provides an alias mapping, "
                 "always rewrite the alias to its canonical character name "
                 "before reasoning or output.",
-                "Apply this consistently in arc_scores, topic_labels, "
+                "Apply this consistently in arc_scores, focus_characters, main_characters, core_cast, topic_labels, "
                 "diagnosis, value_logic_reason, power_stance_reason, "
                 "dignity_reason, and cultural_depth_reason.",
                 f"known_characters={json.dumps(known_characters, ensure_ascii=False)}",

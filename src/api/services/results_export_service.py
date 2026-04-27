@@ -15,6 +15,7 @@ from typing import Any
 from loguru import logger
 
 from src.api.dependencies import get_metrics_service
+from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.services.results_contracts import validate_aggregate_metrics_contract
 from src.api.services.results_queries import (
     _fetch_character_relations,
@@ -30,6 +31,7 @@ from src.api.services.results_queries import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
+from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
 from src.knowledge.authority import (
     ExportGraphAuthorityView,
     GraphAuthorityReport,
@@ -91,6 +93,7 @@ def load_character_bundle(
     annotation_repo: AnnotationRepository,
     alias_map: dict[str, str],
     export_graph_view: ExportGraphAuthorityView,
+    diagnosis: Any | None = None,
 ) -> tuple[Any, dict[str, float] | None, list[str] | None, set[str], list[str]]:
     """
     加载角色相关数据
@@ -101,22 +104,34 @@ def load_character_bundle(
     修改内容: diagnosis 缺失判断改为复用 annotation_repo fallback，避免导出 payload 已有 diagnosis
               但 missing_fields 仍把它标成缺失。
 
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改内容: 角色导出链路改为传递 `focus_characters`，保证导出结果与角色页
+              使用同一套焦点身份判定逻辑。
+
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
     """
     missing_fields: list[str] = []
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
-    if not diagnosis:
+    if diagnosis is None:
+        diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is not None and diagnosis.rerun_required:
+        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
+    diagnosis_is_complete = _is_complete_diagnosis_result(diagnosis)
+    if not diagnosis_is_complete:
         missing_fields.append("diagnosis")
 
     arc_scores: dict[str, float] | None = None
+    focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
-    if diagnosis:
-        arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
+    if diagnosis_is_complete and diagnosis is not None:
+        arc_scores = diagnosis.arc_scores
+        focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters
 
-    characters = _fetch_characters(run_id, annotation_repo, arc_scores, main_characters, limit=None)
+    characters = _fetch_characters(run_id, annotation_repo, arc_scores, focus_characters, main_characters, limit=None)
     if not characters:
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
@@ -384,6 +399,10 @@ def fetch_all_results_data(
     diagnosis 等字段若被多段 bundle 链路重复判缺，不应在返回值里出现重复项。
     """
     alias_map = annotation_repo.fetch_alias_map(run_id)
+    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is not None and diagnosis.rerun_required:
+        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
+
     graph_authority_service = KnowledgeGraphAuthorityService.from_session(stats_repo.session)
     graph_authority_service.assert_graph_projection_ready(run_id)
     export_graph_view = graph_authority_service.build_export_view(run_id)
@@ -393,13 +412,13 @@ def fetch_all_results_data(
     chunk_curves, missing_fields = load_core_results(run_id, stats_repo, annotation_repo, chunk_repo)
 
     characters, arc_scores, main_characters, valid_character_names, char_missing = load_character_bundle(
-        run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view
+        run_id, novel_id, stats_repo, annotation_repo, alias_map, export_graph_view, diagnosis=diagnosis
     )
     missing_fields.extend(char_missing)
 
-    diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
-    if not diagnosis:
+    if not _is_complete_diagnosis_result(diagnosis):
         missing_fields.append("diagnosis")
+        diagnosis = None
 
     topics, chunk_styles, chunk_annotations, chunk_missing = load_chunk_bundle(
         run_id,

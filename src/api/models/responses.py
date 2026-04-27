@@ -108,6 +108,14 @@ class CharacterStats(BaseModel):
       - 新增 protagonist_score 字段
       - 新增 is_protagonist 字段
 
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改内容:
+      - 删除 protagonist_score / is_protagonist
+      - 新增 narrative_focus_score / is_focus_character
+      - 明确区分“叙事中心度分数”和“焦点人物身份”
+
     """
 
     name: str
@@ -115,8 +123,8 @@ class CharacterStats(BaseModel):
     dominant_role_function: str
     role_function_distribution: dict[str, int] = Field(default_factory=dict)
     dominant_role_ratio: float = 0.0
-    protagonist_score: float | None = None
-    is_protagonist: bool | None = None
+    narrative_focus_score: float | None = None
+    is_focus_character: bool = False
     avg_emotion_score: float | None = None
 
 
@@ -295,7 +303,6 @@ class EmotionStats(BaseModel):
 
 class CharacterStatsAggregate(BaseModel):
     network_density: float | None = None
-    protagonist_betweenness: float | None = None
     greimas_coverage: float | None = None
     function_coverage_distribution: dict[str, float] | None = None
     antagonist_strength_gap: float | None = None
@@ -322,6 +329,8 @@ class TopicInfo(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
+    rerun_required: bool = False
+    rerun_reason: str | None = None
     foreshadow_expectation: float | None = Field(
         default=None,
         description=(
@@ -342,7 +351,8 @@ class DiagnosisResult(BaseModel):
     cultural_depth_score: int | None = None
     cultural_depth_reason: str | None = None
     narrative_arc_type: str | None = None
-    protagonist: str | None = None
+    focus_structure: Literal["single", "dual", "ensemble"] | None = None
+    focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
     core_cast: list[str] | None = None
     theme_color: str | None = Field(default=None, description="小说主题色，十六进制格式，如 #4A90D9")

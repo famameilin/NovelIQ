@@ -13,6 +13,7 @@ import {
   getDiagnosis,
   getChunkCurves,
 } from "@/api/results";
+import { isDiagnosisRerunRequiredError } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
 import { createAnalysisTask, resumeAnalysisTask, batchDeleteTasks, cancelAnalysisTask } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
@@ -27,6 +28,7 @@ import { MiniCurvePreview } from "@/components/charts/MiniCurvePreview";
 import { AnalysisProgressPanel } from "@/components/analysis/AnalysisProgressPanel";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -115,6 +117,17 @@ function EmptyTaskPrompt({ onAnalyze, isAnalyzing }: {
         {isAnalyzing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         {isAnalyzing ? "正在创建分析任务..." : "开始分析"}
       </Button>
+    </div>
+  );
+}
+
+function RerunRequiredState() {
+  return (
+    <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
+      <p className="text-base font-semibold text-text">当前结果需要重新分析</p>
+      <p className="text-sm text-text-muted">
+        该任务的 diagnosis 焦点合同已失效，当前仪表盘结果不再可信，请重新分析后再查看。
+      </p>
     </div>
   );
 }
@@ -308,7 +321,13 @@ export function NovelDetailPage() {
     staleTime: STALE_TIME,
   });
 
-  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError;
+  const diagnosis = diagnosisQuery.data;
+  const diagnosisRequiresRerun =
+    diagnosisQuery.isSuccess &&
+    diagnosis != null &&
+    (diagnosis.rerun_required === true || !hasCompleteFocusContract(diagnosis));
+  const isTopicsRerunError = isDiagnosisRerunRequiredError(topicsQuery.error);
+  const hasDiagnosisLoaded = diagnosisQuery.isFetched && !diagnosisQuery.isError && !diagnosisRequiresRerun;
 
   const allMetricsLoaded =
     narrativeQuery.data &&
@@ -328,12 +347,14 @@ export function NovelDetailPage() {
       diagnosisQuery.isLoading ||
       curvesQuery.isLoading);
 
+  // 中文注释：首页对 rerun-required diagnosis 采用“单一重跑态”；
+  // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败。
   const hasAnyError =
     narrativeQuery.isError ||
     emotionQuery.isError ||
     characterQuery.isError ||
     styleQuery.isError ||
-    topicsQuery.isError ||
+    (topicsQuery.isError && !(diagnosisRequiresRerun && isTopicsRerunError)) ||
     diagnosisQuery.isError ||
     curvesQuery.isError;
 
@@ -390,8 +411,10 @@ export function NovelDetailPage() {
         </div>
       )}
 
+      {!isAnalyzing && diagnosisRequiresRerun && !isLoading && currentTaskId && <RerunRequiredState />}
+
       {/* Main content - only when not analyzing */}
-      {!isAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && (
+      {!isAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && !diagnosisRequiresRerun && (
         <div className="space-y-4">
           {/* Row 1: 诊断画像 + 评分速览 */}
           <motion.div
