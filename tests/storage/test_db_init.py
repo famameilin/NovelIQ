@@ -73,13 +73,13 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
 
 def test_timeline_contract_runtime_schema_columns_and_constraints_exist() -> None:
     """
-    验证测试库初始化后已具备时间轴合同重构所需的版本列与 change_type 约束。
+    验证 pytest fresh schema 已具备时间轴合同重构所需的版本列与 change_type 约束。
 
     创建时间: 2026-04-27
     修改者: Codex
     任务: timeline-contract-db-migration
-    说明: 这次不是只补 ORM 字段；旧库运行时也必须真正拥有 analysis_runs 的版本列，
-          以及 graph_relation_events 的 v2 change_type 约束，否则新 timeline contract 只在代码层成立。
+    说明: 当前主线不再兼容旧库 runtime/migration 收口；
+          这里验证的是 pytest 会话下 freshly created 的测试 schema，必须与新 timeline contract 保持一致。
     """
 
     expected_columns = {
