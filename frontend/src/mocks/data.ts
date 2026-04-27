@@ -376,16 +376,26 @@ const CHAR_SETS: string[][] = [
 
 export function createTimeline(): TimelineResponse {
   const nodes = PHASE_EVENTS.map((event, i) => ({
-    chunk_id: Math.floor((i / PHASE_EVENTS.length) * 120 + 5),
+    node_id: `plot:${Math.floor((i / PHASE_EVENTS.length) * 120 + 5)}`,
+    anchor_chunk_id: Math.floor((i / PHASE_EVENTS.length) * 120 + 5),
     progress: +(i / PHASE_EVENTS.length).toFixed(3),
     importance_score: +(0.3 + Math.random() * 0.7).toFixed(2),
     level: (Math.random() > 0.6 ? 1 : Math.random() > 0.3 ? 2 : 3) as 1 | 2 | 3,
-    event,
+    summary: event,
     characters: CHAR_SETS[i],
-    is_pivot: i === 0 || i === 5 || i === PHASE_EVENTS.length - 1,
-    is_cliffhanger: i === 4 || i === 7,
-    tension_percentile: Math.floor(Math.random() * 100),
-    node_type: (["plot", "character_entry", "relation_change"] as const)[i % 3],
+    phase_name: (["引入期", "发展期", "高潮期", "收束期"] as const)[Math.min(Math.floor(i / 3), 3)],
+    node_type: "plot" as const,
+    node_subtype: "plot" as const,
+    score_breakdown: {
+      pivot: i === 0 || i === 5 || i === PHASE_EVENTS.length - 1 ? 3 : 0,
+      cliffhanger: i === 4 || i === 7 ? 2 : 0,
+      tension: +(Math.random() * 2).toFixed(2),
+    },
+    plot_flags: {
+      is_pivot: i === 0 || i === 5 || i === PHASE_EVENTS.length - 1,
+      is_cliffhanger: i === 4 || i === 7,
+      tension_percentile: Math.floor(Math.random() * 100),
+    },
   }));
 
   const tension_curve = Array.from({ length: 120 }, (_, i) => {
@@ -398,6 +408,7 @@ export function createTimeline(): TimelineResponse {
       novel_id: "",
       novel_name: "斗破苍穹",
       total_chunks: 120,
+      timeline_contract_version: 2,
     },
     phases: [
       { name: "引入期", start: 0, end: 30, ratio: 0.25 },

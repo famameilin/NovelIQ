@@ -96,7 +96,7 @@ export interface TimelineTrackProps {
   nodes: TimelineNodeType[];
   phases?: { name: string; start: number; end: number; ratio: number }[];
   activePhase?: string;
-  selectedNodeId?: number;
+  selectedNodeId?: string;
   onNodeClick?: (node: TimelineNodeType) => void;
   className?: string;
   tensionCurve?: number[];
@@ -131,7 +131,7 @@ export function TimelineTrack({
   const isNodeInHighlight = useCallback(
     (node: TimelineNodeType): boolean => {
       if (!highlightedRange) return false;
-      return node.chunk_id >= highlightedRange[0] && node.chunk_id <= highlightedRange[1];
+      return node.anchor_chunk_id >= highlightedRange[0] && node.anchor_chunk_id <= highlightedRange[1];
     },
     [highlightedRange]
   );
@@ -251,12 +251,12 @@ export function TimelineTrack({
                   const labelTop = getLabelTopPx(anchorY, lane);
                   const labelLeft = getClampedLabelLeftPx(anchorX, labelWidth, canvasMinWidth);
                   const labelAnchorY = lane < 0 ? labelTop + LABEL_HEIGHT_PX : labelTop;
-                  const presentation = getTimelineNodePresentation(node.node_type);
-                  const isSelected = selectedNodeId === node.chunk_id;
+                  const presentation = getTimelineNodePresentation(node.node_type, node.node_subtype);
+                  const isSelected = selectedNodeId === node.node_id;
                   const isHighlighted = isNodeInHighlight(node);
 
                   return (
-                    <div key={node.chunk_id}>
+                    <div key={node.node_id}>
                       <motion.div
                         className={cn(
                           "absolute w-px bg-border/80",
@@ -301,9 +301,9 @@ export function TimelineTrack({
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="text-[11px] font-semibold text-text">{presentation.label}</span>
-                            <span className="text-[11px] text-text-muted">Chunk {node.chunk_id}</span>
+                            <span className="text-[11px] text-text-muted">Chunk {node.anchor_chunk_id}</span>
                           </div>
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-text">{node.event}</p>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-text">{node.summary}</p>
                         </div>
                       </motion.button>
 

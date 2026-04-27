@@ -187,12 +187,17 @@ TIMELINE_AUTHORITY_DEPENDENCY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     "character_entities": ("entity_id", "name", "entity_type"),
     "entity_lifecycles": ("entity_id", "name", "entity_type", "first_seen_chunk", "last_seen_chunk"),
     "relation_events": (
+        "relation_event_id",
         "chunk_id",
         "from_entity_id",
         "to_entity_id",
+        "from_name",
+        "to_name",
         "relation_type",
         "change_type",
         "evidence",
+        "confidence",
+        "directionality",
     ),
 }
 

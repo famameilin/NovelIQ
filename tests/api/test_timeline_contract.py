@@ -8,15 +8,16 @@ from sqlalchemy import delete
 
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from src.storage.models import ChunkRelation, GraphEntityParticipant
+from src.storage.repositories import RunRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
-    index_by_chunk_id,
-    relation_change_names,
-    relation_change_tuples,
+    nodes_for_anchor_chunk,
+    relation_event_names,
+    relation_event_tuples,
 )
 
 
-def test_get_timeline_preserves_authority_backed_contract(api_client: TestClient, db_session) -> None:
+def test_get_timeline_returns_v2_contract_nodes(api_client: TestClient, db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
 
     response = api_client.get(
@@ -26,30 +27,29 @@ def test_get_timeline_preserves_authority_backed_contract(api_client: TestClient
 
     assert response.status_code == 200
     payload = response.json()
-    nodes_by_chunk = index_by_chunk_id(payload["nodes"])
 
     assert payload["meta"]["novel_id"] == scenario.novel_id
     assert payload["meta"]["total_chunks"] == 5
+    assert payload["meta"]["timeline_contract_version"] == 2
     assert len(payload["phases"]) == 4
     assert payload["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
-
     assert [node["progress"] for node in payload["nodes"]] == sorted(node["progress"] for node in payload["nodes"])
 
-    assert nodes_by_chunk[0]["node_type"] == "character_entry"
-    assert nodes_by_chunk[0]["character_entries"] == [scenario.hero_name]
-    assert nodes_by_chunk[1]["node_type"] == "character_entry"
-    assert nodes_by_chunk[1]["character_entries"] == [scenario.rival_name]
-    assert nodes_by_chunk[2]["node_type"] == "relation_change"
-    assert relation_change_tuples(nodes_by_chunk[2]["relation_changes"]) == {
+    anchor_chunk_zero_nodes = nodes_for_anchor_chunk(payload["nodes"], 0)
+    anchor_chunk_two_nodes = nodes_for_anchor_chunk(payload["nodes"], 2)
+    anchor_chunk_four_nodes = nodes_for_anchor_chunk(payload["nodes"], 4)
+
+    assert any(node["node_type"] == "plot" for node in anchor_chunk_zero_nodes)
+    assert any(
+        node["node_type"] == "lifecycle" and node["node_subtype"] == "entry" for node in anchor_chunk_zero_nodes
+    )
+    assert any(node["node_type"] == "plot" for node in anchor_chunk_two_nodes)
+    relation_node = next(node for node in anchor_chunk_two_nodes if node["node_type"] == "relation")
+    assert relation_event_tuples(relation_node["relation_events"]) == {
         (scenario.hero_name, scenario.rival_name, "新建")
     }
-    assert scenario.organization_name not in relation_change_names(nodes_by_chunk[2]["relation_changes"])
-    assert nodes_by_chunk[3]["node_type"] == "character_exit"
-    assert nodes_by_chunk[3]["character_exits"] == [scenario.rival_name]
-    assert nodes_by_chunk[4]["character_exits"] == [scenario.hero_name]
-    assert relation_change_tuples(nodes_by_chunk[4]["relation_changes"]) == {
-        (scenario.hero_name, scenario.rival_name, "断裂")
-    }
+    assert scenario.organization_name not in relation_event_names(relation_node["relation_events"])
+    assert any(node["node_type"] == "plot" for node in anchor_chunk_four_nodes)
 
 
 def test_get_timeline_max_level_filter_only_changes_node_subset(api_client: TestClient, db_session) -> None:
@@ -74,11 +74,8 @@ def test_get_timeline_max_level_filter_only_changes_node_subset(api_client: Test
     assert filtered_payload["tension_curve"] is None
     assert len(filtered_payload["nodes"]) < len(full_payload["nodes"])
     assert all(node["level"] <= 2 for node in filtered_payload["nodes"])
-    assert [node["progress"] for node in filtered_payload["nodes"]] == sorted(
-        node["progress"] for node in filtered_payload["nodes"]
-    )
-    assert {node["chunk_id"] for node in filtered_payload["nodes"]}.issubset(
-        {node["chunk_id"] for node in full_payload["nodes"]}
+    assert {node["node_id"] for node in filtered_payload["nodes"]}.issubset(
+        {node["node_id"] for node in full_payload["nodes"]}
     )
 
 
@@ -95,31 +92,31 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
 
     assert response.status_code == 200
     payload = response.json()
-    nodes_by_chunk = index_by_chunk_id(payload["nodes"])
-    relation_change = nodes_by_chunk[2]["relation_changes"][0]
+    relation_node = next(node for node in payload["nodes"] if node["node_type"] == "relation")
+    relation_event = relation_node["relation_events"][0]
 
-    # Public /timeline payload should stay stable and must not leak authority view internals.
     assert set(payload) == {"meta", "phases", "nodes", "tension_curve"}
     assert "character_entities" not in payload
     assert "entity_lifecycles" not in payload
     assert "relation_events" not in payload
 
-    assert set(nodes_by_chunk[2]) == {
-        "chunk_id",
+    assert set(relation_node) == {
+        "node_id",
+        "anchor_chunk_id",
         "progress",
         "importance_score",
         "level",
-        "event",
+        "summary",
         "characters",
-        "is_pivot",
-        "is_cliffhanger",
-        "tension_percentile",
+        "phase_name",
         "node_type",
-        "relation_changes",
-        "character_entries",
-        "character_exits",
+        "node_subtype",
+        "score_breakdown",
+        "plot_flags",
+        "relation_events",
+        "lifecycle_events",
     }
-    assert set(relation_change) == {
+    assert set(relation_event) == {
         "relation_event_id",
         "from_char",
         "to_char",
@@ -129,41 +126,11 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
         "confidence",
         "directionality",
     }
-    assert relation_change["from_char"] == scenario.hero_name
-    assert relation_change["to_char"] == scenario.rival_name
-    assert relation_change["relation_type"] == "盟友"
-    assert relation_change["change_type"] == "新建"
-    assert relation_change["evidence"] == "二人正式结盟"
-
-
-def test_get_timeline_exposes_route_owned_relation_locator_fields(api_client: TestClient, db_session) -> None:
-    scenario = create_timeline_contract_scenario(db_session)
-
-    response = api_client.get(
-        f"/api/novels/{scenario.novel_id}/timeline",
-        params={"task_id": scenario.task_id, "include_curve": "false"},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    nodes_by_chunk = index_by_chunk_id(payload["nodes"])
-    relation_change = nodes_by_chunk[2]["relation_changes"][0]
-
-    # 中文说明：这些字段只是 /timeline 的 route-owned 定位信息，不代表 authority
-    # contract 扩边界。
-    assert set(relation_change) == {
-        "relation_event_id",
-        "from_char",
-        "to_char",
-        "relation_type",
-        "change_type",
-        "evidence",
-        "confidence",
-        "directionality",
-    }
-    assert relation_change["relation_event_id"] is not None
-    assert relation_change["confidence"] == 0.91
-    assert relation_change["directionality"] == "directed"
+    assert relation_event["from_char"] == scenario.hero_name
+    assert relation_event["to_char"] == scenario.rival_name
+    assert relation_event["relation_type"] == "盟友"
+    assert relation_event["change_type"] == "新建"
+    assert relation_event["evidence"] == "二人正式结盟"
 
 
 def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_payload(
@@ -176,7 +143,7 @@ def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_pa
     def _raise_contract_error(*_args, **_kwargs):
         raise TimelineAuthorityContractError("broken authority contract")
 
-    monkeypatch.setattr("src.api.routes.timeline.build_timeline_candidates", _raise_contract_error)
+    monkeypatch.setattr("src.api.routes.timeline.build_timeline_plan", _raise_contract_error)
 
     with (
         patch("src.api.main._recover_orphaned_tasks", return_value=(0, 0)),
@@ -220,6 +187,24 @@ def test_get_timeline_pending_partial_graph_returns_409(api_client: TestClient, 
             confidence=0.66,
             projection_status="pending",
         )
+    )
+    db_session.commit()
+
+    response = api_client.get(
+        f"/api/novels/{scenario.novel_id}/timeline",
+        params={"task_id": scenario.task_id, "include_curve": "true"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_type"] == "GraphReadinessError"
+
+
+def test_get_timeline_version_mismatch_returns_409(api_client: TestClient, db_session) -> None:
+    scenario = create_timeline_contract_scenario(db_session)
+    RunRepository(db_session).set_graph_contract_versions(
+        scenario.run_id,
+        graph_projection_version=1,
+        timeline_contract_version=1,
     )
     db_session.commit()
 

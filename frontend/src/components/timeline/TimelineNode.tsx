@@ -54,11 +54,12 @@ export function TimelineNode({
   position,
   verticalOffset,
 }: TimelineNodeProps) {
-  const presentation = getTimelineNodePresentation(node.node_type);
+  const presentation = getTimelineNodePresentation(node.node_type, node.node_subtype);
   const Icon = presentation.icon;
 
   const size = calculateNodeSize(node.importance_score);
-  const resolvedVerticalOffset = verticalOffset ?? calculateDefaultVerticalOffset(node.tension_percentile);
+  const resolvedVerticalOffset =
+    verticalOffset ?? calculateDefaultVerticalOffset(node.plot_flags?.tension_percentile ?? 50);
 
   return (
     <motion.button
@@ -81,8 +82,8 @@ export function TimelineNode({
       transition={{ duration: 0.3, ease: "easeOut" }}
       whileHover={{ scale: 1.2 }}
       onClick={onClick}
-      title={node.event}
-      aria-label={`${presentation.label}: ${node.event}`}
+      title={node.summary}
+      aria-label={`${presentation.label}: ${node.summary}`}
     >
       <div
         className={cn(
@@ -102,21 +103,21 @@ export function TimelineNode({
 
       {showLabel && (
         <span className="absolute top-full mt-1 whitespace-nowrap text-[10px] text-text-muted">
-          {(node.event ?? "").slice(0, 10)}...
+          {(node.summary ?? "").slice(0, 10)}...
         </span>
       )}
 
-      {node.is_pivot && (
+      {node.plot_flags?.is_pivot && (
         <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-chart-negative text-[8px] text-white">
           !
         </span>
       )}
 
-      {node.is_cliffhanger && (
+      {node.plot_flags?.is_cliffhanger && (
         <span
           className={cn(
             "absolute flex h-3 w-3 items-center justify-center rounded-full bg-chart-3 text-[8px] text-white",
-            node.is_pivot ? "-right-4 -top-1" : "-right-1 -top-1"
+            node.plot_flags?.is_pivot ? "-right-4 -top-1" : "-right-1 -top-1"
           )}
         >
           ?

@@ -353,6 +353,7 @@ export interface TimelineMeta {
   novel_id: string;
   novel_name: string;
   total_chunks: number;
+  timeline_contract_version: number;
 }
 
 export interface TimelinePhase {
@@ -362,31 +363,44 @@ export interface TimelinePhase {
   ratio: number;
 }
 
-export interface RelationChangeEvent {
-  relation_event_id?: number | null;
-  from_char: string;
-  to_char: string;
-  relation_type: string;
-  change_type: string;
-  evidence?: string;
-  confidence?: number | null;
-  directionality?: string | null;
-}
-
-export interface TimelineNode {
-  chunk_id: number;
-  progress: number;
-  importance_score: number;
-  level: 1 | 2 | 3;
-  event: string;
-  characters: string[];
+export interface PlotFlags {
   is_pivot: boolean;
   is_cliffhanger: boolean;
   tension_percentile: number;
-  node_type: "plot" | "character_entry" | "character_exit" | "relation_change";
-  relation_changes?: RelationChangeEvent[];
-  character_entries?: string[];
-  character_exits?: string[];
+}
+
+export interface RelationTimelineEvent {
+  relation_event_id: number;
+  from_char: string;
+  to_char: string;
+  relation_type: string;
+  change_type: "新建" | "强化" | "弱化" | "断裂";
+  evidence?: string;
+  confidence?: number | null | undefined;
+  directionality?: string | null | undefined;
+}
+
+export interface LifecycleTimelineEvent {
+  entity_id: number;
+  character_name: string;
+  lifecycle_type: "entry" | "exit";
+}
+
+export interface TimelineNode {
+  node_id: string;
+  anchor_chunk_id: number;
+  progress: number;
+  importance_score: number;
+  level: 1 | 2 | 3;
+  summary: string;
+  characters: string[];
+  phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
+  node_type: "plot" | "relation" | "lifecycle";
+  node_subtype: "plot" | "entry" | "exit" | "新建" | "强化" | "弱化" | "断裂";
+  score_breakdown: Record<string, number>;
+  plot_flags?: PlotFlags | null;
+  relation_events?: RelationTimelineEvent[] | null;
+  lifecycle_events?: LifecycleTimelineEvent[] | null;
 }
 
 export interface TimelineResponse {

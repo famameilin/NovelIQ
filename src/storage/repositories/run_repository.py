@@ -143,6 +143,8 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             "cancel_requested": run.cancel_requested,
             "worker_id": run.worker_id,
             "heartbeat_at": run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+            "graph_projection_version": run.graph_projection_version,
+            "timeline_contract_version": run.timeline_contract_version,
             "completed_at": run.completed_at.isoformat() if run.completed_at else None,
             "created_at": run.created_at.isoformat() if run.created_at else None,
             "updated_at": run.updated_at.isoformat() if run.updated_at else None,
@@ -184,12 +186,34 @@ class RunRepository(BaseRepository[dict[str, Any]]):
             status="pending",
             task_kind=task_kind,
             request_payload=self._serialize_request_payload(request_payload),
+            graph_projection_version=2,
+            timeline_contract_version=2,
             created_at=now,
             updated_at=now,
         )
         self.session.add(run)
         self.session.commit()
         return run_id
+
+    # 2026-04-27，任务：时间轴合同重构
+    # 新建原因：graph projection 完成后需要把 run 显式标记为新 graph/timeline 合同版本，
+    # 让旧 run 能被 authority 直接识别为需要重跑，而不是继续走旧数据读取。
+    def set_graph_contract_versions(
+        self,
+        run_id: str,
+        *,
+        graph_projection_version: int,
+        timeline_contract_version: int,
+    ) -> None:
+        stmt = select(AnalysisRun).where(AnalysisRun.run_id == run_id)
+        run = self.session.execute(stmt).scalar_one_or_none()
+        if run is None:
+            raise ValueError(f"run not found: {run_id}")
+
+        run.graph_projection_version = graph_projection_version
+        run.timeline_contract_version = timeline_contract_version
+        run.updated_at = datetime.now(UTC)
+        self.session.flush()
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         """

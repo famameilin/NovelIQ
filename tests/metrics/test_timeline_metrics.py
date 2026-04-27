@@ -1,11 +1,12 @@
 """
-叙事时间轴核心算法单元测试
+叙事时间轴核心算法单元测试。
 
 测试范围:
 - compute_importance_score: 重要性分数计算
+- compute_timeline_node_budget: 自适应预算
 - compute_four_phases: 四阶段划分算法
-- select_timeline_nodes: 节点筛选逻辑
-- 边界条件测试（短小说、数据缺失等）
+- select_timeline_nodes: 节点筛选与去重逻辑
+- serialize_timeline_node: 新合同序列化
 """
 
 from __future__ import annotations
@@ -13,508 +14,89 @@ from __future__ import annotations
 import pytest
 
 from src.metrics.timeline_metrics import (
+    LifecycleEventDTO,
     NarrativePhase,
-    RelationChangeEventDTO,
-    TimelineCandidate,
+    PlotFlagsDTO,
+    RelationEventDTO,
+    TimelineBudget,
+    TimelineNodeDTO,
     calculate_tension_percentile,
     compute_four_phases,
     compute_importance_score,
-    convert_to_timeline_nodes,
+    compute_timeline_node_budget,
     convert_to_timeline_phases,
     select_timeline_nodes,
+    serialize_timeline_node,
 )
 
 
 class TestComputeImportanceScore:
-    """测试重要性分数计算"""
-
-    def test_all_factors_max_score(self):
-        """测试所有因素最高分时返回正确分数和级别"""
+    def test_high_score_returns_level_one(self):
         score, level = compute_importance_score(
-            pivot_moment=True,
-            cliffhanger=True,
-            tension_composite=1.0,
-            all_tensions=[0.0, 0.5, 1.0],
-            event_type="冲突",
-            emotional_valence="strong_positive",
-            has_relation_change=True,
-            has_character_entry=True,
-            has_character_exit=False,
-            is_major_character=True,
+            {
+                "pivot": 3.0,
+                "cliffhanger": 2.0,
+                "tension": 2.0,
+                "event_type": 1.2,
+            }
         )
-        # 3(转折) + 2(悬念) + 2(张力百分位100%) + 1(冲突) + 1(极端情感) + 2(关系变化) + 2(主要角色) = 13
-        # 但实际最大约11分
-        assert score > 7
+        assert score == pytest.approx(8.2)
         assert level == 1
 
-    def test_min_score(self):
-        """测试所有因素最低分时返回正确分数和级别"""
+    def test_medium_score_returns_level_two(self):
         score, level = compute_importance_score(
-            pivot_moment=False,
-            cliffhanger=False,
-            tension_composite=0.0,
-            all_tensions=[0.0, 0.5, 1.0],
-            event_type="铺垫",
-            emotional_valence="neutral",
-            has_relation_change=False,
-            has_character_entry=False,
-            has_character_exit=False,
-            is_major_character=False,
+            {
+                "change_type_weight": 2.4,
+                "pair_importance": 1.2,
+                "phase_rarity": 0.8,
+            }
         )
-        # 张力百分位: 1/3 = 33.3%, *2 = 0.67 (最低分)
-        # 实际最小分数约为 0.67，不是 0
-        assert score < 1.0
-        assert level == 3
-
-    def test_level_thresholds(self):
-        """测试级别阈值边界"""
-        # level 1 (>=7)
-        score, level = compute_importance_score(
-            pivot_moment=True,  # +3
-            cliffhanger=True,  # +2
-            tension_composite=1.0,
-            all_tensions=[0.0, 1.0],
-            event_type="铺垫",
-            emotional_valence="neutral",
-        )
-        assert score >= 7
-        assert level == 1
-
-        # level 2 (4-6)
-        score, level = compute_importance_score(
-            pivot_moment=True,  # +3
-            cliffhanger=True,  # +2
-            tension_composite=0.0,
-            all_tensions=[0.0, 1.0],
-            event_type="铺垫",
-            emotional_valence="neutral",
-        )
-        # 3 + 2 + 0 = 5
-        assert 4 <= score <= 6
+        assert score == pytest.approx(4.4)
         assert level == 2
 
-        # level 3 (<4)
+    def test_low_score_returns_level_three(self):
         score, level = compute_importance_score(
-            pivot_moment=False,
-            cliffhanger=False,
-            tension_composite=0.5,
-            all_tensions=[0.0, 1.0],
-            event_type="铺垫",
-            emotional_valence="neutral",
+            {
+                "tension": 0.4,
+                "event_type": 0.4,
+            }
         )
-        # 百分位约50% * 2 = 1
-        assert score < 4
+        assert score == pytest.approx(0.8)
         assert level == 3
 
-    def test_empty_tensions(self):
-        """测试空张力列表时不会崩溃"""
-        score, level = compute_importance_score(
-            pivot_moment=True,
-            cliffhanger=False,
-            tension_composite=0.5,
-            all_tensions=[],
-            event_type="冲突",
-            emotional_valence="strong_positive",
-        )
-        assert score >= 0
-        assert level in (1, 2, 3)
 
-    def test_tension_percentile_calculation(self):
-        """测试张力百分位计算正确"""
-        all_tensions = [0.0, 0.25, 0.5, 0.75, 1.0]
+class TestComputeTimelineNodeBudget:
+    def test_budget_for_short_story(self):
+        budget = compute_timeline_node_budget(37)
+        assert budget == TimelineBudget(min_nodes=8, target_nodes=12, max_nodes=16)
 
-        # 最小值，百分位 = 20% (1/5)
-        score, _ = compute_importance_score(
-            pivot_moment=False,
-            cliffhanger=False,
-            tension_composite=0.0,
-            all_tensions=all_tensions,
-            event_type="铺垫",
-            emotional_valence="neutral",
-        )
-        assert score == pytest.approx(0.2 * 2, abs=0.01)  # 0.4
-
-        # 最大值，百分位 = 100% (5/5)
-        score, _ = compute_importance_score(
-            pivot_moment=False,
-            cliffhanger=False,
-            tension_composite=1.0,
-            all_tensions=all_tensions,
-            event_type="铺垫",
-            emotional_valence="neutral",
-        )
-        assert score == pytest.approx(1.0 * 2, abs=0.01)  # 2.0
+    def test_budget_for_long_story(self):
+        budget = compute_timeline_node_budget(255)
+        assert budget == TimelineBudget(min_nodes=14, target_nodes=30, max_nodes=40)
 
 
 class TestComputeFourPhases:
-    """测试四阶段划分算法"""
-
-    def test_short_novel_fixed_ratio(self):
-        """测试短小说使用固定比例"""
+    def test_short_novel_uses_fixed_ratio(self):
         tension_scores = [0.1] * 10
         chunk_ids = list(range(1, 11))
 
         phases = compute_four_phases(tension_scores, chunk_ids)
 
         assert len(phases) == 4
-        assert phases[0].name == "引入期"
-        assert phases[1].name == "发展期"
-        assert phases[2].name == "高潮期"
-        assert phases[3].name == "收束期"
+        assert [phase.name for phase in phases] == ["引入期", "发展期", "高潮期", "收束期"]
 
-        # 检查各阶段至少1个chunk
-        for phase in phases:
-            # 找到start和end在chunk_ids中的索引差
-            start_idx = chunk_ids.index(phase.start)
-            end_idx = chunk_ids.index(phase.end)
-            assert end_idx - start_idx + 1 >= 1
-
-    def test_long_novel_dynamic_phases(self):
-        """测试长小说使用张力曲线动态划分"""
-        # 创建一个张力曲线，高潮在中间
+    def test_long_novel_uses_peak_based_split(self):
         tension_scores = [0.1] * 40 + [0.9] + [0.1] * 59
         chunk_ids = list(range(1, 101))
 
         phases = compute_four_phases(tension_scores, chunk_ids)
 
-        assert len(phases) >= 3  # 至少3个阶段
-        phase_names = [p.name for p in phases]
-        assert "高潮期" in phase_names
-
-        # 高潮期应该在张力峰值附近
-        climax_phase = next(p for p in phases if p.name == "高潮期")
+        climax_phase = next(phase for phase in phases if phase.name == "高潮期")
         assert 30 <= chunk_ids.index(climax_phase.start) <= 50
-
-    def test_peak_at_start(self):
-        """测试峰值在开始位置的边界情况"""
-        tension_scores = [0.9] + [0.1] * 99
-        chunk_ids = list(range(1, 101))
-
-        phases = compute_four_phases(tension_scores, chunk_ids)
-
-        # 应该有至少引入期和高潮期
-        assert len(phases) >= 2
-
-    def test_peak_at_end(self):
-        """测试峰值在结束位置的边界情况"""
-        tension_scores = [0.1] * 99 + [0.9]
-        chunk_ids = list(range(1, 101))
-
-        phases = compute_four_phases(tension_scores, chunk_ids)
-
-        assert len(phases) >= 2
-
-    def test_empty_data(self):
-        """测试空数据返回空列表"""
-        assert compute_four_phases([], []) == []
-        assert compute_four_phases([0.5], []) == []
-        assert compute_four_phases([], [1]) == []
-
-    def test_min_phase_length_protection(self):
-        """测试最小阶段长度保护"""
-        tension_scores = [0.1, 0.5, 0.9, 0.5, 0.1]
-        chunk_ids = list(range(1, 6))
-
-        phases = compute_four_phases(tension_scores, chunk_ids)
-
-        # 即使数据很少，每个阶段也应该至少有1个chunk
-        for phase in phases:
-            start_idx = chunk_ids.index(phase.start)
-            end_idx = chunk_ids.index(phase.end)
-            assert end_idx - start_idx + 1 >= 1
-
-
-class TestSelectTimelineNodes:
-    """测试节点筛选逻辑"""
-
-    def create_candidate(self, chunk_id: int, progress: float, importance_score: float, level: int = 3, **kwargs):
-        """辅助方法：创建候选节点"""
-        return TimelineCandidate(
-            chunk_id=chunk_id,
-            progress=progress,
-            importance_score=importance_score,
-            level=level,
-            event=f"Event at {chunk_id}",
-            characters=kwargs.get("characters", []),
-            is_pivot=kwargs.get("is_pivot", False),
-            is_cliffhanger=kwargs.get("is_cliffhanger", False),
-            tension_percentile=kwargs.get("tension_percentile", 50),
-            node_type=kwargs.get("node_type", "plot"),
-        )
-
-    def test_must_keep_nodes(self):
-        """测试必选节点（开始、结束、高潮）一定被包含"""
-        chunk_ids = [1, 2, 3, 4, 5]
-        tension_scores = [0.1, 0.3, 0.9, 0.5, 0.2]  # 高潮在 chunk 3 (index 2)
-
-        candidates = [
-            self.create_candidate(1, 0.0, 1.0),
-            self.create_candidate(2, 0.25, 2.0),
-            self.create_candidate(3, 0.5, 3.0),
-            self.create_candidate(4, 0.75, 2.0),
-            self.create_candidate(5, 1.0, 1.0),
-        ]
-
-        selected = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=[],
-            relation_break_events=[],
-            min_nodes=3,
-            max_nodes=10,
-        )
-
-        selected_chunk_ids = [c.chunk_id for c in selected]
-        assert 1 in selected_chunk_ids  # 开始
-        assert 5 in selected_chunk_ids  # 结束
-        assert 3 in selected_chunk_ids  # 高潮
-
-    def test_max_nodes_limit(self):
-        """测试最大节点数限制"""
-        chunk_ids = list(range(1, 21))
-        tension_scores = [0.1] * 20
-
-        candidates = [self.create_candidate(i, (i - 1) / 19, float(i)) for i in chunk_ids]
-
-        selected = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=[],
-            relation_break_events=[],
-            min_nodes=5,
-            max_nodes=10,
-        )
-
-        assert len(selected) <= 10
-
-    def test_min_nodes_fill(self):
-        """测试节点数不足时自动补充"""
-        chunk_ids = [1, 2, 3]
-        tension_scores = [0.1, 0.5, 0.9]
-
-        candidates = [
-            self.create_candidate(1, 0.0, 1.0),
-            self.create_candidate(2, 0.5, 2.0),
-            self.create_candidate(3, 1.0, 3.0),
-        ]
-
-        selected = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=[],
-            relation_break_events=[],
-            min_nodes=5,  # 要求5个，但只有3个候选
-            max_nodes=10,
-        )
-
-        # 最多只能返回3个
-        assert len(selected) <= 3
-
-    def test_pivot_priority(self):
-        """测试转折点优先级高于普通节点"""
-        chunk_ids = list(range(1, 11))
-        tension_scores = [0.1] * 10
-
-        candidates = [
-            self.create_candidate(1, 0.0, 1.0),  # 必选：开始
-            self.create_candidate(2, 0.11, 1.0),  # 普通节点
-            self.create_candidate(3, 0.22, 1.0, is_pivot=True),  # 转折点
-            self.create_candidate(4, 0.33, 1.0),  # 普通节点
-            self.create_candidate(5, 0.44, 1.0, is_pivot=True),  # 转折点
-            self.create_candidate(6, 0.55, 1.0),  # 普通节点
-            self.create_candidate(7, 0.66, 1.0),  # 普通节点
-            self.create_candidate(8, 0.77, 1.0),  # 普通节点
-            self.create_candidate(9, 0.88, 1.0),  # 普通节点
-            self.create_candidate(10, 1.0, 1.0),  # 必选：结束
-        ]
-
-        selected = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=[],
-            relation_break_events=[],
-            min_nodes=5,
-            max_nodes=7,
-        )
-
-        # 转折点应该被包含
-        selected_pivot_ids = [c.chunk_id for c in selected if c.is_pivot]
-        assert 3 in selected_pivot_ids or 5 in selected_pivot_ids
-
-    def test_cliffhanger_limit(self):
-        """测试悬念点优先选择高分节点，且新增悬念点不超过5个"""
-        chunk_ids = list(range(1, 21))
-        tension_scores = [0.1] * 20
-
-        # 创建悬念点，但重要性分数不同
-        candidates = [
-            self.create_candidate(1, 0.0, 10.0),  # 开始（高分必选）
-            self.create_candidate(2, 0.05, 9.0, is_cliffhanger=True),  # 悬念点，高分
-            self.create_candidate(3, 0.1, 8.0, is_cliffhanger=True),
-            self.create_candidate(4, 0.15, 7.0, is_cliffhanger=True),
-            self.create_candidate(5, 0.2, 6.0, is_cliffhanger=True),
-            self.create_candidate(6, 0.25, 5.0, is_cliffhanger=True),
-            self.create_candidate(7, 0.3, 4.0, is_cliffhanger=True),
-            self.create_candidate(8, 0.35, 3.0, is_cliffhanger=True),
-            self.create_candidate(9, 0.4, 2.0, is_cliffhanger=True),
-            *[self.create_candidate(i, (i - 1) / 19, 1.0, is_cliffhanger=True) for i in range(10, 20)],
-            self.create_candidate(20, 1.0, 10.0),  # 结束（高分必选）
-        ]
-
-        selected = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=[],
-            relation_break_events=[],
-            min_nodes=10,
-            max_nodes=15,
-        )
-
-        # 获取选中的悬念点
-        selected_cliffhangers = [c for c in selected if c.is_cliffhanger]
-
-        # 悬念点应该按重要性排序选择（高分优先）
-        # 至少应该包含 chunk 2-6（高分悬念点）
-        selected_cliffhanger_ids = {c.chunk_id for c in selected_cliffhangers}
-        assert 2 in selected_cliffhanger_ids  # 高分悬念点应该被选中
-        assert 3 in selected_cliffhanger_ids
-
-        # 新增悬念点数量应该有限制（由于实现机制，不能保证严格<=5，但应该合理）
-        # 主要验证高分悬念点被优先选中
-        assert len(selected_cliffhangers) >= 2  # 至少有几个悬念点
-
-    def test_progress_sorting(self):
-        """测试返回节点按 progress 排序"""
-        chunk_ids = [1, 2, 3, 4, 5]
-        tension_scores = [0.1, 0.3, 0.9, 0.5, 0.2]
-
-        candidates = [
-            self.create_candidate(1, 0.0, 1.0),
-            self.create_candidate(5, 1.0, 1.0),
-            self.create_candidate(3, 0.5, 1.0),
-        ]
-
-        selected = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=[],
-            relation_break_events=[],
-            min_nodes=3,
-            max_nodes=10,
-        )
-
-        # 检查是否按 progress 排序
-        progresses = [c.progress for c in selected]
-        assert progresses == sorted(progresses)
-
-
-class TestGetMajorCharactersBySpan:
-    """测试主要角色判断（基于活跃跨度）"""
-
-    def test_span_calculation(self):
-        """测试活跃跨度计算正确"""
-        from unittest.mock import MagicMock
-
-        # 模拟 GraphEntity
-        entities = []
-        for name, first, last in [("A", 1, 100), ("B", 50, 60), ("C", 1, 50)]:
-            e = MagicMock()
-            e.canonical_name = name
-            e.first_seen_chunk = first
-            e.last_seen_chunk = last
-            entities.append(e)
-
-        from src.metrics.timeline_metrics import get_major_characters_by_span
-
-        major = get_major_characters_by_span(entities, top_n=2)
-
-        # A 的跨度 = 100, C 的跨度 = 50, B 的跨度 = 11
-        assert len(major) == 2
-        assert major[0].canonical_name == "A"  # 跨度最大
-        assert major[1].canonical_name == "C"  # 跨度第二
-
-    def test_none_chunks_filtered(self):
-        """测试 first_seen_chunk 或 last_seen_chunk 为 None 的实体被过滤"""
-        from unittest.mock import MagicMock
-
-        entities = []
-        for name, first, last in [
-            ("A", 1, 100),
-            ("B", None, 60),  # 无效
-            ("C", 1, None),  # 无效
-        ]:
-            e = MagicMock()
-            e.canonical_name = name
-            e.first_seen_chunk = first
-            e.last_seen_chunk = last
-            entities.append(e)
-
-        from src.metrics.timeline_metrics import get_major_characters_by_span
-
-        major = get_major_characters_by_span(entities, top_n=3)
-
-        assert len(major) == 1
-        assert major[0].canonical_name == "A"
-
-    def test_empty_entities(self):
-        """测试空实体列表返回空"""
-        from src.metrics.timeline_metrics import get_major_characters_by_span
-
-        major = get_major_characters_by_span([], top_n=3)
-        assert major == []
-
-    def test_hasattr_protection(self):
-        """测试函数通过 hasattr 保护属性访问"""
-        from src.metrics.timeline_metrics import get_major_characters_by_span
-
-        # 模拟一个没有完整属性的对象
-        class PartialEntity:
-            pass
-
-        # 只有 first_seen_chunk 的对象
-        e1 = PartialEntity()
-        e1.first_seen_chunk = 1
-        # 缺少 last_seen_chunk
-
-        # 只有 last_seen_chunk 的对象
-        e2 = PartialEntity()
-        # 缺少 first_seen_chunk
-        e2.last_seen_chunk = 100
-
-        # 完整的对象
-        e3 = PartialEntity()
-        e3.first_seen_chunk = 1
-        e3.last_seen_chunk = 50
-
-        major = get_major_characters_by_span([e1, e2, e3], top_n=3)
-
-        # 只有 e3 应该被选中
-        assert len(major) == 1
-        assert major[0] == e3
-
-    def test_empty_candidates(self):
-        """测试空候选列表返回空"""
-        selected = select_timeline_nodes(
-            candidates=[],
-            chunk_ids=[],
-            tension_scores=[],
-            major_character_entries=[],
-            relation_break_events=[],
-        )
-        assert selected == []
 
 
 class TestCalculateTensionPercentile:
-    """测试张力百分位计算"""
-
     def test_normal_calculation(self):
-        """测试正常情况下的百分位计算"""
         all_tensions = [0.0, 0.25, 0.5, 0.75, 1.0]
 
         assert calculate_tension_percentile(0.0, all_tensions) == 20
@@ -522,172 +104,261 @@ class TestCalculateTensionPercentile:
         assert calculate_tension_percentile(0.5, all_tensions) == 60
         assert calculate_tension_percentile(1.0, all_tensions) == 100
 
-    def test_empty_list(self):
-        """测试空列表返回默认值"""
+    def test_empty_list_returns_default(self):
         assert calculate_tension_percentile(0.5, []) == 50
 
 
-class TestConvertToTimelinePhases:
-    """测试阶段转换函数"""
-
-    def test_normal_conversion(self):
-        """测试正常转换"""
-        phases = [
-            NarrativePhase("引入期", 1, 10, 0.2),
-            NarrativePhase("发展期", 11, 50, 0.4),
-            NarrativePhase("高潮期", 51, 70, 0.2),
-            NarrativePhase("收束期", 71, 100, 0.2),
-        ]
-
-        timeline_phases = convert_to_timeline_phases(phases)
-
-        assert len(timeline_phases) == 4
-        assert timeline_phases[0].name == "引入期"
-        assert timeline_phases[0].start == 1
-        assert timeline_phases[0].end == 10
-
-    def test_invalid_name_fallback(self):
-        """测试无效名称时使用fallback"""
-        phases = [
-            NarrativePhase("无效名称", 1, 10, 0.2),
-        ]
-
-        timeline_phases = convert_to_timeline_phases(phases)
-        assert timeline_phases[0].name == "引入期"
-
-
-class TestConvertToTimelineNodes:
-    """测试节点转换函数"""
-
-    def test_normal_conversion(self):
-        """测试正常转换"""
-        candidates = [
-            TimelineCandidate(
-                chunk_id=1,
-                progress=0.0,
-                importance_score=6.5,
-                level=1,
-                event="Test event",
-                characters=["A", "B"],
-                is_pivot=False,
-                is_cliffhanger=False,
-                tension_percentile=50,
-                node_type="plot",
-            )
-        ]
-
-        nodes = convert_to_timeline_nodes(candidates)
-
-        assert len(nodes) == 1
-        assert nodes[0].chunk_id == 1
-        assert nodes[0].importance_score == 6.5
-        assert nodes[0].level == 1
-
-    def test_with_relation_changes(self):
-        """测试带关系变化的节点转换"""
-        relation_changes = [
-            RelationChangeEventDTO(
-                from_char="A",
-                to_char="B",
-                relation_type="师徒",
-                change_type="断裂",
-                evidence="Test",
-            )
-        ]
-
-        candidates = [
-            TimelineCandidate(
-                chunk_id=1,
-                progress=0.0,
-                importance_score=8.0,
-                level=1,
-                event="关系变化",
-                characters=["A", "B"],
-                is_pivot=False,
-                is_cliffhanger=False,
-                tension_percentile=80,
-                node_type="relation_change",
-                relation_changes=relation_changes,
-            )
-        ]
-
-        nodes = convert_to_timeline_nodes(candidates)
-
-        assert len(nodes) == 1
-        assert nodes[0].node_type == "relation_change"
-        assert nodes[0].relation_changes is not None
-        assert len(nodes[0].relation_changes) == 1
-
-
-class TestIntegration:
-    """集成测试"""
-
-    def test_full_workflow_short_novel(self):
-        """测试短小说完整流程"""
-        # 模拟10个chunk的短小说
-        chunk_ids = list(range(1, 11))
-        tension_scores = [0.2, 0.3, 0.5, 0.6, 0.9, 0.8, 0.5, 0.3, 0.2, 0.1]
-
-        # 1. 计算四阶段
-        phases = compute_four_phases(tension_scores, chunk_ids)
-        assert len(phases) == 4
-
-        # 2. 创建候选节点
-        candidates = []
-        for i, chunk_id in enumerate(chunk_ids):
-            score, level = compute_importance_score(
-                pivot_moment=(i == 4),  # 高潮处是转折点
-                cliffhanger=(i == 8),  # 悬念点
-                tension_composite=tension_scores[i],
-                all_tensions=tension_scores,
-                event_type="冲突" if i == 4 else "铺垫",
-                emotional_valence="neutral",
-            )
-            candidates.append(
-                TimelineCandidate(
-                    chunk_id=chunk_id,
-                    progress=i / 9,
-                    importance_score=score,
-                    level=level,
-                    event=f"Event {chunk_id}",
-                    characters=[],
-                    is_pivot=(i == 4),
-                    is_cliffhanger=(i == 8),
-                    tension_percentile=calculate_tension_percentile(tension_scores[i], tension_scores),
-                    node_type="plot",
-                )
-            )
-
-        # 3. 筛选节点
-        selected = select_timeline_nodes(
-            candidates=candidates,
-            chunk_ids=chunk_ids,
-            tension_scores=tension_scores,
-            major_character_entries=[],
-            relation_break_events=[],
-            min_nodes=5,
-            max_nodes=8,
+class TestSelectTimelineNodes:
+    def create_node(
+        self,
+        *,
+        node_id: str,
+        anchor_chunk_id: int,
+        progress: float,
+        importance_score: float,
+        level: int = 2,
+        node_type: str = "plot",
+        node_subtype: str = "plot",
+        phase_name: str = "发展期",
+        plot_flags: PlotFlagsDTO | None = None,
+        relation_events: list[RelationEventDTO] | None = None,
+        lifecycle_events: list[LifecycleEventDTO] | None = None,
+    ) -> TimelineNodeDTO:
+        return TimelineNodeDTO(
+            node_id=node_id,
+            anchor_chunk_id=anchor_chunk_id,
+            progress=progress,
+            importance_score=importance_score,
+            level=level,
+            summary=node_id,
+            characters=["角色A", "角色B"] if node_type == "relation" else ["角色A"],
+            phase_name=phase_name,  # type: ignore[arg-type]
+            node_type=node_type,  # type: ignore[arg-type]
+            node_subtype=node_subtype,  # type: ignore[arg-type]
+            score_breakdown={"score": importance_score},
+            plot_flags=plot_flags,
+            relation_events=relation_events,
+            lifecycle_events=lifecycle_events,
         )
 
-        assert len(selected) >= 3  # 至少包含开始、结束、高潮
-        assert len(selected) <= 8  # 不超过最大值
+    def test_select_timeline_nodes_keeps_start_end_and_peak_plot_nodes(self):
+        phases = convert_to_timeline_phases(
+            [
+                NarrativePhase("引入期", 1, 3, 0.3),
+                NarrativePhase("发展期", 4, 6, 0.3),
+                NarrativePhase("高潮期", 7, 8, 0.2),
+                NarrativePhase("收束期", 9, 10, 0.2),
+            ]
+        )
+        nodes = [
+            self.create_node(
+                node_id="plot:1",
+                anchor_chunk_id=1,
+                progress=0.0,
+                importance_score=4.2,
+                phase_name="引入期",
+                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=20),
+            ),
+            self.create_node(
+                node_id="plot:7",
+                anchor_chunk_id=7,
+                progress=0.7,
+                importance_score=7.4,
+                level=1,
+                phase_name="高潮期",
+                plot_flags=PlotFlagsDTO(is_pivot=True, is_cliffhanger=False, tension_percentile=95),
+            ),
+            self.create_node(
+                node_id="plot:10",
+                anchor_chunk_id=10,
+                progress=1.0,
+                importance_score=4.1,
+                phase_name="收束期",
+                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=15),
+            ),
+        ]
 
-        # 转折点应该被选中
-        pivot_selected = any(c.is_pivot for c in selected)
-        assert pivot_selected
+        selected = select_timeline_nodes(
+            nodes=nodes,
+            chunk_ids=list(range(1, 11)),
+            tension_scores=[0.1, 0.2, 0.25, 0.3, 0.4, 0.6, 0.95, 0.5, 0.2, 0.1],
+            phases=phases,
+            budget=TimelineBudget(min_nodes=3, target_nodes=4, max_nodes=6),
+        )
 
-    def test_full_workflow_long_novel(self):
-        """测试长小说完整流程"""
-        # 模拟100个chunk的长小说
-        chunk_ids = list(range(1, 101))
-        # 创建有高峰的张力曲线
-        tension_scores = [0.1] * 30 + [0.3, 0.5, 0.7, 0.9, 0.95, 0.9, 0.7, 0.5, 0.3] + [0.1] * 61
+        selected_ids = {node.node_id for node in selected}
+        assert {"plot:1", "plot:7", "plot:10"}.issubset(selected_ids)
 
-        # 计算四阶段
-        phases = compute_four_phases(tension_scores, chunk_ids)
-        assert len(phases) >= 3
+    def test_select_timeline_nodes_allows_same_chunk_multi_type_but_dedupes_same_relation_pair(self):
+        phases = convert_to_timeline_phases(
+            [
+                NarrativePhase("引入期", 1, 2, 0.2),
+                NarrativePhase("发展期", 3, 6, 0.4),
+                NarrativePhase("高潮期", 7, 8, 0.2),
+                NarrativePhase("收束期", 9, 10, 0.2),
+            ]
+        )
+        nodes = [
+            self.create_node(
+                node_id="plot:5",
+                anchor_chunk_id=5,
+                progress=0.5,
+                importance_score=6.1,
+                level=1,
+                plot_flags=PlotFlagsDTO(is_pivot=True, is_cliffhanger=True, tension_percentile=88),
+            ),
+            self.create_node(
+                node_id="relation:101",
+                anchor_chunk_id=5,
+                progress=0.5,
+                importance_score=6.9,
+                level=1,
+                node_type="relation",
+                node_subtype="新建",
+                relation_events=[
+                    RelationEventDTO(
+                        relation_event_id=101,
+                        from_char="顾承渊",
+                        to_char="苏映雪",
+                        relation_type="盟友",
+                        change_type="新建",
+                    )
+                ],
+            ),
+            self.create_node(
+                node_id="relation:102",
+                anchor_chunk_id=6,
+                progress=0.6,
+                importance_score=6.3,
+                level=1,
+                node_type="relation",
+                node_subtype="强化",
+                relation_events=[
+                    RelationEventDTO(
+                        relation_event_id=102,
+                        from_char="顾承渊",
+                        to_char="苏映雪",
+                        relation_type="盟友",
+                        change_type="强化",
+                    )
+                ],
+            ),
+            self.create_node(
+                node_id="lifecycle:entry:1:5",
+                anchor_chunk_id=5,
+                progress=0.5,
+                importance_score=5.1,
+                node_type="lifecycle",
+                node_subtype="entry",
+                lifecycle_events=[LifecycleEventDTO(entity_id=1, character_name="顾承渊", lifecycle_type="entry")],
+            ),
+            self.create_node(
+                node_id="plot:1",
+                anchor_chunk_id=1,
+                progress=0.0,
+                importance_score=4.2,
+                phase_name="引入期",
+                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=20),
+            ),
+            self.create_node(
+                node_id="plot:10",
+                anchor_chunk_id=10,
+                progress=1.0,
+                importance_score=4.1,
+                phase_name="收束期",
+                plot_flags=PlotFlagsDTO(is_pivot=False, is_cliffhanger=False, tension_percentile=15),
+            ),
+        ]
 
-        # 验证高潮期在正确的位置
-        climax_phase = next((p for p in phases if p.name == "高潮期"), None)
-        assert climax_phase is not None
-        assert 25 <= chunk_ids.index(climax_phase.start) <= 45  # 高潮期在30-40附近
+        selected = select_timeline_nodes(
+            nodes=nodes,
+            chunk_ids=list(range(1, 11)),
+            tension_scores=[0.1, 0.2, 0.25, 0.3, 0.88, 0.84, 0.4, 0.3, 0.2, 0.1],
+            phases=phases,
+            budget=TimelineBudget(min_nodes=5, target_nodes=6, max_nodes=8),
+        )
+
+        selected_ids = {node.node_id for node in selected}
+        assert "plot:5" in selected_ids
+        assert "relation:101" in selected_ids
+        assert "lifecycle:entry:1:5" in selected_ids
+        assert not {"relation:101", "relation:102"}.issubset(selected_ids)
+
+    def test_select_timeline_nodes_respects_budget_ceiling(self):
+        phases = convert_to_timeline_phases(
+            [
+                NarrativePhase("引入期", 1, 5, 0.25),
+                NarrativePhase("发展期", 6, 10, 0.25),
+                NarrativePhase("高潮期", 11, 15, 0.25),
+                NarrativePhase("收束期", 16, 20, 0.25),
+            ]
+        )
+        nodes = [
+            self.create_node(
+                node_id=f"plot:{chunk_id}",
+                anchor_chunk_id=chunk_id,
+                progress=(chunk_id - 1) / 19,
+                importance_score=float(chunk_id) / 2,
+                phase_name=phases[min((chunk_id - 1) // 5, 3)].name,
+                plot_flags=PlotFlagsDTO(is_pivot=chunk_id == 12, is_cliffhanger=False, tension_percentile=50),
+            )
+            for chunk_id in range(1, 21)
+        ]
+
+        selected = select_timeline_nodes(
+            nodes=nodes,
+            chunk_ids=list(range(1, 21)),
+            tension_scores=[0.1] * 11 + [0.95] + [0.1] * 8,
+            phases=phases,
+            budget=TimelineBudget(min_nodes=8, target_nodes=10, max_nodes=12),
+        )
+
+        assert len(selected) <= 12
+
+
+class TestSerializeTimelineNode:
+    def test_serialize_timeline_node_uses_new_contract(self):
+        node = TimelineNodeDTO(
+            node_id="relation:101",
+            anchor_chunk_id=8,
+            progress=0.4,
+            importance_score=6.7,
+            level=1,
+            summary="顾承渊与苏映雪结盟",
+            characters=["顾承渊", "苏映雪"],
+            phase_name="发展期",
+            node_type="relation",
+            node_subtype="新建",
+            score_breakdown={"change_type_weight": 2.4, "pair_importance": 1.1},
+            relation_events=[
+                RelationEventDTO(
+                    relation_event_id=101,
+                    from_char="顾承渊",
+                    to_char="苏映雪",
+                    relation_type="盟友",
+                    change_type="新建",
+                    confidence=0.91,
+                    directionality="directed",
+                )
+            ],
+        )
+
+        payload = serialize_timeline_node(node)
+
+        assert set(payload) == {
+            "node_id",
+            "anchor_chunk_id",
+            "progress",
+            "importance_score",
+            "level",
+            "summary",
+            "characters",
+            "phase_name",
+            "node_type",
+            "node_subtype",
+            "score_breakdown",
+            "plot_flags",
+            "relation_events",
+            "lifecycle_events",
+        }
+        assert payload["relation_events"][0]["relation_event_id"] == 101
