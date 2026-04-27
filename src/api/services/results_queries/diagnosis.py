@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from loguru import logger
+
 from src.api.models.responses import DiagnosisResult
 from src.storage.repositories import AnnotationRepository, StatsRepository
 
@@ -21,6 +23,46 @@ from .common import (
     _parse_int_field,
     _parse_json_field,
 )
+
+
+def _filter_character_list_against_arc_scores(
+    values: list[str] | None,
+    arc_scores: dict[str, float] | None,
+) -> list[str] | None:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract-followup-fixes
+    说明: alias 归一化会把别名和规范名折叠到同一个角色名上；
+    结果读取层必须在归一化后再次按 `arc_scores` 收口，避免焦点人物、
+    主要人物、核心角色继续携带失效名称。
+    """
+    if values is None:
+        return None
+    if not arc_scores:
+        return []
+    valid_names = set(arc_scores.keys())
+    return [name for name in values if name in valid_names]
+
+
+def _derive_focus_structure_from_characters(
+    focus_characters: list[str] | None,
+) -> Literal["single", "dual", "ensemble"] | None:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract-followup-fixes
+    说明: alias 归一化后，焦点人物数量可能发生折叠；此时必须按归一化后的
+    最终名单重新推导 focus_structure，不能把 `dual` + 单人列表这种矛盾合同继续对外暴露。
+    """
+    if not focus_characters:
+        return None
+    focus_count = len(focus_characters)
+    if focus_count == 1:
+        return "single"
+    if focus_count == 2:
+        return "dual"
+    return "ensemble"
 
 
 def _fetch_diagnosis(
@@ -84,6 +126,31 @@ def _fetch_diagnosis(
     else:
         focus_structure = None
 
+    focus_characters_filtered = _filter_character_list_against_arc_scores(
+        focus_characters_normalized if isinstance(focus_characters_normalized, list) else None,
+        arc_scores_normalized,
+    )
+    main_characters_filtered = _filter_character_list_against_arc_scores(
+        main_characters_normalized if isinstance(main_characters_normalized, list) else None,
+        arc_scores_normalized,
+    )
+    core_cast_filtered = _filter_character_list_against_arc_scores(
+        core_cast_normalized if isinstance(core_cast_normalized, list) else None,
+        arc_scores_normalized,
+    )
+    normalized_focus_structure = _derive_focus_structure_from_characters(focus_characters_filtered)
+    if focus_structure != normalized_focus_structure:
+        logger.warning(
+            "diagnosis focus contract changed after alias normalization: run_id={} novel_id={} raw_structure={} "
+            "normalized_structure={} raw_focus_characters={} normalized_focus_characters={}",
+            run_id,
+            novel_id,
+            focus_structure,
+            normalized_focus_structure,
+            focus_characters_normalized,
+            focus_characters_filtered,
+        )
+
     return DiagnosisResult(
         foreshadow_expectation=data.get("foreshadow_expectation") if data else None,
         arc_scores=arc_scores_normalized,
@@ -102,9 +169,9 @@ def _fetch_diagnosis(
             alias_map,
         ),
         narrative_arc_type=data.get("narrative_arc_type") if data else None,
-        focus_structure=focus_structure,
-        focus_characters=focus_characters_normalized,
-        main_characters=main_characters_normalized,
-        core_cast=core_cast_normalized,
+        focus_structure=normalized_focus_structure,
+        focus_characters=focus_characters_filtered,
+        main_characters=main_characters_filtered,
+        core_cast=core_cast_filtered,
         theme_color=(theme_color.strip() if (data and (theme_color := data.get("theme_color"))) else None),
     )
