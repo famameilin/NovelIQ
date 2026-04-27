@@ -44,6 +44,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import text
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -112,6 +113,9 @@ class TestCloudDiagnose:
             Chunk(index=i, start=0, end=100, text=f"这是第{i}个测试文本，包含一些内容。") for i in range(chunk_count)
         ]
         chunk_repo.insert_chunks(self.run_id, chunks)
+        # 中文注释：diagnosis 现在会校验 topic_labels 数量必须和本次真正发送给 LLM 的 topic_words 数一致；
+        # 测试基线需要显式造出至少一个主题，避免 payload.topic_words 为空时再用“单主题标签”样例误报。
+        chunk_repo.insert_chunk_topics(self.run_id, [(i, 0, 1.0) for i in range(chunk_count)])
 
         style_rows = [
             ChunkStyleData(
@@ -331,7 +335,7 @@ class TestCloudDiagnose:
         rows = self.db_session.execute(
             text(
                 "SELECT novel_id, narrative_type, foreshadow_expectation, narrative_arc_type, "
-                "protagonist, main_characters, core_cast "
+                "focus_structure, focus_characters, main_characters, core_cast "
                 "FROM cloud_analysis WHERE run_id = :run_id"
             ),
             {"run_id": self.run_id},
@@ -339,9 +343,10 @@ class TestCloudDiagnose:
         assert len(rows) > 0
         assert rows[0][0] == self.novel_id
         assert rows[0][3] == "白手起家"
-        assert rows[0][4] == "角色0"
+        assert rows[0][4] == "dual"
         assert "角色0" in rows[0][5]
-        assert "角色1" in rows[0][6]
+        assert "角色0" in rows[0][6]
+        assert "角色1" in rows[0][7]
 
         token_rows = self.db_session.execute(
             text("SELECT novel_id FROM token_usage WHERE run_id = :run_id"),
@@ -352,7 +357,8 @@ class TestCloudDiagnose:
         stats_repo = StatsRepository(self.db_session)
         fetched = stats_repo.fetch_cloud_analysis(self.novel_id, self.run_id)
         assert fetched is not None
-        assert fetched["protagonist"] == "角色0"
+        assert fetched["focus_structure"] == "dual"
+        assert fetched["focus_characters"] is not None
         assert fetched["main_characters"] is not None
         assert fetched["core_cast"] is not None
 
@@ -370,12 +376,13 @@ class TestCloudDiagnose:
             {
                 "novel_id": self.novel_id,
                 "foreshadow_expectation": 0.2,
-                "arc_scores": {"角色0": 9.1},
+                "arc_scores": {"角色0": 9.1, "角色1": 7.8},
                 "narrative_type": "三幕",
                 "topic_labels": ["成长"],
                 "diagnosis": "诊断完成",
                 "narrative_arc_type": "白手起家",
-                "protagonist": "角色0",
+                "focus_structure": "single",
+                "focus_characters": ["角色0"],
                 "main_characters": ["角色0"],
                 "core_cast": ["角色0", "角色1"],
             },
@@ -429,12 +436,13 @@ class TestCloudDiagnose:
         result = CloudAnalysis(
             novel_id="raw-novel",
             foreshadow_expectation=0.1,
-            arc_scores={"角色0": 8.5},
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
-            protagonist="角色0",
+            focus_structure="single",
+            focus_characters=["角色0"],
             main_characters=["角色0"],
             core_cast=["角色0", "角色1"],
         )
@@ -442,9 +450,182 @@ class TestCloudDiagnose:
         finalized = client._finalize_result(result, "fixed-novel", payload={})
 
         assert finalized.novel_id == "fixed-novel"
-        assert finalized.protagonist == "角色0"
+        assert finalized.focus_structure == "single"
+        assert finalized.focus_characters == ["角色0"]
         assert finalized.main_characters == ["角色0"]
         assert finalized.core_cast == ["角色0", "角色1"]
+
+    def test_finalize_result_rejects_partial_topic_labels_against_payload_topic_words(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: fix-diagnosis-topic-label-count-contract
+        说明: diagnosis 结果里的 topic_labels 会被主题页按位置消费；
+        如果本次实际发给 LLM 的 topic_words 有多个，而返回标签数不足，就必须在落库前直接拒绝。
+        """
+
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_expectation=0.1,
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
+            narrative_type="三幕",
+            topic_labels=["成长"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            focus_structure="single",
+            focus_characters=["角色0"],
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
+        )
+
+        with pytest.raises(ValueError, match="topic_labels count must match payload.topic_words count"):
+            client._finalize_result(
+                result,
+                "fixed-novel",
+                payload={
+                    "topic_words": [
+                        ["成长", "修炼", "历练"],
+                        ["命运", "抉择", "因果"],
+                    ]
+                },
+            )
+
+    def test_finalize_result_accepts_topic_labels_when_count_matches_payload_topic_words(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: fix-diagnosis-topic-label-count-contract
+        说明: 多主题 payload 只要返回标签数量和本次发送给 LLM 的 topic_words 数一致，
+        就应允许正常落库，不把合法 diagnosis 误判为坏结果。
+        """
+
+        client = object.__new__(DiagnosisClient)
+        result = CloudAnalysis(
+            novel_id="raw-novel",
+            foreshadow_expectation=0.1,
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
+            narrative_type="三幕",
+            topic_labels=["成长", "命运"],
+            diagnosis="ok",
+            narrative_arc_type="白手起家",
+            focus_structure="single",
+            focus_characters=["角色0"],
+            main_characters=["角色0"],
+            core_cast=["角色0", "角色1"],
+        )
+
+        finalized = client._finalize_result(
+            result,
+            "fixed-novel",
+            payload={
+                "topic_words": [
+                    ["成长", "修炼", "历练"],
+                    ["命运", "抉择", "因果"],
+                ]
+            },
+        )
+
+        assert finalized.topic_labels == ["成长", "命运"]
+
+    def test_cloud_analysis_rejects_formal_diagnosis_missing_focus_contract(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: protagonist-focus-contract-review-fixes
+        说明: 当前分支已经硬切焦点合同；只要是正式 diagnosis 结果，
+        就不能再依赖默认值落出缺 `focus_structure` / `focus_characters` 的半成品对象。
+        """
+
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={"角色0": 8.5, "角色1": 7.1},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                main_characters=["角色0"],
+                core_cast=["角色0", "角色1"],
+            )
+
+    def test_cloud_analysis_rejects_formal_diagnosis_missing_main_and_core_cast(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: protagonist-focus-contract-review-fixes-round2
+        说明: 新焦点合同不允许主要人物/核心角色静默缺失；
+        正式 diagnosis 缺这两个字段时，模型层必须直接拒绝。
+        """
+
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={"角色0": 8.5, "角色1": 7.1},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+            )
+
+    def test_cloud_analysis_rejects_formal_diagnosis_missing_topic_labels(self) -> None:
+        """
+        创建时间: 2026-04-27
+        创建者: Codex
+        任务: protagonist-focus-contract-review-fixes-round5
+        说明: 正式 diagnosis 合同同样要求完整主题命名；
+        如果 topic_labels 缺失，模型层必须直接拒绝，不能落成“焦点合同完整但主题命名为空”的半成品。
+        """
+
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={"角色0": 8.5, "角色1": 7.1},
+                narrative_type="三幕",
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+                main_characters=["角色0"],
+                core_cast=["角色0", "角色1"],
+            )
+
+    def test_cloud_analysis_rejects_main_characters_over_limit(self) -> None:
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={f"角色{i}": 7.0 + i for i in range(6)},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+                main_characters=[f"角色{i}" for i in range(6)],
+                core_cast=[f"角色{i}" for i in range(6)],
+            )
+
+    def test_cloud_analysis_rejects_core_cast_over_limit(self) -> None:
+        with pytest.raises(ValidationError):
+            CloudAnalysis(
+                novel_id="raw-novel",
+                foreshadow_expectation=0.1,
+                arc_scores={f"角色{i}": 7.0 + i for i in range(11)},
+                narrative_type="三幕",
+                topic_labels=["成长"],
+                diagnosis="ok",
+                narrative_arc_type="白手起家",
+                focus_structure="single",
+                focus_characters=["角色0"],
+                main_characters=["角色0"],
+                core_cast=[f"角色{i}" for i in range(11)],
+            )
 
     def test_finalize_result_resets_expectation_to_none_when_payload_has_no_ledger_value(self) -> None:
         """
@@ -459,12 +640,13 @@ class TestCloudDiagnose:
         result = CloudAnalysis(
             novel_id="raw-novel",
             foreshadow_expectation=0.27,
-            arc_scores={"角色0": 8.5},
+            arc_scores={"角色0": 8.5, "角色1": 7.1},
             narrative_type="三幕",
             topic_labels=["成长"],
             diagnosis="ok",
             narrative_arc_type="白手起家",
-            protagonist="角色0",
+            focus_structure="single",
+            focus_characters=["角色0"],
             main_characters=["角色0"],
             core_cast=["角色0", "角色1"],
         )

@@ -17,7 +17,9 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
+from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.main import app
 from src.api.models.responses import DiagnosisResult
 from src.storage.repositories import RunRepository
@@ -67,6 +69,150 @@ class TestResults:
         """测试获取不存在任务的诊断结果 - 返回404"""
         response = api_client.get("/api/novels/nonexistent/diagnosis?task_id=nonexistent")
         assert response.status_code == 404
+
+    def test_get_diagnosis_returns_rerun_required_for_incomplete_focus_contract(
+        self,
+        api_client: TestClient,
+        db_session,
+    ) -> None:
+        novel_id = "d" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Diagnosis Incomplete Contract",
+        )
+        run_repo.update_run_status(run_id, "completed")
+        db_session.execute(
+            text(
+                "INSERT INTO cloud_analysis "
+                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
+                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+            ),
+            {
+                "novel_id": novel_id,
+                "foreshadow_expectation": 0.42,
+                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
+                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "run_id": run_id,
+            },
+        )
+        db_session.commit()
+
+        response = api_client.get(f"/api/novels/{novel_id}/diagnosis", params={"task_id": run_id[:8]})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["rerun_required"] is True
+        assert payload["rerun_reason"] == "focus_contract_incomplete"
+
+    def test_get_characters_rejects_incomplete_focus_contract(self, api_client: TestClient, db_session) -> None:
+        novel_id = "c" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Characters Incomplete Contract",
+        )
+        run_repo.update_run_status(run_id, "completed")
+        db_session.execute(
+            text(
+                "INSERT INTO cloud_analysis "
+                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
+                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+            ),
+            {
+                "novel_id": novel_id,
+                "foreshadow_expectation": 0.42,
+                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
+                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "run_id": run_id,
+            },
+        )
+        db_session.commit()
+
+        response = api_client.get(f"/api/novels/{novel_id}/characters", params={"task_id": run_id[:8]})
+
+        assert response.status_code == 409
+        payload = response.json()["detail"]
+        assert payload["code"] == "diagnosis_rerun_required"
+        assert payload["reason"] == "focus_contract_incomplete"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/novels/{novel_id}/graph",
+            "/api/novels/{novel_id}/graph/events",
+        ],
+    )
+    def test_graph_routes_reject_incomplete_focus_contract(
+        self,
+        api_client: TestClient,
+        db_session,
+        path: str,
+    ) -> None:
+        novel_id = "g" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Graph Incomplete Contract",
+        )
+        run_repo.update_run_status(run_id, "completed")
+        db_session.execute(
+            text(
+                "INSERT INTO cloud_analysis "
+                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
+                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+            ),
+            {
+                "novel_id": novel_id,
+                "foreshadow_expectation": 0.42,
+                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
+                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "run_id": run_id,
+            },
+        )
+        db_session.commit()
+
+        response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+
+        assert response.status_code == 409
+        payload = response.json()["detail"]
+        assert payload["code"] == "diagnosis_rerun_required"
+        assert payload["reason"] == "focus_contract_incomplete"
+
+    def test_get_results_rejects_incomplete_focus_contract(
+        self,
+        api_client: TestClient,
+        db_session,
+        monkeypatch,
+    ) -> None:
+        novel_id = "r" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Results Incomplete Contract",
+        )
+        run_repo.update_run_status(run_id, "completed")
+        monkeypatch.setattr(
+            "src.api.routes.results.fetch_all_results_data",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                DiagnosisRerunRequiredError(reason="focus_contract_incomplete")
+            ),
+        )
+
+        response = api_client.get(f"/api/novels/{novel_id}/results", params={"task_id": run_id[:8]})
+
+        assert response.status_code == 409
+        payload = response.json()["detail"]
+        assert payload["code"] == "diagnosis_rerun_required"
+        assert payload["reason"] == "focus_contract_incomplete"
 
     def test_get_chunk_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
         """测试 chunk_annotations 不接受属于其他小说的 task_id。"""
@@ -132,17 +278,29 @@ class TestResults:
         assert "theme_color" in properties
         assert "setup thread ledger" in properties["foreshadow_expectation"]["description"]
 
+    def test_get_characters_openapi_declares_typed_response(self):
+        schema = app.openapi()
+        response_schema = schema["paths"]["/api/novels/{novel_id}/characters"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        assert response_schema["type"] == "array"
+        assert response_schema["items"]["$ref"] == "#/components/schemas/CharacterStats"
+
 
 @pytest.mark.parametrize(
     "path",
     [
+        "/api/novels/{novel_id}/chunk-curves",
+        "/api/novels/{novel_id}/chunk-annotations",
+        "/api/novels/{novel_id}/topics",
+        "/api/novels/{novel_id}/foreshadowing-threads",
         "/api/novels/{novel_id}/metrics/narrative-structure",
         "/api/novels/{novel_id}/metrics/emotion-stats",
         "/api/novels/{novel_id}/metrics/character-stats",
         "/api/novels/{novel_id}/metrics/style-stats",
     ],
 )
-def test_metrics_routes_reject_non_terminal_run_status(api_client: TestClient, db_session, path: str) -> None:
+def test_result_routes_reject_non_terminal_run_status(api_client: TestClient, db_session, path: str) -> None:
     novel_id = "m" + uuid.uuid4().hex[:7]
     insert_graph_test_novel(db_session, novel_id)
     run_repo = RunRepository(db_session)
@@ -150,6 +308,34 @@ def test_metrics_routes_reject_non_terminal_run_status(api_client: TestClient, d
         novel_id=novel_id,
         source_path="test",
         title="Metrics Non Terminal Run",
+    )
+    run_repo.update_run_status(run_id, "running")
+
+    response = api_client.get(path.format(novel_id=novel_id), params={"task_id": run_id[:8]})
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "AnalysisNotCompleteError"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/novels/{novel_id}/diagnosis",
+        "/api/novels/{novel_id}/characters",
+    ],
+)
+def test_diagnosis_and_characters_routes_reject_non_terminal_run_status(
+    api_client: TestClient,
+    db_session,
+    path: str,
+) -> None:
+    novel_id = "r" + uuid.uuid4().hex[:7]
+    insert_graph_test_novel(db_session, novel_id)
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(
+        novel_id=novel_id,
+        source_path="test",
+        title="Results Non Terminal Run",
     )
     run_repo.update_run_status(run_id, "running")
 

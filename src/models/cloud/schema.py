@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ValueLogicType = Literal["善义有价值", "强者为王", "混合型"]
+FocusStructureType = Literal["single", "dual", "ensemble"]
 
 
 class DisambiguationAliasMap(BaseModel):
@@ -39,16 +40,17 @@ class CloudAnalysis(BaseModel):
     任务: 迁移数据模型至 Pydantic
     说明: 从 dataclass 迁移至 Pydantic BaseModel，使用 field_validator 替代手动验证
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 新增角色相关字段
-    修改内容: 新增 protagonist、main_characters、core_cast 字段，更新 to_dict() 方法
-
     修改时间: 2026-04-26
     修改者: Codex
     任务: remove-foreshadow-rate-contract
     修改内容: 移除旧 `foreshadow_rate` 兼容字段，统一改为 `foreshadow_expectation`
     单一合同，并承接 diagnosis 阶段对 setup ledger 的正式消费。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改内容: 废弃单主角合同，新增 `focus_structure` / `focus_characters`，
+    并对焦点结构与人物名单一致性做严格校验。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -63,7 +65,7 @@ class CloudAnalysis(BaseModel):
             "并作为对外与持久化的单一正式字段。"
         ),
     )
-    arc_scores: list[float] | dict[str, float] = Field(default_factory=list)
+    arc_scores: dict[str, float] = Field(default_factory=dict)
     narrative_type: str | None = None
     topic_labels: list[str] = Field(default_factory=list)
     diagnosis: str | None = None
@@ -76,7 +78,8 @@ class CloudAnalysis(BaseModel):
     cultural_depth_score: int | None = Field(default=None, ge=0, le=5)
     cultural_depth_reason: str | None = None
     narrative_arc_type: str | None = None
-    protagonist: str | None = None
+    focus_structure: FocusStructureType | None = None
+    focus_characters: list[str] = Field(default_factory=list)
     main_characters: list[str] = Field(default_factory=list)
     core_cast: list[str] = Field(default_factory=list)
     theme_color: str | None = Field(
@@ -107,17 +110,139 @@ class CloudAnalysis(BaseModel):
                 raise ValueError(f"value_logic_type must be one of {valid_types}, got: {v}")
         return v
 
-    def to_dict(self) -> dict:
-        arc_scores_value: list[float] | dict[str, float]
-        if isinstance(self.arc_scores, dict):
-            arc_scores_value = dict(self.arc_scores)
-        else:
-            arc_scores_value = list(self.arc_scores)
+    @field_validator("focus_characters", "main_characters", "core_cast")
+    @classmethod
+    def validate_character_lists(cls, values: list[str]) -> list[str]:
+        """
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: protagonist-focus-contract
+        修改原因: 焦点人物、主要人物、核心角色现在都是正式结构化合同；
+        这里统一去除空白名并保留原顺序，避免后续落库和页面展示继续吞脏值。
+        """
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            name = value.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            normalized.append(name)
+        return normalized
 
+    @field_validator("arc_scores")
+    @classmethod
+    def validate_arc_scores(cls, values: dict[str, float]) -> dict[str, float]:
+        """
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: protagonist-focus-contract
+        修改原因: 新合同不再接受匿名数组形态的弧线分；所有分数都必须是
+        `人物名 -> 分数` 的命名字典，供焦点合同和前端统一消费。
+        """
+        normalized: dict[str, float] = {}
+        for raw_name, raw_score in values.items():
+            name = raw_name.strip()
+            if not name:
+                continue
+            score = float(raw_score)
+            normalized[name] = score
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_focus_contract(self) -> CloudAnalysis:
+        """
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: protagonist-focus-contract
+        修改原因: diagnosis 结果现在允许 single / dual / ensemble，
+        必须在模型层阻止“结构标签”和“人物列表”彼此矛盾的脏结果进入数据库。
+
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: protagonist-focus-contract-review-fixes-round5
+        修改原因: 正式 diagnosis 合同同样要求完整的 `topic_labels`；
+        这里补上主题命名必填校验，避免“焦点合同完整但主题命名静默缺失”的半成品落库。
+        """
+        # 中文注释：空云端桩和少量测试辅助对象仍可能构造“全空 diagnosis”，
+        # 这里允许这种空对象通过；但只要已经进入正式 diagnosis 结果形态，
+        # 就必须显式给出完整 focus contract，不能再靠默认值糊成半成品。
+        has_formal_diagnosis_payload = any(
+            (
+                self.foreshadow_expectation is not None,
+                bool(self.arc_scores),
+                self.narrative_type is not None,
+                bool(self.topic_labels),
+                self.diagnosis is not None,
+                self.value_logic_type is not None,
+                self.value_logic_reason is not None,
+                self.power_stance_score is not None,
+                self.power_stance_reason is not None,
+                self.common_people_dignity is not None,
+                self.dignity_reason is not None,
+                self.cultural_depth_score is not None,
+                self.cultural_depth_reason is not None,
+                self.narrative_arc_type is not None,
+                bool(self.main_characters),
+                bool(self.core_cast),
+                self.theme_color is not None,
+            )
+        )
+
+        arc_score_names = set(self.arc_scores.keys())
+
+        for label, values in (
+            ("focus_characters", self.focus_characters),
+            ("main_characters", self.main_characters),
+            ("core_cast", self.core_cast),
+        ):
+            invalid_names = [name for name in values if name not in arc_score_names]
+            if invalid_names:
+                raise ValueError(f"{label} contains names missing from arc_scores: {invalid_names}")
+
+        if has_formal_diagnosis_payload:
+            if self.focus_structure is None:
+                raise ValueError("focus_structure is required for formal diagnosis payload")
+            if not self.focus_characters:
+                raise ValueError("focus_characters is required for formal diagnosis payload")
+            if not self.main_characters:
+                raise ValueError("main_characters is required for formal diagnosis payload")
+            if not self.core_cast:
+                raise ValueError("core_cast is required for formal diagnosis payload")
+            if not self.topic_labels:
+                raise ValueError("topic_labels is required for formal diagnosis payload")
+            if len(self.main_characters) > 5:
+                raise ValueError("main_characters cannot exceed 5 items")
+            if len(self.core_cast) > 10:
+                raise ValueError("core_cast cannot exceed 10 items")
+
+        if self.focus_structure is None:
+            if self.focus_characters:
+                raise ValueError("focus_structure is required when focus_characters is not empty")
+            return self
+
+        focus_count = len(self.focus_characters)
+        expected_count_by_structure = {
+            "single": 1,
+            "dual": 2,
+        }
+        if self.focus_structure in expected_count_by_structure:
+            expected_count = expected_count_by_structure[self.focus_structure]
+            if focus_count != expected_count:
+                raise ValueError(
+                    f"focus_structure={self.focus_structure} requires exactly {expected_count} focus_characters, "
+                    f"got {focus_count}"
+                )
+        elif self.focus_structure == "ensemble" and focus_count < 3:
+            raise ValueError("focus_structure=ensemble requires at least 3 focus_characters")
+
+        return self
+
+    def to_dict(self) -> dict:
         return {
             "novel_id": self.novel_id,
             "foreshadow_expectation": self.foreshadow_expectation,
-            "arc_scores": arc_scores_value,
+            "arc_scores": dict(self.arc_scores),
             "narrative_type": self.narrative_type,
             "topic_labels": list(self.topic_labels),
             "diagnosis": self.diagnosis,
@@ -130,7 +255,8 @@ class CloudAnalysis(BaseModel):
             "cultural_depth_score": self.cultural_depth_score,
             "cultural_depth_reason": self.cultural_depth_reason,
             "narrative_arc_type": self.narrative_arc_type,
-            "protagonist": self.protagonist,
+            "focus_structure": self.focus_structure,
+            "focus_characters": list(self.focus_characters),
             "main_characters": list(self.main_characters),
             "core_cast": list(self.core_cast),
             "theme_color": self.theme_color,
