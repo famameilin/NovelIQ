@@ -120,16 +120,7 @@ def _fetch_diagnosis(
     """
     data = stats_repo.fetch_cloud_analysis(novel_id, run_id)
     if not data:
-        if annotation_repo is None:
-            return None
-        foreshadow_expectation = annotation_repo.calculate_foreshadow_expectation(run_id)
-        if foreshadow_expectation is None:
-            return None
-        return DiagnosisResult(
-            rerun_required=True,
-            rerun_reason="diagnosis_missing_focus_contract",
-            foreshadow_expectation=foreshadow_expectation,
-        )
+        return None
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (

@@ -237,7 +237,7 @@ def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_missing():
     assert result is None
 
 
-def test_fetch_diagnosis_returns_ledger_only_payload_when_cloud_diagnosis_missing():
+def test_fetch_diagnosis_returns_none_when_cloud_diagnosis_row_missing_even_if_ledger_exists():
     stats_repo = _DummyStatsRepo(None)
     annotation_repo = _DummyAnnotationRepo(alias_map={}, rows=[])
     annotation_repo.foreshadow_expectation = 0.58
@@ -250,12 +250,7 @@ def test_fetch_diagnosis_returns_ledger_only_payload_when_cloud_diagnosis_missin
         alias_map={},
     )
 
-    assert result is not None
-    assert result.rerun_required is True
-    assert result.rerun_reason == "diagnosis_missing_focus_contract"
-    assert result.foreshadow_expectation == 0.58
-    assert result.diagnosis is None
-    assert result.topic_labels is None
+    assert result is None
 
 
 def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():

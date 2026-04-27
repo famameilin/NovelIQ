@@ -179,6 +179,8 @@ export interface Topic {
 // ============================================================
 
 export interface DiagnosisResult {
+  rerun_required?: boolean;
+  rerun_reason?: string | null;
   narrative_type?: string;
   foreshadow_expectation?: number;
   narrative_arc_type?: string;

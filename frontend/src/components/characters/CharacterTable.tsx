@@ -9,8 +9,6 @@ import type { Character } from "@/api/types";
 export interface CharacterTableProps {
   /** 角色列表数据 */
   characters: Character[];
-  /** 焦点人物名称列表 */
-  focusCharacters?: string[] | null;
   className?: string;
 }
 
@@ -39,17 +37,15 @@ function SortIcon({
  * 修改原因：统一人物页表格容器样式，减少页面上普通 Card 与新卡片壳并存的割裂感。
  *
  * 2026-04-27，任务：protagonist-focus-contract
- * 修改原因：表格列和高亮逻辑统一切到焦点合同，展示 `narrative_focus_score`
- * 并支持多个 `focus_characters` 同时高亮。
+ * 修改原因：表格列和高亮逻辑统一切到焦点合同，展示 `narrative_focus_score`，
+ * 并直接消费角色结果里的 `is_focus_character`，不再依赖额外的名称列表高亮。
  */
 export function CharacterTable({
   characters,
-  focusCharacters,
   className,
 }: CharacterTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("appearance_count");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const focusCharacterSet = useMemo(() => new Set(focusCharacters ?? []), [focusCharacters]);
 
   const sortedCharacters = useMemo(() => {
     return [...characters].sort((a, b) => {
@@ -157,15 +153,15 @@ export function CharacterTable({
                   key={char.name}
                   className={cn(
                     "cursor-pointer transition-colors hover:bg-surface-hover",
-                    focusCharacterSet.has(char.name) && "bg-primary/5"
+                    char.is_focus_character && "bg-primary/5"
                   )}
                 >
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
-                      {focusCharacterSet.has(char.name) && (
+                      {char.is_focus_character && (
                         <User className="h-3 w-3 text-primary" />
                       )}
-                      <span className={focusCharacterSet.has(char.name) ? "text-primary font-semibold" : ""}>
+                      <span className={char.is_focus_character ? "text-primary font-semibold" : ""}>
                         {char.name}
                       </span>
                     </div>

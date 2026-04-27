@@ -13,8 +13,20 @@ export function hasCompleteFocusContract(
 ): diagnosis is DiagnosisResult & {
   focus_structure: "single" | "dual" | "ensemble";
   focus_characters: string[];
+  main_characters: string[];
+  core_cast: string[];
 } {
-  if (!diagnosis?.focus_structure || !Array.isArray(diagnosis.focus_characters)) {
+  if (diagnosis?.rerun_required) {
+    return false;
+  }
+  if (
+    !diagnosis?.focus_structure ||
+    !Array.isArray(diagnosis.focus_characters) ||
+    !Array.isArray(diagnosis.main_characters) ||
+    !Array.isArray(diagnosis.core_cast) ||
+    diagnosis.main_characters.length === 0 ||
+    diagnosis.core_cast.length === 0
+  ) {
     return false;
   }
 
