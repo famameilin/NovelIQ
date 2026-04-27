@@ -89,6 +89,28 @@ function IncompleteFocusContractState() {
   );
 }
 
+/**
+ * 创建时间: 2026-04-27
+ * 创建者: Codex
+ * 任务: protagonist-focus-contract-compat-cleanup
+ * 说明: 角色页现在以 diagnosis 新合同为前置条件；
+ * diagnosis 尚未产出时，不再提前渲染仅靠 annotation 聚合得到的角色表，
+ * 避免页面继续对“无 diagnosis 的旧路径”做静默兼容。
+ */
+function EmptyDiagnosisState() {
+  return (
+    <DashboardCardShell
+      title="角色焦点结果暂未生成"
+      icon={<Users className="h-4 w-4" />}
+      accent="chart-2"
+      className="min-h-[240px]"
+      bodyClassName="items-center justify-center gap-3 text-center"
+    >
+      <p className="text-sm text-text-muted">当前任务暂时还没有可展示的角色焦点结果。</p>
+    </DashboardCardShell>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
@@ -118,13 +140,6 @@ export function CharactersPage() {
   // Data fetching
   const enabled = !!novelId && !!currentTaskId;
 
-  const charactersQuery = useQuery({
-    queryKey: ["results", novelId, currentTaskId, "characters"],
-    queryFn: () => getCharacters(novelId!, currentTaskId!),
-    enabled,
-    staleTime: STALE_TIME,
-  });
-
   const diagnosisQuery = useQuery({
     queryKey: ["results", novelId, currentTaskId, "diagnosis"],
     queryFn: () => getDiagnosis(novelId!, currentTaskId!),
@@ -132,24 +147,47 @@ export function CharactersPage() {
     staleTime: STALE_TIME,
   });
 
-  const isLoading = enabled && (charactersQuery.isLoading || diagnosisQuery.isLoading);
-  const isError = enabled && (charactersQuery.isError || diagnosisQuery.isError);
+  const diagnosis = diagnosisQuery.data;
+  const hasFocusContract = hasCompleteFocusContract(diagnosis);
+  const isDiagnosisRerunRequired =
+    diagnosis?.rerun_required === true || (diagnosisQuery.isSuccess && diagnosis !== null && !hasFocusContract);
+  const shouldFetchCharacters = enabled && diagnosisQuery.isSuccess && diagnosis !== null && !isDiagnosisRerunRequired;
+
+  const charactersQuery = useQuery({
+    queryKey: ["results", novelId, currentTaskId, "characters"],
+    queryFn: () => getCharacters(novelId!, currentTaskId!),
+    enabled: shouldFetchCharacters,
+    staleTime: STALE_TIME,
+  });
+
+  const isLoading =
+    enabled &&
+    (diagnosisQuery.isLoading || (shouldFetchCharacters && charactersQuery.isLoading));
+  const isError =
+    enabled &&
+    (diagnosisQuery.isError || (shouldFetchCharacters && charactersQuery.isError));
 
   const retry = () => {
-    charactersQuery.refetch();
+    if (shouldFetchCharacters) {
+      charactersQuery.refetch();
+    }
     diagnosisQuery.refetch();
   };
 
   const { data: characters } = charactersQuery;
-  const { data: diagnosis } = diagnosisQuery;
-  const hasFocusContract = hasCompleteFocusContract(diagnosis);
   const focusCharacters = hasFocusContract ? diagnosis.focus_characters : [];
+  const hasNullDiagnosis =
+    enabled &&
+    diagnosisQuery.isFetched &&
+    !diagnosisQuery.isLoading &&
+    !diagnosisQuery.isError &&
+    diagnosis === null;
   const shouldShowIncompleteFocusContractState =
-    !!characters &&
-    characters.length > 0 &&
+    diagnosisQuery.isSuccess &&
+    diagnosis !== null &&
     !isLoading &&
     !isError &&
-    !hasFocusContract;
+    isDiagnosisRerunRequired;
 
   // ---------- Render ----------
 
@@ -206,6 +244,9 @@ export function CharactersPage() {
         </DashboardCardShell>
       )}
 
+      {/* Diagnosis empty state */}
+      {hasNullDiagnosis && !isLoading && !isError && <EmptyDiagnosisState />}
+
       {/* Contract-broken state */}
       {shouldShowIncompleteFocusContractState && <IncompleteFocusContractState />}
 
@@ -218,10 +259,7 @@ export function CharactersPage() {
           className="space-y-6"
         >
           {/* Character Ranking Bar */}
-          <CharacterRankingBar
-            characters={characters}
-            focusCharacters={focusCharacters}
-          />
+          <CharacterRankingBar characters={characters} />
 
           {/* Pie + Protagonist Card */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -235,10 +273,7 @@ export function CharactersPage() {
           </div>
 
           {/* Character Table */}
-          <CharacterTable
-            characters={characters}
-            focusCharacters={focusCharacters}
-          />
+          <CharacterTable characters={characters} />
         </motion.div>
       )}
     </PageContainer>

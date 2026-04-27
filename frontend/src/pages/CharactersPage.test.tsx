@@ -130,16 +130,7 @@ describe("CharactersPage", () => {
     useNovelStore.getState().clear();
   });
 
-  it("renders rerun-required state when characters exist but diagnosis focus contract is incomplete", async () => {
-    getCharactersMock.mockResolvedValue([
-      {
-        name: "沈砚",
-        appearance_count: 12,
-        dominant_role_function: "主体",
-        narrative_focus_score: null,
-        is_focus_character: false,
-      },
-    ]);
+  it("renders rerun-required state when diagnosis focus contract is incomplete", async () => {
     getDiagnosisMock.mockResolvedValue({
       foreshadow_expectation: 0.42,
     });
@@ -151,5 +142,16 @@ describe("CharactersPage", () => {
       screen.getByText("当前任务缺少完整的焦点结构合同，请重新分析后再查看角色焦点结果。"),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("character-ranking-bar")).not.toBeInTheDocument();
+    expect(getCharactersMock).not.toHaveBeenCalled();
+  });
+
+  it("renders empty diagnosis state when diagnosis is still missing", async () => {
+    getDiagnosisMock.mockResolvedValue(null);
+
+    renderCharactersPage();
+
+    expect(await screen.findByText("角色焦点结果暂未生成")).toBeInTheDocument();
+    expect(screen.getByText("当前任务暂时还没有可展示的角色焦点结果。")).toBeInTheDocument();
+    expect(getCharactersMock).not.toHaveBeenCalled();
   });
 });

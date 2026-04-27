@@ -110,6 +110,25 @@ def _require_readable_run_status(run: dict[str, Any]) -> None:
         raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
 
 
+def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> None:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract-compat-cleanup
+    说明: 当前分支已经明确不兼容旧 diagnosis 合同；
+    只要结果读取命中 rerun-required diagnosis，就应在 API 层显式中止，
+    不能继续把旧 run 包装成“成功但无焦点数据”的静默降级结果。
+    """
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "diagnosis_rerun_required",
+            "message": "当前任务的 diagnosis 焦点合同已失效，请重新分析。",
+            "reason": diagnosis.rerun_reason,
+        },
+    )
+
+
 @router.get(
     "/{novel_id}/results",
     response_model=ResultsWriteResponse,
@@ -315,6 +334,8 @@ async def get_characters(
 
     alias_map = annotation_repo.fetch_alias_map(run_id)
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is not None and diagnosis.rerun_required:
+        _raise_rerun_required_for_focus_contract(diagnosis)
 
     arc_scores: dict[str, float] | None = None
     focus_characters: list[str] | None = None

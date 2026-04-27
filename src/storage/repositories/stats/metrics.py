@@ -456,6 +456,7 @@ def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[s
             CloudAnalysis.novel_id == novel_id,
             CloudAnalysis.run_id == run_id,
         )
+        .order_by(CloudAnalysis.id.desc())
         .limit(1)
     )
 

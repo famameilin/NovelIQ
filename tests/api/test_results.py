@@ -17,6 +17,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from src.api.main import app
 from src.api.models.responses import DiagnosisResult
@@ -67,6 +68,74 @@ class TestResults:
         """测试获取不存在任务的诊断结果 - 返回404"""
         response = api_client.get("/api/novels/nonexistent/diagnosis?task_id=nonexistent")
         assert response.status_code == 404
+
+    def test_get_diagnosis_returns_rerun_required_for_incomplete_focus_contract(
+        self,
+        api_client: TestClient,
+        db_session,
+    ) -> None:
+        novel_id = "d" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Diagnosis Incomplete Contract",
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO cloud_analysis "
+                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
+                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+            ),
+            {
+                "novel_id": novel_id,
+                "foreshadow_expectation": 0.42,
+                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
+                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "run_id": run_id,
+            },
+        )
+        db_session.commit()
+
+        response = api_client.get(f"/api/novels/{novel_id}/diagnosis", params={"task_id": run_id[:8]})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["rerun_required"] is True
+        assert payload["rerun_reason"] == "focus_contract_incomplete"
+
+    def test_get_characters_rejects_incomplete_focus_contract(self, api_client: TestClient, db_session) -> None:
+        novel_id = "c" + uuid.uuid4().hex[:7]
+        insert_graph_test_novel(db_session, novel_id)
+        run_repo = RunRepository(db_session)
+        run_id = run_repo.create_run(
+            novel_id=novel_id,
+            source_path="test",
+            title="Characters Incomplete Contract",
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO cloud_analysis "
+                "(novel_id, foreshadow_expectation, arc_scores, diagnosis, run_id) "
+                "VALUES (:novel_id, :foreshadow_expectation, :arc_scores, :diagnosis, :run_id)"
+            ),
+            {
+                "novel_id": novel_id,
+                "foreshadow_expectation": 0.42,
+                "arc_scores": '{"角色0": 8.2, "角色1": 7.4}',
+                "diagnosis": "旧 diagnosis 行缺少 focus contract",
+                "run_id": run_id,
+            },
+        )
+        db_session.commit()
+
+        response = api_client.get(f"/api/novels/{novel_id}/characters", params={"task_id": run_id[:8]})
+
+        assert response.status_code == 409
+        payload = response.json()["detail"]
+        assert payload["code"] == "diagnosis_rerun_required"
+        assert payload["reason"] == "focus_contract_incomplete"
 
     def test_get_chunk_annotations_rejects_task_from_other_novel(self, api_client: TestClient):
         """测试 chunk_annotations 不接受属于其他小说的 task_id。"""

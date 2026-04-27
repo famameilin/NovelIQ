@@ -184,6 +184,8 @@ describe("DiagnosisPage", () => {
       foreshadow_expectation: 0.42,
       focus_structure: "single",
       focus_characters: ["沈砚"],
+      main_characters: ["沈砚"],
+      core_cast: ["沈砚"],
       topic_labels: ["成长"],
     });
     getForeshadowingThreadsMock.mockRejectedValue(new Error("threads boom"));

@@ -201,3 +201,51 @@ def test_insert_cloud_analysis(db_session) -> None:
     assert row[0] == novel_id
     assert row[1] == 0.5
     assert row[2] == "白手起家"
+
+
+def test_fetch_cloud_analysis_prefers_latest_row_for_same_run(db_session) -> None:
+    novel_id = uuid.uuid4().hex[:8]
+    _insert_test_novel(db_session, novel_id)
+
+    run_repo = RunRepository(db_session)
+    run_id = run_repo.create_run(novel_id=novel_id, source_path="test", title="Test Novel")
+
+    stats_repo = StatsRepository(db_session)
+    stats_repo.insert_cloud_analysis(
+        run_id,
+        CloudAnalysis(
+            novel_id=novel_id,
+            foreshadow_expectation=0.2,
+            arc_scores={"角色0": 7.0},
+            narrative_type="旧诊断",
+            topic_labels=["旧主题"],
+            diagnosis="old",
+            narrative_arc_type="白手起家",
+            focus_structure="single",
+            focus_characters=["角色0"],
+            main_characters=["角色0"],
+            core_cast=["角色0"],
+        ),
+    )
+    stats_repo.insert_cloud_analysis(
+        run_id,
+        CloudAnalysis(
+            novel_id=novel_id,
+            foreshadow_expectation=0.8,
+            arc_scores={"角色1": 9.0},
+            narrative_type="新诊断",
+            topic_labels=["新主题"],
+            diagnosis="new",
+            narrative_arc_type="白手起家",
+            focus_structure="single",
+            focus_characters=["角色1"],
+            main_characters=["角色1"],
+            core_cast=["角色1"],
+        ),
+    )
+
+    fetched = stats_repo.fetch_cloud_analysis(novel_id, run_id)
+
+    assert fetched is not None
+    assert fetched["narrative_type"] == "新诊断"
+    assert fetched["foreshadow_expectation"] == 0.8
