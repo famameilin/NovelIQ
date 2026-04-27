@@ -664,7 +664,7 @@ describe("GraphPage pagination", () => {
     await user.click(await screen.findByRole("button", { name: "去时间轴联动查看" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_node_id=relation%3A101&selected_chunk=50&relation_event_id=101"
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=relation%3A101&selected_chunk=50&relation_event_id=101"
     );
   });
 
@@ -685,7 +685,7 @@ describe("GraphPage pagination", () => {
     await user.click(await screen.findByRole("button", { name: "查看首次登场" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_node_id=lifecycle%3Aentry%3Atask-a-hero%3A1&selected_chunk=1"
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=lifecycle%3Aentry%3Atask-a-hero%3A1&selected_chunk=1"
     );
   });
 
@@ -706,7 +706,7 @@ describe("GraphPage pagination", () => {
     await user.click(screen.getByRole("button", { name: "去时间轴联动查看" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=48"
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_chunk=48"
     );
   });
 
@@ -749,7 +749,7 @@ describe("GraphPage pagination", () => {
     await user.click(screen.getByRole("button", { name: "去时间轴联动查看" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=48"
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_chunk=48"
     );
   });
 
@@ -779,7 +779,7 @@ describe("GraphPage pagination", () => {
         screen.queryByText(/未在当前图谱事件窗口定位到指定关系事件/)
       ).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/第 50 段 · task-a Hero → task-a Ally/)).toBeInTheDocument();
+    expect(screen.getAllByText(/第 50 段 · task-a Hero → task-a Ally/).length).toBeGreaterThan(0);
     expect(navigateMock).toHaveBeenCalledWith(
       "/novels/novel-1/graph?task_id=task-a&selected_chunk=50&relation_event_id=101",
       { replace: true }

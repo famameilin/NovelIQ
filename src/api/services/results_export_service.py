@@ -43,6 +43,7 @@ from src.metrics.timeline_metrics import (
     TimelineAuthorityContractError,
     TimelineDataUnavailableError,
     build_timeline_plan,
+    serialize_timeline_composite_node,
     serialize_timeline_node,
     serialize_timeline_phases,
 )
@@ -282,7 +283,7 @@ def _fetch_timeline_data(
     获取时间轴数据用于导出
 
     Returns:
-        时间轴数据字典，包含 phases, nodes, tension_curve
+        时间轴数据字典，包含 phases, composite_nodes, atomic_nodes, tension_curve
 
     Contract note:
         Export intentionally reuses the same authority-backed timeline helper
@@ -309,7 +310,8 @@ def _fetch_timeline_data(
 
     return {
         "phases": serialize_timeline_phases(timeline_plan.phases),
-        "nodes": [serialize_timeline_node(node) for node in timeline_plan.nodes],
+        "composite_nodes": [serialize_timeline_composite_node(node) for node in timeline_plan.composite_nodes],
+        "atomic_nodes": [serialize_timeline_node(node) for node in timeline_plan.atomic_nodes],
         "tension_curve": timeline_plan.tension_curve,
         "total_chunks": timeline_plan.total_chunks,
     }
