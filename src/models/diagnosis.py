@@ -337,6 +337,13 @@ class DiagnosisClient(BaseModelClient):
         任务: protagonist-focus-contract
         修改原因: 新 diagnosis 合同允许 single / dual / ensemble；
         落库前必须重新走一遍 CloudAnalysis 校验，禁止把非法焦点结构静默写入数据库。
+
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: fix-diagnosis-topic-label-count-contract
+        修改原因: 当前 prompt 和前端主题页都把 `topic_labels` 当作按位置消费的完整命名结果；
+        这里必须显式校验“返回标签数 == 实际发给 LLM 的 topic_words 数”，
+        禁止部分命名结果落库后被误当成完整 diagnosis。
         """
 
         updates: dict[str, Any] = {}
@@ -353,6 +360,20 @@ class DiagnosisClient(BaseModelClient):
                 raise TypeError(
                     "payload.foreshadow_expectation must be float or None, "
                     f"got {type(payload_expectation).__name__}"
+                )
+
+        topic_words = payload.get("topic_words")
+        if topic_words is not None:
+            if not isinstance(topic_words, list):
+                raise TypeError(f"payload.topic_words must be list when provided, got {type(topic_words).__name__}")
+            expected_topic_label_count = len(topic_words)
+            actual_topic_label_count = len(result.topic_labels)
+            # 中文注释：payload.topic_words 已经是本次真正发给 LLM 的主题头部列表，
+            # 所以这里校验的是“返回标签数 == 发送主题数”，而不是全文 total_topics。
+            if actual_topic_label_count != expected_topic_label_count:
+                raise ValueError(
+                    "topic_labels count must match payload.topic_words count: "
+                    f"expected {expected_topic_label_count}, got {actual_topic_label_count}"
                 )
 
         final_payload = result.model_dump()
