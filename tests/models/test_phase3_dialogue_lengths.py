@@ -4,12 +4,18 @@ Phase3 对话长度与后处理验证测试
 创建时间: 2026-04-23
 任务: 复杂度与耦合审查 P2 - 测试工程化
 说明: 从 test_phase3.py 拆出长度聚合、thinking 参数和 speaker 后处理场景。
+
+修改时间: 2026-04-26
+修改者: Codex
+任务: phase3-proof-only-fastpath-batch10
+修改内容: 补齐 Phase3 新批处理实现需要的 mock 配置，避免旧测试因 settings 桩不完整而失真。
 """
 
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.models.local.annotation.phase3 import attribute_dialogues_with_llm, compute_dialogue_lengths_with_llm
+from src.models.local.annotation.projectors.dialogue import project_dialogue_lengths
 from src.models.local.schema import DialogueRecord, QuoteCandidate
 
 
@@ -72,6 +78,8 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"
@@ -200,11 +208,57 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.dialogue_identity_clues, {1: "声音低沉的中年男子"})
 
     @patch("src.models.local.annotation.phase3.settings")
+    async def test_metadata_request_keeps_identity_clues_for_fastpath_like_input(
+        self,
+        mock_settings: MagicMock,
+    ) -> None:
+        """即使文本形状可命中 fastpath，主链仍应保留 fastpath speaker 并补齐 LLM 元数据。"""
+        mock_settings.prompts.phase3.system = "system"
+        mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
+        mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
+
+        mock_annotation_client = MagicMock()
+        mock_annotation_client._config.model = "test-model"
+        mock_annotation_client._config.thinking_enabled = False
+        mock_annotation_client._config.temperature = 0.7
+        mock_annotation_client._config.top_p = 0.9
+        mock_annotation_client._config.presence_penalty = 0.0
+        mock_annotation_client._is_cloud_api.return_value = False
+        mock_annotation_client._build_json_schema.return_value = {}
+        mock_response = MagicMock(
+            dialogues=[
+                DialogueRecord(
+                    index=1,
+                    content="我叫白芷。",
+                    is_dialogue=True,
+                    speaker=["李四"],
+                    identity_clue="张三自称名为白芷",
+                ),
+            ],
+            model_dump=MagicMock(return_value={}),
+        )
+        mock_annotation_client._call_annotation_api = AsyncMock(return_value=(mock_response, "{}"))
+
+        result = await compute_dialogue_lengths_with_llm(
+            mock_annotation_client,
+            "张三说：“我叫白芷。”",
+            known_characters=["张三", "李四"],
+            return_identity_clues=True,
+        )
+
+        self.assertEqual(result.canonical_attribution, {1: ["张三"]})
+        self.assertEqual(result.dialogue_identity_clues, {1: "张三自称名为白芷"})
+
+    @patch("src.models.local.annotation.phase3.settings")
     async def test_thinking_enabled_false_is_passed_to_api(self, mock_settings: MagicMock) -> None:
         """验证 thinking_enabled=False 时 enable_thinking=False 被传递给 API 调用。"""
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"
@@ -238,6 +292,8 @@ class TestComputeDialogueLengthsWithLLM(unittest.IsolatedAsyncioTestCase):
         mock_settings.prompts.phase3.system = "system"
         mock_settings.prompts.phase3.user_template = "{chunk_text}\n{dialogue_list}\n{known_characters}"
         mock_settings.thinking.phase3_candidates_per_batch = 8
+        mock_settings.thinking.phase3_batch_parallelism = 1
+        mock_settings.runtime.annotation.phase3_max_retries = 3
 
         mock_annotation_client = MagicMock()
         mock_annotation_client._config.model = "test-model"
@@ -306,6 +362,20 @@ class TestPostProcessValidationFix(unittest.TestCase):
         result = self._call_validation(records, known_characters=["侯飞白"], alias_map={"猴子": "侯飞白"})
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].speaker, ["侯飞白"])
+
+    def test_alias_normalization_deduplicates_same_canonical_speaker(self) -> None:
+        """别名归一化后若落成同一 canonical 名称，不应重复累计长度或保留重复 speaker。"""
+        records = [
+            DialogueRecord(index=1, content="你好", is_dialogue=True, speaker=["猴子", "侯飞白"]),
+        ]
+        result = self._call_validation(records, known_characters=["侯飞白"], alias_map={"猴子": "侯飞白"})
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].speaker, ["侯飞白"])
+
+        projected = project_dialogue_lengths(result, [QuoteCandidate(index=1, content="你好")])
+        self.assertEqual(projected.speaker_lengths, {"侯飞白": len("你好")})
+        self.assertEqual(projected.canonical_attribution, {1: ["侯飞白"]})
 
     def test_no_known_characters_passes_through(self) -> None:
         """无 known_characters 时正常通过"""
