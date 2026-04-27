@@ -144,6 +144,39 @@ function createTimelineResponse(): TimelineResponse {
   };
 }
 
+// 2026-04-27，任务：fix-timeline-selected-node-relation-event-conflict。
+// 构造两个 relation 节点，验证 selected_node_id 与 relation_event_id 冲突时页面不会把错误事件带回图谱。
+function createConflictingTimelineResponse(): TimelineResponse {
+  return {
+    ...createTimelineResponse(),
+    nodes: [
+      ...(createTimelineResponse().nodes ?? []),
+      {
+        node_id: "relation:32",
+        anchor_chunk_id: 9,
+        progress: 0.75,
+        importance_score: 7,
+        level: 1,
+        summary: "顾承渊与陆沉反目",
+        characters: ["顾承渊", "陆沉"],
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtype: "断裂",
+        score_breakdown: { change_type_weight: 2.1, pair_importance: 1.3 },
+        relation_events: [
+          {
+            relation_event_id: 32,
+            from_char: "顾承渊",
+            to_char: "陆沉",
+            relation_type: "对手",
+            change_type: "断裂",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 // 2026-04-23，任务：复杂度与耦合审查 P2。构造真实 NovelHeader 查询所需小说对象。
 function createNovel(): Novel {
   return {
@@ -180,6 +213,19 @@ describe("TimelinePage integration", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&relation_event_id=31");
+  });
+
+  it("does not carry a conflicting relation_event_id back to graph when selected_node_id points elsewhere", async () => {
+    currentTimelineSearchParams = "task_id=task-integration&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=32";
+    getTimelineMock.mockResolvedValue(createConflictingTimelineResponse());
+    const user = userEvent.setup();
+
+    renderTimelinePage();
+
+    expect((await screen.findAllByText("顾承渊与苏映雪结盟")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
+
     expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&relation_event_id=31");
   });
 });

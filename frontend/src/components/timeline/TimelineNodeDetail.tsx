@@ -36,6 +36,36 @@ export interface TimelineNodeDetailProps {
   className?: string;
 }
 
+/**
+ * 修改时间: 2026-04-27
+ * 修改者: Codex
+ * 任务: fix-timeline-selected-node-relation-event-conflict
+ * 修改内容:
+ *   - 外部传入的 selectedRelationEventId 只有在确实属于当前节点时才可信
+ *   - 若外部值不属于当前节点，则回退到节点自身唯一 relation event，避免生成不可能成立的 graph deep-link
+ */
+function resolveNodeGraphRelationEventId(
+  node: TimelineNodeType | null,
+  selectedRelationEventId: number | null,
+): number | null {
+  if (node?.node_type !== "relation") {
+    return null;
+  }
+
+  const nodeRelationEventIds = Array.from(
+    new Set(
+      (node.relation_events ?? [])
+        .map((relationEvent) => relationEvent.relation_event_id)
+        .filter((relationEventId): relationEventId is number => relationEventId != null),
+    ),
+  );
+
+  if (selectedRelationEventId != null && nodeRelationEventIds.includes(selectedRelationEventId)) {
+    return selectedRelationEventId;
+  }
+  return nodeRelationEventIds.length === 1 ? nodeRelationEventIds[0] : null;
+}
+
 export function TimelineNodeDetail({
   node,
   novelId,
@@ -57,18 +87,8 @@ export function TimelineNodeDetail({
   );
 
   const graphRelationEventId = useMemo(() => {
-    if (selectedRelationEventId != null) {
-      return selectedRelationEventId;
-    }
-    const uniqueRelationEventIds = Array.from(
-      new Set(
-        (node?.relation_events ?? [])
-          .map((relationEvent) => relationEvent.relation_event_id)
-          .filter((relationEventId): relationEventId is number => relationEventId != null),
-      ),
-    );
-    return uniqueRelationEventIds.length === 1 ? uniqueRelationEventIds[0] : null;
-  }, [node?.relation_events, selectedRelationEventId]);
+    return resolveNodeGraphRelationEventId(node, selectedRelationEventId);
+  }, [node, selectedRelationEventId]);
 
   const shouldSelectGraphEvent = node?.node_type === "relation" && graphRelationEventId != null;
 
