@@ -103,7 +103,7 @@ function createTimelineResponse(): TimelineResponse {
       novel_id: "novel-1",
       novel_name: "Timeline Integration Novel",
       total_chunks: 12,
-      timeline_contract_version: 2,
+      timeline_contract_version: 3,
     },
     phases: [
       { name: "引入期", start: 1, end: 3, ratio: 0.25 },
@@ -111,7 +111,27 @@ function createTimelineResponse(): TimelineResponse {
       { name: "高潮期", start: 7, end: 9, ratio: 0.25 },
       { name: "收束期", start: 10, end: 12, ratio: 0.25 },
     ],
-    nodes: [
+    composite_nodes: [
+      {
+        node_id: "composite:relation:8:0",
+        anchor_chunk_id: 8,
+        start_chunk_id: 8,
+        end_chunk_id: 8,
+        progress: 0.66,
+        start_progress: 0.66,
+        end_progress: 0.66,
+        importance_score: 9,
+        level: 1,
+        summary: "顾承渊与苏映雪结盟",
+        characters: ["顾承渊", "苏映雪"],
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtypes: ["新建"],
+        representative_node_id: "relation:31",
+        child_node_ids: ["relation:31"],
+      },
+    ],
+    atomic_nodes: [
       {
         node_id: "relation:31",
         anchor_chunk_id: 8,
@@ -149,8 +169,29 @@ function createTimelineResponse(): TimelineResponse {
 function createConflictingTimelineResponse(): TimelineResponse {
   return {
     ...createTimelineResponse(),
-    nodes: [
-      ...(createTimelineResponse().nodes ?? []),
+    composite_nodes: [
+      ...(createTimelineResponse().composite_nodes ?? []),
+      {
+        node_id: "composite:relation:9:0",
+        anchor_chunk_id: 9,
+        start_chunk_id: 9,
+        end_chunk_id: 9,
+        progress: 0.75,
+        start_progress: 0.75,
+        end_progress: 0.75,
+        importance_score: 7,
+        level: 1,
+        summary: "顾承渊与陆沉反目",
+        characters: ["顾承渊", "陆沉"],
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtypes: ["断裂"],
+        representative_node_id: "relation:32",
+        child_node_ids: ["relation:32"],
+      },
+    ],
+    atomic_nodes: [
+      ...(createTimelineResponse().atomic_nodes ?? []),
       {
         node_id: "relation:32",
         anchor_chunk_id: 9,
@@ -208,7 +249,7 @@ describe("TimelinePage integration", () => {
     await user.click(screen.getByRole("button", { name: "重要" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=31",
+      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&view=composite&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=31",
       { replace: true }
     );
 

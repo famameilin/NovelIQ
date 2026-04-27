@@ -1,9 +1,11 @@
-import type { TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
 
 import { getCurveNodeYPx, getNormalizedProgress, getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
+type TimelineLayoutInputNode = TimelineNodeType | TimelineCompositeNode;
+
 export interface TimelineLayoutNode {
-  node: TimelineNodeType;
+  node: TimelineLayoutInputNode;
   lane: number;
   labelWidth: number;
 }
@@ -35,7 +37,7 @@ export function estimateLabelWidth(summaryText: string): number {
   return Math.max(120, Math.min(188, estimated));
 }
 
-export function createTimelineLayoutNodes(nodes: TimelineNodeType[], canvasWidth: number): TimelineLayoutNode[] {
+export function createTimelineLayoutNodes(nodes: TimelineLayoutInputNode[], canvasWidth: number): TimelineLayoutNode[] {
   const laneLastEndMap = new Map<number, number>(LANE_ORDER.map((lane) => [lane, -1]));
 
   return nodes.map((node, index) => {

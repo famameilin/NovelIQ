@@ -1,7 +1,7 @@
 """
 叙事时间轴 API 响应模型。
 
-基于时间轴合同重构后的 v2 节点结构定义时间轴数据结构。
+基于时间轴合同重构后的 v3 结构定义时间轴数据结构。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ class TimelineMeta(BaseModel):
     novel_id: str = Field(description="小说 ID")
     novel_name: str = Field(description="小说名称")
     total_chunks: int = Field(ge=0, description="总 chunk 数量")
-    timeline_contract_version: int = Field(default=2, description="时间轴合同版本")
+    timeline_contract_version: int = Field(default=3, description="时间轴合同版本")
 
 
 class TimelinePhase(BaseModel):
@@ -77,10 +77,32 @@ class TimelineNode(BaseModel):
     lifecycle_events: list[LifecycleTimelineEvent] | None = Field(default=None, description="生命周期事件")
 
 
+class TimelineCompositeNode(BaseModel):
+    """时间轴复合节点。"""
+
+    node_id: str = Field(description="复合节点唯一标识")
+    anchor_chunk_id: int = Field(description="复合节点主锚点 chunk ID")
+    start_chunk_id: int = Field(description="复合节点起始 chunk ID")
+    end_chunk_id: int = Field(description="复合节点结束 chunk ID")
+    progress: float = Field(ge=0, le=1, description="代表节点叙事进度 (0-1)")
+    start_progress: float = Field(ge=0, le=1, description="起始进度 (0-1)")
+    end_progress: float = Field(ge=0, le=1, description="结束进度 (0-1)")
+    importance_score: float = Field(ge=0, description="重要性分数")
+    level: Literal[1, 2, 3] = Field(description="重要性级别: 1=重要, 2=较重要, 3=不重要")
+    summary: str = Field(description="复合节点摘要")
+    characters: list[str] = Field(default_factory=list, description="涉及角色")
+    phase_name: Literal["引入期", "发展期", "高潮期", "收束期"] = Field(description="所属叙事阶段")
+    node_type: Literal["plot", "relation", "lifecycle"] = Field(description="节点大类")
+    node_subtypes: list[str] = Field(default_factory=list, description="复合节点包含的子类型")
+    representative_node_id: str = Field(description="代表原子节点 ID")
+    child_node_ids: list[str] = Field(default_factory=list, description="包含的原子节点 ID 列表")
+
+
 class TimelineResponse(BaseModel):
     """时间轴 API 响应。"""
 
     meta: TimelineMeta = Field(description="时间轴元信息")
     phases: list[TimelinePhase] = Field(description="四阶段划分")
-    nodes: list[TimelineNode] = Field(description="时间轴节点列表")
+    composite_nodes: list[TimelineCompositeNode] = Field(description="默认概览使用的复合节点列表")
+    atomic_nodes: list[TimelineNode] = Field(description="全量原子节点列表")
     tension_curve: list[float] | None = Field(default=None, description="张力曲线数据")

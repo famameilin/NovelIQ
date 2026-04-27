@@ -406,10 +406,30 @@ export interface TimelineNode {
   lifecycle_events?: LifecycleTimelineEvent[] | null;
 }
 
+export interface TimelineCompositeNode {
+  node_id: string;
+  anchor_chunk_id: number;
+  start_chunk_id: number;
+  end_chunk_id: number;
+  progress: number;
+  start_progress: number;
+  end_progress: number;
+  importance_score: number;
+  level: 1 | 2 | 3;
+  summary: string;
+  characters: string[];
+  phase_name: "引入期" | "发展期" | "高潮期" | "收束期";
+  node_type: "plot" | "relation" | "lifecycle";
+  node_subtypes: ("plot" | "entry" | "exit" | "新建" | "强化" | "弱化" | "断裂")[];
+  representative_node_id: string;
+  child_node_ids: string[];
+}
+
 export interface TimelineResponse {
   meta: TimelineMeta;
   phases: TimelinePhase[];
-  nodes: TimelineNode[];
+  composite_nodes: TimelineCompositeNode[];
+  atomic_nodes: TimelineNode[];
   tension_curve?: number[];
 }
 

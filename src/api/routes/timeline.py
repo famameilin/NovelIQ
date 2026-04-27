@@ -13,6 +13,13 @@
 - 改为直接消费新的 build_timeline_plan() 结果
 - 删除 route-owned relation enrichment，统一使用 shared timeline contract
 - 时间轴节点响应切换到 node_id / anchor_chunk_id 新结构
+
+修改时间: 2026-04-28
+修改者: Codex
+任务: 时间轴合同重构第二轮
+修改内容:
+- API 响应升级为 `composite_nodes + atomic_nodes` 双层节点结构
+- route 不再按 `max_level` 裁剪节点，默认展示密度交给前端本地筛选
 """
 
 from __future__ import annotations
@@ -26,12 +33,13 @@ from sqlalchemy.orm import Session
 from src.api.dependencies import get_db_session, get_novel_service
 from src.api.exceptions import AnalysisNotCompleteError, NovelNotFoundError
 from src.api.models.responses import ErrorResponse
-from src.api.models.timeline import TimelineMeta, TimelineNode, TimelinePhase, TimelineResponse
+from src.api.models.timeline import TimelineCompositeNode, TimelineMeta, TimelineNode, TimelinePhase, TimelineResponse
 from src.api.services.novel_service import NovelService
 from src.knowledge.authority import KnowledgeGraphAuthorityService
 from src.metrics.timeline_metrics import (
     TimelineDataUnavailableError,
     build_timeline_plan,
+    serialize_timeline_composite_node,
     serialize_timeline_node,
     serialize_timeline_phases,
 )
@@ -74,7 +82,6 @@ async def get_timeline(
     session: Annotated[Session, Depends(get_db_session)],
     service: Annotated[NovelService, Depends(get_novel_service)],
     include_curve: Annotated[bool, Query(description="是否包含张力曲线数据")] = False,
-    max_level: Annotated[int, Query(ge=1, le=3, description="显示重要性级别 ≤ 此值的节点")] = 3,
 ) -> TimelineResponse:
     """
     获取叙事时间轴数据。
@@ -121,25 +128,30 @@ async def get_timeline(
                 novel_id=novel_id,
                 novel_name=novel_name,
                 total_chunks=0,
-                timeline_contract_version=2,
+                timeline_contract_version=3,
             ),
             phases=[],
-            nodes=[],
+            composite_nodes=[],
+            atomic_nodes=[],
             tension_curve=None,
         )
 
-    api_nodes = [
+    api_composite_nodes = [
+        TimelineCompositeNode.model_validate(serialize_timeline_composite_node(node))
+        for node in timeline_plan.composite_nodes
+    ]
+    api_atomic_nodes = [
         TimelineNode.model_validate(serialize_timeline_node(node))
-        for node in timeline_plan.nodes
-        if node.level <= max_level
+        for node in timeline_plan.atomic_nodes
     ]
     api_phases = [TimelinePhase.model_validate(item) for item in serialize_timeline_phases(timeline_plan.phases)]
 
     logger.info(
-        "Timeline generated for novel {} task {}: {} nodes, {} phases",
+        "Timeline generated for novel {} task {}: {} composite nodes, {} atomic nodes, {} phases",
         novel_id,
         task_id,
-        len(api_nodes),
+        len(api_composite_nodes),
+        len(api_atomic_nodes),
         len(api_phases),
     )
 
@@ -148,9 +160,10 @@ async def get_timeline(
             novel_id=novel_id,
             novel_name=novel_name,
             total_chunks=timeline_plan.total_chunks,
-            timeline_contract_version=2,
+            timeline_contract_version=3,
         ),
         phases=api_phases,
-        nodes=api_nodes,
+        composite_nodes=api_composite_nodes,
+        atomic_nodes=api_atomic_nodes,
         tension_curve=timeline_plan.tension_curve if include_curve else None,
     )

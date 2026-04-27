@@ -17,7 +17,7 @@ from tests.support.timeline_contract_helpers import (
 )
 
 
-def test_get_timeline_returns_v2_contract_nodes(api_client: TestClient, db_session) -> None:
+def test_get_timeline_returns_v3_atomic_and_composite_nodes(api_client: TestClient, db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
 
     response = api_client.get(
@@ -30,14 +30,20 @@ def test_get_timeline_returns_v2_contract_nodes(api_client: TestClient, db_sessi
 
     assert payload["meta"]["novel_id"] == scenario.novel_id
     assert payload["meta"]["total_chunks"] == 5
-    assert payload["meta"]["timeline_contract_version"] == 2
+    assert payload["meta"]["timeline_contract_version"] == 3
     assert len(payload["phases"]) == 4
     assert payload["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
-    assert [node["progress"] for node in payload["nodes"]] == sorted(node["progress"] for node in payload["nodes"])
+    assert [node["progress"] for node in payload["atomic_nodes"]] == sorted(
+        node["progress"] for node in payload["atomic_nodes"]
+    )
+    assert [node["start_progress"] for node in payload["composite_nodes"]] == sorted(
+        node["start_progress"] for node in payload["composite_nodes"]
+    )
 
-    anchor_chunk_zero_nodes = nodes_for_anchor_chunk(payload["nodes"], 0)
-    anchor_chunk_two_nodes = nodes_for_anchor_chunk(payload["nodes"], 2)
-    anchor_chunk_four_nodes = nodes_for_anchor_chunk(payload["nodes"], 4)
+    anchor_chunk_zero_nodes = nodes_for_anchor_chunk(payload["atomic_nodes"], 0)
+    anchor_chunk_two_nodes = nodes_for_anchor_chunk(payload["atomic_nodes"], 2)
+    anchor_chunk_four_nodes = nodes_for_anchor_chunk(payload["atomic_nodes"], 4)
+    composite_anchor_chunk_two_nodes = nodes_for_anchor_chunk(payload["composite_nodes"], 2)
 
     assert any(node["node_type"] == "plot" for node in anchor_chunk_zero_nodes)
     assert any(
@@ -50,9 +56,17 @@ def test_get_timeline_returns_v2_contract_nodes(api_client: TestClient, db_sessi
     }
     assert scenario.organization_name not in relation_event_names(relation_node["relation_events"])
     assert any(node["node_type"] == "plot" for node in anchor_chunk_four_nodes)
+    assert any(node["node_type"] == "relation" for node in composite_anchor_chunk_two_nodes)
+    assert any(
+        "relation:" in child_id
+        for node in composite_anchor_chunk_two_nodes
+        for child_id in node["child_node_ids"]
+    )
 
-
-def test_get_timeline_max_level_filter_only_changes_node_subset(api_client: TestClient, db_session) -> None:
+def test_get_timeline_ignores_legacy_max_level_query_and_returns_same_contract(
+    api_client: TestClient,
+    db_session,
+) -> None:
     scenario = create_timeline_contract_scenario(db_session)
 
     full_response = api_client.get(
@@ -72,11 +86,9 @@ def test_get_timeline_max_level_filter_only_changes_node_subset(api_client: Test
 
     assert full_payload["tension_curve"] is None
     assert filtered_payload["tension_curve"] is None
-    assert len(filtered_payload["nodes"]) < len(full_payload["nodes"])
-    assert all(node["level"] <= 2 for node in filtered_payload["nodes"])
-    assert {node["node_id"] for node in filtered_payload["nodes"]}.issubset(
-        {node["node_id"] for node in full_payload["nodes"]}
-    )
+    assert filtered_payload["meta"]["timeline_contract_version"] == 3
+    assert filtered_payload["atomic_nodes"] == full_payload["atomic_nodes"]
+    assert filtered_payload["composite_nodes"] == full_payload["composite_nodes"]
 
 
 def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_shapes(
@@ -92,10 +104,10 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
 
     assert response.status_code == 200
     payload = response.json()
-    relation_node = next(node for node in payload["nodes"] if node["node_type"] == "relation")
+    relation_node = next(node for node in payload["atomic_nodes"] if node["node_type"] == "relation")
     relation_event = relation_node["relation_events"][0]
 
-    assert set(payload) == {"meta", "phases", "nodes", "tension_curve"}
+    assert set(payload) == {"meta", "phases", "composite_nodes", "atomic_nodes", "tension_curve"}
     assert "character_entities" not in payload
     assert "entity_lifecycles" not in payload
     assert "relation_events" not in payload
@@ -131,6 +143,26 @@ def test_get_timeline_keeps_public_contract_decoupled_from_authority_internal_sh
     assert relation_event["relation_type"] == "盟友"
     assert relation_event["change_type"] == "新建"
     assert relation_event["evidence"] == "二人正式结盟"
+
+    composite_relation_node = next(node for node in payload["composite_nodes"] if node["node_type"] == "relation")
+    assert set(composite_relation_node) == {
+        "node_id",
+        "anchor_chunk_id",
+        "start_chunk_id",
+        "end_chunk_id",
+        "progress",
+        "start_progress",
+        "end_progress",
+        "importance_score",
+        "level",
+        "summary",
+        "characters",
+        "phase_name",
+        "node_type",
+        "node_subtypes",
+        "representative_node_id",
+        "child_node_ids",
+    }
 
 
 def test_get_timeline_does_not_downgrade_authority_contract_failures_to_empty_payload(

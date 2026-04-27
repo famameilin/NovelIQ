@@ -11,8 +11,16 @@
 任务: 时间轴合同重构
 修改内容:
 - 重写时间轴引擎，改为 TimelineAtom -> TimelineNodePlan 的新模型
-- 统一 route / export 共用的预算与序列化逻辑
+- 第一轮统一 route / export 共用的预算与序列化逻辑
 - 去除 “每个 chunk 只有一个时间轴节点” 与 “无变化关系也计分” 的旧语义
+
+修改时间: 2026-04-28
+修改者: Codex
+任务: 时间轴合同重构第二轮
+修改内容:
+- 删除识别层预算与固定选点主路径，改为“全量原子节点 + 复合节点概览”
+- 新增 TimelineCompositeNodeDTO 与复合节点分组逻辑
+- route / export 共享入口升级为 v3 contract，前端展示密度改由本地 level 筛选控制
 """
 
 from __future__ import annotations
@@ -119,6 +127,29 @@ class TimelineNodeDTO:
     plot_flags: PlotFlagsDTO | None = None
     relation_events: list[RelationEventDTO] | None = None
     lifecycle_events: list[LifecycleEventDTO] | None = None
+    composite_group_hint: tuple[str, ...] | None = None
+
+
+@dataclass(slots=True)
+class TimelineCompositeNodeDTO:
+    """时间轴复合节点 DTO。"""
+
+    node_id: str
+    anchor_chunk_id: int
+    start_chunk_id: int
+    end_chunk_id: int
+    progress: float
+    start_progress: float
+    end_progress: float
+    importance_score: float
+    level: ImportanceLevel
+    summary: str
+    characters: list[str]
+    phase_name: TimelinePhaseName
+    node_type: TimelineNodeType
+    node_subtypes: list[TimelineNodeSubtype]
+    representative_node_id: str
+    child_node_ids: list[str]
 
 
 @dataclass(slots=True)
@@ -165,19 +196,11 @@ class TimelineSourceData:
 
 
 @dataclass(slots=True)
-class TimelineBudget:
-    """时间轴节点预算。"""
-
-    min_nodes: int
-    target_nodes: int
-    max_nodes: int
-
-
-@dataclass(slots=True)
 class TimelinePlanBuildResult:
     """时间轴最终构建结果。"""
 
-    nodes: list[TimelineNodeDTO]
+    atomic_nodes: list[TimelineNodeDTO]
+    composite_nodes: list[TimelineCompositeNodeDTO]
     total_chunks: int
     phases: list[TimelinePhaseDTO]
     tension_curve: list[float]
@@ -244,19 +267,6 @@ def calculate_tension_percentile(
     count_le = sum(1 for tension in all_tensions if tension <= tension_score)
     percentile = int((count_le / len(all_tensions)) * 100)
     return min(percentile, 100)
-
-
-# 2026-04-27，任务：时间轴合同重构
-# 新建原因：时间轴节点数量不再固定 10/20，而是按小说篇幅自适应预算，
-# 让 30 chunk 与 250 chunk 的时间轴不再共享同一硬上限。
-def compute_timeline_node_budget(total_chunks: int) -> TimelineBudget:
-    if total_chunks <= 40:
-        return TimelineBudget(min_nodes=8, target_nodes=12, max_nodes=16)
-    if total_chunks <= 120:
-        return TimelineBudget(min_nodes=10, target_nodes=16, max_nodes=24)
-    if total_chunks <= 240:
-        return TimelineBudget(min_nodes=12, target_nodes=24, max_nodes=32)
-    return TimelineBudget(min_nodes=14, target_nodes=30, max_nodes=40)
 
 
 def compute_four_phases(
@@ -797,6 +807,12 @@ def compose_timeline_nodes(
                     is_cliffhanger=atom.is_cliffhanger,
                     tension_percentile=atom.tension_percentile,
                 ),
+                composite_group_hint=(
+                    atom.event_type or "",
+                    atom.emotional_valence or "",
+                    "pivot" if atom.is_pivot else "no-pivot",
+                    "cliffhanger" if atom.is_cliffhanger else "no-cliffhanger",
+                ),
             )
         )
 
@@ -867,13 +883,6 @@ def _node_sort_key(node: TimelineNodeDTO) -> tuple[float, int, str]:
     return (node.progress, node.anchor_chunk_id, f"{subtype_rank.get(node.node_subtype, 9)}:{node.node_id}")
 
 
-def _select_best_plot_node(nodes: list[TimelineNodeDTO], anchor_chunk_id: int) -> TimelineNodeDTO | None:
-    plot_nodes = [node for node in nodes if node.node_type == "plot" and node.anchor_chunk_id == anchor_chunk_id]
-    if not plot_nodes:
-        return None
-    return max(plot_nodes, key=lambda node: node.importance_score)
-
-
 def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str, str] | None:
     """
     2026-04-27，任务：fix-timeline-relation-dedup-signature
@@ -896,146 +905,211 @@ def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str,
     )
 
 
-def _lifecycle_signature(node: TimelineNodeDTO) -> tuple[int, str] | None:
-    if not node.lifecycle_events:
+def _relation_composite_signature(node: TimelineNodeDTO) -> tuple[str, str, str, str] | None:
+    """
+    2026-04-28，任务：时间轴合同重构第二轮
+    新建原因：复合 relation 节点需要按“角色对 + 关系类型 + 方向”分组，
+    但不能把 `change_type` 带进主分组键，否则 `新建 -> 强化` 这类连续事件会被硬拆散。
+    """
+    if not node.relation_events:
         return None
-    event = node.lifecycle_events[0]
-    return (event.entity_id, event.lifecycle_type)
+    event = node.relation_events[0]
+    if event.directionality == "symmetric":
+        left_name, right_name = tuple(sorted((event.from_char, event.to_char)))
+    else:
+        left_name, right_name = event.from_char, event.to_char
+    return (left_name, right_name, event.relation_type, event.directionality or "unknown")
 
 
-def _has_selection_conflict(candidate: TimelineNodeDTO, selected: list[TimelineNodeDTO]) -> bool:
-    for existing in selected:
-        if (
-            candidate.node_type == "plot"
-            and existing.node_type == "plot"
-            and candidate.node_subtype == existing.node_subtype
-            and abs(candidate.anchor_chunk_id - existing.anchor_chunk_id) <= 2
-        ):
-            return True
-
-        if candidate.node_type == "relation" and existing.node_type == "relation":
-            candidate_signature = _relation_pair_signature(candidate)
-            existing_signature = _relation_pair_signature(existing)
-            if (
-                candidate_signature is not None
-                and existing_signature is not None
-                and candidate_signature == existing_signature
-                and abs(candidate.anchor_chunk_id - existing.anchor_chunk_id) <= 3
-            ):
-                return True
-
-        if candidate.node_type == "lifecycle" and existing.node_type == "lifecycle":
-            candidate_lifecycle_signature = _lifecycle_signature(candidate)
-            existing_lifecycle_signature = _lifecycle_signature(existing)
-            if (
-                candidate_lifecycle_signature is not None
-                and existing_lifecycle_signature == candidate_lifecycle_signature
-            ):
-                return True
-
-    return False
+def _unique_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
-def _maybe_add_node(selected: list[TimelineNodeDTO], candidate: TimelineNodeDTO | None, max_nodes: int) -> bool:
-    if candidate is None:
+def _character_overlap_ratio(left: list[str], right: list[str]) -> float:
+    left_set = set(left)
+    right_set = set(right)
+    if not left_set and not right_set:
+        return 1.0
+    union = left_set | right_set
+    if not union:
+        return 0.0
+    return len(left_set & right_set) / len(union)
+
+
+def _is_opposite_relation_change(left_change: str, right_change: str) -> bool:
+    opposite_pairs = {
+        ("新建", "断裂"),
+        ("断裂", "新建"),
+        ("强化", "弱化"),
+        ("弱化", "强化"),
+    }
+    return (left_change, right_change) in opposite_pairs
+
+
+def _can_extend_relation_composite(group_nodes: list[TimelineNodeDTO], candidate: TimelineNodeDTO) -> bool:
+    if not group_nodes or candidate.node_type != "relation":
         return False
-    if len(selected) >= max_nodes:
+    last_node = group_nodes[-1]
+    if candidate.phase_name != group_nodes[0].phase_name:
         return False
-    if any(existing.node_id == candidate.node_id for existing in selected):
+    if candidate.anchor_chunk_id > last_node.anchor_chunk_id + 1:
         return False
-    if _has_selection_conflict(candidate, selected):
+    group_signature = _relation_composite_signature(group_nodes[0])
+    candidate_signature = _relation_composite_signature(candidate)
+    if group_signature is None or group_signature != candidate_signature:
         return False
-    selected.append(candidate)
+    last_event = last_node.relation_events[0] if last_node.relation_events else None
+    candidate_event = candidate.relation_events[0] if candidate.relation_events else None
+    if last_event is None or candidate_event is None:
+        return False
+    if _is_opposite_relation_change(last_event.change_type, candidate_event.change_type):
+        return False
     return True
 
 
-def _pick_phase_coverage_nodes(
-    nodes: list[TimelineNodeDTO],
-    phases: list[TimelinePhaseDTO],
-    selected: list[TimelineNodeDTO],
-    max_nodes: int,
-) -> None:
-    type_priority = {"plot": 0, "relation": 1, "lifecycle": 2}
-    for phase in phases:
-        phase_nodes = [node for node in nodes if node.phase_name == phase.name]
-        phase_nodes.sort(
-            key=lambda node: (
-                type_priority.get(node.node_type, 9),
-                -node.importance_score,
-                node.anchor_chunk_id,
-            )
-        )
-        for node in phase_nodes:
-            if _maybe_add_node(selected, node, max_nodes):
-                break
+def _can_extend_plot_composite(group_nodes: list[TimelineNodeDTO], candidate: TimelineNodeDTO) -> bool:
+    if not group_nodes or candidate.node_type != "plot":
+        return False
+    last_node = group_nodes[-1]
+    if candidate.phase_name != group_nodes[0].phase_name:
+        return False
+    if candidate.anchor_chunk_id > last_node.anchor_chunk_id + 1:
+        return False
+    if candidate.composite_group_hint != group_nodes[0].composite_group_hint:
+        return False
+    if abs(candidate.importance_score - last_node.importance_score) > 1.5:
+        return False
+    return _character_overlap_ratio(last_node.characters, candidate.characters) >= 0.5
 
 
-def _type_quota_map(target_nodes: int) -> dict[TimelineNodeType, int]:
-    plot_quota = max(3, round(target_nodes * 0.4))
-    relation_quota = max(2, round(target_nodes * 0.35))
-    lifecycle_quota = max(2, target_nodes - plot_quota - relation_quota)
-    return {
-        "plot": plot_quota,
-        "relation": relation_quota,
-        "lifecycle": lifecycle_quota,
-    }
+def _select_representative_atomic_node(group_nodes: list[TimelineNodeDTO]) -> TimelineNodeDTO:
+    return max(
+        group_nodes,
+        key=lambda node: (
+            node.importance_score,
+            -node.anchor_chunk_id,
+            -node.progress,
+        ),
+    )
 
 
-# 2026-04-27，任务：时间轴合同重构
-# 新建原因：新的选择器需要同时满足 budget、phase 覆盖、类型配额与近距去重；
-# 它不再围绕“每个 chunk 选一个 candidate”，而是直接对规划后的节点集合做筛选。
-def select_timeline_nodes(
-    nodes: list[TimelineNodeDTO],
-    chunk_ids: list[int],
-    tension_scores: list[float],
-    phases: list[TimelinePhaseDTO],
-    budget: TimelineBudget,
-) -> list[TimelineNodeDTO]:
-    if not nodes or not chunk_ids:
+def _build_composite_node(
+    group_nodes: list[TimelineNodeDTO],
+    ordinal: int,
+) -> TimelineCompositeNodeDTO:
+    representative_node = _select_representative_atomic_node(group_nodes)
+    start_chunk_id = min(node.anchor_chunk_id for node in group_nodes)
+    end_chunk_id = max(node.anchor_chunk_id for node in group_nodes)
+    start_progress = min(node.progress for node in group_nodes)
+    end_progress = max(node.progress for node in group_nodes)
+    characters = _unique_preserving_order(
+        [character for node in group_nodes for character in node.characters]
+    )
+    node_subtypes = _unique_preserving_order([node.node_subtype for node in group_nodes])
+    composite_node_id = f"composite:{representative_node.node_type}:{representative_node.anchor_chunk_id}:{ordinal}"
+    return TimelineCompositeNodeDTO(
+        node_id=composite_node_id,
+        anchor_chunk_id=representative_node.anchor_chunk_id,
+        start_chunk_id=start_chunk_id,
+        end_chunk_id=end_chunk_id,
+        progress=representative_node.progress,
+        start_progress=start_progress,
+        end_progress=end_progress,
+        importance_score=max(node.importance_score for node in group_nodes),
+        level=min(node.level for node in group_nodes),
+        summary=representative_node.summary,
+        characters=characters,
+        phase_name=representative_node.phase_name,
+        node_type=representative_node.node_type,
+        node_subtypes=[cast(TimelineNodeSubtype, subtype) for subtype in node_subtypes],
+        representative_node_id=representative_node.node_id,
+        child_node_ids=[node.node_id for node in group_nodes],
+    )
+
+
+def _build_relation_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[TimelineCompositeNodeDTO]:
+    relation_nodes = sorted((node for node in nodes if node.node_type == "relation"), key=_node_sort_key)
+    if not relation_nodes:
         return []
 
-    selected: list[TimelineNodeDTO] = []
-    peak_idx = find_global_peak(tension_scores) if tension_scores else 0
-    start_chunk_id = chunk_ids[0]
-    end_chunk_id = chunk_ids[-1]
-    peak_chunk_id = chunk_ids[peak_idx]
-
-    _maybe_add_node(selected, _select_best_plot_node(nodes, start_chunk_id), budget.max_nodes)
-    _maybe_add_node(selected, _select_best_plot_node(nodes, end_chunk_id), budget.max_nodes)
-    _maybe_add_node(selected, _select_best_plot_node(nodes, peak_chunk_id), budget.max_nodes)
-
-    _pick_phase_coverage_nodes(nodes, phases, selected, budget.max_nodes)
-
-    quota_map = _type_quota_map(budget.target_nodes)
-    sorted_nodes = sorted(nodes, key=lambda node: (-node.importance_score, node.anchor_chunk_id, node.node_id))
-    type_counts = {
-        "plot": sum(1 for node in selected if node.node_type == "plot"),
-        "relation": sum(1 for node in selected if node.node_type == "relation"),
-        "lifecycle": sum(1 for node in selected if node.node_type == "lifecycle"),
-    }
-    for node in sorted_nodes:
-        if len(selected) >= budget.target_nodes:
-            break
-        if type_counts[node.node_type] >= quota_map[node.node_type]:
+    grouped_nodes: list[list[TimelineNodeDTO]] = []
+    for node in relation_nodes:
+        if grouped_nodes and _can_extend_relation_composite(grouped_nodes[-1], node):
+            grouped_nodes[-1].append(node)
             continue
-        if _maybe_add_node(selected, node, budget.max_nodes):
-            type_counts[node.node_type] += 1
+        grouped_nodes.append([node])
 
-    for node in sorted_nodes:
-        if len(selected) >= budget.target_nodes:
-            break
-        _maybe_add_node(selected, node, budget.max_nodes)
+    ordinal_by_anchor: dict[int, int] = {}
+    composite_nodes: list[TimelineCompositeNodeDTO] = []
+    for group in grouped_nodes:
+        anchor_chunk_id = _select_representative_atomic_node(group).anchor_chunk_id
+        next_ordinal = ordinal_by_anchor.get(anchor_chunk_id, 0)
+        composite_nodes.append(_build_composite_node(group, next_ordinal))
+        ordinal_by_anchor[anchor_chunk_id] = next_ordinal + 1
+    return composite_nodes
 
-    if len(selected) < budget.min_nodes:
-        for node in sorted_nodes:
-            if len(selected) >= budget.min_nodes:
-                break
-            if any(existing.node_id == node.node_id for existing in selected):
-                continue
-            selected.append(node)
 
-    selected.sort(key=_node_sort_key)
-    return selected[: budget.max_nodes]
+def _build_plot_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[TimelineCompositeNodeDTO]:
+    plot_nodes = sorted((node for node in nodes if node.node_type == "plot"), key=_node_sort_key)
+    if not plot_nodes:
+        return []
+
+    grouped_nodes: list[list[TimelineNodeDTO]] = []
+    for node in plot_nodes:
+        if grouped_nodes and _can_extend_plot_composite(grouped_nodes[-1], node):
+            grouped_nodes[-1].append(node)
+            continue
+        grouped_nodes.append([node])
+
+    ordinal_by_anchor: dict[int, int] = {}
+    composite_nodes: list[TimelineCompositeNodeDTO] = []
+    for group in grouped_nodes:
+        anchor_chunk_id = _select_representative_atomic_node(group).anchor_chunk_id
+        next_ordinal = ordinal_by_anchor.get(anchor_chunk_id, 0)
+        composite_nodes.append(_build_composite_node(group, next_ordinal))
+        ordinal_by_anchor[anchor_chunk_id] = next_ordinal + 1
+    return composite_nodes
+
+
+def _build_lifecycle_composite_nodes(nodes: list[TimelineNodeDTO]) -> list[TimelineCompositeNodeDTO]:
+    lifecycle_nodes = sorted((node for node in nodes if node.node_type == "lifecycle"), key=_node_sort_key)
+    ordinal_by_anchor: dict[int, int] = {}
+    composite_nodes: list[TimelineCompositeNodeDTO] = []
+    for node in lifecycle_nodes:
+        next_ordinal = ordinal_by_anchor.get(node.anchor_chunk_id, 0)
+        composite_nodes.append(_build_composite_node([node], next_ordinal))
+        ordinal_by_anchor[node.anchor_chunk_id] = next_ordinal + 1
+    return composite_nodes
+
+
+def _composite_node_sort_key(node: TimelineCompositeNodeDTO) -> tuple[float, int, str]:
+    type_rank = {"plot": 0, "relation": 1, "lifecycle": 2}
+    return (node.start_progress, type_rank.get(node.node_type, 9), node.node_id)
+
+
+# 2026-04-28，任务：时间轴合同重构第二轮
+# 新建原因：第二轮把“识别真相”和“默认展示密度”拆开，
+# 复合节点只负责概览展示，不再承担压缩真相层节点数量的职责。
+def compose_composite_timeline_nodes(
+    atomic_nodes: list[TimelineNodeDTO],
+    phases: list[TimelinePhaseDTO],
+) -> list[TimelineCompositeNodeDTO]:
+    del phases  # 中文注释：当前复合分组直接使用 atomic node 自带的 phase_name，不额外重算阶段归属。
+
+    composite_nodes = [
+        *_build_plot_composite_nodes(atomic_nodes),
+        *_build_relation_composite_nodes(atomic_nodes),
+        *_build_lifecycle_composite_nodes(atomic_nodes),
+    ]
+    composite_nodes.sort(key=_composite_node_sort_key)
+    return composite_nodes
 
 
 def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
@@ -1087,6 +1161,27 @@ def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
     return payload
 
 
+def serialize_timeline_composite_node(node: TimelineCompositeNodeDTO) -> dict[str, Any]:
+    return {
+        "node_id": node.node_id,
+        "anchor_chunk_id": node.anchor_chunk_id,
+        "start_chunk_id": node.start_chunk_id,
+        "end_chunk_id": node.end_chunk_id,
+        "progress": round(node.progress, 4),
+        "start_progress": round(node.start_progress, 4),
+        "end_progress": round(node.end_progress, 4),
+        "importance_score": round(node.importance_score, 2),
+        "level": node.level,
+        "summary": node.summary,
+        "characters": node.characters,
+        "phase_name": node.phase_name,
+        "node_type": node.node_type,
+        "node_subtypes": node.node_subtypes,
+        "representative_node_id": node.representative_node_id,
+        "child_node_ids": node.child_node_ids,
+    }
+
+
 def serialize_timeline_phases(phases: list[TimelinePhaseDTO]) -> list[dict[str, Any]]:
     return [
         {
@@ -1100,8 +1195,12 @@ def serialize_timeline_phases(phases: list[TimelinePhaseDTO]) -> list[dict[str, 
 
 
 # 2026-04-27，任务：时间轴合同重构
-# 新建原因：新的 timeline 共享入口直接返回“已选节点 + 阶段 + 曲线”，
-# route 与 export 不再感知旧 candidate/select/convert 三段式内部实现。
+# 修改时间: 2026-04-28
+# 修改者: Codex
+# 任务: 时间轴合同重构第二轮
+# 修改内容:
+# - 共享入口从“已选节点列表”升级为“atomic_nodes + composite_nodes”
+# - route / export 不再感知预算器和固定上限，默认展示密度交由前端本地筛选
 def build_timeline_plan(
     run_id: str,
     chunk_repo: Any,
@@ -1113,17 +1212,11 @@ def build_timeline_plan(
     authority_data = _adapt_timeline_authority_view(timeline_view)
     phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chunk_ids))
     plot_atoms, relation_atoms, lifecycle_atoms = build_timeline_atoms(source_data, authority_data, phases)
-    all_nodes = compose_timeline_nodes(plot_atoms, relation_atoms, lifecycle_atoms)
-    budget = compute_timeline_node_budget(source_data.total_chunks)
-    selected_nodes = select_timeline_nodes(
-        nodes=all_nodes,
-        chunk_ids=source_data.chunk_ids,
-        tension_scores=source_data.tension_scores,
-        phases=phases,
-        budget=budget,
-    )
+    atomic_nodes = compose_timeline_nodes(plot_atoms, relation_atoms, lifecycle_atoms)
+    composite_nodes = compose_composite_timeline_nodes(atomic_nodes, phases)
     return TimelinePlanBuildResult(
-        nodes=selected_nodes,
+        atomic_nodes=sorted(atomic_nodes, key=_node_sort_key),
+        composite_nodes=composite_nodes,
         total_chunks=source_data.total_chunks,
         phases=phases,
         tension_curve=source_data.tension_scores,

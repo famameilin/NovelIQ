@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TimelineNodeDetail } from "@/components/timeline/TimelineNodeDetail";
-import type { TimelineNode } from "@/api/types";
+import type { TimelineCompositeNode, TimelineNode } from "@/api/types";
 
 const navigateMock = vi.fn();
 
@@ -122,13 +122,34 @@ function createMultiRelationNode(): TimelineNode {
   };
 }
 
+function createCompositeRelationNode(): TimelineCompositeNode {
+  return {
+    node_id: "composite:relation:12:0",
+    anchor_chunk_id: 12,
+    start_chunk_id: 12,
+    end_chunk_id: 13,
+    progress: 0.6,
+    start_progress: 0.6,
+    end_progress: 0.7,
+    importance_score: 8.5,
+    level: 1,
+    summary: "顾承渊与苏映雪关系连续恶化",
+    characters: ["顾承渊", "苏映雪"],
+    phase_name: "高潮期",
+    node_type: "relation",
+    node_subtypes: ["强化", "断裂"],
+    representative_node_id: "relation:9002",
+    child_node_ids: ["relation:9002", "relation:9101"],
+  };
+}
+
 describe("TimelineNodeDetail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("shows lifecycle guidance for lifecycle entry nodes", () => {
-    render(<TimelineNodeDetail node={createLifecycleNode()} novelId="novel-1" taskId="task-a" />);
+    render(<TimelineNodeDetail node={createLifecycleNode()} atomicNodes={[createLifecycleNode()]} novelId="novel-1" taskId="task-a" />);
 
     expect(screen.getByText("这里表达的是 authority lifecycle 的稳定事件，不是页面侧临时推断结果。")).toBeInTheDocument();
     expect(screen.getAllByText("苏映雪").length).toBeGreaterThanOrEqual(2);
@@ -137,7 +158,7 @@ describe("TimelineNodeDetail", () => {
   it("does not send a chunk-only graph selection for lifecycle nodes", async () => {
     const user = userEvent.setup();
 
-    render(<TimelineNodeDetail node={createLifecycleNode()} novelId="novel-1" taskId="task-a" />);
+    render(<TimelineNodeDetail node={createLifecycleNode()} atomicNodes={[createLifecycleNode()]} novelId="novel-1" taskId="task-a" />);
 
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
@@ -150,6 +171,7 @@ describe("TimelineNodeDetail", () => {
     render(
       <TimelineNodeDetail
         node={createRelationNode()}
+        atomicNodes={[createRelationNode()]}
         novelId="novel-1"
         taskId="task-a"
         selectedRelationEventId={9002}
@@ -174,6 +196,7 @@ describe("TimelineNodeDetail", () => {
     render(
       <TimelineNodeDetail
         node={createRelationNode()}
+        atomicNodes={[createRelationNode()]}
         novelId="novel-1"
         taskId="task-a"
         selectedRelationEventId={9101}
@@ -190,7 +213,7 @@ describe("TimelineNodeDetail", () => {
   it("does not send a graph auto-selection when the node contains multiple relation events", async () => {
     const user = userEvent.setup();
 
-    render(<TimelineNodeDetail node={createMultiRelationNode()} novelId="novel-1" taskId="task-a" />);
+    render(<TimelineNodeDetail node={createMultiRelationNode()} atomicNodes={[createMultiRelationNode()]} novelId="novel-1" taskId="task-a" />);
 
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
@@ -200,12 +223,49 @@ describe("TimelineNodeDetail", () => {
   it("falls back to the node's only relation event when the url-level selection is absent", async () => {
     const user = userEvent.setup();
 
-    render(<TimelineNodeDetail node={createRelationNode()} novelId="novel-1" taskId="task-a" />);
+    render(<TimelineNodeDetail node={createRelationNode()} atomicNodes={[createRelationNode()]} novelId="novel-1" taskId="task-a" />);
 
     await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
       "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002",
     );
+  });
+
+  it("shows composite child nodes and does not construct a fuzzy graph selection", async () => {
+    const user = userEvent.setup();
+    const onSelectAtomicNode = vi.fn();
+    const firstAtomicNode = createRelationNode();
+    const secondAtomicNode: TimelineNode = {
+      ...createRelationNode(),
+      node_id: "relation:9101",
+      anchor_chunk_id: 13,
+      relation_events: [
+        {
+          relation_event_id: 9101,
+          from_char: "顾承渊",
+          to_char: "苏映雪",
+          relation_type: "盟友",
+          change_type: "强化",
+        },
+      ],
+    };
+
+    render(
+      <TimelineNodeDetail
+        node={createCompositeRelationNode()}
+        atomicNodes={[firstAtomicNode, secondAtomicNode]}
+        novelId="novel-1"
+        taskId="task-a"
+        onSelectAtomicNode={onSelectAtomicNode}
+      />,
+    );
+
+    expect(screen.getByText("复合节点包含的原子节点")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-a");
+
+    await user.click(screen.getAllByRole("button", { name: "查看原子节点" })[0]!);
+    expect(onSelectAtomicNode).toHaveBeenCalledWith(firstAtomicNode);
   });
 });
