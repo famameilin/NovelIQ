@@ -175,9 +175,12 @@ def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.M
 
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
     diagnosis = SimpleNamespace(
+        rerun_required=False,
         arc_scores={"沈砚": 8.0},
+        focus_structure="single",
         focus_characters=["沈砚"],
         main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
     characters = [SimpleNamespace(name="沈砚")]
 
@@ -219,13 +222,18 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
     assert missing_fields == []
 
 
-def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fallback_hits(
+def test_load_character_bundle_marks_ledger_only_diagnosis_as_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     diagnosis = SimpleNamespace(
-        arc_scores={"沈砚": 8.0},
-        focus_characters=["沈砚"],
-        main_characters=["沈砚"],
+        rerun_required=True,
+        rerun_reason="diagnosis_missing_focus_contract",
+        foreshadow_expectation=0.58,
+        arc_scores=None,
+        focus_structure=None,
+        focus_characters=None,
+        main_characters=None,
+        core_cast=None,
     )
     characters = [SimpleNamespace(name="沈砚")]
     annotation_repo = MagicMock()
@@ -263,10 +271,10 @@ def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fall
         export_graph_view=export_graph_view,
     )
 
-    assert arc_scores == {"沈砚": 8.0}
-    assert main_characters == ["沈砚"]
+    assert arc_scores is None
+    assert main_characters is None
     assert valid_character_names == {"沈砚"}
-    assert missing_fields == []
+    assert missing_fields == ["diagnosis"]
 
 
 def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -383,9 +391,12 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     diagnosis = SimpleNamespace(
+        rerun_required=False,
         arc_scores={"沈砚": 8.0},
+        focus_structure="single",
         focus_characters=["沈砚"],
         main_characters=["沈砚"],
+        core_cast=["沈砚"],
     )
     characters = [SimpleNamespace(name="沈砚")]
 

@@ -30,6 +30,7 @@ from src.api.services.results_queries import (
     _fetch_token_usage_stats,
     _fetch_topics,
 )
+from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
 from src.knowledge.authority import (
     ExportGraphAuthorityView,
     GraphAuthorityReport,
@@ -113,13 +114,14 @@ def load_character_bundle(
     missing_fields: list[str] = []
 
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
-    if not diagnosis:
+    diagnosis_is_complete = _is_complete_diagnosis_result(diagnosis)
+    if not diagnosis_is_complete:
         missing_fields.append("diagnosis")
 
     arc_scores: dict[str, float] | None = None
     focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
-    if diagnosis:
+    if diagnosis_is_complete and diagnosis is not None:
         arc_scores = diagnosis.arc_scores
         focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters
@@ -406,8 +408,9 @@ def fetch_all_results_data(
     missing_fields.extend(char_missing)
 
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
-    if not diagnosis:
+    if not _is_complete_diagnosis_result(diagnosis):
         missing_fields.append("diagnosis")
+        diagnosis = None
 
     topics, chunk_styles, chunk_annotations, chunk_missing = load_chunk_bundle(
         run_id,

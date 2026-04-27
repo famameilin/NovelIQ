@@ -251,6 +251,8 @@ def test_fetch_diagnosis_returns_ledger_only_payload_when_cloud_diagnosis_missin
     )
 
     assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "diagnosis_missing_focus_contract"
     assert result.foreshadow_expectation == 0.58
     assert result.diagnosis is None
     assert result.topic_labels is None
@@ -297,7 +299,9 @@ def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
         alias_map={},
     )
 
-    assert result is None
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
 
 
 def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
@@ -318,7 +322,9 @@ def test_fetch_diagnosis_returns_none_when_cloud_row_missing_focus_contract():
         alias_map={},
     )
 
-    assert result is None
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
 
 
 def test_fetch_diagnosis_rederives_focus_structure_after_alias_collapse():

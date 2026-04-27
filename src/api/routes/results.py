@@ -62,6 +62,7 @@ from src.api.routes.results_fetchers import (
 from src.api.services.metrics_service import MetricsService
 from src.api.services.novel_service import NovelService
 from src.api.services.results_export_service import fetch_all_results_data
+from src.api.services.results_queries.diagnosis import _is_complete_diagnosis_result
 from src.config import settings
 from src.storage.repositories import (
     AnnotationRepository,
@@ -318,7 +319,7 @@ async def get_characters(
     arc_scores: dict[str, float] | None = None
     focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
-    if diagnosis:
+    if _is_complete_diagnosis_result(diagnosis):
         arc_scores = diagnosis.arc_scores
         focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters

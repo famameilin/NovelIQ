@@ -372,4 +372,26 @@ describe("NovelDetailPage", () => {
       expect(screen.getByTestId("score-overview-card")).toBeInTheDocument();
     });
   });
+
+  it("旧 diagnosis 合同被判重跑时应继续渲染诊断卡而不是回退到暂无数据", async () => {
+    currentSearchParams = "task_id=task-ready";
+    useNovelStore.setState({ currentNovelId: "novel-1", currentTaskId: null, novelsCache: [] });
+    getDiagnosisMock.mockResolvedValue({
+      rerun_required: true,
+      rerun_reason: "focus_contract_incomplete",
+    });
+    getNarrativeStructureMock.mockResolvedValue({});
+    getEmotionStatsMock.mockResolvedValue({});
+    getCharacterStatsMock.mockResolvedValue({});
+    getStyleStatsMock.mockResolvedValue({});
+    getTopicsMock.mockResolvedValue([]);
+    getChunkCurvesMock.mockResolvedValue([]);
+
+    renderNovelDetailPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("diagnosis-summary-card")).toBeInTheDocument();
+      expect(screen.queryByText("暂无诊断数据")).not.toBeInTheDocument();
+    });
+  });
 });

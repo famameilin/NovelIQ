@@ -68,6 +68,8 @@ def _derive_focus_structure_from_characters(
 def _has_complete_focus_contract(
     focus_structure: Literal["single", "dual", "ensemble"] | None,
     focus_characters: list[str] | None,
+    main_characters: list[str] | None = None,
+    core_cast: list[str] | None = None,
 ) -> bool:
     """
     创建时间: 2026-04-27
@@ -77,9 +79,27 @@ def _has_complete_focus_contract(
     结果读取层必须把缺 `focus_structure` / `focus_characters` 的数据视为无效，
     统一走 rerun-required 分支，而不是继续向 API / export 暴露半成品对象。
     """
-    if focus_structure is None or not focus_characters:
+    if focus_structure is None or not focus_characters or not main_characters or not core_cast:
         return False
     return _derive_focus_structure_from_characters(focus_characters) == focus_structure
+
+
+def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> bool:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: protagonist-focus-contract-review-fixes-round2
+    说明: results/export/characters 都需要把“新焦点合同是否完整”当成统一真相源；
+    这里收口到 DiagnosisResult 级别，避免每条链路各自重复判断。
+    """
+    if diagnosis is None or diagnosis.rerun_required:
+        return False
+    return _has_complete_focus_contract(
+        diagnosis.focus_structure,
+        diagnosis.focus_characters,
+        diagnosis.main_characters,
+        diagnosis.core_cast,
+    )
 
 
 def _fetch_diagnosis(
@@ -105,7 +125,11 @@ def _fetch_diagnosis(
         foreshadow_expectation = annotation_repo.calculate_foreshadow_expectation(run_id)
         if foreshadow_expectation is None:
             return None
-        return DiagnosisResult(foreshadow_expectation=foreshadow_expectation)
+        return DiagnosisResult(
+            rerun_required=True,
+            rerun_reason="diagnosis_missing_focus_contract",
+            foreshadow_expectation=foreshadow_expectation,
+        )
 
     focus_characters_raw = _parse_json_field(data.get("focus_characters")) if data else None
     focus_characters_normalized = (
@@ -168,7 +192,12 @@ def _fetch_diagnosis(
             focus_characters_filtered,
         )
 
-    if not _has_complete_focus_contract(normalized_focus_structure, focus_characters_filtered):
+    if not _has_complete_focus_contract(
+        normalized_focus_structure,
+        focus_characters_filtered,
+        main_characters_filtered,
+        core_cast_filtered,
+    ):
         logger.warning(
             "diagnosis focus contract incomplete after normalization: run_id={} novel_id={} raw_structure={} "
             "normalized_structure={} raw_focus_characters={} normalized_focus_characters={}",
@@ -179,7 +208,10 @@ def _fetch_diagnosis(
             focus_characters_normalized,
             focus_characters_filtered,
         )
-        return None
+        return DiagnosisResult(
+            rerun_required=True,
+            rerun_reason="focus_contract_incomplete",
+        )
 
     return DiagnosisResult(
         foreshadow_expectation=data.get("foreshadow_expectation") if data else None,

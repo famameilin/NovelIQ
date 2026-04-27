@@ -185,6 +185,8 @@ def test_insert_cloud_analysis(db_session) -> None:
         narrative_arc_type="白手起家",
         focus_structure="dual",
         focus_characters=["角色0", "角色1"],
+        main_characters=["角色0", "角色1"],
+        core_cast=["角色0", "角色1"],
     )
 
     run_repo = RunRepository(db_session)
