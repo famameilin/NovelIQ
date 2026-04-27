@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, text
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
+from src.storage import db as db_module  # noqa: E402
 from src.storage.models import Base  # noqa: E402
 
 
@@ -25,12 +26,17 @@ def _apply_schema_upgrade(database_url: str) -> None:
         "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS projection_status VARCHAR(20)",
         "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS projected_at TIMESTAMP",
         "ALTER TABLE chunk_relations ADD COLUMN IF NOT EXISTS projection_error TEXT",
-        "CREATE INDEX IF NOT EXISTS idx_chunk_relations_projection_status ON chunk_relations (run_id, projection_status)",
+        (
+            "CREATE INDEX IF NOT EXISTS idx_chunk_relations_projection_status "
+            "ON chunk_relations (run_id, projection_status)"
+        ),
     ]
 
     with engine.begin() as conn:
         for sql in statements:
             conn.execute(text(sql))
+        db_module._ensure_analysis_related_foreign_keys(conn)
+        db_module._ensure_graph_projection_contract_schema(conn)
 
     print("Graph projection schema upgrade completed.")
 
