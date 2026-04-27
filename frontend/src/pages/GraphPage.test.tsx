@@ -353,6 +353,32 @@ describe("GraphPage pagination", () => {
     expect(navigateMock).not.toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-b", { replace: true });
   });
 
+  it("renders rerun-required state when graph api rejects old diagnosis contract", async () => {
+    currentGraphSearchParams = "task_id=task-a";
+    useNovelStore.setState({
+      currentNovelId: "novel-1",
+      currentTaskId: "task-a",
+      novelsCache: [],
+    });
+    getGraphMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: "diagnosis_rerun_required",
+            reason: "focus_contract_incomplete",
+          },
+        },
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("图谱结果需要重跑")).toBeInTheDocument();
+    expect(screen.getByText("当前任务的 diagnosis 焦点合同已失效，请重新分析后再查看图谱页面。")).toBeInTheDocument();
+  });
+
   it("reflects an in-page task switch back into the graph url", async () => {
     currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
     useNovelStore.setState({
@@ -414,6 +440,39 @@ describe("GraphPage pagination", () => {
 
     expect(await screen.findByText("task-a Hero")).toBeInTheDocument();
     expect(getGraphMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the graph error state when appearance count query fails", async () => {
+    const taskAGraph = createGraphData("task-a", {
+      eventNames: [{ from: "task-a Hero", to: "task-a Ally", eventId: 101, chunkId: 50 }],
+      total: 1,
+      nextCursor: null,
+    });
+    getGraphMock.mockResolvedValue(taskAGraph);
+    getCharactersMock.mockRejectedValueOnce(new Error("characters boom"));
+
+    renderPage();
+
+    expect(await screen.findByText("图谱数据加载失败")).toBeInTheDocument();
+  });
+
+  it("renders analysis-not-complete state for running tasks", async () => {
+    getGraphMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("图谱结果尚未完成")).toBeInTheDocument();
+    expect(screen.getByText("当前任务仍在分析中，人物关系图谱和关系变化记录暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
   });
 
   it("shows the empty graph state when the task has no graph nodes", async () => {

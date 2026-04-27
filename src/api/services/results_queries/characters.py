@@ -16,17 +16,24 @@ from src.config import settings
 from src.config.constants import EMOTION_SCORE_MAPPING
 from src.storage.repositories import AnnotationRepository, GraphRepository
 
-from .common import _calculate_protagonist_scores
+from .common import _calculate_narrative_focus_scores
 
 
 def _fetch_characters(
     run_id: str,
     annotation_repo: AnnotationRepository,
     arc_scores: dict[str, float] | None = None,
+    focus_characters: list[str] | None = None,
     main_characters: list[str] | None = None,
     limit: int | None = settings.api.query_limit,
 ) -> list:
-    """获取角色统计数据。"""
+    """
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改原因: 角色结果现在需要同时暴露“叙事中心度”和“是否属于 diagnosis 焦点人物”，
+    因此这里改为接收 `focus_characters`，不再从最高分反推唯一主角。
+    """
     graph_repo = GraphRepository(annotation_repo.session)
     alias_map = graph_repo.fetch_alias_map(run_id)
     rows = annotation_repo.fetch_characters_with_scores(run_id)
@@ -67,15 +74,15 @@ def _fetch_characters(
                 dominant_role_function=dominant_role,
                 role_function_distribution=rf_counts,
                 dominant_role_ratio=dominant_ratio,
-                protagonist_score=None,
-                is_protagonist=None,
+                narrative_focus_score=None,
+                is_focus_character=False,
                 avg_emotion_score=avg_score,
             )
         )
 
     result.sort(key=lambda item: item.appearance_count, reverse=True)
-    if arc_scores is not None and main_characters is not None:
-        result = _calculate_protagonist_scores(result, arc_scores, main_characters)
+    if arc_scores is not None and main_characters is not None and focus_characters is not None:
+        result = _calculate_narrative_focus_scores(result, arc_scores, focus_characters, main_characters)
 
     if limit is None:
         return result
