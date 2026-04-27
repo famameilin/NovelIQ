@@ -99,6 +99,14 @@ _INVERSE_RELATION_PAIRS: dict[str, str] = {
 _PARENT_CHILD_GROUP = {"child_of", "parent_of", "son_of", "father_of"}
 
 
+def _get_valid_hierarchical_relation_types() -> set[str]:
+    """
+    2026-04-27，任务：graph hierarchical relation contract fixes
+    新建原因：终消歧 `entity_relations` 使用英文层级关系类型，不能继续复用 phase4 中文关系枚举。
+    """
+    return set(settings.analysis.valid_hierarchical_relation_types)
+
+
 def _is_valid_inverse_pair(relations: list[dict[str, str]], from_node: str, to_node: str) -> bool:
     """
     检查两个节点之间的双向关系是否是合法的互逆关系对
@@ -246,48 +254,18 @@ def _process_entity_relations(
     if not entity_relations:
         return 0, []
 
+    prepared_relations, skipped_relations = _prepare_entity_relations_for_projection(
+        entity_relations,
+        alias_map=alias_map,
+    )
     graph_repo = GraphRepository(conn)
-
-    valid_relations, cycle_skipped, cycle_paths = detect_cycle_in_relations(entity_relations)
-
-    if cycle_paths:
-        logger.warning(
-            "检测到循环依赖关系",
-            cycle_paths=cycle_paths,
-            skipped_count=len(cycle_skipped),
-        )
-
     success_count = 0
-    skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
+    affected_pairs: set[tuple[int, int]] = set()
 
-    valid_relation_types = set(settings.analysis.valid_relation_types)
-
-    for rel in valid_relations:
-        raw_from_name = rel.get("from")
-        raw_to_name = rel.get("to")
-        rel_type = rel.get("type")
-        from_name = alias_map.get(raw_from_name, raw_from_name) if raw_from_name else None
-        to_name = alias_map.get(raw_to_name, raw_to_name) if raw_to_name else None
-
-        if not from_name or not to_name or not rel_type:
-            skipped_relations.append(
-                {
-                    "relation": rel,
-                    "reason": "missing_fields",
-                }
-            )
-            continue
-
-        if rel_type not in valid_relation_types:
-            logger.warning(f"无效的关系类型: {rel_type}, 跳过关系 {rel}")
-            skipped_relations.append(
-                {
-                    "relation": rel,
-                    "reason": "invalid_relation_type",
-                }
-            )
-            continue
-
+    for rel in prepared_relations:
+        from_name = rel["from"]
+        to_name = rel["to"]
+        rel_type = rel["type"]
         from_entity_obj = graph_repo.upsert_entity(
             run_id=run_id,
             canonical_name=from_name,
@@ -307,14 +285,16 @@ def _process_entity_relations(
                 from_entity_id=from_entity_obj.entity_id,
                 to_entity_id=to_entity_obj.entity_id,
                 relation_type=rel_type,
-                change_type="established",
+                # 中文注释：终消歧补写的是“正式建立关系”，必须复用图谱共享的 change_type 语义，
+                # 不能写入孤立英文标签，否则下游统计会把这类事件静默漏掉。
+                change_type="新建",
                 chunk_id=0,
                 evidence=None,
                 confidence=1.0,
                 source_relation_row_id=None,
-                directionality=None,
+                directionality="symmetric" if rel_type in {"spouse_of", "sibling_of"} else "directed",
             )
-            graph_repo.refresh_current_relation(run_id, from_entity_obj.entity_id, to_entity_obj.entity_id)
+            affected_pairs.add((from_entity_obj.entity_id, to_entity_obj.entity_id))
             success_count += 1
         except Exception as e:
             logger.error(f"插入关系失败: {rel}, 错误: {e}")
@@ -325,6 +305,8 @@ def _process_entity_relations(
                 }
             )
 
+    graph_repo.refresh_relation_projections(run_id, affected_pairs)
+
     if skipped_relations:
         logger.warning(
             f"关系处理完成: 成功 {success_count}, 跳过 {len(skipped_relations)}",
@@ -332,3 +314,74 @@ def _process_entity_relations(
         )
 
     return success_count, skipped_relations
+
+
+def _prepare_entity_relations_for_projection(
+    entity_relations: list[dict[str, str]],
+    *,
+    alias_map: Mapping[str, str],
+) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+    """
+    2026-04-27，任务：graph final-disambiguation rebuild fixes
+    新建原因：终消歧关系既要复用同一套 cycle/alias/合法性过滤规则，又要分别支持
+    “先落到 chunk_relations 再 rebuild”和“直接写 graph_* 表”两类后续处理，不能把校验逻辑绑死在单一写路径里。
+    """
+    if not entity_relations:
+        return [], []
+
+    valid_relations, cycle_skipped, cycle_paths = detect_cycle_in_relations(entity_relations)
+    if cycle_paths:
+        logger.warning(
+            "检测到循环依赖关系",
+            cycle_paths=cycle_paths,
+            skipped_count=len(cycle_skipped),
+        )
+
+    valid_relation_types = _get_valid_hierarchical_relation_types()
+    prepared_relations: list[dict[str, str]] = []
+    skipped_relations: list[dict[str, Any]] = list(cycle_skipped)
+
+    for rel in valid_relations:
+        raw_from_name = rel.get("from")
+        raw_to_name = rel.get("to")
+        rel_type = rel.get("type")
+        from_name = alias_map.get(raw_from_name, raw_from_name) if raw_from_name else None
+        to_name = alias_map.get(raw_to_name, raw_to_name) if raw_to_name else None
+
+        if not from_name or not to_name or not rel_type:
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "missing_fields",
+                }
+            )
+            continue
+
+        if from_name == to_name:
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "self_loop_after_alias_resolution",
+                }
+            )
+            continue
+
+        if rel_type not in valid_relation_types:
+            logger.warning(f"无效的关系类型: {rel_type}, 跳过关系 {rel}")
+            skipped_relations.append(
+                {
+                    "relation": rel,
+                    "reason": "invalid_relation_type",
+                }
+            )
+            continue
+
+        prepared_relations.append(
+            {
+                "from": from_name,
+                "to": to_name,
+                "type": rel_type,
+            }
+        )
+
+    return prepared_relations, skipped_relations

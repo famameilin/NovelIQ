@@ -9,8 +9,8 @@ from .types import (
     GraphPageSummary,
     GraphQualitySignals,
     GraphSharedSummary,
+    ParticipantState,
     RelationEvent,
-    StableState,
 )
 
 LOW_CONFIDENCE_REPORT_LIMIT = 20
@@ -21,12 +21,12 @@ GRAPH_PAGE_KEY_RELATION_LIMIT = 5
 
 
 def build_graph_shared_summary(
-    stable_states: list[StableState],
+    participant_states: list[ParticipantState],
     confirmed_relations: list[ConfirmedRelation],
 ) -> GraphSharedSummary:
     """Compute aggregate-only graph summary counters for shared downstream consumers."""
 
-    node_count = len(stable_states)
+    node_count = len(participant_states)
     edge_count = len(confirmed_relations)
     density = 0.0
     if node_count > 1:
@@ -40,18 +40,18 @@ def build_graph_shared_summary(
 
 
 def build_graph_page_summary(
-    stable_states: list[StableState],
+    participant_states: list[ParticipantState],
     confirmed_relations: list[ConfirmedRelation],
 ) -> GraphPageSummary:
     """Compute graph-page-only summary highlights from stable authority facts."""
 
-    shared_summary = build_graph_shared_summary(stable_states, confirmed_relations)
+    shared_summary = build_graph_shared_summary(participant_states, confirmed_relations)
     # 中文注释：graph page 的 `core_characters` 是页面契约字段，只能从 character 节点中挑选，
     # 不能因为组织/地点最近出现过就挤掉真正的角色。
     core_characters = [
         state.name
         for state in sorted(
-            [state for state in stable_states if state.entity_type == "character"],
+            [state for state in participant_states if state.entity_type == "character"],
             key=lambda item: (item.last_seen_chunk is None, -(item.last_seen_chunk or 0), item.name),
         )[:GRAPH_PAGE_CORE_CHARACTER_LIMIT]
     ]

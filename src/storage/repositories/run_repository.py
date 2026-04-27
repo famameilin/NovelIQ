@@ -78,6 +78,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         "chunks",
         "character_appearances",
         "graph_entity_aliases",
+        "graph_entity_participants",
         "graph_relation_events",
         "graph_relations_current",
         "graph_entities",

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.config import settings
@@ -31,6 +32,7 @@ from src.models.local.disambiguation import (
 from src.models.local.disambiguation.constants import PROTECTED_CONTEXT_PREFIX
 from src.models.local.prompts import STAGE_SUMMARY_SYSTEM_PROMPT, STAGE_SUMMARY_USER_TEMPLATE
 from src.rag import EvidenceRequest
+from src.storage.models import Chunk as ChunkModel
 from src.storage.repositories import AnnotationRepository
 from src.storage.repositories.annotation.characters import fetch_all_character_names
 from src.storage.repositories.stats import fetch_chunk_summaries_by_range, insert_stage_summary
@@ -53,7 +55,7 @@ from .relations import (
     _extract_retryable_relations,
     _merge_relations,
     _normalize_relations_with_alias_map,
-    _process_entity_relations,
+    _prepare_entity_relations_for_projection,
 )
 from .state_logic import (
     DISAMBIG_STATE_RESOLVED,
@@ -815,20 +817,61 @@ def persist_final_disambiguation(
     final_relations = _normalize_relations_with_alias_map(result.entity_relations, new_state.get_alias_merges_dict())
     relations_to_process = _merge_relations(pending_relations, final_relations)
     retryable_relations: list[dict[str, str]] = []
-    if relations_to_process:
-        success_count, skipped = _process_entity_relations(
-            conn,
-            novel_id,
-            run_id,
-            relations_to_process,
-            result.entity_types,
-            new_state.get_alias_merges_dict(),
-        )
-        logger.info("Final disambig: processed {} hierarchical relations", success_count)
-        retryable_relations = _extract_retryable_relations(skipped)
-        if retryable_relations:
-            logger.warning("Final disambig: {} relations left for retry, kept in checkpoint", len(retryable_relations))
+    prepared_relations, skipped = _prepare_entity_relations_for_projection(
+        relations_to_process,
+        alias_map=new_state.get_alias_merges_dict(),
+    )
+    _replace_final_disambiguation_chunk_relations(
+        conn,
+        run_id=run_id,
+        prepared_relations=prepared_relations,
+    )
+    if prepared_relations:
+        logger.info("Final disambig: staged {} hierarchical relations for graph rebuild", len(prepared_relations))
+    retryable_relations = _extract_retryable_relations(skipped)
+    if retryable_relations:
+        logger.warning("Final disambig: {} relations left for retry, kept in checkpoint", len(retryable_relations))
 
     persisted_state = new_state.with_updates(pending_relations=tuple(retryable_relations))
     _save_disambig_checkpoint(conn, run_id, persisted_state)
     return persisted_state
+
+
+def _replace_final_disambiguation_chunk_relations(
+    conn: Session,
+    *,
+    run_id: str,
+    prepared_relations: list[dict[str, str]],
+) -> None:
+    """
+    2026-04-27，任务：graph final-disambiguation rebuild fixes
+    新建原因：annotate 末尾会对 graph_* 执行 rebuild，因此终消歧层级关系必须先落回 chunk_relations，
+    才能在 reset_graph_tables() 之后被统一重新投影出来。
+    """
+    final_chunk_id = conn.execute(
+        select(func.max(ChunkModel.chunk_id)).where(ChunkModel.run_id == run_id)
+    ).scalar_one_or_none()
+    if final_chunk_id is None:
+        raise RuntimeError(f"cannot stage final disambiguation relations without chunks for run_id={run_id}")
+
+    ann_repo = AnnotationRepository(conn)
+    ann_repo.replace_chunk_relations_for_source_model(
+        run_id,
+        int(final_chunk_id),
+        [
+            {
+                "from_name": relation["from"],
+                "to_name": relation["to"],
+                "type": relation["type"],
+                "change": "新建",
+                "evidence": "终消歧层级关系（最终阶段补写）",
+                "confidence": 1.0,
+                "directionality": "symmetric" if relation["type"] in {"spouse_of", "sibling_of"} else "directed",
+                "projection_status": "pending",
+            }
+            for relation in prepared_relations
+        ],
+        source_model="final_disambiguation",
+        commit=False,
+    )
+    conn.flush()
