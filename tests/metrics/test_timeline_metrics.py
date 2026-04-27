@@ -6,7 +6,7 @@
 - compute_four_phases: 四阶段划分算法
 - calculate_tension_percentile: 张力百分位
 - compose_composite_timeline_nodes: 第二轮复合节点分组
-- serialize_timeline_node / serialize_timeline_composite_node: v3 合同序列化
+- serialize_timeline_node / serialize_timeline_composite_node: 双层节点合同序列化
 """
 
 from __future__ import annotations
@@ -357,7 +357,7 @@ class TestSerializeTimelineNode:
         }
         assert payload["relation_events"][0]["relation_event_id"] == 101
 
-    def test_serialize_timeline_composite_node_uses_v3_contract(self):
+    def test_serialize_timeline_composite_node_uses_dual_layer_contract(self):
         phases = convert_to_timeline_phases(
             [
                 NarrativePhase("引入期", 1, 3, 0.25),

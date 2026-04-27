@@ -8,7 +8,6 @@ from sqlalchemy import delete
 
 from src.metrics.timeline_metrics import TimelineAuthorityContractError
 from src.storage.models import ChunkRelation, GraphEntityParticipant
-from src.storage.repositories import RunRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
     nodes_for_anchor_chunk,
@@ -17,7 +16,7 @@ from tests.support.timeline_contract_helpers import (
 )
 
 
-def test_get_timeline_returns_v3_atomic_and_composite_nodes(api_client: TestClient, db_session) -> None:
+def test_get_timeline_returns_atomic_and_composite_nodes(api_client: TestClient, db_session) -> None:
     scenario = create_timeline_contract_scenario(db_session)
 
     response = api_client.get(
@@ -30,7 +29,6 @@ def test_get_timeline_returns_v3_atomic_and_composite_nodes(api_client: TestClie
 
     assert payload["meta"]["novel_id"] == scenario.novel_id
     assert payload["meta"]["total_chunks"] == 5
-    assert payload["meta"]["timeline_contract_version"] == 3
     assert len(payload["phases"]) == 4
     assert payload["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
     assert [node["progress"] for node in payload["atomic_nodes"]] == sorted(
@@ -86,7 +84,6 @@ def test_get_timeline_ignores_legacy_max_level_query_and_returns_same_contract(
 
     assert full_payload["tension_curve"] is None
     assert filtered_payload["tension_curve"] is None
-    assert filtered_payload["meta"]["timeline_contract_version"] == 3
     assert filtered_payload["atomic_nodes"] == full_payload["atomic_nodes"]
     assert filtered_payload["composite_nodes"] == full_payload["composite_nodes"]
 
@@ -219,24 +216,6 @@ def test_get_timeline_pending_partial_graph_returns_409(api_client: TestClient, 
             confidence=0.66,
             projection_status="pending",
         )
-    )
-    db_session.commit()
-
-    response = api_client.get(
-        f"/api/novels/{scenario.novel_id}/timeline",
-        params={"task_id": scenario.task_id, "include_curve": "true"},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["error_type"] == "GraphReadinessError"
-
-
-def test_get_timeline_version_mismatch_returns_409(api_client: TestClient, db_session) -> None:
-    scenario = create_timeline_contract_scenario(db_session)
-    RunRepository(db_session).set_graph_contract_versions(
-        scenario.run_id,
-        graph_projection_version=1,
-        timeline_contract_version=1,
     )
     db_session.commit()
 
