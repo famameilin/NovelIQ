@@ -429,10 +429,12 @@ export interface EmotionStatsMetrics {
 }
 
 export interface CharacterStatsMetrics {
-  total_characters: number;
-  protagonist_count: number;
-  network_density: number;
-  greimas_coverage: number;
+  network_density?: number | null;
+  greimas_coverage?: number | null;
+  function_coverage_distribution?: Record<string, number> | null;
+  antagonist_strength_gap?: number | null;
+  relation_change_freq?: number | null;
+  degree_centrality?: Record<string, number> | null;
 }
 
 export interface StyleStatsMetrics {

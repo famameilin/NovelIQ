@@ -66,6 +66,7 @@ def _derive_focus_structure_from_characters(
 
 
 def _has_complete_focus_contract(
+    arc_scores: dict[str, float] | None,
     focus_structure: Literal["single", "dual", "ensemble"] | None,
     focus_characters: list[str] | None,
     main_characters: list[str] | None = None,
@@ -79,7 +80,7 @@ def _has_complete_focus_contract(
     结果读取层必须把缺 `focus_structure` / `focus_characters` 的数据视为无效，
     统一走 rerun-required 分支，而不是继续向 API / export 暴露半成品对象。
     """
-    if focus_structure is None or not focus_characters or not main_characters or not core_cast:
+    if not arc_scores or focus_structure is None or not focus_characters or not main_characters or not core_cast:
         return False
     return _derive_focus_structure_from_characters(focus_characters) == focus_structure
 
@@ -95,6 +96,7 @@ def _is_complete_diagnosis_result(diagnosis: DiagnosisResult | None) -> bool:
     if diagnosis is None or diagnosis.rerun_required:
         return False
     return _has_complete_focus_contract(
+        diagnosis.arc_scores,
         diagnosis.focus_structure,
         diagnosis.focus_characters,
         diagnosis.main_characters,
@@ -184,6 +186,7 @@ def _fetch_diagnosis(
         )
 
     if not _has_complete_focus_contract(
+        arc_scores_normalized,
         normalized_focus_structure,
         focus_characters_filtered,
         main_characters_filtered,

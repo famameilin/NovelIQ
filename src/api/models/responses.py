@@ -303,7 +303,6 @@ class EmotionStats(BaseModel):
 
 class CharacterStatsAggregate(BaseModel):
     network_density: float | None = None
-    protagonist_betweenness: float | None = None
     greimas_coverage: float | None = None
     function_coverage_distribution: dict[str, float] | None = None
     antagonist_strength_gap: float | None = None

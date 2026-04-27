@@ -15,6 +15,7 @@ from typing import Any
 from loguru import logger
 
 from src.api.dependencies import get_metrics_service
+from src.api.exceptions import DiagnosisRerunRequiredError
 from src.api.services.results_contracts import validate_aggregate_metrics_contract
 from src.api.services.results_queries import (
     _fetch_character_relations,
@@ -114,6 +115,8 @@ def load_character_bundle(
     missing_fields: list[str] = []
 
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is not None and diagnosis.rerun_required:
+        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
     diagnosis_is_complete = _is_complete_diagnosis_result(diagnosis)
     if not diagnosis_is_complete:
         missing_fields.append("diagnosis")
@@ -408,6 +411,8 @@ def fetch_all_results_data(
     missing_fields.extend(char_missing)
 
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
+    if diagnosis is not None and diagnosis.rerun_required:
+        raise DiagnosisRerunRequiredError(reason=diagnosis.rerun_reason)
     if not _is_complete_diagnosis_result(diagnosis):
         missing_fields.append("diagnosis")
         diagnosis = None

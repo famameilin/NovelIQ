@@ -278,6 +278,28 @@ def test_fetch_diagnosis_uses_cloud_analysis_expectation_as_single_contract():
     assert result.focus_characters == ["沈砚"]
 
 
+def test_fetch_diagnosis_marks_focus_contract_incomplete_when_arc_scores_missing():
+    stats_repo = _DummyStatsRepo(
+        {
+            "focus_structure": "single",
+            "focus_characters": '["沈砚"]',
+            "main_characters": '["沈砚"]',
+            "core_cast": '["沈砚"]',
+        }
+    )
+
+    result = _fetch_diagnosis(
+        run_id="run-1",
+        novel_id="novel-1",
+        stats_repo=stats_repo,
+        alias_map={},
+    )
+
+    assert result is not None
+    assert result.rerun_required is True
+    assert result.rerun_reason == "focus_contract_incomplete"
+
+
 def test_fetch_diagnosis_rejects_legacy_arc_score_list_contract():
     stats_repo = _DummyStatsRepo(
         {
