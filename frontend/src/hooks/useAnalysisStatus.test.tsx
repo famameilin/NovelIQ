@@ -310,4 +310,35 @@ describe("useAnalysisStatus", () => {
       expect(screen.getByTestId("analysis-status")).toHaveAttribute("data-stable", "false");
     });
   });
+
+  it("接收 LLM 流事件时应把 stream_id 原样透传给 store", async () => {
+    getTaskStatusMock.mockResolvedValue(createRunningStatus("task-stream-id"));
+
+    render(<HookHarness novelId="novel-1" taskId="task-stream-id" />);
+
+    await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledWith("novel-1", "task-stream-id");
+    });
+
+    emitSSEEvent("llm_output", {
+      action: "output",
+      stage: "annotate",
+      sub_stage: "phase3",
+      chunk_id: 3,
+      stream_id: "phase3-3-2",
+      current: 3,
+      total: 10,
+      percent: 35,
+      sub_percent: 60,
+      content: "乙流输出",
+      message: "phase3 推理中",
+    });
+
+    expect(streamStoreState.appendLLMOutput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stream_id: "phase3-3-2",
+        content: "乙流输出",
+      }),
+    );
+  });
 });
