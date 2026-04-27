@@ -180,6 +180,7 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
         arc_scores={"沈砚": 8.0},
         focus_structure="single",
         focus_characters=["沈砚"],
+        topic_labels=["成长"],
         main_characters=["沈砚"],
         core_cast=["沈砚"],
     )
@@ -453,6 +454,7 @@ def test_load_character_bundle_excludes_non_character_canonical_entities_from_ch
         arc_scores={"沈砚": 8.0},
         focus_structure="single",
         focus_characters=["沈砚"],
+        topic_labels=["成长"],
         main_characters=["沈砚"],
         core_cast=["沈砚"],
     )
