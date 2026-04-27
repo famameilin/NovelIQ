@@ -866,7 +866,7 @@ def _replace_final_disambiguation_chunk_relations(
                 "change": "新建",
                 "evidence": "终消歧层级关系（最终阶段补写）",
                 "confidence": 1.0,
-                "directionality": "directed",
+                "directionality": "symmetric" if relation["type"] in {"spouse_of", "sibling_of"} else "directed",
                 "projection_status": "pending",
             }
             for relation in prepared_relations

@@ -208,6 +208,17 @@ class KnowledgeGraphAuthorityService:
             raise GraphReadinessError(
                 "graph projection is still pending; finish projection before reading graph-derived authority views."
             )
+        failed_relations = self._annotation_repo.fetch_chunk_relations_window(run_id, projection_status="failed")
+        blocking_failures = [
+            relation
+            for relation in failed_relations
+            if getattr(relation, "projection_error", None) not in {"self relation"}
+        ]
+        if blocking_failures:
+            raise GraphReadinessError(
+                "graph projection has failed rows; "
+                "resolve projection failures before reading graph-derived authority views."
+            )
 
     def _build_alias_mappings(self, alias_map: dict[str, str]) -> list[AliasMapping]:
         return [
