@@ -154,4 +154,24 @@ describe("CharactersPage", () => {
     expect(screen.getByText("当前任务暂时还没有可展示的角色焦点结果。")).toBeInTheDocument();
     expect(getCharactersMock).not.toHaveBeenCalled();
   });
+
+  it("renders analysis-not-complete state for running tasks", async () => {
+    getDiagnosisMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+
+    renderCharactersPage();
+
+    expect(await screen.findByText("角色结果尚未完成")).toBeInTheDocument();
+    expect(screen.getByText("当前任务仍在分析中，角色焦点结果暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
+    expect(getCharactersMock).not.toHaveBeenCalled();
+  });
 });

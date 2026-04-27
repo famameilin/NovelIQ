@@ -157,6 +157,12 @@ class CloudAnalysis(BaseModel):
         任务: protagonist-focus-contract
         修改原因: diagnosis 结果现在允许 single / dual / ensemble，
         必须在模型层阻止“结构标签”和“人物列表”彼此矛盾的脏结果进入数据库。
+
+        修改时间: 2026-04-27
+        修改者: Codex
+        任务: protagonist-focus-contract-review-fixes-round5
+        修改原因: 正式 diagnosis 合同同样要求完整的 `topic_labels`；
+        这里补上主题命名必填校验，避免“焦点合同完整但主题命名静默缺失”的半成品落库。
         """
         # 中文注释：空云端桩和少量测试辅助对象仍可能构造“全空 diagnosis”，
         # 这里允许这种空对象通过；但只要已经进入正式 diagnosis 结果形态，
@@ -203,6 +209,8 @@ class CloudAnalysis(BaseModel):
                 raise ValueError("main_characters is required for formal diagnosis payload")
             if not self.core_cast:
                 raise ValueError("core_cast is required for formal diagnosis payload")
+            if not self.topic_labels:
+                raise ValueError("topic_labels is required for formal diagnosis payload")
             if len(self.main_characters) > 5:
                 raise ValueError("main_characters cannot exceed 5 items")
             if len(self.core_cast) > 10:

@@ -214,4 +214,34 @@ describe("DiagnosisPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("伏笔回收预期")).not.toBeInTheDocument();
   });
+
+  it("renders analysis-not-complete state for running tasks", async () => {
+    getDiagnosisMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+    getForeshadowingThreadsMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+
+    renderDiagnosisPage();
+
+    expect(await screen.findByText("诊断结果尚未完成")).toBeInTheDocument();
+    expect(screen.getByText("当前任务仍在分析中，诊断报告和 setup 台账暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
+  });
 });
