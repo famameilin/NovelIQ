@@ -35,9 +35,9 @@ from src.storage.models import ChunkRelation
 from src.storage.repositories import AnnotationRepository, ChunkRepository, StatsRepository
 from tests.support.timeline_contract_helpers import (
     create_timeline_contract_scenario,
-    index_by_chunk_id,
-    relation_change_names,
-    relation_change_tuples,
+    nodes_for_anchor_chunk,
+    relation_event_names,
+    relation_event_tuples,
 )
 
 
@@ -62,40 +62,40 @@ def test_fetch_timeline_data_reuses_authority_backed_contract(db_session) -> Non
     assert timeline_data["tension_curve"] == [0.15, 0.3, 0.95, 0.45, 0.1]
     assert len(timeline_data["phases"]) == 4
 
-    nodes_by_chunk = index_by_chunk_id(timeline_data["nodes"])
-    assert relation_change_tuples(nodes_by_chunk[2]["relation_changes"]) == {
+    relation_node = next(
+        node for node in nodes_for_anchor_chunk(timeline_data["nodes"], 2) if node["node_type"] == "relation"
+    )
+    assert relation_event_tuples(relation_node["relation_events"]) == {
         (scenario.hero_name, scenario.rival_name, "新建")
     }
-    assert scenario.organization_name not in relation_change_names(nodes_by_chunk[2]["relation_changes"])
-    assert relation_change_tuples(nodes_by_chunk[4]["relation_changes"]) == {
-        (scenario.hero_name, scenario.rival_name, "断裂")
-    }
+    assert scenario.organization_name not in relation_event_names(relation_node["relation_events"])
 
-    # Export keeps the current public shape and must not leak authority internals.
     assert "entity_lifecycles" not in timeline_data
-    assert set(nodes_by_chunk[2].keys()) == {
-        "chunk_id",
+    assert set(relation_node.keys()) == {
+        "node_id",
+        "anchor_chunk_id",
         "progress",
         "importance_score",
         "level",
-        "event",
+        "summary",
         "characters",
-        "is_pivot",
-        "is_cliffhanger",
-        "tension_percentile",
+        "phase_name",
         "node_type",
-        "relation_changes",
-        "character_entries",
-        "character_exits",
+        "node_subtype",
+        "score_breakdown",
+        "plot_flags",
+        "relation_events",
+        "lifecycle_events",
     }
-    # 中文说明：export 只保留 shared timeline 语义，不导出 /timeline route-only
-    # 的定位与展示字段。
-    assert set(nodes_by_chunk[2]["relation_changes"][0].keys()) == {
+    assert set(relation_node["relation_events"][0].keys()) == {
+        "relation_event_id",
         "from_char",
         "to_char",
         "relation_type",
         "change_type",
         "evidence",
+        "confidence",
+        "directionality",
     }
 
 
@@ -141,7 +141,7 @@ def test_fetch_timeline_data_re_raises_authority_contract_failures(monkeypatch: 
     def _raise_contract_error(*_args, **_kwargs):
         raise TimelineAuthorityContractError("broken authority contract")
 
-    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_candidates", _raise_contract_error)
+    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_plan", _raise_contract_error)
 
     with pytest.raises(TimelineAuthorityContractError, match="broken authority contract"):
         _fetch_timeline_data(
@@ -161,7 +161,7 @@ def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.M
     def _raise_runtime_error(*_args, **_kwargs):
         raise RuntimeError("timeline boom")
 
-    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_candidates", _raise_runtime_error)
+    monkeypatch.setattr("src.api.services.results_export_service.build_timeline_plan", _raise_runtime_error)
 
     with pytest.raises(RuntimeError, match="timeline boom"):
         _fetch_timeline_data(
@@ -269,8 +269,6 @@ def test_fetch_all_results_data_deduplicates_missing_diagnosis_marker(monkeypatc
     说明: diagnosis 缺失可能在多个 bundle 链路里被检测到；
     export 返回前必须去重，避免 `missing_fields` 出现重复 diagnosis 条目。
     """
-
-    from src.api.services.results_export_service import fetch_all_results_data
 
     monkeypatch.setattr(
         "src.api.services.results_export_service.load_core_results",
@@ -473,8 +471,7 @@ def test_load_export_relation_bundle_uses_graph_report_view_for_export(monkeypat
                 relation_type="spouse_of",
                 first_seen_chunk=2,
                 last_seen_chunk=5,
-            )
-            ,
+            ),
             ExportRelationSnapshot(
                 relation_id=23,
                 from_name="苏镜",

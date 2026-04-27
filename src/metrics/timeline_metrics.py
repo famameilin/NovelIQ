@@ -6,15 +6,18 @@
 任务: refactor-session-management
 说明: 提供时间轴节点重要性计算、四阶段划分、节点筛选功能
 
+修改时间: 2026-04-27
+修改者: Codex
+任务: 时间轴合同重构
 修改内容:
-- 定义独立 DTO，解耦 API 模型依赖
-- 使用 Literal 类型强化类型安全
-- 修复四阶段边界逻辑
+- 重写时间轴引擎，改为 TimelineAtom -> TimelineNodePlan 的新模型
+- 统一 route / export 共用的预算与序列化逻辑
+- 去除 “每个 chunk 只有一个时间轴节点” 与 “无变化关系也计分” 的旧语义
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 
 from loguru import logger
@@ -22,10 +25,30 @@ from loguru import logger
 from src.knowledge.authority import TIMELINE_AUTHORITY_DEPENDENCY_FIELDS, TimelineAuthorityView
 from src.metrics.narrative_metrics import find_global_peak, find_local_peaks
 
-# Literal 类型定义
-TimelineNodeType = Literal["plot", "character_entry", "character_exit", "relation_change"]
+TimelineNodeType = Literal["plot", "relation", "lifecycle"]
+TimelineNodeSubtype = Literal["plot", "entry", "exit", "新建", "强化", "弱化", "断裂"]
 TimelinePhaseName = Literal["引入期", "发展期", "高潮期", "收束期"]
 ImportanceLevel = Literal[1, 2, 3]
+LifecycleType = Literal["entry", "exit"]
+
+PLOT_EVENT_TYPE_WEIGHTS: dict[str, float] = {
+    "冲突": 1.2,
+    "转折": 1.0,
+    "铺垫": 0.4,
+}
+EMOTIONAL_VALENCE_WEIGHTS: dict[str, float] = {
+    "strong_positive": 1.0,
+    "strong_negative": 1.0,
+    "mild_positive": 0.5,
+    "mild_negative": 0.5,
+    "neutral": 0.0,
+}
+RELATION_CHANGE_WEIGHTS: dict[str, float] = {
+    "新建": 2.4,
+    "强化": 1.8,
+    "弱化": 1.6,
+    "断裂": 2.6,
+}
 
 
 class TimelineDataUnavailableError(ValueError):
@@ -36,23 +59,41 @@ class TimelineAuthorityContractError(RuntimeError):
     """Raised when the authority-backed timeline contract is violated."""
 
 
-# ==================== DTO 定义 ====================
+@dataclass(slots=True)
+class RelationEventDTO:
+    """时间轴关系事件 DTO。"""
 
-
-@dataclass
-class RelationChangeEventDTO:
-    """关系变化事件 DTO"""
-
+    relation_event_id: int
     from_char: str
     to_char: str
     relation_type: str
-    change_type: str
+    change_type: Literal["新建", "强化", "弱化", "断裂"]
     evidence: str | None = None
+    confidence: float | None = None
+    directionality: str | None = None
 
 
-@dataclass
+@dataclass(slots=True)
+class LifecycleEventDTO:
+    """时间轴生命周期事件 DTO。"""
+
+    entity_id: int
+    character_name: str
+    lifecycle_type: LifecycleType
+
+
+@dataclass(slots=True)
+class PlotFlagsDTO:
+    """剧情节点附加标记。"""
+
+    is_pivot: bool
+    is_cliffhanger: bool
+    tension_percentile: int
+
+
+@dataclass(slots=True)
 class TimelinePhaseDTO:
-    """时间轴阶段 DTO"""
+    """时间轴阶段 DTO。"""
 
     name: TimelinePhaseName
     start: int
@@ -60,55 +101,34 @@ class TimelinePhaseDTO:
     ratio: float
 
 
-@dataclass
+@dataclass(slots=True)
 class TimelineNodeDTO:
-    """时间轴节点 DTO"""
+    """时间轴节点 DTO。"""
 
-    chunk_id: int
+    node_id: str
+    anchor_chunk_id: int
     progress: float
     importance_score: float
     level: ImportanceLevel
-    event: str
-    characters: list[str] = field(default_factory=list)
-    is_pivot: bool = False
-    is_cliffhanger: bool = False
-    tension_percentile: int = 50
-    node_type: TimelineNodeType = "plot"
-    relation_changes: list[RelationChangeEventDTO] | None = None
-    character_entries: list[str] | None = None
-    character_exits: list[str] | None = None
+    summary: str
+    characters: list[str]
+    phase_name: TimelinePhaseName
+    node_type: TimelineNodeType
+    node_subtype: TimelineNodeSubtype
+    score_breakdown: dict[str, float]
+    plot_flags: PlotFlagsDTO | None = None
+    relation_events: list[RelationEventDTO] | None = None
+    lifecycle_events: list[LifecycleEventDTO] | None = None
 
 
-# ==================== 内部数据结构 ====================
-
-
-@dataclass
+@dataclass(slots=True)
 class NarrativePhase:
-    """叙事阶段内部数据结构"""
+    """叙事阶段内部数据结构。"""
 
     name: str
     start: int
     end: int
     ratio: float
-
-
-@dataclass
-class TimelineCandidate:
-    """时间轴候选节点内部数据结构"""
-
-    chunk_id: int
-    progress: float
-    importance_score: float
-    level: ImportanceLevel
-    event: str
-    characters: list[str]
-    is_pivot: bool
-    is_cliffhanger: bool
-    tension_percentile: int
-    node_type: TimelineNodeType
-    relation_changes: list[RelationChangeEventDTO] | None = None
-    character_entries: list[str] | None = None
-    character_exits: list[str] | None = None
 
 
 @dataclass(slots=True)
@@ -145,368 +165,63 @@ class TimelineSourceData:
 
 
 @dataclass(slots=True)
-class TimelineSelectionInputs:
-    """节点选择阶段依赖的独立输入。"""
+class TimelineBudget:
+    """时间轴节点预算。"""
 
-    chunk_ids: list[int]
-    tension_scores: list[float]
-    major_character_entries: list[tuple[str, int]]
-    relation_break_events: list[tuple[int, RelationChangeEventDTO]]
+    min_nodes: int
+    target_nodes: int
+    max_nodes: int
 
 
 @dataclass(slots=True)
-class TimelineBuildResult:
-    """时间轴候选构建结果，明确区分候选与选择阶段输入。"""
+class TimelinePlanBuildResult:
+    """时间轴最终构建结果。"""
 
-    candidates: list[TimelineCandidate]
+    nodes: list[TimelineNodeDTO]
     total_chunks: int
     phases: list[TimelinePhaseDTO]
-    selection_inputs: TimelineSelectionInputs
+    tension_curve: list[float]
 
 
-# ==================== 核心函数 ====================
+@dataclass(slots=True)
+class PlotAtom:
+    """剧情原子信号。"""
+
+    anchor_chunk_id: int
+    progress: float
+    summary: str
+    phase_name: TimelinePhaseName
+    characters: list[str]
+    event_type: str
+    emotional_valence: str
+    tension_score: float
+    tension_percentile: int
+    is_pivot: bool
+    is_cliffhanger: bool
 
 
-def compute_importance_score(
-    pivot_moment: bool,
-    cliffhanger: bool,
-    tension_composite: float,
-    all_tensions: list[float],
-    event_type: str,
-    emotional_valence: str,
-    has_relation_change: bool = False,
-    has_character_entry: bool = False,
-    has_character_exit: bool = False,
-    is_major_character: bool = False,
-) -> tuple[float, ImportanceLevel]:
-    """
-    计算节点重要性分数。
+@dataclass(slots=True)
+class RelationAtom:
+    """关系变化原子信号。"""
 
-    分数构成:
-    - 转折点: +3
-    - 悬念: +2
-    - 张力百分位: 0-2 (基于百分位排名 × 2)
-    - 冲突事件: +1
-    - 极端情感: +1
-    - 关系变化: +2
-    - 主要角色登场/退场: +2
-
-    分级阈值:
-    - ≥ 7 分: level 1 (重要)
-    - 4-6 分: level 2 (较重要)
-    - 0-3 分: level 3 (不重要)
-
-    Args:
-        pivot_moment: 是否为转折点
-        cliffhanger: 是否为悬念点
-        tension_composite: 张力综合分数
-        all_tensions: 所有 chunk 的张力分数列表（用于计算百分位）
-        event_type: 事件类型
-        emotional_valence: 情感倾向
-        has_relation_change: 是否有关系变化
-        has_character_entry: 是否有角色登场
-        has_character_exit: 是否有角色退场
-        is_major_character: 是否为主要角色
-
-    Returns:
-        (importance_score, level): 重要性分数 (0-11) 和级别 (1-3)
-    """
-    score = 0.0
-
-    if pivot_moment:
-        score += 3
-    if cliffhanger:
-        score += 2
-
-    if all_tensions:
-        # 计算百分位排名
-        percentile = sum(1 for t in all_tensions if t <= tension_composite) / len(all_tensions)
-        score += percentile * 2
-
-    if event_type == "冲突":
-        score += 1
-    if emotional_valence in ["strong_positive", "strong_negative"]:
-        score += 1
-
-    if has_relation_change:
-        score += 2
-    if (has_character_entry or has_character_exit) and is_major_character:
-        score += 2
-
-    # 分级
-    if score >= 7:
-        level: ImportanceLevel = 1
-    elif score >= 4:
-        level = 2
-    else:
-        level = 3
-
-    return score, level
+    anchor_chunk_id: int
+    progress: float
+    phase_name: TimelinePhaseName
+    relation_event: RelationEventDTO
+    characters: list[str]
+    phase_rarity: float
+    pair_importance: float
 
 
-def compute_four_phases(
-    tension_scores: list[float],
-    chunk_ids: list[int],
-) -> list[NarrativePhase]:
-    """
-    计算四阶段划分（多峰模型）。
+@dataclass(slots=True)
+class LifecycleAtom:
+    """角色生命周期原子信号。"""
 
-    基于 Freytag 金字塔理论 + 网络小说多波次叠加结构，使用局部峰值
-    检测确定高潮位置，而非单一全局峰值。
-
-    核心设计决策:
-    - 网络小说通常有多个小高潮 + 一个最终大高潮（"逐步升级"模式）
-    - 使用 find_local_peaks() 找出所有局部峰值
-    - 取「后 50% 区间内的最强峰」作为主高潮位置
-    - 这比全局最大值更能反映网文的叙事节奏
-
-    边界保护:
-    - MIN_PHASE_LENGTH = 1: 每个阶段至少 1 个 chunk
-    - 高潮期半径: 至少 3 个 chunk，最多 5%（但不超过总长度的 10%）
-    - 小说太短时 (< 20 chunks): 使用固定比例 15%-35%-30%-20%
-    - 无有效局部峰值时: 回退到全局最大值
-
-    Args:
-        tension_scores: 张力分数列表（与 chunk_ids 一一对应）
-        chunk_ids: chunk ID 列表（按顺序排列，可能不连续）
-
-    Returns:
-        NarrativePhase 列表，按顺序包含引入期、发展期、高潮期、收束期
-        始终返回 4 个阶段（极端情况下某些阶段可能为空，ratio=0）
-    """
-    if not tension_scores or not chunk_ids:
-        return []
-
-    total = len(tension_scores)
-    MIN_PHASE_LENGTH = 1
-
-    # 短小说固定比例划分
-    if total < 20:
-        b1 = max(1, min(int(total * 0.15), total - 3))
-        b2 = max(b1 + 1, min(int(total * 0.50), total - 2))
-        b3 = max(b2 + 1, min(int(total * 0.80), total - 2))
-        return [
-            NarrativePhase("引入期", chunk_ids[0], chunk_ids[b1], (b1 + 1) / total),
-            NarrativePhase("发展期", chunk_ids[b1 + 1], chunk_ids[b2], (b2 - b1) / total),
-            NarrativePhase("高潮期", chunk_ids[b2 + 1], chunk_ids[b3], (b3 - b2) / total),
-            NarrativePhase("收束期", chunk_ids[b3 + 1], chunk_ids[-1], (total - b3 - 1) / total),
-        ]
-
-    # ── 多峰模型：用 find_local_peaks 找出所有局部峰值 ──
-    local_peaks = find_local_peaks(tension_scores, total)
-
-    # 选择高潮位置的策略：
-    # 1. 如果找到局部峰值 → 取后半部分（>=50%）中的最高峰
-    #    （符合网文"逐步升级"模式：最终大高潮在全书后半段）
-    # 2. 如果无局部峰值或后半部分无峰 → 回退到全局最大值
-    # 3. 如果所有峰都在前半段 → 取最靠后的那个峰
-    half_idx = total // 2
-
-    if local_peaks:
-        # 后半部分的峰值
-        late_peaks = [p for p in local_peaks if p >= half_idx]
-        if late_peaks:
-            # 后半部分有峰：取其中张力值最高的
-            peak_idx = max(late_peaks, key=lambda p: tension_scores[p])
-        else:
-            # 所有峰都在前半段：取最靠后的峰（最后一个局部峰）
-            peak_idx = local_peaks[-1]
-    else:
-        # 无任何局部峰值：回退到全局最大值
-        logger.warning("No local peaks found in tension_scores, falling back to global peak")
-        peak_idx = find_global_peak(tension_scores)
-
-    logger.debug(
-        "Multi-peak phase detection: local_peaks=%s, selected_peak=%d/%d (%.1f%%)",
-        local_peaks,
-        peak_idx,
-        total,
-        peak_idx / total,
-    )
-
-    # 峰值前的谷底
-    if peak_idx == 0:
-        valley_idx = max(MIN_PHASE_LENGTH, int(total * 0.15))
-    else:
-        before_peak = tension_scores[:peak_idx]
-        valley_idx = max(MIN_PHASE_LENGTH, min(range(len(before_peak)), key=lambda i: before_peak[i]))
-
-    # 高潮期半径
-    max_climax_radius = int(total * 0.10)
-    climax_radius = min(max(3, int(total * 0.05)), max_climax_radius)
-    climax_start = max(valley_idx + MIN_PHASE_LENGTH, peak_idx - climax_radius)
-    climax_end = min(total - 1 - MIN_PHASE_LENGTH, peak_idx + climax_radius)
-
-    valley_idx = min(valley_idx, climax_start - MIN_PHASE_LENGTH)
-    valley_idx = max(valley_idx, MIN_PHASE_LENGTH)
-
-    phases: list[NarrativePhase] = []
-
-    phases.append(NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total))
-
-    dev_start_idx = valley_idx + 1
-    dev_end_idx = climax_start - 1
-    if dev_end_idx >= dev_start_idx:
-        phases.append(
-            NarrativePhase(
-                "发展期",
-                chunk_ids[dev_start_idx],
-                chunk_ids[dev_end_idx],
-                (dev_end_idx - dev_start_idx + 1) / total,
-            )
-        )
-    else:
-        logger.warning(f"发展期被跳过: valley_idx={valley_idx}, climax_start={climax_start}, total={total}")
-        phases.append(NarrativePhase("发展期", chunk_ids[valley_idx], chunk_ids[valley_idx], 0.0))
-
-    phases.append(
-        NarrativePhase(
-            "高潮期",
-            chunk_ids[climax_start],
-            chunk_ids[climax_end],
-            (climax_end - climax_start + 1) / total,
-        )
-    )
-
-    if climax_end < total - 1 - MIN_PHASE_LENGTH:
-        phases.append(
-            NarrativePhase(
-                "收束期",
-                chunk_ids[climax_end + 1],
-                chunk_ids[-1],
-                (total - climax_end - 1) / total,
-            )
-        )
-    else:
-        # 退化处理：高潮期直接到结尾，收束期为空
-        phases.append(NarrativePhase("收束期", chunk_ids[climax_end], chunk_ids[climax_end], 0.0))
-
-    return phases
-
-
-def select_timeline_nodes(
-    candidates: list[TimelineCandidate],
-    chunk_ids: list[int],
-    tension_scores: list[float],
-    major_character_entries: list[tuple[str, int]],  # [(char_name, first_chunk_idx), ...]
-    relation_break_events: list[tuple[int, RelationChangeEventDTO]],  # [(chunk_idx, event), ...]
-    min_nodes: int = 10,
-    max_nodes: int = 20,
-) -> list[TimelineCandidate]:
-    """
-    筛选时间轴节点。
-
-    筛选规则:
-    - 必选: 故事开始、故事结局、全局高潮、主要角色登场（去重）
-    - 可选: 转折点、悬念点（限5个）、关系断裂
-    - 补充: 当节点数不足 min_nodes 时，按重要性补充
-
-    数量控制:
-    - 最少 min_nodes 个节点（默认 10）
-    - 最多 max_nodes 个节点（默认 20）
-    - 必选节点超过 max_nodes 时，按重要性排序保留
-
-    Args:
-        candidates: 所有候选节点列表
-        chunk_ids: chunk ID 列表（与 candidates 一一对应）
-        tension_scores: 张力分数列表
-        major_character_entries: 主要角色登场信息 [(角色名, 首次出现索引), ...]
-        relation_break_events: 关系断裂事件 [(chunk索引, 事件), ...]
-        min_nodes: 最少节点数
-        max_nodes: 最多节点数
-
-    Returns:
-        筛选后的 TimelineCandidate 列表（按 progress 排序）
-    """
-    if not candidates:
-        return []
-
-    # 创建 chunk_id 到 candidate 的映射
-    chunk_to_candidate: dict[int, TimelineCandidate] = {}
-    for c in candidates:
-        chunk_to_candidate[c.chunk_id] = c
-
-    must_keep_chunks: set[int] = set()
-
-    # 1. 故事开始（最高优先级）
-    must_keep_chunks.add(chunk_ids[0])
-
-    # 2. 故事结局
-    must_keep_chunks.add(chunk_ids[-1])
-
-    # 3. 全局高潮
-    peak_idx = find_global_peak(tension_scores)
-    must_keep_chunks.add(chunk_ids[peak_idx])
-
-    # 4. 主要角色登场（去重：如果 chunk 已在必选集合中，跳过）
-    for _char_name, first_idx in major_character_entries:
-        real_chunk_id = chunk_ids[first_idx]
-        if real_chunk_id not in must_keep_chunks:
-            must_keep_chunks.add(real_chunk_id)
-
-    # 5. 关系断裂节点
-    break_chunk_ids: set[int] = set()
-    for chunk_idx, _ in relation_break_events:
-        break_chunk_ids.add(chunk_ids[chunk_idx])
-
-    # 收集必选节点
-    selected: list[TimelineCandidate] = []
-    for chunk_id in must_keep_chunks:
-        if chunk_id in chunk_to_candidate:
-            selected.append(chunk_to_candidate[chunk_id])
-
-    # 添加关系断裂节点（如果不超限）
-    for chunk_id in break_chunk_ids:
-        if chunk_id in chunk_to_candidate and chunk_id not in must_keep_chunks:
-            if len(selected) < max_nodes:
-                selected.append(chunk_to_candidate[chunk_id])
-
-    # 添加转折点（按重要性排序）
-    pivot_candidates = [c for c in candidates if c.is_pivot and c.chunk_id not in {s.chunk_id for s in selected}]
-    pivot_candidates.sort(key=lambda x: x.importance_score, reverse=True)
-
-    for c in pivot_candidates:
-        if len(selected) >= max_nodes:
-            break
-        selected.append(c)
-
-    # 添加悬念点（限 5 个，按重要性排序）
-    cliffhanger_candidates = [
-        c for c in candidates if c.is_cliffhanger and c.chunk_id not in {s.chunk_id for s in selected}
-    ]
-    cliffhanger_candidates.sort(key=lambda x: x.importance_score, reverse=True)
-
-    for i, c in enumerate(cliffhanger_candidates):
-        if i >= 5 or len(selected) >= max_nodes:
-            break
-        selected.append(c)
-
-    # 补充节点（如果不足 min_nodes）
-    if len(selected) < min_nodes:
-        remaining = [c for c in candidates if c.chunk_id not in {s.chunk_id for s in selected}]
-        remaining.sort(key=lambda x: x.importance_score, reverse=True)
-
-        for c in remaining:
-            if len(selected) >= min_nodes:
-                break
-            selected.append(c)
-
-    # 保护逻辑：如果必选节点超过 max_nodes，按重要性排序保留
-    if len(must_keep_chunks) > max_nodes:
-        must_keep_list = list(must_keep_chunks)
-        must_keep_candidates: list[TimelineCandidate] = [
-            chunk_to_candidate[cid] for cid in must_keep_list if cid in chunk_to_candidate
-        ]
-        must_keep_candidates.sort(key=lambda x: x.importance_score, reverse=True)
-
-        # 只保留前 max_nodes 个
-        keep_chunk_ids = {c.chunk_id for c in must_keep_candidates[:max_nodes]}
-        selected = [c for c in selected if c.chunk_id in keep_chunk_ids]
-
-    # 按 progress 排序
-    selected.sort(key=lambda x: x.progress)
-
-    return selected
+    anchor_chunk_id: int
+    progress: float
+    phase_name: TimelinePhaseName
+    lifecycle_event: LifecycleEventDTO
+    character_importance: float
 
 
 def calculate_tension_percentile(
@@ -526,113 +241,164 @@ def calculate_tension_percentile(
     if not all_tensions:
         return 50
 
-    count_le = sum(1 for t in all_tensions if t <= tension_score)
+    count_le = sum(1 for tension in all_tensions if tension <= tension_score)
     percentile = int((count_le / len(all_tensions)) * 100)
     return min(percentile, 100)
 
 
-def get_major_characters_by_span(
-    entities: list[Any],
-    top_n: int = 3,
-) -> list[Any]:
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：时间轴节点数量不再固定 10/20，而是按小说篇幅自适应预算，
+# 让 30 chunk 与 250 chunk 的时间轴不再共享同一硬上限。
+def compute_timeline_node_budget(total_chunks: int) -> TimelineBudget:
+    if total_chunks <= 40:
+        return TimelineBudget(min_nodes=8, target_nodes=12, max_nodes=16)
+    if total_chunks <= 120:
+        return TimelineBudget(min_nodes=10, target_nodes=16, max_nodes=24)
+    if total_chunks <= 240:
+        return TimelineBudget(min_nodes=12, target_nodes=24, max_nodes=32)
+    return TimelineBudget(min_nodes=14, target_nodes=30, max_nodes=40)
+
+
+def compute_four_phases(
+    tension_scores: list[float],
+    chunk_ids: list[int],
+) -> list[NarrativePhase]:
     """
-    基于活跃跨度获取主要角色。
+    计算四阶段划分（多峰模型）。
 
-    活跃跨度 = 角色在 chunk 序列中的最大索引 - 最小索引 + 1
-    （注意：活跃跨度 ≠ 出现次数）
-
-    Args:
-        entities: GraphEntity 列表（或其他具有 first_seen_chunk/last_seen_chunk 属性的对象）
-        top_n: 返回前 N 个主要角色
-
-    Returns:
-        按活跃跨度排序的主要角色列表
+    基于 Freytag 金字塔理论 + 网络小说多波次叠加结构，使用局部峰值
+    检测确定高潮位置，而非单一全局峰值。
     """
-    valid_entities = [
-        e
-        for e in entities
-        if hasattr(e, "first_seen_chunk")
-        and hasattr(e, "last_seen_chunk")
-        and e.first_seen_chunk is not None
-        and e.last_seen_chunk is not None
-    ]
+    if not tension_scores or not chunk_ids:
+        return []
 
-    # 计算活跃跨度
-    def get_span(entity: Any) -> int:
-        return entity.last_seen_chunk - entity.first_seen_chunk + 1
+    total = len(tension_scores)
+    min_phase_length = 1
 
-    sorted_entities = sorted(valid_entities, key=get_span, reverse=True)
-    return sorted_entities[:top_n]
+    if total < 20:
+        boundary_1 = max(1, min(int(total * 0.15), total - 3))
+        boundary_2 = max(boundary_1 + 1, min(int(total * 0.50), total - 2))
+        boundary_3 = max(boundary_2 + 1, min(int(total * 0.80), total - 2))
+        return [
+            NarrativePhase("引入期", chunk_ids[0], chunk_ids[boundary_1], (boundary_1 + 1) / total),
+            NarrativePhase(
+                "发展期",
+                chunk_ids[boundary_1 + 1],
+                chunk_ids[boundary_2],
+                (boundary_2 - boundary_1) / total,
+            ),
+            NarrativePhase(
+                "高潮期",
+                chunk_ids[boundary_2 + 1],
+                chunk_ids[boundary_3],
+                (boundary_3 - boundary_2) / total,
+            ),
+            NarrativePhase("收束期", chunk_ids[boundary_3 + 1], chunk_ids[-1], (total - boundary_3 - 1) / total),
+        ]
+
+    local_peaks = find_local_peaks(tension_scores, total)
+    half_idx = total // 2
+
+    if local_peaks:
+        late_peaks = [peak for peak in local_peaks if peak >= half_idx]
+        if late_peaks:
+            peak_idx = max(late_peaks, key=lambda idx: tension_scores[idx])
+        else:
+            peak_idx = local_peaks[-1]
+    else:
+        logger.warning("No local peaks found in tension_scores, falling back to global peak")
+        peak_idx = find_global_peak(tension_scores)
+
+    if peak_idx == 0:
+        valley_idx = max(min_phase_length, int(total * 0.15))
+    else:
+        before_peak = tension_scores[:peak_idx]
+        valley_idx = max(min_phase_length, min(range(len(before_peak)), key=lambda idx: before_peak[idx]))
+
+    max_climax_radius = int(total * 0.10)
+    climax_radius = min(max(3, int(total * 0.05)), max_climax_radius)
+    climax_start = max(valley_idx + min_phase_length, peak_idx - climax_radius)
+    climax_end = min(total - 1 - min_phase_length, peak_idx + climax_radius)
+
+    valley_idx = min(valley_idx, climax_start - min_phase_length)
+    valley_idx = max(valley_idx, min_phase_length)
+
+    phases: list[NarrativePhase] = []
+    phases.append(NarrativePhase("引入期", chunk_ids[0], chunk_ids[valley_idx], (valley_idx + 1) / total))
+
+    dev_start_idx = valley_idx + 1
+    dev_end_idx = climax_start - 1
+    if dev_end_idx >= dev_start_idx:
+        phases.append(
+            NarrativePhase(
+                "发展期",
+                chunk_ids[dev_start_idx],
+                chunk_ids[dev_end_idx],
+                (dev_end_idx - dev_start_idx + 1) / total,
+            )
+        )
+    else:
+        phases.append(NarrativePhase("发展期", chunk_ids[valley_idx], chunk_ids[valley_idx], 0.0))
+
+    phases.append(
+        NarrativePhase(
+            "高潮期",
+            chunk_ids[climax_start],
+            chunk_ids[climax_end],
+            (climax_end - climax_start + 1) / total,
+        )
+    )
+
+    if climax_end < total - 1 - min_phase_length:
+        phases.append(
+            NarrativePhase(
+                "收束期",
+                chunk_ids[climax_end + 1],
+                chunk_ids[-1],
+                (total - climax_end - 1) / total,
+            )
+        )
+    else:
+        phases.append(NarrativePhase("收束期", chunk_ids[climax_end], chunk_ids[climax_end], 0.0))
+
+    return phases
 
 
 def convert_to_timeline_phases(phases: list[NarrativePhase]) -> list[TimelinePhaseDTO]:
-    """
-    将内部 NarrativePhase 转换为 TimelinePhaseDTO。
-
-    Args:
-        phases: NarrativePhase 列表
-
-    Returns:
-        TimelinePhaseDTO 列表
-    """
+    """将内部 NarrativePhase 转换为 TimelinePhaseDTO。"""
     result: list[TimelinePhaseDTO] = []
-    for p in phases:
-        if p.name in ("引入期", "发展期", "高潮期", "收束期"):
-            name = cast(TimelinePhaseName, p.name)
+    for phase in phases:
+        if phase.name in ("引入期", "发展期", "高潮期", "收束期"):
+            name = cast(TimelinePhaseName, phase.name)
         else:
-            name = "引入期"  # fallback
-        result.append(
-            TimelinePhaseDTO(
-                name=name,
-                start=p.start,
-                end=p.end,
-                ratio=round(p.ratio, 4),
-            )
-        )
+            name = "引入期"
+        result.append(TimelinePhaseDTO(name=name, start=phase.start, end=phase.end, ratio=round(phase.ratio, 4)))
     return result
 
 
-def convert_to_timeline_nodes(candidates: list[TimelineCandidate]) -> list[TimelineNodeDTO]:
+def compute_importance_score(score_breakdown: dict[str, float]) -> tuple[float, ImportanceLevel]:
     """
-    将内部 TimelineCandidate 转换为 TimelineNodeDTO。
+    根据分项得分计算节点总分与等级。
 
     Args:
-        candidates: TimelineCandidate 列表
+        score_breakdown: 节点分项得分
 
     Returns:
-        TimelineNodeDTO 列表
+        (importance_score, level): 总分与级别
     """
-    return [
-        TimelineNodeDTO(
-            chunk_id=c.chunk_id,
-            progress=round(c.progress, 4),
-            importance_score=round(c.importance_score, 2),
-            level=c.level,
-            event=c.event,
-            characters=c.characters,
-            is_pivot=c.is_pivot,
-            is_cliffhanger=c.is_cliffhanger,
-            tension_percentile=c.tension_percentile,
-            node_type=c.node_type,
-            relation_changes=c.relation_changes,
-            character_entries=c.character_entries,
-            character_exits=c.character_exits,
-        )
-        for c in candidates
-    ]
+    score = round(sum(score_breakdown.values()), 2)
+    if score >= 6.5:
+        level: ImportanceLevel = 1
+    elif score >= 4.0:
+        level = 2
+    else:
+        level = 3
+    return score, level
 
 
 def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any], list[Any], dict[int, str]]:
     """
-    Validate the authority-backed timeline contract before building candidates.
-
-    Timeline is intentionally allowed to depend on only three authority surfaces:
-    - ``character_entities``: use ``entity_id/name/entity_type`` to freeze the character subgraph
-    - ``entity_lifecycles``: use ``entity_id/name/first_seen_chunk/last_seen_chunk`` as entry/exit truth
-    - ``relation_events``: use ``chunk_id/from_entity_id/to_entity_id/relation_type/change_type/evidence``
-
-    If any non-character entity or cross-subgraph relation leaks into this view, we
-    fail fast so the shared contract regression is visible in tests and API behavior.
+    Validate the authority-backed timeline contract before building timeline plans.
     """
 
     character_entities = list(timeline_view.character_entities)
@@ -666,9 +432,6 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
     if len(set(entity_ids)) != len(entity_ids):
         raise TimelineAuthorityContractError("TimelineAuthorityView.character_entities must not duplicate entity_id")
 
-    # Entry/exit spans and relation rendering must talk about the exact same
-    # character set, otherwise timeline can silently emit different names for
-    # the same entity across node types.
     character_map = {
         int(entity.entity_id): entity for entity in character_entities if getattr(entity, "entity_id", None) is not None
     }
@@ -677,6 +440,7 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
         raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must provide non-null entity_id")
     if len(set(lifecycle_ids)) != len(lifecycle_ids):
         raise TimelineAuthorityContractError("TimelineAuthorityView.entity_lifecycles must not duplicate entity_id")
+
     lifecycle_map = {int(lifecycle.entity_id): lifecycle for lifecycle in entity_lifecycles}
     character_ids = set(character_map)
 
@@ -707,13 +471,17 @@ def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any],
             raise TimelineAuthorityContractError(
                 "TimelineAuthorityView.relation_events must stay inside the character subgraph"
             )
+        if getattr(event, "change_type", None) not in RELATION_CHANGE_WEIGHTS:
+            raise TimelineAuthorityContractError(
+                "TimelineAuthorityView.relation_events must expose only meaningful relation changes"
+            )
 
     return entity_lifecycles, relation_events, {entity_id: entity.name for entity_id, entity in character_map.items()}
 
 
-# 2026-04-23，任务：复杂度与耦合审查 P1
-# 新建原因：把 authority contract 校验后的 view 收口成 timeline 指标层专用输入，
-# 避免后续候选构建继续依赖 TimelineAuthorityView 的原始形状。
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：把 authority contract 校验后的 view 收口成 timeline 专用输入，
+# 避免 route/export 继续依赖 TimelineAuthorityView 的原始形状。
 def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> TimelineAuthorityData:
     entity_lifecycles, relation_events, entity_name_map = _resolve_timeline_authority_contract(timeline_view)
     return TimelineAuthorityData(
@@ -723,8 +491,8 @@ def _adapt_timeline_authority_view(timeline_view: TimelineAuthorityView) -> Time
     )
 
 
-# 2026-04-23，任务：复杂度与耦合审查 P1
-# 新建原因：把张力曲线长度校正逻辑独立出来，避免候选构建阶段混入数据清洗细节。
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：把张力曲线长度校正逻辑独立出来，确保 timeline atom 计算只面对与 chunk 对齐的张力数组。
 def _normalize_tension_scores(
     chunk_curves: list[Any] | None,
     total_chunks: int,
@@ -744,8 +512,8 @@ def _normalize_tension_scores(
     return tension_scores
 
 
-# 2026-04-23，任务：复杂度与耦合审查 P1
-# 新建原因：用具名快照替代函数内临时类，明确标注适配层和候选构建层的边界。
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：用具名快照替代函数内临时结构，明确标注数据到 plot atom 的适配边界。
 def _build_timeline_annotation_map(raw_annotations: list[Any]) -> dict[int, TimelineAnnotationSnapshot]:
     if not raw_annotations:
         return {}
@@ -762,8 +530,8 @@ def _build_timeline_annotation_map(raw_annotations: list[Any]) -> dict[int, Time
     return annotation_map
 
 
-# 2026-04-23，任务：复杂度与耦合审查 P1
-# 新建原因：把 repository 返回值统一适配成候选构建上下文，降低 build_timeline_candidates 的职责密度。
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：统一装载 chunk / summary / annotation / tension 输入，避免 timeline 新引擎继续散落访问 repository。
 def _load_timeline_source_data(
     run_id: str,
     chunk_repo: Any,
@@ -774,9 +542,9 @@ def _load_timeline_source_data(
     if not chunk_texts:
         raise TimelineDataUnavailableError(f"No chunks found for run {run_id}")
 
-    chunk_ids = [cid for cid, _ in chunk_texts]
+    chunk_ids = [chunk_id for chunk_id, _ in chunk_texts]
     total_chunks = len(chunk_ids)
-    chunk_id_to_idx = {cid: idx for idx, cid in enumerate(chunk_ids)}
+    chunk_id_to_idx = {chunk_id: idx for idx, chunk_id in enumerate(chunk_ids)}
 
     chunk_curves = stats_repo.fetch_chunk_curves_full(run_id)
     tension_scores = _normalize_tension_scores(chunk_curves, total_chunks)
@@ -794,209 +562,555 @@ def _load_timeline_source_data(
     )
 
 
-# 2026-04-23，任务：复杂度与耦合审查 P1
-# 新建原因：把“候选构建完成后给节点选择阶段的输入”独立成单独步骤，避免调用方继续拆 7 元组。
-def _build_timeline_selection_inputs(
+def _resolve_phase_name(chunk_id: int, phases: list[TimelinePhaseDTO]) -> TimelinePhaseName:
+    for phase in phases:
+        if phase.start <= chunk_id <= phase.end:
+            return phase.name
+    return phases[-1].name if phases else "引入期"
+
+
+def _build_character_importance_map(
     source_data: TimelineSourceData,
     authority_data: TimelineAuthorityData,
-) -> TimelineSelectionInputs:
-    major_characters = get_major_characters_by_span(authority_data.entity_lifecycles, top_n=3)
-    major_character_entries: list[tuple[str, int]] = []
-    for char in major_characters:
-        if char.first_seen_chunk is None:
-            continue
-        idx = source_data.chunk_id_to_idx.get(char.first_seen_chunk)
-        if idx is not None:
-            major_character_entries.append((char.name, idx))
+) -> dict[int, float]:
+    relation_counterpart_map: dict[int, set[int]] = {}
+    relation_event_count_map: dict[int, int] = {}
+    for event in authority_data.relation_events:
+        relation_counterpart_map.setdefault(event.from_entity_id, set()).add(event.to_entity_id)
+        relation_counterpart_map.setdefault(event.to_entity_id, set()).add(event.from_entity_id)
+        relation_event_count_map[event.from_entity_id] = relation_event_count_map.get(event.from_entity_id, 0) + 1
+        relation_event_count_map[event.to_entity_id] = relation_event_count_map.get(event.to_entity_id, 0) + 1
 
-    relation_break_events: list[tuple[int, RelationChangeEventDTO]] = []
-    for rel_event in authority_data.relation_events:
-        if rel_event.change_type != "断裂":
+    importance_map: dict[int, float] = {}
+    for lifecycle in authority_data.entity_lifecycles:
+        if lifecycle.entity_id is None:
             continue
-        idx = source_data.chunk_id_to_idx.get(rel_event.chunk_id)
-        if idx is None:
+        first_seen_chunk = lifecycle.first_seen_chunk if lifecycle.first_seen_chunk is not None else 0
+        last_seen_chunk = lifecycle.last_seen_chunk if lifecycle.last_seen_chunk is not None else first_seen_chunk
+        span = max(last_seen_chunk - first_seen_chunk + 1, 1)
+        span_score = span / max(source_data.total_chunks, 1) * 3.0
+        degree_score = len(relation_counterpart_map.get(lifecycle.entity_id, set())) * 0.6
+        relation_event_score = relation_event_count_map.get(lifecycle.entity_id, 0) * 0.35
+        importance_map[lifecycle.entity_id] = round(span_score + degree_score + relation_event_score, 2)
+
+    return importance_map
+
+
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：plot / relation / lifecycle 的选择逻辑完全不同，先拆成原子信号，
+# 再进入统一节点规划层，避免再次退回 “每个 chunk 一个节点” 的旧模型。
+def build_timeline_atoms(
+    source_data: TimelineSourceData,
+    authority_data: TimelineAuthorityData,
+    phases: list[TimelinePhaseDTO],
+) -> tuple[list[PlotAtom], list[RelationAtom], list[LifecycleAtom]]:
+    phase_names_by_chunk = {
+        chunk_id: _resolve_phase_name(chunk_id, phases)
+        for chunk_id in source_data.chunk_ids
+    }
+    character_importance_map = _build_character_importance_map(source_data, authority_data)
+
+    plot_atoms: list[PlotAtom] = []
+    for index, (chunk_id, text) in enumerate(source_data.chunk_texts):
+        annotation = source_data.annotation_map.get(chunk_id)
+        summary = source_data.summary_map.get(chunk_id, "")
+        if not summary:
+            summary = text[:30] + "..." if len(text) > 30 else text
+
+        characters = sorted(
+            {
+                lifecycle.name
+                for lifecycle in authority_data.entity_lifecycles
+                if lifecycle.first_seen_chunk == chunk_id or lifecycle.last_seen_chunk == chunk_id
+            }
+        )
+        plot_atoms.append(
+            PlotAtom(
+                anchor_chunk_id=chunk_id,
+                progress=index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0,
+                summary=summary,
+                phase_name=phase_names_by_chunk[chunk_id],
+                characters=characters,
+                event_type=annotation.event_type if annotation else "",
+                emotional_valence=annotation.emotional_valence if annotation else "",
+                tension_score=source_data.tension_scores[index],
+                tension_percentile=calculate_tension_percentile(
+                    source_data.tension_scores[index],
+                    source_data.tension_scores,
+                ),
+                is_pivot=annotation.pivot_moment if annotation else False,
+                is_cliffhanger=annotation.cliffhanger if annotation else False,
+            )
+        )
+
+    relation_phase_counts: dict[str, int] = {}
+    for relation_event in authority_data.relation_events:
+        phase_name = phase_names_by_chunk.get(relation_event.chunk_id, "引入期")
+        relation_phase_counts[phase_name] = relation_phase_counts.get(phase_name, 0) + 1
+
+    max_phase_relation_count = max(relation_phase_counts.values(), default=1)
+    relation_atoms: list[RelationAtom] = []
+    for relation_event in authority_data.relation_events:
+        chunk_index = source_data.chunk_id_to_idx.get(relation_event.chunk_id)
+        if chunk_index is None:
             continue
-        from_char = authority_data.entity_name_map.get(rel_event.from_entity_id, str(rel_event.from_entity_id))
-        to_char = authority_data.entity_name_map.get(rel_event.to_entity_id, str(rel_event.to_entity_id))
-        relation_break_events.append(
+        phase_name = phase_names_by_chunk.get(relation_event.chunk_id, "引入期")
+        from_name = authority_data.entity_name_map.get(
+            relation_event.from_entity_id,
+            str(relation_event.from_entity_id),
+        )
+        to_name = authority_data.entity_name_map.get(
+            relation_event.to_entity_id,
+            str(relation_event.to_entity_id),
+        )
+        relation_event_dto = RelationEventDTO(
+            relation_event_id=int(relation_event.relation_event_id),
+            from_char=from_name,
+            to_char=to_name,
+            relation_type=relation_event.relation_type,
+            change_type=cast(Literal["新建", "强化", "弱化", "断裂"], relation_event.change_type),
+            evidence=relation_event.evidence,
+            confidence=relation_event.confidence,
+            directionality=relation_event.directionality,
+        )
+        phase_rarity = 1.0 - (
+            relation_phase_counts.get(phase_name, 0) / max(max_phase_relation_count, 1)
+        )
+        pair_importance = round(
             (
-                idx,
-                RelationChangeEventDTO(
-                    from_char=from_char,
-                    to_char=to_char,
-                    relation_type=rel_event.relation_type,
-                    change_type=rel_event.change_type,
-                    evidence=rel_event.evidence,
+                character_importance_map.get(relation_event.from_entity_id, 0.0)
+                + character_importance_map.get(relation_event.to_entity_id, 0.0)
+            )
+            / 2,
+            2,
+        )
+        relation_atoms.append(
+            RelationAtom(
+                anchor_chunk_id=relation_event.chunk_id,
+                progress=chunk_index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0,
+                phase_name=phase_name,
+                relation_event=relation_event_dto,
+                characters=sorted({from_name, to_name}),
+                phase_rarity=round(phase_rarity, 2),
+                pair_importance=pair_importance,
+            )
+        )
+
+    lifecycle_atoms: list[LifecycleAtom] = []
+    for lifecycle in authority_data.entity_lifecycles:
+        if lifecycle.entity_id is None:
+            continue
+        if lifecycle.first_seen_chunk is not None:
+            lifecycle_atoms.append(
+                LifecycleAtom(
+                    anchor_chunk_id=lifecycle.first_seen_chunk,
+                    progress=(
+                        source_data.chunk_id_to_idx.get(lifecycle.first_seen_chunk, 0) / (source_data.total_chunks - 1)
+                        if source_data.total_chunks > 1
+                        else 0.0
+                    ),
+                    phase_name=phase_names_by_chunk.get(lifecycle.first_seen_chunk, "引入期"),
+                    lifecycle_event=LifecycleEventDTO(
+                        entity_id=lifecycle.entity_id,
+                        character_name=lifecycle.name,
+                        lifecycle_type="entry",
+                    ),
+                    character_importance=character_importance_map.get(lifecycle.entity_id, 0.0),
+                )
+            )
+        if lifecycle.last_seen_chunk is not None:
+            lifecycle_atoms.append(
+                LifecycleAtom(
+                    anchor_chunk_id=lifecycle.last_seen_chunk,
+                    progress=(
+                        source_data.chunk_id_to_idx.get(lifecycle.last_seen_chunk, 0) / (source_data.total_chunks - 1)
+                        if source_data.total_chunks > 1
+                        else 0.0
+                    ),
+                    phase_name=phase_names_by_chunk.get(lifecycle.last_seen_chunk, "收束期"),
+                    lifecycle_event=LifecycleEventDTO(
+                        entity_id=lifecycle.entity_id,
+                        character_name=lifecycle.name,
+                        lifecycle_type="exit",
+                    ),
+                    character_importance=character_importance_map.get(lifecycle.entity_id, 0.0),
+                )
+            )
+
+    return plot_atoms, relation_atoms, lifecycle_atoms
+
+
+def _build_plot_score_breakdown(atom: PlotAtom) -> dict[str, float]:
+    return {
+        "pivot": 3.0 if atom.is_pivot else 0.0,
+        "cliffhanger": 2.0 if atom.is_cliffhanger else 0.0,
+        "tension": round(atom.tension_percentile / 50, 2),
+        "event_type": PLOT_EVENT_TYPE_WEIGHTS.get(atom.event_type, 0.0),
+        "emotional_valence": EMOTIONAL_VALENCE_WEIGHTS.get(atom.emotional_valence, 0.0),
+    }
+
+
+def _build_relation_score_breakdown(atom: RelationAtom) -> dict[str, float]:
+    return {
+        "change_type_weight": RELATION_CHANGE_WEIGHTS.get(atom.relation_event.change_type, 0.0),
+        "pair_importance": atom.pair_importance,
+        "phase_rarity": round(atom.phase_rarity, 2),
+        "duplicate_penalty": 0.0,
+    }
+
+
+def _build_lifecycle_score_breakdown(atom: LifecycleAtom) -> dict[str, float]:
+    return {
+        "character_importance": round(atom.character_importance, 2),
+        "entry_exit_bonus": 1.4 if atom.lifecycle_event.lifecycle_type == "entry" else 1.2,
+    }
+
+
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：节点规划层负责把不同 atom 映射为统一节点 DTO，并显式生成稳定 node_id，
+# 让 route / export / frontend 全部摆脱 chunk_id 唯一节点假设。
+def compose_timeline_nodes(
+    plot_atoms: list[PlotAtom],
+    relation_atoms: list[RelationAtom],
+    lifecycle_atoms: list[LifecycleAtom],
+) -> list[TimelineNodeDTO]:
+    nodes: list[TimelineNodeDTO] = []
+
+    for atom in plot_atoms:
+        score_breakdown = _build_plot_score_breakdown(atom)
+        importance_score, level = compute_importance_score(score_breakdown)
+        nodes.append(
+            TimelineNodeDTO(
+                node_id=f"plot:{atom.anchor_chunk_id}",
+                anchor_chunk_id=atom.anchor_chunk_id,
+                progress=round(atom.progress, 4),
+                importance_score=importance_score,
+                level=level,
+                summary=atom.summary,
+                characters=atom.characters,
+                phase_name=atom.phase_name,
+                node_type="plot",
+                node_subtype="plot",
+                score_breakdown=score_breakdown,
+                plot_flags=PlotFlagsDTO(
+                    is_pivot=atom.is_pivot,
+                    is_cliffhanger=atom.is_cliffhanger,
+                    tension_percentile=atom.tension_percentile,
                 ),
             )
         )
 
-    return TimelineSelectionInputs(
-        chunk_ids=source_data.chunk_ids,
-        tension_scores=source_data.tension_scores,
-        major_character_entries=major_character_entries,
-        relation_break_events=relation_break_events,
-    )
-
-
-# 2026-04-23，任务：复杂度与耦合审查 P1
-# 新建原因：把候选节点构建独立成纯编排函数，明确它只消费已适配的 source/authority 数据。
-def _build_timeline_candidates_from_context(
-    source_data: TimelineSourceData,
-    authority_data: TimelineAuthorityData,
-) -> list[TimelineCandidate]:
-    chunk_relation_events: dict[int, list[Any]] = {}
-    for relation_event in authority_data.relation_events:
-        chunk_relation_events.setdefault(relation_event.chunk_id, []).append(relation_event)
-
-    major_characters = get_major_characters_by_span(authority_data.entity_lifecycles, top_n=3)
-    major_character_names = {character.name for character in major_characters}
-    candidates: list[TimelineCandidate] = []
-
-    for index, (chunk_id, text) in enumerate(source_data.chunk_texts):
-        progress = index / (source_data.total_chunks - 1) if source_data.total_chunks > 1 else 0.0
-        annotation = source_data.annotation_map.get(chunk_id)
-        pivot_moment = annotation.pivot_moment if annotation else False
-        cliffhanger = annotation.cliffhanger if annotation else False
-        event_type = annotation.event_type if annotation else ""
-        emotional_valence = annotation.emotional_valence if annotation else ""
-
-        event = source_data.summary_map.get(chunk_id, "")
-        if not event:
-            event = text[:30] + "..." if len(text) > 30 else text
-
-        character_entries: list[str] = []
-        character_exits: list[str] = []
-        for lifecycle in authority_data.entity_lifecycles:
-            if lifecycle.first_seen_chunk == chunk_id:
-                character_entries.append(lifecycle.name)
-            if lifecycle.last_seen_chunk == chunk_id:
-                character_exits.append(lifecycle.name)
-
-        relation_changes: list[RelationChangeEventDTO] = []
-        for relation_event in chunk_relation_events.get(chunk_id, []):
-            from_char = authority_data.entity_name_map.get(
-                relation_event.from_entity_id,
-                str(relation_event.from_entity_id),
-            )
-            to_char = authority_data.entity_name_map.get(
-                relation_event.to_entity_id,
-                str(relation_event.to_entity_id),
-            )
-            relation_changes.append(
-                RelationChangeEventDTO(
-                    from_char=from_char,
-                    to_char=to_char,
-                    relation_type=relation_event.relation_type,
-                    change_type=relation_event.change_type,
-                    evidence=relation_event.evidence,
-                )
-            )
-
-        is_major_character = bool((set(character_entries) | set(character_exits)) & major_character_names)
-        importance_score, level = compute_importance_score(
-            pivot_moment=pivot_moment,
-            cliffhanger=cliffhanger,
-            tension_composite=source_data.tension_scores[index],
-            all_tensions=source_data.tension_scores,
-            event_type=event_type,
-            emotional_valence=emotional_valence,
-            has_relation_change=bool(relation_changes),
-            has_character_entry=bool(character_entries),
-            has_character_exit=bool(character_exits),
-            is_major_character=is_major_character,
-        )
-
-        node_type: TimelineNodeType = "plot"
-        if character_entries and is_major_character:
-            node_type = "character_entry"
-        elif character_exits and is_major_character:
-            node_type = "character_exit"
-        elif relation_changes:
-            node_type = "relation_change"
-
-        tension_percentile = calculate_tension_percentile(
-            source_data.tension_scores[index],
-            source_data.tension_scores,
-        )
-        characters = list(set(character_entries + character_exits))
-        if relation_changes:
-            for relation_change in relation_changes:
-                characters.extend([relation_change.from_char, relation_change.to_char])
-        characters = list(set(characters))
-
-        candidates.append(
-            TimelineCandidate(
-                chunk_id=chunk_id,
-                progress=progress,
+    for relation_atom in relation_atoms:
+        score_breakdown = _build_relation_score_breakdown(relation_atom)
+        importance_score, level = compute_importance_score(score_breakdown)
+        nodes.append(
+            TimelineNodeDTO(
+                node_id=f"relation:{relation_atom.relation_event.relation_event_id}",
+                anchor_chunk_id=relation_atom.anchor_chunk_id,
+                progress=round(relation_atom.progress, 4),
                 importance_score=importance_score,
                 level=level,
-                event=event,
-                characters=characters,
-                is_pivot=pivot_moment,
-                is_cliffhanger=cliffhanger,
-                tension_percentile=tension_percentile,
-                node_type=node_type,
-                relation_changes=relation_changes if relation_changes else None,
-                character_entries=character_entries if character_entries else None,
-                character_exits=character_exits if character_exits else None,
+                summary=(
+                    f"{relation_atom.relation_event.from_char}与{relation_atom.relation_event.to_char}"
+                    f"{relation_atom.relation_event.change_type}{relation_atom.relation_event.relation_type}"
+                ),
+                characters=relation_atom.characters,
+                phase_name=relation_atom.phase_name,
+                node_type="relation",
+                node_subtype=cast(TimelineNodeSubtype, relation_atom.relation_event.change_type),
+                score_breakdown=score_breakdown,
+                relation_events=[relation_atom.relation_event],
             )
         )
 
-    return candidates
+    for lifecycle_atom in lifecycle_atoms:
+        score_breakdown = _build_lifecycle_score_breakdown(lifecycle_atom)
+        importance_score, level = compute_importance_score(score_breakdown)
+        lifecycle_type = lifecycle_atom.lifecycle_event.lifecycle_type
+        nodes.append(
+            TimelineNodeDTO(
+                node_id=(
+                    f"lifecycle:{lifecycle_type}:"
+                    f"{lifecycle_atom.lifecycle_event.entity_id}:{lifecycle_atom.anchor_chunk_id}"
+                ),
+                anchor_chunk_id=lifecycle_atom.anchor_chunk_id,
+                progress=round(lifecycle_atom.progress, 4),
+                importance_score=importance_score,
+                level=level,
+                summary=(
+                    f"{lifecycle_atom.lifecycle_event.character_name}首次登场"
+                    if lifecycle_type == "entry"
+                    else f"{lifecycle_atom.lifecycle_event.character_name}退场"
+                ),
+                characters=[lifecycle_atom.lifecycle_event.character_name],
+                phase_name=lifecycle_atom.phase_name,
+                node_type="lifecycle",
+                node_subtype=cast(TimelineNodeSubtype, lifecycle_type),
+                score_breakdown=score_breakdown,
+                lifecycle_events=[lifecycle_atom.lifecycle_event],
+            )
+        )
+
+    return nodes
 
 
-# 2026-04-23，任务：复杂度与耦合审查 P1
-# 修改原因：改为由调用方传入 authority view，并把 contract 校验、数据适配、候选构建、
-# 节点选择输入分拆为独立步骤，去掉指标层对 repo.session 的反向依赖。
-def build_timeline_candidates(
+def _node_sort_key(node: TimelineNodeDTO) -> tuple[float, int, str]:
+    subtype_rank = {
+        "plot": 0,
+        "entry": 1,
+        "新建": 2,
+        "强化": 3,
+        "弱化": 4,
+        "断裂": 5,
+        "exit": 6,
+    }
+    return (node.progress, node.anchor_chunk_id, f"{subtype_rank.get(node.node_subtype, 9)}:{node.node_id}")
+
+
+def _select_best_plot_node(nodes: list[TimelineNodeDTO], anchor_chunk_id: int) -> TimelineNodeDTO | None:
+    plot_nodes = [node for node in nodes if node.node_type == "plot" and node.anchor_chunk_id == anchor_chunk_id]
+    if not plot_nodes:
+        return None
+    return max(plot_nodes, key=lambda node: node.importance_score)
+
+
+def _relation_pair_signature(node: TimelineNodeDTO) -> tuple[str, str, str] | None:
+    if not node.relation_events:
+        return None
+    event = node.relation_events[0]
+    name_pair = tuple(sorted((event.from_char, event.to_char)))
+    return (name_pair[0], name_pair[1], event.relation_type)
+
+
+def _lifecycle_signature(node: TimelineNodeDTO) -> tuple[int, str] | None:
+    if not node.lifecycle_events:
+        return None
+    event = node.lifecycle_events[0]
+    return (event.entity_id, event.lifecycle_type)
+
+
+def _has_selection_conflict(candidate: TimelineNodeDTO, selected: list[TimelineNodeDTO]) -> bool:
+    for existing in selected:
+        if (
+            candidate.node_type == "plot"
+            and existing.node_type == "plot"
+            and candidate.node_subtype == existing.node_subtype
+            and abs(candidate.anchor_chunk_id - existing.anchor_chunk_id) <= 2
+        ):
+            return True
+
+        if candidate.node_type == "relation" and existing.node_type == "relation":
+            candidate_signature = _relation_pair_signature(candidate)
+            existing_signature = _relation_pair_signature(existing)
+            if (
+                candidate_signature is not None
+                and existing_signature is not None
+                and candidate_signature == existing_signature
+                and abs(candidate.anchor_chunk_id - existing.anchor_chunk_id) <= 3
+            ):
+                return True
+
+        if candidate.node_type == "lifecycle" and existing.node_type == "lifecycle":
+            candidate_lifecycle_signature = _lifecycle_signature(candidate)
+            existing_lifecycle_signature = _lifecycle_signature(existing)
+            if (
+                candidate_lifecycle_signature is not None
+                and existing_lifecycle_signature == candidate_lifecycle_signature
+            ):
+                return True
+
+    return False
+
+
+def _maybe_add_node(selected: list[TimelineNodeDTO], candidate: TimelineNodeDTO | None, max_nodes: int) -> bool:
+    if candidate is None:
+        return False
+    if len(selected) >= max_nodes:
+        return False
+    if any(existing.node_id == candidate.node_id for existing in selected):
+        return False
+    if _has_selection_conflict(candidate, selected):
+        return False
+    selected.append(candidate)
+    return True
+
+
+def _pick_phase_coverage_nodes(
+    nodes: list[TimelineNodeDTO],
+    phases: list[TimelinePhaseDTO],
+    selected: list[TimelineNodeDTO],
+    max_nodes: int,
+) -> None:
+    type_priority = {"plot": 0, "relation": 1, "lifecycle": 2}
+    for phase in phases:
+        phase_nodes = [node for node in nodes if node.phase_name == phase.name]
+        phase_nodes.sort(
+            key=lambda node: (
+                type_priority.get(node.node_type, 9),
+                -node.importance_score,
+                node.anchor_chunk_id,
+            )
+        )
+        for node in phase_nodes:
+            if _maybe_add_node(selected, node, max_nodes):
+                break
+
+
+def _type_quota_map(target_nodes: int) -> dict[TimelineNodeType, int]:
+    plot_quota = max(3, round(target_nodes * 0.4))
+    relation_quota = max(2, round(target_nodes * 0.35))
+    lifecycle_quota = max(2, target_nodes - plot_quota - relation_quota)
+    return {
+        "plot": plot_quota,
+        "relation": relation_quota,
+        "lifecycle": lifecycle_quota,
+    }
+
+
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：新的选择器需要同时满足 budget、phase 覆盖、类型配额与近距去重；
+# 它不再围绕“每个 chunk 选一个 candidate”，而是直接对规划后的节点集合做筛选。
+def select_timeline_nodes(
+    nodes: list[TimelineNodeDTO],
+    chunk_ids: list[int],
+    tension_scores: list[float],
+    phases: list[TimelinePhaseDTO],
+    budget: TimelineBudget,
+) -> list[TimelineNodeDTO]:
+    if not nodes or not chunk_ids:
+        return []
+
+    selected: list[TimelineNodeDTO] = []
+    peak_idx = find_global_peak(tension_scores) if tension_scores else 0
+    start_chunk_id = chunk_ids[0]
+    end_chunk_id = chunk_ids[-1]
+    peak_chunk_id = chunk_ids[peak_idx]
+
+    _maybe_add_node(selected, _select_best_plot_node(nodes, start_chunk_id), budget.max_nodes)
+    _maybe_add_node(selected, _select_best_plot_node(nodes, end_chunk_id), budget.max_nodes)
+    _maybe_add_node(selected, _select_best_plot_node(nodes, peak_chunk_id), budget.max_nodes)
+
+    _pick_phase_coverage_nodes(nodes, phases, selected, budget.max_nodes)
+
+    quota_map = _type_quota_map(budget.target_nodes)
+    sorted_nodes = sorted(nodes, key=lambda node: (-node.importance_score, node.anchor_chunk_id, node.node_id))
+    type_counts = {
+        "plot": sum(1 for node in selected if node.node_type == "plot"),
+        "relation": sum(1 for node in selected if node.node_type == "relation"),
+        "lifecycle": sum(1 for node in selected if node.node_type == "lifecycle"),
+    }
+    for node in sorted_nodes:
+        if len(selected) >= budget.target_nodes:
+            break
+        if type_counts[node.node_type] >= quota_map[node.node_type]:
+            continue
+        if _maybe_add_node(selected, node, budget.max_nodes):
+            type_counts[node.node_type] += 1
+
+    for node in sorted_nodes:
+        if len(selected) >= budget.target_nodes:
+            break
+        _maybe_add_node(selected, node, budget.max_nodes)
+
+    if len(selected) < budget.min_nodes:
+        for node in sorted_nodes:
+            if len(selected) >= budget.min_nodes:
+                break
+            if any(existing.node_id == node.node_id for existing in selected):
+                continue
+            selected.append(node)
+
+    selected.sort(key=_node_sort_key)
+    return selected[: budget.max_nodes]
+
+
+def serialize_timeline_node(node: TimelineNodeDTO) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "node_id": node.node_id,
+        "anchor_chunk_id": node.anchor_chunk_id,
+        "progress": round(node.progress, 4),
+        "importance_score": round(node.importance_score, 2),
+        "level": node.level,
+        "summary": node.summary,
+        "characters": node.characters,
+        "phase_name": node.phase_name,
+        "node_type": node.node_type,
+        "node_subtype": node.node_subtype,
+        "score_breakdown": {key: round(value, 2) for key, value in node.score_breakdown.items()},
+        "plot_flags": None,
+        "relation_events": None,
+        "lifecycle_events": None,
+    }
+    if node.plot_flags is not None:
+        payload["plot_flags"] = {
+            "is_pivot": node.plot_flags.is_pivot,
+            "is_cliffhanger": node.plot_flags.is_cliffhanger,
+            "tension_percentile": node.plot_flags.tension_percentile,
+        }
+    if node.relation_events is not None:
+        payload["relation_events"] = [
+            {
+                "relation_event_id": event.relation_event_id,
+                "from_char": event.from_char,
+                "to_char": event.to_char,
+                "relation_type": event.relation_type,
+                "change_type": event.change_type,
+                "evidence": event.evidence,
+                "confidence": event.confidence,
+                "directionality": event.directionality,
+            }
+            for event in node.relation_events
+        ]
+    if node.lifecycle_events is not None:
+        payload["lifecycle_events"] = [
+            {
+                "entity_id": event.entity_id,
+                "character_name": event.character_name,
+                "lifecycle_type": event.lifecycle_type,
+            }
+            for event in node.lifecycle_events
+        ]
+    return payload
+
+
+def serialize_timeline_phases(phases: list[TimelinePhaseDTO]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": phase.name,
+            "start": phase.start,
+            "end": phase.end,
+            "ratio": round(phase.ratio, 4),
+        }
+        for phase in phases
+    ]
+
+
+# 2026-04-27，任务：时间轴合同重构
+# 新建原因：新的 timeline 共享入口直接返回“已选节点 + 阶段 + 曲线”，
+# route 与 export 不再感知旧 candidate/select/convert 三段式内部实现。
+def build_timeline_plan(
     run_id: str,
     chunk_repo: Any,
     annotation_repo: Any,
     stats_repo: Any,
     timeline_view: TimelineAuthorityView,
-) -> TimelineBuildResult:
-    """
-    构建时间轴候选节点（共享函数）。
-
-    统一 timeline.py 路由和 results_export_service.py 的数据获取 + 候选构建逻辑，
-    消除两处 ~150 行的重复代码。
-
-    Shared contract notes:
-    - timeline 依赖 authority 的字段清单见 ``TIMELINE_AUTHORITY_DEPENDENCY_FIELDS``
-    - 角色登场/退场只来自 TimelineAuthorityView.entity_lifecycles
-    - 关系变化只来自 TimelineAuthorityView.relation_events
-    - timeline 不直接消费 GraphRepository 的原始 ORM / dict 形状
-    - timeline 只看 character subgraph，不接受 organization/group 边渗透进来
-
-    数据获取全部通过 Repository 方法，不使用裸 session.query()。
-    chunk_id 查找使用预构建 dict，O(1) 替代 list.index() O(N)。
-
-    Args:
-        run_id: 运行ID
-        chunk_repo: ChunkRepository 实例
-        annotation_repo: AnnotationRepository 实例
-        stats_repo: StatsRepository 实例
-
-    Returns:
-        TimelineBuildResult:
-        - candidates: 候选节点
-        - total_chunks: chunk 总数
-        - phases: 时间轴阶段 DTO
-        - selection_inputs: 节点选择阶段需要的独立输入
-
-    Raises:
-        ValueError: 无 chunk 数据时
-    """
+) -> TimelinePlanBuildResult:
     source_data = _load_timeline_source_data(run_id, chunk_repo, annotation_repo, stats_repo)
     authority_data = _adapt_timeline_authority_view(timeline_view)
-    timeline_phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chunk_ids))
-    selection_inputs = _build_timeline_selection_inputs(source_data, authority_data)
-    candidates = _build_timeline_candidates_from_context(source_data, authority_data)
-
-    return TimelineBuildResult(
-        candidates=candidates,
+    phases = convert_to_timeline_phases(compute_four_phases(source_data.tension_scores, source_data.chunk_ids))
+    plot_atoms, relation_atoms, lifecycle_atoms = build_timeline_atoms(source_data, authority_data, phases)
+    all_nodes = compose_timeline_nodes(plot_atoms, relation_atoms, lifecycle_atoms)
+    budget = compute_timeline_node_budget(source_data.total_chunks)
+    selected_nodes = select_timeline_nodes(
+        nodes=all_nodes,
+        chunk_ids=source_data.chunk_ids,
+        tension_scores=source_data.tension_scores,
+        phases=phases,
+        budget=budget,
+    )
+    return TimelinePlanBuildResult(
+        nodes=selected_nodes,
         total_chunks=source_data.total_chunks,
-        phases=timeline_phases,
-        selection_inputs=selection_inputs,
+        phases=phases,
+        tension_curve=source_data.tension_scores,
     )

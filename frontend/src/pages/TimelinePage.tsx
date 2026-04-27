@@ -57,6 +57,7 @@ function buildTimelinePageUrl(
   taskId: string,
   options: {
     maxLevel: 1 | 2 | 3;
+    selectedNodeId?: string | null;
     selectedChunk?: number | null;
     relationEventId?: number | null;
   }
@@ -65,6 +66,9 @@ function buildTimelinePageUrl(
     task_id: taskId,
     max_level: String(options.maxLevel),
   });
+  if (options.selectedNodeId) {
+    params.set("selected_node_id", options.selectedNodeId);
+  }
   if (options.selectedChunk != null) {
     params.set("selected_chunk", String(options.selectedChunk));
   }
@@ -86,6 +90,7 @@ export function TimelinePage() {
 
   const urlTaskId = searchParams.get("task_id");
   const urlMaxLevel = searchParams.get("max_level");
+  const urlSelectedNodeId = searchParams.get("selected_node_id");
   const urlSelectedChunk = searchParams.get("selected_chunk");
   const urlRelationEventId = searchParams.get("relation_event_id");
   const urlTaskSyncRef = useRef<string | null>(urlTaskId && currentTaskId !== urlTaskId ? urlTaskId : null);
@@ -144,6 +149,7 @@ export function TimelinePage() {
         maxLevel,
         // 中文注释：时间轴 deep-link 选择态是 task-scoped，切任务时必须清空，
         // 否则旧任务的 relation_event_id / chunk 会污染新任务高亮。
+        selectedNodeId: null,
         selectedChunk: null,
         relationEventId: null,
       }), { replace: true });
@@ -178,24 +184,34 @@ export function TimelinePage() {
     if (relationEventIdFromUrl == null) return null;
     return (
       nodes.find((node) =>
-        node.relation_changes?.some((relationChange) => relationChange.relation_event_id === relationEventIdFromUrl)
+        node.relation_events?.some((relationEvent) => relationEvent.relation_event_id === relationEventIdFromUrl)
       ) ?? null
     );
   }, [nodes, relationEventIdFromUrl]);
+  const selectedNodeById = useMemo(() => {
+    if (!urlSelectedNodeId) return null;
+    return nodes.find((node) => node.node_id === urlSelectedNodeId) ?? null;
+  }, [nodes, urlSelectedNodeId]);
   const selectedNode = useMemo(() => {
     if (nodes.length === 0) return null;
+    if (selectedNodeById) {
+      return selectedNodeById;
+    }
     if (matchedRelationEventNode) {
       return matchedRelationEventNode;
     }
     if (selectedChunkFromUrl != null) {
-      return nodes.find((node) => node.chunk_id === selectedChunkFromUrl) ?? null;
+      return nodes.find((node) => node.anchor_chunk_id === selectedChunkFromUrl) ?? null;
     }
     return null;
-  }, [matchedRelationEventNode, nodes, selectedChunkFromUrl]);
+  }, [matchedRelationEventNode, nodes, selectedChunkFromUrl, selectedNodeById]);
   const resolvedRelationEventId = matchedRelationEventNode ? relationEventIdFromUrl : null;
-  const pivotCount = useMemo(() => nodes.filter((node) => node.is_pivot).length, [nodes]);
+  const pivotCount = useMemo(
+    () => nodes.filter((node) => node.plot_flags?.is_pivot).length,
+    [nodes]
+  );
   const relationChangeCount = useMemo(
-    () => nodes.filter((node) => node.node_type === "relation_change").length,
+    () => nodes.filter((node) => node.node_type === "relation").length,
     [nodes]
   );
   const selectionHint = useMemo(() => {
@@ -212,7 +228,8 @@ export function TimelinePage() {
       if (!novelId || !taskScopeId) return;
       navigate(buildTimelinePageUrl(novelId, taskScopeId, {
         maxLevel: level,
-        selectedChunk: selectedNode?.chunk_id ?? selectedChunkFromUrl,
+        selectedNodeId: selectedNode?.node_id ?? null,
+        selectedChunk: selectedNode?.anchor_chunk_id ?? selectedChunkFromUrl,
         // 中文注释：控制项变更属于“延续当前有效选择”，而不是回写失效 deep-link。
         // 一旦 relation_event_id 已无法命中当前时间轴节点，就只保留已回退成功的 chunk 选择。
         relationEventId: resolvedRelationEventId,
@@ -223,11 +240,12 @@ export function TimelinePage() {
 
   const handleNodeClick = useCallback((node: TimelineNode) => {
     if (!novelId || !taskScopeId) return;
-    const nextSelectedChunk = selectedNode?.chunk_id === node.chunk_id ? null : node.chunk_id;
+    const isSameNode = selectedNode?.node_id === node.node_id;
     navigate(
       buildTimelinePageUrl(novelId, taskScopeId, {
         maxLevel,
-        selectedChunk: nextSelectedChunk,
+        selectedNodeId: isSameNode ? null : node.node_id,
+        selectedChunk: isSameNode ? null : node.anchor_chunk_id,
         relationEventId: null,
       }),
       { replace: true }
@@ -403,7 +421,7 @@ export function TimelinePage() {
                     nodes={nodes}
                     phases={phases}
                     activePhase={activePhase}
-                    selectedNodeId={selectedNode?.chunk_id}
+                    selectedNodeId={selectedNode?.node_id}
                     onNodeClick={handleNodeClick}
                     tensionCurve={tensionCurve}
                     totalChunks={totalChunks}
@@ -420,6 +438,7 @@ export function TimelinePage() {
                         navigate(
                           buildTimelinePageUrl(novelId, taskScopeId, {
                             maxLevel,
+                            selectedNodeId: null,
                             selectedChunk: null,
                             relationEventId: null,
                           }),

@@ -85,6 +85,8 @@ class AnalysisRun(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    graph_projection_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    timeline_contract_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
 
