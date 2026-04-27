@@ -372,6 +372,37 @@ async def test_annotation_client_structured_call_respects_stream_config(
 
 
 @pytest.mark.asyncio
+async def test_annotation_phase3_real_chain_uses_annotation_mode_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    创建时间: 2026-04-27
+    任务: fix-phase3-followup-review-findings
+    说明: annotation 客户端以 `call_type=phase3` 走真实 structured-output 链时，应落到 annotation 的 mode 配置。
+    """
+    monkeypatch.setattr(settings.structured_output, "annotation", "json_object")
+    fake_sdk_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=_make_response('{"name":"白芷","score":7}'))))
+    )
+    client = AnnotationClient(
+        task_type="annotation",
+        config=TaskModelConfig(base_url="http://127.0.0.1:8000/v1", model="test-model", api_key="test-key"),
+        client=fake_sdk_client,
+    )
+
+    parsed, _raw_response = await client._call_annotation_api(
+        messages=[{"role": "user", "content": "请输出 json"}],
+        enable_thinking=False,
+        chunk_id=1,
+        response_model=_AdapterPayload,
+        call_type="phase3",
+    )
+
+    assert parsed == _AdapterPayload(name="白芷", score=7)
+    assert fake_sdk_client.chat.completions.create.await_args.kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
 async def test_structured_output_schema_validation_error_is_not_swallowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -248,6 +248,30 @@ class TestAttributeDialoguesWithLLM(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dict(reject_reasons), {})
         self.assertEqual(llm_candidates, [])
 
+    def test_fastpath_keeps_strict_single_speaker_with_addressee_tail_or_modifier(self) -> None:
+        """引号内称呼对象、句尾叙述和安全修饰语不应破坏已严格证明的 speaker。"""
+        scenarios = [
+            ("张三说：“李四快跑！”", ["张三", "李四"], "prefix_speech_verb", ["张三"]),
+            ("张三说：“走吧。”他转身离开。", ["张三"], "prefix_speech_verb", ["张三"]),
+            ("猴子兴奋地喊道：“快跑！”", ["猴子"], "prefix_speech_verb", ["猴子"]),
+        ]
+
+        for text, known_characters, hit_type, expected_speaker in scenarios:
+            with self.subTest(text=text):
+                candidates = extract_dialogues_from_text(text)
+                fastpath_records, llm_candidates, hit_types, reject_reasons = _resolve_phase3_fastpath_candidates(
+                    text,
+                    candidates,
+                    known_characters=known_characters,
+                    alias_map=None,
+                )
+
+                self.assertEqual(len(fastpath_records), 1)
+                self.assertEqual(fastpath_records[0].speaker, expected_speaker)
+                self.assertEqual(dict(hit_types), {hit_type: 1})
+                self.assertEqual(dict(reject_reasons), {})
+                self.assertEqual(llm_candidates, [])
+
     def test_fastpath_rejects_complex_or_ambiguous_speakers(self) -> None:
         """proof-only fastpath 会把复杂句、多人竞争和代词场景退回 LLM。"""
         scenarios = [
