@@ -3,6 +3,7 @@ from unittest.mock import patch
 from sqlalchemy import text
 
 from src.storage.db import get_session_factory, init_db
+from src.storage.models import Base
 
 
 def test_init_db_excludes_level3_tables_by_default() -> None:
@@ -68,3 +69,27 @@ def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
         ).scalars().all()
 
     assert set(rows) == expected_constraints
+
+
+def test_stage_summaries_metadata_has_single_run_id_foreign_key() -> None:
+    """
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: fix-stage-summary-orm-duplicate-fk
+    说明: StageSummary.run_id 只应在 ORM 元数据里声明一次外键；
+          否则 schema diff 会持续把同义 FK 误报成元数据漂移。
+    """
+    stage_summaries = Base.metadata.tables["stage_summaries"]
+    foreign_keys = sorted(
+        (
+            tuple(column.name for column in constraint.columns),
+            tuple(element.column.table.name for element in constraint.elements),
+            tuple(element.column.name for element in constraint.elements),
+            constraint.ondelete,
+        )
+        for constraint in stage_summaries.foreign_key_constraints
+    )
+
+    assert foreign_keys == [
+        (("run_id",), ("analysis_runs",), ("run_id",), "CASCADE"),
+    ]
