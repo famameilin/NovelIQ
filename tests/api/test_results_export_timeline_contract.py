@@ -174,7 +174,11 @@ def test_fetch_timeline_data_re_raises_unexpected_failures(monkeypatch: pytest.M
 
 
 def test_load_character_bundle_uses_export_authority_entities_for_valid_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    diagnosis = SimpleNamespace(
+        arc_scores={"沈砚": 8.0},
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+    )
     characters = [SimpleNamespace(name="沈砚")]
 
     monkeypatch.setattr(
@@ -218,7 +222,11 @@ def test_load_character_bundle_uses_export_authority_entities_for_valid_names(mo
 def test_load_character_bundle_keeps_diagnosis_present_when_annotation_repo_fallback_hits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    diagnosis = SimpleNamespace(
+        arc_scores={"沈砚": 8.0},
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+    )
     characters = [SimpleNamespace(name="沈砚")]
     annotation_repo = MagicMock()
 
@@ -374,7 +382,11 @@ def test_fetch_all_results_data_rejects_partial_pending_graph_projection(db_sess
 def test_load_character_bundle_excludes_non_character_canonical_entities_from_character_filter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    diagnosis = SimpleNamespace(arc_scores={"沈砚": 8.0}, main_characters=["沈砚"])
+    diagnosis = SimpleNamespace(
+        arc_scores={"沈砚": 8.0},
+        focus_characters=["沈砚"],
+        main_characters=["沈砚"],
+    )
     characters = [SimpleNamespace(name="沈砚")]
 
     monkeypatch.setattr(

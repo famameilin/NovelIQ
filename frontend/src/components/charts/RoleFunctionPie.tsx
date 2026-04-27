@@ -42,6 +42,9 @@ export interface RoleFunctionPieProps {
 /**
  * 2026-04-21，任务：多页面卡片风格统一
  * 修改原因：统一人物页饼图卡片容器，使可视化区域与其他业务信息卡保持一致。
+ *
+ * 2026-04-27，任务：protagonist-focus-contract
+ * 修改原因：移除基于旧主角分阈值的兜底归类，避免旧中心度语义继续干扰角色功能分布。
  */
 export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps) {
   const themeSignature = useChartThemeSignature();
@@ -64,9 +67,6 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
 
       if (matchedFunc) {
         counts[matchedFunc.key]++;
-      } else if (char.protagonist_score && char.protagonist_score >= 4) {
-        // 高主角分的默认为 protagonist
-        counts["protagonist"]++;
       }
     });
 
@@ -78,7 +78,7 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
         value: counts[f.key],
         itemStyle: { color: getCSSColorVar(f.colorVar) },
       }));
-  }, [characters, themeSignature]);
+  }, [characters]);
 
   const option = useMemo(() => {
     if (functionData.length === 0) return {};

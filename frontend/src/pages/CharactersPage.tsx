@@ -10,7 +10,7 @@ import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { CharacterRankingBar } from "@/components/charts/CharacterRankingBar";
 import { RoleFunctionPie } from "@/components/charts/RoleFunctionPie";
 import { CharacterTable } from "@/components/characters/CharacterTable";
-import { ProtagonistCard } from "@/components/characters/ProtagonistCard";
+import { FocusCastCard } from "@/components/characters/FocusCastCard";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Users } from "lucide-react";
@@ -69,6 +69,11 @@ function SkeletonGrid() {
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-27，任务：protagonist-focus-contract
+ * 修改原因：角色页主展示逻辑改为消费 `focus_structure` / `focus_characters`，
+ * 并用新的 FocusCastCard 与多焦点高亮替代旧单主角页面。
+ */
 export function CharactersPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -113,11 +118,7 @@ export function CharactersPage() {
 
   const { data: characters } = charactersQuery;
   const { data: diagnosis } = diagnosisQuery;
-
-  // 找到主角数据
-  const protagonist = characters?.find(
-    (c) => c.name === diagnosis?.protagonist
-  );
+  const focusCharacters = diagnosis?.focus_characters ?? [];
 
   // ---------- Render ----------
 
@@ -185,15 +186,16 @@ export function CharactersPage() {
           {/* Character Ranking Bar */}
           <CharacterRankingBar
             characters={characters}
-            protagonist={diagnosis?.protagonist}
+            focusCharacters={focusCharacters}
           />
 
           {/* Pie + Protagonist Card */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <RoleFunctionPie characters={characters} />
-            <ProtagonistCard
-              protagonist={protagonist}
-              protagonistName={diagnosis?.protagonist}
+            <FocusCastCard
+              characters={characters}
+              focusStructure={diagnosis?.focus_structure}
+              focusCharacters={focusCharacters}
               arcScores={diagnosis?.arc_scores}
             />
           </div>
@@ -201,7 +203,7 @@ export function CharactersPage() {
           {/* Character Table */}
           <CharacterTable
             characters={characters}
-            protagonist={diagnosis?.protagonist}
+            focusCharacters={focusCharacters}
           />
         </motion.div>
       )}

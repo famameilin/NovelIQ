@@ -26,6 +26,9 @@ export interface DiagnosisSummaryCardProps {
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
  * 修改原因：让诊断画像卡回收到共享卡片壳上，复用 MetricCard 的视觉原语而不是继续使用普通 Card。
+ *
+ * 2026-04-27，任务：protagonist-focus-contract
+ * 修改原因：诊断摘要不再展示唯一主角，而是展示焦点结构与焦点人物列表。
  */
 export function DiagnosisSummaryCard({
   diagnosis,
@@ -33,6 +36,12 @@ export function DiagnosisSummaryCard({
   className,
 }: DiagnosisSummaryCardProps) {
   const navigate = useNavigate();
+  const focusStructureLabel =
+    diagnosis.focus_structure === "dual"
+      ? "双主角"
+      : diagnosis.focus_structure === "ensemble"
+      ? "群像焦点"
+      : "主角";
 
   return (
     <DashboardCardShell
@@ -71,15 +80,15 @@ export function DiagnosisSummaryCard({
         </div>
 
         <div className="grid gap-2.5 md:grid-cols-2">
-          {diagnosis.protagonist && (
+          {diagnosis.focus_characters && diagnosis.focus_characters.length > 0 && (
             <div className="flex items-center gap-2.5 rounded-xl border border-primary/10 bg-primary/5 px-3 py-2.5 shadow-sm">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <User className="h-4 w-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <span className="text-xs uppercase tracking-wide text-text-muted">主角</span>
+                <span className="text-xs uppercase tracking-wide text-text-muted">{focusStructureLabel}</span>
                 <div className="text-sm font-medium text-text">
-                  {diagnosis.protagonist}
+                  {diagnosis.focus_characters.join(" / ")}
                 </div>
               </div>
             </div>

@@ -178,11 +178,13 @@ def test_insert_cloud_analysis(db_session) -> None:
     analysis = CloudAnalysis(
         novel_id=novel_id,
         foreshadow_expectation=0.5,
-        arc_scores=[0.2, 0.4],
+        arc_scores={"角色0": 8.2, "角色1": 7.4},
         narrative_type="三幕",
         topic_labels=["成长"],
         diagnosis="ok",
         narrative_arc_type="白手起家",
+        focus_structure="dual",
+        focus_characters=["角色0", "角色1"],
     )
 
     run_repo = RunRepository(db_session)

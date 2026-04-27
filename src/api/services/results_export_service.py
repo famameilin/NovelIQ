@@ -101,6 +101,12 @@ def load_character_bundle(
     修改内容: diagnosis 缺失判断改为复用 annotation_repo fallback，避免导出 payload 已有 diagnosis
               但 missing_fields 仍把它标成缺失。
 
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改内容: 角色导出链路改为传递 `focus_characters`，保证导出结果与角色页
+              使用同一套焦点身份判定逻辑。
+
     Returns:
         (characters, arc_scores, main_characters, valid_character_names, missing_fields)
     """
@@ -111,12 +117,14 @@ def load_character_bundle(
         missing_fields.append("diagnosis")
 
     arc_scores: dict[str, float] | None = None
+    focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
     if diagnosis:
-        arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
+        arc_scores = diagnosis.arc_scores
+        focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters
 
-    characters = _fetch_characters(run_id, annotation_repo, arc_scores, main_characters, limit=None)
+    characters = _fetch_characters(run_id, annotation_repo, arc_scores, focus_characters, main_characters, limit=None)
     if not characters:
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}

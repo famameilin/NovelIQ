@@ -301,6 +301,12 @@ async def get_characters(
     修改者: TraeAI
     任务: protagonist-score-fusion
     修改内容: 先获取 diagnosis，传递 arc_scores 和 main_characters 给 _fetch_characters
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract
+    修改内容: 角色页改为消费 `focus_characters` + `narrative_focus_score`，
+    不再从 diagnosis.protagonist 推导唯一主角。
     """
     _require_run_for_novel(session, novel_id, run_id)
     annotation_repo = AnnotationRepository(session)
@@ -310,12 +316,14 @@ async def get_characters(
     diagnosis = _fetch_diagnosis(run_id, novel_id, stats_repo, annotation_repo, alias_map)
 
     arc_scores: dict[str, float] | None = None
+    focus_characters: list[str] | None = None
     main_characters: list[str] | None = None
     if diagnosis:
-        arc_scores = diagnosis.arc_scores if isinstance(diagnosis.arc_scores, dict) else None
+        arc_scores = diagnosis.arc_scores
+        focus_characters = diagnosis.focus_characters
         main_characters = diagnosis.main_characters
 
-    return _fetch_characters(run_id, annotation_repo, arc_scores, main_characters)
+    return _fetch_characters(run_id, annotation_repo, arc_scores, focus_characters, main_characters)
 
 
 @router.get("/{novel_id}/topics")

@@ -83,8 +83,8 @@ export interface Character {
   dominant_role_function: string;
   role_function_distribution?: Record<string, number>;
   dominant_role_ratio?: number;
-  protagonist_score?: number | null;
-  is_protagonist?: boolean | null;
+  narrative_focus_score?: number | null;
+  is_focus_character?: boolean;
   avg_emotion_score?: number | null;
 }
 
@@ -181,7 +181,6 @@ export interface Topic {
 export interface DiagnosisResult {
   narrative_type?: string;
   foreshadow_expectation?: number;
-  protagonist?: string;
   narrative_arc_type?: string;
   arc_scores?: Record<string, number>;
   diagnosis?: string;
@@ -193,6 +192,8 @@ export interface DiagnosisResult {
   dignity_reason?: string;
   cultural_depth_score?: number;
   cultural_depth_reason?: string;
+  focus_structure?: "single" | "dual" | "ensemble";
+  focus_characters?: string[];
   topic_labels?: string[];
   core_cast?: string[];
   main_characters?: string[];
