@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 from src.api.models.responses import CharacterRelation, HierarchicalRelation
+from src.config import settings
 from src.knowledge.authority import (
     GRAPH_PAGE_AUTHORITY_DEPENDENCY_FIELDS,
     ExportGraphAuthorityView,
@@ -132,12 +133,12 @@ def _validate_authority_dependency_items(
 
 
 def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], list[Any], list[Any]]:
-    stable_states = list(getattr(graph_view, "stable_states", []))
+    participant_states = list(getattr(graph_view, "participant_states", []))
     confirmed_relations = list(getattr(graph_view, "confirmed_relations", []))
     relation_events = list(getattr(graph_view, "relation_events", []))
 
     required_slices = {
-        "stable_states": stable_states,
+        "participant_states": participant_states,
         "confirmed_relations": confirmed_relations,
         "relation_events": relation_events,
     }
@@ -150,7 +151,7 @@ def _resolve_graph_page_authority_contract(graph_view: Any) -> tuple[list[Any], 
             contract_name=f"graph page authority contract.{slice_name}",
         )
 
-    return stable_states, confirmed_relations, relation_events
+    return participant_states, confirmed_relations, relation_events
 
 
 def _paginate_graph_relation_events(
@@ -203,21 +204,15 @@ def _fetch_character_relations(
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
     """获取角色关系数据。"""
+    authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
+    authority_service.assert_graph_projection_ready(run_id)
     if export_graph_view is None:
-        export_graph_view = KnowledgeGraphAuthorityService.from_session(annotation_repo.session).build_export_view(
-            run_id
-        )
-
-    if not export_graph_view.current_relations:
-        pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-        if pending_relations:
-            raise RuntimeError(
-                "graph current relations are empty while pending relations still exist; "
-                "run graph projection before reading character relations."
-            )
+        export_graph_view = authority_service.build_export_view(run_id)
 
     result: list[CharacterRelation] = []
     for relation in export_graph_view.current_relations:
+        if not relation.is_active:
+            continue
         from_char = _normalize_name(relation.from_name, alias_map) or relation.from_name
         to_char = _normalize_name(relation.to_name, alias_map) or relation.to_name
         if valid_character_names is not None and (
@@ -253,9 +248,14 @@ def _fetch_hierarchical_relations(
     valid_character_names: set[str] | None = None,
 ) -> list:
     """获取层级关系数据。"""
-    hierarchical_types = {"child_of", "parent_of", "father_of", "son_of", "sibling_of", "spouse_of"}
+    hierarchical_types = set(settings.analysis.valid_hierarchical_relation_types)
+    valid_entity_names = {
+        entity.name for entity in export_graph_view.canonical_entities if getattr(entity, "name", None)
+    }
     result = []
     for relation in export_graph_view.current_relations:
+        if not relation.is_active:
+            continue
         rel_type = relation.relation_type
         if rel_type not in hierarchical_types:
             continue
@@ -263,8 +263,9 @@ def _fetch_hierarchical_relations(
         to_name_raw = relation.to_name
         from_entity = _normalize_name(from_name_raw, alias_map) or from_name_raw
         to_entity = _normalize_name(to_name_raw, alias_map) or to_name_raw
-        if valid_character_names is not None and (
-            from_entity not in valid_character_names or to_entity not in valid_character_names
+        allowed_names = valid_entity_names or valid_character_names
+        if allowed_names is not None and (
+            from_entity not in allowed_names or to_entity not in allowed_names
         ):
             continue
         rel_id = relation.relation_id
@@ -291,13 +292,9 @@ def _fetch_graph_snapshot(
     events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
     """获取知识图谱快照（nodes/edges/events/summary）。"""
-    pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-    if pending_relations:
-        raise RuntimeError("graph projection is still pending; finish projection before reading graph snapshot.")
-
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     graph_view = authority_service.build_graph_view(run_id)
-    stable_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
+    participant_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
 
     nodes = [
         {
@@ -309,7 +306,7 @@ def _fetch_graph_snapshot(
             "role": row.primary_role_function,
             "status": row.status,
         }
-        for row in stable_states
+        for row in participant_states
     ]
     edges = [
         {
@@ -331,7 +328,7 @@ def _fetch_graph_snapshot(
         limit=events_limit,
     )
     events = [_serialize_graph_event(event) for event in paged_relation_events]
-    summary = _serialize_graph_page_summary(build_graph_page_summary(stable_states, confirmed_relations))
+    summary = _serialize_graph_page_summary(build_graph_page_summary(participant_states, confirmed_relations))
     quality = _serialize_graph_page_quality(build_graph_page_quality(confirmed_relations, relation_events))
 
     return {
@@ -352,10 +349,6 @@ def _fetch_graph_events_page(
     events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
     """获取 graph page relation events 的增量分页结果。"""
-    pending_relations = annotation_repo.fetch_pending_chunk_relations(run_id, limit=1)
-    if pending_relations:
-        raise RuntimeError("graph projection is still pending; finish projection before reading graph events.")
-
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     start = _decode_graph_events_cursor(events_cursor)
     page_limit = max(1, min(events_limit, GRAPH_PAGE_EVENT_LIMIT))

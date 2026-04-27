@@ -24,6 +24,7 @@ from src.api.exceptions import (
     AnalysisError,
     AnalysisNotCompleteError,
     FileStorageError,
+    GraphReadinessError,
     InvalidFileError,
     NovelNotFoundError,
 )
@@ -106,6 +107,16 @@ async def file_storage_error_handler(request: Request, exc: FileStorageError) ->
         detail=exc.message,
         error_type="FileStorageError",
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+    return error_response.to_json_response()
+
+
+async def graph_readiness_error_handler(request: Request, exc: GraphReadinessError) -> JSONResponse:
+    logger.error(f"GraphReadinessError: {exc.message}")
+    error_response = create_error_response(
+        detail=exc.message,
+        error_type="GraphReadinessError",
+        status_code=status.HTTP_409_CONFLICT,
     )
     return error_response.to_json_response()
 
@@ -202,6 +213,7 @@ def register_exception_handlers(app) -> None:
     app.add_exception_handler(AnalysisNotCompleteError, analysis_not_complete_handler)
     app.add_exception_handler(AnalysisError, analysis_error_handler)
     app.add_exception_handler(FileStorageError, file_storage_error_handler)
+    app.add_exception_handler(GraphReadinessError, graph_readiness_error_handler)
 
     # ID转换相关异常处理器
     app.add_exception_handler(TaskIDNotFoundError, task_id_not_found_handler)
