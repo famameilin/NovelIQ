@@ -1,8 +1,8 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from sqlalchemy import text
 
-from src.storage.db import get_session_factory, init_db
+from src.storage.db import _ensure_runtime_schema, get_session_factory, init_db
 from src.storage.models import Base
 
 
@@ -32,6 +32,60 @@ def test_init_db_can_include_level3_tables() -> None:
     assert "chunk_embeddings" in table_names
     assert "paragraph_embeddings" in table_names
     mock_ensure_runtime_schema.assert_called_once()
+
+
+def test_init_db_runs_focus_contract_guard_after_runtime_schema() -> None:
+    """
+    验证 init_db() 主链路会在 create_all 和 runtime schema 之后执行 focus-contract fail-closed 校验。
+
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: fix-focus-contract-runtime-schema-conflict
+    说明: 这条测试专门覆盖 init_db() 的真实调用顺序，避免后续再把 focus-contract 校验从主链路上绕开。
+    """
+    fake_engine = object()
+    with (
+        patch("src.storage.db.get_engine", return_value=fake_engine),
+        patch("src.storage.models.Base.metadata.create_all"),
+        patch("src.storage.db._ensure_runtime_schema") as mock_ensure_runtime_schema,
+        patch("src.storage.db._assert_focus_contract_schema") as mock_assert_focus_contract_schema,
+    ):
+        init_db()
+
+    mock_ensure_runtime_schema.assert_called_once_with(fake_engine)
+    mock_assert_focus_contract_schema.assert_called_once_with(fake_engine)
+
+
+def test_runtime_schema_does_not_backfill_legacy_focus_contract_columns() -> None:
+    """
+    验证 PostgreSQL runtime schema 不会再补旧 protagonist-contract 列。
+
+    创建时间: 2026-04-27
+    创建者: Codex
+    任务: fix-focus-contract-runtime-schema-conflict
+    说明: 当前主线以 focus-contract fail-closed 为准；
+          若 runtime schema 仍偷偷补 `protagonist/main_characters/core_cast/theme_color`，就会和启动校验自相矛盾。
+    """
+    fake_engine = MagicMock()
+    fake_engine.dialect.name = "postgresql"
+    fake_conn = MagicMock()
+    fake_engine.begin.return_value.__enter__.return_value = fake_conn
+
+    with (
+        patch("src.storage.db._table_exists", return_value=False),
+        patch("src.storage.db._ensure_analysis_related_foreign_keys"),
+    ):
+        _ensure_runtime_schema(fake_engine)
+
+    executed_sql = [str(call.args[0]) for call in fake_conn.execute.call_args_list]
+
+    expected_foreshadow_sql = "ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS foreshadow_expectation"
+
+    assert any(expected_foreshadow_sql in sql for sql in executed_sql)
+    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS protagonist" in sql for sql in executed_sql)
+    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS main_characters" in sql for sql in executed_sql)
+    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS core_cast" in sql for sql in executed_sql)
+    assert not any("ALTER TABLE cloud_analysis ADD COLUMN IF NOT EXISTS theme_color" in sql for sql in executed_sql)
 
 
 def test_analysis_related_foreign_keys_exist_in_runtime_schema() -> None:
