@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from src.api.exceptions import GraphReadinessError
-from src.storage.repositories import AnnotationRepository, GraphRepository
+from src.storage.repositories import AnnotationRepository, GraphRepository, RunRepository
 from src.storage.repositories.graph import ActiveEntityRow, CurrentRelationRow, ParticipantEntityRow, RelationEventRow
 
 from .graph_outputs import build_graph_quality_report, build_graph_shared_summary
@@ -61,6 +61,7 @@ class KnowledgeGraphAuthorityService:
         """
 
         self.assert_graph_projection_ready(run_id)
+        self._assert_timeline_contract_version(run_id)
         participant_entities = self._graph_repo.fetch_participant_entities(run_id)
         self._assert_participant_projection_consistency(
             run_id,
@@ -88,6 +89,19 @@ class KnowledgeGraphAuthorityService:
             entity_lifecycles=self._build_entity_lifecycles(character_entities),
             relation_events=relation_events,
         )
+
+    # 2026-04-27，任务：时间轴合同重构
+    # 新建原因：timeline 不再兼容旧 graph/timeline 合同版本；旧 run 即使表结构还在，
+    # 也必须在 authority 入口处显式失败并要求重跑，避免新旧时间轴语义混用。
+    def _assert_timeline_contract_version(self, run_id: str) -> None:
+        run = RunRepository(self._graph_repo.session).get_run(run_id)
+        if run is None:
+            raise GraphReadinessError(f"analysis run not found for timeline authority: run_id={run_id}")
+
+        graph_projection_version = int(run.get("graph_projection_version") or 0)
+        timeline_contract_version = int(run.get("timeline_contract_version") or 0)
+        if graph_projection_version != 2 or timeline_contract_version != 2:
+            raise GraphReadinessError("timeline contract version mismatch; rerun analysis")
 
     def build_active_entity_view(
         self,

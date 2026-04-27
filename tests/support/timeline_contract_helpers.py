@@ -268,15 +268,24 @@ def create_timeline_contract_scenario(db_session: Any) -> TimelineContractScenar
     )
 
 
-def index_by_chunk_id(items: list[Any]) -> dict[int, Any]:
-    return {int(item["chunk_id"]) if isinstance(item, dict) else int(item.chunk_id): item for item in items}
+def index_by_node_id(items: list[Any]) -> dict[str, Any]:
+    return {str(item["node_id"]) if isinstance(item, dict) else str(item.node_id): item for item in items}
 
 
-def relation_change_tuples(relation_changes: list[Any] | None) -> set[tuple[str, str, str]]:
-    if not relation_changes:
+def nodes_for_anchor_chunk(items: list[Any], anchor_chunk_id: int) -> list[Any]:
+    matched: list[Any] = []
+    for item in items:
+        current_anchor = int(item["anchor_chunk_id"]) if isinstance(item, dict) else int(item.anchor_chunk_id)
+        if current_anchor == anchor_chunk_id:
+            matched.append(item)
+    return matched
+
+
+def relation_event_tuples(relation_events: list[Any] | None) -> set[tuple[str, str, str]]:
+    if not relation_events:
         return set()
     tuples: set[tuple[str, str, str]] = set()
-    for item in relation_changes:
+    for item in relation_events:
         if isinstance(item, dict):
             tuples.add((str(item["from_char"]), str(item["to_char"]), str(item["change_type"])))
         else:
@@ -284,11 +293,11 @@ def relation_change_tuples(relation_changes: list[Any] | None) -> set[tuple[str,
     return tuples
 
 
-def relation_change_names(relation_changes: list[Any] | None) -> set[str]:
-    if not relation_changes:
+def relation_event_names(relation_events: list[Any] | None) -> set[str]:
+    if not relation_events:
         return set()
     names: set[str] = set()
-    for item in relation_changes:
+    for item in relation_events:
         if isinstance(item, dict):
             names.update({str(item["from_char"]), str(item["to_char"])})
         else:

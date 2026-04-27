@@ -96,13 +96,14 @@ function renderTimelinePage() {
   );
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation_change 的时间轴响应，覆盖图谱联动路径。
+// 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation node 的时间轴响应，覆盖图谱联动路径。
 function createTimelineResponse(): TimelineResponse {
   return {
     meta: {
       novel_id: "novel-1",
       novel_name: "Timeline Integration Novel",
       total_chunks: 12,
+      timeline_contract_version: 2,
     },
     phases: [
       { name: "引入期", start: 1, end: 3, ratio: 0.25 },
@@ -112,17 +113,23 @@ function createTimelineResponse(): TimelineResponse {
     ],
     nodes: [
       {
-        chunk_id: 8,
+        node_id: "relation:31",
+        anchor_chunk_id: 8,
         progress: 0.66,
         importance_score: 9,
         level: 1,
-        event: "顾承渊与苏映雪结盟",
+        summary: "顾承渊与苏映雪结盟",
         characters: ["顾承渊", "苏映雪"],
-        is_pivot: true,
-        is_cliffhanger: false,
-        tension_percentile: 82,
-        node_type: "relation_change",
-        relation_changes: [
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtype: "新建",
+        score_breakdown: { change_type_weight: 2.4, pair_importance: 1.6 },
+        plot_flags: {
+          is_pivot: true,
+          is_cliffhanger: false,
+          tension_percentile: 82,
+        },
+        relation_events: [
           {
             relation_event_id: 31,
             from_char: "顾承渊",
@@ -168,7 +175,7 @@ describe("TimelinePage integration", () => {
     await user.click(screen.getByRole("button", { name: "重要" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&selected_chunk=8&relation_event_id=31",
+      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=31",
       { replace: true }
     );
 

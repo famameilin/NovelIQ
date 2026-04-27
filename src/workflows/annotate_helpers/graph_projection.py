@@ -269,6 +269,7 @@ def project_graph_tables(
     projected_count = 0
     pending_count = 0
     failed_count = 0
+    no_change_count = 0
     affected_pairs: set[tuple[int, int]] = set()
     allowed_relation_types = VALID_RELATION_TYPES | set(settings.analysis.valid_hierarchical_relation_types)
 
@@ -372,7 +373,7 @@ def project_graph_tables(
             graph_alias_map[relation.to_char] = resolved_to
 
         rel_type = relation.type or "未知"
-        rel_change = relation.change or "无变化"
+        rel_change = (relation.change or "").strip()
 
         # Validate relation_type and change_type before writing to graph
         if rel_type not in allowed_relation_types:
@@ -385,6 +386,12 @@ def project_graph_tables(
             relation.projection_error = f"invalid relation_type: {rel_type}"
             relation.projected_at = None
             pending_count += 1
+            continue
+        if rel_change in {"", "无变化"}:
+            relation.projection_status = "projected"
+            relation.projected_at = datetime.now(UTC)
+            relation.projection_error = None
+            no_change_count += 1
             continue
         if rel_change not in VALID_CHANGE_TYPES:
             logger.warning(
@@ -428,13 +435,18 @@ def project_graph_tables(
         projected_count += 1
 
     graph_repo.refresh_relation_projections(run_id, affected_pairs)
+    run_repo.set_graph_contract_versions(
+        run_id,
+        graph_projection_version=2,
+        timeline_contract_version=2,
+    )
 
     session.commit()
     logger.info(
         "graph projection completed: "
         "run_id={} from_chunk={} to_chunk={} rebuild={} "
         "window_relations={} retried_pending={} total_relations={} "
-        "projected={} pending={} failed={} affected_pairs={}",
+        "projected={} pending={} failed={} no_change_skipped={} affected_pairs={}",
         run_id,
         from_chunk,
         to_chunk,
@@ -445,5 +457,6 @@ def project_graph_tables(
         projected_count,
         pending_count,
         failed_count,
+        no_change_count,
         len(affected_pairs),
     )

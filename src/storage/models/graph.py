@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -96,6 +97,10 @@ class GraphRelationEvent(Base):
             ["chunks.chunk_id", "chunks.run_id"],
             ondelete="CASCADE",
             name="graph_relation_events_chunk_id_run_id_fkey",
+        ),
+        CheckConstraint(
+            "change_type IN ('新建', '强化', '弱化', '断裂')",
+            name="ck_graph_relation_events_change_type_v2",
         ),
         UniqueConstraint(
             "run_id",
