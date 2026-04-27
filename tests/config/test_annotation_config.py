@@ -26,6 +26,7 @@ from src.config.constants import (
     VALID_ROLE_FUNCTIONS,
 )
 from src.config.schemas import _parse_runtime_settings
+from src.config.schemas.analysis import _parse_analysis_settings
 
 
 class TestAnnotationConstants(unittest.TestCase):
@@ -88,6 +89,24 @@ class TestRuntimeSettings(unittest.TestCase):
         """测试 runtime 对非法值执行严格校验。"""
         with self.assertRaises(ValueError):
             _parse_runtime_settings({"annotation": {"phase_max_retries": 0}})
+
+    def test_parse_analysis_settings_defaults_include_hierarchical_relation_types(self) -> None:
+        analysis = _parse_analysis_settings(None)
+        self.assertEqual(
+            analysis.valid_hierarchical_relation_types,
+            [
+                "belongs_to",
+                "member_of",
+                "leader_of",
+                "affiliated_with",
+                "father_of",
+                "son_of",
+                "parent_of",
+                "child_of",
+                "sibling_of",
+                "spouse_of",
+            ],
+        )
 
 
 if __name__ == "__main__":
