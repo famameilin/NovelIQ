@@ -23,9 +23,23 @@ export function ProtagonistCard({
   className,
 }: ProtagonistCardProps) {
   const fallbackName = protagonist?.name ?? protagonistName ?? null;
+  const fallbackCharacter =
+    protagonist ??
+    (fallbackName
+      ? {
+          name: fallbackName,
+          appearance_count: 0,
+          dominant_role_function: "",
+          role_function_distribution: {},
+          dominant_role_ratio: 0,
+          narrative_focus_score: 0,
+          is_focus_character: true,
+          avg_emotion_score: null,
+        }
+      : null)
   return (
     <FocusCastCard
-      characters={protagonist ? [protagonist] : []}
+      characters={fallbackCharacter ? [fallbackCharacter] : []}
       focusStructure="single"
       focusCharacters={fallbackName ? [fallbackName] : []}
       arcScores={arcScores}
