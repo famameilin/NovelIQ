@@ -145,6 +145,11 @@ def test_annotation_fallback_parse_failure_still_records_annotation_bucket() -> 
     任务: fix-token-coverage-fallback-bucket
     说明: fallback annotation client 在结构化解析失败时，原始 token_usage
           也必须直接写回 annotation 主业务桶，不能留下 annotation_fallback 脏数据。
+
+    修改时间: 2026-04-27
+    任务: fix-structured-output-token-usage-test
+    修改内容: 改为走当前 AnnotationClient 的真实 structured-output 调用面，
+    用可 await 的 SDK mock 覆盖解析失败补记 token 路径。
     """
     recorded_calls: list[dict[str, object]] = []
 
@@ -171,16 +176,17 @@ def test_annotation_fallback_parse_failure_still_records_annotation_bucket() -> 
             }
         )
 
+    invalid_response = MagicMock()
+    invalid_response.choices = [MagicMock(message=MagicMock(content="not-json"))]
+    sdk_client = MagicMock()
+    sdk_client.chat.completions.create = AsyncMock(return_value=invalid_response)
     client = AnnotationClient(
         task_type="annotation_fallback",
         config=TaskModelConfig(base_url="http://example.com", model="gpt-test", api_key="k"),
-        client=MagicMock(),
+        client=sdk_client,
         token_usage_callback=token_usage_callback,
         novel_id="novel-1",
     )
-    invalid_response = MagicMock()
-    invalid_response.choices = [MagicMock(message=MagicMock(content="not-json"))]
-    client._call_api_stream = AsyncMock(return_value=invalid_response)
 
     try:
         import asyncio
