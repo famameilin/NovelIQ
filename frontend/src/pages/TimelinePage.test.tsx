@@ -356,6 +356,23 @@ describe("TimelinePage deep links", () => {
     expect(screen.queryByText("未定位到指定关系事件，已回退到对应时间节点。")).not.toBeInTheDocument();
   });
 
+  it("prefers selected_node_id over a conflicting relation_event_id and drops the stale event binding", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_node_id=relation%3A9001&selected_chunk=8&relation_event_id=9002";
+    const user = userEvent.setup();
+
+    renderPage();
+
+    expect(await screen.findByText("selected-relation:9001")).toBeInTheDocument();
+    expect(screen.getByText("event-none")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "切到重要" }));
+
+    expect(navigateMock).toHaveBeenLastCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&selected_node_id=relation%3A9001&selected_chunk=8",
+      { replace: true }
+    );
+  });
+
   it("falls back to selected_chunk when relation_event_id is missing", async () => {
     currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9999";
 

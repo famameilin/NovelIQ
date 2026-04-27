@@ -78,6 +78,23 @@ function buildTimelinePageUrl(
   return `/novels/${novelId}/timeline?${params.toString()}`;
 }
 
+/**
+ * 修改时间: 2026-04-27
+ * 修改者: Codex
+ * 任务: fix-timeline-selected-node-relation-event-conflict
+ * 修改内容:
+ *   - 只有当 relation_event_id 真正属于当前 selected node 时，才允许继续保留到详情面板与后续 URL。
+ *   - 避免 selected_node_id 已胜出时，页面仍把别的节点 relation_event_id 带入 graph/timeline 深链。
+ */
+function getSelectedNodeRelationEventId(node: TimelineNode | null, relationEventId: number | null): number | null {
+  if (node == null || relationEventId == null) {
+    return null;
+  }
+  const belongsToSelectedNode =
+    node.relation_events?.some((relationEvent) => relationEvent.relation_event_id === relationEventId) ?? false;
+  return belongsToSelectedNode ? relationEventId : null;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                    */
 /* ------------------------------------------------------------------ */
@@ -209,7 +226,10 @@ export function TimelinePage() {
     }
     return null;
   }, [matchedRelationEventNode, nodes, selectedChunkCandidates, selectedChunkFromUrl, selectedNodeById]);
-  const resolvedRelationEventId = matchedRelationEventNode ? relationEventIdFromUrl : null;
+  const resolvedRelationEventId = useMemo(
+    () => getSelectedNodeRelationEventId(selectedNode, relationEventIdFromUrl),
+    [relationEventIdFromUrl, selectedNode]
+  );
   const pivotCount = useMemo(
     () => nodes.filter((node) => node.plot_flags?.is_pivot).length,
     [nodes]

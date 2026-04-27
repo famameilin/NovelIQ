@@ -168,6 +168,25 @@ describe("TimelineNodeDetail", () => {
     );
   });
 
+  it("ignores an external relation_event_id that does not belong to the current node", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TimelineNodeDetail
+        node={createRelationNode()}
+        novelId="novel-1"
+        taskId="task-a"
+        selectedRelationEventId={9101}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "回到图谱入口" }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/novels/novel-1/graph?task_id=task-a&selected_chunk=12&relation_event_id=9002",
+    );
+  });
+
   it("does not send a graph auto-selection when the node contains multiple relation events", async () => {
     const user = userEvent.setup();
 
