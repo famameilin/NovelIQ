@@ -464,10 +464,27 @@ async def get_graph(
     run_id: Annotated[str, Depends(resolve_run_id)],
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
-    """获取知识图谱快照"""
+    """
+    获取知识图谱快照。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract-review-fixes-round5
+    修改原因: 本分支已经明确旧 diagnosis 合同不再兼容；
+    图谱页也必须和 characters/topics/results 一样，命中失效 focus contract 时直接要求重跑。
+    """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
+    alias_map = annotation_repo.fetch_alias_map(run_id)
+    stats_repo = StatsRepository(session)
+    _fetch_and_require_valid_diagnosis(
+        run_id=run_id,
+        novel_id=novel_id,
+        stats_repo=stats_repo,
+        annotation_repo=annotation_repo,
+        alias_map=alias_map,
+    )
     return _fetch_graph_snapshot(run_id, annotation_repo)
 
 
@@ -479,10 +496,27 @@ async def get_graph_events(
     events_cursor: Annotated[str | None, Query(description="graph relation events 分页 cursor")] = None,
     events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict:
-    """获取 graph page relation events 的增量分页结果。"""
+    """
+    获取 graph page relation events 的增量分页结果。
+
+    修改时间: 2026-04-27
+    修改者: Codex
+    任务: protagonist-focus-contract-review-fixes-round5
+    修改原因: graph events 是 graph page 的同一结果链路；
+    旧 diagnosis 合同失效时，这里也必须统一走 rerun gate，不能继续把旧 run 当成可读分页结果。
+    """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
     annotation_repo = AnnotationRepository(session)
+    alias_map = annotation_repo.fetch_alias_map(run_id)
+    stats_repo = StatsRepository(session)
+    _fetch_and_require_valid_diagnosis(
+        run_id=run_id,
+        novel_id=novel_id,
+        stats_repo=stats_repo,
+        annotation_repo=annotation_repo,
+        alias_map=alias_map,
+    )
     try:
         return _fetch_graph_events_page(
             run_id,

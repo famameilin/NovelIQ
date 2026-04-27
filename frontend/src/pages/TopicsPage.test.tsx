@@ -139,4 +139,34 @@ describe("TopicsPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByTestId("topic-word-cloud")).not.toBeInTheDocument();
   });
+
+  it("renders analysis-not-complete state for running tasks", async () => {
+    getTopicsMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+    getDiagnosisMock.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          detail: "分析未完成，当前状态: running",
+          error_type: "AnalysisNotCompleteError",
+          status_code: 400,
+        },
+      },
+    });
+
+    renderTopicsPage();
+
+    expect(await screen.findByText("主题结果尚未完成")).toBeInTheDocument();
+    expect(screen.getByText("当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。")).toBeInTheDocument();
+  });
 });

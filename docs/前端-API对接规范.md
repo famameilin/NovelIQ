@@ -270,7 +270,6 @@ export interface EmotionStats {
 
 export interface CharacterStatsAggregate {
   network_density?: number;
-  protagonist_betweenness?: number;
   greimas_coverage?: number;
   function_coverage_distribution?: Record<string, number>;
   antagonist_strength_gap?: number;

@@ -10,9 +10,11 @@ import { useEffect, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { isAnalysisNotCompleteError } from "@/api/errorGuards";
 import { getTopics, getDiagnosis } from "@/api/results";
 import type { Topic } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
+import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { NovelHeader } from "@/components/common/NovelHeader";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
@@ -105,7 +107,9 @@ export function TopicsPage() {
   }, [topicsQuery.data, topicLabels]);
 
   const isLoading = topicsQuery.isLoading || diagnosisQuery.isLoading;
-  const isError = (topicsQuery.isError || diagnosisQuery.isError) && !diagnosisRequiresRerun;
+  const isAnalysisNotComplete =
+    isAnalysisNotCompleteError(topicsQuery.error) || isAnalysisNotCompleteError(diagnosisQuery.error);
+  const isError = (topicsQuery.isError || diagnosisQuery.isError) && !diagnosisRequiresRerun && !isAnalysisNotComplete;
   const errors = [topicsQuery.error, diagnosisQuery.error].filter(Boolean);
   const error = errors[0];
 
@@ -185,6 +189,17 @@ export function TopicsPage() {
               当前任务的 diagnosis 焦点合同已失效，主题命名结果不再可信，请重新分析后再查看主题页。
             </p>
           </DashboardCardShell>
+        </motion.div>
+      );
+    }
+
+    if (isAnalysisNotComplete) {
+      return (
+        <motion.div variants={itemVariants}>
+          <AnalysisNotCompleteState
+            title="主题结果尚未完成"
+            description="当前任务仍在分析中，主题结果暂时不可读，请等待任务进入完成态后再查看。"
+          />
         </motion.div>
       );
     }

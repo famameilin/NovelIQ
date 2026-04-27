@@ -5,7 +5,7 @@ import type { DiagnosisResult } from "@/api/types";
  * 创建者: Codex
  * 任务: protagonist-focus-contract-review-fixes
  * 说明: 前端多个页面都需要判断 diagnosis 是否具备完整的焦点合同；
- * 如果只拿到了 ledger-only 或缺 focus 字段的半成品结果，页面必须显式提示重跑，
+ * 如果只拿到了 ledger-only、缺 focus 字段，或缺主题命名的半成品结果，页面必须显式提示重跑，
  * 不能再静默降级成“正常页面但焦点区为空”。
  */
 export function hasCompleteFocusContract(
@@ -25,8 +25,10 @@ export function hasCompleteFocusContract(
     !diagnosis.arc_scores ||
     Object.keys(diagnosis.arc_scores).length === 0 ||
     !Array.isArray(diagnosis.focus_characters) ||
+    !Array.isArray(diagnosis.topic_labels) ||
     !Array.isArray(diagnosis.main_characters) ||
     !Array.isArray(diagnosis.core_cast) ||
+    diagnosis.topic_labels.length === 0 ||
     diagnosis.main_characters.length === 0 ||
     diagnosis.core_cast.length === 0
   ) {
