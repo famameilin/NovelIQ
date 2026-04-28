@@ -10,9 +10,14 @@ import { getDiagnosis } from "@/api/results";
 import { generateHomeThemePalette, generateThemePalette } from "@/lib/theme";
 
 const getDiagnosisMock = vi.fn();
+const getTaskStatusMock = vi.fn();
 
 vi.mock("@/api/results", () => ({
   getDiagnosis: (...args: unknown[]) => getDiagnosisMock(...args),
+}));
+
+vi.mock("@/api/analysis", () => ({
+  getTaskStatus: (...args: unknown[]) => getTaskStatusMock(...args),
 }));
 
 function createQueryClient() {
@@ -66,6 +71,7 @@ function DiagnosisConsumer() {
 describe("useNovelTheme", () => {
   beforeEach(() => {
     getDiagnosisMock.mockReset();
+    getTaskStatusMock.mockReset();
     useNovelStore.setState({
       currentNovelId: "novel-1",
       currentTaskId: "task-1",
@@ -75,6 +81,13 @@ describe("useNovelTheme", () => {
       seedColor: DEFAULT_SEED,
       isDark: false,
       autoSyncEnabled: true,
+    });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-1",
+      status: "completed",
+      progress: 100,
+      current_step: "done",
     });
     document.documentElement.removeAttribute("style");
   });
@@ -89,6 +102,7 @@ describe("useNovelTheme", () => {
     renderThemeHarness(queryClient, "/novels/novel-1?task_id=task-1", true);
 
     await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledTimes(1);
       expect(getDiagnosisMock).toHaveBeenCalledTimes(1);
       expect(useThemeStore.getState().seedColor).toBe("#123456");
     });
@@ -130,6 +144,7 @@ describe("useNovelTheme", () => {
     renderThemeHarness(queryClient, "/novels/novel-1?task_id=task-1");
 
     await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledTimes(1);
       expect(getDiagnosisMock).toHaveBeenCalledTimes(1);
       expect(useThemeStore.getState().seedColor).toBe("#123456");
     });
@@ -229,6 +244,7 @@ describe("useNovelTheme", () => {
     renderThemeHarness(queryClient, "/novels/novel-1?task_id=task-2");
 
     await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledTimes(1);
       expect(getDiagnosisMock).toHaveBeenCalledTimes(1);
     });
 
@@ -248,13 +264,20 @@ describe("useNovelTheme", () => {
     });
   });
 
-  it("新任务诊断暂不可用时应保持中性白底并清掉旧 seed", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    getDiagnosisMock.mockRejectedValue(new Error("diagnosis not ready"));
+  it("运行中的新任务不应请求 diagnosis，并应保持中性白底与默认 seed", async () => {
     useNovelStore.setState({
       currentNovelId: "novel-1",
       currentTaskId: "task-running",
       novelsCache: [],
+    });
+    getTaskStatusMock.mockResolvedValue({
+      novel_id: "novel-1",
+      task_id: "task-running",
+      status: "running",
+      progress: 12,
+      current_step: "preprocess",
+      stage: "preprocess",
+      message: "任务执行中",
     });
     useThemeStore.setState({
       seedColor: "#E84393",
@@ -268,6 +291,8 @@ describe("useNovelTheme", () => {
 
     const neutralPalette = generateHomeThemePalette();
     await waitFor(() => {
+      expect(getTaskStatusMock).toHaveBeenCalledTimes(1);
+      expect(getDiagnosisMock).not.toHaveBeenCalled();
       expect(useThemeStore.getState().seedColor).toBe(DEFAULT_SEED);
       expect(document.documentElement.style.getPropertyValue("--background")).toBe(
         neutralPalette.light["--background"],
@@ -276,9 +301,6 @@ describe("useNovelTheme", () => {
         neutralPalette.light["--surface"],
       );
     });
-
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
   });
 
   it("组件展示页首屏不应发起任务主题同步或覆盖手动试色", async () => {

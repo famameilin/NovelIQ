@@ -2,9 +2,11 @@
 Tests for EventBus.emit sub_percent propagation.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from src.api.models.events import StreamEvent, AnalysisEventBus
+
+import pytest
+
+from src.api.models.events import AnalysisEventBus, StreamEvent
 
 
 @pytest.mark.asyncio
@@ -225,3 +227,75 @@ async def test_eventbus_demotes_llm_output_and_thinking_logs_to_debug():
 
     assert mock_debug.call_count == 2
     assert mock_info.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_eventbus_demotes_high_frequency_embedding_progress_logs_to_debug():
+    """
+    验证 EventBus 会把高频 embedding batch progress 记录到 DEBUG，而不是 INFO。
+
+    创建时间: 2026-04-28
+    创建者: Codex
+    任务: demote-eventbus-embedding-progress-log
+    说明: `semantic_chunking_embedding` / `paragraph_embedding` 会在 preprocess 中按批次连续发 progress；
+          这类日志应降到 DEBUG，但普通 progress 仍应保留在 INFO。
+    """
+    task_manager = MagicMock()
+    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
+
+    with (
+        patch("src.api.services.event_manager.event_manager") as mock_em,
+        patch("src.api.models.events.logger.debug") as mock_debug,
+        patch("src.api.models.events.logger.info") as mock_info,
+    ):
+        mock_em.send = AsyncMock()
+
+        await bus.emit(
+            StreamEvent(
+                action="progress",
+                stage="preprocess",
+                sub_stage="semantic_chunking_embedding",
+                percent=3.3,
+                sub_percent=33.0,
+            )
+        )
+        await bus.emit(
+            StreamEvent(
+                action="progress",
+                stage="preprocess",
+                sub_stage="paragraph_embedding",
+                percent=6.6,
+                sub_percent=66.0,
+            )
+        )
+        await bus.emit(StreamEvent(action="progress", stage="annotate", sub_stage="phase1", percent=10.0))
+
+    assert mock_debug.call_count == 2
+    assert mock_info.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_emit_stage_complete_uses_stage_end_percent_instead_of_global_100() -> None:
+    """
+    验证阶段完成事件写回的 percent 使用当前阶段终点，而不是错误地统一写成 100。
+
+    创建时间: 2026-04-28
+    创建者: Codex
+    任务: fix-stage-complete-percent-range
+    说明: 前端和 DB 都按全局 percent 解释阶段进度；
+          preprocess complete 若被写成 100，会污染当前阶段判断与后续 backfill 语义。
+    """
+    task_manager = MagicMock()
+    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
+
+    with patch("src.api.services.event_manager.event_manager") as mock_em:
+        mock_em.send = AsyncMock()
+
+        await bus.emit_stage_complete("preprocess")
+        await bus.emit_stage_complete("annotate")
+
+    preprocess_update = task_manager.update_task.call_args_list[0].kwargs
+    annotate_update = task_manager.update_task.call_args_list[1].kwargs
+
+    assert preprocess_update["progress"] == 10.0
+    assert annotate_update["progress"] == 80.0

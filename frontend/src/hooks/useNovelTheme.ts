@@ -5,6 +5,7 @@ import { useThemeStore, DEFAULT_SEED } from "@/store/themeStore";
 import { useNovelStore } from "@/store/novelStore";
 import { generateHomeThemePalette, generateThemePalette } from "@/lib/theme";
 import { getDiagnosis } from "@/api/results";
+import { getTaskStatus } from "@/api/analysis";
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const STALE_TIME = 5 * 60 * 1000;
@@ -34,10 +35,24 @@ export function useNovelTheme() {
   const shouldUseNeutralTheme = isHomeRoute || (isNovelRoute && !urlTaskId);
   const currentTaskThemeKey =
     currentNovelId && currentTaskId ? `${currentNovelId}:${currentTaskId}` : null;
+  const taskStatusQuery = useQuery({
+    queryKey: ["task-status", currentNovelId, currentTaskId],
+    queryFn: () => getTaskStatus(currentNovelId!, currentTaskId!),
+    enabled: !!currentTaskThemeKey && !shouldUseNeutralTheme && !isThemePreviewRoute,
+    staleTime: 5 * 1000,
+  });
+  const taskStatus = taskStatusQuery.data?.status;
+  const isTaskActivelyProcessing =
+    taskStatus === "pending" || taskStatus === "running" || taskStatus === "cancelling";
   const diagnosisQuery = useQuery({
     queryKey: ["results", currentNovelId, currentTaskId, "diagnosis"],
     queryFn: () => getDiagnosis(currentNovelId!, currentTaskId!),
-    enabled: !!currentTaskThemeKey && !shouldUseNeutralTheme && !isThemePreviewRoute,
+    enabled:
+      !!currentTaskThemeKey &&
+      !shouldUseNeutralTheme &&
+      !isThemePreviewRoute &&
+      taskStatusQuery.isSuccess &&
+      !isTaskActivelyProcessing,
     staleTime: STALE_TIME,
   });
   const themeColor = diagnosisQuery.data?.theme_color;
@@ -46,7 +61,7 @@ export function useNovelTheme() {
     !!currentTaskThemeKey &&
     !shouldUseNeutralTheme &&
     !isThemePreviewRoute &&
-    !hasValidThemeColor;
+    (!taskStatusQuery.isSuccess || isTaskActivelyProcessing || !hasValidThemeColor);
   const effectiveSeedColor = hasValidThemeColor ? themeColor : DEFAULT_SEED;
   const shouldUseNeutralPalette = shouldUseNeutralTheme || shouldUsePendingTaskTheme;
 
@@ -66,6 +81,15 @@ export function useNovelTheme() {
     }
 
     if (!currentTaskThemeKey) {
+      if (seedColor !== DEFAULT_SEED) {
+        setSeedColor(DEFAULT_SEED);
+      }
+      return;
+    }
+
+    // 中文注释：运行中的任务还没有稳定 diagnosis，主题 hook 不能抢先打结果接口；
+    // 此时统一保持 neutral palette，并清掉旧 seed，避免沿用上一个任务主题。
+    if (!taskStatusQuery.isSuccess || isTaskActivelyProcessing) {
       if (seedColor !== DEFAULT_SEED) {
         setSeedColor(DEFAULT_SEED);
       }
@@ -97,6 +121,8 @@ export function useNovelTheme() {
     themeColor,
     seedColor,
     setSeedColor,
+    taskStatusQuery.isSuccess,
+    isTaskActivelyProcessing,
     isThemePreviewRoute,
     shouldUseNeutralTheme,
   ]);
