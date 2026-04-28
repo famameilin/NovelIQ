@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Novel, TimelineResponse } from "@/api/types";
+import type { Novel, TimelineCompositeNode, TimelineNode, TimelineResponse } from "@/api/types";
 import { TimelinePage } from "@/pages/TimelinePage";
 import { useNovelStore } from "@/store/novelStore";
 
@@ -15,6 +15,7 @@ const navigateMock = vi.fn();
 
 let currentTimelineSearchParams = "task_id=task-a&selected_chunk=12&relation_event_id=9002";
 let currentTimelineNovelId = "novel-1";
+type TimelineDisplayNode = TimelineNode | TimelineCompositeNode;
 
 function passthroughComponent(displayName: string) {
   const Component = ({ children }: { children?: ReactNode }) => <div data-testid={displayName}>{children}</div>;
@@ -91,12 +92,17 @@ vi.mock("@/components/common/MetricCard", () => ({
 vi.mock("@/components/timeline", () => ({
   TimelineControls: ({
     onMaxLevelChange,
+    onViewModeChange,
   }: {
     onMaxLevelChange: (level: 1 | 2 | 3) => void;
+    onViewModeChange: (view: "composite" | "atomic") => void;
   }) => (
     <div data-testid="timeline-controls">
       <button type="button" onClick={() => onMaxLevelChange(1)}>
         切到重要
+      </button>
+      <button type="button" onClick={() => onViewModeChange("atomic")}>
+        切到原子
       </button>
     </div>
   ),
@@ -108,15 +114,15 @@ vi.mock("@/components/timeline", () => ({
     onNodeClick,
     showTension,
   }: {
-    nodes: TimelineResponse["nodes"];
-    onNodeClick: (node: TimelineResponse["nodes"][number]) => void;
+    nodes: TimelineDisplayNode[];
+    onNodeClick: (node: TimelineDisplayNode) => void;
     showTension?: boolean;
   }) => (
     <div data-testid="timeline-track">
       <span>{showTension ? "tension-on" : "tension-off"}</span>
       {nodes.map((node) => (
-        <button key={node.chunk_id} type="button" onClick={() => onNodeClick(node)}>
-          节点 {node.chunk_id}
+        <button key={node.node_id} type="button" onClick={() => onNodeClick(node)}>
+          节点 {node.anchor_chunk_id}
         </button>
       ))}
     </div>
@@ -124,15 +130,23 @@ vi.mock("@/components/timeline", () => ({
   TimelineNodeDetail: ({
     node,
     selectedRelationEventId,
+    atomicNodes,
+    onSelectAtomicNode,
     onClose,
   }: {
-    node: TimelineResponse["nodes"][number] | null;
+    node: TimelineDisplayNode | null;
     selectedRelationEventId?: number | null;
+    atomicNodes?: TimelineNode[];
+    onSelectAtomicNode?: (node: TimelineNode) => void;
     onClose?: () => void;
   }) => (
     <div data-testid="timeline-node-detail">
-      <span>{node ? `selected-${node.chunk_id}` : "selected-none"}</span>
+      <span>{node ? `selected-${node.node_id}` : "selected-none"}</span>
       <span>{selectedRelationEventId != null ? `event-${selectedRelationEventId}` : "event-none"}</span>
+      <span>{atomicNodes?.length != null ? `atomic-count-${atomicNodes.length}` : "atomic-count-none"}</span>
+      <button type="button" onClick={() => atomicNodes?.[0] && onSelectAtomicNode?.(atomicNodes[0])}>
+        选择第一个原子节点
+      </button>
       <button type="button" onClick={onClose}>
         关闭详情
       </button>
@@ -182,19 +196,58 @@ function createTimelineResponse(): TimelineResponse {
       { name: "高潮期", start: 11, end: 15, ratio: 0.25 },
       { name: "收束期", start: 16, end: 20, ratio: 0.25 },
     ],
-    nodes: [
+    composite_nodes: [
       {
-        chunk_id: 8,
+        node_id: "composite:relation:8:0",
+        anchor_chunk_id: 8,
+        start_chunk_id: 8,
+        end_chunk_id: 8,
+        progress: 0.4,
+        start_progress: 0.4,
+        end_progress: 0.4,
+        importance_score: 5,
+        level: 2,
+        summary: "关系变化 A",
+        characters: ["顾承渊", "苏映雪"],
+        phase_name: "发展期",
+        node_type: "relation",
+        node_subtypes: ["新建"],
+        representative_node_id: "relation:9001",
+        child_node_ids: ["relation:9001"],
+      },
+      {
+        node_id: "composite:relation:12:0",
+        anchor_chunk_id: 12,
+        start_chunk_id: 12,
+        end_chunk_id: 12,
+        progress: 0.6,
+        start_progress: 0.6,
+        end_progress: 0.6,
+        importance_score: 8,
+        level: 1,
+        summary: "关系变化 B",
+        characters: ["顾承渊", "苏映雪"],
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtypes: ["断裂"],
+        representative_node_id: "relation:9002",
+        child_node_ids: ["relation:9002"],
+      },
+    ],
+    atomic_nodes: [
+      {
+        node_id: "relation:9001",
+        anchor_chunk_id: 8,
         progress: 0.4,
         importance_score: 5,
         level: 2,
-        event: "关系变化 A",
+        summary: "关系变化 A",
         characters: ["顾承渊", "苏映雪"],
-        is_pivot: false,
-        is_cliffhanger: false,
-        tension_percentile: 60,
-        node_type: "relation_change",
-        relation_changes: [
+        phase_name: "发展期",
+        node_type: "relation",
+        node_subtype: "新建",
+        score_breakdown: { change_type_weight: 2.4 },
+        relation_events: [
           {
             relation_event_id: 9001,
             from_char: "顾承渊",
@@ -205,17 +258,23 @@ function createTimelineResponse(): TimelineResponse {
         ],
       },
       {
-        chunk_id: 12,
+        node_id: "relation:9002",
+        anchor_chunk_id: 12,
         progress: 0.6,
         importance_score: 8,
         level: 1,
-        event: "关系变化 B",
+        summary: "关系变化 B",
         characters: ["顾承渊", "苏映雪"],
-        is_pivot: true,
-        is_cliffhanger: false,
-        tension_percentile: 90,
-        node_type: "relation_change",
-        relation_changes: [
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtype: "断裂",
+        score_breakdown: { change_type_weight: 2.6 },
+        plot_flags: {
+          is_pivot: true,
+          is_cliffhanger: false,
+          tension_percentile: 90,
+        },
+        relation_events: [
           {
             relation_event_id: 9002,
             from_char: "顾承渊",
@@ -238,8 +297,57 @@ function createEmptyTimelineResponse(): TimelineResponse {
       total_chunks: 0,
     },
     phases: [],
-    nodes: [],
+    composite_nodes: [],
+    atomic_nodes: [],
     tension_curve: [],
+  };
+}
+
+function createAmbiguousChunkTimelineResponse(): TimelineResponse {
+  return {
+    ...createTimelineResponse(),
+    composite_nodes: [
+      ...createTimelineResponse().composite_nodes,
+      {
+        node_id: "composite:plot:12:1",
+        anchor_chunk_id: 12,
+        start_chunk_id: 12,
+        end_chunk_id: 12,
+        progress: 0.6,
+        start_progress: 0.6,
+        end_progress: 0.6,
+        importance_score: 6,
+        level: 2,
+        summary: "第十二块的剧情节点",
+        characters: ["顾承渊"],
+        phase_name: "高潮期",
+        node_type: "plot",
+        node_subtypes: ["plot"],
+        representative_node_id: "plot:12",
+        child_node_ids: ["plot:12"],
+      },
+    ],
+    atomic_nodes: [
+      ...createTimelineResponse().atomic_nodes,
+      {
+        node_id: "plot:12",
+        anchor_chunk_id: 12,
+        progress: 0.6,
+        importance_score: 6,
+        level: 2,
+        summary: "第十二块的剧情节点",
+        characters: ["顾承渊"],
+        phase_name: "高潮期",
+        node_type: "plot",
+        node_subtype: "plot",
+        score_breakdown: { tension: 1.4 },
+        plot_flags: {
+          is_pivot: false,
+          is_cliffhanger: true,
+          tension_percentile: 88,
+        },
+      },
+    ],
   };
 }
 
@@ -301,13 +409,12 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
     expect(getTimelineMock).toHaveBeenCalledWith("novel-1", "task-a", {
       includeCurve: true,
-      maxLevel: 3,
     });
     expect(navigateMock).not.toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-b&max_level=3",
+      "/novels/novel-1/timeline?task_id=task-b&max_level=3&view=composite",
       { replace: true }
     );
   });
@@ -315,9 +422,26 @@ describe("TimelinePage deep links", () => {
   it("prefers relation_event_id over selected_chunk when deep-linking from graph", async () => {
     renderPage();
 
-    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
     expect(screen.getByText("event-9002")).toBeInTheDocument();
     expect(screen.queryByText("未定位到指定关系事件，已回退到对应时间节点。")).not.toBeInTheDocument();
+  });
+
+  it("prefers selected_node_id over a conflicting relation_event_id and drops the stale event binding", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_node_id=relation%3A9001&selected_chunk=8&relation_event_id=9002";
+    const user = userEvent.setup();
+
+    renderPage();
+
+    expect(await screen.findByText("selected-relation:9001")).toBeInTheDocument();
+    expect(screen.getByText("event-none")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "切到重要" }));
+
+    expect(navigateMock).toHaveBeenLastCalledWith(
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9001&selected_chunk=8",
+      { replace: true }
+    );
   });
 
   it("falls back to selected_chunk when relation_event_id is missing", async () => {
@@ -325,9 +449,20 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(await screen.findByText("selected-composite:relation:12:0")).toBeInTheDocument();
     expect(screen.getByText("event-none")).toBeInTheDocument();
     expect(screen.getByText("未定位到指定关系事件，已回退到对应时间节点。")).toBeInTheDocument();
+  });
+
+  it("does not guess a node when selected_chunk maps to multiple timeline nodes", async () => {
+    currentTimelineSearchParams = "task_id=task-a&selected_chunk=12";
+    getTimelineMock.mockResolvedValue(createAmbiguousChunkTimelineResponse());
+
+    renderPage();
+
+    await screen.findByTestId("timeline-track");
+    expect(screen.queryByTestId("timeline-node-detail")).not.toBeInTheDocument();
+    expect(screen.getByText("该时间块包含多个不同类型节点，请使用稳定节点链接重新定位。")).toBeInTheDocument();
   });
 
   it("shows a no-match hint without keeping stale selection when neither relation event nor chunk exists", async () => {
@@ -361,27 +496,27 @@ describe("TimelinePage deep links", () => {
     await waitFor(() => {
       expect(getTimelineMock).toHaveBeenCalledTimes(2);
     });
-    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
   });
 
   it("keeps the graph deep-link selection when timeline controls change", async () => {
     const user = userEvent.setup();
     const view = renderPage();
 
-    await screen.findByText("selected-12");
+    await screen.findByText("selected-relation:9002");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&selected_chunk=12&relation_event_id=9002",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&relation_event_id=9002",
       { replace: true }
     );
 
-    currentTimelineSearchParams = "task_id=task-a&max_level=1&selected_chunk=12&relation_event_id=9002";
+    currentTimelineSearchParams = "task_id=task-a&max_level=1&view=composite&selected_node_id=relation%3A9002&selected_chunk=12&relation_event_id=9002";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <TimelinePage />
       </QueryClientProvider>
     );
-    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
   });
 
   it("drops a stale relation_event_id when controls change after falling back to selected_chunk", async () => {
@@ -390,11 +525,11 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    await screen.findByText("selected-12");
+    await screen.findByText("selected-composite:relation:12:0");
     await user.click(screen.getByRole("button", { name: "切到重要" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=1&selected_chunk=12",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=1&view=composite&selected_node_id=composite%3Arelation%3A12%3A0&selected_chunk=12",
       { replace: true }
     );
   });
@@ -404,11 +539,11 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    await screen.findByText("selected-12");
+    await screen.findByText("selected-relation:9002");
     await user.click(screen.getByRole("button", { name: "节点 8" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&selected_chunk=8",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=composite%3Arelation%3A8%3A0&selected_chunk=8",
       { replace: true }
     );
   });
@@ -418,11 +553,11 @@ describe("TimelinePage deep links", () => {
 
     renderPage();
 
-    await screen.findByText("selected-12");
+    await screen.findByText("selected-relation:9002");
     await user.click(screen.getByRole("button", { name: "关闭详情" }));
 
     expect(navigateMock).toHaveBeenLastCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3",
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite",
       { replace: true }
     );
   });
@@ -430,7 +565,7 @@ describe("TimelinePage deep links", () => {
   it("clears deep-link selection when switching to another task", async () => {
     renderPage();
 
-    await screen.findByText("selected-12");
+    await screen.findByText("selected-relation:9002");
     useNovelStore.setState({
       currentNovelId: "novel-1",
       currentTaskId: "task-b",
@@ -439,19 +574,20 @@ describe("TimelinePage deep links", () => {
 
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith(
-        "/novels/novel-1/timeline?task_id=task-b&max_level=3",
+        "/novels/novel-1/timeline?task_id=task-b&max_level=3&view=composite",
         { replace: true }
       );
     });
   });
 
-  it("re-syncs controls and query params when the timeline url changes while mounted", async () => {
+  it("re-syncs local controls without refetching timeline data when only display params change", async () => {
     const view = renderPage();
 
-    expect(await screen.findByText("selected-12")).toBeInTheDocument();
+    expect(await screen.findByText("selected-relation:9002")).toBeInTheDocument();
     expect(screen.getByText("tension-on")).toBeInTheDocument();
+    expect(getTimelineMock).toHaveBeenCalledTimes(1);
 
-    currentTimelineSearchParams = "task_id=task-a&max_level=1&selected_chunk=8";
+    currentTimelineSearchParams = "task_id=task-a&max_level=3&view=atomic&selected_node_id=relation%3A9001&selected_chunk=8";
     view.rerender(
       <QueryClientProvider client={view.queryClient}>
         <TimelinePage />
@@ -459,12 +595,9 @@ describe("TimelinePage deep links", () => {
     );
 
     await waitFor(() => {
-      expect(getTimelineMock).toHaveBeenLastCalledWith("novel-1", "task-a", {
-        includeCurve: true,
-        maxLevel: 1,
-      });
+      expect(getTimelineMock).toHaveBeenCalledTimes(1);
     });
-    expect(await screen.findByText("selected-8")).toBeInTheDocument();
+    expect(await screen.findByText("selected-relation:9001")).toBeInTheDocument();
     expect(screen.getByText("tension-on")).toBeInTheDocument();
   });
 });

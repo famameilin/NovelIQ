@@ -51,7 +51,7 @@ SYMMETRIC_RELATION_TYPES: frozenset[str] = frozenset({"家族", "友情", "盟�
 
 VALID_RELATION_TYPES: frozenset[str] = frozenset({"家族", "师徒", "敌对", "盟友", "友情", "爱慕", "主从", "利益"})
 
-VALID_CHANGE_TYPES: frozenset[str] = frozenset({"无变化", "新建", "强化", "弱化", "断裂"})
+VALID_CHANGE_TYPES: frozenset[str] = frozenset({"新建", "强化", "弱化", "断裂"})
 
 DIRECTIONALITY_DIRECTED: Literal["directed"] = "directed"
 DIRECTIONALITY_SYMMETRIC: Literal["symmetric"] = "symmetric"
