@@ -206,12 +206,23 @@ class NarrativeEvidenceService:
         self._progress_emitter = progress_emitter
         self._bundle_cache: dict[tuple[object, ...], EvidenceBundle] = {}
 
-    async def _emit_level3_progress(self, current_chunk: int | None, message: str, sub_percent: float) -> None:
+    async def _emit_level3_progress(self, current_chunk: int | None, message: str, _sub_percent: float) -> None:
         """
         创建时间: 2026-04-24
         任务: level3-progress-sse
-        说明: 复用现有 stage_progress 事件向前端暴露 Level3/mention 长耗时节点；
-              这里只更新 message/sub_stage，不改全局 percent，避免进度条在 chunk 间跳动。
+        说明: 复用现有 stage_progress 事件向前端暴露 Level3 长耗时节点；
+              这里只更新 message，不改全局 percent，避免进度条在 chunk 间跳动。
+
+        修改时间: 2026-04-28
+        任务: fix-level3-sse-phase-progress-contract
+        修改说明: annotate 阶段下方 sub 进度条的稳定语义是 phase 级，不应被 Level3 mention
+                  这种更细粒度的内部节点劫持。这里不再显式写入 `sub_stage/sub_percent`，
+                  统一复用 EventBus 已有 phase 上下文，只刷新提示文案。
+
+        修改时间: 2026-04-28
+        任务: simplify-level3-sse-copy
+        修改说明: 前端只需要知道“当前正在收集证据”，不需要暴露 mention/rerank 等内部步骤，
+                  因此这里统一收口成稳定文案，避免推流提示继续漂移。
         """
         if self._progress_emitter is None:
             return
@@ -219,10 +230,8 @@ class NarrativeEvidenceService:
             StreamEvent(
                 action="progress",
                 stage="annotate",
-                sub_stage="level3",
                 chunk_id=current_chunk,
-                sub_percent=sub_percent,
-                message=message,
+                message="正在收集证据",
             )
         )
 
