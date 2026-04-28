@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter
 
 from src.config import settings
-from src.metrics.fourier_filter import fourier_smooth
 
 
 def find_global_peak(scores: list[float]) -> int:
@@ -33,32 +32,54 @@ def find_local_peaks(scores: list[float], total_chunks: int) -> list[int]:
     return peaks
 
 
+def find_dominant_climax_peak(scores: list[float]) -> int:
+    """
+    2026-04-28，任务：三幕比例主高潮峰修复
+    新建原因：三幕比例如果只取全局最高峰，容易被前段尖峰误判成“主高潮”，
+    导致后续真正的高潮与收束被整体压扁；这里独立从张力曲线中选择更符合
+    叙事结构语义的主高潮峰，不直接依赖时间轴阶段结果。
+    """
+    if not scores:
+        return 0
+
+    total = len(scores)
+    if total < 3:
+        return find_global_peak(scores)
+
+    local_peaks = find_local_peaks(scores, total)
+    if not local_peaks:
+        return find_global_peak(scores)
+
+    half_idx = total // 2
+    late_peaks = [peak_idx for peak_idx in local_peaks if peak_idx >= half_idx]
+    if late_peaks:
+        return max(late_peaks, key=lambda peak_idx: (scores[peak_idx], peak_idx))
+
+    return local_peaks[-1]
+
+
 def compute_three_act_ratio_by_tension(
     tension_composite_scores: list[float],
 ) -> dict[str, float]:
     """
-    计算三幕比例
+    2026-04-28，任务：三幕比例主高潮峰修复
+    修改原因：当前输入的 `tension_composite_scores` 已经在 aggregate 阶段完成
+    一次平滑；这里若再做二次平滑，会把后段真正主高潮继续削峰，进而把三幕
+    比例误判成“前段极短 + 后段几乎全是收束”。
 
-    基于 Freytag 金字塔理论，通过张力峰值位置确定三幕边界
-
-
-
-    理论依据:
-    - Act1 = 开始 → 峰前谷底（铺垫期，张力积累前的平静）
-    - Act2 = 谷底 → 全局峰值（上升期+高潮，张力爬坡）
-    - Act3 = 峰值 → 结束（收束期）
-    - 典型黄金比例: 25%–50%–25%
+    当前实现保持三幕比例独立于 timeline 结果计算，但主高潮峰不再使用
+    “全局最高峰”这一过于脆弱的规则，而是优先在后半段局部峰中选择最能代表
+    最终高潮的峰位，保留与时间轴互相校验的能力。
     """
-    smoothed_scores = fourier_smooth(tension_composite_scores, keep_ratio=settings.metrics.fourier_smooth_keep_ratio)
-    if not smoothed_scores:
+    if not tension_composite_scores:
         return {"act1_ratio": 0.0, "act2_ratio": 0.0, "act3_ratio": 0.0}
 
-    total = len(smoothed_scores)
+    total = len(tension_composite_scores)
     if total < 3:
         return {"act1_ratio": 1 / 3, "act2_ratio": 1 / 3, "act3_ratio": 1 / 3}
 
-    peak_idx = find_global_peak(smoothed_scores)
-    valley_idx = find_valley_before_peak(smoothed_scores, peak_idx)
+    peak_idx = find_dominant_climax_peak(tension_composite_scores)
+    valley_idx = find_valley_before_peak(tension_composite_scores, peak_idx)
 
     act1_raw = valley_idx / total
     if peak_idx == total - 1:

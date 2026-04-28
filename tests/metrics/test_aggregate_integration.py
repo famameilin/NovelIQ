@@ -105,7 +105,10 @@ class TestAggregateAllMetrics:
         self.db_session.execute(
             text(
                 "INSERT INTO chunk_curves "
-                "(chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) "
+                "("
+                "chunk_id, pos_density, neg_density, net_density, "
+                "smoothed_density, tension_proxy, tension_composite, run_id"
+                ") "
                 "VALUES (0, 0.1, 0.05, 0.05, 0.05, 0.3, 0.25, :run_id)"
             ),
             {"run_id": self.run_id},
@@ -113,7 +116,10 @@ class TestAggregateAllMetrics:
         self.db_session.execute(
             text(
                 "INSERT INTO chunk_curves "
-                "(chunk_id, pos_density, neg_density, net_density, smoothed_density, tension_proxy, tension_composite, run_id) "
+                "("
+                "chunk_id, pos_density, neg_density, net_density, "
+                "smoothed_density, tension_proxy, tension_composite, run_id"
+                ") "
                 "VALUES (1, 0.02, 0.1, -0.08, -0.06, 0.7, 0.65, :run_id)"
             ),
             {"run_id": self.run_id},
