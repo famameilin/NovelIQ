@@ -1155,6 +1155,32 @@ class TestSharedEvidenceRenderer(unittest.TestCase):
 
 class TestNarrativeEvidenceServiceLevel3Async:
     @pytest.mark.asyncio
+    async def test_emit_level3_progress_only_updates_message_without_overriding_phase_contract(self) -> None:
+        """
+        创建时间: 2026-04-28
+        任务: fix-level3-sse-phase-progress-contract
+        说明: Level3 mention / rerank 进度只应刷新提示文案，不应把 phase 级 sub_stage/sub_percent
+              改写成更细粒度的内部节点。
+
+        修改时间: 2026-04-28
+        任务: simplify-level3-sse-copy
+        修改说明: 前端只需要稳定看到“正在收集证据”，不再暴露内部细分步骤文案。
+        """
+        progress_emitter = AsyncMock()
+        provider = NarrativeEvidenceService(level3_enabled=True, progress_emitter=progress_emitter)
+
+        await provider._emit_level3_progress(12, "[identity] 正在抽取 Level3 mention", 15)
+
+        progress_emitter.assert_awaited_once()
+        event = progress_emitter.await_args.args[0]
+        assert event.action == "progress"
+        assert event.stage == "annotate"
+        assert event.chunk_id == 12
+        assert event.message == "正在收集证据"
+        assert event.sub_stage == ""
+        assert event.sub_percent is None
+
+    @pytest.mark.asyncio
     async def test_collect_evidence_with_level3_adds_emotion_exemplar_items(self) -> None:
         """
         修改时间: 2026-04-23

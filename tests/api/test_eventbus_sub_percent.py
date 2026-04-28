@@ -92,6 +92,61 @@ async def test_eventbus_preserves_sub_percent_from_context():
 
 
 @pytest.mark.asyncio
+async def test_eventbus_progress_message_without_sub_stage_preserves_phase_context():
+    """
+    验证 message-only progress 事件不会改写已有的 phase 级 sub_stage/sub_percent。
+
+    创建时间: 2026-04-28
+    创建者: Codex
+    任务: fix-level3-sse-phase-progress-contract
+    说明: Level3 mention 这类更细粒度节点只应刷新提示文案，EventBus 仍应沿用当前 phase
+          上下文，避免前端下方 sub 进度条从 phase 级跳成内部 mention 级。
+
+    修改时间: 2026-04-28
+    任务: simplify-level3-sse-copy
+    修改说明: 提示文案统一收口成“正在收集证据”，前端不再感知内部步骤名。
+    """
+    task_manager = MagicMock()
+    task_manager.update_progress = MagicMock()
+
+    bus = AnalysisEventBus(task_id="test-task", task_manager=task_manager)
+
+    with patch("src.api.services.event_manager.event_manager") as mock_em:
+        mock_em.send = AsyncMock()
+
+        await bus.emit(
+            StreamEvent(
+                action="progress",
+                stage="annotate",
+                sub_stage="phase3",
+                chunk_id=8,
+                current=21,
+                total=37,
+                percent=49.7,
+                sub_percent=75,
+                message="phase3 进行中",
+            )
+        )
+        await bus.emit(
+            StreamEvent(
+                action="progress",
+                stage="annotate",
+                chunk_id=8,
+                message="正在收集证据",
+            )
+        )
+
+        call1_kwargs = mock_em.send.call_args_list[0].kwargs
+        call2_kwargs = mock_em.send.call_args_list[1].kwargs
+
+        assert call1_kwargs["data"]["sub_stage"] == "phase3"
+        assert call1_kwargs["data"]["sub_percent"] == 75
+        assert call2_kwargs["data"]["sub_stage"] == "phase3"
+        assert call2_kwargs["data"]["sub_percent"] == 75
+        assert call2_kwargs["data"]["message"] == "正在收集证据"
+
+
+@pytest.mark.asyncio
 async def test_eventbus_calculates_percent_from_current_total():
     """
     验证 EventBus.emit 在事件没有提供 percent 时，根据 current/total 自动计算
