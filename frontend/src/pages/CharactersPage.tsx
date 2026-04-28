@@ -6,8 +6,7 @@ import { isAnalysisNotCompleteError } from "@/api/errorGuards";
 import { getCharacters, getDiagnosis } from "@/api/results";
 import { useNovelStore } from "@/store/novelStore";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { NovelHeader } from "@/components/common/NovelHeader";
+import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { CharacterRankingBar } from "@/components/charts/CharacterRankingBar";
 import { RoleFunctionPie } from "@/components/charts/RoleFunctionPie";
@@ -107,6 +106,9 @@ function EmptyDiagnosisState() {
  * 2026-04-27，任务：protagonist-focus-contract
  * 修改原因：角色页主展示逻辑改为消费 `focus_structure` / `focus_characters`，
  * 并用新的 FocusCastCard 与多焦点高亮替代旧单主角页面
+ *
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：角色页主展示区拆成排行、功能焦点、角色表三个 tab，保证首屏优先展示排行
  */
 export function CharactersPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -185,13 +187,7 @@ export function CharactersPage() {
   // ---------- Render ----------
 
   return (
-    <PageContainer>
-      {/* Header */}
-      <NovelHeader
-        title="角色分析"
-        className="mb-6"
-      />
-
+    <AnalysisWorkspace title="角色分析">
       {/* No task selected prompt */}
       {!currentTaskId && (
         <DashboardCardShell
@@ -255,26 +251,34 @@ export function CharactersPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="space-y-6"
+          className="flex min-h-0 flex-1 flex-col"
         >
-          {/* Character Ranking Bar */}
-          <CharacterRankingBar characters={characters} />
-
-          {/* Pie + Protagonist Card */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <RoleFunctionPie characters={characters} />
-            <FocusCastCard
-              characters={characters}
-              focusStructure={hasFocusContract ? diagnosis.focus_structure : undefined}
-              focusCharacters={focusCharacters}
-              arcScores={diagnosis?.arc_scores}
-            />
-          </div>
-
-          {/* Character Table */}
-          <CharacterTable characters={characters} />
+          {/*
+            2026-04-28，任务：分析详情页单屏 Tabs 改造
+            修改原因：角色页按“排行优先”拆成 tab，让排行、焦点和表格都接受同一单屏工作区边界。
+          */}
+          <AnalysisWorkspace.Tabs defaultValue="ranking">
+            <AnalysisWorkspace.Tab value="ranking" label="角色排行">
+              <CharacterRankingBar characters={characters} className="h-full" />
+            </AnalysisWorkspace.Tab>
+            <AnalysisWorkspace.Tab value="focus" label="功能与焦点">
+              <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-2">
+                <RoleFunctionPie characters={characters} className="h-full min-h-[320px]" />
+                <FocusCastCard
+                  characters={characters}
+                  focusStructure={hasFocusContract ? diagnosis.focus_structure : undefined}
+                  focusCharacters={focusCharacters}
+                  arcScores={diagnosis?.arc_scores}
+                  className="h-full min-h-[320px]"
+                />
+              </div>
+            </AnalysisWorkspace.Tab>
+            <AnalysisWorkspace.Tab value="table" label="角色表">
+              <CharacterTable characters={characters} className="h-full" />
+            </AnalysisWorkspace.Tab>
+          </AnalysisWorkspace.Tabs>
         </motion.div>
       )}
-    </PageContainer>
+    </AnalysisWorkspace>
   );
 }

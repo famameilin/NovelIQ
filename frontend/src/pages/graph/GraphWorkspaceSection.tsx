@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { cn } from "@/lib/cn";
 
 interface GraphWorkspaceSectionProps {
+  view?: "full" | "graph" | "events";
   graphData: GraphData;
   forceGraphRef: RefObject<ForceGraphHandle | null>;
   onNodeClick: (node: GraphNodeObject) => void;
@@ -53,7 +54,10 @@ interface GraphWorkspaceSectionProps {
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
 // 把图谱工作区、分页事件侧栏和联动详情区块拆到独立组件，收缩 GraphPage 的 JSX 复杂度
+// 2026-04-28，任务：分析详情页单屏 Tabs 改造
+// 修改原因：同一工作区需要按 tab 分别渲染图谱画布或关系变化面板，避免复制两套图谱逻辑
 export function GraphWorkspaceSection({
+  view = "full",
   graphData,
   forceGraphRef,
   onNodeClick,
@@ -92,16 +96,21 @@ export function GraphWorkspaceSection({
       initial="hidden"
       animate="visible"
       transition={{ duration: 0.28, delay: 0.15 }}
-      className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr),380px]"
+      className={cn(
+        "h-full min-h-0",
+        view === "full" && "grid gap-6 xl:grid-cols-[minmax(0,1.55fr),380px]",
+        view !== "full" && "block overflow-hidden"
+      )}
     >
-      <Card id="graph-workspace" variant="elevated" className="rounded-2xl">
-        <CardHeader className="gap-4">
+      {view !== "events" && (
+      <Card id="graph-workspace" variant="elevated" className="flex h-full min-h-[420px] flex-col rounded-2xl">
+        <CardHeader className="shrink-0 gap-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-1">
               <CardTitle className="text-base">关系工作区</CardTitle>
               <CardDescription>在这里可以缩放、筛选和定位人物之间的关系连接。</CardDescription>
             </div>
-            <div className="overflow-x-auto pb-1">
+            <div className="pb-1">
               <GraphToolbar
                 onZoomIn={onZoomIn}
                 onZoomOut={onZoomOut}
@@ -112,18 +121,18 @@ export function GraphWorkspaceSection({
                 onRelationTypeChange={onRelationTypeChange}
                 searchQuery={searchQuery}
                 onSearchChange={onSearchChange}
-                className="w-max"
+                className="max-w-full"
               />
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-4">
+        <CardContent className="flex min-h-0 flex-1 flex-col space-y-4">
           <div className="rounded-xl border border-border/70 bg-surface-hover/35 px-4 py-3 text-sm text-text-muted">
             可以先从上方的关系概览进入，再在这里放大、筛选并查看具体角色节点。
           </div>
 
-          <div className="relative min-h-[620px] overflow-hidden rounded-xl border border-border bg-surface lg:min-h-[720px]">
+          <div className="relative min-h-[320px] flex-1 overflow-hidden rounded-xl border border-border bg-surface">
             <ForceGraph
               ref={forceGraphRef}
               data={graphData}
@@ -140,8 +149,10 @@ export function GraphWorkspaceSection({
           </div>
         </CardContent>
       </Card>
+      )}
 
-      <div className="space-y-4 xl:sticky xl:top-6 xl:self-start">
+      {view !== "graph" && (
+      <div className={cn("h-full space-y-4 overflow-hidden", view !== "events" && "xl:self-start")}>
         <DashboardCardShell
           title="关系变化记录"
           icon={<History className="h-4 w-4" />}
@@ -171,7 +182,7 @@ export function GraphWorkspaceSection({
             ) : null}
             {sortedEvents.length ? (
               <>
-                <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                <div className="space-y-3 pr-1">
                   {sortedEvents.map((event) => {
                     const isSelected = activeSelectedEventId === event.relation_event_id;
                     return (
@@ -316,6 +327,7 @@ export function GraphWorkspaceSection({
           </div>
         </DashboardCardShell>
       </div>
+      )}
     </motion.section>
   );
 }
