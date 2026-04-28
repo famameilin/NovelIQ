@@ -15,7 +15,13 @@ import {
 } from "@/api/results";
 import { isDiagnosisRerunRequiredError } from "@/api/errorGuards";
 import { getNovel } from "@/api/novels";
-import { createAnalysisTask, resumeAnalysisTask, batchDeleteTasks, cancelAnalysisTask } from "@/api/analysis";
+import {
+  createAnalysisTask,
+  resumeAnalysisTask,
+  batchDeleteTasks,
+  cancelAnalysisTask,
+  getTaskStatus,
+} from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -142,16 +148,16 @@ export function NovelDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentTaskId, setNovel, setTask } = useNovelStore();
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isStartingTask, setIsStartingTask] = useState(false);
 
   // 使用 useAnalysisStatus hook 进行轮询并同步进度到 store
   useAnalysisStatus(novelId ?? null, currentTaskId, {
     enabled: !!novelId && !!currentTaskId,
     onRunning: () => {
-      setIsAnalyzing(true);
+      setIsStartingTask(false);
     },
     onCompleted: () => {
-      setIsAnalyzing(false);
+      setIsStartingTask(false);
       toast.success("分析完成");
       // 刷新所有指标数据，确保仪表盘显示最新结果
       queryClient.invalidateQueries({ queryKey: ["metrics", novelId, currentTaskId] });
@@ -159,11 +165,11 @@ export function NovelDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["results", novelId, currentTaskId] });
     },
     onCancelled: () => {
-      setIsAnalyzing(false);
+      setIsStartingTask(false);
       toast.info("分析任务已取消");
     },
     onFailed: (error) => {
-      setIsAnalyzing(false);
+      setIsStartingTask(false);
       toast.error(`分析失败: ${error}`);
     },
   });
@@ -190,17 +196,25 @@ export function NovelDetailPage() {
     }
   }, [currentTaskId, novelId, navigate]);
 
-  // Reset isAnalyzing when task is cleared
-  useEffect(() => {
-    if (!currentTaskId) {
-      setIsAnalyzing(false);
-    }
-  }, [currentTaskId]);
+  // Parallel data fetching
+  const enabled = !!novelId && !!currentTaskId;
+  const taskStatusQuery = useQuery({
+    queryKey: ["task-status", novelId, currentTaskId],
+    queryFn: () => getTaskStatus(novelId!, currentTaskId!),
+    enabled,
+    staleTime: 5 * 1000,
+  });
+  const taskStatus = taskStatusQuery.data?.status;
+  const isTaskActivelyProcessing =
+    taskStatus === "pending" || taskStatus === "running" || taskStatus === "cancelling";
+  const canRequestResults = enabled && taskStatusQuery.isSuccess && !isTaskActivelyProcessing;
+  const effectiveIsAnalyzing = isStartingTask || isTaskActivelyProcessing;
+  const isTaskBusy = isStartingTask || isTaskActivelyProcessing;
 
   /** 创建任务并启动分析：调用 createAnalysisTask → 刷新任务列表 → 设置 taskId */
   const handleCreateTask = useCallback(async () => {
-    if (!novelId || isAnalyzing) return;
-    setIsAnalyzing(true);
+    if (!novelId || isTaskBusy) return;
+    setIsStartingTask(true);
     try {
       const result = await createAnalysisTask(novelId);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
@@ -208,27 +222,27 @@ export function NovelDetailPage() {
       setTask(newTaskId);
       toast.info("分析任务已创建，正在执行...");
     } catch {
-      setIsAnalyzing(false);
+      setIsStartingTask(false);
       toast.error("创建分析任务失败");
     }
-  }, [novelId, isAnalyzing, queryClient, setTask]);
+  }, [novelId, isTaskBusy, queryClient, setTask]);
 
   /** 继续失败/待处理任务：调用 resumeAnalysisTask → 刷新任务列表 → 保持 task_id 不变 */
   const handleResumeTask = useCallback(async (taskId: string) => {
-    if (!novelId || isAnalyzing) return;
+    if (!novelId || isTaskBusy) return;
     const normalizedTaskId = taskId.trim();
     if (!normalizedTaskId) return;
-    setIsAnalyzing(true);
+    setIsStartingTask(true);
     try {
       const result = await resumeAnalysisTask(novelId, normalizedTaskId);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
       setTask(result.task_id);
       toast.info("继续分析任务已启动...");
     } catch {
-      setIsAnalyzing(false);
+      setIsStartingTask(false);
       toast.error("继续分析失败");
     }
-  }, [novelId, isAnalyzing, queryClient, setTask]);
+  }, [novelId, isTaskBusy, queryClient, setTask]);
 
   const handleDeleteTask = useCallback(async () => {
     if (!novelId || !currentTaskId) return;
@@ -242,7 +256,7 @@ export function NovelDetailPage() {
         return;
       }
       setTask(null);
-      setIsAnalyzing(false);
+      setIsStartingTask(false);
       queryClient.invalidateQueries({ queryKey: ["tasks", novelId] });
       toast.success("任务已删除");
     } catch {
@@ -261,9 +275,6 @@ export function NovelDetailPage() {
     }
   }, [novelId, queryClient]);
 
-  // Parallel data fetching
-  const enabled = !!novelId && !!currentTaskId;
-
   // Fetch novel info for title
   const novelQuery = useQuery({
     queryKey: ["novel", novelId],
@@ -275,49 +286,49 @@ export function NovelDetailPage() {
   const narrativeQuery = useQuery({
     queryKey: ["metrics", novelId, currentTaskId, "narrative"],
     queryFn: () => getNarrativeStructure(novelId!, currentTaskId!),
-    enabled,
+    enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const emotionQuery = useQuery({
     queryKey: ["metrics", novelId, currentTaskId, "emotion"],
     queryFn: () => getEmotionStats(novelId!, currentTaskId!),
-    enabled,
+    enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const characterQuery = useQuery({
     queryKey: ["metrics", novelId, currentTaskId, "character"],
     queryFn: () => getCharacterStats(novelId!, currentTaskId!),
-    enabled,
+    enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const styleQuery = useQuery({
     queryKey: ["metrics", novelId, currentTaskId, "style"],
     queryFn: () => getStyleStats(novelId!, currentTaskId!),
-    enabled,
+    enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const topicsQuery = useQuery({
     queryKey: ["topics", novelId, currentTaskId],
     queryFn: () => getTopics(novelId!, currentTaskId!),
-    enabled,
+    enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const diagnosisQuery = useQuery({
     queryKey: ["results", novelId, currentTaskId, "diagnosis"],
     queryFn: () => getDiagnosis(novelId!, currentTaskId!),
-    enabled,
+    enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
   const curvesQuery = useQuery({
     queryKey: ["results", novelId, currentTaskId, "curves"],
     queryFn: () => getChunkCurves(novelId!, currentTaskId!),
-    enabled,
+    enabled: canRequestResults,
     staleTime: STALE_TIME,
   });
 
@@ -339,17 +350,20 @@ export function NovelDetailPage() {
 
   const isLoading =
     enabled &&
-    (narrativeQuery.isLoading ||
-      emotionQuery.isLoading ||
-      characterQuery.isLoading ||
-      styleQuery.isLoading ||
-      topicsQuery.isLoading ||
-      diagnosisQuery.isLoading ||
-      curvesQuery.isLoading);
+    (taskStatusQuery.isLoading ||
+      (canRequestResults &&
+        (narrativeQuery.isLoading ||
+          emotionQuery.isLoading ||
+          characterQuery.isLoading ||
+          styleQuery.isLoading ||
+          topicsQuery.isLoading ||
+          diagnosisQuery.isLoading ||
+          curvesQuery.isLoading)));
 
   // 中文注释：首页对 rerun-required diagnosis 采用“单一重跑态”；
   // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败。
   const hasAnyError =
+    taskStatusQuery.isError ||
     narrativeQuery.isError ||
     emotionQuery.isError ||
     characterQuery.isError ||
@@ -359,6 +373,7 @@ export function NovelDetailPage() {
     curvesQuery.isError;
 
   const retryAll = () => {
+    taskStatusQuery.refetch();
     narrativeQuery.refetch();
     emotionQuery.refetch();
     characterQuery.refetch();
@@ -379,17 +394,17 @@ export function NovelDetailPage() {
         onCreateTask={handleCreateTask}
         onResumeTask={handleResumeTask}
         onDeleteCurrentTask={currentTaskId ? handleDeleteTask : undefined}
-        isResuming={isAnalyzing}
+        isResuming={effectiveIsAnalyzing}
         className="mb-3"
       />
 
       {/* No task selected — offer start analysis */}
       {!currentTaskId && (
-        <EmptyTaskPrompt onAnalyze={handleCreateTask} isAnalyzing={isAnalyzing} />
+        <EmptyTaskPrompt onAnalyze={handleCreateTask} isAnalyzing={isStartingTask} />
       )}
 
       {/* Analysis in progress — show progress panel, hide everything else */}
-      {isAnalyzing && currentTaskId && (
+      {effectiveIsAnalyzing && currentTaskId && (
         <motion.div className="flex min-h-0 flex-1 flex-col">
           <AnalysisProgressPanel
             taskId={currentTaskId}
@@ -399,10 +414,10 @@ export function NovelDetailPage() {
       )}
 
       {/* Loading skeleton - only when not analyzing */}
-      {!isAnalyzing && isLoading && currentTaskId && <SkeletonGrid />}
+      {!effectiveIsAnalyzing && isLoading && currentTaskId && <SkeletonGrid />}
 
       {/* Error state — only when not analyzing */}
-      {!isAnalyzing && hasAnyError && !isLoading && currentTaskId && (
+      {!effectiveIsAnalyzing && hasAnyError && !isLoading && currentTaskId && (
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-text-muted">数据加载失败</p>
           <Button variant="ghost" size="sm" onClick={retryAll}>
@@ -411,10 +426,10 @@ export function NovelDetailPage() {
         </div>
       )}
 
-      {!isAnalyzing && diagnosisRequiresRerun && !isLoading && currentTaskId && <RerunRequiredState />}
+      {!effectiveIsAnalyzing && diagnosisRequiresRerun && !isLoading && currentTaskId && <RerunRequiredState />}
 
       {/* Main content - only when not analyzing */}
-      {!isAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && !diagnosisRequiresRerun && (
+      {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && !diagnosisRequiresRerun && (
         <div className="space-y-4">
           {/* Row 1: 诊断画像 + 评分速览 */}
           <motion.div
