@@ -45,10 +45,7 @@ vi.mock("framer-motion", () => ({
 }));
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: StreamOutput 需要真实消费 Zustand 多流状态，因此测试直接用 store seed 当前 task/progress 与并行流事件。
+ * StreamOutput 需要真实消费 Zustand 多流状态，因此测试直接用 store seed 当前 task/progress 与并行流事件
  */
 function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
   return {
@@ -68,10 +65,7 @@ function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
 }
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: 输出面板依赖当前 task 和 progress 才会渲染，需要统一初始化上下文避免每个测试重复手写 store 搭建。
+ * 输出面板依赖当前 task 和 progress 才会渲染，需要统一初始化上下文避免每个测试重复手写 store 搭建
  */
 function seedTaskContext(taskId: string) {
   act(() => {
@@ -112,7 +106,114 @@ describe("StreamOutput 多流展示", () => {
     render(<StreamOutput taskId="task-1" />);
 
     expect(screen.getByText("单流输出内容")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "输出" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "思考" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看全部流" })).not.toBeInTheDocument();
+  });
+
+  it("phase1 尚未收到流文本时也应保持输出与思考 tab 骨架", () => {
+    act(() => {
+      useStreamStore.getState().setTaskId("task-pending-phase1");
+      useStreamStore.getState().updateProgress(
+        createLLMEvent({
+          action: "start",
+          sub_stage: "phase1",
+          chunk_id: 1,
+          current: 1,
+          total: 10,
+          percent: 17,
+          sub_percent: 0,
+          content: "",
+          message: "开始 phase1",
+        }),
+      );
+    });
+
+    render(<StreamOutput taskId="task-pending-phase1" />);
+
+    expect(screen.getByRole("tab", { name: "输出" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "思考" })).toBeInTheDocument();
+    expect(screen.getByText("开始 phase1")).toBeInTheDocument();
+    expect(screen.getByText(/模型输出尚未到达/)).toBeInTheDocument();
+    expect(screen.queryByText("LLM 输出将在模型推理阶段显示...")).not.toBeInTheDocument();
+  });
+
+  it("当前 phase 尚无新流时应回退展示同 chunk 最近输出", () => {
+    act(() => {
+      useStreamStore.getState().setTaskId("task-phase-fallback");
+      useStreamStore.getState().updateProgress(
+        createLLMEvent({
+          action: "start",
+          sub_stage: "phase4",
+          chunk_id: 244,
+          current: 244,
+          total: 255,
+          percent: 77,
+          sub_percent: 75,
+          content: "",
+          message: "开始 phase4",
+        }),
+      );
+      useStreamStore.getState().appendLLMOutput(
+        createLLMEvent({
+          action: "output",
+          sub_stage: "phase2",
+          chunk_id: 244,
+          current: 244,
+          total: 255,
+          percent: 76.98,
+          sub_percent: 25,
+          content: "智子向人类发送五个字信息，",
+        }),
+      );
+    });
+
+    render(<StreamOutput taskId="task-phase-fallback" />);
+
+    expect(screen.getByText("智子向人类发送五个字信息，")).toBeInTheDocument();
+    expect(screen.queryByText(/模型输出尚未到达/)).not.toBeInTheDocument();
+  });
+
+  it("同 chunk 的 thinking 落在其他 phase 时也应在思考 tab 回退展示", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useStreamStore.getState().setTaskId("task-thinking-fallback");
+      useStreamStore.getState().updateProgress(
+        createLLMEvent({
+          action: "start",
+          sub_stage: "phase4",
+          chunk_id: 244,
+          current: 244,
+          total: 255,
+          percent: 77,
+          sub_percent: 75,
+          content: "",
+          message: "开始 phase4",
+        }),
+      );
+      useStreamStore.getState().appendLLMOutput(
+        createLLMEvent({
+          action: "output",
+          sub_stage: "phase2",
+          chunk_id: 244,
+          content: "phase2 输出",
+        }),
+      );
+      useStreamStore.getState().appendLLMOutput(
+        createLLMEvent({
+          action: "thinking",
+          sub_stage: "phase1",
+          chunk_id: 244,
+          content: "phase1 思考",
+        }),
+      );
+    });
+
+    render(<StreamOutput taskId="task-thinking-fallback" />);
+
+    await user.click(screen.getByRole("tab", { name: "思考" }));
+    expect(screen.getByText("phase1 思考")).toBeInTheDocument();
+    expect(screen.queryByText(/模型思考尚未到达/)).not.toBeInTheDocument();
   });
 
   it("多流时应默认显示最近更新流，并允许主面板切换", async () => {

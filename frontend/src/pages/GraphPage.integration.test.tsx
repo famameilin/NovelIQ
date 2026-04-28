@@ -20,7 +20,7 @@ const navigateMock = vi.fn();
 let currentGraphSearchParams = "task_id=task-integration";
 let currentGraphNovelId = "novel-1";
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。测试里只替换动画壳，保留真实页面子组件组合。
+// 2026-04-23，任务：复杂度与耦合审查 P2。测试里只替换动画壳，保留真实页面子组件组合
 function motionElement(tagName: string) {
   const Component = (props: {
     children?: ReactNode;
@@ -140,7 +140,7 @@ vi.mock("@/api/analysis", () => ({
   getAnalysisTasks: (...args: unknown[]) => getAnalysisTasksMock(...args),
 }));
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。创建独立 QueryClient，避免页面集成测试间缓存串扰。
+// 2026-04-23，任务：复杂度与耦合审查 P2。创建独立 QueryClient，避免页面集成测试间缓存串扰
 function renderGraphPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -154,7 +154,7 @@ function renderGraphPage() {
   );
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。复用真实 GraphPage 需要的最小完整图谱合约。
+// 2026-04-23，任务：复杂度与耦合审查 P2。复用真实 GraphPage 需要的最小完整图谱合约
 function createGraphData(): GraphData {
   return {
     nodes: [
@@ -229,7 +229,7 @@ function createGraphData(): GraphData {
   };
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。构造真实 NovelHeader 查询所需小说对象。
+// 2026-04-23，任务：复杂度与耦合审查 P2。构造真实 NovelHeader 查询所需小说对象
 function createNovel(): Novel {
   return {
     novel_id: "novel-1",

@@ -1,10 +1,7 @@
 """
-结果查询共享工具。
+结果查询共享工具
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
-说明: 承载 route/service 共享的解析、归一化与评分工具，避免 service 反向依赖 route。
+说明: 承载 route/service 共享的解析、归一化与评分工具，避免 service 反向依赖 route
 """
 
 from __future__ import annotations
@@ -22,7 +19,7 @@ from src.config.constants import (
 
 
 def _parse_json_field(value: Any) -> Any:
-    """解析 JSON 字段，处理可能的异常。"""
+    """解析 JSON 字段，处理可能的异常"""
     if value is None:
         return None
     if isinstance(value, dict | list):
@@ -36,7 +33,7 @@ def _parse_json_field(value: Any) -> Any:
 
 
 def _parse_int_field(value: Any) -> int | None:
-    """解析整数字段，处理可能的异常。"""
+    """解析整数字段，处理可能的异常"""
     if value is None:
         return None
     try:
@@ -46,7 +43,7 @@ def _parse_int_field(value: Any) -> int | None:
 
 
 def _normalize_name(name: str | None, alias_map: dict[str, str] | None) -> str | None:
-    """对单个人名应用别名归一化。"""
+    """对单个人名应用别名归一化"""
     if name is None:
         return None
     if alias_map and name in alias_map:
@@ -55,7 +52,7 @@ def _normalize_name(name: str | None, alias_map: dict[str, str] | None) -> str |
 
 
 def _normalize_name_list(values: list[str] | None, alias_map: dict[str, str] | None) -> list[str] | None:
-    """对名称列表应用别名归一化并去重，保持原有顺序。"""
+    """对名称列表应用别名归一化并去重，保持原有顺序"""
     if not values:
         return values
 
@@ -72,7 +69,7 @@ def _normalize_name_list(values: list[str] | None, alias_map: dict[str, str] | N
 
 
 def _normalize_text_by_alias_map(text: str | None, alias_map: dict[str, str] | None) -> str | None:
-    """对自由文本中的人物别名做谨慎归一化。"""
+    """对自由文本中的人物别名做谨慎归一化"""
     if not text or not alias_map:
         return text
 
@@ -156,14 +153,6 @@ def _calculate_narrative_focus_scores(
     focus_characters: list[str],
     main_characters: list[str],
 ) -> list[CharacterStats]:
-    """
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: 旧 `protagonist_score` 语义会把“唯一主角判定”和“中心度融合分”混在一起；
-    现在保留原四因子公式，但只把它作为 `narrative_focus_score`，焦点身份改由
-    diagnosis 输出的 `focus_characters` 决定。
-    """
     if not characters:
         return characters
 
@@ -189,18 +178,7 @@ def _normalize_arc_scores(
     alias_map: dict[str, str] | None,
 ) -> dict[str, float] | None:
     """
-    对 arc_scores 的人物名称进行归一化，并收口为命名字典。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-diagnosis-followup-review-findings
-    修改原因: 结果 API 与前端页面都按“角色名 -> 分数”消费 arc_scores。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: 焦点合同已经明确不兼容旧数据；这里不再接受匿名数组形态的旧弧线分，
-    只保留命名字典输入，避免继续在活链路里保留旧合同兼容分支。
+    对 arc_scores 的人物名称进行归一化，并收口为命名字典
     """
     if not arc_scores:
         return None

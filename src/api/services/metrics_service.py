@@ -1,9 +1,6 @@
 """
 聚合指标服务类
 
-创建时间: 2026-04-22
-创建者: TraeAI
-任务: metrics接口重复计算问题重构
 说明: 封装聚合结果的获取和缓存逻辑，消除重复计算和代码重复
 """
 
@@ -122,7 +119,7 @@ class MetricsService:
         return style_stats
 
     def get_aggregate_metrics_contract(self, run_id: str, session: Session) -> dict[str, Any]:
-        """获取稳定的 aggregate metrics contract，并复用聚合缓存。"""
+        """获取稳定的 aggregate metrics contract，并复用聚合缓存"""
         narrative_structure, emotion_stats, character_stats, style_stats = self.get_aggregate_result(run_id, session)
         return build_aggregate_metrics_contract_from_models(
             narrative_structure,

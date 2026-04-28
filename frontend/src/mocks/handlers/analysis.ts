@@ -7,10 +7,7 @@
  * - taskStatus 返回当前进度（由模拟计时器更新）
  * - 任务完成后所有结果 API 可正常返回数据
  *
- * 修改时间: 2026-04-07
- * 修改者: TraeAI
- * 任务: implement-task-cancellation
- * 修改内容: 添加模拟 LLM 输出，支持 HTTP 轮询显示
+ * 添加模拟 LLM 输出，支持 HTTP 轮询显示
  */
 import { http, HttpResponse, delay } from "msw";
 import { taskDb, createTask } from "../data";
@@ -60,7 +57,7 @@ const MOCK_LLM_OUTPUTS = [
   "生成诊断报告...",
 ];
 
-// 2026-04-19, fix-review-findings: 同步 taskDb 中的任务状态，避免 mock 列表与运行态漂移。
+// 同步 taskDb 中的任务状态，避免 mock 列表与运行态漂移
 function updateTaskRecord(
   novelId: string,
   taskId: string,
@@ -184,7 +181,7 @@ export const createTaskHandler = http.post(`${BASE}/api/novels/:novelId/tasks`, 
   });
 });
 
-// 兼容旧入口：语义对齐为“创建新任务”，不再承载 resume 行为。
+// 兼容旧入口：语义对齐为“创建新任务”，不再承载 resume 行为
 export const analyzeHandler = http.post(`${BASE}/api/novels/:novelId/analyze`, async ({ params, request }) => {
   await delay(500);
   const body = await request.clone().json().catch(() => null) as { task_id?: string } | null;
@@ -259,7 +256,7 @@ export const taskStatusHandler = http.get(
   }
 );
 
-// 兼容旧入口：仍允许通过 query 读取，但前端主流程已切到 /tasks/{taskId}/status。
+// 兼容旧入口：仍允许通过 query 读取，但前端主流程已切到 /tasks/{taskId}/status
 export const analysisStatusHandler = http.get(
   `${BASE}/api/novels/:novelId/status`,
   async ({ params, request }) => {

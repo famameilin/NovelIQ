@@ -1,9 +1,7 @@
 """
-RAG EvidenceBundle 组装器。
+RAG EvidenceBundle 组装器
 
-创建时间: 2026-04-23
-任务: p1-rag-retriever-split
-说明: 将 structured/local/semantic evidence 的组装细节从 provider 主类中抽离。
+将 structured/local/semantic evidence 的组装细节从 provider 主类中抽离
 """
 
 from __future__ import annotations
@@ -20,11 +18,9 @@ if TYPE_CHECKING:
 
 class EvidenceBundleBuilder:
     """
-    EvidenceBundle 组装器。
+    EvidenceBundle 组装器
 
-    创建时间: 2026-04-23
-    任务: p1-rag-retriever-split
-    说明: 统一封装各层 evidence item 的构造，provider 只负责编排调用顺序。
+    统一封装各层 evidence item 的构造，provider 只负责编排调用顺序
     """
 
     def build_structured_bundle(
@@ -32,11 +28,11 @@ class EvidenceBundleBuilder:
         snapshot: Level1AuthoritySnapshot,
         requested_names: list[str] | None = None,
     ) -> EvidenceBundle:
-        """按请求名字构建 Level1 structured evidence。"""
+        """按请求名字构建 Level1 structured evidence"""
         normalized_requested_names = [name for name in (requested_names or []) if name]
         if requested_names is not None and not normalized_requested_names:
-            # 中文注释：显式传入空请求名表示“当前消费者没有可信实体锚点”，
-            # 这里不能退回全量 Level1 事实，否则会把整本书的结构化事实误注入 direct-only 的消费者。
+            # 显式传入空请求名表示“当前消费者没有可信实体锚点”，
+            # 这里不能退回全量 Level1 事实，否则会把整本书的结构化事实误注入 direct-only 的消费者
             return EvidenceBundle(
                 structured_evidence=[],
                 requested_names=[],
@@ -130,7 +126,7 @@ class EvidenceBundleBuilder:
         )
 
     def build_active_entity_items(self, active_entities: list[ActiveEntityContext]) -> list[EvidenceItem]:
-        """构建 Level2 活跃实体 evidence items。"""
+        """构建 Level2 活跃实体 evidence items"""
         return [
             EvidenceItem(
                 evidence_type="active_entity",
@@ -152,7 +148,7 @@ class EvidenceBundleBuilder:
         ]
 
     def build_active_entity_fallback_items(self, candidates: list[str]) -> list[EvidenceItem]:
-        """构建缺少 authority view 时的 Level2 fallback items。"""
+        """构建缺少 authority view 时的 Level2 fallback items"""
         return [
             EvidenceItem(
                 evidence_type="active_entity",
@@ -165,22 +161,14 @@ class EvidenceBundleBuilder:
 
     def _build_semantic_recall_metadata(self, result: SimilarChunkRow) -> dict[str, object]:
         """
-        创建时间: 2026-04-24
-        任务: level3-mention-retrieval-closure
-        说明: 冻结 Level3 semantic_recall 的 metadata 合同；即使某些字段当前为空，也保持键名稳定，
-              便于后续日志观察、共享 renderer 和延期评测直接复用。
+        冻结 Level3 semantic_recall 的 metadata 合同；即使某些字段当前为空，也保持键名稳定，
+              便于后续日志观察、共享 renderer 和延期评测直接复用
 
-        修改时间: 2026-04-24
-        任务: split-level3-score-fields
-        修改说明: 显式暴露 chunk / paragraph / business / final 分数，并删除已废弃的旧分数字段。
+        显式暴露 chunk / paragraph / business / final 分数，并删除已废弃的旧分数字段
 
-        修改时间: 2026-04-24
-        任务: full-global-offset-rollout
-        修改说明: paragraph offset metadata 改为显式 local/global 字段，不再继续输出旧的歧义字段名。
+        paragraph offset metadata 改为显式 local/global 字段，不再继续输出旧的歧义字段名
 
-        修改时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        修改说明: 冻结 LLM mention / query_variant / model rerank 观察字段，不改变 EvidenceBundle 主结构。
+        冻结 LLM mention / query_variant / model rerank 观察字段，不改变 EvidenceBundle 主结构
         """
         chunk_semantic_score = (
             result.chunk_semantic_score
@@ -252,23 +240,15 @@ class EvidenceBundleBuilder:
 
     def build_semantic_recall_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
         """
-        构建 Level3 通用语义召回证据。
+        构建 Level3 通用语义召回证据
 
-        修改时间: 2026-04-23
-        任务: level3-mention-retrieval
-        修改说明: mention query 产物额外写入 metadata，不改变 EvidenceBundle 主结构。
+        mention query 产物额外写入 metadata，不改变 EvidenceBundle 主结构
 
-        修改时间: 2026-04-24
-        任务: level3-paragraph-rerank
-        修改说明: 将 paragraph rerank 的局部 preview 与分数写入 metadata，供 renderer 优先展示局部 evidence。
+        将 paragraph rerank 的局部 preview 与分数写入 metadata，供 renderer 优先展示局部 evidence
 
-        修改时间: 2026-04-24
-        任务: level3-mention-rerank
-        修改说明: 写入 mention-aware rerank 分数与加权原因，便于后续评测和日志核对。
+        写入 mention-aware rerank 分数与加权原因，便于后续评测和日志核对
 
-        修改时间: 2026-04-24
-        任务: llm-mention-rerank-chain
-        修改说明: 显式转换 final_rank_score，避免 metadata 的宽 object 类型影响静态检查。
+        显式转换 final_rank_score，避免 metadata 的宽 object 类型影响静态检查
         """
         items: list[EvidenceItem] = []
         for result in level3_results:
@@ -288,20 +268,14 @@ class EvidenceBundleBuilder:
 
     def build_emotion_exemplar_items(self, level3_results: list[SimilarChunkRow]) -> list[EvidenceItem]:
         """
-        构建用于情绪判断的 Level3 专用证据。
+        构建用于情绪判断的 Level3 专用证据
 
-        修改时间: 2026-04-23
-        任务: level3-mention-review-fix
-        修改说明: emotion exemplar 只消费 chunk 级语义召回，避免 mention 身份检索结果污染情绪证据。
+        emotion exemplar 只消费 chunk 级语义召回，避免 mention 身份检索结果污染情绪证据
 
-        修改时间: 2026-04-24
-        任务: fix-emotion-exemplar-score-contract
-        修改说明: paragraph rerank 仅影响 semantic_recall；emotion exemplar 继续使用 chunk 级分数，
-                  避免局部 paragraph 分数污染整段 chunk 示例排序语义。
+        paragraph rerank 仅影响 semantic_recall；emotion exemplar 继续使用 chunk 级分数，
+                  避免局部 paragraph 分数污染整段 chunk 示例排序语义
 
-        修改时间: 2026-04-24
-        任务: split-level3-score-fields
-        修改说明: emotion exemplar 固定读取显式 chunk 语义分，避免 final/business 分数误入情绪示例排序。
+        emotion exemplar 固定读取显式 chunk 语义分，避免 final/business 分数误入情绪示例排序
         """
         exemplar_items: list[EvidenceItem] = []
         for result in level3_results:

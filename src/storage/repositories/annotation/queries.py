@@ -1,10 +1,7 @@
 """
 标注数据查询操作
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分annotation_repository
-说明: 标注数据查询相关操作
+标注数据查询相关操作
 """
 
 from __future__ import annotations
@@ -131,10 +128,7 @@ def fetch_chunk_dialogues_full(session: Session, run_id: str) -> list[Any]:
     """
     获取完整的分块对话数据
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    修改内容: 添加 tone 字段到返回结果
+    添加 tone 字段到返回结果
 
     Returns:
         (chunk_id, speaker, length, tone) 元组列表
@@ -269,7 +263,7 @@ def fetch_pending_chunk_relations(
     to_chunk: int | None = None,
     limit: int = 200,
 ) -> list[ChunkRelation]:
-    """获取待重试投影的关系（pending）。"""
+    """获取待重试投影的关系（pending）"""
     stmt = select(ChunkRelation).where(
         ChunkRelation.run_id == run_id,
         ChunkRelation.projection_status == "pending",
@@ -310,10 +304,7 @@ def get_annotation_by_chunk(session: Session, run_id: str, chunk_id: int) -> dic
     """
     获取指定 chunk 的标注结果
 
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 修复缺失的 get_annotation_by_chunk 方法
-    说明: 用于增量消歧时提取新出现的人名
+    用于增量消歧时提取新出现的人名
 
     Args:
         session: 数据库会话

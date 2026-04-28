@@ -22,19 +22,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, GitBranch, Tags } from "lucide-react";
 
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
-
 const STALE_TIME = 5 * 60 * 1000;
 
-/**
- * 修改时间: 2026-04-26
- * 修改者: Codex
- * 任务: fix-diagnosis-review-findings
- * 修改原因: diagnosis 页现在会同时展示 thread ledger，
- * 需要把状态标签集中到一个 helper，避免页面分支和展示语义漂移。
- */
+/** 统一 diagnosis thread 状态到标签文案 */
 function getThreadStatusMeta(status: string) {
   switch (status) {
     case "likely_paid_off":
@@ -48,15 +38,8 @@ function getThreadStatusMeta(status: string) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  State Cards                                                       */
-/* ------------------------------------------------------------------ */
-
 /**
- * 创建时间: 2026-04-26
- * 创建者: Codex
- * 任务: fix-diagnosis-review-findings
- * 说明: 诊断页在 `200 null` 场景下需要稳定空态，避免用户看到空白成功页。
+ * 诊断页在 `200 null` 场景下需要稳定空态，避免用户看到空白成功页
  */
 function EmptyDiagnosisState() {
   return (
@@ -73,11 +56,8 @@ function EmptyDiagnosisState() {
 }
 
 /**
- * 创建时间: 2026-04-27
- * 创建者: Codex
- * 任务: protagonist-focus-contract-review-fixes
- * 说明: diagnosis 页一旦拿到缺焦点合同的半成品 payload，就不能再按正常诊断报告渲染；
- * 这里显式提示用户该任务需要重跑，同时允许下方 setup ledger 继续独立展示。
+ * diagnosis 页一旦拿到缺焦点合同的半成品 payload，就不能再按正常诊断报告渲染；
+ * 这里显式提示用户该任务需要重跑，同时允许下方 setup ledger 继续独立展示
  */
 function IncompleteDiagnosisContractState() {
   return (
@@ -96,10 +76,7 @@ function IncompleteDiagnosisContractState() {
 }
 
 /**
- * 创建时间: 2026-04-26
- * 创建者: Codex
- * 任务: fix-diagnosis-review-findings
- * 说明: setup thread 台账是独立查询，失败时必须显式告警，而不是静默吞掉。
+ * setup thread 台账是独立查询，失败时必须显式告警，而不是静默吞掉
  */
 function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
   return (
@@ -118,11 +95,8 @@ function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
 }
 
 /**
- * 创建时间: 2026-04-26
- * 创建者: Codex
- * 任务: fix-diagnosis-ledger-fallback
- * 说明: setup 台账是独立于云端 diagnosis 的主链结果；
- * 即便 diagnosis 为空，只要 ledger 已可用，也应该继续对用户可见。
+ * setup 台账是独立于云端 diagnosis 的主链结果；
+ * 即便 diagnosis 为空，只要 ledger 已可用，也应该继续对用户可见
  */
 function ForeshadowingThreadsSection(props: {
   foreshadowingThreads: Array<{
@@ -194,10 +168,7 @@ function ForeshadowingThreadsSection(props: {
 }
 
 /**
- * 修改时间: 2026-04-26
- * 修改者: Codex
- * 任务: fix-diagnosis-review-findings
- * 修改原因: 诊断页新增空态与台账错误分支后，仍保留独立 skeleton 以避免首屏闪烁。
+ * 修改原因: 诊断页新增空态与台账错误分支后，仍保留独立 skeleton 以避免首屏闪烁
  */
 function SkeletonGrid() {
   return (
@@ -255,7 +226,7 @@ function SkeletonGrid() {
 
 /**
  * 2026-04-27，任务：protagonist-focus-contract
- * 修改原因：诊断页角色阵容展示改为焦点结构合同，允许单主角、双主角与群像三种结果稳定渲染。
+ * 修改原因：诊断页角色阵容展示改为焦点结构合同，允许单主角、双主角与群像三种结果稳定渲染
  */
 export function DiagnosisPage() {
   const { novelId } = useParams<{ novelId: string }>();

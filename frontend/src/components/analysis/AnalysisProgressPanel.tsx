@@ -1,20 +1,11 @@
 /**
  * AnalysisProgressPanel - 仪表盘进度展示面板
  *
- * 创建时间: 2026-04-07
- * 创建者: TraeAI
- * 任务: implement-task-cancellation
- * 说明: 任务运行中时在仪表盘展示进度，替代骨架屏
+ * 任务运行中时在仪表盘展示进度，替代骨架屏
  *
- * 修改时间: 2026-04-07
- * 修改者: TraeAI
- * 任务: implement-task-cancellation
- * 修改内容: 使用 flex-1 填满父元素高度，移除固定高度
+ * 使用 flex-1 填满父元素高度，移除固定高度
  *
- * 修改时间: 2026-04-08
- * 修改者: TraeAI
- * 任务: fix-stream-output-height
- * 修改内容: 配合 NovelDetailPage 的 flex-1 flex-col min-h-0 父容器使用 flex-1
+ * 配合 NovelDetailPage 的 flex-1 flex-col min-h-0 父容器使用 flex-1
  */
 import { Square } from "lucide-react";
 import { Button } from "@/components/ui/button";

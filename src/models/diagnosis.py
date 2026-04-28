@@ -1,44 +1,7 @@
 """
-创建时间: 2026-03-23
-创建者: TraeAI
-任务: unify-model-client-architecture
 说明: 统一的诊断客户端，同时支持本地和云端
 
-本模块包含诊断客户端，负责对小说进行整体诊断分析。
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: unify-model-client-architecture
-修改内容: 创建统一的 DiagnosisClient，替代 cloud/diagnosis_client.py
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 简化 diagnosis payload
-修改内容: _build_messages 方法移除 common_character_names 相关逻辑，只使用 alias_map
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 创建统一的模型交互记录接口
-修改内容: 使用 record_model_interaction 替代内联保存逻辑
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: runtime-behavior-settings
-修改内容: 诊断重试次数改由 settings.runtime.diagnosis 驱动，移除类级硬编码常量
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: unify-estimated-token-accounting
-修改内容: diagnosis token_usage 统一改为基于 messages/response_text 的估算口径
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: count-failed-llm-calls
-修改内容: 诊断响应已返回但 JSON 解析失败时，仍补记本次请求的 token 成本
-
-修改时间: 2026-04-26
-修改者: Codex
-任务: remove-foreshadow-rate-contract
-修改内容: 诊断主链统一切到 `foreshadow_expectation`，不再在 summary 和结果模型里保留旧字段
+本模块包含诊断客户端，负责对小说进行整体诊断分析
 """
 
 from __future__ import annotations
@@ -64,8 +27,8 @@ class DiagnosisClient(BaseModelClient):
     """
     统一诊断客户端
 
-    负责对小说进行整体诊断分析，包括叙事类型、主题、价值观等。
-    同时支持本地和云端模型，通过 base_url 自动检测。
+    负责对小说进行整体诊断分析，包括叙事类型、主题、价值观等
+    同时支持本地和云端模型，通过 base_url 自动检测
     """
 
     RETRY_DELAY_SECONDS = 2
@@ -90,13 +53,6 @@ class DiagnosisClient(BaseModelClient):
         )
 
     async def diagnose(self, payload: dict, *, run_id: str | None = None) -> CloudAnalysis:
-        """
-        修改时间: 2026-04-25
-        修改者: Codex
-        任务: remove-diagnosis-cache-and-fix-interaction-persistence
-        修改内容: diagnose 审计记录所需的 run_id 改为显式参数传入，
-                  不再依赖 payload 隐式夹带，避免 prompt 输入和落库上下文混在一起。
-        """
         if not self._config.model:
             raise ValueError("model is required for diagnosis")
         novel_id = payload.get("novel_id")
@@ -142,12 +98,6 @@ class DiagnosisClient(BaseModelClient):
         )
 
     def _build_json_schema(self, response_model: type[T]) -> dict[str, Any]:
-        """
-        修改时间: 2026-04-20
-        修改者: Codex
-        任务: fix-phase2-response-format-schema
-        修改内容: 诊断链路复用 BaseModelClient 的 strict schema 构建逻辑，避免与 annotation/disambiguation 再次分叉。
-        """
         return super()._build_json_schema(response_model)
 
     def _parse_structured_response(self, response: Any, response_model: type[T]) -> T:
@@ -172,10 +122,6 @@ class DiagnosisClient(BaseModelClient):
     ) -> Any:
         """
         非流式API调用（async 版本）
-
-        创建时间: 2026-04-09
-        创建者: TraeAI
-        任务: 支持 AsyncOpenAI
         """
         logger.debug("Using non-streaming mode for diagnosis API call")
 
@@ -199,16 +145,7 @@ class DiagnosisClient(BaseModelClient):
         attempt_number: int = 1,
     ) -> CloudAnalysis:
         """
-        执行单次诊断结构化调用。
-
-        修改时间: 2026-04-24
-        任务: structured-output-adapter-instructor-unification
-        修改内容: 使用项目级 structured_output 适配层负责 response_format 选择和 Pydantic 解析，
-                  本函数继续保留诊断审计、analysis_logger 与 token 记账职责。
-
-        修改时间: 2026-04-24
-        任务: fix-structured-output-review-findings
-        修改内容: 结构化调用失败时仅对已返回 raw_response 的场景补记 token，避免本地前置错误被记账。
+        执行单次诊断结构化调用
         """
         start_time = time.time()
 
@@ -318,32 +255,7 @@ class DiagnosisClient(BaseModelClient):
 
     def _finalize_result(self, result: CloudAnalysis, novel_id: Any, *, payload: dict[str, Any]) -> CloudAnalysis:
         """
-        统一收口 diagnosis 结果的持久化前终态。
-
-        创建时间: 2026-04-26
-        修改者: Codex
-        任务: remove-foreshadow-rate-contract
-        新建原因: `foreshadow_expectation` 现在以 payload 中的 setup-ledger 真相源为准；
-        即便 LLM 返回了别的值，这里也要在落库前强制对齐，避免同一次 diagnosis 出现双真相。
-
-        修改时间: 2026-04-26
-        修改者: Codex
-        任务: fix-diagnosis-review-findings
-        修改原因: 当 setup ledger 合法为空时，payload 会显式给出 `foreshadow_expectation=None`；
-        此时也必须覆写掉 LLM 猜测值，继续保持 setup ledger 单一真相源。
-
-        修改时间: 2026-04-27
-        修改者: Codex
-        任务: protagonist-focus-contract
-        修改原因: 新 diagnosis 合同允许 single / dual / ensemble；
-        落库前必须重新走一遍 CloudAnalysis 校验，禁止把非法焦点结构静默写入数据库。
-
-        修改时间: 2026-04-27
-        修改者: Codex
-        任务: fix-diagnosis-topic-label-count-contract
-        修改原因: 当前 prompt 和前端主题页都把 `topic_labels` 当作按位置消费的完整命名结果；
-        这里必须显式校验“返回标签数 == 实际发给 LLM 的 topic_words 数”，
-        禁止部分命名结果落库后被误当成完整 diagnosis。
+        统一收口 diagnosis 结果的持久化前终态
         """
 
         updates: dict[str, Any] = {}
@@ -368,8 +280,8 @@ class DiagnosisClient(BaseModelClient):
                 raise TypeError(f"payload.topic_words must be list when provided, got {type(topic_words).__name__}")
             expected_topic_label_count = len(topic_words)
             actual_topic_label_count = len(result.topic_labels)
-            # 中文注释：payload.topic_words 已经是本次真正发给 LLM 的主题头部列表，
-            # 所以这里校验的是“返回标签数 == 发送主题数”，而不是全文 total_topics。
+            # payload.topic_words 已经是本次真正发给 LLM 的主题头部列表，
+            # 所以这里校验的是“返回标签数 == 发送主题数”，而不是全文 total_topics
             if actual_topic_label_count != expected_topic_label_count:
                 raise ValueError(
                     "topic_labels count must match payload.topic_words count: "

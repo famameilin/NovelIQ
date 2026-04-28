@@ -1,5 +1,5 @@
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：集中管理图谱页和时间轴页的深链 URL 构造，避免页面与 hook 各自拼接参数。
+// 集中管理图谱页和时间轴页的深链 URL 构造，避免页面与 hook 各自拼接参数
 
 export function buildGraphUrl(
   novelId: string,
@@ -17,12 +17,9 @@ export function buildGraphUrl(
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：统一时间轴入口 URL，确保图谱页各跳转点保持同一默认参数口径。
+// 统一时间轴入口 URL，确保图谱页各跳转点保持同一默认参数口径
 //
-// 修改时间: 2026-04-28
-// 修改者: Codex
-// 任务: 时间轴合同重构第二轮
-// 修改内容:
+
 // - 时间轴默认入口改为 `view=composite`
 // - 移除未消费的 `show_tension` 参数，避免 URL 语义继续漂移
 export function buildTimelineUrl(novelId: string, taskId: string): string {
@@ -30,7 +27,7 @@ export function buildTimelineUrl(novelId: string, taskId: string): string {
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把时间轴联动参数拼装从页面组件中抽出，减少 UI 代码中的字符串拼接。
+// 把时间轴联动参数拼装从页面组件中抽出，减少 UI 代码中的字符串拼接
 export function buildTimelineSelectionUrl(
   baseUrl: string,
   options?: { selectedNodeId?: string | null; chunkId?: number | null; relationEventId?: number | null }

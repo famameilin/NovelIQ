@@ -1,20 +1,7 @@
 """
 消歧模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
 说明: 人名消歧相关功能模块
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: disambiguation-state-three-layer
-修改内容: 新增 NameReviewState、DisambiguationState、validate_state_invariants 导出
-
-修改时间: 2026-04-16
-修改者: Codex
-任务: trim-legacy-string-evidence
-修改内容: 改为 lazy export，避免 package 顶层导出触发循环导入
 """
 
 # ruff: noqa: F401
@@ -93,8 +80,8 @@ def __getattr__(name: str) -> Any:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
     module_name, attr_name = _EXPORTS[name]
-    # 中文注释：按需导入子模块，既保留 `from ... import X` 的兼容接口，
-    # 也避免 `__init__` 在包初始化阶段把整条消歧依赖链一次性拉起。
+    # 按需导入子模块，既保留 `from ... import X` 的兼容接口，
+    # 也避免 `__init__` 在包初始化阶段把整条消歧依赖链一次性拉起
     module = import_module(module_name, __name__)
     value = getattr(module, attr_name)
     globals()[name] = value

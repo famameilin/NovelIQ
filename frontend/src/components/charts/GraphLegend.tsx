@@ -1,21 +1,12 @@
 /**
  * GraphLegend 组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: 创建图谱图例组件
- * 说明: 动态显示关系图谱中节点类型和关系类型的图例，从实际数据派生内容
+ * 动态显示关系图谱中节点类型和关系类型的图例，从实际数据派生内容
  *
- * 修改时间: 2026-04-05
- * 修改者: Code Review Fix
- * 修改内容:
  *   - 重构为动态生成模式，根据传入的实际 entityTypes/relationTypes 数据渲染图例
- *   - 解决之前硬编码 3 种节点类型、3 种英文 key 关系类型的 bug
+ *   - 避免把节点类型和关系类型写死在前端图例里
  *   - 颜色映射与 ForceGraph.tsx 的 ENTITY_TYPE_COLORS / RELATION_TYPE_COLORS 保持一致
  *
- * 修改时间: 2026-04-05
- * 修改者: Theme Optimization
- * 修改内容:
  *   - 颜色从硬编码 HSL 改为 CSS 变量（使用 var(--xxx) 内联样式）
  *   - 与 ForceGraph 的"一书一色"主题系统完全同步
  */

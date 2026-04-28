@@ -1,9 +1,7 @@
 """
-Level3 mention-aware 确定性 rerank。
+Level3 mention-aware 确定性 rerank
 
-创建时间: 2026-04-24
-任务: level3-mention-rerank
-说明: 在向量粗召回和 paragraph 局部聚焦之后，用可解释的业务特征重排 mention 检索结果。
+在向量粗召回和 paragraph 局部聚焦之后，用可解释的业务特征重排 mention 检索结果
 """
 
 from __future__ import annotations
@@ -45,9 +43,7 @@ def rerank_mention_level3_results(
     current_chunk: int | None = None,
 ) -> list[SimilarChunkRow]:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: 对 Level3 召回结果应用轻量确定性 rerank；只改变排序字段，不改 EvidenceBundle 结构。
+    对 Level3 召回结果应用轻量确定性 rerank；只改变排序字段，不改 EvidenceBundle 结构
     """
     if not results:
         return []
@@ -74,18 +70,12 @@ def _score_row(
     current_chunk: int | None,
 ) -> SimilarChunkRow:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: 给单条候选计算业务 rerank 分；mention 特征、候选名和历史身份线索都写入可解释字段。
+    给单条候选计算业务 rerank 分；mention 特征、候选名和历史身份线索都写入可解释字段
 
-    修改时间: 2026-04-24
-    任务: split-level3-score-fields
-    修改说明: business rerank 基于显式语义分字段计算，并单独产出 `business_rerank_score` / `final_rank_score`，
-              避免继续复用含义漂移的 `similarity`。
+    business rerank 基于显式语义分字段计算，并单独产出 `business_rerank_score` / `final_rank_score`，
+              避免继续复用含义漂移的 `similarity`
 
-    修改时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    修改说明: 标记 deterministic_fallback 来源，使模型 rerank 缺席时的排序语义进入 metadata。
+    标记 deterministic_fallback 来源，使模型 rerank 缺席时的排序语义进入 metadata
     """
     evidence_text = _evidence_text(result)
     normalized_chunk_semantic_score = (
@@ -142,14 +132,10 @@ def _score_row(
 
 def _evidence_text(result: SimilarChunkRow) -> str:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: paragraph preview 命中时优先把局部片段纳入特征匹配，同时保留完整 chunk 兜底。
+    paragraph preview 命中时优先把局部片段纳入特征匹配，同时保留完整 chunk 兜底
 
-    修改时间: 2026-04-24
-    任务: fix-mention-rerank-visible-evidence-only
-    修改说明: 一旦已选定 local_preview，就只允许基于这段实际会展示给模型的局部 evidence 做加权；
-              避免隐藏在完整 chunk 其他位置的身份线索影响排序，导致排序依据与 prompt 可见证据不一致。
+    一旦已选定 local_preview，就只允许基于这段实际会展示给模型的局部 evidence 做加权；
+              避免隐藏在完整 chunk 其他位置的身份线索影响排序，导致排序依据与 prompt 可见证据不一致
     """
     if result.local_preview:
         return result.local_preview
@@ -158,27 +144,21 @@ def _evidence_text(result: SimilarChunkRow) -> str:
 
 def _contains_any(text: str, names: set[str]) -> bool:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: 判断候选 evidence 是否包含活跃实体或当前候选名，空集合直接返回 False。
+    判断候选 evidence 是否包含活跃实体或当前候选名，空集合直接返回 False
     """
     return any(name in text for name in names)
 
 
 def _has_identity_clue(text: str) -> bool:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: 捕捉历史片段中的身份揭示词，作为轻量加权信号而非身份裁决。
+    捕捉历史片段中的身份揭示词，作为轻量加权信号而非身份裁决
     """
     return any(word in text for word in IDENTITY_CLUE_WORDS)
 
 
 def _time_decay(chunk_id: int, current_chunk: int | None) -> float:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: 给更近的历史片段小幅加分；未来 chunk 理论上已被 cutoff 排除，这里不额外放行。
+    给更近的历史片段小幅加分；未来 chunk 理论上已被 cutoff 排除，这里不额外放行
     """
     if current_chunk is None or chunk_id >= current_chunk:
         return 0.0
@@ -194,9 +174,7 @@ def _time_decay(chunk_id: int, current_chunk: int | None) -> float:
 
 def _role_conflict_penalties(matched_features: tuple[str, ...], evidence_text: str) -> tuple[str, ...]:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: 对明显性别/角色词冲突做轻微扣分，避免“红衣女子”命中“红衣男子”排得过高。
+    对明显性别/角色词冲突做轻微扣分，避免“红衣女子”命中“红衣男子”排得过高
     """
     mention_text = " ".join(matched_features)
     mention_is_female = any(word in mention_text for word in FEMALE_ROLE_WORDS)
@@ -214,13 +192,9 @@ def _role_conflict_penalties(matched_features: tuple[str, ...], evidence_text: s
 
 def _sort_key(result: SimilarChunkRow) -> tuple[float, float, int]:
     """
-    创建时间: 2026-04-24
-    任务: level3-mention-rerank
-    说明: final_rank_score 优先，其次回退语义分；chunk_id 只作为稳定排序的最后兜底。
+    final_rank_score 优先，其次回退语义分；chunk_id 只作为稳定排序的最后兜底
 
-    修改时间: 2026-04-24
-    任务: split-level3-score-fields
-    修改说明: 优先按 `final_rank_score` 排序，旧字段只作为兼容回退。
+    优先按 `final_rank_score` 排序，旧字段只作为兼容回退
     """
     rank_score = (
         result.final_rank_score

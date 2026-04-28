@@ -1,9 +1,5 @@
 """
-从数据库提取消歧决策，生成金标 JSONL 模板供人工审核。
-
-创建时间: 2026-04-01
-创建者: CodeBuddy
-任务: P0 评测基线系统 — 金标集生成
+从数据库提取消歧决策，生成金标 JSONL 模板供人工审核
 
 用法:
     uv run python -m scripts.tools.generate_gold_standard --run-ids 6b401f00,abededd4
@@ -34,7 +30,7 @@ DEFAULT_OUTPUT_DIR = Path(_project_root) / "data" / "gold_standards" / "disambig
 
 
 def load_disambig_state(session, run_id: str) -> dict | None:
-    """从 disambig_checkpoint 加载消歧状态。"""
+    """从 disambig_checkpoint 加载消歧状态"""
     row = session.execute(
         sa_text("SELECT state_json FROM disambig_checkpoint WHERE run_id = :rid"),
         {"rid": run_id},
@@ -49,7 +45,7 @@ def load_disambig_state(session, run_id: str) -> dict | None:
 
 
 def load_graph_aliases(session, run_id: str) -> list[dict]:
-    """从 graph_entity_aliases 获取已落库的别名合并记录。"""
+    """从 graph_entity_aliases 获取已落库的别名合并记录"""
     rows = session.execute(
         sa_text("""
             SELECT
@@ -80,7 +76,7 @@ def load_graph_aliases(session, run_id: str) -> list[dict]:
 
 
 def load_novel_title(session, run_id: str) -> str:
-    """获取 run 对应的小说标题。"""
+    """获取 run 对应的小说标题"""
     row = session.execute(
         sa_text("SELECT title FROM analysis_runs WHERE run_id = :rid"),
         {"rid": run_id},
@@ -95,7 +91,7 @@ def build_gold_records(
 ) -> list[dict]:
     """
     合并 disambig_checkpoint 和 graph_entity_aliases 的信息，
-    构建待人工审核的金标记录。
+    构建待人工审核的金标记录
     """
     records: dict[tuple[str, str], dict] = {}
 
@@ -196,7 +192,7 @@ def build_gold_records(
 
 def resolve_run_ids(session, ids: list[str]) -> dict[str, str]:
     """
-    将输入的 task_id（8位）或 run_id（36位）统一解析为 run_id。
+    将输入的 task_id（8位）或 run_id（36位）统一解析为 run_id
 
     Returns:
         {原始输入: 完整run_id} 映射

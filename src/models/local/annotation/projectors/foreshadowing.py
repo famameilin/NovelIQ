@@ -1,7 +1,5 @@
 """
-创建时间: 2026-04-23
-任务: annotation-projector-runtime-landing
-说明: Phase2 伏笔结果投影器，负责校验与 ChunkAnnotation 伏笔视图合并。
+说明: Phase2 伏笔结果投影器，负责校验与 ChunkAnnotation 伏笔视图合并
 """
 
 from __future__ import annotations
@@ -18,11 +16,7 @@ def normalize_foreshadowing_result(
     chunk_id: int | None,
 ) -> ForeshadowingResult | None:
     """
-    校验并归一化 Phase2 伏笔结果。
-
-    创建时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    新建原因: 将 Phase2 输出校验从 multi_phase 调度层迁到 foreshadowing projector。
+    校验并归一化 Phase2 伏笔结果
     """
     if not foreshadowing:
         return None
@@ -47,16 +41,7 @@ def merge_annotation_foreshadowing(
     resolved_payoff_likelihood: str | None = None,
 ) -> ChunkAnnotation:
     """
-    将 Phase2 伏笔结果投影回 ChunkAnnotation 写入视图。
-
-    创建时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    新建原因: storage 只做写入编排，伏笔字段覆盖和描述拼接由 projector 统一处理。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: negative 结果统一回写为干净的空伏笔视图，并保留 annotation 里的其他非 Phase2 字段。
+    将 Phase2 伏笔结果投影回 ChunkAnnotation 写入视图
     """
     if foreshadowing is None:
         return annotation

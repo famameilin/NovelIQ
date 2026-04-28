@@ -1,10 +1,7 @@
 """
 消歧模块
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: disambiguation-module-split
-说明: 从 disambiguation.py 拆分为多个子模块
+从 disambiguation.py 拆分为多个子模块
 
 子模块说明：
 - state_logic.py: 状态决策和校验逻辑

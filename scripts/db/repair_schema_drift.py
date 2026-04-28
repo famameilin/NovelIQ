@@ -1,13 +1,10 @@
 """
-创建时间: 2026-04-22
-创建者: Codex
-任务: repair-live-schema-drift
-说明: 修复开发库与测试库的关键 schema 漂移。
+修复开发库与测试库的关键 schema 漂移
 
 设计原则:
-- 开发库只做原地、可验证的定点修复。
-- 测试库允许重建 public schema，因为它应是可抛弃环境。
-- 运行时兜底只保留非破坏性修复；删除旧列、重建测试库这类动作只在显式脚本里执行。
+- 开发库只做原地、可验证的定点修复
+- 测试库允许重建 public schema，因为它应是可抛弃环境
+- 运行时兜底只保留非破坏性修复；删除旧列、重建测试库这类动作只在显式脚本里执行
 """
 
 from __future__ import annotations
@@ -247,12 +244,7 @@ EXPECTED_FOREIGN_KEYS: list[dict[str, str]] = [
 
 
 def load_database_url(target: str) -> str:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 读取目标数据库连接串，避免脚本里硬编码真实地址。
-    """
+    """读取目标数据库连接串，避免脚本里硬编码真实地址"""
     env_key = "DATABASE_URL" if target == "dev" else "TEST_DATABASE_URL"
     database_url = os.environ.get(env_key)
     if not database_url:
@@ -261,22 +253,12 @@ def load_database_url(target: str) -> str:
 
 
 def build_engine(database_url: str) -> Engine:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 为独立 schema 修复脚本创建短生命周期引擎，避免复用应用内全局单例状态。
-    """
+    """为独立 schema 修复脚本创建短生命周期引擎"""
     return create_engine(database_url, future=True)
 
 
 def constraint_exists(conn, table_name: str, constraint_name: str) -> bool:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 按表名和约束名检查 PostgreSQL 约束是否存在。
-    """
+    """按表名和约束名检查 PostgreSQL 约束是否存在"""
     result = conn.execute(
         text(
             """
@@ -292,12 +274,7 @@ def constraint_exists(conn, table_name: str, constraint_name: str) -> bool:
 
 
 def column_exists(conn, table_name: str, column_name: str) -> bool:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 检查指定表列是否存在，用于决定是否补列或删旧列。
-    """
+    """检查指定表列是否存在，用于决定是否补列或删旧列"""
     result = conn.execute(
         text(
             """
@@ -314,33 +291,18 @@ def column_exists(conn, table_name: str, column_name: str) -> bool:
 
 
 def index_exists(conn, index_name: str) -> bool:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 检查索引是否存在，避免重复创建同名索引。
-    """
+    """检查索引是否存在，避免重复创建同名索引"""
     result = conn.execute(text("SELECT to_regclass(:index_name)"), {"index_name": index_name})
     return result.scalar_one_or_none() is not None
 
 
 def scalar_count(conn, sql: str) -> int:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 统一执行计数 SQL，便于在补约束前先做孤儿数据守卫。
-    """
+    """统一执行计数 SQL，便于在补约束前先做孤儿数据守卫"""
     return int(conn.execute(text(sql)).scalar_one())
 
 
 def ensure_model_interaction_columns(conn) -> list[str]:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 为 model_interactions 补齐 observability 新增列，保持与当前代码一致。
-    """
+    """为 model_interactions 补齐 observability 新增列"""
     applied: list[str] = []
     if not column_exists(conn, "model_interactions", "reasoning_tokens"):
         conn.execute(text("ALTER TABLE model_interactions ADD COLUMN reasoning_tokens INTEGER"))
@@ -357,12 +319,7 @@ def ensure_model_interaction_columns(conn) -> list[str]:
 
 
 def ensure_runtime_indexes(conn) -> list[str]:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 补齐按 run_id 过滤常用表的关键索引，避免旧库长期缺索引。
-    """
+    """补齐按 run_id 过滤常用表的关键索引"""
     applied: list[str] = []
     for index_name, sql in EXPECTED_RUNTIME_INDEXES:
         if index_exists(conn, index_name):
@@ -373,12 +330,7 @@ def ensure_runtime_indexes(conn) -> list[str]:
 
 
 def drop_redundant_indexes(conn) -> list[str]:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 删除由旧版 index=True 重复生成的 ix_* 索引，避免同义索引长期共存。
-    """
+    """删除重复生成的 ix_* 索引，避免同义索引长期共存"""
     dropped: list[str] = []
     for index_name in REDUNDANT_INDEXES:
         if not index_exists(conn, index_name):
@@ -389,12 +341,7 @@ def drop_redundant_indexes(conn) -> list[str]:
 
 
 def drop_legacy_constraints(conn) -> list[str]:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 删除已被当前命名规范替代的旧约束，避免同义外键重复存在。
-    """
+    """删除已被当前命名规范替代的旧约束"""
     dropped: list[str] = []
     for table_name, constraint_name in LEGACY_CONSTRAINTS_TO_DROP:
         if not constraint_exists(conn, table_name, constraint_name):
@@ -405,12 +352,7 @@ def drop_legacy_constraints(conn) -> list[str]:
 
 
 def ensure_foreign_keys(conn) -> list[str]:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 只在孤儿数据计数为 0 时补外键，避免把脏数据问题静默推迟到事务中途爆炸。
-    """
+    """只在孤儿数据计数为 0 时补外键"""
     applied: list[str] = []
     for item in EXPECTED_FOREIGN_KEYS:
         if constraint_exists(conn, item["table"], item["name"]):
@@ -426,12 +368,7 @@ def ensure_foreign_keys(conn) -> list[str]:
 
 
 def drop_legacy_chunk_style_column(conn) -> bool:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 删除已从代码与仓储层完全移除的 cultural_density 历史残留列。
-    """
+    """删除已从代码与仓储层完全移除的 cultural_density 残留列"""
     if not column_exists(conn, "chunk_style", "cultural_density"):
         return False
     conn.execute(text("ALTER TABLE chunk_style DROP COLUMN cultural_density"))
@@ -439,12 +376,7 @@ def drop_legacy_chunk_style_column(conn) -> bool:
 
 
 def repair_development_database(database_url: str) -> list[str]:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 对开发库做原地修复，包含补列、补外键、补索引和删除确认无用的旧列。
-    """
+    """对开发库做原地修复"""
     engine = build_engine(database_url)
     applied: list[str] = []
     try:
@@ -462,12 +394,7 @@ def repair_development_database(database_url: str) -> list[str]:
 
 
 def rebuild_test_database(database_url: str) -> None:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 测试库允许重建 public schema，用于清掉孤儿数据和历史错误约束。
-    """
+    """重建测试库 public schema"""
     engine = build_engine(database_url)
     try:
         with engine.begin() as conn:
@@ -491,12 +418,7 @@ def rebuild_test_database(database_url: str) -> None:
 
 
 def collect_schema_report(database_url: str) -> dict[str, object]:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 收集本次修复关心的关键结构状态，作为执行后的核对结果。
-    """
+    """收集修复后需要核对的关键结构状态"""
     engine = build_engine(database_url)
     inspector = inspect(engine)
     try:
@@ -540,12 +462,7 @@ def collect_schema_report(database_url: str) -> dict[str, object]:
 
 
 def parse_args() -> argparse.Namespace:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 解析脚本参数，显式区分开发库原地修复与测试库重建。
-    """
+    """解析脚本参数，区分开发库修复与测试库重建"""
     parser = argparse.ArgumentParser(description="修复 novel_analysis 数据库 schema 漂移")
     parser.add_argument("--target", choices=["dev", "test"], required=True, help="修复目标数据库")
     parser.add_argument(
@@ -557,12 +474,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    """
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: repair-live-schema-drift
-    说明: 脚本入口，执行修复并打印最终核对结果。
-    """
+    """执行修复并打印最终核对结果"""
     args = parse_args()
     database_url = load_database_url(args.target)
 

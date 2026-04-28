@@ -1,15 +1,9 @@
 """
 重试工具模块
 
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 提取核心业务逻辑到 workflows
-说明: 从 src/cli/retry_utils.py 提取的核心业务逻辑，提供统一的API调用重试机制
+从 src/cli/retry_utils.py 提取的核心业务逻辑，提供统一的API调用重试机制
 原始文件: src/cli/retry_utils.py
 
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - 统一重试机制
 """
 
 from __future__ import annotations
@@ -24,9 +18,6 @@ class MaxRetriesExceededError(Exception):
     """
     重试次数耗尽异常
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
     """
 
     pass
@@ -36,9 +27,6 @@ class RetryableOperation:
     """
     可重试操作封装类
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-analysis-layer-functions
     """
 
     def __init__(
@@ -61,19 +49,8 @@ class RetryableOperation:
         """
         执行带重试的操作（async 版本）
 
-        创建时间: 2026-03-13
-        创建者: TraeAI
-        任务: refactor-analysis-layer-functions
 
-        修改时间: 2026-03-19
-        修改者: TraeAI
-        任务: 添加模型交互记录保存
-        修改内容: 添加 pass_attempt_number 参数，支持传递尝试次数
 
-        修改时间: 2026-04-09
-        修改者: TraeAI
-        任务: 支持 async 函数
-        修改内容: 改为 async def，使用 await 调用 func
         """
         last_error: Exception | None = None
 

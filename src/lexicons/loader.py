@@ -12,22 +12,16 @@ def _default_lexicon_dir() -> Path:
 
 def _clean_line(line: str) -> str:
     """
-    清理词表行。
+    清理词表行
 
-    修改时间: 2026-04-23
-    任务: P2-基础设施解耦
-    修改内容: 复用公共词表解析器，统一注释行、空行和加权词表行处理规则。
     """
     return parse_lexicon_term(line)
 
 
 def load_lexicon(name: str, base_dir: Path | None = None) -> list[str]:
     """
-    加载指定名称的词表。
+    加载指定名称的词表
 
-    修改时间: 2026-04-23
-    任务: P2-基础设施解耦
-    修改内容: 使用 src.utils.lexicon_parser.load_lexicon_terms，避免 loader 与 registry 重复解析格式。
     """
     lexicon_dir = base_dir or _default_lexicon_dir()
     path = lexicon_dir / f"{name}.txt"

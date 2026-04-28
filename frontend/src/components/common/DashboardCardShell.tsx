@@ -53,7 +53,7 @@ interface DashboardCardShellProps {
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 新建原因：抽出 MetricCard 的共享视觉原语，避免业务卡片各自维护第二套卡片容器样式。
+ * 抽出 MetricCard 的共享视觉原语，避免业务卡片各自维护第二套卡片容器样式
  */
 export function getMetricAccentColor(accent: MetricAccent, alpha?: number): string {
   return alpha == null ? `hsl(var(--${accent}))` : `hsl(var(--${accent}) / ${alpha})`;
@@ -61,7 +61,7 @@ export function getMetricAccentColor(accent: MetricAccent, alpha?: number): stri
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 新建原因：统一业务卡片底部链接的 hover 色，避免组件内重复维护静态类映射。
+ * 统一业务卡片底部链接的 hover 色，避免组件内重复维护静态类映射
  */
 export function getMetricAccentHoverTextClass(accent: MetricAccent): string {
   return METRIC_ACCENT_HOVER_TEXT_CLASS_MAP[accent];
@@ -69,7 +69,7 @@ export function getMetricAccentHoverTextClass(accent: MetricAccent): string {
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 新建原因：让仪表盘业务组件统一复用 MetricCard 的容器、图标色块与 hover 反馈。
+ * 让仪表盘业务组件统一复用 MetricCard 的容器、图标色块与 hover 反馈
  */
 export function DashboardCardShell({
   title,

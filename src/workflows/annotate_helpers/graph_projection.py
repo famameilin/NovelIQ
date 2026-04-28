@@ -62,7 +62,7 @@ def _merge_relations_for_projection(
 
 
 def _get_last_projected_chunk(session, run_id: str) -> int:
-    """查询 ChunkRelation 表中已投影的最大 chunk_id。"""
+    """查询 ChunkRelation 表中已投影的最大 chunk_id"""
     result = session.execute(
         text("""
             SELECT COALESCE(MAX(chunk_id), -1) AS max_chunk_id
@@ -83,7 +83,6 @@ def project_graph_tables(
 ) -> None:
     """
     2026-04-27，任务：timeline-contract-graph-projection
-    修改内容：
     - “无变化”关系不再写入 graph history
     - 若某条已投影关系后来被修正为“无变化”，必须删除旧事件并回刷受影响 pair
     """

@@ -1,11 +1,8 @@
 """
-任务应用服务。
+任务应用服务
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
 说明: 将 analysis 路由中的取消、删除、恢复状态机下沉到 service 层，
-      让 route 只保留 HTTP 参数绑定与响应装配职责。
+      让 route 只保留 HTTP 参数绑定与响应装配职责
 """
 
 from __future__ import annotations
@@ -31,12 +28,7 @@ def resolve_task_for_novel(
     task_id: str,
 ) -> dict[str, Any]:
     """
-    获取并校验任务是否属于指定小说。
-
-    创建时间: 2026-04-23
-    创建者: Codex
-    任务: p1-api-route-service-decouple
-    新建原因: 将 route 中的任务归属校验下沉到可复用的应用服务辅助函数。
+    获取并校验任务是否属于指定小说
     """
     try:
         task = novel_service.get_task(task_id)
@@ -50,12 +42,7 @@ def resolve_task_for_novel(
 
 def raise_cancel_not_allowed(task_status: str) -> None:
     """
-    统一校验任务是否允许进入取消流程。
-
-    创建时间: 2026-04-23
-    创建者: Codex
-    任务: p1-api-route-service-decouple
-    新建原因: 避免取消状态机判断继续散落在 route 与 service 两侧。
+    统一校验任务是否允许进入取消流程
     """
     if task_status in ("completed", "cancelled", "cancelling"):
         raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
@@ -65,12 +52,7 @@ def raise_cancel_not_allowed(task_status: str) -> None:
 
 def persist_task_cancellation_request(task_id: str) -> str:
     """
-    将取消请求可靠写入数据库。
-
-    创建时间: 2026-04-23
-    创建者: Codex
-    任务: p1-api-route-service-decouple
-    新建原因: 将 DB-first cancel 语义从路由层迁到应用服务共享入口。
+    将取消请求可靠写入数据库
     """
     session_factory = get_session_factory()
     try:
@@ -91,12 +73,7 @@ def persist_task_cancellation_request(task_id: str) -> str:
 
 def cancel_unclaimed_pending_task(task_id: str) -> bool:
     """
-    直接终结尚未被任何 worker 领取的 pending 任务。
-
-    创建时间: 2026-04-23
-    创建者: Codex
-    任务: p1-api-route-service-decouple
-    新建原因: 将 pending 原子取消语义下沉到应用服务层，供 route/service 共用。
+    直接终结尚未被任何 worker 领取的 pending 任务
     """
     session_factory = get_session_factory()
     try:
@@ -116,12 +93,7 @@ def cancel_unclaimed_pending_task(task_id: str) -> bool:
 
 async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
     """
-    删除任务前清理运行态缓存与后台协程。
-
-    创建时间: 2026-04-23
-    创建者: Codex
-    任务: p1-api-route-service-decouple
-    新建原因: 删除前的运行态收尾属于任务应用服务，不应继续由 route 直接编排。
+    删除任务前清理运行态缓存与后台协程
     """
     task_info = task_manager.get_task(task_id)
     if task_info is None:
@@ -129,8 +101,8 @@ async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMan
 
     task_manager.cancel_task(task_id)
 
-    # 中文注释：删除前的清理仍然要遵守 DB-first 状态机；
-    # 若 DB 已先进入终态，这里的原子取消请求只会读到赢家状态，不会把终态覆写回 cancelling。
+    # 删除前的清理仍然要遵守 DB-first 状态机；
+    # 若 DB 已先进入终态，这里的原子取消请求只会读到赢家状态，不会把终态覆写回 cancelling
     session_factory = get_session_factory()
     try:
         with session_factory() as session:
@@ -164,22 +136,14 @@ async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMan
 
 class TaskApplicationService:
     """
-    任务应用服务。
+    任务应用服务
 
-    创建时间: 2026-04-23
-    创建者: Codex
-    任务: p1-api-route-service-decouple
-    说明: 面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程。
+    说明: 面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程
     """
 
     def __init__(self, novel_service: NovelService, task_manager: TaskManager):
         """
-        初始化任务应用服务。
-
-        创建时间: 2026-04-23
-        创建者: Codex
-        任务: p1-api-route-service-decouple
-        新建原因: 将任务状态机操作聚合为单一应用服务入口。
+        初始化任务应用服务
         """
         self.novel_service = novel_service
         self.task_manager = task_manager
@@ -187,12 +151,7 @@ class TaskApplicationService:
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行指定任务。
-
-        创建时间: 2026-04-23
-        创建者: Codex
-        任务: p1-api-route-service-decouple
-        新建原因: route 只负责 HTTP 映射，恢复状态机交由应用服务收口。
+        继续执行指定任务
         """
         try:
             return await self.analysis_service.resume_task(novel_id, task_id)
@@ -201,12 +160,7 @@ class TaskApplicationService:
 
     async def delete_task(self, novel_id: str, task_id: str) -> dict[str, str]:
         """
-        删除单个分析任务。
-
-        创建时间: 2026-04-23
-        创建者: Codex
-        任务: p1-api-route-service-decouple
-        新建原因: 将删除前置状态机与运行态清理从 route 下沉到应用服务。
+        删除单个分析任务
         """
         task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
         task_status = task.get("status", "")
@@ -219,12 +173,7 @@ class TaskApplicationService:
 
     async def cancel_task(self, novel_id: str, task_id: str) -> dict[str, str]:
         """
-        取消指定分析任务。
-
-        创建时间: 2026-04-23
-        创建者: Codex
-        任务: p1-api-route-service-decouple
-        新建原因: 将取消状态机迁移到应用服务，避免 route 继续直连 DB 状态流转。
+        取消指定分析任务
         """
         task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
         task_status = task.get("status", "")
@@ -237,8 +186,8 @@ class TaskApplicationService:
                 logger.info(f"Task {task_id} cancelled immediately before any worker claim")
                 return {"task_id": task_id, "status": "cancelled", "message": "任务尚未启动，已直接取消"}
 
-            # 中文注释：如果原子 pending 取消没赢，说明别的执行方已经推进了 DB 真相；
-            # 这里必须重新读库，以赢家状态继续判断，不能沿用旧快照。
+            # 如果原子 pending 取消没赢，说明别的执行方已经推进了 DB 真相；
+            # 这里必须重新读库，以赢家状态继续判断，不能沿用旧快照
             task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
             task_status = task.get("status", "")
             raise_cancel_not_allowed(task_status)

@@ -1,10 +1,7 @@
 """
-分块查询组装器。
+分块查询组装器
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
-说明: 承载 chunks 相关查询组装逻辑。
+说明: 承载 chunks 相关查询组装逻辑
 """
 
 from __future__ import annotations
@@ -31,7 +28,7 @@ from .common import _normalize_name
 
 
 def _build_chunk_curve_points(rows: Sequence[Any]) -> list[ChunkCurvePoint]:
-    """统一构建 chunk curve DTO。"""
+    """统一构建 chunk curve DTO"""
     return [
         ChunkCurvePoint(
             chunk_id=row.chunk_id,
@@ -48,7 +45,7 @@ def _build_chunk_curve_points(rows: Sequence[Any]) -> list[ChunkCurvePoint]:
 
 
 def _fetch_raw_chunk_curves(run_id: str, stats_repo: StatsRepository) -> list[ChunkCurvePoint]:
-    """获取数据库中持久化的原始 chunk_curves。"""
+    """获取数据库中持久化的原始 chunk_curves"""
     rows = stats_repo.fetch_chunk_curves_full(run_id)
     return _build_chunk_curve_points(rows)
 
@@ -59,7 +56,7 @@ def _fetch_chunk_curves(
     annotation_repo: AnnotationRepository,
     chunk_repo: ChunkRepository,
 ) -> list:
-    """获取分块曲线数据（情绪 + 节奏）。"""
+    """获取分块曲线数据（情绪 + 节奏）"""
     from src.metrics.emotion_curve_fusion import build_display_emotion_curve
     from src.metrics.rhythm_curve_fusion import build_display_surface_tension
 
@@ -77,7 +74,7 @@ def _fetch_chunk_curves(
 
 
 def _fetch_chunk_styles(run_id: str, chunk_repo: ChunkRepository) -> list:
-    """获取分块风格数据。"""
+    """获取分块风格数据"""
     rows = chunk_repo.fetch_chunk_styles_full(run_id)
     return [
         ChunkStyle(
@@ -106,14 +103,7 @@ def _fetch_chunk_annotations(
     require_graph_projection: bool = True,
 ) -> list:
     """
-    获取分块标注数据。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 新增 require_graph_projection 开关，让 `chunk-annotations`
-    这类只关心 Phase2 结果的 consumer 可以在 graph projection 未完成时降级返回，
-    同时保留 export 链路对 relation events 完整性的严格要求。
+    获取分块标注数据
     """
     annotations_raw = annotation_repo.fetch_chunk_annotations_full(run_id)
     characters_raw = annotation_repo.fetch_chunk_characters_full(run_id)

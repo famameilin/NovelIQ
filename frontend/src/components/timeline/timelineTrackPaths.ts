@@ -1,5 +1,5 @@
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把 TimelineTrack 的 SVG path 生成与张力插值抽成纯函数，便于单独测试。
+// 把 TimelineTrack 的 SVG path 生成与张力插值抽成纯函数，便于单独测试
 
 export interface TimelineTensionPath {
   linePath: string;

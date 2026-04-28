@@ -1,15 +1,7 @@
 """
-WebSocket 流式消息模型。
+WebSocket 流式消息模型
 
-创建时间: 2026-04-07
-创建者: TraeAI
-任务: 实现 WebSocket 流式消息模型
 说明: 定义流式消息类型枚举及相关数据模型，用于任务执行过程中的实时状态推送
-
-修改时间: 2026-04-09
-修改者: GLM-5
-任务: refactor/sse-unified-event-bus
-修改内容: StreamMessageType 迁移到 events.py，此文件仅保留 StreamMessage 模型
 """
 
 from __future__ import annotations

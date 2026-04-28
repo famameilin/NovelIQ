@@ -22,7 +22,7 @@ export interface ScoreOverviewCardProps {
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：让评分速览的环形进度随共享 accent 系统切换，而不是固定只吃 primary。
+ * 修改原因：让评分速览的环形进度随共享 accent 系统切换，而不是固定只吃 primary
  */
 function MiniProgressRing({
   progress,
@@ -102,7 +102,7 @@ function MiniProgressRing({
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：让评分圆点与卡片壳使用同一套 accent 色，避免局部控件仍停留在旧视觉语言里。
+ * 修改原因：让评分圆点与卡片壳使用同一套 accent 色，避免局部控件仍停留在旧视觉语言里
  */
 function DotRating({
   score,
@@ -143,7 +143,7 @@ function DotRating({
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：统一评分行的布局与强调色传递，支撑新的仪表盘卡片壳。
+ * 修改原因：统一评分行的布局与强调色传递，支撑新的仪表盘卡片壳
  */
 function ScoreRow({
   label,
@@ -182,7 +182,7 @@ function ScoreRow({
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：让评分速览卡复用共享卡片壳，和展示页中的强调色、图标色块、hover 反馈保持一致。
+ * 修改原因：让评分速览卡复用共享卡片壳，和展示页中的强调色、图标色块、hover 反馈保持一致
  */
 export function ScoreOverviewCard({
   foreshadowExpectation,

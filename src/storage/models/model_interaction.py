@@ -1,8 +1,5 @@
 """
-创建时间: 2026-03-19
-创建者: TraeAI
-任务: 保存模型交互记录
-说明: 存储每次模型调用的 prompt、response、think 内容
+存储每次模型调用的 prompt、response、think 内容
 
 本模块定义模型交互记录表：
 - ModelInteraction: 模型交互记录表，关联 chunk，保存每次调用的详细信息
@@ -22,10 +19,7 @@ class ModelInteraction(Base):
     """
     模型交互记录表
 
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 保存模型交互记录
-    说明: 存储每次模型调用的 prompt、response、think 内容，关联到具体 chunk
+    存储每次模型调用的 prompt、response、think 内容，关联到具体 chunk
 
     记录策略:
     - 每个 chunk 最多记录 4 次交互（本地模型最多3次重试 + 1次云端回退）

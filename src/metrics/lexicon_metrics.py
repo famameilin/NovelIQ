@@ -21,29 +21,11 @@
 - count_token_hits: 旧版 token 匹配
 - token_density: 旧版 token 密度
 
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 预处理流程
-说明: 词表匹配核心函数
+词表匹配核心函数
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 移除向后兼容代码
-修改内容: 移除旧版精确匹配函数，仅保留 phrase 模式匹配函数
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 支持加权计数
-修改内容: 新增 load_weighted_lexicon、term_weighted_counts、count_weighted_hits 函数
 
-修改时间: 2026-04-07
-修改者: GLM-5
-任务: 性能优化
-修改内容: 新增Aho-Corasick算法优化版本，性能提升2-5倍
 
-修改时间: 2026-04-23
-任务: P2-基础设施解耦
-修改内容: load_weighted_lexicon 由公共解析层提供，metrics 仅保留兼容导出。
 """
 
 from __future__ import annotations
@@ -65,7 +47,7 @@ def _is_phrase_term(term: str) -> bool:
 
 def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequence[str]) -> dict[str, int]:
     """
-    非重叠 span 匹配核心算法。
+    非重叠 span 匹配核心算法
 
     策略:
       1. 长词优先匹配（避免短词吞掉长词的一部分）
@@ -120,7 +102,7 @@ def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequen
 
 
 def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) -> dict[str, int]:
-    """返回词条级别的计数（phrase 模式）。"""
+    """返回词条级别的计数（phrase 模式）"""
     if not terms:
         return {}
 
@@ -129,18 +111,15 @@ def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) ->
 
 
 def count_mixed_hits(text: str, tokens: Sequence[str], terms: Iterable[str]) -> int:
-    """计算词表命中次数（phrase 模式）。"""
+    """计算词表命中次数（phrase 模式）"""
     return sum(term_mixed_counts(text, tokens, terms).values())
 
 
 def get_emotion_spans(text: str, tokens: Sequence[str], terms: Iterable[str]) -> list[tuple[int, int, str]]:
     """
-    获取情感词在文本中的位置信息。
+    获取情感词在文本中的位置信息
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 否定词翻转逻辑实现
-    说明: 返回情感词的 (起始位置, 结束位置, 词条) 列表，用于否定词检测。
+    返回情感词的 (起始位置, 结束位置, 词条) 列表，用于否定词检测
 
     返回:
         list[tuple[int, int, str]]: 按起始位置排序的位置列表
@@ -206,11 +185,8 @@ def get_emotion_spans(text: str, tokens: Sequence[str], terms: Iterable[str]) ->
 
 def load_weighted_lexicon(filepath: str, default_weight: int = 1) -> dict[str, int]:
     """
-    兼容导出带权重词典加载器。
+    兼容导出带权重词典加载器
 
-    修改时间: 2026-04-23
-    任务: P2-基础设施解耦
-    修改内容: 实际解析逻辑迁移到 src.utils.lexicon_parser，本函数只保留 metrics 旧导入路径。
     """
     return _load_weighted_lexicon(filepath, default_weight=default_weight)
 
@@ -219,12 +195,9 @@ def term_weighted_counts(
     text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]
 ) -> dict[str, tuple[int, float]]:
     """
-    返回词条级别的计数和权重。
+    返回词条级别的计数和权重
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 支持加权计数
-    说明: 返回词条级别的计数和权重，使用 phrase 模式匹配
+    返回词条级别的计数和权重，使用 phrase 模式匹配
 
     参数：
         text: 原始文本
@@ -250,14 +223,11 @@ def term_weighted_counts(
 
 def count_weighted_hits(text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]) -> float:
     """
-    计算加权命中次数。
+    计算加权命中次数
 
     公式：sum(count_i * weight_i)
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 支持加权计数
-    说明: 计算加权命中次数，使用 phrase 模式匹配
+    计算加权命中次数，使用 phrase 模式匹配
 
     参数：
         text: 原始文本
@@ -278,12 +248,9 @@ def count_weighted_hits(text: str, tokens: Sequence[str], weighted_terms: Mappin
 
 def build_automaton(terms: Iterable[str]):
     """
-    构建Aho-Corasick自动机。
+    构建Aho-Corasick自动机
 
-    创建时间: 2026-04-07
-    创建者: GLM-5
-    任务: 性能优化
-    说明: 使用Aho-Corasick算法优化多模式匹配，性能提升2-5倍。
+    使用Aho-Corasick算法优化多模式匹配，性能提升2-5倍
 
     参数：
         terms: 词条集合
@@ -312,12 +279,9 @@ def build_automaton(terms: Iterable[str]):
 
 def _count_non_overlapping_spans_fast(text: str, automaton, tokens: Sequence[str] | None = None) -> dict[str, int]:
     """
-    使用Aho-Corasick优化的非重叠匹配算法。
+    使用Aho-Corasick优化的非重叠匹配算法
 
-    创建时间: 2026-04-07
-    创建者: GLM-5
-    任务: 性能优化
-    说明: 使用Aho-Corasick算法一次扫描找到所有匹配，避免暴力匹配。
+    使用Aho-Corasick算法一次扫描找到所有匹配，避免暴力匹配
 
     性能对比：
         - 暴力匹配: O(词条数量 × 文本长度)
@@ -373,12 +337,9 @@ def _count_non_overlapping_spans_fast(text: str, automaton, tokens: Sequence[str
 
 def get_emotion_spans_fast(text: str, automaton, tokens: Sequence[str] | None = None) -> list[tuple[int, int, str]]:
     """
-    使用Aho-Corasick优化的情感词位置获取。
+    使用Aho-Corasick优化的情感词位置获取
 
-    创建时间: 2026-04-07
-    创建者: GLM-5
-    任务: 性能优化
-    说明: 使用Aho-Corasick算法快速获取情感词位置信息。
+    使用Aho-Corasick算法快速获取情感词位置信息
 
     参数：
         text: 原始文本

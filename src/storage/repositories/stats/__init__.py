@@ -1,15 +1,9 @@
 """
 统计数据 Repository 模块
 
-创建时间: 2026-03-17
-创建者: TraeAI
-任务: code-quality-refactor - 拆分stats_repository
-说明: 保持向后兼容的导入接口
+保持向后兼容的导入接口
 
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - 补充遗漏方法
-修改内容: 添加 graphs, summaries 模块导出
+添加 graphs, summaries 模块导出
 """
 
 from __future__ import annotations

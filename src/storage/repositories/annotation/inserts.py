@@ -1,10 +1,7 @@
 """
 标注数据插入操作
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分annotation_repository
-说明: 标注数据插入相关操作
+标注数据插入相关操作
 """
 
 from __future__ import annotations
@@ -115,10 +112,7 @@ def insert_chunk_relations(
     """
     插入分块关系数据
 
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: phase4-code-review-fix
-    修改内容: 添加 directionality 字段写入
+    添加 directionality 字段写入
     """
     records = [
         ChunkRelation(
@@ -159,8 +153,8 @@ def replace_chunk_relations_for_source_model(
 ) -> None:
     """
     2026-04-27，任务：graph final-disambiguation rebuild fixes
-    新建原因：终消歧生成的层级关系需要先稳定回写到 chunk_relations，再交给后续 rebuild 统一投影，
-    否则直接写进 graph_* 表的结果会在 reset_graph_tables() 后丢失。
+    终消歧生成的层级关系需要先稳定回写到 chunk_relations，再交给后续 rebuild 统一投影，
+    否则直接写进 graph_* 表的结果会在 reset_graph_tables() 后丢失
     """
     session.execute(
         delete(ChunkRelation).where(
@@ -206,7 +200,7 @@ def update_relation_projection_status(
     projected_at: datetime | None = None,
     projection_error: str | None = None,
 ) -> None:
-    """更新单条关系的投影状态。"""
+    """更新单条关系的投影状态"""
     stmt = (
         update(ChunkRelation)
         .where(ChunkRelation.id == relation_id)
@@ -230,30 +224,15 @@ def insert_chunk_dialogues(
 ) -> None:
     """插入分块对话数据
 
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: fix-insert_chunk_dialogues-speakers-param
-    修改内容: speakers 参数已移除， dialogue.speaker 字段已包含正确的说话者
+    speakers 参数已移除， dialogue.speaker 字段已包含正确的说话者
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    修改内容: 从 dialogue.tone 字段获取语气类型并保存到数据库
+    从 dialogue.tone 字段获取语气类型并保存到数据库
 
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-unknown-speaker-context
-    修改内容: 保存 content 和 evidence 字段，便于追溯未知说话者的上下文
+    保存 content 和 evidence 字段，便于追溯未知说话者的上下文
 
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: use-phase3-identity-clue-in-disambiguation
-    修改内容: 保存 identity_clue 字段，存储 Phase 3 提取的身份线索
+    保存 identity_clue 字段，存储 Phase 3 提取的身份线索
 
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: speaker 存储为 JSON 数组字符串，删除 evidence 字段
+    speaker 存储为 JSON 数组字符串，删除 evidence 字段
     """
 
     records: list[ChunkDialogue] = []

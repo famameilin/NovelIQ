@@ -1,15 +1,7 @@
 """
 分析错误处理服务
 
-创建时间: 2026-04-07
-创建者: GLM-5
-任务: AnalysisService 重构 - 提取错误处理职责
 说明: 负责处理分析过程中的成功、失败和取消事件
-
-修改时间: 2026-04-09
-创建者: GLM-5
-任务: refactor/sse-unified-event-bus
-修改内容: 使用 AnalysisEventBus 统一发送终止事件
 """
 
 from __future__ import annotations
@@ -69,9 +61,9 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "completed")
         session.commit()
 
-        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效。
-        # 中文注释：这里必须命中 api.dependencies 中维护的同一 MetricsService 单例，
-        # 否则只会失效一个临时新实例上的空缓存，路由真实读取的缓存仍然保留旧值。
+        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效
+        # 这里必须命中 api.dependencies 中维护的同一 MetricsService 单例，
+        # 否则只会失效一个临时新实例上的空缓存，路由真实读取的缓存仍然保留旧值
         try:
             from src.api.dependencies import get_metrics_service
 
@@ -99,11 +91,6 @@ class AnalysisErrorHandler:
     ) -> None:
         """
         处理分析失败
-
-        修改时间: 2026-04-24
-        任务: fix-failure-session-rollback-before-status-commit
-        修改内容: 失败收口前先回滚当前 session 中未提交的业务写入，
-                  避免 preprocess/annotate 中途失败后把半成品数据随 run 状态一起提交
         """
         if analysis_logger:
             analysis_logger.write_summary(
@@ -120,8 +107,8 @@ class AnalysisErrorHandler:
         logger.error(f"{log_prefix} failed: {task_id} - {error}")
         self.task_manager.complete_task(task_id, success=False, error=str(error))
 
-        # 中文注释：这里必须先清掉失败现场遗留的未提交事务，
-        # 再写 run 状态；否则后续 commit 会把半成品业务数据一并刷进数据库。
+        # 这里必须先清掉失败现场遗留的未提交事务，
+        # 再写 run 状态；否则后续 commit 会把半成品业务数据一并刷进数据库
         session.rollback()
         run_repo = RunRepository(session)
         run_repo.update_run_status(run_id, "failed")
@@ -141,22 +128,12 @@ class AnalysisErrorHandler:
     ) -> None:
         """
         处理分析取消
-
-        修改时间: 2026-04-19
-        修改者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 取消收口时同步清除 cancel_requested，并写入 completed_at，避免 DB 终态留下自相矛盾的脏状态。
-
-        修改时间: 2026-04-24
-        任务: fix-cancel-session-rollback-before-status-commit
-        修改内容: 取消收口前先回滚当前 session 中未提交的业务写入，
-                  避免取消阶段把半成品数据与 cancel 状态一起提交
         """
         self.task_manager.cancel_completed_task(task_id, error="用户取消")
         self.novel_service.update_task_status(task_id, "cancelled")
 
-        # 中文注释：取消路径与失败路径一样，共享同一个 session；
-        # 若不先 rollback，commit cancel 状态时仍会把之前残留的脏写入一起提交。
+        # 取消路径与失败路径一样，共享同一个 session；
+        # 若不先 rollback，commit cancel 状态时仍会把之前残留的脏写入一起提交
         session.rollback()
         run_repo = RunRepository(session)
         run_repo.update_run_task_fields(

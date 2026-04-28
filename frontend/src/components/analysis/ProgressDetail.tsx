@@ -1,21 +1,8 @@
-/**
- * 创建时间: 2026-04-07
- * 创建者: GLM-5
- * 任务: 细粒度进度展示组件
- * 说明: 展示任务执行的详细进度，包括当前阶段、进度条、阶段列表和子任务进度
- *
- * 修改时间: 2026-04-24
- * 任务: level3-progress-sse
- * 修改内容: 增加 level3 子阶段展示文案，让后端 Level3/mention SSE 进度不显示内部代号。
- */
+/** 展示任务执行的详细进度，包括当前阶段、进度条和子任务进度 */
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, Loader2, Circle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStreamStore } from "@/store/streamStore";
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
 
 interface StageConfig {
   label: string;
@@ -23,10 +10,6 @@ interface StageConfig {
 }
 
 type StageKey = "preprocess" | "annotate" | "aggregate" | "topic-model" | "diagnose";
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
 
 const STAGE_CONFIG: Record<StageKey, StageConfig> = {
   preprocess: { label: "预处理", range: [0, 10] },
@@ -45,10 +28,6 @@ const PHASE_CONFIG: Record<string, { label: string }> = {
 };
 
 const STAGE_ORDER: StageKey[] = ["preprocess", "annotate", "aggregate", "topic-model", "diagnose"];
-
-/* ------------------------------------------------------------------ */
-/*  Utils                                                             */
-/* ------------------------------------------------------------------ */
 
 function getStageStatus(
   stageKey: StageKey,

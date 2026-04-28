@@ -1,24 +1,7 @@
 """
 Phase4: 关系抽取（LLM调用）
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: Phase4 关系抽取逻辑
-
-修改时间: 2026-04-05
-修改者: TraeAI
-任务: refactor-phase4-relation-extraction
-修改内容: 从启发式规则改为LLM调用，统一处理静态关系和关系变化
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: unify-estimated-token-accounting
-修改内容: Phase4 在交互日志之外补记统一估算 token_usage
-
-修改时间: 2026-04-23
-任务: annotation-projector-runtime-landing
-修改内容: Phase4 单次调用改用 thin phase runtime，关系快照转换迁入 relation projector。
 """
 
 from __future__ import annotations
@@ -43,9 +26,6 @@ class Phase4MaxRetriesExceededError(Exception):
     """
     Phase4 重试次数耗尽异常
 
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
     说明: 当 Phase4 关系抽取重试次数耗尽时抛出此异常
     """
 
@@ -59,15 +39,6 @@ def _build_phase4_messages(
 ) -> list[dict[str, str]]:
     """
     构建 Phase4 消息
-
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
-
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: phase4-code-review-fix
-    修改内容: 添加 Prompt 空值运行时校验
     """
     from string import Template
 
@@ -88,8 +59,8 @@ def _build_phase4_messages(
         known_characters=known_chars,
     )
     if evidence_sections:
-        # 中文注释：Phase4 只追加 renderer 已经选好的共享 evidence blocks，
-        # 不在关系抽取阶段重新定义 Level1/2/3 的文案或 section 协议。
+        # Phase4 只追加 renderer 已经选好的共享 evidence blocks，
+        # 不在关系抽取阶段重新定义 Level1/2/3 的文案或 section 协议
         user_prompt += "\n\n" + "\n\n".join(evidence_sections)
 
     return [
@@ -104,19 +75,6 @@ def _convert_to_snapshots(
 ) -> list[RelationChangeSnapshot]:
     """
     将 LLM 输出转换为 RelationChangeSnapshot 列表
-
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
-
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: phase4-code-review-fix
-    修改内容: 移除类型验证（已由 Pydantic Literal 约束处理）
-
-    修改时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    修改内容: 保留兼容入口，实际转换逻辑委托 relation projector。
     """
     return convert_relation_result_to_snapshots(result, source_model)
 
@@ -132,25 +90,6 @@ async def execute_phase4_call(
 ) -> list[RelationChangeSnapshot]:
     """
     执行 Phase4 单次调用
-
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-token-coverage-fallback-bucket
-    修改内容: Phase4 经 annotation_fallback 执行时仍统一归入 annotation 主业务桶，
-              避免 coverage 统计把 fallback 调用误报为缺口
-
-    修改时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    修改内容: 委托 execute_phase_call 统一模型调用后的记录、thinking 和 token 估算。
     """
     config = client._config
 
@@ -192,25 +131,7 @@ async def annotate_chunk_phase4(
     """
     Phase4: 关系抽取（使用 LLM）
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
     说明: Phase4 关系抽取逻辑
-
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: refactor-phase4-relation-extraction
-    修改内容: 从启发式规则改为LLM调用，统一处理静态关系和关系变化
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: strict-phase34-fallback
-    修改内容: 接入 fallback_client，并在主/兜底全部失败后继续抛错，避免静默吞掉关系抽取失败
     """
     if not text:
         return []

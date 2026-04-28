@@ -1,12 +1,7 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分protocols.py
-说明: 标注数据协议接口
+标注数据协议接口
 
-修改时间: 2026-04-23
-任务: P2-基础设施解耦
-修改内容: 使用 AnnotationRecord 替代动态字典，收窄协议边界。
+使用 AnnotationRecord 替代动态字典，收窄协议边界
 """
 
 from __future__ import annotations
@@ -22,7 +17,7 @@ class AnnotationRepositoryProtocol(Protocol):
     """
     标注数据接口
 
-    管理小说标注数据的存储和检索。
+    管理小说标注数据的存储和检索
     """
 
     def get_annotations(self, novel_id: str) -> list[AnnotationRecord]:

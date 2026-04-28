@@ -41,10 +41,8 @@ export interface ThemePalette {
 }
 
 /**
- * 创建时间: 2026-04-22
- * 任务: 首页白底主题预览
- * 说明: 首页需要纯白底，但 Hero 与按钮区仍应保持原本的 Indigo 强调色，
- * 因此单独提供一套首页变量：背景保持纯白，交互色回到默认主题的紫蓝体系。
+ * 首页需要纯白底，但 Hero 与按钮区仍应保持原本的 Indigo 强调色，
+ * 因此单独提供一套首页变量：背景保持纯白，交互色回到默认主题的紫蓝体系
  */
 export function generateHomeThemePalette(): ThemePalette {
   return {
@@ -94,8 +92,8 @@ export function generateHomeThemePalette(): ThemePalette {
 }
 
 /**
- * Generate a complete theme palette from a seed hex color.
- * Derives all CSS variable values for light and dark modes.
+ * Generate a complete theme palette from a seed hex color
+ * Derives all CSS variable values for light and dark modes
  */
 export function generateThemePalette(seedHex: string): ThemePalette {
   const { h, s } = hexToHSL(seedHex);
@@ -108,7 +106,7 @@ export function generateThemePalette(seedHex: string): ThemePalette {
       "--primary": `${h} ${s}% 50%`,
       "--primary-hover": `${h} ${s}% 43%`,
       "--primary-active": `${h} ${s}% 37%`,
-      // 中文注释：浅色主题不再把背景压到接近纯白，确保主题色能在页面底色上肉眼可见。
+      // 浅色主题不再把背景压到接近纯白，确保主题色能在页面底色上肉眼可见
       "--primary-subtle": `${h} ${Math.max(s - 14, 24)}% 90%`,
       "--background": `${h} ${softSurfaceS}% 94%`,
       "--surface": `${h} ${Math.max(softSurfaceS - 6, 22)}% 97%`,
@@ -151,8 +149,8 @@ export function generateThemePalette(seedHex: string): ThemePalette {
 }
 
 /**
- * Convert a CSS hsl()/hsla() string to hsla() format with alpha.
- * Handles both hsl(H S% L%) space-separated (Tailwind modern format) and hsl(H,S%,L%) comma-separated.
+ * Convert a CSS hsl()/hsla() string to hsla() format with alpha
+ * Handles both hsl(H S% L%) space-separated (Tailwind modern format) and hsl(H,S%,L%) comma-separated
  */
 export function hslToHsla(hsl: string, alpha: number): string {
   const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;

@@ -1,15 +1,9 @@
 """
 统计数据 Repository 主类
 
-创建时间: 2026-03-17
-创建者: TraeAI
-任务: code-quality-refactor - 拆分stats_repository
-说明: 主Repository类，通过组合方式使用各模块函数
+主Repository类，通过组合方式使用各模块函数
 
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - 补充遗漏方法
-修改内容: 添加 graphs, summaries 模块导入和对应方法
+添加 graphs, summaries 模块导入和对应方法
 """
 
 from __future__ import annotations
@@ -30,13 +24,10 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     """
     统计数据 Repository
 
-    管理全局统计、情绪曲线、节奏曲线等数据。
-    所有方法支持 run_id 参数以区分不同的分析运行。
+    管理全局统计、情绪曲线、节奏曲线等数据
+    所有方法支持 run_id 参数以区分不同的分析运行
 
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 拆分stats_repository
-    修改内容: 使用函数组合方式重组代码结构，拆分为5个模块：
+    使用函数组合方式重组代码结构，拆分为5个模块：
         - metrics: 全局统计和Token使用统计、云端分析、全局上下文
         - runs: 运行状态和完成度检查
         - chunks: 分块曲线、文化数据
@@ -124,10 +115,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """
         获取分块曲线完整数据（情绪 + 节奏，包含 chunk_id）
 
-        修改时间: 2026-03-31
-        修改者: TraeAI
-        任务: refactor-hardcoded-index-access
-        修改内容: 返回 Sequence[Row] 支持字段名访问， 替代元组列表
+        返回 Sequence[Row] 支持字段名访问， 替代元组列表
         """
         return chunks.fetch_chunk_curves_full(self.session, run_id)
 
@@ -135,10 +123,7 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """
         获取情绪密度数据
 
-        修改时间: 2026-03-31
-        修改者: TraeAI
-        任务: refactor-hardcoded-index-access
-        修改内容: 返回 Sequence[Row] 支持字段名访问， 替代元组列表
+        返回 Sequence[Row] 支持字段名访问， 替代元组列表
         """
         return chunks.fetch_emotion_densities(self.session, run_id)
 
@@ -181,9 +166,6 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
         """
         检查是否已存在 global_context 记录
 
-        创建时间: 2026-03-25
-        创建者: TraeAI
-        任务: fix-resume-feature - 断点续传功能修复
         """
         return metrics.has_global_context(self.session, run_id)
 

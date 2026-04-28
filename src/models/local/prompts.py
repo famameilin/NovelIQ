@@ -1,13 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: Prompt 常量和工具函数
-
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: prompt-consolidation
-修改内容: 使用新的按任务组织的 prompt 结构
 """
 
 from __future__ import annotations
@@ -52,15 +44,6 @@ def build_retry_prompt(
 ) -> str:
     """
     构建重试 prompt
-
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor
-
-    修改时间: 2026-03-30
-    修改者: TraeAI
-    任务: feature/chunk-summary-timeline-only
-    修改内容: 添加 is_repetitive 参数，支持重复输出重试
 
     Args:
         original_user_prompt: 原始用户 prompt

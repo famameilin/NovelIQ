@@ -1,4 +1,4 @@
-"""消歧消息构建模块。"""
+"""消歧消息构建模块"""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def _has_original_sentence_content(context: str) -> bool:
 
 
 def _extract_evidence_types_from_context(context: str) -> list[str]:
-    """从上下文字符串中提取证据类型。"""
+    """从上下文字符串中提取证据类型"""
     evidence_types: list[str] = []
 
     matches = _EVIDENCE_MARKER_PATTERN.findall(context)
@@ -83,14 +83,14 @@ def _extract_evidence_types_from_context(context: str) -> list[str]:
 
 
 def _format_evidence_annotation(evidence_types: list[str]) -> str:
-    """格式化证据来源标注。"""
+    """格式化证据来源标注"""
     if not evidence_types:
         return ""
     return "【证据来源：" + "、".join(evidence_types) + "】"
 
 
 def _get_category_label(category: str | None) -> str:
-    """将分类类别转为中文标签。"""
+    """将分类类别转为中文标签"""
     if category == "protected":
         return PROTECTED_CATEGORY_LABEL
     return "普通"
@@ -103,7 +103,7 @@ def _format_candidate_block(
     evidence_profile: EvidenceProfile,
     category: str | None = None,
 ) -> str:
-    """构建更结构化的候选项描述。"""
+    """构建更结构化的候选项描述"""
 
     lines = [
         f"- 候选称呼：{name}",
@@ -121,7 +121,7 @@ def build_existing_character_hint(
     existing_names: list[str] | None,
     existing_context_sentences: dict[str, str] | None = None,
 ) -> str | None:
-    """构建已有角色锚点提示。"""
+    """构建已有角色锚点提示"""
 
     if not existing_names:
         return None
@@ -164,7 +164,7 @@ _ENTITY_TYPE_DESCRIPTIONS: dict[str, str] = {
 
 
 def _build_relation_types_section() -> str:
-    """根据配置动态构建关系类型说明。"""
+    """根据配置动态构建关系类型说明"""
     valid_types = settings.analysis.valid_hierarchical_relation_types
     lines = ["【关系类型说明】"]
     for rel_type in valid_types:
@@ -174,13 +174,13 @@ def _build_relation_types_section() -> str:
 
 
 def _build_relation_types_union() -> str:
-    """构建关系类型联合字符串，用于 JSON 格式说明。"""
+    """构建关系类型联合字符串，用于 JSON 格式说明"""
     valid_types = settings.analysis.valid_hierarchical_relation_types
     return "|".join(valid_types)
 
 
 def _build_entity_types_section() -> str:
-    """根据配置动态构建实体类型说明。"""
+    """根据配置动态构建实体类型说明"""
     valid_types = list(VALID_ENTITY_TYPES) or ["character"]
     lines = ["【实体类型识别规则】"]
     for etype in valid_types:
@@ -190,13 +190,13 @@ def _build_entity_types_section() -> str:
 
 
 def _build_entity_types_union() -> str:
-    """构建实体类型联合字符串，用于 JSON 格式说明。"""
+    """构建实体类型联合字符串，用于 JSON 格式说明"""
     valid_types = list(VALID_ENTITY_TYPES) or ["character"]
     return "|".join(valid_types)
 
 
 def _build_dynamic_system_prompt() -> str:
-    """将动态关系类型和实体类型填入系统提示词模板。"""
+    """将动态关系类型和实体类型填入系统提示词模板"""
     base_prompt = DISAMBIGUATE_SYSTEM_PROMPT
     base_prompt = base_prompt.replace("{{RELATION_TYPES_UNION}}", _build_relation_types_union())
     base_prompt = base_prompt.replace("{{RELATION_TYPES_SECTION}}", _build_relation_types_section())
@@ -207,13 +207,10 @@ def _build_dynamic_system_prompt() -> str:
 
 def _format_reselect_review_summary(review: NameReviewState | None) -> list[str]:
     """
-    格式化最终代表名重选阶段的复审摘要。
+    格式化最终代表名重选阶段的复审摘要
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect
     说明: 终消歧后的额外重选不再判断“是不是同一人”，而是只在已确认 cluster 内
-          选择代表名；这里把当前状态机里已有的复审审计字段整理成稳定提示，供模型参考。
+          选择代表名；这里把当前状态机里已有的复审审计字段整理成稳定提示，供模型参考
     """
     if review is None:
         return ["  当前复审：无"]
@@ -235,11 +232,7 @@ def build_disambiguate_messages(
     classifications: list[CandidateClassification] | None = None,
 ) -> list[dict[str, str]]:
     """
-    构建角色消歧消息，仅接受标准候选结构。
-
-    修改时间: 2026-04-24
-    任务: unify-disambig-transport-record-arrays
-    修改内容: 消歧提示词统一为记录数组格式，与传输层响应模型保持一致。
+    构建角色消歧消息，仅接受标准候选结构
     """
     # Build name -> category lookup
     category_map: dict[str, str] = {}
@@ -300,17 +293,10 @@ def build_canonical_reselect_messages(
     review_states: dict[str, NameReviewState] | None = None,
 ) -> list[dict[str, str]]:
     """
-    构建最终代表名重选消息。
+    构建最终代表名重选消息
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect
     说明: 该阶段只负责“在已确认同一人的 cluster 内选最终代表名”，
-          因此 prompt 明确按组组织输入，禁止模型重新拆组或跨组合并。
-
-    修改时间: 2026-04-24
-    任务: unify-disambig-transport-record-arrays
-    修改内容: 重选提示词统一为记录数组格式，与传输层响应模型保持一致。
+          因此 prompt 明确按组组织输入，禁止模型重新拆组或跨组合并
     """
     counts_by_name = {str(candidate["name"]): int(candidate.get("count", 0)) for candidate in candidates}
     cluster_blocks: list[str] = []
@@ -340,7 +326,7 @@ def build_anonymous_disambig_messages(
     existing_names: list[str] | None = None,
     existing_contexts: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
-    """构建匿名人物消歧消息。"""
+    """构建匿名人物消歧消息"""
     info_parts: list[str] = []
     for name in anonymous_names:
         ctx = anonymous_contexts.get(name, "无上下文")

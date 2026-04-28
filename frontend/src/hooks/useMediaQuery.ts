@@ -1,14 +1,9 @@
 /**
  * useMediaQuery - CSS 媒体查询 Hook
- * 
- * 创建时间: 2026-04-04
- * 创建者: AI Assistant
- * 任务: Sprint 1-A UI 组件
- * 说明: 跟踪 CSS 媒体查询的匹配状态
- * 
- * 修改时间: 2026-04-04
- * 修改者: AI Assistant
- * 修改内容: 修复 effect 中同步调用 setState 的警告
+ *
+ * 跟踪 CSS 媒体查询的匹配状态
+ *
+ * 修复 effect 中同步调用 setState 的警告
  */
 import { useSyncExternalStore } from "react";
 
@@ -30,7 +25,7 @@ function subscribe(query: string, callback: () => void): () => void {
 }
 
 /**
- * React hook that tracks a CSS media query match state.
+ * React hook that tracks a CSS media query match state
  */
 export function useMediaQuery(query: string): boolean {
   const matches = useSyncExternalStore(

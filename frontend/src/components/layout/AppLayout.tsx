@@ -45,10 +45,8 @@ export function AppLayout({ mode = "default" }: AppLayoutProps) {
   const closeUploadDialog = useCallback(() => setUploadDialogOpen(false), []);
 
   /**
-   * 修改时间: 2026-04-22
-   * 任务: 修复首页误继承任务主题色
    * 修改原因: 首页不对应具体小说任务；进入首页布局时需要清空当前小说/任务选择，
-   * 避免全局主题 hook 继续沿用上一次任务的 diagnosis 主题色。
+   * 避免全局主题 hook 继续沿用上一次任务的 diagnosis 主题色
    */
   useEffect(() => {
     if (mode !== "with-hero-panel") {

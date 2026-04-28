@@ -1,13 +1,7 @@
 """
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 实现 DiagnosisRepository 类
-说明: 诊断数据 Repository 实现，管理诊断分析相关的数据查询和存储
+诊断数据 Repository 实现，管理诊断分析相关的数据查询和存储
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 查询替代原生 SQL
+从 sqlite3.Connection 迁移到 SQLAlchemy Session，使用 ORM 查询替代原生 SQL
 """
 
 from __future__ import annotations
@@ -38,12 +32,9 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
     诊断数据 Repository
 
     管理诊断分析相关的数据查询和存储，包括转折点、高张力分块、
-    关系变更、伏笔分块、实体快照等数据操作。
+    关系变更、伏笔分块、实体快照等数据操作
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session
+    从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
 
     def __init__(self, session: Session):
@@ -223,24 +214,18 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_foreshadowing_threads(self, run_id: str) -> list[foreshadowing_thread_repo.ForeshadowingThreadView]:
         """
-        获取 setup thread ledger 视图。
+        获取 setup thread ledger 视图
 
-        创建时间: 2026-04-26
-        修改者: Codex
-        任务: remove-foreshadow-rate-contract
-        新建原因: diagnosis 主链改为直接消费 setup ledger，不能继续停留在 chunk 级 foreshadowing_list。
+        diagnosis 主链改为直接消费 setup ledger，不能继续停留在 chunk 级 foreshadowing_list
         """
 
         return foreshadowing_thread_repo.fetch_foreshadowing_threads(self.session, run_id)
 
     def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
         """
-        基于 setup thread ledger 计算伏笔回收预期。
+        基于 setup thread ledger 计算伏笔回收预期
 
-        创建时间: 2026-04-26
-        修改者: Codex
-        任务: remove-foreshadow-rate-contract
-        新建原因: diagnosis payload 现在要把 ledger 的正式 expectation 作为单一真相源传入模型。
+        diagnosis payload 现在要把 ledger 的正式 expectation 作为单一真相源传入模型
         """
 
         return foreshadowing_thread_repo.calculate_foreshadow_expectation(self.session, run_id)
@@ -287,10 +272,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         """
         获取主题词
 
-        创建时间: 2026-03-27
-        创建者: TraeAI
-        任务: 诊断数据获取逻辑收敛到 DiagnosisRepository
-        说明: 从 payload.py 迁移，获取按权重排序的主题词列表
+        从 payload.py 迁移，获取按权重排序的主题词列表
 
         Args:
             run_id: 运行ID
@@ -326,15 +308,9 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         """
         获取角色消歧数据（known_characters 和 alias_merges）
 
-        创建时间: 2026-03-27
-        创建者: TraeAI
-        任务: 诊断数据获取逻辑收敛到 DiagnosisRepository
-        说明: 从 payload.py 迁移，分离获取 known_characters 和 alias_merges
+        从 payload.py 迁移，分离获取 known_characters 和 alias_merges
 
-        修改时间: 2026-03-28
-        修改者: TraeAI
-        任务: consolidate-codebase-architecture
-        修改内容: 禁止静默吞异常，数据格式错误时抛出 ValueError
+        禁止静默吞异常，数据格式错误时抛出 ValueError
 
         Args:
             run_id: 运行ID
@@ -395,10 +371,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
         """
         获取所有阶段性摘要
 
-        创建时间: 2026-04-08
-        创建者: GLM-5
-        任务: summary-full-chain-refactor
-        说明: 从 stage_summaries 表读取所有阶段性摘要，用于云端诊断
+        从 stage_summaries 表读取所有阶段性摘要，用于云端诊断
 
         Args:
             run_id: 运行ID

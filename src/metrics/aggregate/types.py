@@ -1,10 +1,7 @@
 """
 Aggregate Metrics 数据类型定义
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-说明: 提取所有数据类定义
+提取所有数据类定义
 """
 
 from __future__ import annotations
@@ -19,11 +16,6 @@ from src.config.constants import EMOTION_SCORE_MAPPING
 class AggregateResult:
     """聚合结果数据类
 
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix/three-act-ratio-boundary-protection
-    修改内容: narrative_structure 类型从 dict[str, float] 改为 dict[str, Any]，
-              以支持多高潮剖面指标（climax_count: int, climax_positions: list, etc.）
     """
 
     narrative_structure: dict[str, Any] = field(default_factory=dict)
@@ -81,10 +73,6 @@ class TextData:
 class CultureData:
     """文化数据
 
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度字段，只保留 imagery_densities
     """
 
     imagery_densities: list[float]
@@ -101,10 +89,7 @@ class TensionData:
 class DialogueData:
     """对话数据
 
-    创建时间: 2026-03-25
-    创建者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    说明: 存储对话语气数据用于聚合计算
+    存储对话语气数据用于聚合计算
     """
 
     tones: list[str]
@@ -114,10 +99,7 @@ class DialogueData:
 class StyleData:
     """风格指标数据
 
-    创建时间: 2026-04-04
-    创建者: TraeAI
-    任务: fix-style-stats-missing-fields
-    说明: 存储风格指标数据用于聚合计算
+    存储风格指标数据用于聚合计算
     """
 
     dialogue_ratios: list[float]
@@ -128,9 +110,6 @@ def map_emotion_score(score_raw: str | None) -> int:
     """
     将情绪分数字符串映射为数值
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: metrics-repository-refactor
     """
     if score_raw in EMOTION_SCORE_MAPPING:
         return EMOTION_SCORE_MAPPING[score_raw]

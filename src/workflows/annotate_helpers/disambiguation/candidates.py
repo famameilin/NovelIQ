@@ -1,10 +1,7 @@
 """
 候选名字收集和筛选
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: disambiguation-module-split
-说明: 从 disambiguation.py 拆分，包含候选名字收集和筛选相关函数
+从 disambiguation.py 拆分，包含候选名字收集和筛选相关函数
 """
 
 from __future__ import annotations
@@ -37,7 +34,7 @@ EXTENSION_REVIEW_MIN_RATIO = 1.5
 
 @dataclass(frozen=True)
 class DisambigStateSnapshotEntry:
-    """终消歧候选收集所需的最小 review 快照。"""
+    """终消歧候选收集所需的最小 review 快照"""
 
     state: str
     confidence: str
@@ -46,7 +43,7 @@ class DisambigStateSnapshotEntry:
 
 @dataclass
 class DisambigStateSnapshot:
-    """终消歧候选收集的具名快照容器。"""
+    """终消歧候选收集的具名快照容器"""
 
     entries: dict[str, DisambigStateSnapshotEntry] = field(default_factory=dict)
 
@@ -84,14 +81,14 @@ def _build_candidate_payload_by_names(
         except (TypeError, ValueError):
             count = 0
 
-        # 中文注释：数据库返回的是宽松字典，这里收口成 NameCountCandidate，
-        # 避免把仓储层的松散返回形状继续泄漏到消歧主链。
+        # 数据库返回的是宽松字典，这里收口成 NameCountCandidate，
+        # 避免把仓储层的松散返回形状继续泄漏到消歧主链
         payload.append({"name": name, "count": count})
     return payload
 
 
 def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, int]:
-    """Build a name -> count lookup for final disambiguation heuristics."""
+    """Build a name -> count lookup for final disambiguation heuristics"""
     name_counts: dict[str, int] = {}
     for item in all_names:
         name = str(item.get("name", ""))
@@ -107,9 +104,9 @@ def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, i
 
 def _is_self_resolved_leaf(name: str, alias_map: dict[str, str]) -> bool:
     """
-    Whether the name is currently resolved to itself and not acting as another alias's canonical target.
+    Whether the name is currently resolved to itself and not acting as another alias's canonical target
 
-    This targets the "early self-mapped and then locked" case like 贺伯安 -> 贺伯安.
+    This targets the "early self-mapped and then locked" case like 贺伯安 -> 贺伯安
     """
     if alias_map.get(name, name) != name:
         return False
@@ -127,10 +124,7 @@ def _has_more_frequent_related_name(
     - 贺伯安 / 伯安
     - 小侯爷 / 侯爷
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: 修复 final candidate 收集逻辑
-    说明: 对"已 resolved 但可能只是早期自映射"的名字重新放入 final review
+    对"已 resolved 但可能只是早期自映射"的名字重新放入 final review
     """
     current_count = name_counts.get(name, 0)
     if current_count <= 0:
@@ -157,16 +151,9 @@ def _collect_final_disambiguation_candidates(
     state_snapshot: DisambigStateSnapshot | None = None,
 ) -> list[str]:
     """
-    Build candidates for final disambiguation.
+    Build candidates for final disambiguation
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 项目文件结构整理与拆解
 
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 修复 final candidate 收集逻辑
-    修改内容: 低频名和高频名扩展形式不再被"早期自映射"锁死，允许重新进入 final review
 
     新规则：
     - state=resolved 不再直接跳过
@@ -212,7 +199,7 @@ def _augment_prompt_context_with_graph(
     existing_names: list[str],
     candidate_names: list[str],
 ) -> DisambiguationPromptContext | None:
-    """将图谱权威数据补入消歧任务上下文。"""
+    """将图谱权威数据补入消歧任务上下文"""
 
     graph_hint = render_disambiguation_graph_hint(
         alias_map,
@@ -282,17 +269,9 @@ def extract_new_names_from_db(
     """
     从数据库中提取新出现的人名（带频次）
 
-    基于当前 chunk 及之前所有 chunk 的标注结果，提取不在 alias_map 中的新人物名。
+    基于当前 chunk 及之前所有 chunk 的标注结果，提取不在 alias_map 中的新人物名
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 修复增量消歧只提取当前chunk的问题
-    修改内容: 从所有已标注的chunk中提取新名字，使用 fetch_chunk_characters_full
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 修复候选人名没有频次的问题
-    修改内容: 返回带频次的字典列表 [{"name": "伯安", "count": 312}, ...]
     """
     existing_names = set(alias_map.keys()) | set(alias_map.values()) if alias_map else set()
     all_names = fetch_all_character_names(conn, run_id, max_chunk_id=current_chunk_id)
@@ -357,7 +336,7 @@ def filter_candidates_by_class(
     list[NameCountCandidate],
     list[CandidateClassification],
 ]:
-    """基于候选分类器过滤候选名。
+    """基于候选分类器过滤候选名
 
     返回:
         filtered: 被黑名单过滤的候选（丢弃）

@@ -31,8 +31,8 @@ function getFocusStructureLabel(focusStructure?: DiagnosisResult["focus_structur
 
 /**
  * 2026-04-27，任务：protagonist-focus-contract
- * 新建原因：角色页不再展示“唯一主角卡”，而是统一展示焦点结构、焦点人物列表
- * 与叙事中心度最高角色，避免继续把“焦点身份”和“中心度分数”混成一个概念。
+ * 角色页不再展示“唯一主角卡”，而是统一展示焦点结构、焦点人物列表
+ * 与叙事中心度最高角色，避免继续把“焦点身份”和“中心度分数”混成一个概念
  */
 export function FocusCastCard({
   focusStructure,

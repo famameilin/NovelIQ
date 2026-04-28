@@ -1,13 +1,7 @@
 """
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 实现 RunRepository 类
-说明: 分析运行记录的数据库操作实现
+分析运行记录的数据库操作实现
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 从 sqlite3.Connection 迁移到 SQLAlchemy Session
+从 sqlite3.Connection 迁移到 SQLAlchemy Session
 """
 
 from __future__ import annotations
@@ -30,35 +24,26 @@ T = TypeVar("T")
 
 def _is_set[T](value: T | object) -> TypeGuard[T]:
     """
-    判断参数是否不是 `_UNSET` 哨兵值。
+    判断参数是否不是 `_UNSET` 哨兵值
 
-    创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
-    任务: fix-src-static-checks
-    说明: 统一收窄 `T | object` 到真实字段类型，避免 mypy 把 `_UNSET` 联合类型传进 ORM 字段赋值。
+    统一收窄 `T | object` 到真实字段类型，避免 mypy 把 `_UNSET` 联合类型传进 ORM 字段赋值
     """
     return value is not _UNSET
 
 
 class RunRepository(BaseRepository[dict[str, Any]]):
-    """运行记录数据访问层。
+    """运行记录数据访问层
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
 
-    修改时间: 2026-04-20
-    修改者: TraeAI
-    任务: task-system-db-driven-refactor
-    修改内容: 增加 TASK_RELATED_TABLES 常量，统一维护删除任务时需清理的从表清单。
+    增加 TASK_RELATED_TABLES 常量，统一维护删除任务时需清理的从表清单
 
-    管理分析运行的创建、查询和状态更新。
-    使用 AnalysisRun ORM 模型。
-    从 sqlite3.Connection 迁移到 SQLAlchemy Session。
+    管理分析运行的创建、查询和状态更新
+    使用 AnalysisRun ORM 模型
+    从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
 
-    # 任务关联表清单，删除任务时需清理的从表。
-    # 维护须知：新增 run 关联表时请同步更新此列表，避免删除时遗漏产生孤儿数据。
+    # 任务关联表清单，删除任务时需清理的从表
+    # 维护须知：新增 run 关联表时请同步更新此列表，避免删除时遗漏产生孤儿数据
     TASK_RELATED_TABLES: list[str] = [
         "stage_summaries",
         "token_usage",
@@ -89,12 +74,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def _serialize_request_payload(self, request_payload: dict[str, Any] | None) -> str | None:
         """
-        序列化任务请求载荷。
+        序列化任务请求载荷
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-reanalysis-resume-regression
-        修改内容: 将重分析请求参数持久化到 analysis_runs.request_payload，供 resume/recovery 恢复原始语义。
+        将重分析请求参数持久化到 analysis_runs.request_payload，供 resume/recovery 恢复原始语义
         """
         if request_payload is None:
             return None
@@ -102,17 +84,11 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def _deserialize_request_payload(self, request_payload: str | None) -> dict[str, Any] | None:
         """
-        反序列化任务请求载荷。
+        反序列化任务请求载荷
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-reanalysis-resume-regression
-        修改内容: 读取 analysis_runs.request_payload 时恢复为语义化字典，避免上层直接处理 JSON 字符串。
+        读取 analysis_runs.request_payload 时恢复为语义化字典，避免上层直接处理 JSON 字符串
 
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: 增加 JSON 解析异常保护，脏数据时返回 None 并记录警告日志。
+        增加 JSON 解析异常保护，脏数据时返回 None 并记录警告日志
         """
         if not request_payload:
             return None
@@ -227,10 +203,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         更新运行进度
 
-        创建时间: 2026-04-08
-        创建者: TraeAI
-        任务: 修复数据库更新方法缺少关键字段同步问题
-        说明: 同步 progress 字段到数据库
+        同步 progress 字段到数据库
 
         Args:
             run_id: 运行ID
@@ -248,10 +221,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         更新运行阶段
 
-        创建时间: 2026-04-08
-        创建者: TraeAI
-        任务: 修复数据库更新方法缺少关键字段同步问题
-        说明: 同步 stage 字段到数据库
+        同步 stage 字段到数据库
 
         Args:
             run_id: 运行ID
@@ -281,12 +251,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def cancel_run(self, run_id: str) -> bool:
         """
-        原子性地设置任务的取消请求标记。
+        原子性地设置任务的取消请求标记
 
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-system-db-driven-refactor
-        说明: DB 驱动的取消机制，通过 cancel_requested flag 传递取消信号
+        DB 驱动的取消机制，通过 cancel_requested flag 传递取消信号
 
         Args:
             run_id: 运行ID
@@ -308,15 +275,12 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def request_task_cancellation(self, run_id: str) -> str | None:
         """
-        原子性地把可取消任务推进到 cancelling。
+        原子性地把可取消任务推进到 cancelling
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-db-driven-review-findings
-        修改内容: 仅允许 pending/running -> cancelling，避免取消竞态把已终态任务回写成 cancelling。
+        仅允许 pending/running -> cancelling，避免取消竞态把已终态任务回写成 cancelling
 
         Returns:
-            最新任务状态；若成功写入则固定返回 "cancelling"，若任务不存在则返回 None。
+            最新任务状态；若成功写入则固定返回 "cancelling"，若任务不存在则返回 None
         """
         from sqlalchemy import update
 
@@ -342,12 +306,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
         """
-        按状态查询任务。
+        按状态查询任务
 
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-system-db-driven-refactor
-        说明: 用于查询指定状态的所有任务
+        用于查询指定状态的所有任务
 
         Args:
             status: 任务状态
@@ -361,12 +322,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def get_running_tasks(self) -> list[dict[str, Any]]:
         """
-        获取所有运行中的任务。
+        获取所有运行中的任务
 
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-system-db-driven-refactor
-        说明: 用于启动时清理孤儿任务和运行时状态检查
+        用于启动时清理孤儿任务和运行时状态检查
 
         Returns:
             所有 status=running 的任务记录列表
@@ -375,23 +333,17 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def get_pending_tasks(self) -> list[dict[str, Any]]:
         """
-        获取所有 pending 任务。
+        获取所有 pending 任务
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-pending-task-pickup
-        修改内容: 为启动恢复和 DB worker pickup 提供统一的 pending 查询入口。
+        为启动恢复和 DB worker pickup 提供统一的 pending 查询入口
         """
         return self.get_by_status("pending")
 
     def claim_pending_run(self, run_id: str, *, worker_id: str, heartbeat_at: datetime | None = None) -> bool:
         """
-        原子性领取一个尚未执行的 pending 任务。
+        原子性领取一个尚未执行的 pending 任务
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-pending-task-pickup
-        修改内容: 通过单条 UPDATE 将 pending->running，避免多个实例同时把同一任务拉起执行。
+        通过单条 UPDATE 将 pending->running，避免多个实例同时把同一任务拉起执行
         """
         from sqlalchemy import update
 
@@ -415,12 +367,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def cancel_unclaimed_pending_run(self, run_id: str, *, message: str) -> bool:
         """
-        原子性终结尚未被任何 worker 领取的 pending 任务。
+        原子性终结尚未被任何 worker 领取的 pending 任务
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-pending-task-pickup
-        修改内容: 允许进程外取消在任务真正启动前直接落终态，避免进入不可恢复的 cancelling 死状态。
+        允许进程外取消在任务真正启动前直接落终态，避免进入不可恢复的 cancelling 死状态
         """
         from sqlalchemy import update
 
@@ -464,12 +413,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         completed_at: datetime | None | object = _UNSET,
     ) -> None:
         """
-        批量更新任务的运行态字段。
+        批量更新任务的运行态字段
 
-        创建时间: 2026-04-19
-        创建者: TraeAI
-        任务: task-system-db-driven-refactor
-        说明: 统一的运行态字段更新方法，支持选择性更新
+        统一的运行态字段更新方法，支持选择性更新
 
         Args:
             run_id: 运行ID
@@ -530,10 +476,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         通过run_id前缀获取运行记录
 
-        创建时间: 2026-03-19
-        创建者: TraeAI
-        任务: Repository层ID统一优化
-        说明: 使用run_id前缀匹配查询运行记录
+        使用run_id前缀匹配查询运行记录
 
         Args:
             run_id_prefix: run_id前缀（如前8位）
@@ -541,10 +484,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         Returns:
             运行记录字典，不存在则返回 None
 
-        修改时间: 2026-03-25
-        修改者: TraeAI
-        任务: fix-resume-feature - 断点续传功能修复
-        修改内容: 使用 limit(1) 避免多记录时抛出异常
+        使用 limit(1) 避免多记录时抛出异常
         """
         stmt = (
             select(AnalysisRun)
@@ -577,21 +517,12 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def delete_run(self, run_id: str) -> bool:
         """
-        删除运行记录及相关数据。
+        删除运行记录及相关数据
 
-        创建时间: 2026-03-18
-        创建者: TraeAI
-        任务: 修复删除任务不删除数据库数据的问题
 
-        修改时间: 2026-04-08
-        修改者: TraeAI
-        任务: fix-delete-task-failure
-        修改内容: 修正表名列表以匹配实际数据库架构
+        修正表名列表以匹配实际数据库架构
 
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: 使用 TASK_RELATED_TABLES 常量替代内联表名列表，便于统一维护。
+        使用 TASK_RELATED_TABLES 常量替代内联表名列表，便于统一维护
         """
         from sqlalchemy import text
 
@@ -611,10 +542,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         统计不同小说的数量
 
-        创建时间: 2026-04-03
-        创建者: TraeAI
-        任务: 修改端点行为，从数据库查
-        说明: 返回 analysis_runs 表中 distinct novel_id 的数量
+        返回 analysis_runs 表中 distinct novel_id 的数量
         """
         from sqlalchemy import func, select
 
@@ -624,12 +552,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def mark_running_as_failed(self, *, stale_before: datetime) -> int:
         """
-        将明确可判定为孤儿的 running 任务标记为 failed。
+        将明确可判定为孤儿的 running 任务标记为 failed
 
-        修改时间: 2026-04-19
-        修改者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 仅回收带有 worker 归属且心跳超时的任务，避免新进程误收口其他活跃实例上的真实运行任务。
+        仅回收带有 worker 归属且心跳超时的任务，避免新进程误收口其他活跃实例上的真实运行任务
 
         Returns:
             受影响的行数
@@ -654,12 +579,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def mark_cancelling_as_cancelled(self, *, stale_before: datetime) -> int:
         """
-        将明确可判定为孤儿的 cancelling 任务收口为 cancelled。
+        将明确可判定为孤儿的 cancelling 任务收口为 cancelled
 
-        创建时间: 2026-04-19
-        创建者: Codex (GPT-5)
-        任务: fix-task-system-review-findings
-        修改内容: 仅回收带有 worker 归属且心跳超时的任务，避免误终结仍在其他实例中收尾的任务。
+        仅回收带有 worker 归属且心跳超时的任务，避免误终结仍在其他实例中收尾的任务
 
         Returns:
             受影响的行数
@@ -693,10 +615,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         """
         获取所有有分析记录的小说列表
 
-        创建时间: 2026-04-05
-        创建者: AI Assistant
-        任务: fix-test-data-pollution
-        说明: 返回每个 novel_id 的最新运行记录，用于小说列表展示
+        返回每个 novel_id 的最新运行记录，用于小说列表展示
 
         Returns:
             小说列表，每个元素包含 novel_id、title、author、status、created_at 等

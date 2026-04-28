@@ -1,22 +1,9 @@
 """
-模型客户端协议接口定义。
+模型客户端协议接口定义
 
-创建时间: 2026-03-24
-创建者: Codex
-任务: decouple-unified-client-phase1
 说明:
 - 为 workflow 层提供最小能力接口，减少对具体客户端实现的类型耦合
 - 仅约束 workflow 实际使用的方法与属性
-
-修改时间: 2026-03-29
-修改者: TraeAI
-任务: simplify-phase1-prompt
-修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
-
-修改时间: 2026-04-09
-修改者: TraeAI
-任务: refactor/annotate-async
-修改内容: annotate_chunk 改为返回 Awaitable[MultiPhaseAnnotationResult]
 """
 
 from __future__ import annotations
@@ -32,7 +19,7 @@ from src.models.local.disambiguation import DisambiguationPromptContext, Extende
 
 @runtime_checkable
 class AnnotationLike(Protocol):
-    """标注能力协议（workflow 侧最小接口）。"""
+    """标注能力协议（workflow 侧最小接口）"""
 
     _config: Any
     _novel_id: str | None
@@ -66,7 +53,7 @@ class AnnotationLike(Protocol):
 
 @runtime_checkable
 class DisambiguationLike(Protocol):
-    """消歧能力协议（workflow 侧最小接口）。"""
+    """消歧能力协议（workflow 侧最小接口）"""
 
     _config: Any
     _novel_id: str | None

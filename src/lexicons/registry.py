@@ -1,7 +1,7 @@
 """
 词表注册中心 (Lexicon Registry v2)
 
-基于 registry.yaml + conflict_matrix.yaml 的分层词表加载系统。
+基于 registry.yaml + conflict_matrix.yaml 的分层词表加载系统
 
 核心能力:
   - 从 registry.yaml 读取词表分层归属与元信息
@@ -16,7 +16,6 @@
     pos_terms = reg.get("emotion.positive")           # 基础词表
     neg_ext = reg.get_with_domains("emotion.negative", ["xianxia"])  # 带修仙扩展
 
-创建时间: 2026-04-06 | 分支: fix/timeline-multi-peak
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ class LexiconRegistry:
 
     def get(self, key: str, exclude_borrowed: bool = False) -> list[str]:
         """
-        获取指定词表。
+        获取指定词表
 
         Args:
             key: 词表标识，格式 "layer.lexicon"，如 "emotion.positive"
@@ -103,9 +102,9 @@ class LexiconRegistry:
         self, key: str, domain_tags: list[str] | None = None, exclude_borrowed: bool = False
     ) -> list[str]:
         """
-        获取词表 + 领域扩展。
+        获取词表 + 领域扩展
 
-        基础词表与 domain 扩展的并集去重，domain 是增量叠加而非替换。
+        基础词表与 domain 扩展的并集去重，domain 是增量叠加而非替换
 
         Args:
             key: 词表标识
@@ -202,20 +201,13 @@ class LexiconRegistry:
 
     def _load_lexicon_file(self, key: str) -> list[str]:
         """
-        从 .txt 文件加载原始词条。
+        从 .txt 文件加载原始词条
 
         支持两种格式：
         - 纯词条格式：每行一个词条
-        - 加权格式：每行 "词条\\t权重"，只取词条部分
+        - 加权格式：每行 "词条\t权重"，只取词条部分
 
-        修改时间: 2026-04-06
-        修改者: GLM-5
-        任务: 支持加权词典格式
-        修改内容: 处理带权重列的词典文件，只返回词条部分
 
-        修改时间: 2026-04-23
-        任务: P2-基础设施解耦
-        修改内容: 改为调用公共词表解析器，避免 registry 自行维护解析细节。
         """
         path = self._resolve_file_path(key)
         if path is None or not path.exists():
@@ -226,20 +218,13 @@ class LexiconRegistry:
 
     def _load_domain_lexicon(self, tag: str) -> list[str]:
         """
-        加载领域扩展词表。
+        加载领域扩展词表
 
         支持两种格式：
         - 纯词条格式：每行一个词条
-        - 加权格式：每行 "词条\\t权重"，只取词条部分
+        - 加权格式：每行 "词条\t权重"，只取词条部分
 
-        修改时间: 2026-04-06
-        修改者: GLM-5
-        任务: 支持加权词典格式
-        修改内容: 处理带权重列的词典文件，只返回词条部分
 
-        修改时间: 2026-04-23
-        任务: P2-基础设施解耦
-        修改内容: 改为调用公共词表解析器，避免 domain 加载与普通词表加载规则漂移。
         """
         domain_dir = self._base_dir / _DOMAIN_DIR
         path = domain_dir / f"{tag}.txt"
@@ -251,16 +236,12 @@ class LexiconRegistry:
 
     def _exclude_borrowed(self, primary_key: str, terms: list[str]) -> list[str]:
         """
-        排除被声明为「从主属表借用」的词条。
+        排除被声明为「从主属表借用」的词条
 
         当 A 表是某词条的主属表、B 表只是借用时，
         如果调用方请求 B 表且 exclude_borrowed=True，
-        则该词条从 B 的返回结果中移除。
+        则该词条从 B 的返回结果中移除
 
-        修改时间: 2026-04-06
-        修改者: GLM-5
-        任务: 代码审查问题修复
-        修改内容: 移除无效的死代码循环
         """
         borrowed: set[str] = set()
 
@@ -306,16 +287,10 @@ def get_weighted_lexicon_set(
     fight_domains: list[str] | None = None,
 ) -> WeightedLexiconSet:
     """
-    获取完整的加权词表集合。
+    获取完整的加权词表集合
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 清理向后兼容代码
-    说明: 使用 load_weighted_lexicon 加载词典。
+    使用 load_weighted_lexicon 加载词典
 
-    修改时间: 2026-04-23
-    任务: P2-基础设施解耦
-    修改内容: load_weighted_lexicon 改从公共解析层导入，切断 lexicons 对 metrics 的反向依赖。
     """
     from src.workflows.curve_metrics import WeightedLexiconSet
 

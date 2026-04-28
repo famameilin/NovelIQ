@@ -1,10 +1,7 @@
 """
-结果查询共享包。
+结果查询共享包
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
-说明: 为 route 与 service 提供统一的结果查询组装器，纠正原先 service 反向依赖 route 的问题。
+说明: 为 route 与 service 提供统一的结果查询组装器，纠正原先 service 反向依赖 route 的问题
 """
 
 from .characters import _fetch_characters

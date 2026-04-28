@@ -1,7 +1,7 @@
 """
 小说类型自动检测模块
 
-根据领域词表命中模式自动识别小说类型。
+根据领域词表命中模式自动识别小说类型
 
 支持的类型:
 - xianxia: 修仙/仙侠类
@@ -10,21 +10,8 @@
 - shuwen: 爽文/快节奏类
 - general: 通用/无法确定
 
-创建时间: 2026-04-06
-创建者: GLM-5
-任务: 词表与张力信号系统重构 - Task 10
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 类型检测模块修复
-修改内容:
-  - P0: indicators 纳入得分计算，权重为词表的 2 倍
-  - P1: 新增分段检测功能，支持类型序列输出
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 代码审查问题修复
-修改内容: 添加低置信度检测日志输出，便于后续调优
 """
 
 from __future__ import annotations
@@ -99,7 +86,7 @@ def detect_genre(
     min_confidence: float = MIN_CONFIDENCE,
 ) -> GenreDetectionResult:
     """
-    检测小说类型。
+    检测小说类型
 
     Args:
         text: 待检测文本（建议使用前 5000-10000 字）
@@ -175,7 +162,7 @@ def detect_genre_from_file(
     registry: LexiconRegistry | None = None,
 ) -> GenreDetectionResult:
     """
-    从文件检测小说类型。
+    从文件检测小说类型
 
     Args:
         file_path: 小说文件路径
@@ -204,9 +191,9 @@ def detect_genre_sequence(
     registry: LexiconRegistry | None = None,
 ) -> GenreSequenceResult:
     """
-    分段检测小说类型，输出类型序列。
+    分段检测小说类型，输出类型序列
 
-    用于处理"前期都市后期修仙"等类型变化的场景。
+    用于处理"前期都市后期修仙"等类型变化的场景
 
     Args:
         text: 完整文本
@@ -268,7 +255,7 @@ def detect_genre_sequence_from_file(
     registry: LexiconRegistry | None = None,
 ) -> GenreSequenceResult:
     """
-    从文件分段检测小说类型。
+    从文件分段检测小说类型
 
     Args:
         file_path: 小说文件路径
@@ -296,9 +283,9 @@ def get_dynamic_lexicons(
     registry: LexiconRegistry | None = None,
 ) -> dict[str, set[str]]:
     """
-    根据文本内容动态检测类型并加载对应词表。
+    根据文本内容动态检测类型并加载对应词表
 
-    用于处理"前期都市后期修仙"等类型变化的场景。
+    用于处理"前期都市后期修仙"等类型变化的场景
 
     Args:
         text: 待分析文本
@@ -349,7 +336,7 @@ def get_dynamic_lexicons_for_chunk(
     registry: LexiconRegistry | None = None,
 ) -> tuple[dict[str, set[str]], str]:
     """
-    为单个 chunk 动态加载词表。
+    为单个 chunk 动态加载词表
 
     Args:
         chunk_text: chunk 文本
@@ -376,7 +363,7 @@ def detect_genre_weighted(
     registry: LexiconRegistry | None = None,
 ) -> WeightedGenreResult:
     """
-    多类型加权检测：均匀采样 chunk，返回加权类型列表。
+    多类型加权检测：均匀采样 chunk，返回加权类型列表
 
     策略:
       1. 均匀采样 sample_ratio 比例的 chunk（至少 min_samples）
@@ -393,12 +380,6 @@ def detect_genre_weighted(
     Returns:
         WeightedGenreResult: 包含加权类型列表、采样数、原始得分
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 多类型加权混合词表方案
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    修改内容: 移除 max_samples 限制，min_samples 提升到 10
     """
     if registry is None:
         registry = LexiconRegistry()
@@ -416,7 +397,7 @@ def get_weighted_lexicon_config(
     genre_weights: list[tuple[str, float]],
 ) -> list[tuple[str, dict[str, list[str]], float]]:
     """
-    根据加权类型列表获取词表配置。
+    根据加权类型列表获取词表配置
 
     Args:
         genre_weights: 类型权重列表，格式 [(genre, weight), ...]
@@ -424,9 +405,6 @@ def get_weighted_lexicon_config(
     Returns:
         词表配置列表，格式 [(genre, lexicon_config, weight), ...]
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 多类型加权混合词表方案
     """
     return get_weighted_lexicon_config_impl(genre_weights)
 

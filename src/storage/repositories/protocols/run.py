@@ -1,12 +1,7 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分protocols.py
-说明: 运行管理协议接口
+运行管理协议接口
 
-修改时间: 2026-04-23
-任务: P2-基础设施解耦
-修改内容: 使用 RunRecord/RepositoryValue 替代过宽的动态字典。
+使用 RunRecord/RepositoryValue 替代过宽的动态字典
 """
 
 from __future__ import annotations
@@ -22,7 +17,7 @@ class RunRepositoryProtocol(Protocol):
     """
     分析运行管理接口
 
-    管理分析运行的创建、查询和状态更新。
+    管理分析运行的创建、查询和状态更新
     """
 
     def create_run(

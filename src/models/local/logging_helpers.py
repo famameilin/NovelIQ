@@ -1,10 +1,6 @@
 """
-创建时间: 2026-03-13
-创建者: TraeAI
-任务: refactor-model-interaction-layer
-
-本模块提供日志记录辅助函数，用于统一API调用日志格式。
-支持区分云端/本地日志格式，减少客户端代码重复。
+本模块提供日志记录辅助函数，用于统一API调用日志格式
+支持区分云端/本地日志格式，减少客户端代码重复
 """
 
 from __future__ import annotations
@@ -20,10 +16,6 @@ def log_api_call_start(
 ) -> None:
     """
     记录API调用开始日志
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
 
     区分云端/本地日志格式：
     - 云端: logger.info("[云端模型] {call_type} 开始: model={} ...")
@@ -59,10 +51,6 @@ def log_api_call_response(
 ) -> None:
     """
     记录API响应日志
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
 
     区分云端/本地日志格式：
     - 云端: logger.info("[云端模型] {call_type} 响应: ...")
@@ -104,10 +92,6 @@ def log_thinking_info(
     """
     构建thinking相关的metadata字典
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
-
     Args:
         thinking_content: thinking内容字符串
         thinking_format: thinking格式标识
@@ -134,10 +118,6 @@ def log_api_error(
 ) -> None:
     """
     记录API错误日志
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
 
     区分云端/本地日志格式：
     - 云端: logger.info("[云端模型] {call_type} 错误: ...")
@@ -171,10 +151,6 @@ def log_api_complete(
 ) -> None:
     """
     记录API调用完成日志
-
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
 
     Args:
         call_type: 调用类型，如 "annotate", "disambiguate", "embedding" 等

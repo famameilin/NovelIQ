@@ -1,60 +1,7 @@
 """
-创建时间: 2026-03-21
-创建者: TraeAI
-任务: refactor-phase3-to-annotation-layer
 说明: Phase3 对话归属判断逻辑，从 workflows/annotate_helpers/sentence.py 迁移
 
 修改历史:
-- 2026-03-21: 从 sentence.py 迁移 attribute_dialogues_with_llm 和相关函数
-
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: migrate-litellm-to-openai-sdk
-修改内容: 移除 litellm_utils 导入，直接使用配置中的模型名称
-
-修改时间: 2026-03-22
-修改者: TraeAI
-任务: code-quality-review
-修改内容: 对话归属失败时抛出 DialogueAttributionError 而非静默返回空字典
-
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: refactor-dialogue-attribution-pipeline
-修改内容: 重构对话提取函数，返回 QuoteCandidate 列表，提取上下文
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 创建统一的模型交互记录接口
-修改内容: 使用 record_model_interaction 替代本地 _save_interaction 函数
-
-修改时间: 2026-03-28
-修改者: TraeAI
-任务: consolidate-codebase-architecture
-修改内容: 从 constants 导入 PHASE3_MAX_RETRIES，移除本地重复定义
-
-修改时间: 2026-04-17
-修改者: TraeAI
-任务: fix-phase3-alias-priority-conflict
-修改内容: Phase3 evidence sections 改由 renderer helper 产出，复用 Phase1 别名优先级规则
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: unify-estimated-token-accounting
-修改内容: Phase3 在持久化 model_interactions 后同步写入统一估算 token_usage
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: fix-token-coverage-fallback-bucket
-修改内容: 即使重试器把 Phase3 切到 annotation_fallback 执行，也仍按 annotation 主业务桶记账
-
-修改时间: 2026-04-23
-任务: annotation-projector-runtime-landing
-修改内容: 单批模型调用改用 thin phase runtime，对话校验和长度派生迁入 dialogue projector。
-
-修改时间: 2026-04-26
-修改者: Codex
-任务: phase3-proof-only-fastpath-batch10
-修改内容: 落地 proof-only fastpath、batch=10 与 batch 内受控并行，补齐配置与 shadow 统计。
 """
 
 from __future__ import annotations
@@ -124,11 +71,7 @@ _SENTENCE_BOUNDARY_CHARS = "。！？!?；;\n"
 @dataclass(frozen=True)
 class _QuoteMatch:
     """
-    Phase3 引号匹配结果。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 让候选提取与 fastpath 共用同一组引号位置信息，避免 index 与原文上下文再次漂移。
+    Phase3 引号匹配结果
     """
 
     index: int
@@ -140,11 +83,7 @@ class _QuoteMatch:
 @dataclass(frozen=True)
 class _QuoteContext:
     """
-    Phase3 fastpath 使用的引号上下文。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 用 sentence/prefix/suffix 三段稳定表达候选附近文本，便于 proof-only 规则做严格判断。
+    Phase3 fastpath 使用的引号上下文
     """
 
     index: int
@@ -157,11 +96,7 @@ class _QuoteContext:
 @dataclass(frozen=True)
 class _FastpathEvaluation:
     """
-    单个候选的 fastpath 判断结果。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 统一承载命中记录、命中类型和回退原因，便于 Phase3 输出 shadow 统计。
+    单个候选的 fastpath 判断结果
     """
 
     record: DialogueRecordSchema | None
@@ -171,11 +106,7 @@ class _FastpathEvaluation:
 
 def _collect_quote_matches(text: str) -> list[_QuoteMatch]:
     """
-    提取按原文顺序排列的引号匹配结果。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 将原始引号索引和文本位置收口成共享 helper，保证提取候选与 fastpath 使用同一 index 语义。
+    提取按原文顺序排列的引号匹配结果
     """
     seen_positions: set[int] = set()
     all_matches: list[re.Match[str]] = []
@@ -200,11 +131,7 @@ def _collect_quote_matches(text: str) -> list[_QuoteMatch]:
 
 def _find_sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     """
-    计算候选所在的局部句子边界。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: fastpath 只允许基于当前句可证明的信息做判断，不能把整段 chunk 都当成同一句来猜。
+    计算候选所在的局部句子边界
     """
     sentence_start = start
     while sentence_start > 0 and text[sentence_start - 1] not in _SENTENCE_BOUNDARY_CHARS:
@@ -220,11 +147,7 @@ def _find_sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
 
 def _build_quote_contexts(text: str) -> dict[int, _QuoteContext]:
     """
-    为每个非空候选构建 fastpath 所需的上下文字段。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 让 proof-only 规则只依赖稳定、可复用的上下文片段，而不是在主流程里重复切文本。
+    为每个非空候选构建 fastpath 所需的上下文字段
     """
     contexts: dict[int, _QuoteContext] = {}
     for match in _collect_quote_matches(text):
@@ -246,11 +169,7 @@ def _build_fastpath_name_hints(
     alias_map: dict[str, str] | None,
 ) -> list[str]:
     """
-    收集 fastpath 可安全使用的人名提示集。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: proof-only fastpath 只信任上游已经出现过的人名/别名提示，避免靠裸正则把普通名词误判成人名。
+    收集 fastpath 可安全使用的人名提示集
     """
     name_hints: set[str] = set()
     for name in known_characters or []:
@@ -272,11 +191,7 @@ def _collect_non_overlapping_name_spans(
     name_hints: list[str],
 ) -> list[tuple[int, int, str]]:
     """
-    提取句子中不重叠的人名提示命中。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 去掉“贺重明/重明”这类重叠短名的重复计数，避免把同一个人误判成多名竞争角色。
+    提取句子中不重叠的人名提示命中
     """
     spans: list[tuple[int, int, str]] = []
     for name in name_hints:
@@ -291,11 +206,7 @@ def _collect_non_overlapping_name_spans(
 
 def _collect_unique_names(text: str, name_hints: list[str]) -> set[str]:
     """
-    收集文本中的唯一人名提示命中。
-
-    创建时间: 2026-04-27
-    任务: fix-phase3-fastpath-followup-review-findings
-    新建原因: fastpath 需要只在真正承担 speaker 证明责任的局部文本上计算竞争名字，避免把引号内容和无害尾叙述也算进去。
+    收集文本中的唯一人名提示命中
     """
     return {name for _, _, name in _collect_non_overlapping_name_spans(text, name_hints)}
 
@@ -305,12 +216,7 @@ def _build_fastpath_speech_tag_matches(
     name_hints: list[str],
 ) -> tuple[re.Match[str] | None, re.Match[str] | None]:
     """
-    构造 prefix / suffix speech tag 匹配结果。
-
-    创建时间: 2026-04-27
-    任务: fix-phase3-fastpath-followup-review-findings
-    新建原因: 将 fastpath 的严格 speaker 证明限定在紧邻引号的 speech tag 上，
-    允许安全修饰语，但不把尾叙述误算成竞争上下文。
+    构造 prefix / suffix speech tag 匹配结果
     """
     names_pattern = "|".join(re.escape(name) for name in name_hints)
     verbs_pattern = "|".join(re.escape(verb) for verb in _FASTPATH_SPEECH_VERBS)
@@ -330,11 +236,7 @@ def _build_fastpath_speech_tag_matches(
 
 def _is_safe_fastpath_modifier(modifier_text: str, name_hints: list[str]) -> bool:
     """
-    判断 speech tag 中名字与说话动词之间的修饰语是否安全。
-
-    创建时间: 2026-04-27
-    任务: fix-phase3-fastpath-followup-review-findings
-    新建原因: 允许“兴奋地喊道”这类高频修饰语命中 fastpath，同时拦住“对/向/朝某人说”这类会引入受话人的结构。
+    判断 speech tag 中名字与说话动词之间的修饰语是否安全
     """
     normalized = modifier_text.strip()
     if not normalized:
@@ -355,17 +257,7 @@ def _evaluate_proof_only_fastpath(
     name_hints: list[str],
 ) -> _FastpathEvaluation:
     """
-    判断单个候选是否满足 proof-only fastpath。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 把“可证明才直返，否则回退 LLM”的规则收口在单点，避免主流程散落隐式启发式。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-phase3-followup-review-findings
-    修改内容: 只在紧邻引号的 speech tag 上做 speaker 证明，
-    允许安全修饰语与无害尾叙述，避免 strict case 被过度回退到 LLM。
+    判断单个候选是否满足 proof-only fastpath
     """
     if not name_hints:
         return _FastpathEvaluation(record=None, reject_reason="no_name_hints")
@@ -445,11 +337,7 @@ def _resolve_phase3_fastpath_candidates(
     alias_map: dict[str, str] | None,
 ) -> tuple[list[DialogueRecordSchema], list[QuoteCandidate], Counter[str], Counter[str]]:
     """
-    将候选拆分为 fastpath 命中和需要走 LLM 的两组。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: 让 Phase3 主流程先缩减可证明样本，再对剩余样本做批量 LLM 调用。
+    将候选拆分为 fastpath 命中和需要走 LLM 的两组
     """
     contexts = _build_quote_contexts(chunk_text)
     name_hints = _build_fastpath_name_hints(known_characters, alias_map)
@@ -482,11 +370,7 @@ def _collect_fastpath_metadata_candidates(
     candidates: list[QuoteCandidate],
 ) -> list[QuoteCandidate]:
     """
-    收集需要补充 metadata 的 fastpath 命中候选。
-
-    创建时间: 2026-04-27
-    任务: fix-phase3-fastpath-followup-review-findings
-    新建原因: 让 fastpath 先锁定 speaker，再仅对命中的候选补充 tone / identity clue，避免主链上完全绕开 fastpath。
+    收集需要补充 metadata 的 fastpath 命中候选
     """
     candidate_by_index = {candidate.index: candidate for candidate in candidates}
     return [candidate_by_index[record.index] for record in fastpath_records if record.index in candidate_by_index]
@@ -498,11 +382,7 @@ def _collect_fastpath_metadata_known_characters(
     fallback_known_characters: list[str] | None,
 ) -> list[str] | None:
     """
-    为 fastpath metadata enrichment 收敛当前 batch 的已知说话者提示。
-
-    创建时间: 2026-04-27
-    任务: fix-phase3-fastpath-followup-review-findings
-    新建原因: metadata enrichment 不再需要整段角色池，只保留 proof-only 已证明的 speaker，减小 prompt 负担。
+    为 fastpath metadata enrichment 收敛当前 batch 的已知说话者提示
     """
     speaker_by_index = {record.index: record.speaker or [] for record in fastpath_records}
     ordered_speakers: list[str] = []
@@ -520,12 +400,7 @@ def _merge_fastpath_metadata_records(
     require_identity_clues: bool,
 ) -> list[DialogueRecord]:
     """
-    将 LLM metadata enrichment 结果合并回 fastpath 记录。
-
-    创建时间: 2026-04-27
-    任务: fix-phase3-fastpath-followup-review-findings
-    新建原因: fastpath 继续作为 speaker 的权威来源，metadata batch 只补 tone / identity clue，
-    避免主链再次退回纯 LLM speaker 判断。
+    将 LLM metadata enrichment 结果合并回 fastpath 记录
     """
     metadata_by_index = {record.index: record for record in metadata_records}
     merged_records: list[DialogueRecord] = []
@@ -556,11 +431,7 @@ async def _gather_batch_tasks_or_cancel(
     tasks: list[asyncio.Task[tuple[str, int, list[DialogueRecord]]]],
 ) -> list[tuple[str, int, list[DialogueRecord]]]:
     """
-    收集并行 batch 结果，并在首个失败时取消其余任务。
-
-    创建时间: 2026-04-27
-    任务: fix-phase3-followup-review-findings
-    新建原因: 避免某个 batch 已经失败返回后，其他 sibling batch 继续消耗 token 并落审计记录。
+    收集并行 batch 结果，并在首个失败时取消其余任务
     """
     if not tasks:
         return []
@@ -595,11 +466,7 @@ async def _gather_batch_tasks_or_cancel(
 
 def _build_phase3_parallel_stream_id(chunk_id: int | None, batch_index: int) -> str:
     """
-    为 Phase3 并行 batch 生成稳定的流分组标识。
-
-    创建时间: 2026-04-27
-    任务: phase3-multi-stream-ui
-    新建原因: 前端需要靠稳定 stream_id 区分同一 chunk 下的 sibling batch 流式输出，避免多流串到同一输出面板。
+    为 Phase3 并行 batch 生成稳定的流分组标识
     """
     chunk_token = chunk_id if chunk_id is not None else "global"
     return f"phase3-{chunk_token}-{batch_index + 1}"
@@ -610,16 +477,7 @@ def _clone_annotation_client_for_parallel(
     stream_id: str | None = None,
 ) -> AnnotationClient:
     """
-    为并行 batch 构造无共享 session 的轻量客户端副本。
-
-    创建时间: 2026-04-26
-    任务: phase3-proof-only-fastpath-batch10
-    新建原因: Phase3 并发时不能复用同一个 SQLAlchemy session，但仍要复用底层 SDK client 和运行时上下文。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: phase3-multi-stream-ui
-    修改内容: 并行 worker 不再共享父 emitter；对 output/thinking 事件补稳定 stream_id，避免 sibling batch 串流污染。
+    为并行 batch 构造无共享 session 的轻量客户端副本
     """
     if client.__class__.__module__.startswith("unittest.mock"):
         return client
@@ -642,7 +500,7 @@ def _clone_annotation_client_for_parallel(
         parent_emitter = getattr(client, "_emitter", None)
         if callable(parent_emitter) and stream_id:
             async def _emit_with_stream_id(event: StreamEvent) -> None:
-                # 中文注释：只有真正的 LLM 文本/思维片段才需要分流；阶段级进度事件仍保留原来的 chunk 级单流语义。
+                # 只有真正的 LLM 文本/思维片段才需要分流；阶段级进度事件仍保留原来的 chunk 级单流语义
                 if event.action in {"output", "thinking"} and not event.stream_id:
                     event = replace(event, stream_id=stream_id)
                 await parent_emitter(event)
@@ -657,30 +515,7 @@ def extract_dialogues_from_text(text: str, context_chars: int = 50) -> list[Quot
     """
     从文本中提取所有引号候选及其上下文
 
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: analyze-dialogue-length-zero
     说明: 使用正则提取所有双引号包裹的对话内容
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: fix-dialogue-extraction-quotes
-    修改内容: 支持中文双引号、英文双引号、中文方引号等多种引号格式，避免重复匹配
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: fix-dialogue-extraction-chinese-quotes
-    修改内容: 修复中文双引号正则，添加「」和『』的匹配
-
-    修改时间: 2026-03-23
-    创建者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
-    修改内容: 返回 QuoteCandidate 列表，提取 ctx_before 上下文
-
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: cleanup-phase3-ctx-context
-    修改内容: 移除 ctx_before 和 ctx_after，只保留 content
 
     Args:
         text: 原文文本
@@ -701,11 +536,9 @@ def _collect_priority_candidate_names(
     batch_candidates: list[QuoteCandidate],
 ) -> list[str] | None:
     """
-    收集当前 batch 真正提到的优先候选名。
+    收集当前 batch 真正提到的优先候选名
 
-    创建时间: 2026-04-17
-    任务: fix-phase3-alias-priority-conflict
-    说明: 只把当前 batch 文本里出现过的候选名上推给 evidence renderer，避免前几个候选长期占满共享证据窗口。
+    说明: 只把当前 batch 文本里出现过的候选名上推给 evidence renderer，避免前几个候选长期占满共享证据窗口
     """
     if evidence_bundle is None or not evidence_bundle.requested_names:
         return None
@@ -732,36 +565,7 @@ async def attribute_dialogues_with_llm(
     """
     使用 LLM 判断对话候选是否是对话，并识别说话者和语气
 
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: analyze-dialogue-length-zero
     说明: 调用 LLM 根据上下文判断每段对话的说话者
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-17
-    修改者: TraeAI
-    任务: fix-phase3-active-entities-fallback
-    修改内容: 新增 active_entities 参数，优先使用上游已解析好的活跃实体上下文
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: strict-phase34-fallback
-    修改内容: 接入 fallback_client，确保 Phase3 与 Phase1/2 一致走主客户端重试后再兜底
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase3-proof-only-fastpath-batch10
-    修改内容: 新增 proof-only fastpath、batch 内受控并行与 shadow 统计，并为并发 worker 去掉共享 session。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-phase3-proof-only-fastpath-followup-review-findings
-    修改内容: 请求 tone / identity clue 时改为对 fastpath 命中候选做轻量 metadata enrichment，
-    恢复主链 fastpath 可达性并保留按 batch 校验返回 index。
     """
     if not candidates:
         return []
@@ -792,8 +596,8 @@ async def attribute_dialogues_with_llm(
         known_chars = "、".join(effective_known_characters) if effective_known_characters else "无"
         evidence_sections: list[str] = []
         if include_evidence:
-            # 中文注释：Phase3 的共享 evidence 需要按当前 batch 重新裁剪，
-            # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选。
+            # Phase3 的共享 evidence 需要按当前 batch 重新裁剪，
+            # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选
             evidence_sections = render_dialogue_attribution_evidence_sections(
                 evidence_bundle,
                 alias_map=alias_map,
@@ -810,8 +614,8 @@ async def attribute_dialogues_with_llm(
             known_characters=known_chars,
         )
         if evidence_sections:
-            # 中文注释：Phase3 只消费上游已经准备好的共享 evidence blocks，
-            # 不在对话归属阶段重新发起取证，避免 Phase3 再次长成独立上下文体系。
+            # Phase3 只消费上游已经准备好的共享 evidence blocks，
+            # 不在对话归属阶段重新发起取证，避免 Phase3 再次长成独立上下文体系
             user_prompt += "\n\n" + "\n\n".join(evidence_sections)
 
         messages = [
@@ -897,8 +701,8 @@ async def attribute_dialogues_with_llm(
                     operation_name=f"{batch_label}_batch_{batch_idx}",
                     chunk_id=chunk_id,
                 )
-                # 中文注释：并行 worker 复用同一个 SDK client，但显式去掉 _session，
-                # 避免多个 batch 协程同时写同一个 SQLAlchemy session。
+                # 并行 worker 复用同一个 SDK client，但显式去掉 _session，
+                # 避免多个 batch 协程同时写同一个 SQLAlchemy session
                 primary_worker = _clone_annotation_client_for_parallel(current_client, stream_id=stream_id)
                 fallback_worker = (
                     _clone_annotation_client_for_parallel(fallback_client, stream_id=stream_id)
@@ -918,8 +722,8 @@ async def attribute_dialogues_with_llm(
                     bi: int = batch_idx,
                     tb: int = total_batches,
                 ) -> list[DialogueRecordSchema]:
-                    # 中文注释：重试器可能把执行客户端切到 fallback_worker，这里必须消费传入的 working_client，
-                    # 不能闭包捕获 primary_worker，否则兜底分支仍会错误走主客户端。
+                    # 重试器可能把执行客户端切到 fallback_worker，这里必须消费传入的 working_client，
+                    # 不能闭包捕获 primary_worker，否则兜底分支仍会错误走主客户端
                     return await _execute_single_batch(
                         working_client,
                         bc,
@@ -932,8 +736,8 @@ async def attribute_dialogues_with_llm(
                     )
 
                 batch_results = await retry_handler.execute(batch_operation)
-                # 中文注释：每个 batch 都必须先按自己的候选集合校验返回 index，
-                # 避免跨 batch 的全局合法 index 在最终汇总时混进错误结果。
+                # 每个 batch 都必须先按自己的候选集合校验返回 index，
+                # 避免跨 batch 的全局合法 index 在最终汇总时混进错误结果
                 batch_records = _post_process_validation(
                     batch_results or [],
                     batch_candidates,
@@ -996,8 +800,8 @@ async def attribute_dialogues_with_llm(
             require_identity_clues=require_identity_clues,
         )
         ordered_records.extend(llm_records)
-        # 中文注释：各 batch 已各自完成 index 校验，这里只按全局 index 排序，
-        # 保证 fastpath 与 LLM 混合结果对 projector 来说仍是稳定的原文顺序。
+        # 各 batch 已各自完成 index 校验，这里只按全局 index 排序，
+        # 保证 fastpath 与 LLM 混合结果对 projector 来说仍是稳定的原文顺序
         ordered_records.sort(key=lambda record: record.index)
         return ordered_records
 
@@ -1017,11 +821,11 @@ def _post_process_validation(
     chunk_id: int | None,
 ) -> list[DialogueRecord]:
     """
-    后处理验证：验证 index 范围、别名归一化。
+    后处理验证：验证 index 范围、别名归一化
 
     设计决策（2026-04-10）：
     ─────────────────────────────
-    此函数只做两件事：1) 校验 index 有效性；2) 别名归一化。
+    此函数只做两件事：1) 校验 index 有效性；2) 别名归一化
     不对 speaker 做任何丢弃或修正。原因：
 
     1. 漏标注(null) > 错标注(A→B)：
@@ -1041,15 +845,7 @@ def _post_process_validation(
        - 后处理不再因"不在已知列表"而丢弃/修正 speaker
 
     修改历史:
-    - 2026-03-23: 添加 candidates 参数验证 index 范围
-    - 2026-03-31: 增加 identity_clue 反推逻辑（后证明不可靠，已删除）
-    - 2026-04-08: speaker 改为 list[str]，适配多人说话场景
-    - 2026-04-10: 删除 _extract_speaker_from_clue 调用和所有 speaker
       修正/丢弃逻辑，只保留别名归一化和日志记录
-
-    修改时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    修改内容: 保留兼容入口，实际投影逻辑委托 dialogue projector。
     """
     return normalize_dialogue_records(records, candidates, known_characters, alias_map, chunk_id)
 
@@ -1070,30 +866,7 @@ async def compute_dialogue_lengths_with_llm(
     """
     计算每个说话者的对话长度（使用 LLM 判断说话者）
 
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: analyze-dialogue-length-zero
     说明: 调用 LLM 根据上下文判断每段对话的说话者
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-10
-    修改者: GLM-5
-    任务: fix/disambig-retriever-integration
-    修改内容: 返回 DialogueLengthResult 替代多类型 tuple，
-              修复 speakers_str 二次归一化无效问题
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: strict-phase34-fallback
-    修改内容: 接入 fallback_client，确保 Phase3 的批次归属也支持云端兜底
-
-    修改时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    修改内容: 对话长度、归属、tone 与 identity clue 派生改由 dialogue projector 完成。
     """
     logger.info(f"compute_dialogue_lengths_with_llm: chunk_id={chunk_id} text_len={len(text) if text else 0}")
 

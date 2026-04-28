@@ -1,22 +1,12 @@
 /**
  * TimelineNodeDetail - 节点详情展开组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-B 叙事时间轴
- * 说明: 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
+ * 点击节点后展开的详情面板，显示事件描述、角色、关系变化等
  *
- * 修改时间: 2026-04-27
- * 任务: 时间轴合同重构
- * 修改内容:
  *   - 详情面板改为消费 node_id / anchor_chunk_id 新合同
  *   - 展示 score_breakdown、relation_events 与 lifecycle_events 新结构
  *   - 图谱回跳仅在 relation 节点具备稳定 relation_event_id 时附带图谱选择参数
  *
- * 修改时间: 2026-04-28
- * 修改者: Codex
- * 任务: 时间轴合同重构第二轮
- * 修改内容:
  *   - 支持复合节点详情与原子节点详情双模式
  *   - 复合节点只提供稳定 child atomic node 入口，不再构造模糊 graph deep-link
  */
@@ -47,16 +37,11 @@ export interface TimelineNodeDetailProps {
   className?: string;
 }
 
-
 function isAtomicTimelineNode(node: TimelineDetailNode | null): node is TimelineNodeType {
   return node != null && "node_subtype" in node;
 }
 
 /**
- * 修改时间: 2026-04-27
- * 修改者: Codex
- * 任务: fix-timeline-selected-node-relation-event-conflict
- * 修改内容:
  *   - 外部传入的 selectedRelationEventId 只有在确实属于当前节点时才可信
  *   - 若外部值不属于当前节点，则回退到节点自身唯一 relation event，避免生成不可能成立的 graph deep-link
  */

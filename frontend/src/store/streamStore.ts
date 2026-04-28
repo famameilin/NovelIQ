@@ -1,17 +1,4 @@
-/**
- * 创建时间: 2026-04-07
- * 创建者: GLM-5
- * 任务: WebSocket 流式数据状态管理
- * 说明: 管理流式数据连接状态、任务进度、LLM 输出缓冲和阶段完成时间
- *
- * 修改时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 修改内容:
- * - LLM 输出从按 stage/chunk 混合拼接改成按 stream group 分流存储
- * - 新增当前 scope 的活跃流选择状态，支持“默认跟随最新流，用户切换后保持选择”
- * - 保持旧 SSE 事件在缺失 stream_id 时仍自动落入 default 单流分组
- */
+/** 管理任务进度与多流 LLM 输出状态 */
 import { create } from "zustand";
 import type { StreamEventData } from "@/api/streamTypes";
 import { appConfig } from "@/config";
@@ -49,12 +36,7 @@ interface StreamState {
   reset: () => void;
 }
 
-/**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: 前端需要按 chunk/phase 维度管理当前活跃流，避免不同并行 batch 的输出继续混到同一缓冲区。
- */
+/** 按 chunk/phase 维度生成活跃流作用域键 */
 export function buildLLMOutputScopeKey(data: {
   stage: string;
   chunk_id: number;
@@ -63,12 +45,7 @@ export function buildLLMOutputScopeKey(data: {
   return `${data.stage}-${data.chunk_id}-${data.sub_stage || "default"}`;
 }
 
-/**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: 多流分组需要稳定 group key；旧事件缺失 stream_id 时统一收口到 default，保持单流兼容。
- */
+/** 生成多流分组键，并兼容缺失 stream_id 的旧事件 */
 export function buildLLMOutputGroupKey(data: {
   stage: string;
   chunk_id: number;
@@ -78,14 +55,7 @@ export function buildLLMOutputGroupKey(data: {
   return `${buildLLMOutputScopeKey(data)}-${data.stream_id || "default"}`;
 }
 
-/**
- * 修改时间: 2026-04-28
- * 修改者: Codex
- * 任务: 修复后台恢复后分析页卡死与白屏
- * 修改内容:
- * - 单条流输出改为有界字符串缓冲，不再让 store 无限保留细碎 token 片段。
- * - 统一按字符数与行数双上限裁剪，避免后台恢复后 Markdown 渲染窗口持续膨胀。
- */
+/** 将单条流输出裁剪到固定字符数和行数上限内 */
 function _trimLLMOutputText(text: string): string {
   let trimmed = text;
   if (trimmed.length > appConfig.maxLLMOutputCharsPerGroup) {
@@ -100,14 +70,7 @@ function _trimLLMOutputText(text: string): string {
   return trimmed;
 }
 
-/**
- * 修改时间: 2026-04-28
- * 修改者: Codex
- * 任务: 修复后台恢复后分析页卡死与白屏
- * 修改内容:
- * - 按 action 选择 output/thinking 文本缓冲，并在写入时立即做有界裁剪。
- * - 同时累计总字符数，供 UI 摘要展示真实输出体量。
- */
+/** 追加输出文本并维护有界缓冲与累计字符数 */
 function _appendBoundedLLMOutput(
   group: LLMStreamGroup,
   action: StreamEventData["action"],
@@ -132,12 +95,7 @@ function _appendBoundedLLMOutput(
   };
 }
 
-/**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: 当某个分组因 LRU 被淘汰或首次进入 scope 时，需要稳定回退到该 scope 最近更新的流。
- */
+/** 找到某个 scope 下最近更新的流 */
 function _findLatestGroupKeyForScope(
   outputs: Map<string, LLMStreamGroup>,
   scopeKey: string,
@@ -161,12 +119,7 @@ function _findLatestGroupKeyForScope(
   return latestGroupKey;
 }
 
-/**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: LRU 淘汰分组后，若当前活跃流正好被删除，需要把选择安全回退到该 scope 仍存在的最新流。
- */
+/** 分组被淘汰后，修复当前作用域的活跃流选择 */
 function _repairActiveSelectionAfterDeletion(
   activeSelections: Map<string, string>,
   selectionModes: Map<string, "auto" | "manual">,

@@ -5,11 +5,9 @@ import re
 
 def split_sentences(text: str) -> list[str]:
     """
-    按中文/英文句末标点与换行拆分文本。
+    按中文/英文句末标点与换行拆分文本
 
-    创建时间: 2026-04-23
-    任务: P2-基础设施解耦
-    说明: 从 metrics 专属模块上移为公共文本工具，避免 lexicons 为了 tokenizer 反向依赖 metrics。
+    说明: 从 metrics 专属模块上移为公共文本工具，避免 lexicons 为了 tokenizer 反向依赖 metrics
     """
     if not text:
         return []
@@ -19,11 +17,9 @@ def split_sentences(text: str) -> list[str]:
 
 def dialogue_length(text: str) -> int:
     """
-    计算文本中对话内容的总长度。
+    计算文本中对话内容的总长度
 
-    创建时间: 2026-04-23
-    任务: P2-基础设施解耦
-    说明: 从 metrics.text_utils 平移到公共层，供指标与其他文本模块复用。
+    说明: 从 metrics.text_utils 平移到公共层，供指标与其他文本模块复用
     """
     if not text:
         return 0
@@ -43,11 +39,9 @@ def dialogue_length(text: str) -> int:
 
 def tokenize_words(text: str) -> list[str]:
     """
-    调用项目统一分词器。
+    调用项目统一分词器
 
-    创建时间: 2026-04-23
-    任务: P2-基础设施解耦
-    说明: 将 tokenizer 入口放到公共层，lexicons 和 metrics 都只依赖 utils。
+    说明: 将 tokenizer 入口放到公共层，lexicons 和 metrics 都只依赖 utils
     """
     from src.preprocess.tokenize import tokenize
 

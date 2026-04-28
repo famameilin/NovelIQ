@@ -1,9 +1,6 @@
 """
 数据库迁移脚本：为 chunk_dialogues 表添加 tone 列
 
-创建时间: 2026-03-25
-创建者: TraeAI
-任务: fix-tone-distribution-semantic-error
 说明: 添加 tone 列存储对话语气类型（强硬/温和/讽刺/恳求/命令/恐惧/惊慌）
 """
 

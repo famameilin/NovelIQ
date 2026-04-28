@@ -4,7 +4,7 @@ import { getGraphEvents } from "@/api/results";
 import type { GraphData, GraphEvent, GraphEventsPageInfo } from "@/api/types";
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把事件窗口合并逻辑独立出来，避免 GraphPage 同时承担分页与页面渲染职责。
+// 把事件窗口合并逻辑独立出来，避免 GraphPage 同时承担分页与页面渲染职责
 function mergeGraphEvents(existingEvents: GraphEvent[], incomingEvents: GraphEvent[]): GraphEvent[] {
   const merged = new Map<number, GraphEvent>();
   existingEvents.forEach((event) => {
@@ -23,7 +23,7 @@ interface UseGraphEventPaginationOptions {
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：将事件分页、快照合并和 task 切换清理封装为独立 hook，收缩 GraphPage 的副作用密度。
+// 将事件分页、快照合并和 task 切换清理封装为独立 hook，收缩 GraphPage 的副作用密度
 export function useGraphEventPagination({
   novelId,
   taskScopeId,
@@ -62,7 +62,7 @@ export function useGraphEventPagination({
       return;
     }
 
-    // 中文注释：task 变化时先清掉旧分页窗口；如果新 task 已命中缓存，则立即用缓存快照回填。
+    // task 变化时先清掉旧分页窗口；如果新 task 已命中缓存，则立即用缓存快照回填
     eventsRequestVersionRef.current += 1;
     setLoadedEvents(graphData?.events ?? []);
     setEventsPageInfo(graphData?.events_page ?? null);

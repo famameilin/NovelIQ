@@ -1,27 +1,5 @@
 """
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 从 settings.py 拆分模型相关配置类
-
-本模块包含模型相关的配置数据类。
-
-修改时间: 2026-03-12
-修改者: TraeAI
-修改内容: 将thinking配置从各模型配置中移出，统一到独立的thinking配置块
-
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容: 支持从环境变量读取模型配置，敏感信息不再硬编码在 settings.json
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: 清理无效模型配置项
-修改内容: 删除 provider 和模型级 max_retries 配置，避免暴露未生效的伪配置入口
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: refactor-role-based-model-client-names
-修改内容: 将 cloud_annotation 重命名为 annotation_fallback，明确它表达的是标注兜底角色而非部署位置
+本模块包含模型相关的配置数据类
 """
 
 from __future__ import annotations
@@ -43,11 +21,6 @@ class ThinkingConfig:
 class TaskModelSettings:
     """
     任务模型配置（不包含thinking，thinking统一在顶层配置）
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 移除 backend_name 字段，迁移到 OpenAI SDK 后不再需要区分后端
     """
 
     base_url: str | None = None
@@ -74,11 +47,6 @@ class EmbeddingModelSettings:
 class ModelsSettings:
     """
     任务级模型配置集合
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: refactor-role-based-model-client-names
-    修改内容: 将 cloud_annotation 重命名为 annotation_fallback，避免把客户端角色误命名为 provider
     """
 
     annotation: TaskModelSettings = field(default_factory=TaskModelSettings)
@@ -95,20 +63,6 @@ class ModelsSettings:
 class ThinkingSettings:
     """
     各任务thinking开关配置
-
-    创建时间: 2026-03-12
-    创建者: TraeAI
-    任务: 将thinking配置从各模型配置中独立出来
-
-    修改时间: 2026-04-09
-    创建者: TraeAI
-    任务: fix-phase3-validation-error
-    修改内容: 添加 phase3_candidates_per_batch 配置，控制每批处理的候选数量
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase3-proof-only-fastpath-batch10
-    修改内容: 新增 phase3_batch_parallelism 配置，并为 Phase3 批处理参数补显式校验。
     """
 
     annotation: bool = False
@@ -123,16 +77,7 @@ class ThinkingSettings:
 
     def validate(self) -> None:
         """
-        验证配置。
-
-        创建时间: 2026-04-26
-        任务: phase3-proof-only-fastpath-batch10
-        新建原因: 收紧 Phase3 批处理配置契约，避免 0 或负数让运行时静默退化或直接崩溃。
-
-        修改时间: 2026-04-26
-        修改者: Codex
-        任务: fix-phase3-proof-only-fastpath-review-findings
-        修改内容: Phase3 批处理配置必须是正整数，避免字符串/None/float 落成不清晰异常或伪配置。
+        验证配置
         """
         if not isinstance(self.phase3_candidates_per_batch, int) or isinstance(self.phase3_candidates_per_batch, bool):
             raise ValueError("thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数")
@@ -148,10 +93,6 @@ class ThinkingSettings:
 class StreamingSettings:
     """
     各任务streaming开关配置
-
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 支持流式响应模式配置
     """
 
     annotation: bool = False
@@ -171,12 +112,10 @@ class StreamingSettings:
 @dataclass
 class StructuredOutputSettings:
     """
-    结构化输出模式配置。
+    结构化输出模式配置
 
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
     说明: 集中配置各任务默认使用 json_schema / json_object，
-          并允许按 provider marker 覆盖，避免业务模块散落 provider 兼容判断。
+          并允许按 provider marker 覆盖，避免业务模块散落 provider 兼容判断
     """
 
     annotation: str = "json_schema"
@@ -194,11 +133,7 @@ _STRUCTURED_OUTPUT_ALLOWED_MODES = {"json_schema", "json_object"}
 
 def _parse_structured_output_mode(data: dict[str, Any], key: str, default: str) -> str:
     """
-    解析单个结构化输出模式。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 对配置里的 mode 做白名单校验，避免拼写错误静默退回导致 provider 行为不可解释。
+    解析单个结构化输出模式
     """
     mode = data.get(key, default)
     if mode not in _STRUCTURED_OUTPUT_ALLOWED_MODES:
@@ -209,11 +144,7 @@ def _parse_structured_output_mode(data: dict[str, Any], key: str, default: str) 
 
 def _parse_structured_output_settings(data: dict[str, Any] | None) -> StructuredOutputSettings:
     """
-    解析结构化输出模式配置。
-
-    创建时间: 2026-04-24
-    任务: structured-output-adapter-instructor-unification
-    新建原因: 将结构化输出 mode 从业务代码中抽到项目级配置，便于按 provider 能力调整。
+    解析结构化输出模式配置
     """
     json_data = data or {}
     defaults = StructuredOutputSettings()
@@ -261,16 +192,6 @@ def _get_env_var(prefix: str, suffix: str, default: str | None = None) -> str | 
 def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = "") -> TaskModelSettings:
     """
     解析任务模型配置
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 移除 backend_name 字段
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: 清理无效模型配置项
-    修改内容: 不再解析 provider 和模型级 max_retries，避免配置看似可调但运行时无效
     """
     env_base_url = _get_env_var(env_prefix, "BASE_URL")
     env_model = _get_env_var(env_prefix, "MODEL")
@@ -301,26 +222,6 @@ def _parse_task_model_settings(data: dict[str, Any] | None, env_prefix: str = ""
 def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str = "") -> EmbeddingModelSettings:
     """
     解析嵌入模型配置
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 支持从环境变量覆盖配置，优先级：环境变量 > JSON配置
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: 清理无效模型配置项
-    修改内容: 删除模型级 max_retries 解析，保留真正被运行时消费的 embedding_dim
-
-    修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
-    任务: fix-embedding-dimension-config-contract
-    修改内容: 恢复 embedding_dim 的显式配置契约。系统只信任 settings/env 中声明的维度，
-              首次建表使用配置值，后续由“代码配置/模型返回/数据库表结构”三方一致性校验决定是否继续执行。
-
-    修改时间: 2026-04-20
-    修改者: Codex (GPT-5)
-    任务: batch-embedding-requests
-    修改内容: 增加 batch_size 配置，控制语义分块批量请求 embedding API 时每批发送的文本数。
     """
     env_base_url = _get_env_var(env_prefix, "BASE_URL")
     env_model = _get_env_var(env_prefix, "MODEL")
@@ -371,15 +272,6 @@ def _parse_embedding_model_settings(data: dict[str, Any] | None, env_prefix: str
 def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
     """
     解析任务级模型配置集合
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 传递环境变量前缀给各模型配置解析器
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: refactor-role-based-model-client-names
-    修改内容: 将 cloud_annotation 配置解析重命名为 annotation_fallback
     """
     if not data:
         data = {}
@@ -401,20 +293,6 @@ def _parse_models_settings(data: dict[str, Any] | None) -> ModelsSettings:
 def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
     """
     解析thinking配置
-
-    创建时间: 2026-03-12
-    创建者: TraeAI
-    任务: 将thinking配置从各模型配置中独立出来
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 修复thinking参数传递方式
-    修改内容: 配置加载失败时抛出错误，而非使用默认值
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase3-proof-only-fastpath-batch10
-    修改内容: 补齐 Phase3 批处理配置解析，避免 settings.json 中的值继续静默失效。
     """
     if not data:
         raise ValueError("thinking 配置不能为空，请检查 config/settings.json 中的 thinking 配置项")
@@ -436,10 +314,6 @@ def _parse_thinking_settings(data: dict[str, Any] | None) -> ThinkingSettings:
 def _parse_streaming_settings(data: dict[str, Any] | None) -> StreamingSettings:
     """
     解析streaming配置
-
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 支持流式响应模式配置
     """
     if not data:
         return StreamingSettings()

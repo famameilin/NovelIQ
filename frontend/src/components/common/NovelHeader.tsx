@@ -1,35 +1,17 @@
 /**
  * NovelHeader - 小说页面头部组件
  *
- * 创建时间: 2026-04-04
- * 创建者: GLM-5
- * 任务: 小说详情页头部
- * 说明: 显示小说标题、状态徽章、任务选择器和操作按钮
+ * 显示小说标题、状态徽章、任务选择器和操作按钮
  *
- * 修改时间: 2026-04-07
- * 修改者: TraeAI
- * 任务: websocket-streaming-progress
- * 修改内容: 集成细粒度进度展示组件和 LLM 输出组件
+ * 集成细粒度进度展示组件和 LLM 输出组件
  *
- * 修改时间: 2026-04-07
- * 修改者: TraeAI
- * 任务: implement-task-cancellation
- * 修改内容: 合并 TaskSelector 和 TaskPanel 为统一的任务管理下拉面板
+ * 合并 TaskSelector 和 TaskPanel 为统一的任务管理下拉面板
  *
- * 修改时间: 2026-04-07
- * 修改者: TraeAI
- * 任务: code-review-fix
- * 修改内容: 移除未使用的 onCancelTask 属性，简化组件接口
+ * 移除未使用的 onCancelTask 属性，简化组件接口
  *
- * 修改时间: 2026-04-19
- * 修改者: Codex (GPT-5)
- * 任务: task-api-decouple
- * 修改内容: 拆分 onCreateTask / onResumeTask / onDeleteCurrentTask，避免混合动作语义。
+ * 拆分 onCreateTask / onResumeTask / onDeleteCurrentTask，避免混合动作语义
  *
- * 修改时间: 2026-04-19
- * 修改者: Codex (GPT-5)
- * 任务: fix-task-system-review-findings
- * 修改内容: “运行中”计数仅统计真正执行中的 running/cancelling，避免把可恢复的 pending 任务误标成运行中。
+ * “运行中”计数仅统计真正执行中的 running/cancelling，避免把可恢复的 pending 任务误标成运行中
  */
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";

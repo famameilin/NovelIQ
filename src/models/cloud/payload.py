@@ -10,48 +10,13 @@ from src.config import settings
 from src.knowledge.authority import KnowledgeGraphAuthorityService, serialize_graph_report_signals
 from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
-"""
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 构建诊断payload
-
-修改时间: 2026-03-11
-修改者: TraeAI
-修改内容: 添加云端相关日志，提升为info等级
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 使用 SQLAlchemy text() 包装 SQL 语句
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 简化 diagnosis payload
-修改内容: 移除 common_character_names 字段，只保留 alias_map
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: disambiguation-state-three-layer
-修改内容: 将 alias_map 改为 known_characters 和 alias_merges 两项
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 诊断数据获取逻辑收敛到 DiagnosisRepository
-修改内容: 删除所有 _fetch_* 函数，使用 DiagnosisRepository 获取数据
-
-修改时间: 2026-04-08
-修改者: GLM-5
-任务: summary-full-chain-refactor
-修改内容: 移除 first_chapter_summary/last_chapter_summary，新增 summaries 字段传递阶段性摘要
-"""
-
 
 def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """
-    构建 diagnosis 允许复用的共享 graph signals。
+    构建 diagnosis 允许复用的共享 graph signals
 
-    中文注释：diagnosis payload 只搬运 GraphAuthorityReport 的白名单字段，
-    不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入。
+    diagnosis payload 只搬运 GraphAuthorityReport 的白名单字段，
+    不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入
     """
 
     graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
@@ -61,21 +26,6 @@ def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, A
 def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: str | None = None) -> dict:
     """
     构建诊断payload
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 修复run_id过滤BUG
-    修改内容: 添加run_id参数，确保只获取当前运行的数据
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 将 alias_map 改为 known_characters 和 alias_merges 两项
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 诊断数据获取逻辑收敛到 DiagnosisRepository
-    修改内容: 使用 DiagnosisRepository 获取数据，删除 _fetch_* 函数
     """
     logger.info(
         "[云端模型] 构建诊断payload开始: novel_id=%s run_id=%s",
@@ -206,15 +156,10 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
 def _get_total_topic_count(run_id: str, repo: DiagnosisRepository) -> int:
     """
-    获取实际主题总数（用于判断 LLM 需要命名多少个主题）。
+    获取实际主题总数（用于判断 LLM 需要命名多少个主题）
 
     单书模式（~25 个）：全部发给 LLM，全部需要命名
     多书模式（100+ 个）：只发头部，LLM 只需命名发送的那些
-
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 修复 SQLAlchemy 2.0 查询语法
-    修改内容: 使用 select() 构造查询，而非直接使用 func.count()
     """
     from sqlalchemy import func as sa_func
     from sqlalchemy import select

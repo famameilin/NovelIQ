@@ -1,10 +1,8 @@
 """
-创建时间: 2026-04-28
-创建者: Codex
-任务: remove-timeline-version-columns
-说明: 一次性删除 analysis_runs 上的 graph/timeline 版本标签列。
-      当前主线已不再依赖 run-level version gate；
-      该脚本用于把已存在数据库直接收口到最新 schema，不做历史兼容。
+一次性删除 analysis_runs 上的 graph/timeline 版本标签列
+
+当前主线已不再依赖 run-level version gate；
+该脚本用于把已存在数据库直接收口到最新 schema，不做历史兼容
 """
 
 from __future__ import annotations
@@ -24,9 +22,7 @@ sys.path.insert(0, str(project_root))
 load_dotenv(project_root / ".env")
 
 
-# 2026-04-28，任务：remove-timeline-version-columns
-# 新建原因：脚本既支持显式指定单个目标库，也支持默认尝试处理主库和测试库；
-# 默认模式下若某个 URL 未配置应显式跳过，只有显式指定时才应报错。
+# 默认模式下可跳过未配置的 URL；只有显式指定目标库时才报错
 def get_database_url_from_env(env_var_name: str, *, required: bool) -> str | None:
     database_url = os.environ.get(env_var_name)
     if not database_url:
@@ -36,9 +32,7 @@ def get_database_url_from_env(env_var_name: str, *, required: bool) -> str | Non
     return database_url
 
 
-# 2026-04-28，任务：remove-timeline-version-columns
-# 新建原因：脚本需要复用和应用主链一致的 schema 语义，
-# 若配置了 DATABASE_SCHEMA，则 drop 列必须落在同一 search_path 下。
+# 若配置了 DATABASE_SCHEMA，则在相同 search_path 下执行 DDL
 def get_database_schema_from_env() -> str | None:
     schema = os.environ.get("DATABASE_SCHEMA")
     if not schema:
@@ -51,9 +45,7 @@ def get_database_schema_from_env() -> str | None:
     return normalized
 
 
-# 2026-04-28，任务：remove-timeline-version-columns
-# 新建原因：drop 列脚本需要在连接建立时固定 search_path，
-# 避免 schema-isolated 环境下误删 public 或其他 schema 的同名表。
+# 固定 search_path，避免在 schema-isolated 环境误删同名表
 def build_engine(database_url: str, database_schema: str | None) -> Engine:
     connect_args: dict[str, str] = {}
     if database_schema:
@@ -61,9 +53,7 @@ def build_engine(database_url: str, database_schema: str | None) -> Engine:
     return create_engine(database_url, echo=False, connect_args=connect_args)
 
 
-# 2026-04-28，任务：remove-timeline-version-columns
-# 新建原因：执行 destructive DDL 前需要显式确认 analysis_runs 表存在，
-# 避免把错误库或未初始化库也误判成“脚本执行成功”。
+# destructive DDL 前先确认 analysis_runs 存在，避免误报成功
 def has_analysis_runs_table(connection: Connection) -> bool:
     exists = connection.execute(
         text(
@@ -79,9 +69,7 @@ def has_analysis_runs_table(connection: Connection) -> bool:
     return bool(exists)
 
 
-# 2026-04-28，任务：remove-timeline-version-columns
-# 新建原因：删除后需要再次读取当前列集合做强校验，
-# 不允许只执行 DROP COLUMN 而不确认 schema 已经真正收口。
+# 删除后重新读取列集合，确认 schema 已真正收口
 def fetch_analysis_runs_columns(connection: Connection) -> list[str]:
     rows = connection.execute(
         text(
@@ -97,8 +85,7 @@ def fetch_analysis_runs_columns(connection: Connection) -> list[str]:
     return [str(row.column_name) for row in rows]
 
 
-# 2026-04-28，任务：remove-timeline-version-columns
-# 新建原因：把真正的 destructive DDL 集中到一个函数里，便于对 dev/test 库统一复用。
+# 将 destructive DDL 集中在一个入口，便于 dev/test 复用
 def drop_version_columns(database_url: str, database_schema: str | None, *, label: str) -> None:
     engine = build_engine(database_url, database_schema)
     try:

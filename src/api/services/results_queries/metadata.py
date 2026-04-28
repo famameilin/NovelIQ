@@ -1,10 +1,7 @@
 """
-结果元数据查询组装器。
+结果元数据查询组装器
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
-说明: 承载 global_stats、token_usage、novel_name、角色别名等辅助查询逻辑。
+说明: 承载 global_stats、token_usage、novel_name、角色别名等辅助查询逻辑
 """
 
 from __future__ import annotations
@@ -22,7 +19,7 @@ from src.storage.repositories import AnnotationRepository, ChunkRepository, Diag
 
 
 def _fetch_global_stats(run_id: str, stats_repo: StatsRepository, chunk_repo: ChunkRepository) -> GlobalStats | None:
-    """获取全局统计数据。"""
+    """获取全局统计数据"""
     stats = stats_repo.fetch_global_stats_dict(run_id)
     total_chunks, total_chars = chunk_repo.fetch_chunk_counts(run_id)
 
@@ -44,12 +41,12 @@ def _fetch_global_stats(run_id: str, stats_repo: StatsRepository, chunk_repo: Ch
 
 
 def _fetch_novel_name(run_id: str, novel_id: str, stats_repo: StatsRepository) -> str | None:
-    """获取小说名称。"""
+    """获取小说名称"""
     return stats_repo.fetch_novel_title(novel_id, run_id)
 
 
 def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsRepository) -> TokenUsageStats:
-    """获取 token 使用统计。"""
+    """获取 token 使用统计"""
     try:
         stats = stats_repo.fetch_token_usage_stats(run_id, novel_id)
         summary = TokenUsageSummary(
@@ -94,14 +91,14 @@ def _fetch_token_usage_stats(run_id: str, novel_id: str, stats_repo: StatsReposi
 
 
 def _fetch_known_characters(run_id: str, annotation_repo: AnnotationRepository) -> list[str]:
-    """获取已知角色列表（规范名）。"""
+    """获取已知角色列表（规范名）"""
     repo = DiagnosisRepository(annotation_repo.session)
     known_characters, _ = repo.fetch_character_disambig_data(run_id)
     return known_characters
 
 
 def _fetch_alias_merges_only(run_id: str, annotation_repo: AnnotationRepository) -> dict[str, str]:
-    """获取别名映射（只包含 alias != canonical）。"""
+    """获取别名映射（只包含 alias != canonical）"""
     repo = DiagnosisRepository(annotation_repo.session)
     _, alias_merges = repo.fetch_character_disambig_data(run_id)
     return alias_merges

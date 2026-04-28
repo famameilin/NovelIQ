@@ -1,9 +1,3 @@
-"""
-创建时间: 2026-04-20
-修改者: Codex
-任务: runtime-behavior-settings
-修改内容: 新增运行时行为配置 schema，统一承载 annotation/disambiguation/diagnosis 的流程参数
-"""
 
 from __future__ import annotations
 
@@ -19,11 +13,6 @@ def _parse_positive_int(
 ) -> int:
     """
     解析正整数配置值
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 为 runtime 配置统一提供严格整数校验，避免无效值被静默吞掉
     """
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field_name} 必须是整数，当前值: {value!r}")
@@ -36,11 +25,6 @@ def _parse_positive_int(
 class AnnotationRuntimeSettings:
     """
     标注运行时配置
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 统一承载标注阶段的重试与上下文窗口参数
     """
 
     phase_max_retries: int = 3
@@ -49,7 +33,7 @@ class AnnotationRuntimeSettings:
     lookback: int = 10
 
     def validate(self) -> None:
-        """验证标注运行时配置。"""
+        """验证标注运行时配置"""
         self.phase_max_retries = _parse_positive_int(self.phase_max_retries, "runtime.annotation.phase_max_retries")
         self.phase3_max_retries = _parse_positive_int(
             self.phase3_max_retries,
@@ -63,17 +47,12 @@ class AnnotationRuntimeSettings:
 class DisambiguationRuntimeSettings:
     """
     消歧运行时配置
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 统一承载增量/全量消歧流程的重试参数
     """
 
     max_retries: int = 3
 
     def validate(self) -> None:
-        """验证消歧运行时配置。"""
+        """验证消歧运行时配置"""
         self.max_retries = _parse_positive_int(self.max_retries, "runtime.disambiguation.max_retries")
 
 
@@ -81,17 +60,12 @@ class DisambiguationRuntimeSettings:
 class DiagnosisRuntimeSettings:
     """
     诊断运行时配置
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 统一承载诊断流程的重试参数
     """
 
     max_retries: int = 3
 
     def validate(self) -> None:
-        """验证诊断运行时配置。"""
+        """验证诊断运行时配置"""
         self.max_retries = _parse_positive_int(self.max_retries, "runtime.diagnosis.max_retries")
 
 
@@ -99,11 +73,6 @@ class DiagnosisRuntimeSettings:
 class RuntimeSettings:
     """
     运行时行为配置集合
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 聚合 annotation/disambiguation/diagnosis 的流程行为配置
     """
 
     annotation: AnnotationRuntimeSettings = field(default_factory=AnnotationRuntimeSettings)
@@ -111,7 +80,7 @@ class RuntimeSettings:
     diagnosis: DiagnosisRuntimeSettings = field(default_factory=DiagnosisRuntimeSettings)
 
     def validate(self) -> None:
-        """验证整组运行时配置。"""
+        """验证整组运行时配置"""
         self.annotation.validate()
         self.disambiguation.validate()
         self.diagnosis.validate()
@@ -120,11 +89,6 @@ class RuntimeSettings:
 def _parse_annotation_runtime_settings(data: dict[str, Any] | None) -> AnnotationRuntimeSettings:
     """
     解析标注运行时配置
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 从 settings.json 读取 annotation 行为参数并执行严格校验
     """
     json_data = data or {}
     settings = AnnotationRuntimeSettings(
@@ -140,11 +104,6 @@ def _parse_annotation_runtime_settings(data: dict[str, Any] | None) -> Annotatio
 def _parse_disambiguation_runtime_settings(data: dict[str, Any] | None) -> DisambiguationRuntimeSettings:
     """
     解析消歧运行时配置
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 从 settings.json 读取消歧重试参数并执行严格校验
     """
     json_data = data or {}
     settings = DisambiguationRuntimeSettings(
@@ -157,11 +116,6 @@ def _parse_disambiguation_runtime_settings(data: dict[str, Any] | None) -> Disam
 def _parse_diagnosis_runtime_settings(data: dict[str, Any] | None) -> DiagnosisRuntimeSettings:
     """
     解析诊断运行时配置
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 从 settings.json 读取诊断重试参数并执行严格校验
     """
     json_data = data or {}
     settings = DiagnosisRuntimeSettings(
@@ -174,11 +128,6 @@ def _parse_diagnosis_runtime_settings(data: dict[str, Any] | None) -> DiagnosisR
 def _parse_runtime_settings(data: dict[str, Any] | None) -> RuntimeSettings:
     """
     解析运行时行为配置集合
-
-    创建时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-behavior-settings
-    修改内容: 统一解析 annotation/disambiguation/diagnosis 的运行时配置
     """
     json_data = data or {}
     settings = RuntimeSettings(

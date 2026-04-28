@@ -1,52 +1,3 @@
-"""
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: Embedding客户端
-
-修改时间: 2026-03-11
-修改者: TraeAI
-修改内容: 将云端embedding相关日志提升为info等级，添加请求和返回内容的控制台打印
-
-修改时间: 2026-03-13
-修改者: TraeAI
-修改内容: 提取 _log 方法统一处理日志记录，减少 get_embedding 方法中的重复代码
-
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容: 将 OpenAI SDK 替换为 LiteLLM，移除 _client 对象，改用 litellm.embedding() 函数调用
-
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: migrate-litellm-to-openai-sdk
-修改内容: 使用 OpenAI SDK 替代 LiteLLM
-
-修改时间: 2026-03-22
-修改者: TraeAI
-任务: code-quality-review
-修改内容:
-1. 移除 API 密钥硬编码默认值，改为从环境变量读取
-2. 修复云端 API 错误降级为 info 级别的问题，统一使用 error 级别
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: 清理无效模型配置项
-修改内容: 删除未生效的 max_retries 参数和缓存字段，避免 EmbeddingClient 暴露伪配置
-
-修改时间: 2026-04-20
-修改者: Codex (GPT-5)
-任务: batch-embedding-requests
-修改内容: 将语义分块 embedding 从逐条请求改为批量请求，降低本地 embedding 服务的请求往返开销
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: fix-embedding-token-callback-signature
-修改内容: 将 EmbeddingClient 的 token callback 签名对齐到统一契约，补上 model 参数
-
-修改时间: 2026-04-24
-修改者: Codex
-任务: semantic-chunking-embedding-sse-progress
-修改内容: 为批量 embedding 增加可选批次进度回调，供语义分块/预处理把批量请求进度映射到 SSE。
-"""
 
 from __future__ import annotations
 
@@ -70,11 +21,6 @@ EMBEDDING_RETRY_BASE_DELAY_S = 0.5
 class EmbeddingClient:
     """
     Embedding客户端
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 使用 OpenAI SDK 替代 LiteLLM
     """
 
     def __init__(
@@ -154,21 +100,13 @@ class EmbeddingClient:
         *args,
     ) -> None:
         """
-        创建时间: 2026-03-13
-        创建者: TraeAI
-        任务: 审查并优化 embedding.py
-
-        统一处理日志记录，根据是否为云端API选择不同的日志级别和消息格式。
+        统一处理日志记录，根据是否为云端API选择不同的日志级别和消息格式
 
         Args:
             level: 日志级别 ("info", "debug", "error", "warning")
             cloud_msg: 云端API使用的消息模板（带 "[云端模型]" 前缀）
             local_msg: 本地API使用的消息模板
             *args: 日志消息的参数
-
-        修改时间: 2026-03-14
-        修改者: TraeAI
-        修改内容: 修复本地API时INFO日志未降级为DEBUG的问题
         """
         if self._is_cloud:
             msg = f"[云端模型] {cloud_msg}"
@@ -182,26 +120,12 @@ class EmbeddingClient:
         log_func(msg, *args)
 
     def _is_retryable_embedding_status_error(self, error: APIStatusError) -> bool:
-        """
-        创建时间: 2026-04-28
-        创建者: Codex
-        任务: fix-embedding-transient-502
-        新建原因: embedding 服务偶发 429/5xx 属于典型瞬时错误；
-        这里统一收口重试判定，避免 batch/single 两条链路各自散落一套条件。
-        """
         status_code = getattr(error, "status_code", None)
         if not isinstance(status_code, int):
             return False
         return status_code in RETRYABLE_EMBEDDING_STATUS_CODES
 
     async def _create_embeddings_with_retry(self, text_input: str | list[str]):
-        """
-        创建时间: 2026-04-28
-        创建者: Codex
-        任务: fix-embedding-transient-502
-        新建原因: 上游 embedding provider 的瞬时 429/5xx 不应立即把整条分析链打死；
-        这里对可恢复状态做有限次退避重试，其余错误仍保持 fail fast。
-        """
         for attempt in range(1, EMBEDDING_MAX_RETRIES + 2):
             try:
                 return await self._client.embeddings.create(
@@ -240,25 +164,6 @@ class EmbeddingClient:
     async def get_embedding(self, text: str, chunk_id: int | None = None) -> list[float]:
         """
         获取文本的embedding向量
-
-        修改时间: 2026-03-13
-        修改者: TraeAI
-        修改内容: 使用 _log 方法统一处理日志记录，减少重复代码
-
-        修改时间: 2026-03-21
-        修改者: TraeAI
-        任务: migrate-litellm-to-openai-sdk
-        修改内容: 使用 OpenAI SDK 替代 LiteLLM
-
-        修改时间: 2026-04-09
-        修改者: TraeAI
-        任务: 重构 EmbeddingClient 使用 AsyncOpenAI
-        修改内容: 将 get_embedding 改为异步方法，使用 await 调用 embeddings.create
-
-        修改时间: 2026-04-22
-        修改者: Codex
-        任务: clarify-token-accounting-semantics
-        修改内容: 补充 token 口径注释，说明 embedding 在 provider 可稳定返回 usage 时优先记录实报值
         """
         if not self._model:
             raise ValueError("embedding model is required")
@@ -281,9 +186,9 @@ class EmbeddingClient:
             self._validate_embedding_dimension(embedding)
 
             if self._token_usage_callback and response.usage:
-                # 中文注释：embedding 接口通常能稳定返回 provider usage，
+                # embedding 接口通常能稳定返回 provider usage，
                 # 这里优先保留实报值；汇总层对外仍标 estimated，是因为整条分析链路整体只承诺近似统计，
-                # 而不是要求每一笔都必须退化成本地估算。
+                # 而不是要求每一笔都必须退化成本地估算
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",
@@ -355,30 +260,6 @@ class EmbeddingClient:
         """
         批量获取文本的embedding向量
 
-        创建时间: 2026-03-18
-        创建者: TraeAI
-        任务: 支持语义分块的批量embedding
-
-        修改时间: 2026-04-09
-        修改者: TraeAI
-        任务: 重构 EmbeddingClient 使用 AsyncOpenAI
-        修改内容: 将 embed_texts 改为异步方法
-
-        修改时间: 2026-04-20
-        修改者: Codex (GPT-5)
-        任务: batch-embedding-requests
-        修改内容: 改为按配置批量请求 embedding API，默认每批 8 条，减少语义分块时的连续单条请求开销
-
-        修改时间: 2026-04-22
-        修改者: Codex
-        任务: clarify-token-accounting-semantics
-        修改内容: 补充批量 embedding 记账注释，明确 provider usage 仍可直接复用
-
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: semantic-chunking-embedding-sse-progress
-        修改内容: 支持在每个 batch 完成后回调进度，避免上层只能在整批 paragraphs 全部完成后才更新 UI。
-
         Args:
             texts: 文本列表
 
@@ -442,15 +323,15 @@ class EmbeddingClient:
                     f"embedding batch result count mismatch: expected {len(batch_items)}, got {len(response_items)}"
                 )
 
-            # 中文注释：批量接口返回后仍按 index 回填到原始位置，避免上层语义分块逻辑感知到请求模式变化。
+            # 批量接口返回后仍按 index 回填到原始位置，避免上层语义分块逻辑感知到请求模式变化
             for (original_idx, _), item in zip(batch_items, response_items, strict=True):
                 embedding = item.embedding
                 self._validate_embedding_dimension(embedding)
                 embeddings[original_idx] = embedding
 
             if self._token_usage_callback and response.usage:
-                # 中文注释：批量 embedding 与单条 embedding 口径一致，
-                # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平。
+                # 批量 embedding 与单条 embedding 口径一致，
+                # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",

@@ -1,18 +1,5 @@
 """
 分析服务类
-
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 分析服务
-
-修改时间: 2026-04-09
-创建者: GLM-5
-任务: refactor/sse-unified-event-bus
-修改内容:
-- 使用 AnalysisEventBus 替代 ProgressBroadcaster + 闭包回调
-- 所有 SSE 事件走 EventBus 统一发送，不再有双路径
-- 阶段级事件由 service 层 emit，内部进度由 workflow 层通过 emitter emit
-- error_handler 使用 EventBus 发送终止事件
 """
 
 from __future__ import annotations
@@ -42,12 +29,7 @@ from src.storage.session import SessionFactory
 
 class CancellationStateCheckError(RuntimeError):
     """
-    取消状态检查失败异常。
-
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: fix-task-system-review-findings
-    修改内容: 区分“用户请求取消”和“DB 取消状态检查失败”，避免静默继续执行。
+    取消状态检查失败异常
     """
 
 
@@ -101,12 +83,7 @@ class AnalysisService:
         overlap: int = 200,
     ) -> None:
         """
-        执行各分析阶段。
-
-        修改时间: 2026-04-23
-        修改者: Codex
-        任务: P0-remove-silent-exception
-        修改内容: annotate 进度总数查询失败时显式记录并降级为 total=0，禁止静默吞错。
+        执行各分析阶段
         """
         task_id = bus.task_id
 
@@ -212,15 +189,6 @@ class AnalysisService:
         """
         检查任务是否已被请求取消
 
-        创建时间: 2025-03-11
-        创建者: TraeAI
-        任务: 分析服务
-
-        修改时间: 2026-04-19
-        修改者: TraeAI
-        任务: task-5-db-driven-cancel
-        修改内容: DB 优先取消机制，同时检查内存 cancel_event（加速缓存）和 DB cancel_requested（持久化真相）
-
         返回:
             True 表示任务已请求取消，False 表示未取消
         """
@@ -237,12 +205,12 @@ class AnalysisService:
             try:
                 db_session = self.session_factory.get_session()
                 with db_session:
-                    # 使用底层 SQLAlchemy Session。
+                    # 使用底层 SQLAlchemy Session
                     sql_session = db_session.connection
                     try:
                         run_id = task_id_to_run_id(task_id, sql_session)
                     except (TaskIDNotFoundError, ValueError):
-                        # 不存在对应 run 记录时，说明没有可持久化的取消请求。
+                        # 不存在对应 run 记录时，说明没有可持久化的取消请求
                         return False
 
                     run_repo = RunRepository(sql_session)
@@ -270,12 +238,7 @@ class AnalysisService:
         novel_id: str,
         analysis_logger: AnalysisLogger | None,
     ) -> None:
-        """处理已完成的分析任务，确保 DB 状态一致。
-
-        修改时间: 2026-04-20
-        修改者: TraeAI
-        任务: task-system-db-driven-refactor
-        修改内容: complete_task() 已改为仅更新内存，此处需自行完成 DB 状态更新。
+        """处理已完成的分析任务，确保 DB 状态一致
         """
         logger.info(f"Task {task_id} already completed, no action needed")
         self.novel_service.update_task_status(task_id, "completed")
@@ -312,14 +275,11 @@ class AnalysisService:
 
     def _write_failure_to_db(self, task_id: str, error_message: str) -> None:
         """
-        将任务失败状态写入 DB（兜底路径专用）。
+        将任务失败状态写入 DB（兜底路径专用）
 
-        创建时间: 2026-04-20
-        创建者: TraeAI
-        任务: task-system-db-driven-refactor
         说明: 当 session 或 run_id 为 None 时（环境初始化失败），无法走常规 error_handler 路径，
-              此方法通过 task_id 直接查询 run_id 并写入 DB 终态，确保 DB 状态一致性。
-              这是极端异常路径的兜底保护。
+              此方法通过 task_id 直接查询 run_id 并写入 DB 终态，确保 DB 状态一致性
+              这是极端异常路径的兜底保护
         """
         from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
         from src.storage.repositories import RunRepository
@@ -377,12 +337,7 @@ class AnalysisService:
 
     def _build_reanalysis_request_payload(self, request: ReanalyzeRequest | None) -> dict[str, object] | None:
         """
-        构建可持久化的重分析请求载荷。
-
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-reanalysis-resume-regression
-        修改内容: 将 reanalyze 的 force_* / num_topics 等参数持久化，供 resume 与 startup recovery 恢复原始执行语义。
+        构建可持久化的重分析请求载荷
         """
         if request is None:
             return None
@@ -390,12 +345,7 @@ class AnalysisService:
 
     def _restore_execution_request(self, task: dict) -> tuple[str, ReanalyzeRequest | None]:
         """
-        从任务元数据恢复执行类型与请求参数。
-
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-reanalysis-resume-regression
-        修改内容: resume/recovery 不再盲目按普通分析续跑，而是从 DB 恢复任务原始类型与参数。
+        从任务元数据恢复执行类型与请求参数
         """
         task_kind = task["task_kind"]
         if task_kind == TASK_KIND_ANALYSIS:
@@ -409,14 +359,7 @@ class AnalysisService:
 
     def _prepare_task_execution_claim(self, task_id: str) -> str:
         """
-        在真正启动分析前，先把任务从 DB 侧收口到可执行状态。
-
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-pending-task-pickup
-        修改内容:
-        - 为 pending 任务增加原子 claim，避免多个实例重复执行
-        - 为启动前已取消的 pending/cancelling 任务做终态收口，避免 worker 把取消任务重新写回 running
+        在真正启动分析前，先把任务从 DB 侧收口到可执行状态
 
         Returns:
             claimed: 当前 worker 已成功领取任务，可继续执行
@@ -445,8 +388,8 @@ class AnalysisService:
 
                 if status == "pending":
                     if cancel_requested:
-                        # 中文注释：用户在 worker 真正领取前就已经点了取消，此时直接落终态，
-                        # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义。
+                        # 用户在 worker 真正领取前就已经点了取消，此时直接落终态，
+                        # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义
                         run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
                         return "cancelled"
 
@@ -464,8 +407,8 @@ class AnalysisService:
                     return "skipped"
 
                 if status == "cancelling" and cancel_requested:
-                    # 中文注释：这类任务没有真实 worker 可收尾时，直接在启动前完成取消收口，
-                    # 避免卡在无 owner 的 cancelling 历史脏状态。
+                    # 这类任务没有真实 worker 可收尾时，直接在启动前完成取消收口，
+                    # 避免卡在无 owner 的 cancelling 历史脏状态
                     if refreshed_worker_id := run.get("worker_id"):
                         logger.info(
                             "Task {} is cancelling under worker {}, current worker skips execution claim",
@@ -497,20 +440,10 @@ class AnalysisService:
 
     async def recover_pending_tasks(self) -> tuple[int, int]:
         """
-        启动时把 DB 中的 pending 任务重新接回当前执行器。
+        启动时把 DB 中的 pending 任务重新接回当前执行器
 
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-pending-task-pickup
-        修改内容:
-        - 扫描 DB 中的 pending 任务并重新调度
-        - 对已经带 cancel_requested 的 pending 任务直接收口为 cancelled
-
-        修改时间: 2026-04-26
-        修改者: Codex
-        任务: fix-diagnosis-review-findings
         修改原因: startup recovery 需要按任务级隔离异常；
-        单个 pending 恢复失败不能把后续 pending 任务整轮拦死。
+        单个 pending 恢复失败不能把后续 pending 任务整轮拦死
 
         Returns:
             tuple[int, int]: (scheduled_count, cancelled_count)
@@ -552,24 +485,16 @@ class AnalysisService:
 
     def _schedule_analysis_task(self, task_id: str, novel: dict) -> None:
         """
-        安排分析协程并记录 asyncio.Task 引用。
+        安排分析协程并记录 asyncio.Task 引用
 
-        创建时间: 2026-04-19
-        创建者: Codex (GPT-5)
-        任务: task-api-decouple
-        说明: 统一 create/resume 两条路径的协程调度，避免重复代码。
+        说明: 统一 create/resume 两条路径的协程调度，避免重复代码
         """
         task = asyncio.create_task(self._run_analysis(task_id, novel))
         self.task_manager.store_asyncio_task(task_id, task)
 
     def _schedule_reanalysis_task(self, task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
         """
-        安排重分析协程并记录 asyncio.Task 引用。
-
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-reanalysis-resume-regression
-        修改内容: 为 resume/startup recovery 提供与普通分析对称的重分析调度入口，避免丢失原始 request。
+        安排重分析协程并记录 asyncio.Task 引用
         """
         task = asyncio.create_task(self._run_reanalysis(task_id, novel, request))
         self.task_manager.store_asyncio_task(task_id, task)
@@ -582,17 +507,7 @@ class AnalysisService:
         request: ReanalyzeRequest | None,
     ) -> None:
         """
-        按任务类型调度执行协程。
-
-        创建时间: 2026-04-20
-        创建者: Codex (GPT-5)
-        任务: fix-reanalysis-resume-regression
-        修改内容: 将 analysis/reanalysis 的调度分发收口到单入口，确保 create/resume/recovery 走同一套类型恢复逻辑。
-
-        修改时间: 2026-04-20
-        修改者: Codex (GPT-5)
-        任务: remove-compat-layers
-        修改内容: 删除普通分析的 AnalyzeRequest 兼容层，analysis 任务不再构造伪请求对象。
+        按任务类型调度执行协程
         """
         if task_kind == TASK_KIND_ANALYSIS:
             self._schedule_analysis_task(task_id, novel)
@@ -604,12 +519,9 @@ class AnalysisService:
 
     async def create_task_and_start(self, novel_id: str) -> str:
         """
-        创建新任务并立即启动分析。
+        创建新任务并立即启动分析
 
-        创建时间: 2026-04-19
-        创建者: Codex (GPT-5)
-        任务: task-api-decouple
-        说明: 只负责“创建+启动”，不做复用/猜测行为。
+        说明: 只负责“创建+启动”，不做复用/猜测行为
         """
         novel = self.novel_service.get_novel(novel_id)
         task_id = self.novel_service.create_task(novel_id, task_kind=TASK_KIND_ANALYSIS)
@@ -619,12 +531,9 @@ class AnalysisService:
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行 pending/failed 任务。
+        继续执行 pending/failed 任务
 
-        创建时间: 2026-04-19
-        创建者: Codex (GPT-5)
-        任务: task-api-decouple
-        说明: 只负责“继续已有任务”，不创建新任务。
+        说明: 只负责“继续已有任务”，不创建新任务
         """
         novel = self.novel_service.get_novel(novel_id)
         task = self.novel_service.get_task(task_id)
@@ -643,7 +552,7 @@ class AnalysisService:
         if task_info is None:
             self.task_manager.create_task(task_id, novel_id)
 
-        # 重置内存态与 DB 运行态，避免 DB-only 状态接口短暂暴露上一轮失败残留。
+        # 重置内存态与 DB 运行态，避免 DB-only 状态接口短暂暴露上一轮失败残留
         self.task_manager.update_task(
             task_id,
             status=TaskStatus.PENDING,
@@ -681,11 +590,6 @@ class AnalysisService:
     async def _run_analysis(self, task_id: str, novel: dict) -> None:
         """
         执行分析任务
-
-        修改时间: 2026-04-14
-        修改者: TraeAI
-        任务: refactor-analysis-service-duplicate-code
-        修改内容: 提取公共逻辑到 _run_analysis_core 方法
         """
         num_topics = settings.topic_model.single_book.num_topics
         max_chars = settings.chunking.max_chars
@@ -714,11 +618,6 @@ class AnalysisService:
     async def _run_reanalysis(self, task_id: str, novel: dict, request: ReanalyzeRequest | None) -> None:
         """
         执行重新分析任务
-
-        修改时间: 2026-04-14
-        修改者: TraeAI
-        任务: refactor-analysis-service-duplicate-code
-        修改内容: 提取公共逻辑到 _run_analysis_core 方法
         """
         skip_stages = self._build_reanalysis_skip_stages(request)
         logger.info(f"Reanalysis skip_stages: {skip_stages}")
@@ -750,12 +649,9 @@ class AnalysisService:
         overlap: int | None = None,
     ) -> None:
         """
-        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数。
+        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数
 
-        创建时间: 2026-04-17
-        创建者: TraeAI
-        任务: refactor/split-provider-bundle-renderer
-        说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑。
+        说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑
         """
         if max_chars is not None and overlap is not None:
             await self._execute_analysis_stages(
@@ -798,9 +694,6 @@ class AnalysisService:
         """
         统一的分析执行核心逻辑
 
-        创建时间: 2026-04-14
-        创建者: TraeAI
-        任务: refactor-analysis-service-duplicate-code
         说明: 封装 _run_analysis 和 _run_reanalysis 的公共逻辑
 
         Args:
@@ -902,7 +795,7 @@ class AnalysisService:
             try:
                 cancelled = self._is_cancelled(task_id)
             except CancellationStateCheckError as cancel_check_error:
-                # 原始异常已经存在时，取消状态检查失败不应覆盖原始失败，只记录并按失败路径收口。
+                # 原始异常已经存在时，取消状态检查失败不应覆盖原始失败，只记录并按失败路径收口
                 logger.error(f"Failed to re-check cancellation state for task {task_id}: {cancel_check_error}")
 
             if cancelled and session and run_id:
@@ -932,12 +825,9 @@ class AnalysisService:
 
     def get_task_status(self, task_id: str) -> dict | None:
         """
-        获取任务状态（DB-only 查询）。
+        获取任务状态（DB-only 查询）
 
-        创建时间: 2026-04-19
-        创建者: AI Assistant
-        任务: 统一任务状态查询为 DB-only
-        说明: 从数据库查询任务状态，不再依赖内存中的 TaskManager。
+        说明: 从数据库查询任务状态，不再依赖内存中的 TaskManager
         """
         task = self.novel_service.get_run_by_task_id(task_id)
         if not task:
@@ -951,12 +841,9 @@ class AnalysisService:
 
     def get_novel_tasks(self, novel_id: str) -> list[dict]:
         """
-        获取小说的所有任务（DB-only 查询）。
+        获取小说的所有任务（DB-only 查询）
 
-        创建时间: 2026-04-19
-        创建者: AI Assistant
-        任务: 统一任务状态查询为 DB-only
-        说明: 从数据库查询小说的任务列表，不再依赖内存中的 TaskManager。
+        说明: 从数据库查询小说的任务列表，不再依赖内存中的 TaskManager
         """
         tasks = self.novel_service.get_tasks_by_novel(novel_id)
         return tasks

@@ -1,22 +1,7 @@
 """
 SSE 事件管理器
 
-创建时间: 2026-04-09
-创建者: TraeAI
-任务: 实现 SSE 路由和事件管理器
 说明: 管理 SSE 连接和消息推送
-
-修改时间: 2026-04-09
-修改者: TraeAI
-修改内容: 添加连接超时清理机制
-
-修改时间: 2026-04-09
-修改者: GLM-5
-任务: sse-architecture-review
-修改内容:
-- 支持同一 task_id 的多客户端连接（每个连接独立 Queue）
-- 新增消息缓冲（ring buffer），解决 late-joiner 问题
-- connect 时自动回放缓冲消息
 """
 
 from __future__ import annotations
@@ -123,13 +108,7 @@ class EventManager:
 
     async def shutdown(self) -> None:
         """
-        停止事件管理器后台任务并清空连接状态。
-
-        创建时间: 2026-04-26
-        修改者: Codex
-        任务: investigate-slow-test-lifecycle
-        新建原因: EventManager 是模块级单例，测试或应用 shutdown 时若不显式回收，
-        清理协程可能跨用例残留并拖慢后续 TestClient 关闭。
+        停止事件管理器后台任务并清空连接状态
         """
 
         cleanup_task = self._cleanup_task
@@ -148,12 +127,7 @@ class EventManager:
 
     def reset_for_testing(self) -> None:
         """
-        为测试夹具同步清空单例状态。
-
-        创建时间: 2026-04-26
-        修改者: Codex
-        任务: investigate-slow-test-lifecycle
-        新建原因: API 测试并不总是走完整 lifespan；测试前后需要一个无需 await 的快速重置入口。
+        为测试夹具同步清空单例状态
         """
 
         cleanup_task = self._cleanup_task

@@ -17,10 +17,6 @@ interface UseGraphDeepLinkSelectionOptions {
 }
 
 /**
- * 修改时间: 2026-04-27
- * 修改者: Codex
- * 任务: fix-graph-timeline-deeplink-fallback
- * 修改内容:
  *   - chunk-only deep-link 只在当前事件窗口里唯一命中时才允许自动选中
  *   - 带稳定 relation_event_id 的 deep-link 一旦 miss，不再偷偷回退到同 chunk 其他事件
  */
@@ -33,7 +29,7 @@ function getUniqueChunkEvent(events: GraphEvent[], chunkId: number | null): Grap
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把 deep-link 解析、回退提示和 URL 同步独立出来，避免分页与跳转状态交叉耦合。
+// 把 deep-link 解析、回退提示和 URL 同步独立出来，避免分页与跳转状态交叉耦合
 export function useGraphDeepLinkSelection({
   novelId,
   taskScopeId,

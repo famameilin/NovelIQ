@@ -1,15 +1,9 @@
 """
 运行统计相关操作
 
-创建时间: 2026-03-17
-创建者: TraeAI
-任务: code-quality-refactor - 拆分stats_repository
-说明: 运行状态、完成度检查等操作
+运行状态、完成度检查等操作
 
-修改时间: 2026-03-30
-修改者: CodeBuddy
-任务: db-schema-cleanup
-修改内容: 合并 EmotionCurve + RhythmCurve 引用为 ChunkCurve
+合并 EmotionCurve + RhythmCurve 引用为 ChunkCurve
 """
 
 from __future__ import annotations
@@ -28,11 +22,8 @@ if TYPE_CHECKING:
 
 def _parse_json_text_field(value: str | None) -> object | None:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-review-fixes-round2
-    说明: diagnosis 完成态现在必须校验新焦点合同；
-    这里在 storage 层做最小 JSON 解析，避免只按“表里有行”误判完成。
+    diagnosis 完成态现在必须校验新焦点合同；
+    这里在 storage 层做最小 JSON 解析，避免只按“表里有行”误判完成
     """
     if value is None:
         return None
@@ -44,11 +35,8 @@ def _parse_json_text_field(value: str | None) -> object | None:
 
 def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-review-fixes-round2
-    说明: 旧 row、半成品 row 或迁移前残留 row 不应再把 diagnosis 阶段标成已完成；
-    只有能通过新 CloudAnalysis 合同校验的行，才算真正的 diagnosis 结果。
+    旧 row、半成品 row 或迁移前残留 row 不应再把 diagnosis 阶段标成已完成；
+    只有能通过新 CloudAnalysis 合同校验的行，才算真正的 diagnosis 结果
     """
     raw_focus_characters = _parse_json_text_field(row.focus_characters)
     raw_main_characters = _parse_json_text_field(row.main_characters)

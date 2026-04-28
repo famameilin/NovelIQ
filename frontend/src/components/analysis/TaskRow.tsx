@@ -1,22 +1,12 @@
 /**
  * TaskRow - 单行任务条目组件
  *
- * 创建时间: 2026-04-07
- * 创建者: TraeAI
- * 任务: implement-task-cancellation
- * 说明: 显示单个任务的状态、时间和操作按钮
+ * 显示单个任务的状态、时间和操作按钮
  *
- * 修改时间: 2026-04-09
- * 创建者: GLM-5
- * 任务: sse-architecture-review
- * 修改内容:
  * - 移除伪状态 (chunking/annotating/...)，统一使用后端 TaskStatus
  * - 运行中任务从 streamStore 读取 progress.stage 显示具体阶段
  *
- * 修改时间: 2026-04-19
- * 修改者: Codex (GPT-5)
- * 任务: fix-task-system-review-findings
- * 修改内容: 为 pending 任务补齐继续入口，并把“实时流式中”语义收窄到 running/cancelling，避免把可恢复任务误显示成运行中。
+ * 为 pending 任务补齐继续入口，并把“实时流式中”语义收窄到 running/cancelling，避免把可恢复任务误显示成运行中
  */
 import { Circle, CheckCircle, XCircle, Loader2, Square, Eye, Trash2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -68,11 +58,9 @@ function getStatusIcon(status: TaskStatus) {
 }
 
 function formatRelativeTime(dateStr: string | null): string {
-  // 修改时间: 2026-04-20
-  // 修改者: Codex (GPT-5)
-  // 任务: fix-null-created-at-build
-  // 修改内容: 与 TaskRowProps.created_at 的可空语义保持一致，避免严格类型检查构建失败。
-  // 中文注释：列表接口历史上可能漏传 created_at，前端需要兜底避免显示 epoch 假时间。
+
+  // 与 TaskRowProps.created_at 的可空语义保持一致，避免严格类型检查构建失败
+  // 列表接口历史上可能漏传 created_at，前端需要兜底避免显示 epoch 假时间
   if (!dateStr) return "未知时间";
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return "未知时间";

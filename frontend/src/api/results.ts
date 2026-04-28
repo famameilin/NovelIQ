@@ -15,8 +15,6 @@ import type {
   StyleStatsMetrics,
 } from "./types";
 
-// ---- Characters ----
-
 export async function getCharacters(
   novelId: string,
   taskId: string,
@@ -34,8 +32,6 @@ export async function getCharacters(
   );
   return data;
 }
-
-// ---- Chunk Curves ----
 
 export async function getChunkCurves(
   novelId: string,
@@ -55,8 +51,6 @@ export async function getChunkCurves(
   return data;
 }
 
-// ---- Chunk Annotations ----
-
 export async function getChunkAnnotations(
   novelId: string,
   taskId: string
@@ -68,8 +62,6 @@ export async function getChunkAnnotations(
   return data;
 }
 
-// ---- Topics ----
-
 export async function getTopics(
   novelId: string,
   taskId: string
@@ -80,8 +72,6 @@ export async function getTopics(
   );
   return data;
 }
-
-// ---- Diagnosis ----
 
 export async function getDiagnosis(
   novelId: string,
@@ -105,13 +95,7 @@ export async function getForeshadowingThreads(
   return data;
 }
 
-// ---- Knowledge Graph ----
-
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-A 人物关系图谱 API 类型定义
-// 说明: 获取人物关系图谱数据，包含节点、边、事件等信息
-
+// 获取人物关系图谱数据，包含节点、边、事件等信息
 export async function getGraph(
   novelId: string,
   taskId: string
@@ -141,20 +125,7 @@ export async function getGraphEvents(
   return data;
 }
 
-// ---- Timeline ----
-
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-B 叙事时间轴
-// 说明: 获取叙事时间轴数据，支持 include_curve 参数
-
-// 修改时间: 2026-04-28
-// 修改者: Codex
-// 任务: 时间轴合同重构第二轮
-// 修改内容:
-// - 时间轴接口升级为双层节点结构，后端始终返回 `atomic_nodes + composite_nodes`
-// - `max_level` 改为前端本地展示状态，不再作为请求参数发送给后端
-
+// 获取叙事时间轴数据，支持 include_curve 参数
 export async function getTimeline(
   novelId: string,
   taskId: string,
@@ -171,8 +142,6 @@ export async function getTimeline(
   );
   return data;
 }
-
-// ---- Metrics ----
 
 export async function getNarrativeStructure(
   novelId: string,

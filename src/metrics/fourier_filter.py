@@ -1,10 +1,7 @@
 """
 傅里叶变换频域滤波模块
 
-创建时间: 2026-04-06
-创建者: GLM-5
-任务: 创建傅里叶变换频域滤波模块
-说明: 使用离散傅里叶变换进行频域滤波平滑，保留低频分量实现数据平滑。
+使用离散傅里叶变换进行频域滤波平滑，保留低频分量实现数据平滑
       参考: Matthew Jockers《畅销书写作密码》(The Bestseller Code)
 """
 
@@ -15,10 +12,10 @@ import numpy as np
 
 def fourier_smooth(values: list[float], keep_ratio: float = 0.1) -> list[float]:
     """
-    使用傅里叶变换进行频域滤波平滑。
+    使用傅里叶变换进行频域滤波平滑
 
     通过离散傅里叶变换将时域信号转换为频域，保留低频分量（代表整体趋势），
-    滤除高频分量（代表噪声和细节波动），再通过逆变换得到平滑后的信号。
+    滤除高频分量（代表噪声和细节波动），再通过逆变换得到平滑后的信号
 
     参数:
         values: 原始数值序列
@@ -30,7 +27,7 @@ def fourier_smooth(values: list[float], keep_ratio: float = 0.1) -> list[float]:
 
     参考:
         Matthew Jockers 在《畅销书写作密码》中使用傅里叶变换分析小说的
-        情节节奏曲线，通过频域滤波提取情节的主要趋势。
+        情节节奏曲线，通过频域滤波提取情节的主要趋势
     """
     if not values:
         return []

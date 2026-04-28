@@ -1,9 +1,7 @@
 """
-类型检测规则配置。
+类型检测规则配置
 
-创建时间: 2026-04-23
-任务: p1-genre-detector-split
-说明: 拆出领域规则常量与词表推荐配置，避免 genre_detector.py 同时承担规则定义和执行逻辑。
+拆出领域规则常量与词表推荐配置，避免 genre_detector.py 同时承担规则定义和执行逻辑
 """
 
 from __future__ import annotations
@@ -172,11 +170,9 @@ MIN_CONFIDENCE = 0.3
 
 def get_recommended_lexicons(genre: str) -> dict[str, list[str]]:
     """
-    根据小说类型获取推荐的词表配置。
+    根据小说类型获取推荐的词表配置
 
-    创建时间: 2026-04-23
-    任务: p1-genre-detector-split
-    说明: 从主检测文件中拆出配置映射，让 weighted config 能独立复用。
+    从主检测文件中拆出配置映射，让 weighted config 能独立复用
     """
     recommendations: dict[str, dict[str, list[str]]] = {
         "xianxia": {

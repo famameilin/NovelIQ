@@ -2,8 +2,7 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 
-// ---- Code-split pages ----
-
+// 懒加载页面组件
 const HomePage = lazy(() => import("@/pages/HomePage").then((m) => ({ default: m.HomePage })));
 const NovelDetailPage = lazy(() => import("@/pages/NovelDetailPage").then((m) => ({ default: m.NovelDetailPage })));
 const CurvesPage = lazy(() => import("@/pages/CurvesPage").then((m) => ({ default: m.CurvesPage })));
@@ -15,8 +14,7 @@ const DiagnosisPage = lazy(() => import("@/pages/DiagnosisPage").then((m) => ({ 
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage").then((m) => ({ default: m.NotFoundPage })));
 const ComponentShowcase = lazy(() => import("@/pages/ComponentShowcase").then((m) => ({ default: m.ComponentShowcase })));
 
-// ---- Skeleton fallback for lazy pages ----
-
+// 懒加载页面共用骨架屏
 function PageSkeleton() {
   return (
     <div className="flex h-full items-center justify-center">

@@ -1,4 +1,4 @@
-"""基于规则的候选名分类器。
+"""基于规则的候选名分类器
 
 设计决策：
 1. 精确匹配受保护名单 → 标记为 protected（默认不合并但仍送消歧）
@@ -19,7 +19,7 @@ Category = Literal["blacklist", "protected", "deferred", "normal"]
 
 @dataclass(frozen=True)
 class CandidateClassification:
-    """候选名分类结果。"""
+    """候选名分类结果"""
 
     name: str
     category: Category
@@ -28,12 +28,9 @@ class CandidateClassification:
 
 def _contains_name_like_char(name: str) -> bool:
     """
-    判断候选中是否包含常见的人名字符。
+    判断候选中是否包含常见的人名字符
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: preserve-deferred-disambig-candidates
-    说明: 这里只做极保守判断，用来区分“明显脏 token”和“至少像一个名字/称呼”的候选。
+    这里只做极保守判断，用来区分“明显脏 token”和“至少像一个名字/称呼”的候选
     """
     for char in name:
         if "\u4e00" <= char <= "\u9fff":
@@ -45,12 +42,9 @@ def _contains_name_like_char(name: str) -> bool:
 
 def _is_obvious_noise_candidate(name: str) -> bool:
     """
-    判断候选是否明显属于脏 token。
+    判断候选是否明显属于脏 token
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: preserve-deferred-disambig-candidates
-    说明: 仅对空串、纯数字、纯符号等明显不可能成为角色名的候选做硬丢弃。
+    仅对空串、纯数字、纯符号等明显不可能成为角色名的候选做硬丢弃
     """
     stripped = name.strip()
     if not stripped:
@@ -61,7 +55,7 @@ def _is_obvious_noise_candidate(name: str) -> bool:
 
 
 def _load_protected_list() -> frozenset[str]:
-    """从配置文件加载受保护名单（默认不合并但仍送消歧）。"""
+    """从配置文件加载受保护名单（默认不合并但仍送消歧）"""
     protected_path = settings.paths.lexicons_dir / "disambig_protected.txt"
     if not protected_path.exists():
         return _DEFAULT_PROTECTED
@@ -95,7 +89,7 @@ _DEFAULT_PROTECTED: frozenset[str] = frozenset(
 
 
 class CandidateFilter:
-    """基于规则的候选名分类器。
+    """基于规则的候选名分类器
 
     分类规则（按优先级）：
     - blacklist: 明显脏 token（空串/纯数字/纯符号）→ 丢弃
@@ -117,7 +111,7 @@ class CandidateFilter:
         count: int,
         has_context: bool = False,
     ) -> CandidateClassification:
-        """对单个候选名进行分类。"""
+        """对单个候选名进行分类"""
         stripped_name = name.strip()
 
         # 1. 明显脏 token：唯一硬丢弃规则
@@ -155,7 +149,7 @@ class CandidateFilter:
         candidates: list[dict],
         context_sentences: dict[str, str] | None = None,
     ) -> tuple[list[CandidateClassification], list[CandidateClassification], list[CandidateClassification]]:
-        """批量分类候选名，返回 (filtered, deferred, remaining)。
+        """批量分类候选名，返回 (filtered, deferred, remaining)
 
         filtered: blacklist 候选（被丢弃）
         deferred: deferred 候选（暂不送模型，但保留）
