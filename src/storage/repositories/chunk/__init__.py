@@ -1,18 +1,4 @@
-"""
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分chunk_repository.py
-说明: chunk 子模块初始化
-
-修改时间: 2026-04-10
-修改者: TraeAI
-任务: implement-level3-vector-retrieval
-修改内容: 新增 embedding 操作函数导出
-
-修改时间: 2026-04-24
-任务: level3-paragraph-rerank
-修改内容: 新增 paragraph embedding DTO 与候选 chunk 内 rerank 查询函数导出
-"""
+"""导出 chunk 相关的样式、主题与 embedding 访问函数"""
 
 from .embedding_ops import (
     ParagraphEmbeddingRow,

@@ -1,26 +1,10 @@
-/**
- * useWebSocket - WebSocket 连接管理 Hook
- *
- * 创建时间: 2026-04-07
- * 创建者: AI Assistant
- * 任务: WebSocket 连接管理
- * 说明: 提供 WebSocket 连接管理，支持自动重连（指数退避+抖动）、
- *       心跳检测（ping/pong）、消息收发、连接状态追踪
- */
+/** WebSocket 连接管理 Hook，提供重连、心跳和连接状态追踪 */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appConfig } from "@/config";
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
 
 function jitter(): number {
   return Math.random() * 1_000;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
 
 interface UseWebSocketOptions {
   url: string;
@@ -43,10 +27,6 @@ interface UseWebSocketReturn {
   disconnect: () => void;
   reconnect: () => void;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Hook                                                              */
-/* ------------------------------------------------------------------ */
 
 export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const {
@@ -80,10 +60,6 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   useEffect(() => {
     callbacksRef.current = { onMessage, onOpen, onClose, onError };
   }, [onMessage, onOpen, onClose, onError]);
-
-  /* ---------------------------------------------------------------- */
-  /*  Timer helpers                                                    */
-  /* ---------------------------------------------------------------- */
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeoutRef.current) {

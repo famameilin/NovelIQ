@@ -1,8 +1,5 @@
 """
-创建时间: 2026-04-10
-创建者: TraeAI
-任务: implement-level3-vector-retrieval
-说明: Chunk / paragraph 向量嵌入 ORM 模型定义
+Chunk / paragraph 向量嵌入 ORM 模型定义
 
 本模块定义 chunk 向量嵌入相关的数据表：
 - ChunkEmbedding: 存储 chunk 文本的向量嵌入，用于语义相似度检索
@@ -26,10 +23,7 @@ class ChunkEmbedding(Base):
     """
     Chunk 向量嵌入表
 
-    创建时间: 2026-04-10
-    创建者: TraeAI
-    任务: implement-level3-vector-retrieval
-    说明: 存储 chunk 文本的向量嵌入，用于 Level 3 向量检索
+    存储 chunk 文本的向量嵌入，用于 Level 3 向量检索
 
     使用 pgvector 扩展进行向量相似度搜索。
     向量维度为 1536，与 EmbeddingClient 配置一致。
@@ -64,14 +58,10 @@ class ParagraphEmbedding(Base):
     """
     Paragraph 向量嵌入表
 
-    创建时间: 2026-04-24
-    任务: level3-paragraph-rerank
-    说明: 存储 chunk 内 paragraph 的文本、局部字符范围与 embedding，
+    存储 chunk 内 paragraph 的文本、局部字符范围与 embedding，
           仅用于命中 chunk 范围内的局部 evidence rerank，不承担全库召回入口。
 
-    修改时间: 2026-04-24
-    任务: full-global-offset-rollout
-    修改说明: 旧的 start_char/end_char 字段已替换为显式 local/global offset，
+    旧的 start_char/end_char 字段已替换为显式 local/global offset，
               避免继续使用含义模糊的字段名。
     """
 

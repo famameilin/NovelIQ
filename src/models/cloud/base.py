@@ -1,39 +1,5 @@
 """
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 从 client.py 拆分云端模型基础客户端类
-
 本模块包含云端模型客户端的基础类和公共接口。
-
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容: 将 OpenAI SDK 替换为 LiteLLM
-
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: migrate-litellm-to-openai-sdk
-修改内容:
-1. 移除 LiteLLM 依赖，改用 OpenAI SDK
-2. 移除 extra_body 参数，改用顶级参数
-3. 添加 reasoning_effort 参数支持
-4. 移除 API 密钥硬编码默认值
-
-修改时间: 2026-03-24
-修改者: TraeAI
-任务: Phase 2 - 统一客户端基类
-修改内容:
-1. BaseCloudModelClient 继承自 BaseModelClient（src.models.local.base）
-2. 移除重复的方法实现，使用继承的通用方法
-3. 保留云端特定的 thinking_enabled 配置处理
-
-修改时间: 2026-03-29
-修改者: TraeAI
-修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
-
-修改时间: 2026-04-24
-修改者: Codex
-任务: omit-thinking-fields-when-disabled
-修改内容: think 关闭时不再向云端旧基类透传任何 thinking 相关字段，避免残留旧契约。
 """
 
 from __future__ import annotations
@@ -91,16 +57,6 @@ class BaseCloudModelClient(BaseModelClient):
     云端模型客户端基类
 
     继承自 BaseModelClient，提供云端特定的配置和功能。
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 使用 OpenAI SDK 替代 LiteLLM
-
-    修改时间: 2026-03-24
-    修改者: TraeAI
-    任务: Phase 2 - 统一客户端基类
-    修改内容: 继承自 BaseModelClient，移除重复方法，保留云端特定逻辑
     """
 
     def __init__(
@@ -133,19 +89,7 @@ class BaseCloudModelClient(BaseModelClient):
         """
         构建请求参数（云端版本）
 
-        创建时间: 2026-03-24
-        创建者: TraeAI
-        任务: Phase 2 - 统一客户端基类
         说明: 云端专用版本，使用 reasoning_effort 参数
-
-        修改时间: 2026-03-29
-        修改者: TraeAI
-        修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
-
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: omit-thinking-fields-when-disabled
-        修改内容: 与主 BaseModelClient 对齐，关闭时不再发送 reasoning_effort=none / think=false。
         """
         request_params: dict[str, Any] = {
             "model": self._config.model,
@@ -161,12 +105,6 @@ class BaseCloudModelClient(BaseModelClient):
 
 
 def make_empty_analysis() -> CloudAnalysis:
-    """
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: 空诊断结果也要对齐新的焦点合同字段，避免测试桩继续产出旧主角结构。
-    """
     analysis = CloudAnalysis(
         novel_id=None,
         foreshadow_expectation=None,

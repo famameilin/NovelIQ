@@ -52,7 +52,7 @@ interface GraphWorkspaceSectionProps {
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 新建原因：把图谱工作区、分页事件侧栏和联动详情区块拆到独立组件，收缩 GraphPage 的 JSX 复杂度。
+// 把图谱工作区、分页事件侧栏和联动详情区块拆到独立组件，收缩 GraphPage 的 JSX 复杂度。
 export function GraphWorkspaceSection({
   graphData,
   forceGraphRef,

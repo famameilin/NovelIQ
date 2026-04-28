@@ -1,23 +1,12 @@
 /**
  * StreamOutput - LLM 输出实时显示组件
  *
- * 创建时间: 2026-04-07
- * 创建者: GLM-5
- * 任务: LLM 输出实时显示组件
- * 说明: 实时显示 LLM 流式输出内容，支持自动滚动和行数限制
+ * 实时显示 LLM 流式输出内容，支持自动滚动和行数限制
  *
- * 修改时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 修改内容:
  * - 按 stream group 展示 Phase3 并行流，避免多个 batch 继续拼成一段混流文本
  * - 主面板默认只展示当前活跃流，其余流收口为摘要和切换入口
  * - 详细多流查看改放进 Dialog，避免主页面高度被并行输出撑爆
  *
- * 修改时间: 2026-04-28
- * 修改者: Codex
- * 任务: 修复后台恢复后分析页卡死与白屏
- * 修改内容:
  * - 改为直接消费 store 中的有界文本缓冲，避免每次渲染都全量 join/split 历史片段
  * - 细化最近流选择与摘要长度计算，减少长时间后台恢复后的主线程负担
  */
@@ -56,10 +45,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: 主视图和弹窗都要复用“仅保留最近 N 行”的裁剪逻辑，避免并行流文本无限增长。
+ * 主视图和弹窗都要复用“仅保留最近 N 行”的裁剪逻辑，避免并行流文本无限增长。
  */
 function _limitMarkdownLines(content: string, maxLines: number): string {
   const allLines = content.split("\n");
@@ -67,20 +53,14 @@ function _limitMarkdownLines(content: string, maxLines: number): string {
 }
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: UI 不直接暴露后端 batch 编号，而是按当前 scope 首次出现顺序生成稳定的“并行流 N”标签。
+ * UI 不直接暴露后端 batch 编号，而是按当前 scope 首次出现顺序生成稳定的“并行流 N”标签。
  */
 function _buildStreamLabel(streamNumber: number): string {
   return `并行流 ${streamNumber}`;
 }
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: Markdown 详情面板需要在流式追加时自动滚到末尾，但不影响主页面整体布局高度。
+ * Markdown 详情面板需要在流式追加时自动滚到末尾，但不影响主页面整体布局高度。
  */
 function StreamMarkdownPanel({
   content,
@@ -112,10 +92,7 @@ function StreamMarkdownPanel({
 }
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: 单条流在主面板和弹窗详情里都要以相同方式呈现 output/thinking 双视图。
+ * 单条流在主面板和弹窗详情里都要以相同方式呈现 output/thinking 双视图。
  */
 function StreamGroupDetail({
   group,

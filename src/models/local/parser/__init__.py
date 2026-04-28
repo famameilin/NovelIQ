@@ -1,15 +1,7 @@
 """
 解析模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 标注结果解析模块，包含JSON解析、标注构建、伏笔解析等功能
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - Task 9 拆分parser.py
-修改内容: 从单文件拆分为子模块
 """
 
 from __future__ import annotations

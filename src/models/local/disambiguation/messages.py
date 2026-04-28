@@ -209,9 +209,6 @@ def _format_reselect_review_summary(review: NameReviewState | None) -> list[str]
     """
     格式化最终代表名重选阶段的复审摘要。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect
     说明: 终消歧后的额外重选不再判断“是不是同一人”，而是只在已确认 cluster 内
           选择代表名；这里把当前状态机里已有的复审审计字段整理成稳定提示，供模型参考。
     """
@@ -236,10 +233,6 @@ def build_disambiguate_messages(
 ) -> list[dict[str, str]]:
     """
     构建角色消歧消息，仅接受标准候选结构。
-
-    修改时间: 2026-04-24
-    任务: unify-disambig-transport-record-arrays
-    修改内容: 消歧提示词统一为记录数组格式，与传输层响应模型保持一致。
     """
     # Build name -> category lookup
     category_map: dict[str, str] = {}
@@ -302,15 +295,8 @@ def build_canonical_reselect_messages(
     """
     构建最终代表名重选消息。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: final-canonical-reselect
     说明: 该阶段只负责“在已确认同一人的 cluster 内选最终代表名”，
           因此 prompt 明确按组组织输入，禁止模型重新拆组或跨组合并。
-
-    修改时间: 2026-04-24
-    任务: unify-disambig-transport-record-arrays
-    修改内容: 重选提示词统一为记录数组格式，与传输层响应模型保持一致。
     """
     counts_by_name = {str(candidate["name"]): int(candidate.get("count", 0)) for candidate in candidates}
     cluster_blocks: list[str] = []

@@ -1,9 +1,6 @@
 """
 角色查询组装器。
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
 说明: 承载 characters 相关查询组装逻辑。
 """
 
@@ -27,13 +24,6 @@ def _fetch_characters(
     main_characters: list[str] | None = None,
     limit: int | None = settings.api.query_limit,
 ) -> list:
-    """
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: 角色结果现在需要同时暴露“叙事中心度”和“是否属于 diagnosis 焦点人物”，
-    因此这里改为接收 `focus_characters`，不再从最高分反推唯一主角。
-    """
     graph_repo = GraphRepository(annotation_repo.session)
     alias_map = graph_repo.fetch_alias_map(run_id)
     rows = annotation_repo.fetch_characters_with_scores(run_id)

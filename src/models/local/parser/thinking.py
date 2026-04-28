@@ -1,9 +1,6 @@
 """
 思考内容提取模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 提取思考内容相关逻辑
 """
 

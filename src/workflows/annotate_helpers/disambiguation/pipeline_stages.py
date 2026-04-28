@@ -1,9 +1,7 @@
 """
 消歧流程阶段拆分辅助模块
 
-创建时间: 2026-04-23
-任务: p1-disambiguation-pipeline-split
-说明: 将增量消歧与最终消歧中“计划、prompt 组装、状态应用、checkpoint 持久化”阶段显式拆开。
+将增量消歧与最终消歧中“计划、prompt 组装、状态应用、checkpoint 持久化”阶段显式拆开。
 """
 
 from __future__ import annotations
@@ -75,9 +73,7 @@ class IncrementalDisambiguationPlan:
     """
     增量消歧计划。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式承接“候选计划”和“prompt 组装”产物，便于主流程按阶段推进。
+    显式承接“候选计划”和“prompt 组装”产物，便于主流程按阶段推进。
     """
 
     state_after_deferred: DisambiguationState
@@ -93,9 +89,7 @@ class FinalDisambiguationPlan:
     """
     最终消歧计划。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 将终消歧的候选收集、prompt 组装和后续落库需要的上下文统一封装。
+    将终消歧的候选收集、prompt 组装和后续落库需要的上下文统一封装。
     """
 
     state_before_apply: DisambiguationState
@@ -112,9 +106,6 @@ def fetch_current_relations(conn: Session, run_id: str) -> list[CurrentRelationR
     """
     从 graph repository 获取当前活跃关系。
 
-    修改时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    修改内容: 抽离为阶段辅助函数，供增量与最终 prompt 组装共用。
     """
     from src.storage.repositories import GraphRepository
 
@@ -132,9 +123,6 @@ async def generate_and_save_stage_summary(
     """
     生成并保存阶段性摘要。
 
-    修改时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    修改内容: 抽离出增量 checkpoint 后置步骤，主流程只负责调用阶段函数。
     """
     start_chunk_id = max(0, current_chunk_id - disambig_interval + 1)
     summaries = fetch_chunk_summaries_by_range(conn, run_id, start_chunk_id, current_chunk_id)
@@ -186,10 +174,6 @@ def resolve_incremental_batch_window(current_chunk_id: int, disambig_interval: i
     """
     解析增量消歧批次窗口。
 
-    创建时间: 2026-04-21
-    任务: align-incremental-disambig-batch-window
-    修改时间: 2026-04-23
-    修改原因: 抽离到阶段模块，供候选计划阶段单独复用。
     """
     batch_start_chunk_id = max(0, current_chunk_id - disambig_interval + 1)
     return batch_start_chunk_id, current_chunk_id
@@ -202,9 +186,6 @@ def inject_category_into_context(
     """
     将 protected 候选的分类标签注入到上下文字符串前缀。
 
-    修改时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    修改内容: 抽离到阶段模块，统一由 prompt 组装阶段调用。
     """
     for cls in classifications:
         if cls.category == "protected" and cls.name in context_sentences:
@@ -218,9 +199,6 @@ def merge_deferred_candidates_into_state(
     """
     将延后处理的候选写回状态。
 
-    修改时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    修改内容: 抽离为候选计划阶段的专用步骤，避免主流程夹杂细节状态修补。
     """
     if not deferred_candidates:
         return state
@@ -268,9 +246,6 @@ def collect_review_candidates(state: DisambiguationState) -> list[NameCountCandi
     """
     收集需要复审的已判决名字。
 
-    修改时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    修改内容: 抽离到候选计划阶段，让主流程只编排阶段，不再遍历 review_status 细节。
     """
     review_dict = state.get_review_status_dict()
     candidates: list[NameCountCandidate] = []
@@ -290,9 +265,6 @@ def build_shared_evidence_query_text(
     """
     将候选名字的例句上下文拼成共享取证查询文本。
 
-    修改时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    修改内容: 抽离为 prompt 组装阶段的独立辅助函数。
     """
     parts: list[str] = []
     for item in candidates:
@@ -313,9 +285,7 @@ def _build_shared_evidence_request(
     current_chunk: int | None,
 ) -> EvidenceRequest:
     """
-    创建时间: 2026-04-25
-    任务: level3-intent-phase-split
-    说明: shared evidence 统一走 identity objective；seed_entities 只来自当前待消歧候选，
+    shared evidence 统一走 identity objective；seed_entities 只来自当前待消歧候选，
           已知 canonical 背景继续留在 existing_character_hint / graph_hint，不再反向污染 requested_names。
     """
     seed_entities: list[str] = []
@@ -357,23 +327,9 @@ async def build_prompt_context_with_shared_evidence(
     """
     把共享 evidence renderer 输出补入消歧 prompt_context。
 
-    修改时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    修改内容: 从主流程中抽离，作为 prompt 组装阶段的统一步骤。
 
-    修改时间: 2026-04-23
-    任务: level3-history-cutoff
-    修改内容: shared Level3 取证显式传入 max_chunk_id；增量阶段截止到当前批次结束 chunk，
-              final 阶段用 None 表示允许全量历史。
 
-    修改时间: 2026-04-24
-    任务: llm-mention-rerank-chain
-    修改内容: mention extraction/query 构造改由 provider 统一编排，消歧 workflow 只传共享 evidence query text。
 
-    修改时间: 2026-04-25
-    任务: fix-shared-evidence-scope-and-fallback
-    修改内容: 已知 canonical 名不再混入 shared-evidence 的 requested_names；
-              当 query_text 为空时仍保留 Level1/2 fallback，避免 protected / 无例句候选失去共享证据。
     """
     if evidence_service is None or not candidates:
         return prompt_context
@@ -418,9 +374,7 @@ async def plan_incremental_disambiguation(
     """
     规划增量消歧候选与 prompt 输入。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式对应“候选计划”和“prompt 组装”两个阶段，返回后续模型决策所需的完整输入。
+    显式对应“候选计划”和“prompt 组装”两个阶段，返回后续模型决策所需的完整输入。
     """
     batch_start_chunk_id, batch_end_chunk_id = resolve_incremental_batch_window(chunk_id, disambig_interval)
     alias_map_dict = state.get_alias_merges_dict()
@@ -515,9 +469,7 @@ def apply_incremental_disambiguation_result(
     """
     应用增量消歧模型决策。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式对应“模型决策后状态应用”阶段，隔离状态机细节。
+    显式对应“模型决策后状态应用”阶段，隔离状态机细节。
     """
     existing_names = list(state.known_canonical_names)
     validated_result = validate_confidence_with_evidence(result, existing_names, context_sentences)
@@ -567,9 +519,7 @@ def persist_incremental_checkpoint(
     """
     持久化增量消歧 checkpoint。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式对应增量流程的 checkpoint 阶段，避免主流程混杂持久化判断。
+    显式对应增量流程的 checkpoint 阶段，避免主流程混杂持久化判断。
     """
     if new_state == old_state:
         return
@@ -592,9 +542,7 @@ def plan_final_disambiguation(
     """
     规划最终消歧的候选集合。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式对应“候选收集”阶段，并把后续落库所需全量上下文一并准备好。
+    显式对应“候选收集”阶段，并把后续落库所需全量上下文一并准备好。
     """
     pending_relations = list(state.pending_relations)
     existing_names = list(state.known_canonical_names)
@@ -695,9 +643,7 @@ async def assemble_final_prompt_context(
     """
     组装最终消歧 prompt 上下文。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式对应终消歧的 prompt/evidence 组装阶段。
+    显式对应终消歧的 prompt/evidence 组装阶段。
     """
     if not plan.candidate_payload:
         return plan
@@ -730,9 +676,7 @@ def apply_final_disambiguation_result(
     """
     应用最终消歧模型决策。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式对应“canonical reselect 前的状态应用”阶段。
+    显式对应“canonical reselect 前的状态应用”阶段。
     """
     existing_names = list(base_state.known_canonical_names)
     validated_result = validate_confidence_with_evidence(result, existing_names, context_sentences)
@@ -787,9 +731,7 @@ def persist_final_disambiguation(
     """
     持久化最终消歧结果与 checkpoint。
 
-    创建时间: 2026-04-23
-    任务: p1-disambiguation-pipeline-split
-    说明: 显式对应终消歧的“实体落库、关系投影、checkpoint 保存”阶段。
+    显式对应终消歧的“实体落库、关系投影、checkpoint 保存”阶段。
     """
     if new_state != previous_state:
         logger.info(
@@ -845,7 +787,6 @@ def _replace_final_disambiguation_chunk_relations(
 ) -> None:
     """
     2026-04-27，任务：graph final-disambiguation rebuild fixes
-    新建原因：annotate 末尾会对 graph_* 执行 rebuild，因此终消歧层级关系必须先落回 chunk_relations，
     才能在 reset_graph_tables() 之后被统一重新投影出来。
     """
     final_chunk_id = conn.execute(

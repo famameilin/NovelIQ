@@ -1,21 +1,10 @@
 """
 主题建模工作流模块
 
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 从 cli/topic.py 提取核心业务逻辑到 workflows 模块
-说明: 本文件包含主题建模的核心业务逻辑，从 src/cli/topic.py 提取而来，
+本文件包含主题建模的核心业务逻辑，从 src/cli/topic.py 提取而来，
       供 CLI 和其他模块复用。
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id/session 参数支持，使用 ChunkRepository 替代直接调用 operations 函数
 
-修改时间: 2026-04-09
-修改者: TraeAI
-任务: 重构其他 workflow 为 async
-修改内容: run_topic_model 改为 async def，所有内部调用改为 await
 """
 
 from __future__ import annotations
@@ -45,19 +34,8 @@ async def run_topic_model(
     """
     执行主题建模流程
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 主题建模流程
 
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
-    修改时间: 2026-04-25
-    修改者: Codex
-    任务: remove-unused-workflow-cache-hooks
-    修改内容: 删除未被主链实际消费的 cache_path 参数，避免保留无效缓存接口。
 
     Args:
         run_id: 运行ID

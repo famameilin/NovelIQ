@@ -1,10 +1,7 @@
 """
 分块摘要和角色出场相关操作
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 补充遗漏方法
-说明: 分块摘要插入、角色出场信息插入等操作
+分块摘要插入、角色出场信息插入等操作
 """
 
 from __future__ import annotations
@@ -98,10 +95,7 @@ def insert_stage_summary(
     """
     插入阶段性摘要
 
-    创建时间: 2026-04-08
-    创建者: GLM-5
-    任务: summary-full-chain-refactor
-    说明: 存储增量消歧阶段生成的阶段性摘要
+    存储增量消歧阶段生成的阶段性摘要
 
     Args:
         session: 数据库会话
@@ -131,10 +125,7 @@ def fetch_chunk_summaries_by_range(
     """
     获取指定范围内的分块摘要
 
-    创建时间: 2026-04-08
-    创建者: GLM-5
-    任务: summary-full-chain-refactor
-    说明: 用于增量消歧阶段获取最近N个chunk的摘要
+    用于增量消歧阶段获取最近N个chunk的摘要
 
     Args:
         session: 数据库会话

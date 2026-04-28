@@ -1,10 +1,7 @@
 /**
  * TopicKeywords - 关键词标签展示组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-C 主题分布
- * 说明: 将关键词列表渲染为 Badge 标签组，超出 maxVisible 部分折叠到 Tooltip 中展示
+ * 将关键词列表渲染为 Badge 标签组，超出 maxVisible 部分折叠到 Tooltip 中展示
  */
 import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";

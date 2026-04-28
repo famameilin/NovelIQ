@@ -1,15 +1,7 @@
 """
 数据获取函数兼容转发层。
 
-创建时间: 2026-03-28
-创建者: TraeAI
-任务: consolidate-codebase-architecture
 说明: 现仅保留向 services.results_queries 的兼容转发，避免 service 反向依赖 route。
-
-修改时间: 2026-04-23
-修改者: Codex
-任务: p1-api-route-service-decouple
-修改内容: 真正实现迁移到 `src.api.services.results_queries` 分区模块，本文件只做兼容导出。
 """
 
 from src.api.services.results_queries import (

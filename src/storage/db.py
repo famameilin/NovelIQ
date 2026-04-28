@@ -1,7 +1,4 @@
 """
-创建时间: 2026-03-15
-创建者: TraeAI
-任务: postgresql-migration
 说明: PostgreSQL 数据库引擎与 Session 管理，使用 SQLAlchemy
 
 本模块提供：
@@ -9,16 +6,6 @@
 - SessionLocal: Session 工厂类
 - get_session(): 上下文管理器，用于获取 Session
 - init_db(): 初始化数据库（创建所有表）
-
-修改时间: 2026-04-04
-修改者: AI Assistant
-任务: fix-backend-stability
-修改内容: 添加数据库连接超时和 SQL 执行超时配置，添加连接池监控事件
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: fix-test-db-concurrency
-修改内容: 支持通过 DATABASE_SCHEMA 注入运行时 search_path，给并发测试提供 schema 级隔离
 """
 
 from __future__ import annotations
@@ -62,9 +49,6 @@ def get_database_schema() -> str | None:
     """
     获取数据库 schema 名称。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-test-db-concurrency
     说明: 运行时默认不指定 schema；
           测试环境可通过 DATABASE_SCHEMA 把所有未限定表名收敛到独立 schema。
     """
@@ -83,9 +67,6 @@ def get_engine():
     """
     获取 SQLAlchemy 引擎（单例模式）
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
     说明: 单例模式获取数据库引擎，支持连接池配置
 
     Returns:
@@ -135,7 +116,7 @@ def get_engine():
             cursor = dbapi_connection.cursor()
             cursor.execute("SET TIME ZONE 'UTC'")
             if database_schema:
-                # 中文注释：连接池里的连接被复用时，仍要确保 search_path 固定在当前运行时 schema，
+                # 连接池里的连接被复用时，仍要确保 search_path 固定在当前运行时 schema，
                 # 避免测试并发时把 ORM/原生 SQL 混写回 public 或其他进程的隔离空间。
                 cursor.execute(f"SET search_path TO {database_schema}, public")
             cursor.close()
@@ -163,9 +144,6 @@ def get_session_factory() -> sessionmaker:
     """
     获取 Session 工厂（单例模式）
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
     说明: 返回 Session 工厂类，用于创建 Session
 
     Returns:
@@ -194,9 +172,6 @@ def _constraint_exists(connection: Connection, table_name: str, constraint_name:
     """
     检查当前 schema 下是否已存在指定约束。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-analysis-related-foreign-keys
     说明: 运行时补约束前必须先做显式存在性检查，
           避免旧库增量迁移与新库 create_all 在启动时互相撞重复 DDL。
     """
@@ -220,12 +195,6 @@ def _constraint_exists(connection: Connection, table_name: str, constraint_name:
 def _table_exists(connection: Connection, table_name: str) -> bool:
     """
     检查当前 schema 下是否存在指定表。
-
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-setup-pool
-    新建原因: 运行时 schema 修复需要区分“旧库缺少可选表”和“表已存在但缺索引/缺列”，
-    不能对未创建的可选表直接执行 DDL。
     """
 
     return bool(
@@ -246,9 +215,6 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
 
 def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract
     说明: 启动期需要对关键表做正式合同校验，这里统一读取当前 schema 下的列集合，
     避免后续把“旧表还能跑”误当成可接受状态。
     """
@@ -271,9 +237,6 @@ def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> Non
     """
     在补外键前校验目标子表没有孤儿数据。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-analysis-related-foreign-keys
     说明: 当前仓库不接受“发现脏数据但继续跳过”的静默策略；
           若仍有孤儿行，直接抛错阻止把不一致状态带入更深处。
     """
@@ -286,9 +249,6 @@ def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
     """
     基于 analysis_runs 回填历史表里漂移的 novel_id。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-analysis-related-foreign-keys
     说明: `cloud_analysis` / `token_usage` / `chunk_locations` 的 novel_id
           实际是 run 侧信息的冗余镜像；补外键前先对齐到 analysis_runs，
           可以安全修复历史 `unknown` 或旧值漂移，而不需要删数据。
@@ -325,9 +285,6 @@ def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
     """
     为历史 PostgreSQL 表补齐分析链路缺失的外键约束。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-analysis-related-foreign-keys
     说明: 这批约束都属于“旧库缺失、新库 ORM 已声明”的收口项。
           先做可安全回填的 novel_id 对齐，再显式校验孤儿数据，最后补约束。
           其中 analysis_runs.novel_id 是整条分析链路的父约束，必须一并补齐，
@@ -471,21 +428,8 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     """
     为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: distinguish-thinking-visibility
     说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进。
           这里仅做“补列 / 补索引”这类非破坏性修复，不在应用启动时静默删除列或重建约束。
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-analysis-related-foreign-keys
-    修改内容: 在启动期补齐分析链路缺失外键，并修复可安全回填的历史 novel_id 漂移值。
-
-    修改时间: 2026-04-24
-    任务: full-global-offset-rollout
-    修改内容: 为旧库补齐 chunks.char_end_offset，避免 ORM 已声明全文终点列而历史表仍缺列。
-
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -525,9 +469,6 @@ def _ensure_runtime_schema(engine: Engine) -> None:
 
 def _assert_focus_contract_schema(engine: Engine) -> None:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract
     说明: 本次主角合同重构明确不兼容旧库，因此启动时必须显式检查
     `cloud_analysis` 是否已切到焦点合同；若仍停留在旧 `protagonist` 结构，直接阻断启动。
     """
@@ -567,15 +508,7 @@ def get_session() -> Generator[Session, None, None]:
     """
     获取 Session 的上下文管理器
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
     说明: 提供上下文管理器方式获取 Session，自动处理提交和回滚
-
-    修改时间: 2026-04-04
-    修改者: AI Assistant
-    任务: fix-backend-stability
-    修改内容: 添加只读场景行为说明
 
     Yields:
         SQLAlchemy Session 实例
@@ -606,9 +539,6 @@ def init_db(include_level3_tables: bool = False) -> None:
     """
     初始化数据库（创建所有表）
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
     说明: 使用 ORM 模型创建所有数据库表
 
     注意：生产环境推荐使用 Alembic 迁移
@@ -618,7 +548,7 @@ def init_db(include_level3_tables: bool = False) -> None:
     engine = get_engine()
     tables = list(Base.metadata.sorted_tables)
     if not include_level3_tables:
-        # 中文注释：Level3 的 pgvector 表由 preprocess 按需 ensure；
+        # Level3 的 pgvector 表由 preprocess 按需 ensure；
         # 普通启动不主动创建，避免未启用 RAG 的环境被向量扩展约束牵连。
         tables = [table for table in tables if table.name not in {"chunk_embeddings", "paragraph_embeddings"}]
     Base.metadata.create_all(bind=engine, tables=tables)
@@ -631,9 +561,6 @@ def dispose_engine() -> None:
     """
     释放数据库引擎资源
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
     说明: 用于测试或应用关闭时清理资源
     """
     global _engine, _session_factory
@@ -649,9 +576,6 @@ def get_pool_status() -> dict | None:
     """
     获取连接池状态
 
-    创建时间: 2026-04-04
-    创建者: AI Assistant
-    任务: fix-backend-stability
     说明: 返回连接池状态信息，用于监控和调试
 
     Returns:

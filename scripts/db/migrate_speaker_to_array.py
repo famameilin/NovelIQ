@@ -5,9 +5,6 @@
 
 使用方法：
     uv run python scripts/db/migrate_speaker_to_array.py
-
-创建时间: 2026-04-09
-任务: fix-speaker-column-type-mismatch
 """
 
 from __future__ import annotations

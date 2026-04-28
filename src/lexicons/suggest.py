@@ -236,9 +236,6 @@ def _collect_and_clean_tokens(
     stopwords: frozenset[str],
 ) -> tuple[list[str], str]:
     """
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 知识增强层函数重构
     收集文本token并清理，返回清理后的token列表和完整文本
     """
     tokens = collect_tokens(texts)
@@ -260,9 +257,6 @@ def _extract_proper_nouns(
     title_only: frozenset[str],
 ) -> list[str]:
     """
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 知识增强层函数重构
     从词频统计中提取专有名词候选词
     """
 
@@ -296,9 +290,6 @@ def _extract_combat_terms(
     stopword_substrings: tuple[str, ...],
 ) -> list[str]:
     """
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 知识增强层函数重构
     从词频统计中提取战斗术语候选词
     """
     return pick_candidates(
@@ -318,9 +309,6 @@ def _extract_sensory_terms(
     sensory_stop: frozenset[str],
 ) -> list[str]:
     """
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 知识增强层函数重构
     从词频统计中提取感官术语候选词
     """
     return pick_candidates(
@@ -343,9 +331,6 @@ def _extract_semantic_terms(
     semantic_stems: tuple[str, ...],
 ) -> list[str]:
     """
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 知识增强层函数重构
     从完整文本中提取语义术语
     """
     return [stem for stem in semantic_stems if stem in full_text and stem not in existing]
@@ -353,13 +338,7 @@ def _extract_semantic_terms(
 
 def expand_lexicons(texts: Iterable[str], lexicon_dir: Path) -> dict[str, list[str]]:
     """
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: 知识增强层函数重构
     从文本中扩展词库，返回各类候选词
-    修改时间: 2026-04-06
-    修改者: 重构
-    修改内容: 使用 LexiconRegistry v2 加载基础词表
     """
     tokens, full_text = _collect_and_clean_tokens(texts, _STOPWORDS)
     freq = Counter(tokens)

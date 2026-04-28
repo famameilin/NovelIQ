@@ -1,14 +1,5 @@
 """
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 配置数据类模块入口
-
 本模块包含所有配置数据类的导出。
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: runtime-behavior-settings
-修改内容: 导出 runtime 配置 schema，移除已弃用的 ANNOTATION_CONFIG 导出
 """
 
 from .analysis import (

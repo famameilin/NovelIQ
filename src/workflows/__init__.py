@@ -1,18 +1,7 @@
 """
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: refactor-module-coupling
-说明: workflows 模块入口，包含核心业务逻辑，供 API 和 CLI 共同调用
+workflows 模块入口，包含核心业务逻辑，供 API 和 CLI 共同调用
 
-修改时间: 2026-03-28
-修改者: TraeAI
-任务: consolidate-codebase-architecture
-修改内容: EVENT_TYPE_SCORES 改为从 src.config.constants 导入
 
-修改时间: 2026-04-08
-修改者: TraeAI
-任务: 移除未使用的 build_cloud_payload 和 run_cloud_diagnose
-修改内容: 移除相关导入和导出
 """
 
 from src.config.constants import EVENT_TYPE_SCORES

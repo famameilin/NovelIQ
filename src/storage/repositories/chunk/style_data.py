@@ -1,18 +1,9 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分chunk_repository.py
-说明: 分块风格数据类
+分块风格数据类
 
-修改时间: 2026-03-26
-修改者: TraeAI
-任务: 删除 cultural_density 字段
-修改内容: 移除 cultural_density 字段
+移除 cultural_density 字段
 
-修改时间: 2026-04-20
-修改者: Codex (GPT-5)
-任务: remove-compat-layers
-修改内容: 将 imagery_lexicon_density 并入 ChunkStyleData，移除独立 culture 兼容写入链路。
+将 imagery_lexicon_density 并入 ChunkStyleData，移除独立 culture 兼容写入链路。
 """
 
 from __future__ import annotations
@@ -25,20 +16,11 @@ class ChunkStyleData:
     """
     分块风格数据类
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Repository 基类和 Protocol 接口定义
-    说明: 封装分块风格指标数据，从 chunk_ops.py 迁移
+    封装分块风格指标数据，从 chunk_ops.py 迁移
 
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - 拆分chunk_repository.py
-    修改内容: 移动到独立模块
+    移动到独立模块
 
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 删除 cultural_density 字段
-    修改内容: 移除 cultural_density 字段
+    移除 cultural_density 字段
     """
 
     chunk_id: int

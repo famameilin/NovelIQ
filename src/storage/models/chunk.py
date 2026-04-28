@@ -1,17 +1,9 @@
 """
-创建时间: 2026-03-15
-创建者: TraeAI
-任务: postgresql-migration
-说明: 分块相关表 ORM 模型定义
+分块相关表 ORM 模型定义
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 使用 pgvector vector 类型，移除 LargeBinary
+使用 pgvector vector 类型，移除 LargeBinary
 
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容: 将主键改为复合主键 (chunk_id, run_id)，支持多 run_id 数据隔离；使用复合外键引用 chunks 表
+将主键改为复合主键 (chunk_id, run_id)，支持多 run_id 数据隔离；使用复合外键引用 chunks 表
 
 本模块定义分块相关的数据表：
 - Chunk: 文本分块表
@@ -31,18 +23,11 @@ class Chunk(Base):
     """
     文本分块表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储文本分块的基本信息
+    存储文本分块的基本信息
 
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，支持多 run_id 数据隔离
+    将主键改为复合主键 (chunk_id, run_id)，支持多 run_id 数据隔离
 
-    修改时间: 2026-04-24
-    任务: full-global-offset-rollout
-    修改说明: 持久化 chunk 的全文起止坐标，供 paragraph global offset 和后续原文定位复用。
+    持久化 chunk 的全文起止坐标，供 paragraph global offset 和后续原文定位复用。
     """
 
     __tablename__ = "chunks"
@@ -66,14 +51,9 @@ class ChunkStyle(Base):
     """
     分块风格指标表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块的文体风格指标数据
+    存储分块的文体风格指标数据
 
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
+    将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
     """
 
     __tablename__ = "chunk_style"
@@ -127,10 +107,7 @@ class ChunkTopic(Base):
     """
     分块主题表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块与主题的关联关系
+    存储分块与主题的关联关系
     """
 
     __tablename__ = "chunk_topics"

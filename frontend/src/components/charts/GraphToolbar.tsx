@@ -36,10 +36,7 @@ export interface GraphToolbarProps {
 /**
  * 图谱工具栏组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: 创建 GraphToolbar 组件
- * 说明: 提供图谱的缩放、居中、关系类型过滤和节点搜索功能
+ * 提供图谱的缩放、居中、关系类型过滤和节点搜索功能
  */
 export function GraphToolbar({
   onZoomIn,

@@ -49,10 +49,6 @@ def format_entities_for_prompt(entities: list[dict[str, Any]]) -> str:
 def _normalize_active_entity_row(row: Any) -> dict[str, Any] | None:
     """
     统一规范化 GraphRepository 返回的实体行。
-
-    修改时间: 2026-04-23
-    任务: P0-graph-repository-dto-boundary
-    修改内容: 支持 ActiveEntityRow DTO，保留测试中 dict stub 的兼容读取。
     """
     if isinstance(row, dict):
         name = row.get("name")

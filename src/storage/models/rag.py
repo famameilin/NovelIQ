@@ -1,8 +1,5 @@
 """
-创建时间: 2026-03-15
-创建者: TraeAI
-任务: postgresql-migration
-说明: RAG 相关表 ORM 模型定义
+RAG 相关表 ORM 模型定义
 
 本模块定义 RAG 相关的数据表：
 - TokenUsage: Token 使用统计表
@@ -20,15 +17,9 @@ class TokenUsage(Base):
     """
     Token 使用统计表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储 API 调用的 token 使用统计
+    存储 API 调用的 token 使用统计
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-analysis-related-foreign-keys
-    修改内容: 为 novel_id 补充到 novels 表的外键约束，避免 token 记账继续写入 unknown 等脏值。
+    为 novel_id 补充到 novels 表的外键约束，避免 token 记账继续写入 unknown 等脏值。
     """
 
     __tablename__ = "token_usage"

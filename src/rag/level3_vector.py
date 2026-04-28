@@ -1,9 +1,7 @@
 """
 RAG Level3 向量检索边界。
 
-创建时间: 2026-04-23
-任务: p1-rag-retriever-split
-说明: 将向量可用性检查和语义检索逻辑从 provider 主类中拆出。
+将向量可用性检查和语义检索逻辑从 provider 主类中拆出。
 """
 
 from __future__ import annotations
@@ -30,9 +28,7 @@ class Level3VectorEvidence:
     """
     Level3: 向量语义相似度检索。
 
-    创建时间: 2026-04-23
-    任务: p1-rag-retriever-split
-    说明: 单独负责 Level3 readiness 检查与 chunk 检索，provider 只做编排。
+    单独负责 Level3 readiness 检查与 chunk 检索，provider 只做编排。
     """
 
     def __init__(
@@ -57,9 +53,7 @@ class Level3VectorEvidence:
 
     def _reset_last_query_failures(self) -> None:
         """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: 每次 Level3 query/batch query 开始前都清空上一跳失败观察字段，
+        每次 Level3 query/batch query 开始前都清空上一跳失败观察字段，
               避免新的 evidence 请求读到过期的 per-query failure attribution。
         """
         self._last_query_failures = []
@@ -73,9 +67,7 @@ class Level3VectorEvidence:
         query_index: int | None = None,
     ) -> None:
         """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: batched retrieval 的失败要按 query 单独归因；
+        batched retrieval 的失败要按 query 单独归因；
               这里统一记录 query_text/index/stage，供 evidence service 回填 generation_meta。
         """
         failure: dict[str, object] = {
@@ -89,9 +81,7 @@ class Level3VectorEvidence:
 
     def consume_last_query_failures(self) -> list[dict[str, object]]:
         """
-        创建时间: 2026-04-25
-        任务: evidence-service-request-unification
-        说明: failure attribution 由上层 evidence service 消费后立即清空，
+        failure attribution 由上层 evidence service 消费后立即清空，
               避免后续 query 误复用上一轮失败信息。
         """
         failures = list(self._last_query_failures)
@@ -100,9 +90,7 @@ class Level3VectorEvidence:
 
     def _raise_not_ready(self, message: str, *, cause: Exception | None = None) -> Never:
         """
-        创建时间: 2026-04-24
-        任务: fix-level3-readiness-revalidation
-        说明: readiness 一旦发现 schema / 数据漂移，先清空缓存状态再抛错，
+        readiness 一旦发现 schema / 数据漂移，先清空缓存状态再抛错，
               避免后续 `is_available()` 或 paragraph rerank 继续复用过期的成功结果。
         """
         self._available = False
@@ -131,9 +119,7 @@ class Level3VectorEvidence:
         """
         执行 Level3 readiness 检查。
 
-        修改时间: 2026-04-24
-        任务: level3-paragraph-readiness
-        修改说明: paragraph rerank 已是 Level3 必需能力，启动检查必须同时校验 paragraph schema、数据存在与完整性。
+        paragraph rerank 已是 Level3 必需能力，启动检查必须同时校验 paragraph schema、数据存在与完整性。
         """
         if self._embedding_client is None or self._session is None or self._run_id is None:
             self._raise_not_ready("Level 3 requires embedding client, session, and run_id")
@@ -141,7 +127,7 @@ class Level3VectorEvidence:
         session = self._session
         run_id = self._run_id
 
-        # 中文注释：provider 会在每次入口显式调用 readiness，这里不能因历史成功缓存而跳过重检；
+        # provider 会在每次入口显式调用 readiness，这里不能因历史成功缓存而跳过重检；
         # 否则 paragraph schema / 数据漂移会被吞掉，破坏“paragraph rerank 是硬前提”的合同。
         actual_dim = await embedding_client.detect_embedding_dimension()
         if actual_dim != self._expected_embedding_dim:
@@ -194,9 +180,7 @@ class Level3VectorEvidence:
         """
         检查 Level3 是否可用。
 
-        修改时间: 2026-04-24
-        任务: fix-level3-availability-contract
-        修改说明: 同步补齐 schema 校验，避免 `is_available()` 在表缺失或向量列维度不匹配时误报可用；
+        同步补齐 schema 校验，避免 `is_available()` 在表缺失或向量列维度不匹配时误报可用；
                   embedding 模型维度仍由 async readiness 入口做最终确认。
         """
         if self._available is not None:
@@ -267,31 +251,18 @@ class Level3VectorEvidence:
         """
         检索语义相似的历史 chunk。
 
-        创建时间: 2026-04-23
-        任务: p1-rag-retriever-split
-        说明: 保留原检索行为，但让 provider 不再直接处理向量层细节。
+        保留原检索行为，但让 provider 不再直接处理向量层细节。
 
-        修改时间: 2026-04-23
-        任务: level3-history-cutoff
-        修改说明: 透传 max_chunk_id 到 repository 层，统一约束 Level3 历史边界。
+        透传 max_chunk_id 到 repository 层，统一约束 Level3 历史边界。
 
-        修改时间: 2026-04-24
-        任务: level3-paragraph-rerank
-        修改说明: chunk 粗召回后，在命中 chunk_ids 内执行 paragraph rerank，并回填局部 evidence 预览。
+        chunk 粗召回后，在命中 chunk_ids 内执行 paragraph rerank，并回填局部 evidence 预览。
 
-        修改时间: 2026-04-24
-        任务: level3-mention-rerank
-        修改说明: 支持调用方传入 retrieval pool 大小，rerank 后再由 provider 裁剪 prompt 预算。
+        支持调用方传入 retrieval pool 大小，rerank 后再由 provider 裁剪 prompt 预算。
 
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: fix-level3-query-readiness-duplication
-        修改内容: 支持外层已完成 readiness 时跳过重复重检，避免 mention/context 多 query
+        支持外层已完成 readiness 时跳过重复重检，避免 mention/context 多 query
                   场景下重复探测 embedding 维度并多次扫描完整性
 
-        修改时间: 2026-04-25
-        任务: level3-intent-phase-split
-        修改内容: 单 query 入口改为复用共享的 embedding->检索执行函数，
+        单 query 入口改为复用共享的 embedding->检索执行函数，
                   为多 query batched retrieval 保持完全一致的检索/paragraph rerank 语义。
         """
         self._reset_last_query_failures()
@@ -299,7 +270,7 @@ class Level3VectorEvidence:
         if ensure_ready:
             await self.ensure_level3_ready()
         elif self._available is not True:
-            # 中文注释：跳过 readiness 重检只允许用于“外层已 ensure 成功”的热路径；
+            # 跳过 readiness 重检只允许用于“外层已 ensure 成功”的热路径；
             # 若当前对象没有成功缓存，就直接返回空，避免这里又偷偷跑一遍重型检查。
             logger.debug("Level3VectorEvidence: cached readiness missing while ensure_ready=False")
             return []
@@ -371,14 +342,10 @@ class Level3VectorEvidence:
         ensure_ready: bool = True,
     ) -> list[list[SimilarChunkRow]]:
         """
-        创建时间: 2026-04-25
-        任务: level3-intent-phase-split
-        说明: 多 query 场景先批量生成 embedding，再逐条执行 run-scoped chunk/paragraph 检索，
+        多 query 场景先批量生成 embedding，再逐条执行 run-scoped chunk/paragraph 检索，
               避免 mention query 在热路径里重复请求 embedding 服务。
 
-        修改时间: 2026-04-25
-        任务: fix-batched-level3-failure-isolation
-        修改内容: batched embedding/search 失败时回退到逐 query 隔离执行；
+        batched embedding/search 失败时回退到逐 query 隔离执行；
                   单个坏 query 只能丢自己，不能把 base query 一起清空。
         """
         self._reset_last_query_failures()
@@ -389,7 +356,7 @@ class Level3VectorEvidence:
         if ensure_ready:
             await self.ensure_level3_ready()
         elif self._available is not True:
-            # 中文注释：batch 路径和单 query 路径保持同一护栏；外层没缓存 readiness 时，不允许偷偷补跑重检。
+            # batch 路径和单 query 路径保持同一护栏；外层没缓存 readiness 时，不允许偷偷补跑重检。
             logger.debug("Level3VectorEvidence: cached readiness missing while ensure_ready=False for batched queries")
             return [[] for _ in query_texts]
 
@@ -488,9 +455,7 @@ class Level3VectorEvidence:
         top_k: int | None,
     ) -> list[list[SimilarChunkRow]]:
         """
-        创建时间: 2026-04-25
-        任务: fix-batched-level3-failure-isolation
-        说明: batched 路径出错时逐 query 回退，确保单个 query 的 embedding / SQL 异常不会拖垮整批结果。
+        batched 路径出错时逐 query 回退，确保单个 query 的 embedding / SQL 异常不会拖垮整批结果。
         """
         aggregated_failures: list[dict[str, object]] = []
         results_by_query: list[list[SimilarChunkRow]] = []
@@ -521,14 +486,10 @@ class Level3VectorEvidence:
         top_k: int,
     ) -> list[SimilarChunkRow]:
         """
-        创建时间: 2026-04-25
-        任务: level3-intent-phase-split
-        说明: 统一复用 precomputed query embedding 的 chunk recall + paragraph rerank，
+        统一复用 precomputed query embedding 的 chunk recall + paragraph rerank，
               确保单 query 和 batched query 看到同一套 SQL 边界与局部证据回填语义。
 
-        修改时间: 2026-04-25
-        任务: fix-level3-typecheck-regressions
-        修改说明: helper 自身重新收紧 session/run_id 非空前提，避免未来复用时依赖“调用方一定先校验”的隐式契约。
+        helper 自身重新收紧 session/run_id 非空前提，避免未来复用时依赖“调用方一定先校验”的隐式契约。
         """
         from src.storage.repositories.chunk import search_similar_chunks
 
@@ -552,11 +513,7 @@ class Level3VectorEvidence:
         """
         检查 paragraph rerank 数据是否可用。
 
-        创建时间: 2026-04-24
-        任务: level3-paragraph-rerank
-        修改时间: 2026-04-24
-        任务: level3-paragraph-readiness
-        修改说明: paragraph rerank 不再是可选增强；缺失时抛出 readiness 错误。
+        paragraph rerank 不再是可选增强；缺失时抛出 readiness 错误。
         """
         if self._paragraph_rerank_available is not None:
             return self._paragraph_rerank_available
@@ -595,22 +552,14 @@ class Level3VectorEvidence:
         """
         使用候选 chunk 内 paragraph 相似度重排 chunk 结果。
 
-        创建时间: 2026-04-24
-        任务: level3-paragraph-rerank
-        说明: 只在 chunk 粗召回结果内查询 paragraph，避免全库 paragraph search 带来的噪声和时间边界风险。
+        只在 chunk 粗召回结果内查询 paragraph，避免全库 paragraph search 带来的噪声和时间边界风险。
 
-        修改时间: 2026-04-24
-        任务: level3-mention-rerank
-        修改说明: 使用调用方指定的 retrieval pool 大小，而不是固定 prompt top_k。
+        使用调用方指定的 retrieval pool 大小，而不是固定 prompt top_k。
 
-        修改时间: 2026-04-24
-        任务: split-level3-score-fields
-        修改说明: paragraph rerank 只更新 paragraph / final 排序分，显式保留 chunk 语义分，
+        paragraph rerank 只更新 paragraph / final 排序分，显式保留 chunk 语义分，
                   为后续接入独立 rerank 模型预留稳定字段。
 
-        修改时间: 2026-04-24
-        任务: full-global-offset-rollout
-        修改说明: 回填结果使用显式 local/global offset 字段，不再继续写旧的歧义 offset 名称。
+        回填结果使用显式 local/global offset 字段，不再继续写旧的歧义 offset 名称。
         """
         if not chunk_results or self._session is None or self._run_id is None:
             return chunk_results

@@ -1,9 +1,6 @@
 """
 主题查询组装器。
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
 说明: 承载 topics 相关查询组装逻辑。
 """
 

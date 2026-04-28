@@ -1,9 +1,6 @@
 """
 API 统一依赖注入模块
 
-创建时间: 2026-03-30
-创建者: CodeBuddy
-任务: refactor-session-management
 说明: 统一 FastAPI 依赖注入函数，替代手动 session 管理
 """
 
@@ -52,9 +49,6 @@ def get_task_manager() -> TaskManager:
     """
     获取任务执行缓存管理器单例。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-novel-task-delete-consistency
     说明: TaskManager 仍只负责执行缓存；这里统一暴露依赖入口，
           避免 novel/task 删除路径各自维护不同的单例来源。
     """
@@ -65,9 +59,6 @@ def get_metrics_service() -> MetricsService:
     """
     获取聚合指标服务单例。
 
-    创建时间: 2026-04-22
-    创建者: TraeAI
-    任务: metrics接口重复计算问题重构
     说明: MetricsService 提供聚合指标的统一获取和缓存，
           消除重复计算和代码重复。
     """

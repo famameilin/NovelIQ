@@ -1,21 +1,11 @@
 /**
  * EmotionCurveChart - 情绪趋势曲线图表组件
- * 
- * 创建时间: 2026-04-04
- * 创建者: AI Assistant
- * 任务: Phase 1-D 情绪/节奏曲线
- * 说明: 展示情绪趋势主线与正负/原始趋势辅助线，支持系列切换和缩放同步
- * 
- * 修改时间: 2026-04-04
- * 修改者: AI Assistant
- * 修改内容: 
+ *
+ * 展示情绪趋势主线与正负/原始趋势辅助线，支持系列切换和缩放同步
+ *
  *   - 添加 dataZoom 支持，用于 Brush 缩放同步
  *   - 添加 chartRef 转发，支持外部访问 ECharts 实例
  *
- * 修改时间: 2026-04-21
- * 修改者: Codex
- * 任务: 修复情绪趋势曲线图例颜色错位
- * 修改内容:
  *   - 将 series 主色显式绑定到 CSS 变量
  *   - 统一图例、tooltip marker、折线颜色来源，避免与默认 ECharts 调色板错位
  *   - 删除未使用的 hslToHsla 导入
@@ -119,7 +109,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         const lineWidth = isMainSeries ? 3 : isSupportSeries ? 2 : 1.5;
         const lineType = isSupportSeries ? "dashed" : "solid";
         const areaOpacity = isMainSeries ? 0.12 : 0;
-        // 中文注释：情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
+        // 情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
         // 避免把“没算出来”和“真实为 0”混成同一条贴地折线。
         const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
         const isActive = activeSeries.has(config.key);

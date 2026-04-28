@@ -49,9 +49,6 @@ class LocationAppearance(BaseModel):
     """
     地点出场信息数据结构
 
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: implement-location-entity-type
     说明: 用于 Phase1 标注阶段识别的地点信息
     """
 
@@ -64,14 +61,6 @@ class LocationAppearance(BaseModel):
 class CharacterAppearance(BaseModel):
     """
     角色出场信息数据结构
-
-    创建时间: 2026-03-12
-    创建者: TraeAI
-    任务: fix-annotation-disambiguation-issues
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 迁移数据模型至 Pydantic
-    修改内容: 从 dataclass 迁移至 Pydantic BaseModel
     """
 
     model_config = ConfigDict(frozen=True)
@@ -84,11 +73,6 @@ class CharacterAppearance(BaseModel):
 class CharacterSnapshot(BaseModel):
     """
     角色快照数据结构
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 迁移数据模型至 Pydantic
-    修改内容: 从 dataclass 迁移至 Pydantic BaseModel
     """
 
     model_config = ConfigDict(frozen=True)
@@ -103,11 +87,6 @@ class CharacterSnapshot(BaseModel):
 class RelationChangeSnapshot(BaseModel):
     """
     关系变化快照数据结构
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 迁移数据模型至 Pydantic
-    修改内容: 从 dataclass 迁移至 Pydantic BaseModel
     """
 
     model_config = ConfigDict(frozen=True)
@@ -128,36 +107,6 @@ class RelationChangeSnapshot(BaseModel):
 class DialogueSnapshot(BaseModel):
     """
     对话快照数据结构
-
-    修改时间: 2026-03-16
-    创建者: TraeAI
-    任务: 迁移数据模型至 Pydantic
-    修改内容: 从 dataclass 迁移至 Pydantic BaseModel
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 添加对话内容字段以支持对话长度计算
-    修改内容: 添加 content 字段存储对话内容
-
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    修改内容: 添加 tone 字段存储对话语气类型
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-unknown-speaker-context
-    修改内容: 添加 evidence 字段，便于追溯未知说话者的判断依据
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: use-phase3-identity-clue-in-disambiguation
-    修改内容: 添加 identity_clue 字段，存储 Phase 3 提取的身份线索
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: speaker 改为 list[str] 支持多人同时说话，删除 evidence 字段
     """
 
     model_config = ConfigDict(frozen=True)
@@ -171,50 +120,6 @@ class DialogueSnapshot(BaseModel):
 class ForeshadowingResult(BaseModel):
     """
     伏笔分析结果数据结构
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 迁移数据模型至 Pydantic
-    修改内容: 从 dataclass 迁移至 Pydantic BaseModel
-
-    修改时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    修改内容: 伏笔类型与置信度字段收紧为正式 Literal 合同，避免继续接受任意字符串。
-
-    修改时间: 2026-04-26
-    任务: phase2-strong-foreshadowing
-    修改内容: positive 结果必须携带正式伏笔类型，避免无类型强伏笔继续进入热路径。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 增加 setup_kind / why_unresolved_now / expected_payoff_family，
-    把强伏笔判断拆成更稳定的结构化字段，减少 validator 对自由文本的依赖。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 补充 is_strong_setup 显式布尔位，避免继续让“是否强 setup”只存在于隐式推断里。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 收紧正负例结构合同，避免 negative 结果继续夹带 strong setup 字段，
-    同时要求 positive 结果必须显式给出 setup_kind。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-setup-pool
-    修改内容: 扩展为 setup 池感知合同，要求 positive 结果显式声明 setup_summary /
-    payoff_likelihood / is_new_setup / linked_setup_id / setup_status，支撑跨 chunk thread 状态更新。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    修改内容: positive 结果不再接受 payoff_likelihood=low，避免与 prompt 合同冲突的弱阳性进入 ledger。
     """
 
     model_config = ConfigDict(frozen=True)
@@ -240,11 +145,6 @@ class ForeshadowingResult(BaseModel):
     def _validate_contract_consistency(self) -> ForeshadowingResult:
         """
         校验 Phase2 强伏笔结果的正负例合同。
-
-        创建时间: 2026-04-26
-        任务: phase2-strong-foreshadowing
-        新建原因: 让结构化输出在进入 Phase2 热路径前就拒绝
-        “positive 缺正式字段”以及“negative 仍夹带 strong setup 状态”的脏结果。
         """
         if self.has_foreshadowing:
             if not self.is_strong_setup:
@@ -273,7 +173,7 @@ class ForeshadowingResult(BaseModel):
                     raise ValueError("setup_status must not be open when is_new_setup=false")
             return self
 
-        # 中文注释：negative 结果允许保留 anchor_reason 解释“为什么不是伏笔”，
+        # negative 结果允许保留 anchor_reason 解释“为什么不是伏笔”，
         # 但不能再夹带 strong setup 专属结构字段，否则后续 projector/storage
         # 会把“否定判断”和“强伏笔标签”同时写进持久化视图。
         if self.is_strong_setup:
@@ -321,15 +221,7 @@ class QuoteCandidate(BaseModel):
     """
     正则提取阶段的候选结构
 
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
     说明: 用于存储正则提取的引号候选及其上下文
-
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: cleanup-phase3-ctx-context
-    修改内容: 移除 ctx_before 和 ctx_after 字段，LLM 有完整 chunk_text 不需要上下文
     """
 
     model_config = ConfigDict(frozen=True)
@@ -342,9 +234,6 @@ class DialogueRecordSchema(BaseModel):
     """
     LLM 结构化输出用的 Schema，不包含 content（content 从 candidates 获取）
 
-    创建时间: 2026-04-09
-    创建者: TraeAI
-    任务: fix-phase3-content-field
     说明: 避免 LLM 返回多余带引号的 content，减少 token 消耗
     """
 
@@ -362,20 +251,7 @@ class DialogueRecord(BaseModel):
     """
     模型判断后的结果结构，写入数据库
 
-    创建时间: 2026-03-23
-    创建者: TraeAI
-    任务: refactor-dialogue-attribution-pipeline
     说明: 用于存储 LLM 判断后的对话结果，包含是否为对话、说话者、语气等信息
-
-    修改时间: 2026-03-29
-    创建者: TraeAI
-    任务: add-identity-clue-to-dialogue-record
-    修改内容: 添加 identity_clue 字段，用于存储对话中提取的身份线索
-
-    修改时间: 2026-04-08
-    创建者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: speaker 改为 list[str] 支持多人同时说话，删除 evidence 字段
     """
 
     model_config = ConfigDict(frozen=True)
@@ -393,15 +269,7 @@ class DialogueAttributionResult(BaseModel):
     """
     对话归属判断结果数据结构
 
-    创建时间: 2026-03-20
-    创建者: TraeAI
-    任务: analyze-dialogue-length-zero
     说明: 用于 LLM 结构化输出的对话归属判断结果模型
-
-    修改时间: 2026-04-09
-    创建者: TraeAI
-    任务: fix-phase3-content-field
-    修改内容: 使用 DialogueRecordSchema 替代 DialogueRecord，避免 LLM 返回 content
     """
 
     model_config = ConfigDict(frozen=True)
@@ -413,9 +281,6 @@ class RelationRecord(BaseModel):
     """
     关系记录数据结构
 
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
     说明: 用于存储 LLM 识别的人物关系
     """
 
@@ -432,9 +297,6 @@ class RelationExtractionResult(BaseModel):
     """
     关系抽取结果数据结构
 
-    创建时间: 2026-04-05
-    创建者: TraeAI
-    任务: refactor-phase4-relation-extraction
     说明: 用于 LLM 结构化输出的关系抽取结果模型
     """
 
@@ -447,9 +309,6 @@ class HierarchicalRelation(BaseModel):
     """
     层级关系数据结构
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
     说明: 用于存储实体间的层级关系（belongs_to, member_of等）
     """
 
@@ -464,9 +323,6 @@ class CanonicalDecisionRecord(BaseModel):
     """
     云端兼容的规范名决策记录。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-cloud-disambig-mapping-schema
     说明: 某些云端 provider 的 strict schema 不接受 dict[str, T] 形式的映射字段，
           因此改为显式数组记录，后续再在本地归一化回内部 dict 结构。
     """
@@ -481,9 +337,6 @@ class AliasConfidenceRecord(BaseModel):
     """
     云端兼容的置信度记录。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-cloud-disambig-mapping-schema
     说明: 将 alias_confidence 从 dict 改成数组记录，避免 provider 拒绝动态键对象 schema。
     """
 
@@ -497,9 +350,6 @@ class EntityTypeRecord(BaseModel):
     """
     云端兼容的实体类型记录。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-cloud-disambig-mapping-schema
     说明: 将 entity_types 从动态映射改成显式列表，兼容云端 strict schema 校验器。
     """
 
@@ -513,9 +363,6 @@ class EvidenceSourceRecord(BaseModel):
     """
     云端兼容的证据来源记录。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-cloud-disambig-mapping-schema
     说明: 将 evidence_sources 从 dict[str, list[str]] 改成显式记录列表。
     """
 
@@ -529,25 +376,7 @@ class DisambiguateResponseModel(BaseModel):
     """
     消歧响应数据结构
 
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 重构本地消歧客户端集成 Instructor
     说明: 用于 Instructor 结构化输出的消歧结果模型
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: entity-type-relation-extraction
-    修改内容: 新增 entity_types 和 entity_relations 字段
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: fix/disambig-thinking-save
-    修改内容: 新增 _thinking_content 字段保存 thinking 内容
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 将 alias_map 重命名为 canonical_decisions，明确表达模型判断而非运行时状态
     """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
@@ -588,15 +417,8 @@ class CloudDisambiguateResponseModel(BaseModel):
     """
     云端兼容的消歧响应数据结构。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-cloud-disambig-mapping-schema
     说明: 部分云端 provider 的 strict json_schema 不支持 dict[str, ...] 映射字段。
           这里将所有动态键对象改为显式记录数组，解析后再归一化回内部标准模型。
-
-    修改时间: 2026-04-24
-    任务: unify-disambig-transport-record-arrays
-    修改内容: 消歧传输层统一使用记录数组格式，不再兼容旧的动态键映射输出。
     """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
@@ -626,38 +448,6 @@ class CloudDisambiguateResponseModel(BaseModel):
 class ChunkAnnotation(BaseModel):
     """
     Chunk 标注数据结构
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 迁移数据模型至 Pydantic
-    修改内容: 从 dataclass 迁移至 Pydantic BaseModel
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: parallel-three-phase
-    修改内容: 添加 dialogue_lengths 字段支持三阶段并行模式
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 relations、character_appearances、chunk_summary 字段
-
-    修改时间: 2026-03-30
-    修改者: TraeAI
-    任务: feature/chunk-summary-timeline-only
-    修改内容: 恢复 chunk_summary 字段，仅用于 Timeline 展示，不参与消歧证据链
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 将 Phase2 强伏笔结构化字段补到 ChunkAnnotation 持久化视图，
-    便于 results API 和前端后续页面直接消费。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-setup-pool
-    修改内容: 新增 thread 定位字段 setup_summary / linked_setup_id / payoff_likelihood，
-    让 chunk 视图能直接定位到 setup ledger。
     """
 
     model_config = ConfigDict(frozen=False)

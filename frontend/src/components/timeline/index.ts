@@ -1,10 +1,7 @@
 /**
  * Timeline 组件模块导出
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-B 叙事时间轴
- * 说明: 导出所有 Timeline 相关组件
+ * 导出所有 Timeline 相关组件
  */
 
 export { PhaseBar } from "./PhaseBar";

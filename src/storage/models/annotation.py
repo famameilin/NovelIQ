@@ -1,21 +1,4 @@
-"""
-创建时间: 2026-03-15
-创建者: TraeAI
-任务: postgresql-migration
-说明: 标注相关表 ORM 模型定义
-
-本模块定义标注相关的数据表：
-- ChunkAnnotation: 分块标注表
-- ChunkCharacter: 分块角色表
-- ChunkRelation: 分块关系表
-- ChunkDialogue: 分块对话表
-- ChunkForeshadowing: 分块伏笔表
-- CharacterAppearance: 角色出场表
-
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容: 将 ChunkAnnotation 和 ChunkForeshadowing 的主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
-"""
+"""标注相关表 ORM 模型定义"""
 
 from __future__ import annotations
 
@@ -28,18 +11,7 @@ from .base import Base
 
 
 class ChunkAnnotation(Base):
-    """
-    分块标注表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块的标注信息（情感、事件类型等）
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
-    """
+    """分块标注表，存储情感、事件类型等结构化标注结果"""
 
     __tablename__ = "chunk_annotation"
 
@@ -79,14 +51,7 @@ class ChunkAnnotation(Base):
 
 
 class ChunkCharacter(Base):
-    """
-    分块角色表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块中出现的角色信息
-    """
+    """分块角色表，存储分块中出现的角色信息"""
 
     __tablename__ = "chunk_characters"
 
@@ -117,19 +82,7 @@ class ChunkCharacter(Base):
 
 
 class ChunkRelation(Base):
-    """
-    分块关系表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块中角色之间的关系变化
-
-    修改时间: 2026-04-05
-    修改者: TraeAI
-    任务: phase4-code-review-fix
-    修改内容: 添加 directionality 字段存储关系方向性
-    """
+    """分块关系表，存储角色之间的关系变化与方向性"""
 
     __tablename__ = "chunk_relations"
 
@@ -166,33 +119,7 @@ class ChunkRelation(Base):
 
 
 class ChunkDialogue(Base):
-    """
-    分块对话表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块中的对话信息
-
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    修改内容: 添加 tone 字段，存储对话语气类型（强硬/温和/讽刺/恳求/命令/恐惧/惊慌）
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-unknown-speaker-context
-    修改内容: 添加 content 和 evidence 字段，便于追溯未知说话者的上下文
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: use-phase3-identity-clue-in-disambiguation
-    修改内容: 添加 identity_clue 字段，存储 Phase 3 提取的身份线索
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: speaker 改为 Text 存储 JSON 数组，删除 evidence 字段
-    """
+    """分块对话表，存储说话者候选、语气、内容和身份线索"""
 
     __tablename__ = "chunk_dialogues"
 
@@ -222,18 +149,7 @@ class ChunkDialogue(Base):
 
 
 class ChunkForeshadowing(Base):
-    """
-    分块伏笔表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块中的伏笔分析结果
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
-    """
+    """分块伏笔表，存储分块中的伏笔分析结果"""
 
     __tablename__ = "chunk_foreshadowing"
 
@@ -273,14 +189,7 @@ class ChunkForeshadowing(Base):
 
 
 class CharacterAppearance(Base):
-    """
-    角色出场表
-
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储角色出场信息和身份线索
-    """
+    """角色出场表，存储角色出场信息和身份线索"""
 
     __tablename__ = "character_appearances"
 

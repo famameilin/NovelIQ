@@ -1,10 +1,7 @@
 """
 地点数据存储操作
 
-创建时间: 2026-03-28
-创建者: TraeAI
-任务: implement-location-entity-type
-说明: 地点信息的存储和查询操作
+地点信息的存储和查询操作
 """
 
 from __future__ import annotations
@@ -31,10 +28,7 @@ def save_chunk_locations(
     """
     保存 chunk 的地点信息
 
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: implement-location-entity-type
-    说明: 将 Phase1 识别的地点存储到 chunk_locations 表
+    将 Phase1 识别的地点存储到 chunk_locations 表
 
     Args:
         session: SQLAlchemy Session
@@ -85,10 +79,7 @@ def fetch_chunk_locations(
     """
     获取 chunk 的地点信息
 
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: implement-location-entity-type
-    说明: 从 chunk_locations 表获取指定 chunk 的地点列表
+    从 chunk_locations 表获取指定 chunk 的地点列表
 
     Args:
         session: SQLAlchemy Session
@@ -114,10 +105,7 @@ def fetch_all_locations(
     """
     获取所有地点及其出现频次
 
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: implement-location-entity-type
-    说明: 统计所有地点的出现次数
+    统计所有地点的出现次数
 
     Args:
         session: SQLAlchemy Session

@@ -1,13 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: 响应处理和thinking提取逻辑
-
-修改时间: 2026-03-30
-修改者: TraeAI
-任务: feature/chunk-summary-timeline-only
-修改内容: 添加重复输出检测，防止模型生成循环内容
 """
 
 from __future__ import annotations
@@ -24,9 +16,6 @@ class RepetitiveOutputError(Exception):
     """
     LLM 输出重复异常
 
-    创建时间: 2026-03-30
-    创建者: TraeAI
-    任务: feature/chunk-summary-timeline-only
     说明: 当 LLM 输出包含重复模式时抛出，触发重试机制
     """
 
@@ -37,9 +26,6 @@ def _detect_repetition(content: str, threshold: int = 3000) -> tuple[bool, str |
     """
     检测 LLM 输出是否存在重复模式
 
-    创建时间: 2026-03-30
-    创建者: TraeAI
-    任务: feature/chunk-summary-timeline-only
     说明: 当响应字符数异常大时，检测是否有重复内容
 
     Args:
@@ -89,20 +75,7 @@ def process_annotation_response(
     """
     封装响应处理和thinking提取
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
     说明: 从 annotate_chunk 拆分出的响应处理逻辑
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 优化云端模型日志，显示更多调用信息
-    修改内容: 添加 chunk_id、phase、novel_id 参数到日志
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
 
     Args:
         response: API 响应对象
@@ -204,15 +177,7 @@ def log_prompt_response(
     """
     封装prompt和response日志记录
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
     说明: 从 annotate_chunk 拆分出的prompt/response日志记录逻辑
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
     """
     if not analysis_logger:
         return
@@ -246,15 +211,7 @@ def log_annotation_result(
     """
     封装标注结果日志记录
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
     说明: 从 annotate_chunk 拆分出的标注结果日志记录逻辑
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
     """
     if not analysis_logger:
         return

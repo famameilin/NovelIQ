@@ -1,17 +1,8 @@
 """
 工作流共享类型定义
 
-创建时间: 2026-04-08
-创建者: TraeAI
-任务: 修复 notify_callback 类型定义问题
-说明: 定义工作流间共享的类型，如进度回调接口
+定义工作流间共享的类型，如进度回调接口
 
-修改时间: 2026-04-09
-创建者: GLM-5
-任务: refactor/sse-unified-event-bus
-修改内容:
-  - StreamEmitter Protocol 替代 IProgressCallback + stream_callback 双回调
-  - StreamEmitter.emit() 接收 StreamEvent 统一格式
 """
 
 from __future__ import annotations

@@ -118,7 +118,7 @@ def _render_task_scoped_shared_sections(
     priority_candidate_names: list[str] | None = None,
     exclude_vector_chunks_with_emotion_exemplars: bool = False,
 ):
-    # 中文注释：task renderer 只在这里声明“每个任务最多吃多少共享证据”，
+    # task renderer 只在这里声明“每个任务最多吃多少共享证据”，
     # 具体 evidence 语义仍由 shared renderer 统一维护，避免 phase 代码各自长出一套裁剪规则。
     return render_shared_evidence_sections(
         bundle,
@@ -153,7 +153,7 @@ def render_annotation_prompt_blocks(
         shared_sections,
         ("level1_facts", "disambig_candidates", "emotion_exemplars", "vector_evidence"),
     )
-    # 中文注释：annotation 主 prompt 当前只接收 active_entities + disambig_context 两个入口，
+    # annotation 主 prompt 当前只接收 active_entities + disambig_context 两个入口，
     # 因此这里显式把 Level 1 结构化事实、情绪 exemplar 和通用向量证据一并并入 disambig_context，
     # 保证 Phase1 在统一 evidence path 内同时看到身份线索与情绪案例。
     combined_disambig = "\n\n".join(prompt_sections) if prompt_sections else None
@@ -180,7 +180,7 @@ def render_relation_extraction_evidence_sections(
         include_level1_alias_mappings=False,
         policy=_PHASE4_EVIDENCE_POLICY,
     )
-    # 中文注释：Phase4 只选择稳定事实、局部活跃实体和历史语义召回三类 section；
+    # Phase4 只选择稳定事实、局部活跃实体和历史语义召回三类 section；
     # 不把消歧候选或 raw structured block 带进去，避免把候选身份和重复事实噪音注入关系抽取。
     return select_shared_evidence_sections(
         shared_sections,
@@ -212,7 +212,7 @@ def render_dialogue_attribution_evidence_sections(
     )
 
     sections: list[str] = []
-    # 中文注释：active_entities 属于任务侧输入，不属于 EvidenceBundle 本体；
+    # active_entities 属于任务侧输入，不属于 EvidenceBundle 本体；
     # 如果上游已经给出带 fallback 的活跃实体上下文，就优先沿用，不再让 renderer 从 bundle 反推覆盖它。
     # 显式传入空字符串时，表示调用方要抑制该区段；这时也不应再回退 bundle 里的活跃实体。
     if active_entities is not None:

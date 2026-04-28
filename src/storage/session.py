@@ -1,13 +1,7 @@
 """
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 创建 Session 管理机制
-说明: 提供 DatabaseSession 类封装数据库连接，SessionFactory 管理连接池，以及辅助函数
+提供 DatabaseSession 类封装数据库连接，SessionFactory 管理连接池，以及辅助函数
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 重写为 SQLAlchemy Session 管理，移除 SQLite 相关逻辑
+重写为 SQLAlchemy Session 管理，移除 SQLite 相关逻辑
 
 本模块提供数据库会话管理机制：
 - DatabaseSession: 封装 SQLAlchemy Session，支持上下文管理器和事务管理
@@ -29,15 +23,9 @@ class DatabaseSession:
     """
     数据库会话类，封装 SQLAlchemy Session
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: 创建 Session 管理机制
-    说明: 提供上下文管理器支持，封装事务管理，支持依赖注入
+    提供上下文管理器支持，封装事务管理，支持依赖注入
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 重写为 SQLAlchemy Session 封装
+    重写为 SQLAlchemy Session 封装
 
     使用示例:
         with DatabaseSession() as session:
@@ -130,15 +118,9 @@ class SessionFactory:
     """
     会话工厂类，管理数据库会话
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: 创建 Session 管理机制
-    说明: SQLAlchemy Session 工厂，支持单一 PostgreSQL 数据库
+    SQLAlchemy Session 工厂，支持单一 PostgreSQL 数据库
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 移除 base_dir 和 .db 文件路径逻辑，使用单一数据库
+    移除 base_dir 和 .db 文件路径逻辑，使用单一数据库
 
     使用示例:
         factory = SessionFactory()
@@ -260,15 +242,9 @@ def get_db_session(init_tables: bool = False) -> DatabaseSession:
     """
     获取数据库会话的辅助函数
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: 创建 Session 管理机制
-    说明: 简便函数，获取 DatabaseSession
+    简便函数，获取 DatabaseSession
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 使用 SQLAlchemy Session
+    使用 SQLAlchemy Session
 
     Args:
         init_tables: 是否初始化表结构，默认 False
@@ -292,15 +268,9 @@ def get_session_from_run_id(
     """
     从 run_id 获取数据库会话
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: 创建 Session 管理机制
-    说明: 简便函数，从 run_id 获取 DatabaseSession
+    简便函数，从 run_id 获取 DatabaseSession
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: postgresql-migration
-    修改内容: 移除 base_dir 参数依赖，使用单一数据库
+    移除 base_dir 参数依赖，使用单一数据库
 
     Args:
         run_id: 运行标识符

@@ -1,24 +1,11 @@
 """
-创建时间: 2025-03-12
-创建者: TraeAI
-任务: RAG 模块初始化
 
-修改时间: 2026-03-30
-修改者: TraeAI
-任务: 重命名 RAGRetriever → DisambigContextProvider，移除向量检索层
 
-修改时间: 2026-04-10
-修改者: TraeAI
-任务: implement-level3-vector-retrieval
-修改内容: 重新导出 Level3VectorEvidence
+重新导出 Level3VectorEvidence
 
-修改时间: 2026-04-24
-任务: llm-mention-rerank-chain
-修改内容: 导出 LLM mention extraction service 与模型 rerank 边界类型，供上层按需注入。
+导出 LLM mention extraction service 与模型 rerank 边界类型，供上层按需注入。
 
-修改时间: 2026-04-25
-任务: evidence-service-request-unification
-修改内容: 公开语义切换到 NarrativeEvidenceService；不再导出 DisambigContextProvider 旧命名。
+公开语义切换到 NarrativeEvidenceService；不再导出 DisambigContextProvider 旧命名。
 """
 
 from src.rag.authority import Level1AuthorityProvider

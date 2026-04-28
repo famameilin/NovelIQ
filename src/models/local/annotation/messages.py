@@ -1,13 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: 消息构建相关方法
-
-修改时间: 2026-03-23
-修改者: TraeAI
-任务: prompt-consolidation
-修改内容: 移除旧版 prompt 导入
 """
 
 from __future__ import annotations
@@ -33,11 +25,6 @@ from src.models.local.prompts import (
 def _render_active_setup_pool_block(active_setup_pool: Sequence[object] | None) -> str:
     """
     渲染 Phase2 活跃 setup 池摘要块。
-
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: Prompt 只需要压缩后的 thread 摘要，不应直接吃 ORM 全对象，
-    这样既能控制 token，也能明确“历史 thread 只是辅助归属，不是放宽强伏笔门槛”的边界。
     """
     if not active_setup_pool:
         return ""
@@ -82,20 +69,6 @@ def _build_annotation_messages_v2(
 ) -> list[dict]:
     """
     构建第一次调用（基础标注）的messages
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: refactor-phase1-identity-extraction
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     messages = [{"role": "system", "content": SYSTEM_PROMPT_V2}]
 
@@ -110,7 +83,7 @@ def _build_annotation_messages_v2(
             evidence_bundle,
             include_level1_alias_mappings=alias_map is None,
         )
-        # 中文注释：EvidenceBundle 是新的主语义入口。
+        # EvidenceBundle 是新的主语义入口。
         # 兼容层字符串只在 bundle 没有产出对应 prompt block 时兜底，避免旧字段反向覆盖新设计。
         # 如果调用方显式给了 alias_map（包括空 dict），就不再把 bundle 里的 Level 1 别名裁决
         # 通过 disambig_context 反向注入，避免新旧入口共存时出现优先级错位。
@@ -157,18 +130,6 @@ def _build_foreshadowing_messages(
 ) -> list[dict]:
     """
     构建第二次调用（伏笔分析）的messages
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容:
-    - 清理已废弃的 next_chunk_text 残留接口，避免 Phase2 继续携带不存在的后文输入
-    - 当前文本优先：默认不再注入共享 evidence block，只有显式 opt-in 才参与 targeted ablation
-    - 删除 prev_chunk_text 兼容形参，保持消息构建函数只暴露真实会进入 prompt 的字段
     """
     messages = [{"role": "system", "content": FORESHADOWING_SYSTEM_PROMPT}]
 
@@ -188,7 +149,7 @@ def _build_foreshadowing_messages(
         user_content += "\n\n" + active_setup_pool_block
 
     if include_evidence_blocks and evidence_bundle is not None:
-        # 中文注释：Phase 2 只被动复用共享 evidence block，
+        # Phase 2 只被动复用共享 evidence block，
         # 不再引入 narrative 专用的二次渲染协议，避免这轮收口任务继续外扩。
         evidence_sections = render_annotation_evidence_blocks(evidence_bundle)
         if evidence_sections:

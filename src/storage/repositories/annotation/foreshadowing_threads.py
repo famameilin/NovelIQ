@@ -1,13 +1,7 @@
 """
-创建时间: 2026-04-26
-修改者: Codex
-任务: phase2-setup-pool
-说明: setup 池 / thread ledger 相关仓储操作。
+setup 池 / thread ledger 相关仓储操作。
 
-修改时间: 2026-04-26
-修改者: Codex
-任务: fix-phase2-setup-pool-review-findings
-修改内容: 收紧 active 池可见性边界与 linked thread 一致性校验，避免 invisible thread merge
+收紧 active 池可见性边界与 linked thread 一致性校验，避免 invisible thread merge
           和 setup 误链接污染 ledger
 """
 
@@ -38,10 +32,7 @@ def _get_active_setup_pool_limit() -> int:
     """
     读取当前 setup 池上限配置。
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    新建原因: active pool limit 现在来自 settings，不能再让默认参数在模块导入时把旧值固化。
+    active pool limit 现在来自 settings，不能再让默认参数在模块导入时把旧值固化。
     """
 
     configured_limit = settings.analysis.multi_phase_annotation.active_setup_pool_limit
@@ -53,9 +44,7 @@ class ActiveSetupPoolEntry:
     """
     Phase2 prompt 用的活跃 setup 摘要。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: prompt 只需要稳定摘要字段，不应直接暴露 ORM 对象给消息层。
+    prompt 只需要稳定摘要字段，不应直接暴露 ORM 对象给消息层。
     """
 
     setup_id: str
@@ -73,9 +62,7 @@ class ForeshadowingThreadProjection:
     """
     thread 同步后的 chunk 视图投影。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: chunk_annotation 需要写入“实际归属到哪个 thread”的结果，
+    chunk_annotation 需要写入“实际归属到哪个 thread”的结果，
     不能直接复用 chunk_foreshadowing 的原始 Phase2 输出。
     """
 
@@ -91,9 +78,7 @@ class ForeshadowingThreadView:
     """
     结果接口使用的 thread 汇总视图。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: API 需要稳定的序列化视图，避免把 ORM 细节泄漏到 route 层。
+    API 需要稳定的序列化视图，避免把 ORM 细节泄漏到 route 层。
     """
 
     setup_id: str
@@ -115,9 +100,7 @@ def _normalize_setup_summary(value: str) -> str:
     """
     标准化 setup_summary 以做 exact-match 去重。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: v1 明确不做模糊语义 merge，只做“同 kind + 同 payoff + 同标准化 summary”的保守并线。
+    v1 明确不做模糊语义 merge，只做“同 kind + 同 payoff + 同标准化 summary”的保守并线。
     """
 
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
@@ -127,10 +110,7 @@ def _utcnow_naive() -> datetime:
     """
     返回用于当前无时区列的 UTC 时间戳。
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    新建原因: Python 已弃用 datetime.utcnow()；这里统一生成“语义上是 UTC、落库仍保持 naive”的时间值，
+    Python 已弃用 datetime.utcnow()；这里统一生成“语义上是 UTC、落库仍保持 naive”的时间值，
     避免 warning 并保持现有表结构兼容。
     """
 
@@ -147,9 +127,7 @@ def _derive_thread_strength(
     """
     计算 thread 强度。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: thread 强度不由模型直接输出，而是根据命中次数、当前状态和 payoff 预期在仓储层稳定推导。
+    thread 强度不由模型直接输出，而是根据命中次数、当前状态和 payoff 预期在仓储层稳定推导。
     """
 
     if prior_strength == "high":
@@ -175,9 +153,7 @@ def _insert_thread_hit(
     """
     插入一条 thread 命中记录。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: 命中明细需要单独留存，后续 API 才能回放 anchor_chunk_ids 与 latest_reason。
+    命中明细需要单独留存，后续 API 才能回放 anchor_chunk_ids 与 latest_reason。
     """
 
     session.add(
@@ -198,9 +174,7 @@ def _count_thread_hits(session, setup_id: str) -> int:
     """
     统计某条 thread 的命中次数。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: 强度推导依赖命中次数，不能在调用方手工拼。
+    强度推导依赖命中次数，不能在调用方手工拼。
     """
 
     stmt = select(func.count()).select_from(ForeshadowingThreadHit).where(ForeshadowingThreadHit.setup_id == setup_id)
@@ -217,10 +191,7 @@ def _select_visible_active_threads(
     """
     读取当前 chunk 真正“可见”的 active setup 集合。
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    新建原因: prompt 侧和仓储侧 exact-match 必须共享同一套可见性边界，
+    prompt 侧和仓储侧 exact-match 必须共享同一套可见性边界，
     不能一边只看前 30 条、一边扫描所有 active thread。
     """
 
@@ -248,10 +219,7 @@ def _result_matches_thread_identity(
     """
     判断 Phase2 返回结果是否与目标 thread 身份一致。
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    新建原因: linked_setup_id 不能只验证“存在于可见池”，还要确认模型返回的稳定字段
+    linked_setup_id 不能只验证“存在于可见池”，还要确认模型返回的稳定字段
     与目标 thread 摘要一致，避免误把命中记到错误 setup 上。
     """
 
@@ -272,9 +240,7 @@ def _find_exact_matching_active_thread(
     """
     用精确规则查找应并入的已有 active thread。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: v1 只允许 exact-match 去重，防止 setup 池在没有明确证据时发生过度合并。
+    v1 只允许 exact-match 去重，防止 setup 池在没有明确证据时发生过度合并。
     """
 
     normalized_summary = _normalize_setup_summary(result.setup_summary)
@@ -296,19 +262,14 @@ def _archive_overflow_threads(session, *, run_id: str, limit: int | None = None)
     """
     按 last_chunk_id 从近到远保留 active 池，超限部分归档。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: 活跃池上限是固定工程口径，归档规则必须统一收口到仓储层。
+    活跃池上限是固定工程口径，归档规则必须统一收口到仓储层。
 
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-diagnosis-followup-review-findings
-    修改原因: `active` 已经足够表达“是否仍在 prompt 可见池”；
+    `active` 已经足够表达“是否仍在 prompt 可见池”；
     出池时不能再覆盖 thread 语义状态，否则 diagnosis 的 expectation 会误读 lifecycle。
     """
 
     pool_limit = limit if limit is not None else _get_active_setup_pool_limit()
-    # 中文注释：仓库 session 显式关闭了 autoflush；
+    # 仓库 session 显式关闭了 autoflush；
     # 这里必须先 flush，后面的 active 查询才能看到刚刚插入/更新的 thread，
     # 否则 overflow 判断会基于旧快照，留下“prompt 不可见但 active=true”的脏 thread。
     session.flush()
@@ -336,9 +297,7 @@ def fetch_active_foreshadowing_threads_for_prompt(
     """
     查询当前 chunk 可见的活跃 setup 池。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: Phase2 在调用前必须读取“截至 chunk_id-1 可见”的活跃池，不能偷看当前或后文状态。
+    Phase2 在调用前必须读取“截至 chunk_id-1 可见”的活跃池，不能偷看当前或后文状态。
     """
 
     rows = _select_visible_active_threads(
@@ -372,9 +331,7 @@ def sync_foreshadowing_thread(
     """
     将一条 Phase2 positive 结果同步到 thread ledger。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: thread 状态更新、命中插入、出池归档必须作为单一事务步骤执行，避免 chunk 视图和 ledger 漂移。
+    thread 状态更新、命中插入、出池归档必须作为单一事务步骤执行，避免 chunk 视图和 ledger 漂移。
     """
 
     if not result.has_foreshadowing:
@@ -513,9 +470,7 @@ def calculate_foreshadow_expectation(session, run_id: str) -> float | None:
     """
     基于 thread ledger 计算伏笔回收预期。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: diagnosis 展示值改由 setup ledger 驱动，不能再把 cloud_analysis 当成唯一真相源。
+    diagnosis 展示值改由 setup ledger 驱动，不能再把 cloud_analysis 当成唯一真相源。
     """
 
     stmt = select(ForeshadowingThread).where(
@@ -542,9 +497,7 @@ def fetch_foreshadowing_threads(session, run_id: str) -> list[ForeshadowingThrea
     """
     查询某次 run 的全部 setup thread 视图。
 
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: 结果接口与导出都需要统一的 thread 汇总视图，避免 route 层手写聚合。
+    结果接口与导出都需要统一的 thread 汇总视图，避免 route 层手写聚合。
     """
 
     threads_stmt = (

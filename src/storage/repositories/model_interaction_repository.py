@@ -1,8 +1,5 @@
 """
-创建时间: 2026-03-19
-创建者: TraeAI
-任务: 模型交互记录 Repository
-说明: 提供模型交互记录的增删改查操作
+提供模型交互记录的增删改查操作
 """
 
 from datetime import datetime
@@ -18,9 +15,6 @@ class ModelInteractionRepository(BaseRepository):
     """
     模型交互记录 Repository
 
-    创建时间: 2026-03-19
-    创建者: TraeAI
-    任务: 保存模型交互记录
     """
 
     def save_interaction(

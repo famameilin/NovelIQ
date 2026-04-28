@@ -1,9 +1,7 @@
 """
 RAG Level1 alias 查询边界。
 
-创建时间: 2026-04-23
-任务: p1-rag-retriever-split
-说明: 单独承接别名缓存与查询职责，避免 retriever 同时维护多层证据细节。
+单独承接别名缓存与查询职责，避免 retriever 同时维护多层证据细节。
 """
 
 from __future__ import annotations
@@ -20,9 +18,7 @@ class AliasLookup:
     """
     Level1: 别名表精确匹配。
 
-    创建时间: 2026-04-23
-    任务: p1-rag-retriever-split
-    说明: 保留原有缓存行为，但将 Level1 边界从 provider 主类中拆出。
+    保留原有缓存行为，但将 Level1 边界从 provider 主类中拆出。
     """
 
     def __init__(

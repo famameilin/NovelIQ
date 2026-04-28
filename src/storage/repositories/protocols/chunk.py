@@ -1,21 +1,11 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分protocols.py
-说明: 分块数据协议接口
+分块数据协议接口
 
-修改时间: 2026-03-26
-修改者: TraeAI
-任务: 简化文化指标系统
-修改内容: 修复 insert_chunk_culture 参数类型为具名序列
+修复 insert_chunk_culture 参数类型为具名序列
 
-修改时间: 2026-04-23
-任务: P2-基础设施解耦
-修改内容: 补齐 run_id 参数，并用命名 DTO 替代协议中的裸结构。
+补齐 run_id 参数，并用命名 DTO 替代协议中的裸结构。
 
-修改时间: 2026-04-23
-任务: P2-基础设施解耦
-修改内容: ChunkStyleData 仅用于类型检查时导入，避免协议模块增加运行时仓储依赖。
+ChunkStyleData 仅用于类型检查时导入，避免协议模块增加运行时仓储依赖。
 """
 
 from __future__ import annotations

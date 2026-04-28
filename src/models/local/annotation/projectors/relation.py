@@ -1,6 +1,4 @@
 """
-创建时间: 2026-04-23
-任务: annotation-projector-runtime-landing
 说明: Phase4 关系抽取结果投影器，负责 RelationExtractionResult 到 RelationChangeSnapshot 的转换。
 """
 
@@ -18,10 +16,6 @@ def convert_relation_result_to_snapshots(
 ) -> list[RelationChangeSnapshot]:
     """
     将 LLM 关系抽取结果转换为关系变化快照。
-
-    创建时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    新建原因: 将 relation 去重、方向性与对称边扩展从 Phase4 调用层迁到 projector。
     """
     snapshots: list[RelationChangeSnapshot] = []
     seen_keys: set[tuple[str, str, str]] = set()

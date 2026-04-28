@@ -1,10 +1,7 @@
 """
 地点相关数据模型
 
-创建时间: 2026-03-28
-创建者: TraeAI
-任务: implement-location-entity-type
-说明: 定义地点相关的数据模型
+定义地点相关的数据模型
 """
 
 from __future__ import annotations
@@ -19,15 +16,9 @@ class ChunkLocation(Base):
     """
     chunk 地点表
 
-    创建时间: 2026-03-28
-    创建者: TraeAI
-    任务: implement-location-entity-type
-    说明: 存储每个 chunk 中出现的地点
+    存储每个 chunk 中出现的地点
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-analysis-related-foreign-keys
-    修改内容: 为 novel_id 与 (chunk_id, run_id) 补充外键约束，避免地点记录脱离小说和 chunk 主表。
+    为 novel_id 与 (chunk_id, run_id) 补充外键约束，避免地点记录脱离小说和 chunk 主表。
     """
 
     __tablename__ = "chunk_locations"

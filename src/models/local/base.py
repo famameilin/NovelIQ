@@ -1,59 +1,4 @@
 """
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 拆分基础客户端类
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容:
-1. 将 OpenAI SDK 替换为 LiteLLM，适配异常处理
-2. 使用共享的 get_model_with_provider 函数
-
-修改时间: 2026-03-17
-修改者: TraeAI
-任务: code-quality-refactor - 提取API调用基类
-修改内容:
-1. 添加 _call_api 方法（非流式API调用）
-2. 添加 _call_api_stream 方法（流式API调用）
-3. 添加 _build_json_schema 方法
-4. 添加 _build_stream_response 方法
-5. 添加 _log_model_call 统一日志方法
-6. 添加 _parse_structured_response 方法
-
-修改时间: 2026-03-24
-修改者: TraeAI
-任务: Phase 2 - 统一客户端基类
-修改内容:
-1. 添加 _build_request_params 方法（统一请求参数构建）
-2. 添加 _extract_response_content 方法（提取响应内容）
-3. 添加 _parse_response 方法（解析JSON响应）
-4. 统一 reasoning_effort 处理逻辑
-
-修改时间: 2026-03-29
-修改者: TraeAI
-修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
-
-修改时间: 2026-04-07
-修改者: TraeAI
-任务: code-review-fix
-修改内容: 移除 _call_api_stream 中发送剩余 buffer 时的冗余条件判断
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: count-failed-llm-calls
-修改内容: 新增从响应对象提取文本并补记失败态 token 的通用 helper，覆盖“请求已发出但后处理失败”的场景
-
-修改时间: 2026-04-23
-修改者: Codex
-任务: p2-base-model-client-split
-修改内容:
-1. 将 transport、stream emitter、structured parser、token usage reporter 拆到独立模块
-2. BaseModelClient 保留兼容方法名，内部改为委托 helper，降低基础类复杂度
-
-修改时间: 2026-04-24
-修改者: Codex
-任务: omit-thinking-fields-when-disabled
-修改内容: 当 think 关闭时不再下发任何 think / reasoning_effort 相关字段，统一关闭态请求契约。
-
 本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
 """
 
@@ -94,17 +39,8 @@ def _ensure_strict_json_schema(node: Any) -> None:
     """
     递归收紧 JSON Schema，满足 strict structured output 的对象约束。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-phase2-response-format-schema
     说明: 仅为声明了 properties 的对象补充 additionalProperties=false，
     避免把 dict[str, T] 这类映射 schema 误改成不允许任何键。
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: fix-phase2-response-format-schema
-    修改内容: strict provider 还要求 properties 中的所有字段都进入 required，
-    因此对对象 schema 统一补全 required，避免 phase2/3/4 再因默认值字段缺席而被拒绝。
     """
     if isinstance(node, dict):
         # 只有真正的对象模型才补 false 和完整 required；
@@ -140,9 +76,6 @@ def _strip_internal_schema_properties(node: Any) -> None:
     """
     递归移除仅供运行时内部使用的 schema 字段。
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-disambig-cloud-schema-internal-field
     说明: `_thinking_content` 这类内部字段并不要求模型通过 JSON 输出返回，
     而是由流式响应中的 reasoning_content 单独提取，因此不应进入 strict response_format。
     """
@@ -198,16 +131,6 @@ class BaseModelClient:
     模型客户端基类
 
     提供公共的配置管理、客户端初始化、API调用等功能。
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 支持传入 session 用于保存模型交互记录
-    修改内容: 添加 _session 属性，用于在同一个 session 中保存模型交互记录
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 使用 OpenAI SDK 替代 LiteLLM
     """
 
     def __init__(
@@ -256,11 +179,6 @@ class BaseModelClient:
     def is_cloud_api(self) -> bool:
         """
         判断是否为云端API（云端API不支持top_k参数）
-
-        创建时间: 2026-03-20
-        创建者: TraeAI
-        任务: 修复 incremental_disambiguation 被错误标记为 local 的问题
-        修改内容: 将 _is_cloud_api 改为公共方法 is_cloud_api
         """
         base_url = self._config.base_url or ""
         if not base_url:
@@ -314,11 +232,6 @@ class BaseModelClient:
     ) -> None:
         """
         记录 token 使用量。
-
-        修改时间: 2026-04-23
-        修改者: Codex
-        任务: p2-base-model-client-split
-        修改内容: 改为委托 base_token_usage helper，BaseModelClient 仅保留兼容入口。
         """
         record_token_usage(self, response, call_type, chunk_id)
 
@@ -326,9 +239,6 @@ class BaseModelClient:
         """
         解析 token_usage 记录要落库的 novel_id。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: fix-token-usage-unknown-novel-id
         说明: token 记账现在已经受 novel 外键保护；
               若运行时上下文没有提供 novel_id，不能再写入 `unknown` 这种脏值。
         """
@@ -338,9 +248,6 @@ class BaseModelClient:
         """
         从响应对象中提取 reasoning token 数。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: distinguish-thinking-visibility
         说明: 优先读取 usage.completion_tokens_details.reasoning_tokens。
               对非标准对象和 dict 结构都做兼容，拿不到时返回 None。
         """
@@ -357,9 +264,6 @@ class BaseModelClient:
         """
         记录估算的token使用量
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: 为流式API提供token使用估算记录
         说明: 使用tiktoken估算的token数量，用于流式API场景
         """
         record_token_usage_estimated(
@@ -384,9 +288,6 @@ class BaseModelClient:
         """
         基于 prompt/response 文本统一记录估算 token。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: unify-estimated-token-accounting
         说明: token_usage 对外统一收敛为“估算消耗”口径。
               各条调用链都应走这一入口，避免 provider 实报、局部估算、
               以及漏记混成多套账本。
@@ -405,9 +306,6 @@ class BaseModelClient:
         """
         从响应对象中提取可用于 token 估算的文本。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: count-failed-llm-calls
         说明: 当请求已经返回，但后续结构化解析或业务校验失败时，
               仍应尽量按真实响应文本补记 token；若提取失败则保守回退为空字符串。
         """
@@ -428,9 +326,6 @@ class BaseModelClient:
         """
         基于响应对象补记统一估算 token。
 
-        创建时间: 2026-04-22
-        创建者: Codex
-        任务: count-failed-llm-calls
         说明: 主要用于“模型调用已完成，但解析/校验失败”的路径；
               此时至少应把 prompt 算上，若还能提取出响应文本，则连 completion 一并估算。
         """
@@ -448,15 +343,7 @@ class BaseModelClient:
         """
         构建 JSON Schema 用于结构化输出
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取API调用基类
         说明: 使用 Pydantic 的 model_json_schema() 方法生成 JSON Schema
-
-        修改时间: 2026-04-20
-        修改者: Codex
-        任务: fix-disambig-cloud-schema-internal-field
-        修改内容: 从 response_format 中剔除内部字段，避免云端 strict schema 校验误伤。
         """
         schema = response_model.model_json_schema()
         _strip_internal_schema_properties(schema)
@@ -473,15 +360,6 @@ class BaseModelClient:
     def _build_thinking_params(self, enable_thinking: bool) -> tuple[str, dict[str, bool]]:
         """
         Build thinking parameters for cloud/local providers.
-
-        修改时间: 2026-03-29
-        修改者: TraeAI
-        修改内容: extra_body 只包含 think 参数（云端模型不支持 thinking 字段）
-
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: omit-thinking-fields-when-disabled
-        修改内容: 关闭 thinking 时返回空参数占位，避免调用方继续把 false 契约下发到 provider。
         """
         if enable_thinking:
             return "medium", {"think": True}
@@ -498,24 +376,7 @@ class BaseModelClient:
         """
         非流式API调用
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取API调用基类
         说明: 统一的非流式API调用方法
-
-        修改时间: 2026-04-09
-        修改者: TraeAI
-        任务: 重构 BaseModelClient 使用 AsyncOpenAI
-        修改内容: 改为 async def，使用 await 调用
-
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: fix-llm-call-timeout
-        修改内容: 添加显式 timeout 参数传递。
-
-        修改时间: 2026-04-24
-        任务: deepseek-json-object-compat
-        修改内容: 允许上层选择 json_object response_format，同时仍用 response_model 做本地校验。
         """
         return await call_api(
             self,
@@ -535,25 +396,7 @@ class BaseModelClient:
         """
         流式API调用
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取API调用基类
         说明: 统一的流式API调用方法，支持实时控制台输出（仅云端API）
-
-        修改时间: 2026-04-07
-        修改者: TraeAI
-        任务: websocket-streaming-progress
-        修改内容: 添加 stream_callback 参数，支持流式输出回调，添加节流机制
-
-        修改时间: 2026-04-09
-        修改者: TraeAI
-        任务: 重构 BaseModelClient 使用 AsyncOpenAI
-        修改内容: 改为 async def，使用 async for 迭代流，使用 await 调用 stream_callback
-
-        修改时间: 2026-04-09
-        修改者: GLM-5
-        任务: refactor/sse-unified-event-bus
-        修改内容: stream_callback → emitter (StreamEvent 统一回调)
         """
         return await call_api_stream(
             self,
@@ -566,9 +409,6 @@ class BaseModelClient:
         """
         构建流式响应的模拟响应对象
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取API调用基类
         说明: 将流式收集的内容构建为标准响应格式
         """
         return build_stream_response(self._config.model, content, reasoning_content, usage=usage)
@@ -582,9 +422,6 @@ class BaseModelClient:
         """
         统一的模型调用日志记录
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取API调用基类
         说明: 统一记录云端/本地模型调用日志，区分格式
         """
         base_fields = {
@@ -604,15 +441,7 @@ class BaseModelClient:
         """
         解析结构化响应
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: code-quality-refactor - 提取API调用基类
         说明: 从响应中提取 JSON 并解析为 Pydantic 模型
-
-        修改时间: 2026-04-09
-        修改者: TraeAI
-        任务: fix-phase3-validation-error-logging
-        修改内容: 在 ValidationError 发生前记录原始 JSON 数据，便于调试
         """
         return parse_structured_response(response, response_model)
 
@@ -620,26 +449,7 @@ class BaseModelClient:
         """
         构建请求参数（统一方法）
 
-        创建时间: 2026-03-24
-        创建者: TraeAI
-        任务: Phase 2 - 统一客户端基类
         说明: 统一云端和本地的请求参数构建逻辑
-
-        修改时间: 2026-03-24
-        修改者: TraeAI
-        任务: Phase 2 - 统一客户端基类
-        修改内容: 统一 reasoning_effort 处理，本地使用 extra_body={"think": true/false}
-
-        修改时间: 2026-04-24
-        任务: deepseek-json-object-compat
-        修改内容: 云端未开启 thinking 时不再发送 reasoning_effort=none，兼容只接受
-                  low/medium/high/max/xhigh 的 OpenAI-compatible 服务商。
-
-        修改时间: 2026-04-24
-        修改者: Codex
-        任务: omit-thinking-fields-when-disabled
-        修改内容: 本地/云端统一在 think 关闭时不发送任何 thinking 相关字段，
-                  避免服务端把显式 false 当成不兼容扩展参数。
         """
         if not self._config.model:
             raise ValueError("model is required")
@@ -651,7 +461,7 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        # 中文注释：关闭 thinking 时统一保持请求体最小化，避免不同 provider 对显式 false 的兼容差异。
+        # 关闭 thinking 时统一保持请求体最小化，避免不同 provider 对显式 false 的兼容差异。
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}
@@ -661,9 +471,6 @@ class BaseModelClient:
         """
         提取响应内容（统一方法）
 
-        创建时间: 2026-03-24
-        创建者: TraeAI
-        任务: Phase 2 - 统一客户端基类
         说明: 统一云端和本地的响应内容提取逻辑，支持多种思考内容格式
         """
         return extract_response_content(message)
@@ -672,9 +479,6 @@ class BaseModelClient:
         """
         解析JSON响应（统一方法）
 
-        创建时间: 2026-03-24
-        创建者: TraeAI
-        任务: Phase 2 - 统一客户端基类
         说明: 支持处理 markdown 代码块包裹的 JSON，兼容云端和本地响应格式
         """
         return parse_response(content)

@@ -1,20 +1,8 @@
 """
 Aggregate Metrics 指标计算模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-说明: 提取所有指标计算函数
+提取所有指标计算函数
 
-修改历史:
-- 2026-03-13: 创建指标计算函数 (refactor-metrics-layer-functions)
-- 2026-03-13: 使用 tension_composite 计算三幕比例 (chunk-annotation-schema-refactor)
-- 2026-03-18: 提取为独立模块函数 (code-quality-refactor Task 11)
-
-修改时间: 2026-03-25
-修改者: TraeAI
-任务: fix-tone-distribution-semantic-error
-修改内容: 修正 _compute_tone_distribution 从 dialogue_tones 计算，移除 _TONE_LEGACY_MAPPING
 """
 
 from __future__ import annotations
@@ -78,10 +66,6 @@ def _compute_tone_distribution(dialogue_tones: list[str] | None) -> dict[str, fl
     """
     计算对话语气分布
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    修改内容: 从 dialogue_tones 计算语气分布，而非 emotional_valences
     """
     if not dialogue_tones:
         return {}
@@ -105,10 +89,6 @@ def compute_narrative_structure_metrics(
     """
     计算叙事结构聚合指标
 
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: 叙事时间轴功能设计评估
-    修改内容: 增加 compute_climax_profile 多高潮剖面指标
     """
     climax_profile = compute_climax_profile(tension_data.tension_composite_scores)
     return {
@@ -135,10 +115,6 @@ def compute_emotion_curve_metrics(
     """
     计算情感曲线聚合指标
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: improve-emotion-curve-accuracy
-    修改内容: 输出 lexical_emotion_trend 词表趋势指标
     """
     return {
         "emotion_recovery_speed": compute_emotion_recovery_speed(emotion_data.emotion_values),
@@ -189,15 +165,7 @@ def compute_language_style_metrics(
     """
     计算语言风格聚合指标
 
-    修改时间: 2026-03-25
-    修改者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    修改内容: 参数名从 emotional_valences 改为 dialogue_tones
 
-    修改时间: 2026-04-04
-    修改者: TraeAI
-    任务: fix-style-stats-missing-fields
-    修改内容: 添加 style_data 参数，计算 dialogue_ratio 和 avg_sent_len
     """
     result = {
         "tone_distribution": _compute_tone_distribution(dialogue_tones),
@@ -225,10 +193,6 @@ def compute_traditional_culture_metrics(
     """
     计算传统文化聚合指标
 
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度指标，只保留 idiom_density、classical_sentence_ratio、imagery_density
     """
     return {
         "idiom_density": compute_idiom_density(texts),

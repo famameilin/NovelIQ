@@ -1,14 +1,8 @@
 /**
  * TimelineNode - 时间轴节点组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-B 叙事时间轴
- * 说明: 时间轴上的单个节点，根据属性映射大小/颜色/图标
+ * 时间轴上的单个节点，根据属性映射大小/颜色/图标
  *
- * 修改时间: 2026-04-21
- * 任务: 修复叙事时间轴页面布局与节点语义表达
- * 修改内容:
  *   - 节点改为显式对齐轨道基线，避免出现节点与时间轴横线错位
  *   - 统一复用节点视觉语义配置，保证图例、节点、详情表达一致
  *   - 增强选中/高亮态，让节点在复杂时间轴中更容易被识别
@@ -141,7 +135,7 @@ function calculateNodeSize(importanceScore: number): number {
 
 /**
  * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 新建原因：默认节点仍保留基于张力的轻微偏移，但轨道组件也可以显式覆盖为分层布局偏移。
+ * 默认节点仍保留基于张力的轻微偏移，但轨道组件也可以显式覆盖为分层布局偏移。
  */
 function calculateDefaultVerticalOffset(tensionPercentile: number): number {
   const normalized = Math.min(Math.max(tensionPercentile, 0), 100);

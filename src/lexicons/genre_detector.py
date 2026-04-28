@@ -10,21 +10,8 @@
 - shuwen: 爽文/快节奏类
 - general: 通用/无法确定
 
-创建时间: 2026-04-06
-创建者: GLM-5
-任务: 词表与张力信号系统重构 - Task 10
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 类型检测模块修复
-修改内容:
-  - P0: indicators 纳入得分计算，权重为词表的 2 倍
-  - P1: 新增分段检测功能，支持类型序列输出
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 代码审查问题修复
-修改内容: 添加低置信度检测日志输出，便于后续调优
 """
 
 from __future__ import annotations
@@ -393,12 +380,6 @@ def detect_genre_weighted(
     Returns:
         WeightedGenreResult: 包含加权类型列表、采样数、原始得分
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 多类型加权混合词表方案
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    修改内容: 移除 max_samples 限制，min_samples 提升到 10
     """
     if registry is None:
         registry = LexiconRegistry()
@@ -424,9 +405,6 @@ def get_weighted_lexicon_config(
     Returns:
         词表配置列表，格式 [(genre, lexicon_config, weight), ...]
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 多类型加权混合词表方案
     """
     return get_weighted_lexicon_config_impl(genre_weights)
 

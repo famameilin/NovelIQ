@@ -1,15 +1,7 @@
 """
 模型交互记录器
 
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: 创建统一的模型交互记录接口
 说明: 提供统一的 record_model_interaction 函数，替代各处重复的 _save_interaction 实现
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: fix-token-coverage-status
-修改内容: 允许调用方显式写入 error 状态与错误信息，避免 coverage 把无响应失败误当成成功交互
 """
 
 from __future__ import annotations
@@ -26,9 +18,6 @@ def _normalize_reasoning_tokens(reasoning_tokens: int | None) -> int | None:
     """
     归一化 reasoning token 计数。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: distinguish-thinking-visibility
     说明: 统一处理 None / 非法值 / 负数，避免把坏值直接写进数据库。
     """
     if reasoning_tokens is None:
@@ -49,9 +38,6 @@ def _derive_thinking_state(
     """
     计算 thinking 可见性状态。
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: distinguish-thinking-visibility
     说明: 区分“有文本 think”“只有 reasoning token”“明确没有 think”
           与“当前链路拿不到足够证据”的 unknown，避免把未知静默记成 none。
     """
@@ -86,9 +72,6 @@ def record_model_interaction(
     """
     保存模型交互记录
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: 创建统一的模型交互记录接口
     说明: 统一的模型交互记录保存函数，支持可选 session 参数
 
     Args:

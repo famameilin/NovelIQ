@@ -1,9 +1,6 @@
 """
 消歧解析模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分parser.py
 说明: 提取消歧解析相关逻辑
 """
 
@@ -23,10 +20,6 @@ class DisambiguationParseError(Exception):
 def parse_alias_map(content: str, candidates: list[NameCountCandidate]) -> dict[str, str]:
     """
     解析消歧结果
-
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 支持 List[str] 和 List[Dict] 两种候选人名格式
     """
     parsed = try_parse_json(content)
     if parsed is None:

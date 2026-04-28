@@ -50,7 +50,7 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
   const themeSignature = useChartThemeSignature();
   // 统计各功能角色数量
   const functionData = useMemo(() => {
-    // 中文注释：颜色值是从当前主题 CSS 变量即时解析出来的；
+    // 颜色值是从当前主题 CSS 变量即时解析出来的；
     // 主题切换时即便 characters 不变，也必须重新计算扇区颜色。
     void themeSignature;
     const counts: Record<string, number> = {};

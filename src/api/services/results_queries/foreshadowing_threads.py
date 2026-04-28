@@ -1,7 +1,4 @@
 """
-创建时间: 2026-04-26
-修改者: Codex
-任务: phase2-setup-pool
 说明: foreshadowing thread 结果查询组装器。
 """
 
@@ -17,10 +14,6 @@ def _fetch_foreshadowing_threads(
 ) -> list[ForeshadowingThreadResponse]:
     """
     获取 setup thread 汇总视图。
-
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: route 层只需要稳定 response model，不应自己拼 thread 命中聚合。
     """
 
     rows = annotation_repo.fetch_foreshadowing_threads(run_id)

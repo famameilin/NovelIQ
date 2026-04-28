@@ -1,14 +1,9 @@
 /**
  * useCountUp - 数字动画 Hook
- * 
- * 创建时间: 2026-04-04
- * 创建者: AI Assistant
- * 任务: Sprint 1-A UI 组件
- * 说明: 数字从 start 到 value 的动画过渡
- * 
- * 修改时间: 2026-04-04
- * 修改者: AI Assistant
- * 修改内容: 修复 effect 中同步调用 setState 的警告
+ *
+ * 数字从 start 到 value 的动画过渡
+ *
+ * 修复 effect 中同步调用 setState 的警告
  */
 import { useEffect, useRef, useState } from "react";
 

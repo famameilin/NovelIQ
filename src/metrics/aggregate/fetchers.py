@@ -1,16 +1,8 @@
 """
 Aggregate Metrics 数据提取模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 11 拆分aggregate_metrics.py
-说明: 提取所有数据提取函数
+提取所有数据提取函数
 
-修改历史:
-- 2026-03-13: 创建数据提取函数 (refactor-metrics-layer-functions)
-- 2026-03-13: event_type 默认值改为"铺垫" (chunk-annotation-schema-refactor)
-- 2026-03-14: 使用 Repository 接口 (metrics-repository-refactor)
-- 2026-03-18: 提取为独立模块函数 (code-quality-refactor Task 11)
 """
 
 from __future__ import annotations
@@ -49,7 +41,7 @@ def _build_aggregate_graph_view(
     """
     获取 aggregate 允许依赖的 graph authority view。
 
-    中文注释：聚合指标属于 graph 下游消费者，只能读取 authority 暴露的稳定事实，
+    聚合指标属于 graph 下游消费者，只能读取 authority 暴露的稳定事实，
     不能再直接依赖 GraphRepository 的原始 row 形状。
     """
 
@@ -62,7 +54,7 @@ def _build_aggregate_alias_lookup(snapshot: Level1AuthoritySnapshot) -> dict[str
     """
     构建 aggregate 可复用的 alias -> canonical 映射。
 
-    中文注释：chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
+    chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
     Level1 规范实体消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
     和情绪序列时因为名称漂移被静默归零。
     """
@@ -85,9 +77,6 @@ def fetch_annotation_data(
     """
     提取 chunk_annotation 表数据。
 
-    修改时间: 2026-04-23
-    任务: P0-clean-row-index-access
-    修改内容: 使用 SQLAlchemy Row 字段名访问，避免聚合层依赖数据库列下标顺序。
     """
     rows = annotation_repo.fetch_full_annotations(run_id)
 
@@ -107,10 +96,6 @@ def fetch_emotion_data(
     """
     提取 chunk_curves 表数据
 
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: refactor-hardcoded-index-access
-    修改内容: 使用字段名访问替代硬编码索引
     """
     rows = stats_repo.fetch_chunk_curves_full(run_id)
     emotion_values = [row.net_density for row in rows]
@@ -133,9 +118,6 @@ def fetch_character_data(
     """
     提取角色数据。
 
-    修改时间: 2026-04-26
-    任务: graph-participant-refactor Worker 2
-    修改内容: 改为从 Level1 snapshot.canonical_entities 读取完整角色种子，
     避免 aggregate character stats 依赖 graph participant state 过滤结果。
     """
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
@@ -217,10 +199,6 @@ def fetch_culture_data(
     """
     提取 chunk_culture 表数据
 
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 只返回 imagery_densities
     """
     culture_rows = stats_repo.fetch_chunk_culture(run_id)
     imagery_densities = [row.imagery_lexicon_density for row in culture_rows if row.imagery_lexicon_density is not None]
@@ -237,10 +215,6 @@ def fetch_tension_data(
     """
     提取 chunk_curves 表的 tension_composite 数据
 
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: refactor-hardcoded-index-access
-    修改内容: 使用字段名访问替代硬编码索引
     """
     rows = stats_repo.fetch_chunk_curves_full(run_id)
     tension_composite_scores = [row.tension_composite for row in rows if row.tension_composite is not None]
@@ -254,15 +228,8 @@ def fetch_dialogue_data(
     """
     提取 chunk_dialogues 表的 tone 数据
 
-    创建时间: 2026-03-25
-    创建者: TraeAI
-    任务: fix-tone-distribution-semantic-error
-    说明: 从对话表获取语气类型数据用于聚合计算
+    从对话表获取语气类型数据用于聚合计算
 
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: refactor-hardcoded-index-access
-    修改内容: 使用字段名访问替代硬编码索引
     """
     rows = annotation_repo.fetch_chunk_dialogues_full(run_id)
     tones = [row.tone for row in rows if row.tone is not None]
@@ -276,10 +243,7 @@ def fetch_style_data(
     """
     提取 chunk_styles 表的风格指标数据
 
-    创建时间: 2026-04-04
-    创建者: TraeAI
-    任务: fix-style-stats-missing-fields
-    说明: 从 chunk_styles 表获取 dialogue_ratio 和 avg_sent_len 数据用于聚合计算
+    从 chunk_styles 表获取 dialogue_ratio 和 avg_sent_len 数据用于聚合计算
     """
     rows = chunk_repo.fetch_chunk_styles(run_id)
     dialogue_ratios = [row.dialogue_ratio for row in rows if row.dialogue_ratio is not None]

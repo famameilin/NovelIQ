@@ -1,42 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: 多阶段标注逻辑（并行和串行模式）
-
-修改时间: 2026-03-22
-修改者: TraeAI
-任务: rename-two-phase-to-multi-phase
-修改内容: 重命名为 multi_phase 模块，annotate_chunk_two_phase 改为 annotate_chunk_multi_phase
-
-修改时间: 2026-03-22
-修改者: TraeAI
-任务: parallel-three-phase
-修改内容: 并行模式扩展为三阶段并行（Phase1+Phase2并行，Phase3在Phase1后执行）
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: refactor-multi-phase-extract-private-functions
-修改内容: 提取私有函数减少重复代码，简化主函数为调度函数
-
-修改时间: 2026-03-29
-修改者: TraeAI
-任务: remove-unused-annotation-fields
-修改内容: 移除 character_appearances 参数
-
-修改时间: 2026-04-17
-修改者: TraeAI
-任务: fix-phase3-active-entities-fallback
-修改内容: _run_phase3_if_needed 新增 active_entities 参数，透传上游活跃实体上下文（含 fallback）
-
-修改时间: 2026-04-23
-修改者: Codex
-任务: p2-multi-phase-shared-context
-修改内容: 抽出并行/串行共享的 phase 事件发送与参数透传逻辑，减少两条执行路径重复代码
-
-修改时间: 2026-04-23
-任务: annotation-projector-runtime-landing
-修改内容: Phase2 伏笔结果归一化委托 foreshadowing projector，调度层不再承担输出投影。
 """
 
 from __future__ import annotations
@@ -68,27 +31,6 @@ PhaseEventAction = Literal["start", "progress", "complete", "output", "thinking"
 
 @dataclass
 class _Phase3Result:
-    """Phase3 执行结果
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-unknown-speaker-context
-    修改内容: 添加 dialogue_evidences 字段存储对话判断依据
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: use-phase3-identity-clue-in-disambiguation
-    修改内容: 添加 dialogue_identity_clues 字段存储身份线索
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: 删除 dialogue_evidences 字段
-    """
 
     dialogue_lengths: dict[str, int] | None = None
     dialogue_speakers: dict[int, list[str]] | None = None
@@ -106,15 +48,6 @@ class _Phase4Result:
 class _MultiPhaseExecutionContext:
     """
     多阶段标注共享执行上下文。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 将并行/串行路径重复透传的 phase 参数集中管理，避免两侧调用签名漂移。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 从 Phase2 共享上下文中移除 next_chunk_text 残留字段，避免再暗示存在后文输入。
     """
 
     client: AnnotationClient
@@ -148,10 +81,6 @@ async def _emit_phase_event(
 ) -> None:
     """
     发送统一的 phase 事件。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 将 parallel/serial 中重复的 StreamEvent 构造逻辑收口到单一入口。
     """
     if context.emitter is None:
         return
@@ -169,10 +98,6 @@ async def _emit_phase_event(
 async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> ChunkAnnotation:
     """
     从共享上下文执行 Phase1。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 统一 Phase1 参数透传，避免并行/串行路径分别维护同一套 kwargs。
     """
     return await _run_phase1(
         client=context.client,
@@ -194,10 +119,6 @@ async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> Chun
 async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> ForeshadowingResult | None:
     """
     从共享上下文执行 Phase2。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 统一 Phase2 参数透传，避免 parallel/serial 两条路径继续携带已废弃的后文字段。
     """
     return await _run_phase2(
         client=context.client,
@@ -219,10 +140,6 @@ async def _run_phase3_from_context(
 ) -> _Phase3Result:
     """
     从共享上下文执行 Phase3。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 锁定 Phase3 透传字段，避免 active_entities/fallback/evidence_bundle 在两条路径里走偏。
     """
     return await _run_phase3_if_needed(
         client=context.client,
@@ -243,17 +160,13 @@ async def _run_phase4_from_context(
 ) -> _Phase4Result:
     """
     从共享上下文执行 Phase4。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 统一 Phase4 的共享 evidence/fallback 透传，减少串并行路径重复实现。
     """
     phase4_bundle = await _resolve_phase4_bundle(context, known_characters)
     relations = await annotate_chunk_phase4(
         client=context.client,
         text=context.text,
         known_characters=known_characters,
-        # 中文注释：Phase4 统一只消费上游传入的 evidence_bundle，
+        # Phase4 统一只消费上游传入的 evidence_bundle，
         # multi_phase 负责调度，不在这里重建关系抽取上下文。
         evidence_bundle=phase4_bundle,
         chunk_id=context.chunk_id,
@@ -268,14 +181,9 @@ async def _resolve_phase4_bundle(
     known_characters: list[str] | None,
 ) -> EvidenceBundle | None:
     """
-    创建时间: 2026-04-25
-    修改时间: 2026-04-25
-    任务: evidence-service-request-unification
     修改说明: Phase4 的 relation request 需要等 Phase1 产出 known_characters 后再补全 requested_names/seed_entities；
           这一步统一委托 evidence service，multi_phase 只负责调度。
 
-    修改时间: 2026-04-25
-    任务: fix-phase4-request-scope
     修改说明: `requested_names` 只代表当前 relation consumer 真正要看的角色；
               template.seed_entities 只保留为检索锚点，不再反向抬升成 consumer target。
     """
@@ -310,10 +218,6 @@ async def _resolve_phase4_bundle(
 def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:
     """
     从 Phase1 结果提取 canonical 角色名列表。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 将串并行公共的 known_characters 派生逻辑收口。
     """
     return [character.name for character in annotation.characters] if annotation.characters else None
 
@@ -325,10 +229,6 @@ def _normalize_phase_outputs(
 ) -> tuple[list[str] | None, ForeshadowingResult | None]:
     """
     归一化 Phase1/2 的共享派生产物。
-
-    创建时间: 2026-04-23
-    任务: p2-multi-phase-shared-context
-    新建原因: 统一 known_characters 与伏笔校验的派生流程，减少 parallel/serial 的重复收尾代码。
     """
     known_characters = _resolve_known_characters(annotation)
     normalized_foreshadowing = _normalize_foreshadowing_result(
@@ -354,17 +254,6 @@ async def _run_phase1(
     run_id: str | None,
     disambig_context: str | None = None,
 ) -> ChunkAnnotation:
-    """执行 Phase1 基础标注
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-    """
     return await annotate_chunk_phase1(
         client=client,
         text=text,
@@ -394,22 +283,6 @@ async def _run_phase2(
     fallback_client: AnnotationClient | None,
     run_id: str | None,
 ) -> ForeshadowingResult | None:
-    """执行 Phase2 伏笔分析
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 删除 next_chunk_text 残留透传，保持 multi_phase 与真实 Phase2 输入边界一致。
-    """
     return await annotate_chunk_phase2(
         client=client,
         text=text,
@@ -418,7 +291,7 @@ async def _run_phase2(
         main_characters=main_characters,
         position_pct=position_pct,
         chapter_id=chapter_id,
-        # 中文注释：优先透传上游已准备好的 evidence bundle，
+        # 优先透传上游已准备好的 evidence bundle，
         # 保证 AnnotationClient -> multi_phase -> Phase2 的真实入口也能复用同一份证据上下文。
         evidence_bundle=evidence_bundle,
         fallback_client=fallback_client,
@@ -437,27 +310,6 @@ async def _run_phase3_if_needed(
     active_entities: str | None = None,
     fallback_client: AnnotationClient | None = None,
 ) -> _Phase3Result:
-    """根据条件执行 Phase3 对话归属判断
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-17
-    修改者: TraeAI
-    任务: fix-phase3-active-entities-fallback
-    修改内容: 新增 active_entities 参数，透传上游已解析好的活跃实体上下文（含 fallback）
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: strict-phase34-fallback
-    修改内容: 继续透传 fallback_client，统一多阶段标注的失败语义
-    """
     result = _Phase3Result()
 
     extracted_dialogues = extract_dialogues_from_text(text)
@@ -474,7 +326,7 @@ async def _run_phase3_if_needed(
         client=client,
         text=text,
         alias_map=alias_map,
-        # 中文注释：Phase3 和 Phase2 一样只复用上游同一份 evidence_bundle，
+        # Phase3 和 Phase2 一样只复用上游同一份 evidence_bundle，
         # 保持多阶段标注共享同一组 Level1/2/3 证据，而不是各阶段各自拼上下文。
         # 透传 active_entities，确保 Phase3 使用与 Phase1 相同的活跃实体上下文（含 fallback）。
         evidence_bundle=evidence_bundle,
@@ -512,16 +364,6 @@ def _normalize_foreshadowing_result(
     text: str,
     chunk_id: int | None,
 ) -> ForeshadowingResult | None:
-    """归一化伏笔结果，校验失败则返回 None
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-
-    修改时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    修改内容: 保留兼容入口，实际校验与归一化委托 foreshadowing projector。
-    """
     return project_foreshadowing_result(foreshadowing, text, chunk_id)
 
 
@@ -531,27 +373,6 @@ def _build_multi_phase_result(
     phase3_result: _Phase3Result,
     phase4_result: _Phase4Result,
 ) -> MultiPhaseAnnotationResult:
-    """构建多阶段标注结果
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: refactor-multi-phase-extract-private-functions
-
-    修改时间: 2026-03-28
-    修改者: TraeAI
-    任务: fix-unknown-speaker-context
-    修改内容: 添加 dialogue_evidences 字段
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: use-phase3-identity-clue-in-disambiguation
-    修改内容: 添加 dialogue_identity_clues 字段
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: 删除 dialogue_evidences 字段
-    """
     return MultiPhaseAnnotationResult(
         annotation=annotation,
         foreshadowing=foreshadowing,
@@ -590,20 +411,6 @@ async def annotate_chunk_multi_phase(
 ) -> MultiPhaseAnnotationResult:
     """
     多阶段标注模式
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def，使用 asyncio.gather 并行执行
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 删除已废弃的 next_chunk_text 参数，避免 multi_phase 对外继续暴露不存在的 Phase2 后文输入。
     """
     parallel = settings.analysis.multi_phase_annotation.parallel
 
@@ -677,20 +484,6 @@ async def annotate_chunk_parallel(
 ) -> MultiPhaseAnnotationResult:
     """
     并行模式：Phase1 和 Phase2 并行执行，Phase3 在 Phase1 完成后执行
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def，使用 asyncio.gather 替代 ThreadPoolExecutor
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 清理 next_chunk_text 残留，保持并行调度与当前 Phase2 热路径一致。
     """
     logger.debug("annotate_chunk_parallel start chunk_id={}", chunk_id)
     import asyncio
@@ -775,20 +568,6 @@ async def annotate_chunk_serial(
 ) -> MultiPhaseAnnotationResult:
     """
     串行模式
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 清理 next_chunk_text 残留，避免串行路径继续携带无效后文字段。
     """
     logger.debug("annotate_chunk_serial start chunk_id={}", chunk_id)
     context = _MultiPhaseExecutionContext(

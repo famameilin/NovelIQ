@@ -1,10 +1,7 @@
 /**
  * TensionOverlay - 张力曲线叠加面积图组件
  *
- * 创建时间: 2026-04-05
- * 创建者: GLM-5
- * 任务: Phase 2-B 叙事时间轴
- * 说明: 使用 ECharts 实现张力曲线面积图，叠加在时间轴下方
+ * 使用 ECharts 实现张力曲线面积图，叠加在时间轴下方
  */
 
 import { useRef, useEffect, useCallback } from "react";

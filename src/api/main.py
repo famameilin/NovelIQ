@@ -1,56 +1,5 @@
 """
 FastAPI 应用入口模块
-
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 小说量化分析 API 服务
-
-修改时间: 2026-03-11
-修改者: TraeAI
-修改内容: 添加端口占用检测功能，当使用 python -m uvicorn 启动时检测端口是否被占用
-
-修改时间: 2026-03-14
-修改者: TraeAI
-修改内容: 修复日志配置顺序问题，确保日志配置在导入 routes 模块之前完成，
-          避免 NovelService 初始化时的 DEBUG 日志输出到控制台
-
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容: 添加 .env 文件加载，确保环境变量正确设置
-
-修改时间: 2026-03-19
-修改者: TraeAI
-修改内容: 移除 load_dotenv，改为在 config 模块中统一加载
-
-修改时间: 2026-04-04
-修改者: AI Assistant
-任务: fix-backend-stability
-修改内容: 增强健康检查端点，添加数据库连接检测和降级响应
-
-修改时间: 2026-04-07
-修改者: TraeAI
-任务: websocket-streaming-progress
-修改内容: 注册 WebSocket 路由，支持实时进度推送
-
-修改时间: 2026-04-09
-修改者: TraeAI
-任务: 实现 SSE 路由和事件管理器
-修改内容: 注册 SSE 路由，支持 Server-Sent Events 实时推送
-修改时间: 2026-04-19
-修改者: TraeAI
-任务: Task 7 - 实现启动时任务恢复逻辑
-修改内容: 完善孤儿任务清理日志,记录清理的任务数量
-
-修改时间: 2026-04-26
-修改者: Codex
-任务: fix-phase2-setup-pool-review-findings
-修改内容: shutdown 时不再取消运行中的分析任务，避免正常停服被误记为“用户取消”
-
-修改时间: 2026-04-28
-修改者: Codex
-任务: fix-startup-schema-guard-boundary
-修改内容: 将数据库 schema 校验与孤儿任务恢复拆开处理，确保 focus-contract
-          fail-closed 异常不会被误降级成 zombie cleanup warning。
 """
 
 from __future__ import annotations
@@ -83,11 +32,6 @@ def _recover_orphaned_tasks() -> tuple[int, int]:
     """
     启动时收口上次进程遗留的孤儿任务。
 
-    创建时间: 2026-04-19
-    创建者: Codex (GPT-5)
-    任务: fix-task-system-review-findings
-    修改内容: 同时清理 orphaned running 与 orphaned cancelling，避免取消中的任务永久卡死。
-
     Returns:
         tuple[int, int]: (failed_count, cancelled_count)
     """
@@ -106,11 +50,6 @@ async def _resume_pending_tasks() -> tuple[int, int]:
     """
     启动时把 DB 中可恢复的 pending 任务重新接回执行器。
 
-    创建时间: 2026-04-20
-    创建者: Codex (GPT-5)
-    任务: fix-pending-task-pickup
-    修改内容: 为 DB 中遗留的 pending 任务补启动恢复链，避免进程重启后只能人工点击 resume。
-
     Returns:
         tuple[int, int]: (scheduled_count, cancelled_count)
     """
@@ -126,13 +65,13 @@ async def _resume_pending_tasks() -> tuple[int, int]:
 async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
 
-    # 中文注释：当前仓库以最新 schema 为唯一真相，启动时只初始化缺失表，
+    # 当前仓库以最新 schema 为唯一真相，启动时只初始化缺失表，
     # 其中 schema guard 失败必须直接阻断启动，不能被误记成“僵尸任务清理失败”。
     from src.storage.db import init_db
 
     init_db()
 
-    # 中文注释：真正允许降级的只有孤儿任务恢复链路；
+    # 真正允许降级的只有孤儿任务恢复链路；
     # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误。
     try:
         failed_count, cancelled_count = _recover_orphaned_tasks()
@@ -157,7 +96,7 @@ async def lifespan(app: FastAPI):
         try:
             from src.api.services.event_manager import event_manager
 
-            # 中文注释：正常应用 shutdown 不能把仍在运行的分析任务收口成“用户取消”。
+            # 正常应用 shutdown 不能把仍在运行的分析任务收口成“用户取消”。
             # TaskManager 的运行态缓存仅供当前进程使用，生产停服时由进程退出自然结束；
             # 测试里的单例清理由 fixture 显式调用 reset_for_testing() 处理。
             await event_manager.shutdown()
@@ -191,9 +130,6 @@ async def health_check():
     """
     健康检查端点
 
-    创建时间: 2026-04-04
-    创建者: AI Assistant
-    任务: fix-backend-stability
     说明: 检查数据库连接状态，异常时返回 503
     """
     from src.storage.db import get_pool_status, get_session
@@ -236,14 +172,6 @@ register_exception_handlers(app)
 def is_port_in_use(port: int) -> bool:
     """
     检测指定端口是否被占用
-
-    创建时间: 2026-03-11
-    创建者: TraeAI
-    任务: 添加端口占用检测功能
-
-    修改时间: 2026-03-11
-    修改者: TraeAI
-    修改内容: 同时检测 127.0.0.1 和 0.0.0.0 两个地址，避免 Windows 下的绑定差异问题
     """
     for check_host in ["127.0.0.1", "0.0.0.0"]:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -257,10 +185,6 @@ def is_port_in_use(port: int) -> bool:
 def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False) -> None:
     """
     启动 FastAPI 服务器，带端口占用检测
-
-    创建时间: 2026-03-11
-    创建者: TraeAI
-    任务: 添加端口占用检测功能
     """
     import uvicorn
 

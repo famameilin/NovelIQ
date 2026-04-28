@@ -45,10 +45,7 @@ vi.mock("framer-motion", () => ({
 }));
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: StreamOutput 需要真实消费 Zustand 多流状态，因此测试直接用 store seed 当前 task/progress 与并行流事件。
+ * StreamOutput 需要真实消费 Zustand 多流状态，因此测试直接用 store seed 当前 task/progress 与并行流事件。
  */
 function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
   return {
@@ -68,10 +65,7 @@ function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
 }
 
 /**
- * 创建时间: 2026-04-27
- * 修改者: Codex
- * 任务: phase3-multi-stream-ui
- * 新建原因: 输出面板依赖当前 task 和 progress 才会渲染，需要统一初始化上下文避免每个测试重复手写 store 搭建。
+ * 输出面板依赖当前 task 和 progress 才会渲染，需要统一初始化上下文避免每个测试重复手写 store 搭建。
  */
 function seedTaskContext(taskId: string) {
   act(() => {

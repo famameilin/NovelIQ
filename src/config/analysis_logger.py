@@ -13,15 +13,6 @@ _active_file_handlers: dict[str, int] = {}
 class AnalysisLogger:
     """
     分析日志记录器
-
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 分析流程日志记录
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 合并本地和云端日志为统一的 prompts.jsonl
-    修改内容: 移除 local_prompts.jsonl 和 cloud_prompts.jsonl 的区分，统一使用 prompts.jsonl
     """
 
     def __init__(self, log_base_dir: Path, task_id: str):
@@ -71,9 +62,6 @@ class AnalysisLogger:
         """
         记录统一的 prompt/response 日志
 
-        创建时间: 2026-03-17
-        创建者: TraeAI
-        任务: 合并本地和云端日志
         说明: 统一的日志记录方法，不再区分本地和云端
         """
         entry = {

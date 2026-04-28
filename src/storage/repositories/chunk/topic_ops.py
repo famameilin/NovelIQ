@@ -1,8 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - 拆分chunk_repository.py
-说明: 分块主题数据操作
+分块主题数据操作
 """
 
 from __future__ import annotations

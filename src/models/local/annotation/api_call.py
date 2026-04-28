@@ -1,13 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: API调用和验证相关逻辑
-
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: migrate-litellm-to-openai-sdk
-修改内容: 使用 OpenAI SDK，移除 get_model_with_provider 调用
 """
 
 from __future__ import annotations
@@ -33,16 +25,6 @@ T = TypeVar("T")
 def parse_annotation(content: str) -> ChunkAnnotation:
     """
     解析标注结果
-
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 重构本地标注客户端集成 Instructor
-    修改内容: 添加说明，此方法作为 fallback 使用，Instructor 会自动解析
-
-    修改时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
     """
     from src.models.local.parser import build_annotation, make_empty_annotation
 
@@ -62,15 +44,7 @@ def extract_names_from_annotation(annotation: ChunkAnnotation) -> list[str]:
     """
     从标注结果中提取所有名字
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
     说明: 从 AnnotationClient 类方法提取为独立函数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 relations 相关逻辑
     """
     names: set[str] = set()
     for character in annotation.characters:
@@ -92,25 +66,7 @@ def validate_annotation(
     """
     验证标注结果中的人名是否在原文中出现
 
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: 简化重试逻辑
     说明: 只验证，不重试。验证失败直接抛异常
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 添加 content_clean 参数，在异常中包含原始输出
-
-    修改时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
-
-    修改时间: 2026-03-27
-    修改者: Codex
-    任务: fix-character-appearance-validation-conflict
-    修改内容: 将“来源不存在”和“relations/dialogues 悬空引用”分开校验，
-        不再要求 character_appearances 中的名字强制同步到 characters
     """
     names_in_result = extract_names_from_annotation(result)
     hallucinated_names = set(validate_names_in_sources(names_in_result, sources))
@@ -148,20 +104,7 @@ def execute_validation_retry_call(
     """
     执行单次验证重试调用
 
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取API调用逻辑
     说明: 从_retry_with_validation中提取的API调用逻辑
-
-    修改时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: migrate-litellm-to-openai-sdk
-    修改内容: 使用 OpenAI SDK，移除 extra_body，添加 reasoning_effort 支持
     """
     config.validate()
 
@@ -219,20 +162,7 @@ def log_annotation_start(
     """
     封装标注开始日志
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-model-interaction-layer
     说明: 从 annotate_chunk 拆分出的开始日志逻辑
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: 优化云端模型日志，显示更多调用信息
-    修改内容: 添加 novel_id、phase 参数到日志
-
-    修改时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
     """
     if is_cloud:
         logger.info(
@@ -268,20 +198,7 @@ def should_use_stream(config: Any, is_cloud: bool) -> bool:
     """
     判断是否应该使用流式响应模式
 
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 启用云端Stream模式
     说明: 根据配置和是否为云端API决定是否使用流式模式
-
-    修改时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-phase3-followup-review-findings
-    修改内容: 接入 stream_cloud_only 语义，避免结构化主链继续把 streaming 配置当作死开关。
     """
     if not config.stream_enabled:
         return False
