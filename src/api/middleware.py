@@ -82,7 +82,7 @@ async def invalid_file_handler(request: Request, exc: InvalidFileError) -> JSONR
 
 
 async def analysis_not_complete_handler(request: Request, exc: AnalysisNotCompleteError) -> JSONResponse:
-    logger.error(f"AnalysisNotCompleteError: {exc.message}")
+    logger.info(f"AnalysisNotCompleteError: {exc.message}")
     error_response = create_error_response(
         detail=exc.message,
         error_type="AnalysisNotCompleteError",
