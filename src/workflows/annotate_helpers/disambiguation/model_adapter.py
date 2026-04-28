@@ -1,7 +1,7 @@
 """
 消歧模型调用与交互记录适配层
 
-统一承接消歧模型调用、重试、消息构建与交互记录，避免主流程同时承担编排与审计职责。
+统一承接消歧模型调用、重试、消息构建与交互记录，避免主流程同时承担编排与审计职责
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ from src.models.local.disambiguation import (
 @dataclass(frozen=True)
 class ModelCallSpec:
     """
-    模型调用规格。
+    模型调用规格
 
-    用统一的数据结构承接“如何调用模型”和“如何记录交互”，让重试适配层不再感知具体业务阶段。
+    用统一的数据结构承接“如何调用模型”和“如何记录交互”，让重试适配层不再感知具体业务阶段
     """
 
     interaction_type: str
@@ -42,9 +42,9 @@ class ModelCallSpec:
 
 def get_client_model_name(client: DisambiguationLike) -> str:
     """
-    安全获取客户端模型名。
+    安全获取客户端模型名
 
-    轻量 fallback client 的 `_config` 可能只是占位对象，不能假定一定有 `model` 属性。
+    轻量 fallback client 的 `_config` 可能只是占位对象，不能假定一定有 `model` 属性
     """
     config = getattr(client, "_config", None)
     model_name = getattr(config, "model", None)
@@ -55,9 +55,9 @@ def get_client_model_name(client: DisambiguationLike) -> str:
 
 def supports_canonical_reselect(client: DisambiguationLike) -> bool:
     """
-    判断客户端是否支持额外的模型代表名重选。
+    判断客户端是否支持额外的模型代表名重选
 
-    fallback client 会显式声明不支持，主流程必须回退到已有 heuristic。
+    fallback client 会显式声明不支持，主流程必须回退到已有 heuristic
     """
     checker = getattr(client, "supports_canonical_reselect", None)
     if callable(checker):
@@ -69,7 +69,7 @@ def supports_canonical_reselect(client: DisambiguationLike) -> bool:
 
 def build_disambig_response_text(result: Any) -> str:
     """
-    构建消歧响应文本。
+    构建消歧响应文本
 
     """
     if isinstance(result, ExtendedDisambigResult):
@@ -113,9 +113,9 @@ def build_disambig_response_text(result: Any) -> str:
 
 def get_git_audit_info() -> dict[str, str]:
     """
-    获取 git 审计信息。
+    获取 git 审计信息
 
-    在模块级做缓存，避免每次模型调用都重复 fork git 子进程。
+    在模块级做缓存，避免每次模型调用都重复 fork git 子进程
     """
     if not hasattr(get_git_audit_info, "_cache"):
         info: dict[str, str] = {}
@@ -152,9 +152,9 @@ async def call_with_recorded_retry(
     record_interaction: Callable[..., Any],
 ) -> Any:
     """
-    统一执行带交互记录的模型调用重试。
+    统一执行带交互记录的模型调用重试
 
-    将重试、耗时统计、错误记录与日志收敛到一处，业务编排层只保留阶段切换。
+    将重试、耗时统计、错误记录与日志收敛到一处，业务编排层只保留阶段切换
     """
     max_retries = settings.runtime.disambiguation.max_retries
     last_exception = None
@@ -221,9 +221,9 @@ def build_disambiguation_call_spec(
     stage_name: str,
 ) -> ModelCallSpec:
     """
-    构建普通消歧阶段的模型调用规格。
+    构建普通消歧阶段的模型调用规格
 
-    把 prompt 构造与 invoke 细节封装为统一规格，供适配层执行。
+    把 prompt 构造与 invoke 细节封装为统一规格，供适配层执行
     """
 
     async def _invoke() -> Any:
@@ -256,9 +256,9 @@ def build_canonical_reselect_call_spec(
     stage_name: str,
 ) -> ModelCallSpec:
     """
-    构建最终代表名重选阶段的模型调用规格。
+    构建最终代表名重选阶段的模型调用规格
 
-    将 cluster reselect 的消息构建与调用方式从主流程中抽离。
+    将 cluster reselect 的消息构建与调用方式从主流程中抽离
     """
 
     async def _invoke() -> Any:

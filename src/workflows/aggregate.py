@@ -57,7 +57,7 @@ TENSION_COMPOSITE_VERSION = "v2-weighted"
 
 def _compute_tension_composite(signals: list[dict]) -> list[float]:
     """
-    计算张力综合指数 (v2 - 加权平均模型).
+    计算张力综合指数 (v2 - 加权平均模型)
 
     相比 v1 的改进:
     - 使用语义加权替代等权平均，避免 sent_len_std 主导结果
@@ -160,7 +160,7 @@ def _log_aggregate_results(agg_result) -> None:
 
 def _build_quality_gate_report(run_id: str, agg_result, chunk_repo: ChunkRepository) -> dict[str, Any]:
     """
-    构建聚合质量门报告。
+    构建聚合质量门报告
 
     """
     language_style = agg_result.language_style if isinstance(agg_result.language_style, dict) else {}
@@ -192,7 +192,7 @@ def _build_lexical_curve_quality_report(
     chunk_curves: list[tuple[int, float, float, float, float, float, float]],
 ) -> dict[str, Any]:
     """
-    构建词汇情绪曲线质量报告。
+    构建词汇情绪曲线质量报告
 
     """
     if not chunk_curves:
@@ -322,7 +322,7 @@ async def run_aggregate(
     total_chunks = len(chunk_texts)
     logger.info(f"loaded {total_chunks} chunks from db")
 
-    # 使用 LexiconRegistry v2 加载词表，支持分层、去重和领域扩展。
+    # 使用 LexiconRegistry v2 加载词表，支持分层、去重和领域扩展
     registry = LexiconRegistry()
     registry.load()
 

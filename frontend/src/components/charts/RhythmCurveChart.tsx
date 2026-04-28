@@ -119,8 +119,8 @@ export const RhythmCurveChart = forwardRef<ReactEChartsCore, RhythmCurveChartPro
 
       const series = SERIES_CONFIG.map((config) => {
         const color = colorMap[config.colorVar];
-        // 老 run 的综合张力仍可能是 0-10 量级，而新的 surface_tension 目前是 0-1。
-        // 这里先只在前端显示层把表层张力按 x10 对齐，便于验证视觉效果，不改后端语义。
+        // 老 run 的综合张力仍可能是 0-10 量级，而新的 surface_tension 目前是 0-1
+        // 这里先只在前端显示层把表层张力按 x10 对齐，便于验证视觉效果，不改后端语义
         const values = data.map((d) => {
           const rawValue = d[config.key as keyof ChunkCurvePoint];
           if (typeof rawValue !== "number") return null;

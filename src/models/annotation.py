@@ -49,8 +49,8 @@ class AnnotationClient(BaseModelClient):
     """
     统一标注客户端
 
-    提供文本块的语义标注功能，支持单阶段和双阶段标注模式。
-    同时支持本地和云端模型，通过 base_url 自动检测。
+    提供文本块的语义标注功能，支持单阶段和双阶段标注模式
+    同时支持本地和云端模型，通过 base_url 自动检测
     """
 
     def __init__(
@@ -64,7 +64,7 @@ class AnnotationClient(BaseModelClient):
         session: Any | None = None,
     ) -> None:
         """
-        初始化 annotation 客户端。
+        初始化 annotation 客户端
 
         结构化输出机制说明:
         - 已移除 instructor_client_factory 参数，结构化输出不再依赖 Instructor 库
@@ -166,7 +166,7 @@ class AnnotationClient(BaseModelClient):
         call_type: str | None = None,
     ) -> Any:
         """
-        调用 annotation 模型 API。
+        调用 annotation 模型 API
         """
         if not self._config.model:
             raise ValueError("model is required")
@@ -192,7 +192,7 @@ class AnnotationClient(BaseModelClient):
                     ),
                 )
             except StructuredOutputError as exc:
-                # 结构化解析失败时，模型响应可能已经返回，必须保留 token 补记。
+                # 结构化解析失败时，模型响应可能已经返回，必须保留 token 补记
                 if call_type and exc.raw_response is not None:
                     token_task_type = "annotation" if self._task_type == "annotation_fallback" else None
                     self._record_estimated_token_usage_from_response(

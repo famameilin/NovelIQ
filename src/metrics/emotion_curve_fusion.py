@@ -1,5 +1,5 @@
 """
-为结果展示层构建 AI 主导、词汇/语气/风格辅助的情绪曲线。
+为结果展示层构建 AI 主导、词汇/语气/风格辅助的情绪曲线
 
 本模块不改写 chunk_curves 表中的词汇曲线存储，只负责把已有的：
 - chunk_annotation.emotional_valence
@@ -7,7 +7,7 @@
 - chunk_dialogues.tone
 - chunk_style 风格信号
 
-融合为面向前端单曲线展示的最终情绪走势。
+融合为面向前端单曲线展示的最终情绪走势
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ _LEXICAL_DENSITY_SCALE = 0.02
 @dataclass(slots=True)
 class DisplayEmotionCurvePoint:
     """
-    展示层情绪曲线点，保留字段名访问，避免下标式消费。
+    展示层情绪曲线点，保留字段名访问，避免下标式消费
     """
 
     chunk_id: int
@@ -61,14 +61,14 @@ class DisplayEmotionCurvePoint:
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     """
-    限制数值范围，避免融合后曲线越界。
+    限制数值范围，避免融合后曲线越界
     """
     return max(low, min(high, value))
 
 
 def _normalize_lexical_density(value: float | None) -> float:
     """
-    将词汇密度映射到 0-1 区间，降低长 chunk 对密度的过度稀释影响。
+    将词汇密度映射到 0-1 区间，降低长 chunk 对密度的过度稀释影响
     """
     raw_value = float(value or 0.0)
     if raw_value <= 0:
@@ -90,7 +90,7 @@ def _soft_signed(value: float, scale: float = 1.35) -> float:
 
 def _tone_signal(tones: Sequence[str]) -> tuple[float, float]:
     """
-    聚合对话语气的方向与强度，方向用于辅助判定，强度用于补充显性情绪热度。
+    聚合对话语气的方向与强度，方向用于辅助判定，强度用于补充显性情绪热度
     """
     values = [_TONE_SIGNAL_MAP[tone] for tone in tones if tone in _TONE_SIGNAL_MAP]
     if not values:
@@ -102,7 +102,7 @@ def _tone_signal(tones: Sequence[str]) -> tuple[float, float]:
 
 def _style_intensity(style_row: Any | None) -> float:
     """
-    将感官、惊叹和对话占比折算为弱情绪强度信号，避免无显式情绪词时整段完全归零。
+    将感官、惊叹和对话占比折算为弱情绪强度信号，避免无显式情绪词时整段完全归零
     """
     if style_row is None:
         return 0.0
@@ -115,7 +115,7 @@ def _style_intensity(style_row: Any | None) -> float:
 
 def _annotation_signal(emotional_valence: str | None) -> float:
     """
-    将五档情绪标签映射为主导方向信号，保持 Phase1 的判断权重高于其他辅助特征。
+    将五档情绪标签映射为主导方向信号，保持 Phase1 的判断权重高于其他辅助特征
     """
     if emotional_valence is None:
         return 0.0
@@ -130,7 +130,7 @@ def build_display_emotion_curve(
     surface_tension_by_chunk: Mapping[int, float] | None = None,
 ) -> list[DisplayEmotionCurvePoint]:
     """
-    构建面向结果展示的融合情绪曲线。
+    构建面向结果展示的融合情绪曲线
 
     融合策略：
     - AI 标注 emotional_valence 决定主方向
@@ -201,7 +201,7 @@ def build_display_emotion_curve(
             pos_value = _soft_positive(positive_raw)
         else:
             # 当 AI 判中性时，不强行制造方向；只让显式词汇和语气提供弱偏向，
-            # 这样真正平稳段落仍能保持接近 0，而隐性情绪不至于全部消失。
+            # 这样真正平稳段落仍能保持接近 0，而隐性情绪不至于全部消失
             positive_raw = lexical_pos * 0.68 + max(tone_direction, 0.0) * 0.24 + style_intensity * 0.1
             negative_raw = lexical_neg * 0.68 + max(-tone_direction, 0.0) * 0.24 + style_intensity * 0.1
             pos_value = _soft_positive(positive_raw)

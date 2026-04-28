@@ -3,7 +3,7 @@
 
 移除 cultural_density 字段
 
-将 imagery_lexicon_density 并入 ChunkStyleData，移除独立 culture 兼容写入链路。
+将 imagery_lexicon_density 并入 ChunkStyleData，移除独立 culture 兼容写入链路
 """
 
 from __future__ import annotations

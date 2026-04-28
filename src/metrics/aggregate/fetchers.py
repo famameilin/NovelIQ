@@ -39,10 +39,10 @@ def _build_aggregate_graph_view(
     run_id: str,
 ):
     """
-    获取 aggregate 允许依赖的 graph authority view。
+    获取 aggregate 允许依赖的 graph authority view
 
     聚合指标属于 graph 下游消费者，只能读取 authority 暴露的稳定事实，
-    不能再直接依赖 GraphRepository 的原始 row 形状。
+    不能再直接依赖 GraphRepository 的原始 row 形状
     """
 
     service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
@@ -52,11 +52,11 @@ def _build_aggregate_graph_view(
 
 def _build_aggregate_alias_lookup(snapshot: Level1AuthoritySnapshot) -> dict[str, str]:
     """
-    构建 aggregate 可复用的 alias -> canonical 映射。
+    构建 aggregate 可复用的 alias -> canonical 映射
 
     chunk 侧仍可能保留原文别名，但 aggregate 已经改成按 authority
     Level1 规范实体消费规范名，因此这里必须先把原始名字归一化，避免补充情绪分数
-    和情绪序列时因为名称漂移被静默归零。
+    和情绪序列时因为名称漂移被静默归零
     """
 
     return {
@@ -65,7 +65,7 @@ def _build_aggregate_alias_lookup(snapshot: Level1AuthoritySnapshot) -> dict[str
 
 
 def _canonicalize_aggregate_character_name(name: str, alias_lookup: dict[str, str]) -> str:
-    """将 chunk 侧角色名折叠到 authority 规范名。"""
+    """将 chunk 侧角色名折叠到 authority 规范名"""
 
     return alias_lookup.get(name, name)
 
@@ -75,7 +75,7 @@ def fetch_annotation_data(
     run_id: str,
 ) -> AnnotationData:
     """
-    提取 chunk_annotation 表数据。
+    提取 chunk_annotation 表数据
 
     """
     rows = annotation_repo.fetch_full_annotations(run_id)
@@ -116,9 +116,9 @@ def fetch_character_data(
     run_id: str,
 ) -> CharacterData:
     """
-    提取角色数据。
+    提取角色数据
 
-    避免 aggregate character stats 依赖 graph participant state 过滤结果。
+    避免 aggregate character stats 依赖 graph participant state 过滤结果
     """
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     snapshot = authority_service.build_level1_snapshot(run_id)
@@ -164,7 +164,7 @@ def fetch_relation_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
 ) -> RelationData:
-    """提取 graph_* 关系数据（权威来源）。"""
+    """提取 graph_* 关系数据（权威来源）"""
     graph_view = _build_aggregate_graph_view(annotation_repo, run_id)
     current_relations = list(graph_view.confirmed_relations)
     relation_events = list(graph_view.relation_events)

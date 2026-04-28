@@ -1,7 +1,7 @@
 """
-项目级结构化输出适配层。
+项目级结构化输出适配层
 
-说明: 统一 json_schema / json_object 的调用、解析与响应元信息提取。
+说明: 统一 json_schema / json_object 的调用、解析与响应元信息提取
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from src.models.structured_output.provider_capabilities import resolve_structure
 @dataclass(frozen=True)
 class StructuredOutputRequest[T: BaseModel]:
     """
-    单次结构化输出请求。
+    单次结构化输出请求
     """
 
     messages: list[dict[str, Any]]
@@ -38,7 +38,7 @@ class StructuredOutputRequest[T: BaseModel]:
 @dataclass(frozen=True)
 class StructuredOutputResult[T: BaseModel]:
     """
-    单次结构化输出结果。
+    单次结构化输出结果
     """
 
     parsed: T
@@ -51,7 +51,7 @@ class StructuredOutputResult[T: BaseModel]:
 
 class StructuredOutputError(ValueError):
     """
-    结构化输出调用或解析失败。
+    结构化输出调用或解析失败
     """
 
     def __init__(
@@ -76,7 +76,7 @@ def build_response_format[T: BaseModel](
     mode: StructuredOutputMode,
 ) -> dict[str, Any] | None:
     """
-    构建 provider 原生 response_format。
+    构建 provider 原生 response_format
     """
     if mode == JSON_SCHEMA_MODE:
         return client._build_json_schema(response_model)
@@ -90,7 +90,7 @@ async def call_structured_output[T: BaseModel](
     request: StructuredOutputRequest[T],
 ) -> StructuredOutputResult[T]:
     """
-    执行一次结构化模型调用。
+    执行一次结构化模型调用
     """
     mode = resolve_structured_output_mode(client, request.call_type)
     if mode == JSON_OBJECT_MODE:
@@ -105,7 +105,7 @@ async def _call_openai_compatible[T: BaseModel](
     mode: StructuredOutputMode,
 ) -> StructuredOutputResult[T]:
     """
-    调用 OpenAI-compatible transport 并执行本地 Pydantic 校验。
+    调用 OpenAI-compatible transport 并执行本地 Pydantic 校验
     """
     raw_response_format = build_response_format(client, request.response_model, mode)
     raw_response: Any | None = None
@@ -152,7 +152,7 @@ def _parse_openai_compatible_response[T: BaseModel](
     mode: StructuredOutputMode,
 ) -> StructuredOutputResult[T]:
     """
-    解析 OpenAI-compatible raw response。
+    解析 OpenAI-compatible raw response
     """
     if isinstance(raw_response, response_model):
         parsed = raw_response
@@ -191,7 +191,7 @@ def _parse_openai_compatible_response[T: BaseModel](
 
 def _extract_response_metadata(client: Any, response: Any) -> tuple[str, str | None, int | None]:
     """
-    从 raw response 中提取审计和 token 账本需要的元信息。
+    从 raw response 中提取审计和 token 账本需要的元信息
     """
     response_text = ""
     thinking_content: str | None = None
@@ -212,7 +212,7 @@ def _extract_response_metadata(client: Any, response: Any) -> tuple[str, str | N
 
 def _dump_parsed_result(parsed: BaseModel) -> str:
     """
-    将 Pydantic 响应转换为稳定文本。
+    将 Pydantic 响应转换为稳定文本
     """
     try:
         return parsed.model_dump_json(ensure_ascii=False)
@@ -222,7 +222,7 @@ def _dump_parsed_result(parsed: BaseModel) -> str:
 
 def _validate_json_output_prompt_contract(messages: list[dict[str, Any]]) -> None:
     """
-    校验 JSON Output prompt 的最低合同。
+    校验 JSON Output prompt 的最低合同
     """
     joined = "\n".join(str(message.get("content", "")) for message in messages)
     if "json" not in joined.lower():

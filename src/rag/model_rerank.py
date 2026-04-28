@@ -1,7 +1,7 @@
 """
-Level3 模型 rerank 边界。
+Level3 模型 rerank 边界
 
-在 chunk 粗召回与 paragraph 局部 evidence 后接入可选模型精排；失败时由 provider 回退确定性 rerank。
+在 chunk 粗召回与 paragraph 局部 evidence 后接入可选模型精排；失败时由 provider 回退确定性 rerank
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class Level3RerankCandidate:
     """
-    传给模型 rerank 的候选 DTO，显式携带 query、chunk 和 paragraph 分数。
+    传给模型 rerank 的候选 DTO，显式携带 query、chunk 和 paragraph 分数
     """
 
     query_text: str
@@ -34,7 +34,7 @@ class Level3RerankCandidate:
 @dataclass(frozen=True, slots=True)
 class Level3RerankResult:
     """
-    模型 rerank 输出，只负责排序分和可选解释，不改变 EvidenceBundle 主结构。
+    模型 rerank 输出，只负责排序分和可选解释，不改变 EvidenceBundle 主结构
     """
 
     chunk_id: int
@@ -45,7 +45,7 @@ class Level3RerankResult:
 
 class Level3ModelReranker(Protocol):
     """
-    模型 rerank 的最小协议；具体模型供应商由外层注入，provider 不创建新供应商配置。
+    模型 rerank 的最小协议；具体模型供应商由外层注入，provider 不创建新供应商配置
     """
 
     async def rerank(
@@ -56,7 +56,7 @@ class Level3ModelReranker(Protocol):
         run_id: str | None = None,
         chunk_id: int | None = None,
     ) -> list[Level3RerankResult]:
-        """返回候选 chunk 的模型排序分。"""
+        """返回候选 chunk 的模型排序分"""
 
 
 async def try_model_rerank_level3_results(
@@ -68,7 +68,7 @@ async def try_model_rerank_level3_results(
     chunk_id: int | None = None,
 ) -> list[SimilarChunkRow] | None:
     """
-    尝试执行模型 rerank；没有模型或模型失败时返回 None，由 provider 显式 fallback。
+    尝试执行模型 rerank；没有模型或模型失败时返回 None，由 provider 显式 fallback
     """
     if reranker is None or not results:
         return None
@@ -112,7 +112,7 @@ async def try_model_rerank_level3_results(
 
 def _to_candidate(result: SimilarChunkRow, *, query_text: str) -> Level3RerankCandidate:
     """
-    从仓储 DTO 转为模型 rerank DTO，优先暴露 paragraph local preview 作为局部 evidence。
+    从仓储 DTO 转为模型 rerank DTO，优先暴露 paragraph local preview 作为局部 evidence
     """
     return Level3RerankCandidate(
         query_text=query_text,
@@ -128,7 +128,7 @@ def _to_candidate(result: SimilarChunkRow, *, query_text: str) -> Level3RerankCa
 
 def _model_sort_key(result: SimilarChunkRow) -> tuple[float, float, float, float, float, float, int]:
     """
-    按文档约定的模型分优先级排序，并保留旧分数字段作为稳定兜底。
+    按文档约定的模型分优先级排序，并保留旧分数字段作为稳定兜底
     """
     return (
         result.model_rerank_score if result.model_rerank_score is not None else float("-inf"),

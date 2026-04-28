@@ -300,7 +300,7 @@ def validate_character_appearances_sync(
     校验 character_appearances 中明确人名线索是否同步到 characters 列表
 
     说明: 检查 character_appearances 中 named_by_other / self_introduction / alias_revealed 类型
-         的名字是否出现在 characters 列表中，如果没有则返回缺失列表。
+         的名字是否出现在 characters 列表中，如果没有则返回缺失列表
 
     Args:
         character_appearances: 角色出场信息列表

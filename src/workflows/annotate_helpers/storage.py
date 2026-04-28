@@ -7,7 +7,7 @@
 
 
 
-本模块包含结果存储相关的函数。
+本模块包含结果存储相关的函数
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 def _merge_annotation_foreshadowing(annotation, foreshadowing):
     """
-    将 Phase2 伏笔结果合并回 ChunkAnnotation 视图。
+    将 Phase2 伏笔结果合并回 ChunkAnnotation 视图
 
 
     """
@@ -38,7 +38,7 @@ def _build_dialogue_snapshots(
     dialogue_identity_clues: dict[int, str | None] | None = None,
 ) -> tuple[list[DialogueSnapshot], list[int]]:
     """
-    将 Phase3 结果转换为可落库的 DialogueSnapshot 列表。
+    将 Phase3 结果转换为可落库的 DialogueSnapshot 列表
 
 
     """
@@ -62,7 +62,7 @@ def _persist_annotation_repositories(
     relations=None,
 ) -> None:
     """
-    执行 annotation/stats repository 写入。
+    执行 annotation/stats repository 写入
 
     """
     from src.storage.repositories import AnnotationRepository

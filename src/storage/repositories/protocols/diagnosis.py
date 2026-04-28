@@ -1,7 +1,7 @@
 """
 诊断数据协议接口
 
-用语义 DTO 替代动态字典与裸结构返回值。
+用语义 DTO 替代动态字典与裸结构返回值
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class DiagnosisRepositoryProtocol(Protocol):
     """
     诊断数据接口
 
-    管理小说诊断数据的存储和检索。
+    管理小说诊断数据的存储和检索
     """
 
     def get_diagnosis(self, novel_id: str) -> RepositoryRecord:

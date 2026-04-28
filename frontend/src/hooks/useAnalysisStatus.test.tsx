@@ -99,7 +99,7 @@ function emitSSEError(): void {
 }
 
 /**
- * useAnalysisStatus 现在显式监听可见性恢复；测试需要稳定切换 jsdom 的 visibilityState。
+ * useAnalysisStatus 现在显式监听可见性恢复；测试需要稳定切换 jsdom 的 visibilityState
  */
 function setDocumentVisibilityState(state: "visible" | "hidden"): void {
   Object.defineProperty(document, "visibilityState", {

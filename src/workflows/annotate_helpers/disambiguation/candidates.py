@@ -34,7 +34,7 @@ EXTENSION_REVIEW_MIN_RATIO = 1.5
 
 @dataclass(frozen=True)
 class DisambigStateSnapshotEntry:
-    """终消歧候选收集所需的最小 review 快照。"""
+    """终消歧候选收集所需的最小 review 快照"""
 
     state: str
     confidence: str
@@ -43,7 +43,7 @@ class DisambigStateSnapshotEntry:
 
 @dataclass
 class DisambigStateSnapshot:
-    """终消歧候选收集的具名快照容器。"""
+    """终消歧候选收集的具名快照容器"""
 
     entries: dict[str, DisambigStateSnapshotEntry] = field(default_factory=dict)
 
@@ -82,13 +82,13 @@ def _build_candidate_payload_by_names(
             count = 0
 
         # 数据库返回的是宽松字典，这里收口成 NameCountCandidate，
-        # 避免把仓储层的松散返回形状继续泄漏到消歧主链。
+        # 避免把仓储层的松散返回形状继续泄漏到消歧主链
         payload.append({"name": name, "count": count})
     return payload
 
 
 def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, int]:
-    """Build a name -> count lookup for final disambiguation heuristics."""
+    """Build a name -> count lookup for final disambiguation heuristics"""
     name_counts: dict[str, int] = {}
     for item in all_names:
         name = str(item.get("name", ""))
@@ -104,9 +104,9 @@ def _build_name_count_lookup(all_names: list[NameCountCandidate]) -> dict[str, i
 
 def _is_self_resolved_leaf(name: str, alias_map: dict[str, str]) -> bool:
     """
-    Whether the name is currently resolved to itself and not acting as another alias's canonical target.
+    Whether the name is currently resolved to itself and not acting as another alias's canonical target
 
-    This targets the "early self-mapped and then locked" case like 贺伯安 -> 贺伯安.
+    This targets the "early self-mapped and then locked" case like 贺伯安 -> 贺伯安
     """
     if alias_map.get(name, name) != name:
         return False
@@ -151,7 +151,7 @@ def _collect_final_disambiguation_candidates(
     state_snapshot: DisambigStateSnapshot | None = None,
 ) -> list[str]:
     """
-    Build candidates for final disambiguation.
+    Build candidates for final disambiguation
 
 
 
@@ -199,7 +199,7 @@ def _augment_prompt_context_with_graph(
     existing_names: list[str],
     candidate_names: list[str],
 ) -> DisambiguationPromptContext | None:
-    """将图谱权威数据补入消歧任务上下文。"""
+    """将图谱权威数据补入消歧任务上下文"""
 
     graph_hint = render_disambiguation_graph_hint(
         alias_map,
@@ -269,7 +269,7 @@ def extract_new_names_from_db(
     """
     从数据库中提取新出现的人名（带频次）
 
-    基于当前 chunk 及之前所有 chunk 的标注结果，提取不在 alias_map 中的新人物名。
+    基于当前 chunk 及之前所有 chunk 的标注结果，提取不在 alias_map 中的新人物名
 
 
     """
@@ -336,7 +336,7 @@ def filter_candidates_by_class(
     list[NameCountCandidate],
     list[CandidateClassification],
 ]:
-    """基于候选分类器过滤候选名。
+    """基于候选分类器过滤候选名
 
     返回:
         filtered: 被黑名单过滤的候选（丢弃）

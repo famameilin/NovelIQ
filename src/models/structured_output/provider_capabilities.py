@@ -1,7 +1,7 @@
 """
-结构化输出 provider 能力判断。
+结构化输出 provider 能力判断
 
-说明: 集中处理 json_schema / json_object mode 选择，业务模块不再感知 provider 差异。
+说明: 集中处理 json_schema / json_object mode 选择，业务模块不再感知 provider 差异
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ _STRUCTURED_OUTPUT_TASK_KEYS = {
 _ANNOTATION_PHASE_CALL_TYPES = {"phase2", "phase3", "phase4"}
 def resolve_structured_output_task_key(client: Any, call_type: str) -> str:
     """
-    解析结构化输出配置键。
+    解析结构化输出配置键
     """
     task_type = getattr(client, "_task_type", None)
     if isinstance(task_type, str) and task_type in _STRUCTURED_OUTPUT_TASK_KEYS:
@@ -45,7 +45,7 @@ def resolve_structured_output_task_key(client: Any, call_type: str) -> str:
 
 def _build_provider_hint(client: Any) -> str:
     """
-    构建 provider 能力匹配文本。
+    构建 provider 能力匹配文本
     """
     config = getattr(client, "_config", None)
     return " ".join(
@@ -59,7 +59,7 @@ def _build_provider_hint(client: Any) -> str:
 
 def resolve_provider_override_mode(client: Any) -> StructuredOutputMode | None:
     """
-    按配置解析 provider 级 mode 覆盖。
+    按配置解析 provider 级 mode 覆盖
     """
     provider_hint = _build_provider_hint(client)
     provider_overrides = getattr(settings.structured_output, "provider_overrides", {})
@@ -74,7 +74,7 @@ def resolve_provider_override_mode(client: Any) -> StructuredOutputMode | None:
 
 def provider_supports_strict_json_schema(client: Any) -> bool:
     """
-    判断当前 provider 是否应走 strict json_schema。
+    判断当前 provider 是否应走 strict json_schema
     """
     override_mode = resolve_provider_override_mode(client)
     if override_mode == JSON_OBJECT_MODE:
@@ -84,7 +84,7 @@ def provider_supports_strict_json_schema(client: Any) -> bool:
 
 def resolve_structured_output_mode(client: Any, call_type: str) -> StructuredOutputMode:
     """
-    解析本次结构化调用应使用的 mode。
+    解析本次结构化调用应使用的 mode
     """
     task_key = resolve_structured_output_task_key(client, call_type)
     configured_mode = getattr(settings.structured_output, task_key, JSON_SCHEMA_MODE)

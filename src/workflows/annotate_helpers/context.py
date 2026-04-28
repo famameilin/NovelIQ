@@ -2,7 +2,7 @@
 标注辅助函数模块 - 上下文管理
 
 
-本模块包含上下文管理相关的数据类和函数。
+本模块包含上下文管理相关的数据类和函数
 
 """
 
@@ -80,14 +80,14 @@ class ChunkContext:
     @property
     def evidence_bundle(self) -> EvidenceBundle | None:
         """
-        提供只读别名给仍在直接构造 ChunkContext 的低层测试；生产主路径统一读取 phase1_bundle。
+        提供只读别名给仍在直接构造 ChunkContext 的低层测试；生产主路径统一读取 phase1_bundle
         """
         return self.phase1_bundle
 
     @property
     def annotation_prompt_blocks(self) -> AnnotationPromptBlocks | None:
         """
-        提供只读别名给旧测试；生产主路径统一读取 phase1_prompt_blocks。
+        提供只读别名给旧测试；生产主路径统一读取 phase1_prompt_blocks
         """
         return self.phase1_prompt_blocks
 
@@ -156,7 +156,7 @@ def _init_optional_mention_extractor(
     run_id: str | None,
 ):
     """
-    仅在 mention_extraction 配置完整时初始化 LLM extractor；未配置时保持规则 fallback 主链不变。
+    仅在 mention_extraction 配置完整时初始化 LLM extractor；未配置时保持规则 fallback 主链不变
     """
     model_client = _build_optional_task_model_client(
         "mention_extraction",
@@ -183,7 +183,7 @@ def _init_optional_level3_reranker(
     run_id: str | None,
 ):
     """
-    仅在 level3_rerank 配置完整时初始化模型 reranker；否则继续走确定性 rerank fallback。
+    仅在 level3_rerank 配置完整时初始化模型 reranker；否则继续走确定性 rerank fallback
     """
     model_client = _build_optional_task_model_client(
         "level3_rerank",
@@ -212,7 +212,7 @@ def _build_optional_task_model_client(
     run_id: str | None,
 ):
     """
-    对可选增强模型统一执行“未配置则禁用、配置不完整则报错、配置完整则初始化”的收口逻辑。
+    对可选增强模型统一执行“未配置则禁用、配置不完整则报错、配置完整则初始化”的收口逻辑
     """
     if not enabled:
         logger.info("optional task model disabled by rag switch: task_type={}", task_type)
@@ -232,7 +232,7 @@ def _build_optional_task_model_client(
 
     from src.models.local.base import BaseModelClient
 
-    # 这里直接复用现有 BaseModelClient，避免为 mention extraction / rerank 再分叉一套 transport。
+    # 这里直接复用现有 BaseModelClient，避免为 mention extraction / rerank 再分叉一套 transport
     client = BaseModelClient(task_type=task_type, novel_id=novel_id, session=session)
     if run_id:
         client.set_runtime_context(novel_id, _build_optional_task_token_usage_callback(session, run_id, novel_id))
@@ -243,7 +243,7 @@ def _build_optional_task_model_client(
 def _build_optional_task_token_usage_callback(session, run_id: str, novel_id: str):
     """
     为 mention extraction / level3 rerank 复用主链 token_usage 落库方式，
-          避免这两条可选增强链只发请求、不进统一统计账本。
+          避免这两条可选增强链只发请求、不进统一统计账本
     """
     from src.storage.repositories import StatsRepository
 
@@ -287,7 +287,7 @@ def _build_active_entity_contexts_from_authority(
     lookback: int,
 ) -> list[ActiveEntityContext]:
     """
-    统一从 authority 拉取活跃实体上下文，供 prompt fallback 和 Level3 seed_entities 复用，避免重复查询。
+    统一从 authority 拉取活跃实体上下文，供 prompt fallback 和 Level3 seed_entities 复用，避免重复查询
     """
 
     return KnowledgeGraphAuthorityService.from_session(conn).build_active_entity_view(
@@ -303,7 +303,7 @@ def _build_active_entities_prompt_from_authority(
     chunk_id: int,
     lookback: int,
 ) -> str | None:
-    """Reuse the authority-owned Level 2 contract even when the RAG provider is unavailable."""
+    """Reuse the authority-owned Level 2 contract even when the RAG provider is unavailable"""
 
     active_entities = _build_active_entity_contexts_from_authority(conn, run_id, chunk_id, lookback)
     return render_active_entities_from_authority(active_entities)
@@ -318,7 +318,7 @@ def _collect_seed_entities(
 ) -> list[str]:
     """
     Level3 seed_entities 只允许来自可信源：chunk 内显式出现的 alias/canonical、
-          authority active entities、调用方显式补充名；不能把整轮累计 alias_map 全量带进当前 chunk。
+          authority active entities、调用方显式补充名；不能把整轮累计 alias_map 全量带进当前 chunk
     """
     seed_entities: list[str] = []
     normalized_query_text = (query_text or "").strip()
@@ -360,7 +360,7 @@ def _collect_requested_names(
 ) -> list[str]:
     """
     requested_names 只表达“当前 consumer 正在处理谁”，
-          不应混入 Level2 active entities 这类仅用于 retrieval 扩锚的背景名。
+          不应混入 Level2 active entities 这类仅用于 retrieval 扩锚的背景名
 
     """
     requested_names = _collect_seed_entities(
@@ -397,7 +397,7 @@ def _build_evidence_request(
 ):
     """
     workflow 侧只构造显式 EvidenceRequest；
-          真实 annotation 主链统一走 `EvidenceRequest -> NarrativeEvidenceService.collect()`。
+          真实 annotation 主链统一走 `EvidenceRequest -> NarrativeEvidenceService.collect()`
     """
     from src.rag import EvidenceRequest
 
@@ -426,7 +426,7 @@ def _extract_active_entity_names(
 ) -> list[str]:
     """
     修改说明: retrieval seed_entities 直接消费 authority 的结构化活跃实体视图；
-              不再从 renderer 文本反解析名字，避免展示层文案反向污染取证边界。
+              不再从 renderer 文本反解析名字，避免展示层文案反向污染取证边界
     """
     return [item.name for item in active_entities if str(item.name).strip()]
 
@@ -437,8 +437,8 @@ def _collect_evidence_sync(
 ) -> EvidenceBundle:
     """
     无 Level3 的同步 annotation 路径也必须统一走 `NarrativeEvidenceService.collect(request)`，
-          这样 request_meta/generation_meta/cache reuse 等语义才不会只在异步路径生效。
-          这里显式限制为“当前线程没有运行中事件循环”的同步场景；若已在 async 上下文中，应改走异步入口。
+          这样 request_meta/generation_meta/cache reuse 等语义才不会只在异步路径生效
+          这里显式限制为“当前线程没有运行中事件循环”的同步场景；若已在 async 上下文中，应改走异步入口
     """
 
     try:
@@ -514,7 +514,7 @@ def _prepare_chunk_context(
         context.phase1_bundle = _collect_evidence_sync(evidence_service, phase1_request)
         # 默认强伏笔路径已经切到 current-text-only，
         # 因此只有显式打开 include_phase2_evidence 时才为 Phase2 额外收集共享 evidence，
-        # 避免在默认热路径上继续支付无效检索成本。
+        # 避免在默认热路径上继续支付无效检索成本
         if include_phase2_evidence:
             phase2_seed_entities = _collect_seed_entities(None, active_entity_names)
             phase2_request = _build_evidence_request(
@@ -532,7 +532,7 @@ def _prepare_chunk_context(
             context.phase2_bundle = _collect_evidence_sync(evidence_service, phase2_request)
         context.phase3_bundle = context.phase1_bundle
         # Phase4 的 consumer target 只能由当前 chunk 的 Phase1 known_characters 决定；
-        # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities。
+        # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities
         context.phase4_request_template = _build_evidence_request(
             consumer="annotation_phase4",
             objective="relation",
@@ -564,9 +564,9 @@ async def _prepare_chunk_context_with_level3(
 
     异步版本，支持 Level 3 向量检索
 
-    修改说明: annotation 阶段的 Level3 检索只允许查看当前 chunk 之前的历史。
+    修改说明: annotation 阶段的 Level3 检索只允许查看当前 chunk 之前的历史
 
-    修改说明: mention extraction/query 构造收口到 provider，workflow 只透传当前 chunk 取证上下文。
+    修改说明: mention extraction/query 构造收口到 provider，workflow 只透传当前 chunk 取证上下文
 
 
     """
@@ -629,7 +629,7 @@ async def _prepare_chunk_context_with_level3(
         )
         context.phase1_bundle = await evidence_service.collect(phase1_request)
         # 异步 Level3 路径与同步路径保持同一语义边界；
-        # 默认不为 Phase2 收集共享 evidence，只有 targeted ablation 时才显式打开。
+        # 默认不为 Phase2 收集共享 evidence，只有 targeted ablation 时才显式打开
         if include_phase2_evidence:
             phase2_request = _build_evidence_request(
                 consumer="annotation_phase2",
@@ -645,7 +645,7 @@ async def _prepare_chunk_context_with_level3(
             context.phase2_bundle = await evidence_service.collect(phase2_request)
         context.phase3_bundle = await evidence_service.collect(phase3_request)
         # Phase4 的 consumer target 只能由当前 chunk 的 Phase1 known_characters 决定；
-        # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities。
+        # 这里先冻结空模板，避免历史活跃实体在真正取证前就放大 requested_names / seed_entities
         context.phase4_request_template = _build_evidence_request(
             consumer="annotation_phase4",
             objective="relation",

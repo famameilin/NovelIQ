@@ -1,8 +1,8 @@
 /**
  * Mock 数据工厂函数
  *
- * 生成与后端 API 类型一致的假数据，用于 MSW handler。
- * 任何 mock 中修改此处即可影响全局返回数据。
+ * 生成与后端 API 类型一致的假数据，用于 MSW handler
+ * 任何 mock 中修改此处即可影响全局返回数据
  */
 import type {
   Novel,
@@ -421,7 +421,7 @@ export function createGraph(): GraphData {
   };
 
   const quality = {
-    // Mock contract follows authority semantics: conflict_count reflects current confirmed relations only.
+    // Mock contract follows authority semantics: conflict_count reflects current confirmed relations only
     conflict_count: 0,
     low_confidence_count: allEvents.filter((event) => (event.confidence ?? 0) < 0.6).length,
     conflicts: [],

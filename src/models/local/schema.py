@@ -144,7 +144,7 @@ class ForeshadowingResult(BaseModel):
     @model_validator(mode="after")
     def _validate_contract_consistency(self) -> ForeshadowingResult:
         """
-        校验 Phase2 强伏笔结果的正负例合同。
+        校验 Phase2 强伏笔结果的正负例合同
         """
         if self.has_foreshadowing:
             if not self.is_strong_setup:
@@ -175,7 +175,7 @@ class ForeshadowingResult(BaseModel):
 
         # negative 结果允许保留 anchor_reason 解释“为什么不是伏笔”，
         # 但不能再夹带 strong setup 专属结构字段，否则后续 projector/storage
-        # 会把“否定判断”和“强伏笔标签”同时写进持久化视图。
+        # 会把“否定判断”和“强伏笔标签”同时写进持久化视图
         if self.is_strong_setup:
             raise ValueError("is_strong_setup must be false when has_foreshadowing=false")
         if self.foreshadowing_type is not None:
@@ -321,10 +321,10 @@ class HierarchicalRelation(BaseModel):
 
 class CanonicalDecisionRecord(BaseModel):
     """
-    云端兼容的规范名决策记录。
+    云端兼容的规范名决策记录
 
     说明: 某些云端 provider 的 strict schema 不接受 dict[str, T] 形式的映射字段，
-          因此改为显式数组记录，后续再在本地归一化回内部 dict 结构。
+          因此改为显式数组记录，后续再在本地归一化回内部 dict 结构
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -335,9 +335,9 @@ class CanonicalDecisionRecord(BaseModel):
 
 class AliasConfidenceRecord(BaseModel):
     """
-    云端兼容的置信度记录。
+    云端兼容的置信度记录
 
-    说明: 将 alias_confidence 从 dict 改成数组记录，避免 provider 拒绝动态键对象 schema。
+    说明: 将 alias_confidence 从 dict 改成数组记录，避免 provider 拒绝动态键对象 schema
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -348,9 +348,9 @@ class AliasConfidenceRecord(BaseModel):
 
 class EntityTypeRecord(BaseModel):
     """
-    云端兼容的实体类型记录。
+    云端兼容的实体类型记录
 
-    说明: 将 entity_types 从动态映射改成显式列表，兼容云端 strict schema 校验器。
+    说明: 将 entity_types 从动态映射改成显式列表，兼容云端 strict schema 校验器
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -361,9 +361,9 @@ class EntityTypeRecord(BaseModel):
 
 class EvidenceSourceRecord(BaseModel):
     """
-    云端兼容的证据来源记录。
+    云端兼容的证据来源记录
 
-    说明: 将 evidence_sources 从 dict[str, list[str]] 改成显式记录列表。
+    说明: 将 evidence_sources 从 dict[str, list[str]] 改成显式记录列表
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -415,10 +415,10 @@ class DisambiguateResponseModel(BaseModel):
 
 class CloudDisambiguateResponseModel(BaseModel):
     """
-    云端兼容的消歧响应数据结构。
+    云端兼容的消歧响应数据结构
 
-    说明: 部分云端 provider 的 strict json_schema 不支持 dict[str, ...] 映射字段。
-          这里将所有动态键对象改为显式记录数组，解析后再归一化回内部标准模型。
+    说明: 部分云端 provider 的 strict json_schema 不支持 dict[str, ...] 映射字段
+          这里将所有动态键对象改为显式记录数组，解析后再归一化回内部标准模型
     """
 
     model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")

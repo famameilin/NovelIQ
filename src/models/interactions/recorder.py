@@ -16,9 +16,9 @@ if TYPE_CHECKING:
 
 def _normalize_reasoning_tokens(reasoning_tokens: int | None) -> int | None:
     """
-    归一化 reasoning token 计数。
+    归一化 reasoning token 计数
 
-    说明: 统一处理 None / 非法值 / 负数，避免把坏值直接写进数据库。
+    说明: 统一处理 None / 非法值 / 负数，避免把坏值直接写进数据库
     """
     if reasoning_tokens is None:
         return None
@@ -36,10 +36,10 @@ def _derive_thinking_state(
     requested_thinking: bool | None,
 ) -> str:
     """
-    计算 thinking 可见性状态。
+    计算 thinking 可见性状态
 
     说明: 区分“有文本 think”“只有 reasoning token”“明确没有 think”
-          与“当前链路拿不到足够证据”的 unknown，避免把未知静默记成 none。
+          与“当前链路拿不到足够证据”的 unknown，避免把未知静默记成 none
     """
     if thinking_content and thinking_content.strip():
         return "text"

@@ -2,7 +2,7 @@
 标注辅助函数模块 - 阶段管理
 
 
-本模块包含阶段管理相关的数据类和函数。
+本模块包含阶段管理相关的数据类和函数
 """
 
 from __future__ import annotations
@@ -136,9 +136,9 @@ class AnnotationPhaseResult:
 
 def _set_client_session(client: Any, session: Any) -> None:
     """
-    为客户端设置会话。
+    为客户端设置会话
 
-    使用公开方法 set_session 进行会话注入。
+    使用公开方法 set_session 进行会话注入
     """
     if client is None:
         return
@@ -439,7 +439,7 @@ async def _process_chunks_phase(
                         percent=10 + (progress_count / total_chunks) * 70,
                         sub_percent=(progress_count / total_chunks) * 100,
                         # resume 模式下进度条应继续从“已存在结果”往前走，
-                        # 但 workflow 返回值仍应只统计本次新成功处理的 chunk 数。
+                        # 但 workflow 返回值仍应只统计本次新成功处理的 chunk 数
                         message=f"标注 chunk {progress_count}/{total_chunks}",
                     )
                 )

@@ -1,7 +1,7 @@
 """
 词表模块（v2）
 
-仅提供 LexiconRegistry 相关 API。
+仅提供 LexiconRegistry 相关 API
 
 移除的 API（2026-04-06）:
 - load_lexicon: 使用 LexiconRegistry.get() 替代

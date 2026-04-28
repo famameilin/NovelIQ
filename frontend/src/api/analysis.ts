@@ -6,7 +6,7 @@ import type {
   TaskStatusResponse,
 } from "./types";
 
-// 显式创建并启动新任务。
+// 显式创建并启动新任务
 export async function createAnalysisTask(
   novelId: string
 ): Promise<AnalysisStartResponse> {
@@ -16,7 +16,7 @@ export async function createAnalysisTask(
   return data;
 }
 
-// 仅继续指定 pending/failed 任务。
+// 仅继续指定 pending/failed 任务
 export async function resumeAnalysisTask(
   novelId: string,
   taskId: string
@@ -27,7 +27,7 @@ export async function resumeAnalysisTask(
   return data;
 }
 
-// 单任务状态查询走专用路由。
+// 单任务状态查询走专用路由
 export async function getTaskStatus(
   novelId: string,
   taskId: string

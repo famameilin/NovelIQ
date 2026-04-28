@@ -1,5 +1,5 @@
 """
-创建测试数据库并安装 pgvector 扩展。
+创建测试数据库并安装 pgvector 扩展
 """
 import os
 import sys
@@ -28,19 +28,19 @@ QUOTED_TEST_DB_NAME = f'"{TEST_DB_NAME.replace("\"", "\"\"")}"'
 DEFAULT_DB_URL: URL = make_url(TEST_DB_URL).set(database="postgres")
 
 
-# 按当前终端编码降级异常文本，避免打印数据库错误时再次触发 UnicodeEncodeError。
+# 按当前终端编码降级异常文本，避免打印数据库错误时再次触发 UnicodeEncodeError
 def _safe_console_text(message: object) -> str:
     raw_text = str(message)
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
     return raw_text.encode(encoding, errors="replace").decode(encoding, errors="replace")
 
 
-# 稳定输出可读错误，避免控制台编码问题中断 bootstrap 流程。
+# 稳定输出可读错误，避免控制台编码问题中断 bootstrap 流程
 def _safe_print(message: object) -> None:
     print(_safe_console_text(message))
 
 
-# 显式判断是否具备“原地重建表结构”的降级条件。
+# 显式判断是否具备“原地重建表结构”的降级条件
 def _can_connect(database_url: str) -> tuple[bool, str | None]:
     engine = create_engine(database_url, echo=False)
     try:
@@ -53,7 +53,7 @@ def _can_connect(database_url: str) -> tuple[bool, str | None]:
 
 
 def create_test_database():
-    """创建或重建测试数据库，并返回是否完成了整库重建。"""
+    """创建或重建测试数据库，并返回是否完成了整库重建"""
     engine = create_engine(DEFAULT_DB_URL, echo=False)
 
     with engine.connect() as conn:
@@ -102,7 +102,7 @@ def setup_pgvector():
 
 
 def create_tables(*, reset_existing_tables: bool = False):
-    """按当前 ORM 建表；必要时先 drop_all 做原地表级重建。"""
+    """按当前 ORM 建表；必要时先 drop_all 做原地表级重建"""
     sys.path.insert(0, str(project_root))
     from src.storage import db as db_module
     from src.storage.models import Base

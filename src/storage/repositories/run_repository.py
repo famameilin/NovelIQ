@@ -24,26 +24,26 @@ T = TypeVar("T")
 
 def _is_set[T](value: T | object) -> TypeGuard[T]:
     """
-    判断参数是否不是 `_UNSET` 哨兵值。
+    判断参数是否不是 `_UNSET` 哨兵值
 
-    统一收窄 `T | object` 到真实字段类型，避免 mypy 把 `_UNSET` 联合类型传进 ORM 字段赋值。
+    统一收窄 `T | object` 到真实字段类型，避免 mypy 把 `_UNSET` 联合类型传进 ORM 字段赋值
     """
     return value is not _UNSET
 
 
 class RunRepository(BaseRepository[dict[str, Any]]):
-    """运行记录数据访问层。
+    """运行记录数据访问层
 
 
-    增加 TASK_RELATED_TABLES 常量，统一维护删除任务时需清理的从表清单。
+    增加 TASK_RELATED_TABLES 常量，统一维护删除任务时需清理的从表清单
 
-    管理分析运行的创建、查询和状态更新。
-    使用 AnalysisRun ORM 模型。
-    从 sqlite3.Connection 迁移到 SQLAlchemy Session。
+    管理分析运行的创建、查询和状态更新
+    使用 AnalysisRun ORM 模型
+    从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
 
-    # 任务关联表清单，删除任务时需清理的从表。
-    # 维护须知：新增 run 关联表时请同步更新此列表，避免删除时遗漏产生孤儿数据。
+    # 任务关联表清单，删除任务时需清理的从表
+    # 维护须知：新增 run 关联表时请同步更新此列表，避免删除时遗漏产生孤儿数据
     TASK_RELATED_TABLES: list[str] = [
         "stage_summaries",
         "token_usage",
@@ -74,9 +74,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def _serialize_request_payload(self, request_payload: dict[str, Any] | None) -> str | None:
         """
-        序列化任务请求载荷。
+        序列化任务请求载荷
 
-        将重分析请求参数持久化到 analysis_runs.request_payload，供 resume/recovery 恢复原始语义。
+        将重分析请求参数持久化到 analysis_runs.request_payload，供 resume/recovery 恢复原始语义
         """
         if request_payload is None:
             return None
@@ -84,11 +84,11 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def _deserialize_request_payload(self, request_payload: str | None) -> dict[str, Any] | None:
         """
-        反序列化任务请求载荷。
+        反序列化任务请求载荷
 
-        读取 analysis_runs.request_payload 时恢复为语义化字典，避免上层直接处理 JSON 字符串。
+        读取 analysis_runs.request_payload 时恢复为语义化字典，避免上层直接处理 JSON 字符串
 
-        增加 JSON 解析异常保护，脏数据时返回 None 并记录警告日志。
+        增加 JSON 解析异常保护，脏数据时返回 None 并记录警告日志
         """
         if not request_payload:
             return None
@@ -251,7 +251,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def cancel_run(self, run_id: str) -> bool:
         """
-        原子性地设置任务的取消请求标记。
+        原子性地设置任务的取消请求标记
 
         DB 驱动的取消机制，通过 cancel_requested flag 传递取消信号
 
@@ -275,12 +275,12 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def request_task_cancellation(self, run_id: str) -> str | None:
         """
-        原子性地把可取消任务推进到 cancelling。
+        原子性地把可取消任务推进到 cancelling
 
-        仅允许 pending/running -> cancelling，避免取消竞态把已终态任务回写成 cancelling。
+        仅允许 pending/running -> cancelling，避免取消竞态把已终态任务回写成 cancelling
 
         Returns:
-            最新任务状态；若成功写入则固定返回 "cancelling"，若任务不存在则返回 None。
+            最新任务状态；若成功写入则固定返回 "cancelling"，若任务不存在则返回 None
         """
         from sqlalchemy import update
 
@@ -306,7 +306,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def get_by_status(self, status: str) -> list[dict[str, Any]]:
         """
-        按状态查询任务。
+        按状态查询任务
 
         用于查询指定状态的所有任务
 
@@ -322,7 +322,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def get_running_tasks(self) -> list[dict[str, Any]]:
         """
-        获取所有运行中的任务。
+        获取所有运行中的任务
 
         用于启动时清理孤儿任务和运行时状态检查
 
@@ -333,17 +333,17 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def get_pending_tasks(self) -> list[dict[str, Any]]:
         """
-        获取所有 pending 任务。
+        获取所有 pending 任务
 
-        为启动恢复和 DB worker pickup 提供统一的 pending 查询入口。
+        为启动恢复和 DB worker pickup 提供统一的 pending 查询入口
         """
         return self.get_by_status("pending")
 
     def claim_pending_run(self, run_id: str, *, worker_id: str, heartbeat_at: datetime | None = None) -> bool:
         """
-        原子性领取一个尚未执行的 pending 任务。
+        原子性领取一个尚未执行的 pending 任务
 
-        通过单条 UPDATE 将 pending->running，避免多个实例同时把同一任务拉起执行。
+        通过单条 UPDATE 将 pending->running，避免多个实例同时把同一任务拉起执行
         """
         from sqlalchemy import update
 
@@ -367,9 +367,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def cancel_unclaimed_pending_run(self, run_id: str, *, message: str) -> bool:
         """
-        原子性终结尚未被任何 worker 领取的 pending 任务。
+        原子性终结尚未被任何 worker 领取的 pending 任务
 
-        允许进程外取消在任务真正启动前直接落终态，避免进入不可恢复的 cancelling 死状态。
+        允许进程外取消在任务真正启动前直接落终态，避免进入不可恢复的 cancelling 死状态
         """
         from sqlalchemy import update
 
@@ -413,7 +413,7 @@ class RunRepository(BaseRepository[dict[str, Any]]):
         completed_at: datetime | None | object = _UNSET,
     ) -> None:
         """
-        批量更新任务的运行态字段。
+        批量更新任务的运行态字段
 
         统一的运行态字段更新方法，支持选择性更新
 
@@ -517,12 +517,12 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def delete_run(self, run_id: str) -> bool:
         """
-        删除运行记录及相关数据。
+        删除运行记录及相关数据
 
 
         修正表名列表以匹配实际数据库架构
 
-        使用 TASK_RELATED_TABLES 常量替代内联表名列表，便于统一维护。
+        使用 TASK_RELATED_TABLES 常量替代内联表名列表，便于统一维护
         """
         from sqlalchemy import text
 
@@ -552,9 +552,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def mark_running_as_failed(self, *, stale_before: datetime) -> int:
         """
-        将明确可判定为孤儿的 running 任务标记为 failed。
+        将明确可判定为孤儿的 running 任务标记为 failed
 
-        仅回收带有 worker 归属且心跳超时的任务，避免新进程误收口其他活跃实例上的真实运行任务。
+        仅回收带有 worker 归属且心跳超时的任务，避免新进程误收口其他活跃实例上的真实运行任务
 
         Returns:
             受影响的行数
@@ -579,9 +579,9 @@ class RunRepository(BaseRepository[dict[str, Any]]):
 
     def mark_cancelling_as_cancelled(self, *, stale_before: datetime) -> int:
         """
-        将明确可判定为孤儿的 cancelling 任务收口为 cancelled。
+        将明确可判定为孤儿的 cancelling 任务收口为 cancelled
 
-        仅回收带有 worker 归属且心跳超时的任务，避免误终结仍在其他实例中收尾的任务。
+        仅回收带有 worker 归属且心跳超时的任务，避免误终结仍在其他实例中收尾的任务
 
         Returns:
             受影响的行数

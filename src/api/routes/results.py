@@ -56,7 +56,7 @@ READABLE_RUN_STATUSES = ("completed", "aggregated", "diagnosed")
 
 def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
     """
-    校验 run_id 存在且属于当前小说。
+    校验 run_id 存在且属于当前小说
     """
     run_repo = RunRepository(session)
     run = run_repo.get_run(run_id)
@@ -82,7 +82,7 @@ def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> None
     """
     说明: 当前分支已经明确不兼容旧 diagnosis 合同；
     只要结果读取命中 rerun-required diagnosis，就应在 API 层显式中止，
-    不能继续把旧 run 包装成“成功但无焦点数据”的静默降级结果。
+    不能继续把旧 run 包装成“成功但无焦点数据”的静默降级结果
     """
     raise HTTPException(
         status_code=409,
@@ -105,7 +105,7 @@ def _fetch_and_require_valid_diagnosis(
     """
     说明: 部分结果接口虽然不直接返回 diagnosis，但它们的页面语义已经依赖
     新焦点合同是否有效；这里统一在路由层短路旧 run，避免不同页面对同一 run
-    同时出现“需要重跑”和“还能继续看”的分裂状态。
+    同时出现“需要重跑”和“还能继续看”的分裂状态
     """
     diagnosis = _fetch_diagnosis(
         run_id,
@@ -283,7 +283,7 @@ async def get_chunk_annotations(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list[ChunkAnnotationResponse]:
     """
-    获取分块标注与伏笔详情数据。
+    获取分块标注与伏笔详情数据
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -375,9 +375,9 @@ async def get_foreshadowing_threads(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list[ForeshadowingThreadResponse]:
     """
-    获取跨 chunk 的 setup thread 台账。
+    获取跨 chunk 的 setup thread 台账
 
-    说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用。
+    说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -392,7 +392,7 @@ async def get_graph(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     """
-    获取知识图谱快照。
+    获取知识图谱快照
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -418,7 +418,7 @@ async def get_graph_events(
     events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict:
     """
-    获取 graph page relation events 的增量分页结果。
+    获取 graph page relation events 的增量分页结果
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)

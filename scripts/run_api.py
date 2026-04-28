@@ -16,12 +16,12 @@ ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
 
 
 def strip_ansi_codes(text: str) -> str:
-    """去除 ANSI 颜色代码。"""
+    """去除 ANSI 颜色代码"""
     return ANSI_ESCAPE_PATTERN.sub('', text)
 
 
 class TeeOutput:
-    """同时输出到终端和文件，并在写文件前去掉 ANSI 颜色代码。"""
+    """同时输出到终端和文件，并在写文件前去掉 ANSI 颜色代码"""
     
     def __init__(self, original_stream, log_file_path: Path):
         self.original_stream = original_stream
@@ -49,7 +49,7 @@ class TeeOutput:
 
 
 def is_port_in_use(port: int) -> bool:
-    """检测指定端口是否已被当前机器占用。"""
+    """检测指定端口是否已被当前机器占用"""
     for check_host in ["127.0.0.1", "0.0.0.0"]:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
@@ -60,7 +60,7 @@ def is_port_in_use(port: int) -> bool:
 
 
 def main() -> None:
-    """启动 FastAPI 服务器并记录控制台输出。"""
+    """启动 FastAPI 服务器并记录控制台输出"""
     parser = argparse.ArgumentParser(description="Run FastAPI server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")

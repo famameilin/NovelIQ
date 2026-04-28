@@ -33,7 +33,7 @@ class AnnotationRuntimeSettings:
     lookback: int = 10
 
     def validate(self) -> None:
-        """验证标注运行时配置。"""
+        """验证标注运行时配置"""
         self.phase_max_retries = _parse_positive_int(self.phase_max_retries, "runtime.annotation.phase_max_retries")
         self.phase3_max_retries = _parse_positive_int(
             self.phase3_max_retries,
@@ -52,7 +52,7 @@ class DisambiguationRuntimeSettings:
     max_retries: int = 3
 
     def validate(self) -> None:
-        """验证消歧运行时配置。"""
+        """验证消歧运行时配置"""
         self.max_retries = _parse_positive_int(self.max_retries, "runtime.disambiguation.max_retries")
 
 
@@ -65,7 +65,7 @@ class DiagnosisRuntimeSettings:
     max_retries: int = 3
 
     def validate(self) -> None:
-        """验证诊断运行时配置。"""
+        """验证诊断运行时配置"""
         self.max_retries = _parse_positive_int(self.max_retries, "runtime.diagnosis.max_retries")
 
 
@@ -80,7 +80,7 @@ class RuntimeSettings:
     diagnosis: DiagnosisRuntimeSettings = field(default_factory=DiagnosisRuntimeSettings)
 
     def validate(self) -> None:
-        """验证整组运行时配置。"""
+        """验证整组运行时配置"""
         self.annotation.validate()
         self.disambiguation.validate()
         self.diagnosis.validate()

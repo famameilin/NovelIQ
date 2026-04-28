@@ -32,7 +32,7 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
     诊断数据 Repository
 
     管理诊断分析相关的数据查询和存储，包括转折点、高张力分块、
-    关系变更、伏笔分块、实体快照等数据操作。
+    关系变更、伏笔分块、实体快照等数据操作
 
     从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """
@@ -214,18 +214,18 @@ class DiagnosisRepository(BaseRepository["DiagnosisRepository"]):
 
     def fetch_foreshadowing_threads(self, run_id: str) -> list[foreshadowing_thread_repo.ForeshadowingThreadView]:
         """
-        获取 setup thread ledger 视图。
+        获取 setup thread ledger 视图
 
-        diagnosis 主链改为直接消费 setup ledger，不能继续停留在 chunk 级 foreshadowing_list。
+        diagnosis 主链改为直接消费 setup ledger，不能继续停留在 chunk 级 foreshadowing_list
         """
 
         return foreshadowing_thread_repo.fetch_foreshadowing_threads(self.session, run_id)
 
     def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
         """
-        基于 setup thread ledger 计算伏笔回收预期。
+        基于 setup thread ledger 计算伏笔回收预期
 
-        diagnosis payload 现在要把 ledger 的正式 expectation 作为单一真相源传入模型。
+        diagnosis payload 现在要把 ledger 的正式 expectation 作为单一真相源传入模型
         """
 
         return foreshadowing_thread_repo.calculate_foreshadow_expectation(self.session, run_id)

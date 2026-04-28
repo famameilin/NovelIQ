@@ -3,7 +3,7 @@ import type { DiagnosisResult } from "@/api/types";
 /**
  * 前端多个页面都需要判断 diagnosis 是否具备完整的焦点合同；
  * 如果只拿到了 ledger-only、缺 focus 字段，或缺主题命名的半成品结果，页面必须显式提示重跑，
- * 不能再静默降级成“正常页面但焦点区为空”。
+ * 不能再静默降级成“正常页面但焦点区为空”
  */
 export function hasCompleteFocusContract(
   diagnosis: DiagnosisResult | null | undefined,

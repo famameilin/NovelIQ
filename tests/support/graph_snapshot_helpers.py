@@ -12,7 +12,7 @@ from src.storage.repositories import StatsRepository
 
 
 def insert_graph_test_novel(db_session, novel_id: str) -> None:
-    """为 graph snapshot contract 测试补 novels 主表记录。"""
+    """为 graph snapshot contract 测试补 novels 主表记录"""
     if len(novel_id) > 8:
         raise ValueError(f"graph snapshot test novel_id must be 8 chars or fewer, got: {novel_id}")
 
@@ -28,7 +28,7 @@ def insert_graph_test_novel(db_session, novel_id: str) -> None:
 
 
 def insert_graph_test_chunks(db_session, run_id: str, chunk_ids: range) -> None:
-    """为 graph relation event 测试补齐 chunks 外键依赖。"""
+    """为 graph relation event 测试补齐 chunks 外键依赖"""
     db_session.add_all(
         [
             ChunkModel(
@@ -53,7 +53,7 @@ def insert_focus_contract_cloud_analysis(
     topic_labels: Sequence[str] | None = None,
 ) -> None:
     """
-    插入一条最小合法的 cloud_analysis 记录，满足 graph/timeline 相关测试的焦点合同 gate。
+    插入一条最小合法的 cloud_analysis 记录，满足 graph/timeline 相关测试的焦点合同 gate
     """
     focus_names = list(focus_characters)
     main_names = list(main_characters or focus_names)
@@ -76,7 +76,7 @@ def insert_focus_contract_cloud_analysis(
 
 
 def create_graph_annotation_repo(session=object()) -> MagicMock:
-    """统一构造 graph fetcher 所需的 annotation repo 假对象。"""
+    """统一构造 graph fetcher 所需的 annotation repo 假对象"""
     annotation_repo = MagicMock()
     annotation_repo.session = session
     annotation_repo.fetch_pending_chunk_relations.return_value = []
@@ -95,7 +95,7 @@ def relation_event(
     change_type: str = "新建",
     confidence: float = 0.8,
 ) -> RelationEvent:
-    """以语义字段构造 RelationEvent。"""
+    """以语义字段构造 RelationEvent"""
     return RelationEvent(
         relation_event_id=relation_event_id,
         chunk_id=chunk_id,
@@ -120,7 +120,7 @@ def participant_state(
     last_seen_chunk: int | None = None,
     source_confidence: float | None = None,
 ) -> ParticipantState:
-    """统一构造 ParticipantState。"""
+    """统一构造 ParticipantState"""
     return ParticipantState(
         entity_id=entity_id,
         name=name,
@@ -140,7 +140,7 @@ def build_graph_authority_view(
     relation_events: Sequence[RelationEvent] | None = None,
     canonical_entities: Sequence[object] | None = None,
 ) -> GraphAuthorityView:
-    """统一按 participant_states 构造 GraphAuthorityView。"""
+    """统一按 participant_states 构造 GraphAuthorityView"""
     return GraphAuthorityView(
         canonical_entities=list(canonical_entities or []),
         participant_states=list(participant_states or []),
@@ -150,12 +150,12 @@ def build_graph_authority_view(
 
 
 def get_graph_participant_states(view: GraphAuthorityView | SimpleNamespace) -> list[object]:
-    """统一读取 graph participant slice。"""
+    """统一读取 graph participant slice"""
     return list(getattr(view, "participant_states", []))
 
 
 class StaticGraphAuthorityService:
-    """固定返回 GraphAuthorityView 或 allowlist namespace，用于页面合约测试。"""
+    """固定返回 GraphAuthorityView 或 allowlist namespace，用于页面合约测试"""
 
     def __init__(
         self,
@@ -182,7 +182,7 @@ class StaticGraphAuthorityService:
 
 
 class PaginatedGraphAuthorityService:
-    """提供增量事件分页接口，锁定 graph events 的分页行为。"""
+    """提供增量事件分页接口，锁定 graph events 的分页行为"""
 
     def __init__(
         self,
@@ -230,7 +230,7 @@ class PaginatedGraphAuthorityService:
 
 
 def patch_graph_authority_service(monkeypatch, service) -> None:
-    """统一替换 KnowledgeGraphAuthorityService.from_session。"""
+    """统一替换 KnowledgeGraphAuthorityService.from_session"""
     monkeypatch.setattr(
         "src.api.routes.results_fetchers.fetchers.KnowledgeGraphAuthorityService.from_session",
         lambda *_args, **_kwargs: service,

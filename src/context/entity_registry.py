@@ -1,7 +1,7 @@
 """
 实体注册管理模块
 
-说明: 管理活跃实体的上下文查询和提示词格式化。
+说明: 管理活跃实体的上下文查询和提示词格式化
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def format_entities_for_prompt(entities: list[dict[str, Any]]) -> str:
 
 def _normalize_active_entity_row(row: Any) -> dict[str, Any] | None:
     """
-    统一规范化 GraphRepository 返回的实体行。
+    统一规范化 GraphRepository 返回的实体行
     """
     if isinstance(row, dict):
         name = row.get("name")

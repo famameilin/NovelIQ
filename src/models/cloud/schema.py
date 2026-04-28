@@ -116,7 +116,7 @@ class CloudAnalysis(BaseModel):
     def validate_focus_contract(self) -> CloudAnalysis:
         # 空云端桩和少量测试辅助对象仍可能构造“全空 diagnosis”，
         # 这里允许这种空对象通过；但只要已经进入正式 diagnosis 结果形态，
-        # 就必须显式给出完整 focus contract，不能再靠默认值糊成半成品。
+        # 就必须显式给出完整 focus contract，不能再靠默认值糊成半成品
         has_formal_diagnosis_payload = any(
             (
                 self.foreshadow_expectation is not None,

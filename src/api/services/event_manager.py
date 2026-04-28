@@ -108,7 +108,7 @@ class EventManager:
 
     async def shutdown(self) -> None:
         """
-        停止事件管理器后台任务并清空连接状态。
+        停止事件管理器后台任务并清空连接状态
         """
 
         cleanup_task = self._cleanup_task
@@ -127,7 +127,7 @@ class EventManager:
 
     def reset_for_testing(self) -> None:
         """
-        为测试夹具同步清空单例状态。
+        为测试夹具同步清空单例状态
         """
 
         cleanup_task = self._cleanup_task

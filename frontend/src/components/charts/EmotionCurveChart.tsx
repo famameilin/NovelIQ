@@ -110,7 +110,7 @@ export const EmotionCurveChart = forwardRef<ReactEChartsCore, EmotionCurveChartP
         const lineType = isSupportSeries ? "dashed" : "solid";
         const areaOpacity = isMainSeries ? 0.12 : 0;
         // 情绪趋势曲线允许后端返回 null 表示缺值，这里保留空洞，
-        // 避免把“没算出来”和“真实为 0”混成同一条贴地折线。
+        // 避免把“没算出来”和“真实为 0”混成同一条贴地折线
         const values = data.map((d) => d[config.key as keyof ChunkCurvePoint] ?? null);
         const isActive = activeSeries.has(config.key);
 

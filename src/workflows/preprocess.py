@@ -1,7 +1,7 @@
 """
 
-本模块从 src.cli.preprocess 提取核心业务逻辑，作为预处理流程的核心工作流模块。
-包含文本清洗、分块、写入数据库，以及风格/文化指标计算等功能。
+本模块从 src.cli.preprocess 提取核心业务逻辑，作为预处理流程的核心工作流模块
+包含文本清洗、分块、写入数据库，以及风格/文化指标计算等功能
 
 
 
@@ -44,7 +44,7 @@ async def run_preprocess(
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> tuple[int, int, float]:
     """
-    执行预处理流程。
+    执行预处理流程
 
 
 
@@ -148,14 +148,14 @@ async def run_preprocess(
 
 def _commit_preprocess_writes(session: Session, *, step: str) -> None:
     """
-    提交 preprocess 阶段的分段写入，及时释放事务锁。
+    提交 preprocess 阶段的分段写入，及时释放事务锁
 
-    preprocess 会连续写 chunks、chunk_style、chunk_embeddings，这些表都外键关联 analysis_runs。
-          若整段预处理共用一个长事务，EventBus 另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout。
-          因此这里在关键批量写入后立即提交，主动切断长事务。
+    preprocess 会连续写 chunks、chunk_style、chunk_embeddings，这些表都外键关联 analysis_runs
+          若整段预处理共用一个长事务，EventBus 另一条连接更新 analysis_runs 时可能被阻塞到 statement timeout
+          因此这里在关键批量写入后立即提交，主动切断长事务
     """
     # 这里的 commit 目标是缩短锁持有时间，而不是改变业务原子性边界；
-    # preprocess 本身已是可恢复阶段，分段提交比让状态写回超时更符合当前系统语义。
+    # preprocess 本身已是可恢复阶段，分段提交比让状态写回超时更符合当前系统语义
     session.commit()
     logger.debug(f"Committed preprocess writes after step={step}")
 
@@ -271,7 +271,7 @@ async def _generate_chunk_embeddings(
         emitter=emitter,
     )
     # 先把 paragraph rows 全部准备好，再开始任何向量表 DML；
-    # 这样 paragraph fail fast 时，当前 session 不会留下 chunk-only 半成品写入。
+    # 这样 paragraph fail fast 时，当前 session 不会留下 chunk-only 半成品写入
     if embeddings:
         insert_chunk_embeddings(session, run_id, embeddings)
     if paragraph_rows:
@@ -301,10 +301,10 @@ async def _generate_chunk_embeddings(
 
 def _split_chunk_paragraphs(chunk: Chunk) -> list[tuple[int, int, str]]:
     """
-    将 chunk 文本拆成 chunk 内 paragraph，并保留 chunk 内字符范围。
+    将 chunk 文本拆成 chunk 内 paragraph，并保留 chunk 内字符范围
 
     这里专门返回 chunk 内 local offset；
-          全局 offset 由调用方基于 `chunk.start` 统一折算，避免 local/global 语义再次混淆。
+          全局 offset 由调用方基于 `chunk.start` 统一折算，避免 local/global 语义再次混淆
     """
     if not chunk.text.strip():
         return []
@@ -342,16 +342,16 @@ async def _generate_paragraph_embedding_rows(
     emitter: Callable[[StreamEvent], Awaitable[None]] | None = None,
 ) -> list[Any]:
     """
-    生成 paragraph embedding 写入 DTO。
+    生成 paragraph embedding 写入 DTO
 
-    复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求。
+    复用 EmbeddingClient.embed_texts 批量接口，避免 paragraph 落库把预处理阶段退化成大量单条请求
 
     修改说明: paragraph embedding 缺失已是 Level3 硬故障，这里改为 fail fast，
-              避免 preprocess 成功但后续 readiness 永远失败。
+              避免 preprocess 成功但后续 readiness 永远失败
 
-    修改说明: paragraph row 直接落显式的 local/global offset，不再继续写旧的歧义字段。
+    修改说明: paragraph row 直接落显式的 local/global offset，不再继续写旧的歧义字段
 
-    修改说明: 通过批量 embedding 的 progress_callback 发 SSE，前端可看到 paragraph 向量化的持续推进。
+    修改说明: 通过批量 embedding 的 progress_callback 发 SSE，前端可看到 paragraph 向量化的持续推进
     """
     paragraph_refs: list[tuple[int, int, int, int, int, int, str]] = []
     for chunk in all_chunks:
@@ -381,7 +381,7 @@ async def _generate_paragraph_embedding_rows(
         total_items: int,
     ) -> None:
         """
-        发射 preprocess 阶段 paragraph embedding 的批次进度。
+        发射 preprocess 阶段 paragraph embedding 的批次进度
 
         """
         if emitter is None or total_batches <= 0:
@@ -389,7 +389,7 @@ async def _generate_paragraph_embedding_rows(
 
         sub_percent = (completed_batches / total_batches) * 100
         # current/total 在这里表达的是“已完成批次/总批次”，
-        # message 再补充总 paragraph 数，避免和 chunk 级 current/total 语义混淆。
+        # message 再补充总 paragraph 数，避免和 chunk 级 current/total 语义混淆
         await emitter(
             StreamEvent(
                 action="progress",

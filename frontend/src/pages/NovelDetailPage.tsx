@@ -353,7 +353,7 @@ export function NovelDetailPage() {
           curvesQuery.isLoading)));
 
   // 首页对 rerun-required diagnosis 采用“单一重跑态”；
-  // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败。
+  // 依赖 diagnosis 的并行查询即便同时返回 409，也不应再额外叠加一层通用加载失败
   const hasAnyError =
     taskStatusQuery.isError ||
     narrativeQuery.isError ||
