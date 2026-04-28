@@ -195,3 +195,8 @@ frontend/.env
 frontend/.env.local
 
 AGENTS.md
+
+skills/
+
+.codex-runtime/ 
+.playwright-mcp/
