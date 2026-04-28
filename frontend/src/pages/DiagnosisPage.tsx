@@ -96,6 +96,9 @@ function ForeshadowingThreadsErrorCard(props: { onRetry: () => void }) {
 /**
  * setup 台账是独立于云端 diagnosis 的主链结果；
  * 即便 diagnosis 为空，只要 ledger 已可用，也应该继续对用户可见
+ *
+ * 2026-04-29，任务：诊断页单屏工作台修正
+ * 修改原因：Setup 台账在 tab 面板内不能依赖整页滚动，改为卡片内部列表滚动，避免底部被 panel 裁剪
  */
 function ForeshadowingThreadsSection(props: {
   foreshadowingThreads: Array<{
@@ -117,9 +120,11 @@ function ForeshadowingThreadsSection(props: {
       title="Setup 台账"
       icon={<GitBranch className="h-4 w-4" />}
       accent="chart-2"
-      bodyClassName="gap-3"
+      className="flex h-full min-h-[240px] flex-col"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-3"
     >
-      <div className="grid grid-cols-1 gap-3">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pr-1">
         {props.foreshadowingThreads.map((thread) => {
           const statusMeta = getThreadStatusMeta(thread.status);
           return (
@@ -229,6 +234,9 @@ function SkeletonGrid() {
  *
  * 2026-04-28，任务：分析详情页单屏 Tabs 改造
  * 修改原因：诊断页内容拆成摘要、价值角色、Arc主题和台账四个 tab，统一交给单屏工作区编排
+ *
+ * 2026-04-29，任务：诊断页信息面收口
+ * 修改原因：诊断页原先 4 个 tab 过于分散，除 Setup 台账外其余内容收口为 2 个更饱满的信息面
  */
 export function DiagnosisPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -350,26 +358,38 @@ export function DiagnosisPage() {
           */}
           <AnalysisWorkspace.Tabs defaultValue="summary">
             <AnalysisWorkspace.Tab value="summary" label="诊断摘要">
-              <div className="flex h-full min-h-0 flex-col gap-4">
-                <DiagnosisHeader narrativeType={diagnosis.narrative_type} arcType={diagnosis.narrative_arc_type} />
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(520px,1.08fr)_minmax(0,0.92fr)]">
+                <div className="grid min-h-0 auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2">
                   <ScoreCard
                     title="伏笔回收预期"
                     type="percent"
                     value={foreshadowMetric != null ? foreshadowMetric * 100 : null}
-                    reason="基于 setup thread ledger 的加权估计，不是严格全文事实回收率。"
                   />
                   <ScoreCard title="权力立场" type="score" score={diagnosis.power_stance_score} reason={diagnosis.power_stance_reason} />
                   <ScoreCard title="平民尊严" type="score" score={diagnosis.common_people_dignity} reason={diagnosis.dignity_reason} />
                   <ScoreCard title="文化深度" type="score" score={diagnosis.cultural_depth_score} reason={diagnosis.cultural_depth_reason} />
                 </div>
-                {diagnosis.diagnosis && (
-                  <DiagnosisText diagnosisText={diagnosis.diagnosis} className="min-h-[300px] flex-1" />
-                )}
+
+                <div className="flex min-h-0 flex-col gap-4">
+                  <DiagnosisHeader narrativeType={diagnosis.narrative_type} arcType={diagnosis.narrative_arc_type} />
+                  {diagnosis.diagnosis ? (
+                    <DiagnosisText diagnosisText={diagnosis.diagnosis} className="min-h-[320px] flex-1" />
+                  ) : (
+                    <DashboardCardShell
+                      title="综合诊断"
+                      icon={<AlertCircle className="h-4 w-4" />}
+                      accent="chart-2"
+                      className="min-h-[240px]"
+                      bodyClassName="items-center justify-center text-center"
+                    >
+                      <p className="text-sm text-text-muted">当前任务暂无综合诊断文本。</p>
+                    </DashboardCardShell>
+                  )}
+                </div>
               </div>
             </AnalysisWorkspace.Tab>
-            <AnalysisWorkspace.Tab value="value-cast" label="价值与角色">
-              <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-2">
+            <AnalysisWorkspace.Tab value="insights" label="价值与主题">
+              <div className="grid h-full min-h-0 auto-rows-fr grid-cols-1 gap-4 lg:grid-cols-2">
                 <ValueLogicCard
                   valueLogicType={diagnosis.value_logic_type}
                   valueLogicReason={diagnosis.value_logic_reason}
@@ -382,19 +402,16 @@ export function DiagnosisPage() {
                   majorCast={diagnosis.main_characters}
                   className="h-full min-h-[260px]"
                 />
-              </div>
-            </AnalysisWorkspace.Tab>
-            <AnalysisWorkspace.Tab value="arc-topic" label="Arc 与主题">
-              <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-2">
                 <ArcScoresChart arcScores={diagnosis.arc_scores} className="h-full min-h-[320px]" />
                 <DashboardCardShell
                   title="主题标签"
                   icon={<Tags className="h-4 w-4" />}
                   accent="chart-4"
-                  bodyClassName="gap-3"
+                  contentClassName="flex h-full flex-col"
+                  bodyClassName="min-h-0 flex-1 gap-3"
                   className="h-full min-h-[240px]"
                 >
-                  <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
+                  <div className="min-h-0 flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
                     <TopicLabels labels={diagnosis.topic_labels} />
                   </div>
                 </DashboardCardShell>

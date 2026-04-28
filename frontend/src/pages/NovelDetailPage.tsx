@@ -131,7 +131,10 @@ function RerunRequiredState() {
 
 /**
  * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：仪表盘页补齐统一单屏 tab 工作区，默认总览优先，结构与曲线进入第二 tab
+ * 修改原因：仪表盘页补齐统一单屏工作区，后续模块统一走共享布局边界
+ *
+ * 2026-04-29，任务：仪表盘收口
+ * 修改原因：仪表盘不再拆成两个 tab，结构与曲线预览直接并回同一面板，减少无意义切换
  */
 export function NovelDetailPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -386,12 +389,12 @@ export function NovelDetailPage() {
         onDeleteCurrentTask: currentTaskId ? handleDeleteTask : undefined,
         isResuming: effectiveIsAnalyzing,
       }}
-      className="px-5 py-4"
+      className="px-5"
       headerClassName="mb-3"
     >
-      {/* 
-        2026-04-28，任务：分析详情页单屏 Tabs 改造
-        修改原因：仪表盘主内容改为 tab 工作区，后续新增模块统一接受单屏边界约束。
+      {/*
+        2026-04-29，任务：仪表盘收口
+        修改原因：仪表盘仍走 tabs 公共工作区，但只保留一个 tab，统一和其他分析页的边距与面板语义。
       */}
 
       {/* No task selected — offer start analysis */}
@@ -426,12 +429,12 @@ export function NovelDetailPage() {
 
       {/* Main content - only when not analyzing */}
       {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && !diagnosisRequiresRerun && (
-        <AnalysisWorkspace.Tabs defaultValue="overview">
-          <AnalysisWorkspace.Tab value="overview" label="总览">
-            <div className="flex h-full min-h-0 flex-col gap-4">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <AnalysisWorkspace.Tabs defaultValue="dashboard">
+          <AnalysisWorkspace.Tab value="dashboard" label="仪表盘">
+            <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {diagnosisQuery.data ? (
-                  <DiagnosisSummaryCard diagnosis={diagnosisQuery.data} novelId={novelId!} className="h-full" />
+                  <DiagnosisSummaryCard diagnosis={diagnosisQuery.data} novelId={novelId!} className="h-full min-h-0" />
                 ) : (
                   <Card className="flex h-full items-center justify-center">
                     <p className="text-sm text-text-muted">暂无诊断数据</p>
@@ -444,12 +447,12 @@ export function NovelDetailPage() {
                   civilianDignity={diagnosisQuery.data?.common_people_dignity}
                   culturalDepth={diagnosisQuery.data?.cultural_depth_score}
                   novelId={novelId!}
-                  className="h-full"
+                  className="h-full min-h-0"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-                <DimensionMiniCard dimension="narrative" data={narrativeQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/timeline`} />
+              <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
+                <DimensionMiniCard dimension="narrative" data={narrativeQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/timeline`} className="min-h-0" />
                 <DimensionMiniCard
                   dimension="emotion"
                   data={{
@@ -459,9 +462,10 @@ export function NovelDetailPage() {
                   }}
                   novelId={novelId!}
                   linkTo={`/novels/${novelId}/curves`}
+                  className="min-h-0"
                 />
-                <DimensionMiniCard dimension="character" data={characterQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/graph`} />
-                <DimensionMiniCard dimension="style" data={styleQuery.data ?? {}} novelId={novelId!} />
+                <DimensionMiniCard dimension="character" data={characterQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/graph`} className="min-h-0" />
+                <DimensionMiniCard dimension="style" data={styleQuery.data ?? {}} novelId={novelId!} className="min-h-0" />
                 <DimensionMiniCard
                   dimension="topic"
                   data={{
@@ -475,20 +479,21 @@ export function NovelDetailPage() {
                   }}
                   novelId={novelId!}
                   linkTo={`/novels/${novelId}/topics`}
+                  className="min-h-0"
                 />
               </div>
-            </div>
-          </AnalysisWorkspace.Tab>
-          <AnalysisWorkspace.Tab value="structure" label="结构与曲线">
-            <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-2">
-              <NarrativeStructureBar
-                act1Ratio={narrativeQuery.data?.act1_ratio}
-                act2Ratio={narrativeQuery.data?.act2_ratio}
-                act3Ratio={narrativeQuery.data?.act3_ratio}
-                eventDensity={narrativeQuery.data?.event_density}
-                novelId={novelId!}
-              />
-              <MiniCurvePreview data={curvesQuery.data ?? []} novelId={novelId!} />
+
+              <div className="grid min-h-0 grid-cols-1 gap-3 lg:grid-cols-2">
+                <NarrativeStructureBar
+                  act1Ratio={narrativeQuery.data?.act1_ratio}
+                  act2Ratio={narrativeQuery.data?.act2_ratio}
+                  act3Ratio={narrativeQuery.data?.act3_ratio}
+                  eventDensity={narrativeQuery.data?.event_density}
+                  novelId={novelId!}
+                  className="h-full min-h-0"
+                />
+                <MiniCurvePreview data={curvesQuery.data ?? []} novelId={novelId!} className="h-full min-h-0" />
+              </div>
             </div>
           </AnalysisWorkspace.Tab>
         </AnalysisWorkspace.Tabs>

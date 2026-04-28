@@ -55,7 +55,7 @@ export function TimelineControls({
     <div
       className={cn(
         "flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/60 bg-surface/70 px-4 py-3",
-        variant === "inline" && "border-border/50 bg-background/70 px-3 py-2.5"
+        variant === "inline" && "border-border/50 bg-background/70 px-3 py-2"
       )}
     >
       <div className="flex flex-wrap items-center gap-3">

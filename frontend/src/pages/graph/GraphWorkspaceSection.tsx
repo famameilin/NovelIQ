@@ -56,6 +56,8 @@ interface GraphWorkspaceSectionProps {
 // 把图谱工作区、分页事件侧栏和联动详情区块拆到独立组件，收缩 GraphPage 的 JSX 复杂度
 // 2026-04-28，任务：分析详情页单屏 Tabs 改造
 // 修改原因：同一工作区需要按 tab 分别渲染图谱画布或关系变化面板，避免复制两套图谱逻辑
+// 2026-04-29，任务：图谱页单屏工作台修正
+// 修改原因：关系变化页签不应依赖整页滚动，改为左侧记录列表 + 右侧详情侧栏的一屏布局
 export function GraphWorkspaceSection({
   view = "full",
   graphData,
@@ -152,11 +154,20 @@ export function GraphWorkspaceSection({
       )}
 
       {view !== "graph" && (
-      <div className={cn("h-full space-y-4 overflow-hidden", view !== "events" && "xl:self-start")}>
+      <div
+        className={cn(
+          "space-y-4",
+          view === "events"
+            ? "grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(340px,0.82fr)]"
+            : "max-h-full overflow-y-auto pr-1 xl:self-start",
+        )}
+      >
         <DashboardCardShell
           title="关系变化记录"
           icon={<History className="h-4 w-4" />}
           accent="chart-4"
+          className={cn(view === "events" && "flex h-full min-h-[420px] flex-col")}
+          contentClassName={cn(view === "events" && "flex h-full flex-col")}
           headerRight={
             <Badge variant="outline">
               {loadedEventCount < totalEventCount ? `${loadedEventCount} / ${totalEventCount}` : totalEventCount}
@@ -168,13 +179,16 @@ export function GraphWorkspaceSection({
               <ArrowRight className="h-4 w-4" />
             </Button>
           }
-          bodyClassName="gap-3"
+          bodyClassName={cn(view === "events" ? "min-h-0 flex-1 gap-3" : "gap-3")}
         >
           <p className="text-sm text-text-muted">
             按剧情推进查看关系的建立、强化、弱化和断裂。
             {hasMoreEvents ? " 当前先展示一部分记录，可继续展开查看更多变化。" : ""}
           </p>
-          <div className="space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4">
+          <div className={cn(
+            "space-y-3 rounded-2xl border border-border/60 bg-surface/70 p-4",
+            view === "events" && "flex min-h-0 flex-1 flex-col"
+          )}>
             {graphSelectionHint ? (
               <div className="rounded-xl border border-chart-negative/20 bg-chart-negative/5 p-3 text-xs leading-5 text-text-muted">
                 {graphSelectionHint}
@@ -182,7 +196,10 @@ export function GraphWorkspaceSection({
             ) : null}
             {sortedEvents.length ? (
               <>
-                <div className="space-y-3 pr-1">
+                <div className={cn(
+                  "space-y-3 pr-1",
+                  view === "events" ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[420px] overflow-y-auto"
+                )}>
                   {sortedEvents.map((event) => {
                     const isSelected = activeSelectedEventId === event.relation_event_id;
                     return (
@@ -232,100 +249,112 @@ export function GraphWorkspaceSection({
           </div>
         </DashboardCardShell>
 
-        {selectedNode?.entity_type === "character" &&
-        (selectedNode.first_seen_chunk != null || selectedNode.last_seen_chunk != null) ? (
-          <DashboardCardShell title="角色生命周期联动" icon={<Users className="h-4 w-4" />} accent="chart-3" bodyClassName="gap-4">
-            <p className="text-sm text-text-muted">从这里可以继续查看角色在故事中的首次登场和最后活跃位置。</p>
-            <div className="space-y-4 rounded-2xl border border-border/60 bg-surface/70 p-4">
-              <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
-                当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
-                {selectedNode.first_seen_chunk != null && selectedNode.last_seen_chunk != null
-                  ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chunk} 段到第 ${selectedNode.last_seen_chunk} 段。`
-                  : "，可继续跳到时间轴查看稳定生命周期节点。"}
+        <div className={cn(view === "events" ? "flex min-h-0 flex-col gap-4 overflow-hidden" : "space-y-4")}>
+          {selectedNode?.entity_type === "character" &&
+          (selectedNode.first_seen_chunk != null || selectedNode.last_seen_chunk != null) ? (
+            <DashboardCardShell title="角色生命周期联动" icon={<Users className="h-4 w-4" />} accent="chart-3" bodyClassName="gap-4">
+              <p className="text-sm text-text-muted">从这里可以继续查看角色在故事中的首次登场和最后活跃位置。</p>
+              <div className="space-y-4 rounded-2xl border border-border/60 bg-surface/70 p-4">
+                <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4 text-sm text-text-muted">
+                  当前选中角色 <span className="font-medium text-text">{selectedNode.name}</span>
+                  {selectedNode.first_seen_chunk != null && selectedNode.last_seen_chunk != null
+                    ? `，稳定生命周期覆盖第 ${selectedNode.first_seen_chunk} 段到第 ${selectedNode.last_seen_chunk} 段。`
+                    : "，可继续跳到时间轴查看稳定生命周期节点。"}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      onOpenTimelineChunk(
+                        selectedNode.first_seen_chunk,
+                        null,
+                        selectedNode.first_seen_chunk != null
+                          ? `lifecycle:entry:${selectedNode.entity_id}:${selectedNode.first_seen_chunk}`
+                          : null,
+                      )
+                    }
+                    disabled={selectedNode.first_seen_chunk == null || !timelineUrl}
+                  >
+                    查看首次登场
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      onOpenTimelineChunk(
+                        selectedNode.last_seen_chunk,
+                        null,
+                        selectedNode.last_seen_chunk != null
+                          ? `lifecycle:exit:${selectedNode.entity_id}:${selectedNode.last_seen_chunk}`
+                          : null,
+                      )
+                    }
+                    disabled={selectedNode.last_seen_chunk == null || !timelineUrl}
+                  >
+                    查看最后活跃
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    onOpenTimelineChunk(
-                      selectedNode.first_seen_chunk,
-                      null,
-                      selectedNode.first_seen_chunk != null
-                        ? `lifecycle:entry:${selectedNode.entity_id}:${selectedNode.first_seen_chunk}`
-                        : null,
-                    )
-                  }
-                  disabled={selectedNode.first_seen_chunk == null || !timelineUrl}
-                >
-                  查看首次登场
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    onOpenTimelineChunk(
-                      selectedNode.last_seen_chunk,
-                      null,
-                      selectedNode.last_seen_chunk != null
-                        ? `lifecycle:exit:${selectedNode.entity_id}:${selectedNode.last_seen_chunk}`
-                        : null,
-                    )
-                  }
-                  disabled={selectedNode.last_seen_chunk == null || !timelineUrl}
-                >
-                  查看最后活跃
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </DashboardCardShell>
-        ) : null}
+            </DashboardCardShell>
+          ) : null}
 
-        <DashboardCardShell title="关系变化详情" icon={<Link2 className="h-4 w-4" />} accent="chart-2" bodyClassName="gap-3">
-          <p className="text-sm text-text-muted">查看当前选中关系变化的上下文说明和原文摘录。</p>
-          <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
-            {selectedEvent ? (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-text">
-                        第 {selectedEvent.chunk_id} 段 · {selectedEvent.from_name} → {selectedEvent.to_name}
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-text-muted">
-                        {selectedEvent.relation_type ?? "未标注关系"} · {getChangeTypeLabel(selectedEvent.change_type)}
-                      </p>
+          <DashboardCardShell
+            title="关系变化详情"
+            icon={<Link2 className="h-4 w-4" />}
+            accent="chart-2"
+            className={cn(view === "events" && "flex min-h-0 flex-1 flex-col")}
+            contentClassName={cn(view === "events" && "flex h-full flex-col")}
+            bodyClassName={cn(view === "events" ? "min-h-0 flex-1 gap-3" : "gap-3")}
+          >
+            <p className="text-sm text-text-muted">查看当前选中关系变化的上下文说明和原文摘录。</p>
+            <div className={cn(
+              "rounded-2xl border border-border/60 bg-surface/70 p-4",
+              view === "events" && "min-h-0 flex-1 overflow-y-auto"
+            )}>
+              {selectedEvent ? (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-border/70 bg-surface-hover/35 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-text">
+                          第 {selectedEvent.chunk_id} 段 · {selectedEvent.from_name} → {selectedEvent.to_name}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-text-muted">
+                          {selectedEvent.relation_type ?? "未标注关系"} · {getChangeTypeLabel(selectedEvent.change_type)}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-border bg-surface p-4">
-                    <p className="text-xs uppercase tracking-wide text-text-muted">变化类型</p>
-                    <p className="mt-2 text-sm font-medium text-text">{getChangeTypeLabel(selectedEvent.change_type)}</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border bg-surface p-4">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">变化类型</p>
+                      <p className="mt-2 text-sm font-medium text-text">{getChangeTypeLabel(selectedEvent.change_type)}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-surface p-4">
+                      <p className="text-xs uppercase tracking-wide text-text-muted">关系方向</p>
+                      <p className="mt-2 text-sm font-medium text-text">{selectedEvent.directionality ?? "未声明"}</p>
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-border bg-surface p-4">
-                    <p className="text-xs uppercase tracking-wide text-text-muted">关系方向</p>
-                    <p className="mt-2 text-sm font-medium text-text">{selectedEvent.directionality ?? "未声明"}</p>
-                  </div>
-                </div>
 
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <p className="text-xs uppercase tracking-wide text-text-muted">证据摘录</p>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-text">
-                    {selectedEvent.evidence?.trim() || "当前事件没有附带 evidence 文本。"}
-                  </p>
+                  <div className="rounded-xl border border-border bg-surface p-4">
+                    <p className="text-xs uppercase tracking-wide text-text-muted">证据摘录</p>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-text">
+                      {selectedEvent.evidence?.trim() || "当前事件没有附带 evidence 文本。"}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-text-muted">
-                选择一条关系变化后，这里会显示详细上下文。
-              </div>
-            )}
-          </div>
-        </DashboardCardShell>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-text-muted">
+                  选择一条关系变化后，这里会显示详细上下文。
+                </div>
+              )}
+            </div>
+          </DashboardCardShell>
+        </div>
       </div>
       )}
     </motion.section>

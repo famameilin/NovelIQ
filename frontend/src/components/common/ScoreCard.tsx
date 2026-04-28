@@ -3,6 +3,7 @@ import { useInView, motion } from "framer-motion";
 import { useId } from "react";
 import { Activity } from "lucide-react";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
+import { cn } from "@/lib/cn";
 
 export interface ScoreCardProps {
   title: string;
@@ -22,6 +23,9 @@ export interface ScoreCardProps {
 /**
  * 2026-04-21，任务：多页面卡片风格统一
  * 修改原因：将诊断页评分卡接入共享卡片壳，统一视觉层级、hover 反馈和主题 accent 表达
+ *
+ * 2026-04-29，任务：诊断摘要排版重构
+ * 修改原因：诊断摘要需要展示更完整的指标解释，评分卡改为更高的信息密度布局，避免理由被过早截断。
  */
 export function ScoreCard({
   title,
@@ -42,8 +46,9 @@ export function ScoreCard({
       icon={<Activity className="h-4 w-4" />}
       accent={isPercent ? "primary" : "chart-2"}
       showOrb
-      className={className}
-      bodyClassName="gap-3"
+      className={cn("h-full min-h-[220px]", className)}
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-4"
     >
       <div className="flex items-center gap-4 rounded-2xl border border-border/60 bg-surface/70 p-3.5">
         {isPercent ? (
@@ -64,7 +69,9 @@ export function ScoreCard({
       </div>
 
       {reason && (
-        <p className="text-xs leading-5 text-text-muted line-clamp-2">{reason}</p>
+        <div className="min-h-[96px] rounded-2xl border border-border/50 bg-surface-hover/30 px-3.5 py-3">
+          <p className="text-xs leading-6 text-text-muted">{reason}</p>
+        </div>
       )}
     </DashboardCardShell>
   );

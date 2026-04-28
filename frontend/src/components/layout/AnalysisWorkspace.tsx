@@ -36,7 +36,6 @@ export interface AnalysisWorkspaceTabProps {
   value: string;
   label: string;
   children: ReactNode;
-  className?: string;
 }
 
 /**
@@ -160,10 +159,7 @@ function AnalysisWorkspaceTabs({
               initial={tabItem.props.value === activeValue ? { opacity: 0, y: 8 } : false}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.16, ease: "easeOut" }}
-              className={cn(
-                "mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=inactive]:hidden",
-                tabItem.props.className,
-              )}
+              className="mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=inactive]:hidden"
             >
               <div className="flex min-h-0 flex-1 flex-col">{tabItem.props.children}</div>
             </motion.div>

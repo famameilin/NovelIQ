@@ -40,7 +40,6 @@ import { motion } from "framer-motion";
 import { useCallback, useMemo } from "react";
 
 import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 
 import { TimelineNode } from "./TimelineNode";
@@ -136,31 +135,14 @@ export function TimelineTrack({
   }, [canvasMinWidth, phases]);
 
   return (
-    <div className={cn("relative overflow-hidden rounded-[28px] border border-border/70 bg-background/80", className)}>
+    <div className={cn("relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-border/70 bg-background/80", className)}>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.8),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,240,236,0.76))]" />
 
-      <div className="relative pb-3 pt-2">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="border-border/70 bg-background/85 text-text">
-              {sortedNodes.length} 个可见节点
-            </Badge>
-            <Badge variant="outline" className="border-border/70 bg-background/85 text-text-muted">
-              曲线表示叙事主轴
-            </Badge>
-            {showTension ? (
-              <Badge variant="outline" className="border-border/70 bg-background/85 text-text-muted">
-                底图表示节奏张力
-              </Badge>
-            ) : null}
-          </div>
-          <div className="text-xs text-text-muted">点击节点可在下方查看完整叙事细节</div>
-        </div>
-
-        <div className="overflow-x-auto overflow-y-hidden px-2 pb-2">
-          <div className="w-max min-w-full">
+      <div className="relative flex min-h-0 flex-1 flex-col pb-2 pt-1">
+        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-2 pb-1">
+          <div className="h-full w-max min-w-full">
             <div
-              className="relative overflow-hidden rounded-[24px] border border-white/60 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.7),rgba(247,240,236,0.4))]"
+              className="relative h-full min-h-[430px] overflow-hidden rounded-[24px] border border-white/60 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.7),rgba(247,240,236,0.4))]"
               style={{ minWidth: `${canvasMinWidth}px` }}
             >
               {phaseLayouts.map((phase) => {
@@ -207,7 +189,7 @@ export function TimelineTrack({
                 </svg>
               )}
 
-              <div className="relative" style={{ height: `${TRACK_HEIGHT_PX}px`, minWidth: `${canvasMinWidth}px` }}>
+              <div className="relative h-full" style={{ minHeight: `${TRACK_HEIGHT_PX}px`, minWidth: `${canvasMinWidth}px` }}>
                 {layoutNodes.map((layoutNode, index) => {
                   const { node, lane, labelWidth } = layoutNode;
                   const anchorX = calculateNodeAnchorX(node.progress, canvasMinWidth);

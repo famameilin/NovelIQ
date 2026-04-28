@@ -31,7 +31,7 @@ export function GraphOverviewSection({
   pageSectionVariants,
 }: GraphOverviewSectionProps) {
   return (
-    <>
+    <div className="space-y-4">
       <motion.section
         variants={pageSectionVariants}
         initial="hidden"
@@ -178,6 +178,6 @@ export function GraphOverviewSection({
           </div>
         </DashboardCardShell>
       </motion.section>
-    </>
+    </div>
   );
 }

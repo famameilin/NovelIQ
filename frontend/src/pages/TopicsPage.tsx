@@ -42,7 +42,7 @@ const itemVariants = {
 
 /**
  * 2026-04-28，任务：分析详情页单屏 Tabs 改造
- * 修改原因：主题页补齐统一 tab 工作区，默认优先展示主题词云，权重和表格按需切换
+ * 修改原因：主题页补齐统一工作区，并恢复为词云 + 权重/表格的单面板布局，避免三个 tab 过度拆散信息
  */
 export function TopicsPage() {
   const { novelId } = useParams<{ novelId: string }>();
@@ -250,17 +250,25 @@ export function TopicsPage() {
     }
 
     return (
-      <AnalysisWorkspace.Tabs defaultValue="wordcloud">
-        <AnalysisWorkspace.Tab value="wordcloud" label="词云">
+      <motion.div
+        className="flex min-h-0 flex-1 flex-col gap-4"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div variants={itemVariants} className="min-h-0 flex-[1.15]">
           <TopicWordCloud topics={topics} maxWords={100} className="h-full" />
-        </AnalysisWorkspace.Tab>
-        <AnalysisWorkspace.Tab value="weights" label="权重">
-          <TopicBarChart topics={topics} className="h-full" />
-        </AnalysisWorkspace.Tab>
-        <AnalysisWorkspace.Tab value="table" label="表格">
-          <TopicTable topics={topics} className="h-full" />
-        </AnalysisWorkspace.Tab>
-      </AnalysisWorkspace.Tabs>
+        </motion.div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+          <motion.div variants={itemVariants} className="min-h-0">
+            <TopicBarChart topics={topics} className="h-full" />
+          </motion.div>
+          <motion.div variants={itemVariants} className="min-h-0">
+            <TopicTable topics={topics} className="h-full" />
+          </motion.div>
+        </div>
+      </motion.div>
     );
   };
 
