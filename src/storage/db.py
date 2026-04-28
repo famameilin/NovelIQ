@@ -485,6 +485,7 @@ def _ensure_runtime_schema(engine: Engine) -> None:
     修改时间: 2026-04-24
     任务: full-global-offset-rollout
     修改内容: 为旧库补齐 chunks.char_end_offset，避免 ORM 已声明全文终点列而历史表仍缺列。
+
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":

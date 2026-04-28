@@ -1,9 +1,11 @@
-import type { TimelineNode as TimelineNodeType } from "@/api/types";
+import type { TimelineCompositeNode, TimelineNode as TimelineNodeType } from "@/api/types";
 
 import { getCurveNodeYPx, getNormalizedProgress, getTrackPositionPx, TRACK_HEIGHT_PX } from "./timelineTrackPaths";
 
+type TimelineLayoutInputNode = TimelineNodeType | TimelineCompositeNode;
+
 export interface TimelineLayoutNode {
-  node: TimelineNodeType;
+  node: TimelineLayoutInputNode;
   lane: number;
   labelWidth: number;
 }
@@ -30,16 +32,16 @@ export const GUIDE_LINE_OFFSET_X_PX = 8;
 export const GUIDE_LINE_OFFSET_Y_PX = 2;
 export const LANE_ORDER = [-2, -1, 1, 2] as const;
 
-export function estimateLabelWidth(eventText: string): number {
-  const estimated = eventText.trim().length * 11 + 56;
+export function estimateLabelWidth(summaryText: string): number {
+  const estimated = summaryText.trim().length * 11 + 56;
   return Math.max(120, Math.min(188, estimated));
 }
 
-export function createTimelineLayoutNodes(nodes: TimelineNodeType[], canvasWidth: number): TimelineLayoutNode[] {
+export function createTimelineLayoutNodes(nodes: TimelineLayoutInputNode[], canvasWidth: number): TimelineLayoutNode[] {
   const laneLastEndMap = new Map<number, number>(LANE_ORDER.map((lane) => [lane, -1]));
 
   return nodes.map((node, index) => {
-    const labelWidth = estimateLabelWidth(node.event);
+    const labelWidth = estimateLabelWidth(node.summary);
     const labelWidthRatio = labelWidth / canvasWidth;
     const nodeLeft = getNormalizedProgress(node.progress);
     const labelStart = nodeLeft - labelWidthRatio / 2;

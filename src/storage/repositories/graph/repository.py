@@ -319,7 +319,36 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             )
         ).scalar_one_or_none()
 
+    def delete_relation_event_by_source_row_id(
+        self,
+        run_id: str,
+        source_relation_row_id: int,
+    ) -> tuple[int, int] | None:
+        """
+        2026-04-27，任务：fix-graph-projection-no-change-refresh
+        新建原因：当某条 ChunkRelation 被修正为“无变化”时，必须显式删除旧的 graph relation event，
+        并把受影响的实体 pair 回刷给 current relation / participant projection。
+        """
+        event = self.session.execute(
+            select(GraphRelationEvent).where(
+                GraphRelationEvent.run_id == run_id,
+                GraphRelationEvent.source_relation_row_id == source_relation_row_id,
+            )
+        ).scalar_one_or_none()
+        if event is None:
+            return None
+
+        affected_pair = (event.from_entity_id, event.to_entity_id)
+        self.session.delete(event)
+        self.session.flush()
+        return affected_pair
+
     def refresh_current_relation(self, run_id: str, from_entity_id: int, to_entity_id: int) -> None:
+        """
+        2026-04-27，任务：fix-graph-projection-no-change-refresh
+        修改原因：当关系历史被删空时，current relation 也必须同步删除；
+        否则 graph / authority / timeline 会继续读到已经失效的旧关系快照。
+        """
         events = list(
             self.session.execute(
                 select(GraphRelationEvent)
@@ -334,6 +363,16 @@ class GraphRepository(BaseRepository["GraphRepository"]):
             .all()
         )
         if not events:
+            existing_without_events = self.session.execute(
+                select(GraphRelationCurrent).where(
+                    GraphRelationCurrent.run_id == run_id,
+                    GraphRelationCurrent.from_entity_id == from_entity_id,
+                    GraphRelationCurrent.to_entity_id == to_entity_id,
+                )
+            ).scalar_one_or_none()
+            if existing_without_events is not None:
+                self.session.delete(existing_without_events)
+                self.session.flush()
             return
 
         latest = events[-1]

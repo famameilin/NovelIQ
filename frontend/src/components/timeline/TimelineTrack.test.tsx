@@ -7,32 +7,42 @@ import { TimelineTrack } from "./TimelineTrack";
 
 vi.mock("framer-motion", () => ({
   motion: {
-    div: ({ children, initial: _initial, animate: _animate, transition: _transition, ...props }: Record<string, unknown>) => (
-      <div {...props}>{children as ReactNode}</div>
-    ),
-    button: ({
-      children,
-      initial: _initial,
-      animate: _animate,
-      transition: _transition,
-      whileHover: _whileHover,
-      ...props
-    }: Record<string, unknown>) => <button {...props}>{children as ReactNode}</button>,
+    div: (props: Record<string, unknown>) => {
+      const sanitizedProps = { ...props };
+      delete sanitizedProps.initial;
+      delete sanitizedProps.animate;
+      delete sanitizedProps.transition;
+      return <div {...sanitizedProps}>{props.children as ReactNode}</div>;
+    },
+    button: (props: Record<string, unknown>) => {
+      const sanitizedProps = { ...props };
+      delete sanitizedProps.initial;
+      delete sanitizedProps.animate;
+      delete sanitizedProps.transition;
+      delete sanitizedProps.whileHover;
+      return <button {...sanitizedProps}>{props.children as ReactNode}</button>;
+    },
   },
 }));
 
 function createNode(overrides: Partial<TimelineNode> = {}): TimelineNode {
   return {
-    chunk_id: 3,
+    node_id: "plot:3",
+    anchor_chunk_id: 3,
     progress: 0.3,
     importance_score: 8,
     level: 1,
-    event: "白芷初遇",
+    summary: "白芷初遇",
     characters: ["白芷"],
-    is_pivot: false,
-    is_cliffhanger: false,
-    tension_percentile: 55,
+    phase_name: "引入期",
     node_type: "plot",
+    node_subtype: "plot",
+    score_breakdown: { tension: 1.1 },
+    plot_flags: {
+      is_pivot: false,
+      is_cliffhanger: false,
+      tension_percentile: 55,
+    },
     ...overrides,
   };
 }
@@ -50,7 +60,7 @@ describe("TimelineTrack", () => {
   it("没有节点时会展示空态，并隐藏张力说明徽标", () => {
     render(<TimelineTrack nodes={[]} showTension={false} totalChunks={20} />);
 
-    expect(screen.getByText("0 个关键节点")).toBeInTheDocument();
+    expect(screen.getByText("0 个可见节点")).toBeInTheDocument();
     expect(screen.getByText("暂无时间轴节点")).toBeInTheDocument();
     expect(screen.queryByText("底图表示节奏张力")).not.toBeInTheDocument();
   });
@@ -64,7 +74,7 @@ describe("TimelineTrack", () => {
         nodes={[node]}
         phases={createPhases()}
         activePhase="引入期"
-        selectedNodeId={3}
+        selectedNodeId="plot:3"
         onNodeClick={onNodeClick}
         tensionCurve={[0.2, 0.5, 0.8]}
         totalChunks={20}
@@ -75,7 +85,7 @@ describe("TimelineTrack", () => {
     expect(detailButton).not.toBeNull();
     expect(detailButton).toHaveClass("border-primary/35");
 
-    const nodeButton = screen.getByRole("button", { name: "情节推进: 白芷初遇" });
+    const nodeButton = screen.getByRole("button", { name: "剧情节点: 白芷初遇" });
     expect(nodeButton).toHaveClass("ring-2");
 
     fireEvent.click(detailButton!);

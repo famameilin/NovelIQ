@@ -42,9 +42,10 @@ from src.knowledge.authority import (
 from src.metrics.timeline_metrics import (
     TimelineAuthorityContractError,
     TimelineDataUnavailableError,
-    build_timeline_candidates,
-    convert_to_timeline_nodes,
-    select_timeline_nodes,
+    build_timeline_plan,
+    serialize_timeline_composite_node,
+    serialize_timeline_node,
+    serialize_timeline_phases,
 )
 from src.storage.repositories import (
     AnnotationRepository,
@@ -282,7 +283,7 @@ def _fetch_timeline_data(
     获取时间轴数据用于导出
 
     Returns:
-        时间轴数据字典，包含 phases, nodes, tension_curve
+        时间轴数据字典，包含 phases, composite_nodes, atomic_nodes, tension_curve
 
     Contract note:
         Export intentionally reuses the same authority-backed timeline helper
@@ -290,7 +291,7 @@ def _fetch_timeline_data(
         lifecycles and character-character relation history.
     """
     try:
-        timeline_build = build_timeline_candidates(
+        timeline_plan = build_timeline_plan(
             run_id,
             chunk_repo,
             annotation_repo,
@@ -307,25 +308,12 @@ def _fetch_timeline_data(
         logger.error(f"Unexpected error building timeline for run {run_id}: {e}")
         raise
 
-    selected_nodes = select_timeline_nodes(
-        candidates=timeline_build.candidates,
-        chunk_ids=timeline_build.selection_inputs.chunk_ids,
-        tension_scores=timeline_build.selection_inputs.tension_scores,
-        major_character_entries=timeline_build.selection_inputs.major_character_entries,
-        relation_break_events=timeline_build.selection_inputs.relation_break_events,
-        min_nodes=10,
-        max_nodes=20,
-    )
-
-    from dataclasses import asdict
-
-    timeline_nodes = convert_to_timeline_nodes(selected_nodes)
-
     return {
-        "phases": [asdict(p) for p in timeline_build.phases],
-        "nodes": [asdict(n) for n in timeline_nodes],
-        "tension_curve": timeline_build.selection_inputs.tension_scores,
-        "total_chunks": timeline_build.total_chunks,
+        "phases": serialize_timeline_phases(timeline_plan.phases),
+        "composite_nodes": [serialize_timeline_composite_node(node) for node in timeline_plan.composite_nodes],
+        "atomic_nodes": [serialize_timeline_node(node) for node in timeline_plan.atomic_nodes],
+        "tension_curve": timeline_plan.tension_curve,
+        "total_chunks": timeline_plan.total_chunks,
     }
 
 

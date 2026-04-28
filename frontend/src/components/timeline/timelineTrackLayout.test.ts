@@ -9,18 +9,24 @@ import {
 } from "./timelineTrackLayout";
 import { buildTensionAreaPath, interpolateSeriesValueAtProgress, mapTensionValueToTrackY } from "./timelineTrackPaths";
 
-function createNode(chunkId: number, progress: number, event: string): TimelineNode {
+function createNode(chunkId: number, progress: number, summary: string): TimelineNode {
   return {
-    chunk_id: chunkId,
+    node_id: `plot:${chunkId}`,
+    anchor_chunk_id: chunkId,
     progress,
     importance_score: 5,
     level: 1,
-    event,
+    summary,
     characters: [],
-    is_pivot: false,
-    is_cliffhanger: false,
-    tension_percentile: 50,
+    phase_name: "发展期",
     node_type: "plot",
+    node_subtype: "plot",
+    score_breakdown: { tension: 1 },
+    plot_flags: {
+      is_pivot: false,
+      is_cliffhanger: false,
+      tension_percentile: 50,
+    },
   };
 }
 

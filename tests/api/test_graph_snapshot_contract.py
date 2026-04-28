@@ -441,7 +441,7 @@ def test_graph_page_public_dto_is_owned_by_route_layer() -> None:
                     from_name="沈砚",
                     to_name="陆明",
                     relation_type="盟友",
-                    change_type="波动",
+                    change_type="强化",
                     confidence=0.55,
                 )
             ],
@@ -474,7 +474,7 @@ def test_graph_page_public_dto_is_owned_by_route_layer() -> None:
                 "from_name": "沈砚",
                 "to_name": "陆明",
                 "relation_type": "盟友",
-                "change_type": "波动",
+                "change_type": "强化",
                 "confidence": 0.55,
             }
         ],
@@ -483,7 +483,7 @@ def test_graph_page_public_dto_is_owned_by_route_layer() -> None:
 
 def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(monkeypatch) -> None:
     relation_events = [
-        relation_event(index + 1, chunk_id=500 - index, change_type="波动", confidence=0.55) for index in range(205)
+        relation_event(index + 1, chunk_id=500 - index, change_type="强化", confidence=0.55) for index in range(205)
     ]
     patch_graph_authority_service(
         monkeypatch,
@@ -529,7 +529,7 @@ def test_fetch_graph_snapshot_quality_counts_full_history_but_caps_page_events(m
 
 def test_fetch_graph_events_page_uses_cursor_for_incremental_history(monkeypatch) -> None:
     relation_events = [
-        relation_event(index + 1, chunk_id=500 - index, change_type="波动", confidence=0.55) for index in range(205)
+        relation_event(index + 1, chunk_id=500 - index, change_type="强化", confidence=0.55) for index in range(205)
     ]
     patch_graph_authority_service(
         monkeypatch,
@@ -755,7 +755,7 @@ def test_fetch_graph_events_page_uses_incremental_authority_page_builder(monkeyp
         relation_event(11, chunk_id=9, change_type="新建", confidence=0.79),
         relation_event(12, chunk_id=8, change_type="强化", confidence=0.77),
         relation_event(13, chunk_id=7, change_type="弱化", confidence=0.73),
-        relation_event(14, chunk_id=6, change_type="波动", confidence=0.72),
+        relation_event(14, chunk_id=6, change_type="强化", confidence=0.72),
         relation_event(15, chunk_id=5, change_type="断裂", confidence=0.71),
     ]
     patch_graph_authority_service(

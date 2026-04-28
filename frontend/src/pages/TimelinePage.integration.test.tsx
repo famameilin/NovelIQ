@@ -96,7 +96,7 @@ function renderTimelinePage() {
   );
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation_change 的时间轴响应，覆盖图谱联动路径。
+// 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation node 的时间轴响应，覆盖图谱联动路径。
 function createTimelineResponse(): TimelineResponse {
   return {
     meta: {
@@ -110,19 +110,45 @@ function createTimelineResponse(): TimelineResponse {
       { name: "高潮期", start: 7, end: 9, ratio: 0.25 },
       { name: "收束期", start: 10, end: 12, ratio: 0.25 },
     ],
-    nodes: [
+    composite_nodes: [
       {
-        chunk_id: 8,
+        node_id: "composite:relation:8:0",
+        anchor_chunk_id: 8,
+        start_chunk_id: 8,
+        end_chunk_id: 8,
+        progress: 0.66,
+        start_progress: 0.66,
+        end_progress: 0.66,
+        importance_score: 9,
+        level: 1,
+        summary: "顾承渊与苏映雪结盟",
+        characters: ["顾承渊", "苏映雪"],
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtypes: ["新建"],
+        representative_node_id: "relation:31",
+        child_node_ids: ["relation:31"],
+      },
+    ],
+    atomic_nodes: [
+      {
+        node_id: "relation:31",
+        anchor_chunk_id: 8,
         progress: 0.66,
         importance_score: 9,
         level: 1,
-        event: "顾承渊与苏映雪结盟",
+        summary: "顾承渊与苏映雪结盟",
         characters: ["顾承渊", "苏映雪"],
-        is_pivot: true,
-        is_cliffhanger: false,
-        tension_percentile: 82,
-        node_type: "relation_change",
-        relation_changes: [
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtype: "新建",
+        score_breakdown: { change_type_weight: 2.4, pair_importance: 1.6 },
+        plot_flags: {
+          is_pivot: true,
+          is_cliffhanger: false,
+          tension_percentile: 82,
+        },
+        relation_events: [
           {
             relation_event_id: 31,
             from_char: "顾承渊",
@@ -134,6 +160,60 @@ function createTimelineResponse(): TimelineResponse {
       },
     ],
     tension_curve: [0.2, 0.45, 0.8],
+  };
+}
+
+// 2026-04-27，任务：fix-timeline-selected-node-relation-event-conflict。
+// 构造两个 relation 节点，验证 selected_node_id 与 relation_event_id 冲突时页面不会把错误事件带回图谱。
+function createConflictingTimelineResponse(): TimelineResponse {
+  return {
+    ...createTimelineResponse(),
+    composite_nodes: [
+      ...(createTimelineResponse().composite_nodes ?? []),
+      {
+        node_id: "composite:relation:9:0",
+        anchor_chunk_id: 9,
+        start_chunk_id: 9,
+        end_chunk_id: 9,
+        progress: 0.75,
+        start_progress: 0.75,
+        end_progress: 0.75,
+        importance_score: 7,
+        level: 1,
+        summary: "顾承渊与陆沉反目",
+        characters: ["顾承渊", "陆沉"],
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtypes: ["断裂"],
+        representative_node_id: "relation:32",
+        child_node_ids: ["relation:32"],
+      },
+    ],
+    atomic_nodes: [
+      ...(createTimelineResponse().atomic_nodes ?? []),
+      {
+        node_id: "relation:32",
+        anchor_chunk_id: 9,
+        progress: 0.75,
+        importance_score: 7,
+        level: 1,
+        summary: "顾承渊与陆沉反目",
+        characters: ["顾承渊", "陆沉"],
+        phase_name: "高潮期",
+        node_type: "relation",
+        node_subtype: "断裂",
+        score_breakdown: { change_type_weight: 2.1, pair_importance: 1.3 },
+        relation_events: [
+          {
+            relation_event_id: 32,
+            from_char: "顾承渊",
+            to_char: "陆沉",
+            relation_type: "对手",
+            change_type: "断裂",
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -168,11 +248,24 @@ describe("TimelinePage integration", () => {
     await user.click(screen.getByRole("button", { name: "重要" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&selected_chunk=8&relation_event_id=31",
+      "/novels/novel-1/timeline?task_id=task-integration&max_level=1&view=composite&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=31",
       { replace: true }
     );
 
     await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
+    expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&relation_event_id=31");
+  });
+
+  it("does not carry a conflicting relation_event_id back to graph when selected_node_id points elsewhere", async () => {
+    currentTimelineSearchParams = "task_id=task-integration&selected_node_id=relation%3A31&selected_chunk=8&relation_event_id=32";
+    getTimelineMock.mockResolvedValue(createConflictingTimelineResponse());
+    const user = userEvent.setup();
+
+    renderTimelinePage();
+
+    expect((await screen.findAllByText("顾承渊与苏映雪结盟")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: /回到图谱入口/ }));
+
     expect(navigateMock).toHaveBeenCalledWith("/novels/novel-1/graph?task_id=task-integration&selected_chunk=8&relation_event_id=31");
   });
 });

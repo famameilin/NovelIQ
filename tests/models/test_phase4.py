@@ -405,7 +405,7 @@ class TestConvertToSnapshots(unittest.TestCase):
                     from_name="张三",
                     to_name="李四",
                     type="家族",
-                    change="无变化",
+                    change="新建",
                     evidence="张三是李四的哥哥",
                 )
             ]
@@ -430,7 +430,7 @@ class TestConvertToSnapshots(unittest.TestCase):
                     from_name="张三",
                     to_name="张三",
                     type="家族",
-                    change="无变化",
+                    change="新建",
                     evidence="自指",
                 )
             ]
@@ -448,14 +448,14 @@ class TestConvertToSnapshots(unittest.TestCase):
                     from_name="张三",
                     to_name="李四",
                     type="家族",
-                    change="无变化",
+                    change="新建",
                     evidence="证据1",
                 ),
                 make_relation_record(
                     from_name="李四",
                     to_name="张三",
                     type="家族",
-                    change="无变化",
+                    change="新建",
                     evidence="证据2",
                 ),
             ]
@@ -758,13 +758,9 @@ class TestConstantsConsistency(unittest.TestCase):
         for rel_type in SYMMETRIC_RELATION_TYPES:
             self.assertIn(rel_type, VALID_RELATION_TYPES)
 
-    def test_change_types_include_no_change(self) -> None:
-        """变化类型包含'无变化'"""
-        self.assertIn("无变化", VALID_CHANGE_TYPES)
-
     def test_change_types_include_all_required(self) -> None:
         """变化类型包含所有必需值"""
-        required = {"无变化", "新建", "强化", "弱化", "断裂"}
+        required = {"新建", "强化", "弱化", "断裂"}
         self.assertEqual(VALID_CHANGE_TYPES, required)
 
 

@@ -147,6 +147,14 @@ function createQueryClient() {
   });
 }
 
+function createGraphEntityIds(taskLabel: string): { heroId: string; allyId: string } {
+  const base = taskLabel.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) * 10;
+  return {
+    heroId: String(base + 1),
+    allyId: String(base + 2),
+  };
+}
+
 function createGraphData(
   taskLabel: string,
   options: {
@@ -156,8 +164,7 @@ function createGraphData(
   },
 ): GraphData {
   const { eventNames, total, nextCursor } = options;
-  const heroId = `${taskLabel}-hero`;
-  const allyId = `${taskLabel}-ally`;
+  const { heroId, allyId } = createGraphEntityIds(taskLabel);
   return {
     nodes: [
       {
@@ -664,7 +671,7 @@ describe("GraphPage pagination", () => {
     await user.click(await screen.findByRole("button", { name: "去时间轴联动查看" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=50&relation_event_id=101"
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=relation%3A101&selected_chunk=50&relation_event_id=101"
     );
   });
 
@@ -684,8 +691,9 @@ describe("GraphPage pagination", () => {
     await user.click(await screen.findByRole("button", { name: "选择第一个节点" }));
     await user.click(await screen.findByRole("button", { name: "查看首次登场" }));
 
+    const { heroId } = createGraphEntityIds("task-a");
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=1"
+      `/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=lifecycle%3Aentry%3A${heroId}%3A1&selected_chunk=1`
     );
   });
 
@@ -706,11 +714,11 @@ describe("GraphPage pagination", () => {
     await user.click(screen.getByRole("button", { name: "去时间轴联动查看" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=48"
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_chunk=48"
     );
   });
 
-  it("falls back to selected_chunk when the deep-linked relation event is not in the current page window", async () => {
+  it("does not auto-select another event when the deep-linked relation event is not in the current page window", async () => {
     currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
     const taskAGraph = createGraphData("task-a", {
       eventNames: [
@@ -725,11 +733,11 @@ describe("GraphPage pagination", () => {
 
     renderPage();
 
-    expect(await screen.findByText("变化类型")).toBeInTheDocument();
-    expect(screen.getByText(/task-a Older -> task-a Ally/)).toBeInTheDocument();
+    expect(await screen.findByText(/第 48 段 · task-a Older → task-a Ally/)).toBeInTheDocument();
+    expect(screen.getByText("selected-node:none")).toBeInTheDocument();
   });
 
-  it("uses the resolved fallback event when jumping back to timeline after a graph deep-link miss", async () => {
+  it("keeps a chunk-only context when jumping back to timeline after a graph deep-link miss", async () => {
     currentGraphSearchParams = "task_id=task-a&selected_chunk=48&relation_event_id=9999";
     const taskAGraph = createGraphData("task-a", {
       eventNames: [
@@ -745,11 +753,11 @@ describe("GraphPage pagination", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText(/task-a Older -> task-a Ally/);
+    await screen.findByText(/未在当前图谱事件窗口定位到指定关系事件/);
     await user.click(screen.getByRole("button", { name: "去时间轴联动查看" }));
 
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&show_tension=true&selected_chunk=48&relation_event_id=102"
+      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_chunk=48"
     );
   });
 
@@ -768,7 +776,7 @@ describe("GraphPage pagination", () => {
 
     renderPage();
 
-    await screen.findByText(/未在当前事件窗口定位到指定关系事件/);
+    await screen.findByText(/未在当前图谱事件窗口定位到指定关系事件/);
     const targetEventButton = screen.getByText(/第 50 段 · task-a Hero → task-a Ally/).closest("button");
     expect(targetEventButton).not.toBeNull();
     navigateMock.mockClear();
@@ -776,10 +784,10 @@ describe("GraphPage pagination", () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByText("未在当前事件窗口定位到指定关系事件，已回退到同一时间节点的关系变化。")
+        screen.queryByText(/未在当前图谱事件窗口定位到指定关系事件/)
       ).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/task-a Hero -> task-a Ally/)).toBeInTheDocument();
+    expect(screen.getAllByText(/第 50 段 · task-a Hero → task-a Ally/).length).toBeGreaterThan(0);
     expect(navigateMock).toHaveBeenCalledWith(
       "/novels/novel-1/graph?task_id=task-a&selected_chunk=50&relation_event_id=101",
       { replace: true }
@@ -907,9 +915,9 @@ describe("GraphPage pagination", () => {
     const user = userEvent.setup();
     const view = renderPage();
 
-    await screen.findByText(/未在当前事件窗口定位到指定关系事件/);
+    await screen.findByText("task-a Hero");
     await user.click(screen.getByRole("button", { name: "选择第一个节点" }));
-    expect(screen.getByText(/task-a Older -> task-a Ally/)).toBeInTheDocument();
+    expect(screen.getByText(/第 50 段 · task-a Hero → task-a Ally/)).toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: "加载更多" }));
     expect(await screen.findByText("旧任务分页失败")).toBeInTheDocument();
@@ -923,10 +931,9 @@ describe("GraphPage pagination", () => {
 
     await screen.findByText("task-b Hero");
     expect(screen.queryByText("旧任务分页失败")).not.toBeInTheDocument();
-    expect(screen.queryByText(/未在当前事件窗口定位到指定关系事件/)).not.toBeInTheDocument();
     expect(screen.getByText("selected-node:none")).toBeInTheDocument();
     expect(screen.queryByText(/task-a Older -> task-a Ally/)).not.toBeInTheDocument();
-    expect(screen.getByText(/task-b Hero -> task-b Ally/)).toBeInTheDocument();
+    expect(screen.getAllByText(/第 40 段 · task-b Hero → task-b Ally/).length).toBeGreaterThan(0);
   });
 
   it("clears toolbar search and relation filters after switching tasks", async () => {
