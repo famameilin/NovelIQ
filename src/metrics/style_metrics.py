@@ -174,7 +174,7 @@ def metaphor_density(text: str) -> float:
 
 def lexicon_density(tokens: Sequence[str], terms: Iterable[str], text: str) -> float:
     """
-    计算词表密度（使用 phrase 模式匹配）。
+    计算词表密度（使用 phrase 模式匹配）
 
     """
     total_tokens = len(tokens)

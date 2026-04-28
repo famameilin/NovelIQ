@@ -1,5 +1,5 @@
 """
-本模块包含云端模型客户端的基础类和公共接口。
+本模块包含云端模型客户端的基础类和公共接口
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class BaseCloudModelClient(BaseModelClient):
     """
     云端模型客户端基类
 
-    继承自 BaseModelClient，提供云端特定的配置和功能。
+    继承自 BaseModelClient，提供云端特定的配置和功能
     """
 
     def __init__(

@@ -60,7 +60,7 @@ def _build_phase4_messages(
     )
     if evidence_sections:
         # Phase4 只追加 renderer 已经选好的共享 evidence blocks，
-        # 不在关系抽取阶段重新定义 Level1/2/3 的文案或 section 协议。
+        # 不在关系抽取阶段重新定义 Level1/2/3 的文案或 section 协议
         user_prompt += "\n\n" + "\n\n".join(evidence_sections)
 
     return [

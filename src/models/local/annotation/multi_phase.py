@@ -47,7 +47,7 @@ class _Phase4Result:
 @dataclass(frozen=True)
 class _MultiPhaseExecutionContext:
     """
-    多阶段标注共享执行上下文。
+    多阶段标注共享执行上下文
     """
 
     client: AnnotationClient
@@ -80,7 +80,7 @@ async def _emit_phase_event(
     message: str,
 ) -> None:
     """
-    发送统一的 phase 事件。
+    发送统一的 phase 事件
     """
     if context.emitter is None:
         return
@@ -97,7 +97,7 @@ async def _emit_phase_event(
 
 async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> ChunkAnnotation:
     """
-    从共享上下文执行 Phase1。
+    从共享上下文执行 Phase1
     """
     return await _run_phase1(
         client=context.client,
@@ -118,7 +118,7 @@ async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> Chun
 
 async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> ForeshadowingResult | None:
     """
-    从共享上下文执行 Phase2。
+    从共享上下文执行 Phase2
     """
     return await _run_phase2(
         client=context.client,
@@ -139,7 +139,7 @@ async def _run_phase3_from_context(
     known_characters: list[str] | None,
 ) -> _Phase3Result:
     """
-    从共享上下文执行 Phase3。
+    从共享上下文执行 Phase3
     """
     return await _run_phase3_if_needed(
         client=context.client,
@@ -159,7 +159,7 @@ async def _run_phase4_from_context(
     known_characters: list[str] | None,
 ) -> _Phase4Result:
     """
-    从共享上下文执行 Phase4。
+    从共享上下文执行 Phase4
     """
     phase4_bundle = await _resolve_phase4_bundle(context, known_characters)
     relations = await annotate_chunk_phase4(
@@ -167,7 +167,7 @@ async def _run_phase4_from_context(
         text=context.text,
         known_characters=known_characters,
         # Phase4 统一只消费上游传入的 evidence_bundle，
-        # multi_phase 负责调度，不在这里重建关系抽取上下文。
+        # multi_phase 负责调度，不在这里重建关系抽取上下文
         evidence_bundle=phase4_bundle,
         chunk_id=context.chunk_id,
         run_id=context.run_id,
@@ -182,10 +182,10 @@ async def _resolve_phase4_bundle(
 ) -> EvidenceBundle | None:
     """
     修改说明: Phase4 的 relation request 需要等 Phase1 产出 known_characters 后再补全 requested_names/seed_entities；
-          这一步统一委托 evidence service，multi_phase 只负责调度。
+          这一步统一委托 evidence service，multi_phase 只负责调度
 
     修改说明: `requested_names` 只代表当前 relation consumer 真正要看的角色；
-              template.seed_entities 只保留为检索锚点，不再反向抬升成 consumer target。
+              template.seed_entities 只保留为检索锚点，不再反向抬升成 consumer target
     """
     if context.phase4_bundle is not None:
         return context.phase4_bundle
@@ -217,7 +217,7 @@ async def _resolve_phase4_bundle(
 
 def _resolve_known_characters(annotation: ChunkAnnotation) -> list[str] | None:
     """
-    从 Phase1 结果提取 canonical 角色名列表。
+    从 Phase1 结果提取 canonical 角色名列表
     """
     return [character.name for character in annotation.characters] if annotation.characters else None
 
@@ -228,7 +228,7 @@ def _normalize_phase_outputs(
     foreshadowing: ForeshadowingResult | None,
 ) -> tuple[list[str] | None, ForeshadowingResult | None]:
     """
-    归一化 Phase1/2 的共享派生产物。
+    归一化 Phase1/2 的共享派生产物
     """
     known_characters = _resolve_known_characters(annotation)
     normalized_foreshadowing = _normalize_foreshadowing_result(
@@ -292,7 +292,7 @@ async def _run_phase2(
         position_pct=position_pct,
         chapter_id=chapter_id,
         # 优先透传上游已准备好的 evidence bundle，
-        # 保证 AnnotationClient -> multi_phase -> Phase2 的真实入口也能复用同一份证据上下文。
+        # 保证 AnnotationClient -> multi_phase -> Phase2 的真实入口也能复用同一份证据上下文
         evidence_bundle=evidence_bundle,
         fallback_client=fallback_client,
         run_id=run_id,
@@ -327,8 +327,8 @@ async def _run_phase3_if_needed(
         text=text,
         alias_map=alias_map,
         # Phase3 和 Phase2 一样只复用上游同一份 evidence_bundle，
-        # 保持多阶段标注共享同一组 Level1/2/3 证据，而不是各阶段各自拼上下文。
-        # 透传 active_entities，确保 Phase3 使用与 Phase1 相同的活跃实体上下文（含 fallback）。
+        # 保持多阶段标注共享同一组 Level1/2/3 证据，而不是各阶段各自拼上下文
+        # 透传 active_entities，确保 Phase3 使用与 Phase1 相同的活跃实体上下文（含 fallback）
         evidence_bundle=evidence_bundle,
         chunk_id=chunk_id,
         run_id=run_id,

@@ -1,7 +1,7 @@
 """
-Level3 mention extraction 共享类型。
+Level3 mention extraction 共享类型
 
-将规则版与 LLM 版 mention extraction 的数据合同抽到独立模块，避免下游绑定某一种抽取实现。
+将规则版与 LLM 版 mention extraction 的数据合同抽到独立模块，避免下游绑定某一种抽取实现
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class PersonMention:
     """
-    描述性人物 mention 的统一结构；新增字段均为可选，保持旧 query builder 的消费合同兼容。
+    描述性人物 mention 的统一结构；新增字段均为可选，保持旧 query builder 的消费合同兼容
     """
 
     raw_text: str
@@ -29,7 +29,7 @@ class PersonMention:
 @dataclass(frozen=True, slots=True)
 class MentionExtractionRequest:
     """
-    provider 传给 mention extraction service 的最小上下文，LLM 只负责发现 mention，不做身份裁决。
+    provider 传给 mention extraction service 的最小上下文，LLM 只负责发现 mention，不做身份裁决
     """
 
     text: str

@@ -1,5 +1,5 @@
 """
-本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用。
+本模块包含模型客户端的基础类和公共接口，供标注客户端和消歧客户端继承使用
 """
 
 from __future__ import annotations
@@ -37,14 +37,14 @@ T = TypeVar("T", bound=BaseModel)
 
 def _ensure_strict_json_schema(node: Any) -> None:
     """
-    递归收紧 JSON Schema，满足 strict structured output 的对象约束。
+    递归收紧 JSON Schema，满足 strict structured output 的对象约束
 
     说明: 仅为声明了 properties 的对象补充 additionalProperties=false，
-    避免把 dict[str, T] 这类映射 schema 误改成不允许任何键。
+    避免把 dict[str, T] 这类映射 schema 误改成不允许任何键
     """
     if isinstance(node, dict):
         # 只有真正的对象模型才补 false 和完整 required；
-        # 映射类型会以 additionalProperties: {...} 表示值 schema，不能把它误改成封闭对象。
+        # 映射类型会以 additionalProperties: {...} 表示值 schema，不能把它误改成封闭对象
         if node.get("type") == "object" and "properties" in node and isinstance(node["properties"], dict):
             node.setdefault("additionalProperties", False)
             node["required"] = list(node["properties"].keys())
@@ -74,10 +74,10 @@ def _ensure_strict_json_schema(node: Any) -> None:
 
 def _strip_internal_schema_properties(node: Any) -> None:
     """
-    递归移除仅供运行时内部使用的 schema 字段。
+    递归移除仅供运行时内部使用的 schema 字段
 
     说明: `_thinking_content` 这类内部字段并不要求模型通过 JSON 输出返回，
-    而是由流式响应中的 reasoning_content 单独提取，因此不应进入 strict response_format。
+    而是由流式响应中的 reasoning_content 单独提取，因此不应进入 strict response_format
     """
     if isinstance(node, dict):
         if node.get("type") == "object" and "properties" in node and isinstance(node["properties"], dict):
@@ -130,7 +130,7 @@ class BaseModelClient:
     """
     模型客户端基类
 
-    提供公共的配置管理、客户端初始化、API调用等功能。
+    提供公共的配置管理、客户端初始化、API调用等功能
     """
 
     def __init__(
@@ -168,11 +168,11 @@ class BaseModelClient:
         )
 
     def set_session(self, session: Any) -> None:
-        """设置数据库会话（用于保存模型交互记录）。"""
+        """设置数据库会话（用于保存模型交互记录）"""
         self._session = session
 
     def set_runtime_context(self, novel_id: str | None, token_usage_callback: Any) -> None:
-        """设置运行时上下文（novel_id 和 token 回调）。"""
+        """设置运行时上下文（novel_id 和 token 回调）"""
         self._novel_id = novel_id
         self._token_usage_callback = token_usage_callback
 
@@ -231,25 +231,25 @@ class BaseModelClient:
         chunk_id: int | None = None,
     ) -> None:
         """
-        记录 token 使用量。
+        记录 token 使用量
         """
         record_token_usage(self, response, call_type, chunk_id)
 
     def _resolve_token_usage_novel_id(self, call_type: str) -> str | None:
         """
-        解析 token_usage 记录要落库的 novel_id。
+        解析 token_usage 记录要落库的 novel_id
 
         说明: token 记账现在已经受 novel 外键保护；
-              若运行时上下文没有提供 novel_id，不能再写入 `unknown` 这种脏值。
+              若运行时上下文没有提供 novel_id，不能再写入 `unknown` 这种脏值
         """
         return resolve_token_usage_novel_id(self, call_type)
 
     def _extract_reasoning_tokens(self, response: Any) -> int | None:
         """
-        从响应对象中提取 reasoning token 数。
+        从响应对象中提取 reasoning token 数
 
-        说明: 优先读取 usage.completion_tokens_details.reasoning_tokens。
-              对非标准对象和 dict 结构都做兼容，拿不到时返回 None。
+        说明: 优先读取 usage.completion_tokens_details.reasoning_tokens
+              对非标准对象和 dict 结构都做兼容，拿不到时返回 None
         """
         return extract_reasoning_tokens(response)
 
@@ -286,11 +286,11 @@ class BaseModelClient:
         model_name: str | None = None,
     ) -> None:
         """
-        基于 prompt/response 文本统一记录估算 token。
+        基于 prompt/response 文本统一记录估算 token
 
-        说明: token_usage 对外统一收敛为“估算消耗”口径。
+        说明: token_usage 对外统一收敛为“估算消耗”口径
               各条调用链都应走这一入口，避免 provider 实报、局部估算、
-              以及漏记混成多套账本。
+              以及漏记混成多套账本
         """
         record_estimated_token_usage_from_messages(
             self,
@@ -304,10 +304,10 @@ class BaseModelClient:
 
     def _extract_response_text_for_token_usage(self, response: Any) -> str:
         """
-        从响应对象中提取可用于 token 估算的文本。
+        从响应对象中提取可用于 token 估算的文本
 
         说明: 当请求已经返回，但后续结构化解析或业务校验失败时，
-              仍应尽量按真实响应文本补记 token；若提取失败则保守回退为空字符串。
+              仍应尽量按真实响应文本补记 token；若提取失败则保守回退为空字符串
         """
         from src.models.local.base_token_usage import extract_response_text_for_token_usage
 
@@ -324,10 +324,10 @@ class BaseModelClient:
         model_name: str | None = None,
     ) -> None:
         """
-        基于响应对象补记统一估算 token。
+        基于响应对象补记统一估算 token
 
         说明: 主要用于“模型调用已完成，但解析/校验失败”的路径；
-              此时至少应把 prompt 算上，若还能提取出响应文本，则连 completion 一并估算。
+              此时至少应把 prompt 算上，若还能提取出响应文本，则连 completion 一并估算
         """
         record_estimated_token_usage_from_response(
             self,
@@ -359,7 +359,7 @@ class BaseModelClient:
 
     def _build_thinking_params(self, enable_thinking: bool) -> tuple[str, dict[str, bool]]:
         """
-        Build thinking parameters for cloud/local providers.
+        Build thinking parameters for cloud/local providers
         """
         if enable_thinking:
             return "medium", {"think": True}
@@ -461,7 +461,7 @@ class BaseModelClient:
             "top_p": self._config.top_p,
         }
 
-        # 关闭 thinking 时统一保持请求体最小化，避免不同 provider 对显式 false 的兼容差异。
+        # 关闭 thinking 时统一保持请求体最小化，避免不同 provider 对显式 false 的兼容差异
         if enable_thinking:
             request_params["reasoning_effort"] = "medium"
             request_params["extra_body"] = {"think": True}

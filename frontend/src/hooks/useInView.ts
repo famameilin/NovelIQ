@@ -1,8 +1,8 @@
 /**
  * useInView - 检测元素是否进入视口的 hook
  *
- * 使用 IntersectionObserver 实现，元素首次可见后自动断开观察。
- * 适用于延迟加载 ECharts 等重型组件以优化首屏性能。
+ * 使用 IntersectionObserver 实现，元素首次可见后自动断开观察
+ * 适用于延迟加载 ECharts 等重型组件以优化首屏性能
  */
 
 import { useEffect, useRef, useState } from "react";

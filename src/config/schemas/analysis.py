@@ -1,5 +1,5 @@
 """
-本模块包含分析相关的配置数据类。
+本模块包含分析相关的配置数据类
 """
 
 from __future__ import annotations

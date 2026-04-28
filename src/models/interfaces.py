@@ -1,5 +1,5 @@
 """
-模型客户端协议接口定义。
+模型客户端协议接口定义
 
 说明:
 - 为 workflow 层提供最小能力接口，减少对具体客户端实现的类型耦合
@@ -19,7 +19,7 @@ from src.models.local.disambiguation import DisambiguationPromptContext, Extende
 
 @runtime_checkable
 class AnnotationLike(Protocol):
-    """标注能力协议（workflow 侧最小接口）。"""
+    """标注能力协议（workflow 侧最小接口）"""
 
     _config: Any
     _novel_id: str | None
@@ -53,7 +53,7 @@ class AnnotationLike(Protocol):
 
 @runtime_checkable
 class DisambiguationLike(Protocol):
-    """消歧能力协议（workflow 侧最小接口）。"""
+    """消歧能力协议（workflow 侧最小接口）"""
 
     _config: Any
     _novel_id: str | None

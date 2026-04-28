@@ -4,7 +4,7 @@ import type { StreamEventData } from "@/api/streamTypes";
 import { buildLLMOutputScopeKey, useStreamStore } from "@/store/streamStore";
 
 /**
- * 多流分组和活跃流选择逻辑迁入 store 后，需要用单元测试锁住兼容 default stream 与用户手动选择的行为。
+ * 多流分组和活跃流选择逻辑迁入 store 后，需要用单元测试锁住兼容 default stream 与用户手动选择的行为
  */
 function createLLMEvent(overrides: Partial<StreamEventData>): StreamEventData {
   return {

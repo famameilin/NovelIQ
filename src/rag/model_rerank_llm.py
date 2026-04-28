@@ -1,7 +1,7 @@
 """
-Level3 LLM rerank 实现。
+Level3 LLM rerank 实现
 
-复用现有 BaseModelClient 结构化输出能力，将候选 chunk/paragraph 小池交给模型做最终精排。
+复用现有 BaseModelClient 结构化输出能力，将候选 chunk/paragraph 小池交给模型做最终精排
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from src.rag.model_rerank import Level3RerankCandidate, Level3RerankResult
 
 class LLMLevel3RerankItem(BaseModel):
     """
-    单条模型 rerank 结果 schema，只返回排序相关字段，不越权改写 evidence contract。
+    单条模型 rerank 结果 schema，只返回排序相关字段，不越权改写 evidence contract
     """
 
     chunk_id: int
@@ -28,7 +28,7 @@ class LLMLevel3RerankItem(BaseModel):
 
 class LLMLevel3RerankResponse(BaseModel):
     """
-    Level3 rerank 的顶层结构化响应。
+    Level3 rerank 的顶层结构化响应
     """
 
     results: list[LLMLevel3RerankItem] = Field(default_factory=list)
@@ -36,7 +36,7 @@ class LLMLevel3RerankResponse(BaseModel):
 
 class LLMLevel3Reranker:
     """
-    使用结构化 JSON 输出执行 Level3 模型 rerank；模型只负责排序，不负责人物身份结论。
+    使用结构化 JSON 输出执行 Level3 模型 rerank；模型只负责排序，不负责人物身份结论
     """
 
     def __init__(self, model_client: Any, *, enable_thinking: bool = False) -> None:
@@ -52,7 +52,7 @@ class LLMLevel3Reranker:
         chunk_id: int | None = None,
     ) -> list[Level3RerankResult]:
         """
-        调用 LLM 对小池候选做重排；若模型调用失败，由 provider 显式回退 deterministic rerank。
+        调用 LLM 对小池候选做重排；若模型调用失败，由 provider 显式回退 deterministic rerank
         """
         if not candidates:
             return []
@@ -82,9 +82,9 @@ def _build_messages(
     candidates: list[Level3RerankCandidate],
 ) -> list[dict[str, str]]:
     """
-    构造 rerank 请求，显式提示模型优先比较同一人物证据而不是泛场景相似度。
+    构造 rerank 请求，显式提示模型优先比较同一人物证据而不是泛场景相似度
 
-    增加 JSON 输出样例，保证该链路切到 json_object 时仍满足 prompt 合同。
+    增加 JSON 输出样例，保证该链路切到 json_object 时仍满足 prompt 合同
     """
     candidate_payload = [
         {
@@ -117,7 +117,7 @@ def _build_messages(
 
 def _normalize_results(results: list[LLMLevel3RerankItem]) -> list[Level3RerankResult]:
     """
-    对模型输出按 chunk_id 去重，保留最高分结果，避免异常重复响应干扰 provider 排序。
+    对模型输出按 chunk_id 去重，保留最高分结果，避免异常重复响应干扰 provider 排序
     """
     best_by_chunk_id: dict[int, Level3RerankResult] = {}
     for item in results:

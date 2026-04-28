@@ -34,8 +34,8 @@ class DisambiguationClient(BaseModelClient):
     """
     统一消歧客户端
 
-    负责处理人物别名识别和匿名人物识别。
-    同时支持本地和云端模型，通过 base_url 自动检测。
+    负责处理人物别名识别和匿名人物识别
+    同时支持本地和云端模型，通过 base_url 自动检测
     """
 
     def __init__(
@@ -49,7 +49,7 @@ class DisambiguationClient(BaseModelClient):
         session: Any | None = None,
     ) -> None:
         """
-        初始化消歧客户端。
+        初始化消歧客户端
         """
         super().__init__(
             task_type=task_type,
@@ -128,10 +128,10 @@ class DisambiguationClient(BaseModelClient):
         review_states: dict[str, Any] | None = None,
     ) -> ExtendedDisambigResult:
         """
-        在已确认 alias cluster 内重选最终代表名。
+        在已确认 alias cluster 内重选最终代表名
 
         说明: 该调用不再判断“是不是同一人”，只负责在终消歧后为每个 cluster
-              选择最终代表名，避免由本地 heuristic 代替模型完成这一步。
+              选择最终代表名，避免由本地 heuristic 代替模型完成这一步
         """
         if not candidates:
             return ExtendedDisambigResult(

@@ -46,7 +46,7 @@ def aggregate_all_metrics(
     stats_repo,
 ) -> AggregateResult:
     """
-    Aggregate all metric groups into a single result object.
+    Aggregate all metric groups into a single result object
 
     """
     result = AggregateResult()

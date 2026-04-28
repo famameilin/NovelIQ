@@ -1,5 +1,5 @@
 """
-叙事时间轴 API 路由。
+叙事时间轴 API 路由
 
 说明: 提供时间轴数据查询接口，支持四阶段划分、节点筛选和张力曲线
 """
@@ -66,10 +66,10 @@ async def get_timeline(
     include_curve: Annotated[bool, Query(description="是否包含张力曲线数据")] = False,
 ) -> TimelineResponse:
     """
-    获取叙事时间轴数据。
+    获取叙事时间轴数据
 
     时间轴节点由 authority-backed timeline plan 直接生成，route 不再维护
-    route-owned relation locator 补丁，避免 shared/export/frontend 再次漂移。
+    route-owned relation locator 补丁，避免 shared/export/frontend 再次漂移
     """
 
     novels = service.list_novels()

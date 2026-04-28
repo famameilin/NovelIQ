@@ -53,8 +53,8 @@ def fetch_all_character_names(
     """
     获取指定运行的所有角色名及出现频次
 
-    只从 chunk_characters 表获取名字，确保只有有明确角色功能的人物才被视为正式角色。
-    character_appearances 表仅作为身份线索参考，不直接参与消歧候选。
+    只从 chunk_characters 表获取名字，确保只有有明确角色功能的人物才被视为正式角色
+    character_appearances 表仅作为身份线索参考，不直接参与消歧候选
 
     移除 character_appearances 的合并逻辑，统一角色定义
 
@@ -120,17 +120,17 @@ def cleanup_self_loop_relations(
     run_id: str,
 ) -> None:
     """
-    清理自环关系。
+    清理自环关系
 
-    不再改写 ChunkCharacter.name、ChunkDialogue.speaker、CharacterAppearance.raw_name。
+    不再改写 ChunkCharacter.name、ChunkDialogue.speaker、CharacterAppearance.raw_name
     原始名称是 LLM 从文本中提取的真实数据，不可逆修改会导致
-    project_graph_tables(rebuild) 后别名关系永久丢失。
+    project_graph_tables(rebuild) 后别名关系永久丢失
 
     归一化由 graph_projection 层通过 DisambiguationState.alias_merges 完成，
-    写入 graph_entity_aliases 表。
+    写入 graph_entity_aliases 表
 
     移除 ChunkCharacter/ChunkDialogue/CharacterAppearance 的归一化写入，
-              保留自环关系清理。
+              保留自环关系清理
 
     重命名为 cleanup_self_loop_relations，移除 alias_merges 参数
 

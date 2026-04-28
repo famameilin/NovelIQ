@@ -1,7 +1,7 @@
 """
 迁移 chunk_dialogues.speaker 列类型：text → text[]
 
-不需要兼容旧数据，直接清空后改列类型。
+不需要兼容旧数据，直接清空后改列类型
 
 使用方法：
     uv run python scripts/db/migrate_speaker_to_array.py

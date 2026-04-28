@@ -1,7 +1,7 @@
 """
 情感密度计算模块
 
-计算文本的情感密度指标。
+计算文本的情感密度指标
 
 
 
@@ -19,9 +19,9 @@ from .text_utils import tokenize_words
 
 def load_negation_words(filepath: str = "data/lexicons/negation_words.txt") -> set[str]:
     """
-    加载否定词表。
+    加载否定词表
 
-    从文件加载否定词集合，跳过注释行和空行。
+    从文件加载否定词集合，跳过注释行和空行
 
     参数:
         filepath: 否定词表文件路径
@@ -45,9 +45,9 @@ def load_negation_words(filepath: str = "data/lexicons/negation_words.txt") -> s
 
 def find_negation_context(text: str, emotion_pos: int, negation_words: set[str], window: int = 3) -> bool:
     """
-    检测情感词前是否存在否定词。
+    检测情感词前是否存在否定词
 
-    在情感词前 window 个字符范围内检测是否存在否定词。
+    在情感词前 window 个字符范围内检测是否存在否定词
 
     参数:
         text: 原始文本
@@ -77,9 +77,9 @@ def find_negation_context(text: str, emotion_pos: int, negation_words: set[str],
 
 def count_negations_before(text: str, emotion_pos: int, negation_words: set[str], window: int = 6) -> int:
     """
-    统计情感词前的否定词数量。
+    统计情感词前的否定词数量
 
-    在情感词前 window 个字符范围内统计否定词出现次数，用于双重否定检测。
+    在情感词前 window 个字符范围内统计否定词出现次数，用于双重否定检测
 
     参数:
         text: 原始文本
@@ -116,7 +116,7 @@ def lexical_sentiment_density(
     enable_negation: bool = True,
 ) -> dict[str, float]:
     """
-    计算词汇情感密度（支持否定词翻转和加权计数）。
+    计算词汇情感密度（支持否定词翻转和加权计数）
 
     使用 phrase 模式匹配，支持：
     - token 级匹配（如"快乐"）
@@ -183,7 +183,7 @@ def lexical_sentiment_density(
 
 def pos_neg_ratio(text: str, pos_terms: dict[str, int], neg_terms: dict[str, int]) -> float:
     """
-    计算正负情感词比例。
+    计算正负情感词比例
 
 
     """

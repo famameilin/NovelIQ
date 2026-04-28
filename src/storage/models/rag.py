@@ -19,7 +19,7 @@ class TokenUsage(Base):
 
     存储 API 调用的 token 使用统计
 
-    为 novel_id 补充到 novels 表的外键约束，避免 token 记账继续写入 unknown 等脏值。
+    为 novel_id 补充到 novels 表的外键约束，避免 token 记账继续写入 unknown 等脏值
     """
 
     __tablename__ = "token_usage"

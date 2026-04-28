@@ -6,7 +6,7 @@
 
 
 
-本模块包含例句构建、全局上下文抽取等辅助函数。
+本模块包含例句构建、全局上下文抽取等辅助函数
 """
 
 from __future__ import annotations
@@ -57,10 +57,10 @@ def _resolve_chunk_window(
     chunk_start_id: int | None = None,
     chunk_end_id: int | None = None,
 ) -> tuple[int | None, int | None]:
-    """解析上下文检索使用的 chunk 窗口。
+    """解析上下文检索使用的 chunk 窗口
 
     只有增量消歧这类带 current chunk 锚点的场景才按 prev_chunks 回看；
-         没有当前 chunk 时继续保留全量历史，避免截断 final 阶段证据。
+         没有当前 chunk 时继续保留全量历史，避免截断 final 阶段证据
 
     """
     if chunk_start_id is not None or chunk_end_id is not None:
@@ -183,10 +183,10 @@ async def _extract_and_save_global_context(
 
 def _get_name_variants(name: str, name_set: set[str]) -> list[str]:
     """
-    生成候选名的字符串变体。
+    生成候选名的字符串变体
 
-    三字及以上的名字，额外加一个去掉第一个字（通常是姓）的版本。
-    短形式已作为独立候选名存在时，不展开，避免污染两个不同人物的参考池。
+    三字及以上的名字，额外加一个去掉第一个字（通常是姓）的版本
+    短形式已作为独立候选名存在时，不展开，避免污染两个不同人物的参考池
 
     示例：
       贺重明, {"贺重明", "伯安"}     → ["贺重明", "重明"]
@@ -211,7 +211,7 @@ def _build_sentence_pool(
     chunk_start_id: int | None = None,
     chunk_end_id: int | None = None,
 ) -> dict[str, str]:
-    """构建句子池。
+    """构建句子池
 
 
 

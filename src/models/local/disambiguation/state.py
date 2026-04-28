@@ -26,9 +26,9 @@ class NameReviewState:
 @dataclass(frozen=True)
 class DisambiguationState:
     """
-    消歧状态（不可变对象）。
+    消歧状态（不可变对象）
 
-    使用 copy-on-write 模式更新状态，每次更新返回新实例。
+    使用 copy-on-write 模式更新状态，每次更新返回新实例
 
     三层状态分离：
     - discovered_names: 系统已经见过的所有名字（包括别名和规范名）

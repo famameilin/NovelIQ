@@ -24,8 +24,8 @@ class StatsRepository(BaseRepository[dict[str, Any]]):
     """
     统计数据 Repository
 
-    管理全局统计、情绪曲线、节奏曲线等数据。
-    所有方法支持 run_id 参数以区分不同的分析运行。
+    管理全局统计、情绪曲线、节奏曲线等数据
+    所有方法支持 run_id 参数以区分不同的分析运行
 
     使用函数组合方式重组代码结构，拆分为5个模块：
         - metrics: 全局统计和Token使用统计、云端分析、全局上下文

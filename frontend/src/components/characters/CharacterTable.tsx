@@ -34,11 +34,11 @@ function SortIcon({
 
 /**
  * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：统一人物页表格容器样式，减少页面上普通 Card 与新卡片壳并存的割裂感。
+ * 修改原因：统一人物页表格容器样式，减少页面上普通 Card 与新卡片壳并存的割裂感
  *
  * 2026-04-27，任务：protagonist-focus-contract
  * 修改原因：表格列和高亮逻辑统一切到焦点合同，展示 `narrative_focus_score`，
- * 并直接消费角色结果里的 `is_focus_character`，不再依赖额外的名称列表高亮。
+ * 并直接消费角色结果里的 `is_focus_character`，不再依赖额外的名称列表高亮
  */
 export function CharacterTable({
   characters,

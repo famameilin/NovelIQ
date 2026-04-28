@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class TaskInfo:
-    """任务执行缓存，仅保留进程级执行对象和短期输出缓冲。
+    """任务执行缓存，仅保留进程级执行对象和短期输出缓冲
     """
 
     task_id: str
@@ -35,7 +35,7 @@ class TaskInfo:
 
 class TaskManager:
     """
-    进程级执行缓存容器（非业务真相源）。
+    进程级执行缓存容器（非业务真相源）
 
     职责边界:
     =========
@@ -64,7 +64,7 @@ class TaskManager:
         heartbeat_interval_seconds: float = 30.0,
     ):
         """
-        初始化任务执行缓存管理器。
+        初始化任务执行缓存管理器
         """
         self._tasks: dict[str, TaskInfo] = {}
         self._progress_callback = progress_callback
@@ -74,38 +74,38 @@ class TaskManager:
 
     def set_db_session_factory(self, factory: Callable[[], Session]) -> None:
         """
-        设置数据库会话工厂。
+        设置数据库会话工厂
         """
         self._runtime_persistence.set_session_factory(factory)
 
     def get_worker_id(self) -> str:
         """
-        返回当前进程的稳定 worker_id。
+        返回当前进程的稳定 worker_id
         """
         return self._worker_id
 
     def _update_db(self, task_id: str, **kwargs) -> None:
         """
-        可靠地更新数据库中的任务状态。
+        可靠地更新数据库中的任务状态
 
-        说明: 移除静默失败，确保状态变更可靠持久化。DB 为唯一业务真相。
+        说明: 移除静默失败，确保状态变更可靠持久化。DB 为唯一业务真相
         """
         self._runtime_persistence.update_task_runtime(task_id, **kwargs)
 
     def _should_refresh_worker_heartbeat(self, update_params: dict[str, Any]) -> bool:
         """
-        判断本次写回是否应刷新 worker 归属和心跳。
+        判断本次写回是否应刷新 worker 归属和心跳
         """
         return self._runtime_persistence._should_refresh_worker_heartbeat(update_params)
 
     def _resolve_run_id_for_db_write(self, task_id: str, session: Session) -> str:
         """
-        将任务写回统一解析到真实 run_id。
+        将任务写回统一解析到真实 run_id
         """
         return self._runtime_persistence._resolve_run_id_for_db_write(task_id, session)
 
     def create_task(self, task_id: str, novel_id: str) -> TaskInfo:
-        """创建任务的内存执行缓存。
+        """创建任务的内存执行缓存
         """
         task = TaskInfo(
             task_id=task_id,
@@ -118,10 +118,10 @@ class TaskManager:
 
     def get_task(self, task_id: str) -> TaskInfo | None:
         """
-        查询当前进程是否持有该任务的执行缓存。
+        查询当前进程是否持有该任务的执行缓存
 
-        说明: 仅回答"当前进程是否有该任务的执行缓存"，不回答"系统是否存在该任务"。
-              服务重启后返回 None 是正常行为，调用方应从 DB 查询业务状态。
+        说明: 仅回答"当前进程是否有该任务的执行缓存"，不回答"系统是否存在该任务"
+              服务重启后返回 None 是正常行为，调用方应从 DB 查询业务状态
 
         Returns:
             TaskInfo 对象（如果进程持有缓存），否则返回 None
@@ -153,7 +153,7 @@ class TaskManager:
 
     def complete_task(self, task_id: str, success: bool = True, error: str | None = None) -> None:
         """
-        更新任务完成状态的内存缓存（仅内存操作）。
+        更新任务完成状态的内存缓存（仅内存操作）
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -175,9 +175,9 @@ class TaskManager:
 
     def cancel_task(self, task_id: str) -> bool:
         """
-        设置取消信号（纯执行层操作）。
+        设置取消信号（纯执行层操作）
 
-        说明: 本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断。
+        说明: 本方法仅负责设置 cancel_event，不做"是否允许取消"的业务判断
 
         Returns:
             True 表示 cancel_event 已设置，False 表示任务不在内存中
@@ -194,7 +194,7 @@ class TaskManager:
 
     def cancel_completed_task(self, task_id: str, error: str | None = None) -> None:
         """
-        清理任务的内存执行缓存并停止心跳（仅内存操作）。
+        清理任务的内存执行缓存并停止心跳（仅内存操作）
         """
         task = self._tasks.get(task_id)
         if task is None:
@@ -206,7 +206,7 @@ class TaskManager:
         logger.info(f"Task {task_id} memory cache cleaned for cancellation")
 
     def append_llm_output(self, task_id: str, content: str) -> None:
-        """追加 LLM 输出到任务信息，限制最大条目数防止内存泄漏。"""
+        """追加 LLM 输出到任务信息，限制最大条目数防止内存泄漏"""
         task = self._tasks.get(task_id)
         if task:
             task.llm_outputs.append(content)
@@ -215,7 +215,7 @@ class TaskManager:
 
     def store_asyncio_task(self, task_id: str, asyncio_task: asyncio.Task) -> None:
         """
-        保存 asyncio.Task 引用并启动独立心跳。
+        保存 asyncio.Task 引用并启动独立心跳
         """
         task_info = self._tasks.get(task_id)
         if task_info:
@@ -225,9 +225,9 @@ class TaskManager:
 
     def _start_runtime_heartbeat(self, task_id: str) -> None:
         """
-        为当前运行任务启动独立心跳协程。
+        为当前运行任务启动独立心跳协程
 
-        说明: 心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at。
+        说明: 心跳与阶段进度写回解耦，保证长阶段静默执行时也能持续刷新 heartbeat_at
         """
         task_info = self._tasks.get(task_id)
         if task_info is None:
@@ -247,9 +247,9 @@ class TaskManager:
 
     def _stop_runtime_heartbeat(self, task_id: str) -> None:
         """
-        停止任务心跳协程。
+        停止任务心跳协程
 
-        说明: 在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness。
+        说明: 在任务成功/失败/取消/删除时及时停止 heartbeat，避免终态后继续刷新 liveness
         """
         task_info = self._tasks.get(task_id)
         if task_info is None:
@@ -262,9 +262,9 @@ class TaskManager:
 
     async def _runtime_heartbeat_loop(self, task_id: str, stop_event: asyncio.Event) -> None:
         """
-        周期性刷新活跃任务的 worker 心跳。
+        周期性刷新活跃任务的 worker 心跳
 
-        说明: 即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at。
+        说明: 即使阶段内部长时间没有 progress 事件，也要持续写回 heartbeat_at
         """
         while not stop_event.is_set():
             try:
@@ -282,16 +282,16 @@ class TaskManager:
                 break
 
             try:
-                # heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”。
+                # heartbeat 独立于 progress/message 写回，专门用于表示“这个进程仍然活着并持有执行权”
                 self._update_db(task_id, worker_id=self._worker_id, heartbeat_at=datetime.now(UTC))
             except Exception as exc:
                 logger.error(f"Failed to refresh runtime heartbeat for task {task_id}: {exc}")
 
     def _handle_heartbeat_task_done(self, task_id: str, heartbeat_task: asyncio.Task) -> None:
         """
-        收尾 heartbeat 协程并记录异常。
+        收尾 heartbeat 协程并记录异常
 
-        说明: 避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception。
+        说明: 避免 heartbeat 后台任务异常结束后只留下未观察到的 Task exception
         """
         task_info = self._tasks.get(task_id)
         if task_info and task_info.heartbeat_task is heartbeat_task:
@@ -306,7 +306,7 @@ class TaskManager:
 
     async def shutdown(self) -> None:
         """
-        回收当前进程 TaskManager 持有的执行缓存与后台任务。
+        回收当前进程 TaskManager 持有的执行缓存与后台任务
         """
 
         task_ids = list(self._tasks.keys())
@@ -331,7 +331,7 @@ class TaskManager:
 
     def reset_for_testing(self) -> None:
         """
-        为测试夹具同步清空执行缓存。
+        为测试夹具同步清空执行缓存
         """
 
         task_ids = list(self._tasks.keys())

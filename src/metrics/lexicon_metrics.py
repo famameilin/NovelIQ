@@ -47,7 +47,7 @@ def _is_phrase_term(term: str) -> bool:
 
 def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequence[str]) -> dict[str, int]:
     """
-    非重叠 span 匹配核心算法。
+    非重叠 span 匹配核心算法
 
     策略:
       1. 长词优先匹配（避免短词吞掉长词的一部分）
@@ -102,7 +102,7 @@ def _count_non_overlapping_spans(text: str, terms: Iterable[str], tokens: Sequen
 
 
 def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) -> dict[str, int]:
-    """返回词条级别的计数（phrase 模式）。"""
+    """返回词条级别的计数（phrase 模式）"""
     if not terms:
         return {}
 
@@ -111,15 +111,15 @@ def term_mixed_counts(text: str, tokens: Sequence[str], terms: Iterable[str]) ->
 
 
 def count_mixed_hits(text: str, tokens: Sequence[str], terms: Iterable[str]) -> int:
-    """计算词表命中次数（phrase 模式）。"""
+    """计算词表命中次数（phrase 模式）"""
     return sum(term_mixed_counts(text, tokens, terms).values())
 
 
 def get_emotion_spans(text: str, tokens: Sequence[str], terms: Iterable[str]) -> list[tuple[int, int, str]]:
     """
-    获取情感词在文本中的位置信息。
+    获取情感词在文本中的位置信息
 
-    返回情感词的 (起始位置, 结束位置, 词条) 列表，用于否定词检测。
+    返回情感词的 (起始位置, 结束位置, 词条) 列表，用于否定词检测
 
     返回:
         list[tuple[int, int, str]]: 按起始位置排序的位置列表
@@ -185,7 +185,7 @@ def get_emotion_spans(text: str, tokens: Sequence[str], terms: Iterable[str]) ->
 
 def load_weighted_lexicon(filepath: str, default_weight: int = 1) -> dict[str, int]:
     """
-    兼容导出带权重词典加载器。
+    兼容导出带权重词典加载器
 
     """
     return _load_weighted_lexicon(filepath, default_weight=default_weight)
@@ -195,7 +195,7 @@ def term_weighted_counts(
     text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]
 ) -> dict[str, tuple[int, float]]:
     """
-    返回词条级别的计数和权重。
+    返回词条级别的计数和权重
 
     返回词条级别的计数和权重，使用 phrase 模式匹配
 
@@ -223,7 +223,7 @@ def term_weighted_counts(
 
 def count_weighted_hits(text: str, tokens: Sequence[str], weighted_terms: Mapping[str, float]) -> float:
     """
-    计算加权命中次数。
+    计算加权命中次数
 
     公式：sum(count_i * weight_i)
 
@@ -248,9 +248,9 @@ def count_weighted_hits(text: str, tokens: Sequence[str], weighted_terms: Mappin
 
 def build_automaton(terms: Iterable[str]):
     """
-    构建Aho-Corasick自动机。
+    构建Aho-Corasick自动机
 
-    使用Aho-Corasick算法优化多模式匹配，性能提升2-5倍。
+    使用Aho-Corasick算法优化多模式匹配，性能提升2-5倍
 
     参数：
         terms: 词条集合
@@ -279,9 +279,9 @@ def build_automaton(terms: Iterable[str]):
 
 def _count_non_overlapping_spans_fast(text: str, automaton, tokens: Sequence[str] | None = None) -> dict[str, int]:
     """
-    使用Aho-Corasick优化的非重叠匹配算法。
+    使用Aho-Corasick优化的非重叠匹配算法
 
-    使用Aho-Corasick算法一次扫描找到所有匹配，避免暴力匹配。
+    使用Aho-Corasick算法一次扫描找到所有匹配，避免暴力匹配
 
     性能对比：
         - 暴力匹配: O(词条数量 × 文本长度)
@@ -337,9 +337,9 @@ def _count_non_overlapping_spans_fast(text: str, automaton, tokens: Sequence[str
 
 def get_emotion_spans_fast(text: str, automaton, tokens: Sequence[str] | None = None) -> list[tuple[int, int, str]]:
     """
-    使用Aho-Corasick优化的情感词位置获取。
+    使用Aho-Corasick优化的情感词位置获取
 
-    使用Aho-Corasick算法快速获取情感词位置信息。
+    使用Aho-Corasick算法快速获取情感词位置信息
 
     参数：
         text: 原始文本

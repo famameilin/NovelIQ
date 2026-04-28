@@ -1,5 +1,5 @@
 """
-说明: annotation Phase2/3/4 共用的薄执行器，统一模型调用、响应清洗、交互记录与 token 估算。
+说明: annotation Phase2/3/4 共用的薄执行器，统一模型调用、响应清洗、交互记录与 token 估算
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from src.models.interactions import record_model_interaction
 @dataclass(frozen=True)
 class AnnotationPhaseCallSpec[T: BaseModel]:
     """
-    定义单次 phase 模型调用所需的稳定元信息。
+    定义单次 phase 模型调用所需的稳定元信息
     """
 
     phase: str
@@ -32,7 +32,7 @@ class AnnotationPhaseCallSpec[T: BaseModel]:
 @dataclass(frozen=True)
 class AnnotationPhaseCallResult[T: BaseModel]:
     """
-    承载单次 phase 调用后的结构化结果与记录元信息。
+    承载单次 phase 调用后的结构化结果与记录元信息
     """
 
     parsed: T
@@ -46,7 +46,7 @@ class AnnotationPhaseCallResult[T: BaseModel]:
 
 def _dump_parsed_result(parsed: BaseModel) -> str:
     """
-    将结构化模型结果转换为可记录文本。
+    将结构化模型结果转换为可记录文本
     """
     return str(parsed.model_dump())
 
@@ -56,7 +56,7 @@ async def execute_phase_call[T: BaseModel](
     spec: AnnotationPhaseCallSpec[T],
 ) -> AnnotationPhaseCallResult[T]:
     """
-    执行一次 Phase2/3/4 结构化 annotation 调用。
+    执行一次 Phase2/3/4 结构化 annotation 调用
     """
     start_time = time.time()
     is_cloud = client._is_cloud_api()
@@ -105,7 +105,7 @@ async def execute_phase_call[T: BaseModel](
             model_provider="cloud" if is_cloud else "local",
             session=client._session if hasattr(client, "_session") else None,
         )
-        # fallback client 只是执行通道切换，annotation phase 的 token 仍统一归入主业务桶。
+        # fallback client 只是执行通道切换，annotation phase 的 token 仍统一归入主业务桶
         client._record_estimated_token_usage_from_messages(
             spec.messages,
             content_clean,

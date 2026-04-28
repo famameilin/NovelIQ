@@ -1,7 +1,7 @@
 """
 运行管理协议接口
 
-使用 RunRecord/RepositoryValue 替代过宽的动态字典。
+使用 RunRecord/RepositoryValue 替代过宽的动态字典
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ class RunRepositoryProtocol(Protocol):
     """
     分析运行管理接口
 
-    管理分析运行的创建、查询和状态更新。
+    管理分析运行的创建、查询和状态更新
     """
 
     def create_run(

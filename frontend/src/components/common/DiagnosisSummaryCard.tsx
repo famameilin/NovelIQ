@@ -26,10 +26,10 @@ export interface DiagnosisSummaryCardProps {
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：让诊断画像卡回收到共享卡片壳上，复用 MetricCard 的视觉原语而不是继续使用普通 Card。
+ * 修改原因：让诊断画像卡回收到共享卡片壳上，复用 MetricCard 的视觉原语而不是继续使用普通 Card
  *
  * 2026-04-27，任务：protagonist-focus-contract
- * 修改原因：诊断摘要不再展示唯一主角，而是展示焦点结构与焦点人物列表。
+ * 修改原因：诊断摘要不再展示唯一主角，而是展示焦点结构与焦点人物列表
  */
 export function DiagnosisSummaryCard({
   diagnosis,

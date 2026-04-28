@@ -1,7 +1,7 @@
 """
-RAG Level3 向量检索边界。
+RAG Level3 向量检索边界
 
-将向量可用性检查和语义检索逻辑从 provider 主类中拆出。
+将向量可用性检查和语义检索逻辑从 provider 主类中拆出
 """
 
 from __future__ import annotations
@@ -21,14 +21,14 @@ if TYPE_CHECKING:
 
 
 class Level3NotReadyError(RuntimeError):
-    """Level 3 向量检索未就绪。"""
+    """Level 3 向量检索未就绪"""
 
 
 class Level3VectorEvidence:
     """
-    Level3: 向量语义相似度检索。
+    Level3: 向量语义相似度检索
 
-    单独负责 Level3 readiness 检查与 chunk 检索，provider 只做编排。
+    单独负责 Level3 readiness 检查与 chunk 检索，provider 只做编排
     """
 
     def __init__(
@@ -54,7 +54,7 @@ class Level3VectorEvidence:
     def _reset_last_query_failures(self) -> None:
         """
         每次 Level3 query/batch query 开始前都清空上一跳失败观察字段，
-              避免新的 evidence 请求读到过期的 per-query failure attribution。
+              避免新的 evidence 请求读到过期的 per-query failure attribution
         """
         self._last_query_failures = []
 
@@ -68,7 +68,7 @@ class Level3VectorEvidence:
     ) -> None:
         """
         batched retrieval 的失败要按 query 单独归因；
-              这里统一记录 query_text/index/stage，供 evidence service 回填 generation_meta。
+              这里统一记录 query_text/index/stage，供 evidence service 回填 generation_meta
         """
         failure: dict[str, object] = {
             "query_text": query_text,
@@ -82,7 +82,7 @@ class Level3VectorEvidence:
     def consume_last_query_failures(self) -> list[dict[str, object]]:
         """
         failure attribution 由上层 evidence service 消费后立即清空，
-              避免后续 query 误复用上一轮失败信息。
+              避免后续 query 误复用上一轮失败信息
         """
         failures = list(self._last_query_failures)
         self._last_query_failures = []
@@ -91,7 +91,7 @@ class Level3VectorEvidence:
     def _raise_not_ready(self, message: str, *, cause: Exception | None = None) -> Never:
         """
         readiness 一旦发现 schema / 数据漂移，先清空缓存状态再抛错，
-              避免后续 `is_available()` 或 paragraph rerank 继续复用过期的成功结果。
+              避免后续 `is_available()` 或 paragraph rerank 继续复用过期的成功结果
         """
         self._available = False
         self._paragraph_rerank_available = False
@@ -101,14 +101,14 @@ class Level3VectorEvidence:
         raise Level3NotReadyError(message) from cause
 
     def set_embedding_client(self, client: EmbeddingClient) -> None:
-        """设置 Embedding 客户端。"""
+        """设置 Embedding 客户端"""
         self._embedding_client = client
         self._available = None
         self._paragraph_rerank_available = None
         self._setup_checked = False
 
     def set_session(self, session: Session, run_id: str) -> None:
-        """设置数据库会话与 run_id。"""
+        """设置数据库会话与 run_id"""
         self._session = session
         self._run_id = run_id
         self._available = None
@@ -117,9 +117,9 @@ class Level3VectorEvidence:
 
     async def ensure_level3_ready(self) -> None:
         """
-        执行 Level3 readiness 检查。
+        执行 Level3 readiness 检查
 
-        paragraph rerank 已是 Level3 必需能力，启动检查必须同时校验 paragraph schema、数据存在与完整性。
+        paragraph rerank 已是 Level3 必需能力，启动检查必须同时校验 paragraph schema、数据存在与完整性
         """
         if self._embedding_client is None or self._session is None or self._run_id is None:
             self._raise_not_ready("Level 3 requires embedding client, session, and run_id")
@@ -128,7 +128,7 @@ class Level3VectorEvidence:
         run_id = self._run_id
 
         # provider 会在每次入口显式调用 readiness，这里不能因历史成功缓存而跳过重检；
-        # 否则 paragraph schema / 数据漂移会被吞掉，破坏“paragraph rerank 是硬前提”的合同。
+        # 否则 paragraph schema / 数据漂移会被吞掉，破坏“paragraph rerank 是硬前提”的合同
         actual_dim = await embedding_client.detect_embedding_dimension()
         if actual_dim != self._expected_embedding_dim:
             self._raise_not_ready(
@@ -178,10 +178,10 @@ class Level3VectorEvidence:
 
     def is_available(self) -> bool:
         """
-        检查 Level3 是否可用。
+        检查 Level3 是否可用
 
         同步补齐 schema 校验，避免 `is_available()` 在表缺失或向量列维度不匹配时误报可用；
-                  embedding 模型维度仍由 async readiness 入口做最终确认。
+                  embedding 模型维度仍由 async readiness 入口做最终确认
         """
         if self._available is not None:
             return self._available
@@ -249,21 +249,21 @@ class Level3VectorEvidence:
         query_index: int | None = None,
     ) -> list[SimilarChunkRow]:
         """
-        检索语义相似的历史 chunk。
+        检索语义相似的历史 chunk
 
-        保留原检索行为，但让 provider 不再直接处理向量层细节。
+        保留原检索行为，但让 provider 不再直接处理向量层细节
 
-        透传 max_chunk_id 到 repository 层，统一约束 Level3 历史边界。
+        透传 max_chunk_id 到 repository 层，统一约束 Level3 历史边界
 
-        chunk 粗召回后，在命中 chunk_ids 内执行 paragraph rerank，并回填局部 evidence 预览。
+        chunk 粗召回后，在命中 chunk_ids 内执行 paragraph rerank，并回填局部 evidence 预览
 
-        支持调用方传入 retrieval pool 大小，rerank 后再由 provider 裁剪 prompt 预算。
+        支持调用方传入 retrieval pool 大小，rerank 后再由 provider 裁剪 prompt 预算
 
         支持外层已完成 readiness 时跳过重复重检，避免 mention/context 多 query
                   场景下重复探测 embedding 维度并多次扫描完整性
 
         单 query 入口改为复用共享的 embedding->检索执行函数，
-                  为多 query batched retrieval 保持完全一致的检索/paragraph rerank 语义。
+                  为多 query batched retrieval 保持完全一致的检索/paragraph rerank 语义
         """
         self._reset_last_query_failures()
 
@@ -271,7 +271,7 @@ class Level3VectorEvidence:
             await self.ensure_level3_ready()
         elif self._available is not True:
             # 跳过 readiness 重检只允许用于“外层已 ensure 成功”的热路径；
-            # 若当前对象没有成功缓存，就直接返回空，避免这里又偷偷跑一遍重型检查。
+            # 若当前对象没有成功缓存，就直接返回空，避免这里又偷偷跑一遍重型检查
             logger.debug("Level3VectorEvidence: cached readiness missing while ensure_ready=False")
             return []
 
@@ -343,10 +343,10 @@ class Level3VectorEvidence:
     ) -> list[list[SimilarChunkRow]]:
         """
         多 query 场景先批量生成 embedding，再逐条执行 run-scoped chunk/paragraph 检索，
-              避免 mention query 在热路径里重复请求 embedding 服务。
+              避免 mention query 在热路径里重复请求 embedding 服务
 
         batched embedding/search 失败时回退到逐 query 隔离执行；
-                  单个坏 query 只能丢自己，不能把 base query 一起清空。
+                  单个坏 query 只能丢自己，不能把 base query 一起清空
         """
         self._reset_last_query_failures()
 
@@ -356,7 +356,7 @@ class Level3VectorEvidence:
         if ensure_ready:
             await self.ensure_level3_ready()
         elif self._available is not True:
-            # batch 路径和单 query 路径保持同一护栏；外层没缓存 readiness 时，不允许偷偷补跑重检。
+            # batch 路径和单 query 路径保持同一护栏；外层没缓存 readiness 时，不允许偷偷补跑重检
             logger.debug("Level3VectorEvidence: cached readiness missing while ensure_ready=False for batched queries")
             return [[] for _ in query_texts]
 
@@ -455,7 +455,7 @@ class Level3VectorEvidence:
         top_k: int | None,
     ) -> list[list[SimilarChunkRow]]:
         """
-        batched 路径出错时逐 query 回退，确保单个 query 的 embedding / SQL 异常不会拖垮整批结果。
+        batched 路径出错时逐 query 回退，确保单个 query 的 embedding / SQL 异常不会拖垮整批结果
         """
         aggregated_failures: list[dict[str, object]] = []
         results_by_query: list[list[SimilarChunkRow]] = []
@@ -487,9 +487,9 @@ class Level3VectorEvidence:
     ) -> list[SimilarChunkRow]:
         """
         统一复用 precomputed query embedding 的 chunk recall + paragraph rerank，
-              确保单 query 和 batched query 看到同一套 SQL 边界与局部证据回填语义。
+              确保单 query 和 batched query 看到同一套 SQL 边界与局部证据回填语义
 
-        helper 自身重新收紧 session/run_id 非空前提，避免未来复用时依赖“调用方一定先校验”的隐式契约。
+        helper 自身重新收紧 session/run_id 非空前提，避免未来复用时依赖“调用方一定先校验”的隐式契约
         """
         from src.storage.repositories.chunk import search_similar_chunks
 
@@ -511,9 +511,9 @@ class Level3VectorEvidence:
 
     def _is_paragraph_rerank_available(self) -> bool:
         """
-        检查 paragraph rerank 数据是否可用。
+        检查 paragraph rerank 数据是否可用
 
-        paragraph rerank 不再是可选增强；缺失时抛出 readiness 错误。
+        paragraph rerank 不再是可选增强；缺失时抛出 readiness 错误
         """
         if self._paragraph_rerank_available is not None:
             return self._paragraph_rerank_available
@@ -550,16 +550,16 @@ class Level3VectorEvidence:
         top_k: int,
     ) -> list[SimilarChunkRow]:
         """
-        使用候选 chunk 内 paragraph 相似度重排 chunk 结果。
+        使用候选 chunk 内 paragraph 相似度重排 chunk 结果
 
-        只在 chunk 粗召回结果内查询 paragraph，避免全库 paragraph search 带来的噪声和时间边界风险。
+        只在 chunk 粗召回结果内查询 paragraph，避免全库 paragraph search 带来的噪声和时间边界风险
 
-        使用调用方指定的 retrieval pool 大小，而不是固定 prompt top_k。
+        使用调用方指定的 retrieval pool 大小，而不是固定 prompt top_k
 
         paragraph rerank 只更新 paragraph / final 排序分，显式保留 chunk 语义分，
-                  为后续接入独立 rerank 模型预留稳定字段。
+                  为后续接入独立 rerank 模型预留稳定字段
 
-        回填结果使用显式 local/global offset 字段，不再继续写旧的歧义 offset 名称。
+        回填结果使用显式 local/global offset 字段，不再继续写旧的歧义 offset 名称
         """
         if not chunk_results or self._session is None or self._run_id is None:
             return chunk_results

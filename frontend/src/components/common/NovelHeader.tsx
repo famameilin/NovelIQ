@@ -9,9 +9,9 @@
  *
  * 移除未使用的 onCancelTask 属性，简化组件接口
  *
- * 拆分 onCreateTask / onResumeTask / onDeleteCurrentTask，避免混合动作语义。
+ * 拆分 onCreateTask / onResumeTask / onDeleteCurrentTask，避免混合动作语义
  *
- * “运行中”计数仅统计真正执行中的 running/cancelling，避免把可恢复的 pending 任务误标成运行中。
+ * “运行中”计数仅统计真正执行中的 running/cancelling，避免把可恢复的 pending 任务误标成运行中
  */
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "react-router-dom";

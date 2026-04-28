@@ -7,7 +7,7 @@
 
 核心设计:
   所有事件走同一条路径，Event Bus 持有 stage/sub_stage/chunk_id 上下文，
-  LLM 输出不再是旁路，自动获得完整上下文后统一发送。
+  LLM 输出不再是旁路，自动获得完整上下文后统一发送
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ class StreamEvent:
     """
     统一 SSE 事件格式
 
-    所有层发送的事件都使用此格式，只是字段填充不同。
-    Event Bus 会自动补全缺失的上下文字段。
+    所有层发送的事件都使用此格式，只是字段填充不同
+    Event Bus 会自动补全缺失的上下文字段
 
     action 语义:
         start    — 阶段/phase/chunk 开始
@@ -100,14 +100,14 @@ class StreamEvent:
 # 原因如下：
 #   1. 语义差异：映射表中的 5 个 action 是「进行中」事件，需要 EventBus 补全
 #      stage/sub_stage/chunk_id 等上下文字段；而终止类事件表示任务级终态，
-#      不需要也不应携带 chunk 级上下文。
+#      不需要也不应携带 chunk 级上下文
 #   2. 数据格式不同：终止类事件的 data 结构固定（如 {"error": ..., "stage": ...}），
 #      与 StreamEvent.to_dict() 的 10 字段格式不同，强行走 emit() 再翻译会丢失
-#      语义或产生冗余字段。
+#      语义或产生冗余字段
 #   3. 副作用控制：emit() 内部会同步调用 task_manager.update_task()，
-#      对终止事件而言这些更新既不必要也可能引发状态冲突。
+#      对终止事件而言这些更新既不必要也可能引发状态冲突
 # 因此 emit_task_complete / emit_task_error / emit_task_cancelled 直接调用
-# event_manager.send()，跳过 emit() 的上下文补全和 TaskManager 同步逻辑。
+# event_manager.send()，跳过 emit() 的上下文补全和 TaskManager 同步逻辑
 _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "start": StreamMessageType.stage_start.value,
     "progress": StreamMessageType.stage_progress.value,
@@ -117,7 +117,7 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
 }
 
 # 这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
-# 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志。
+# 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志
 _DEBUG_PROGRESS_SUB_STAGES = {
     "semantic_chunking_embedding",
     "paragraph_embedding",
@@ -231,7 +231,7 @@ class AnalysisEventBus:
             sse_event_type = "message"
 
         # LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
-        # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO。
+        # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO
         log_level = (
             logger.debug
             if resolved_event.action in {"output", "thinking"}
@@ -259,14 +259,14 @@ class AnalysisEventBus:
         # 同步更新 TaskManager
         if resolved_event.action in ("start", "progress", "complete"):
             # 这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
-            # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源。
+            # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源
             task_update_kwargs: dict[str, Any] = {
                 "stage": resolved_event.stage,
                 "sub_stage": resolved_event.sub_stage,
                 "message": resolved_event.message,
             }
-            # EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”。
-            # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库。
+            # EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”
+            # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库
             if resolved_event.current is not None:
                 task_update_kwargs["current"] = resolved_event.current
             if resolved_event.total is not None:

@@ -1,7 +1,7 @@
 """
 消歧流程阶段拆分辅助模块
 
-将增量消歧与最终消歧中“计划、prompt 组装、状态应用、checkpoint 持久化”阶段显式拆开。
+将增量消歧与最终消歧中“计划、prompt 组装、状态应用、checkpoint 持久化”阶段显式拆开
 """
 
 from __future__ import annotations
@@ -71,9 +71,9 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class IncrementalDisambiguationPlan:
     """
-    增量消歧计划。
+    增量消歧计划
 
-    显式承接“候选计划”和“prompt 组装”产物，便于主流程按阶段推进。
+    显式承接“候选计划”和“prompt 组装”产物，便于主流程按阶段推进
     """
 
     state_after_deferred: DisambiguationState
@@ -87,9 +87,9 @@ class IncrementalDisambiguationPlan:
 @dataclass(frozen=True)
 class FinalDisambiguationPlan:
     """
-    最终消歧计划。
+    最终消歧计划
 
-    将终消歧的候选收集、prompt 组装和后续落库需要的上下文统一封装。
+    将终消歧的候选收集、prompt 组装和后续落库需要的上下文统一封装
     """
 
     state_before_apply: DisambiguationState
@@ -104,7 +104,7 @@ class FinalDisambiguationPlan:
 
 def fetch_current_relations(conn: Session, run_id: str) -> list[CurrentRelationRow]:
     """
-    从 graph repository 获取当前活跃关系。
+    从 graph repository 获取当前活跃关系
 
     """
     from src.storage.repositories import GraphRepository
@@ -121,7 +121,7 @@ async def generate_and_save_stage_summary(
     client: DisambiguationLike,
 ) -> None:
     """
-    生成并保存阶段性摘要。
+    生成并保存阶段性摘要
 
     """
     start_chunk_id = max(0, current_chunk_id - disambig_interval + 1)
@@ -172,7 +172,7 @@ async def generate_and_save_stage_summary(
 
 def resolve_incremental_batch_window(current_chunk_id: int, disambig_interval: int) -> tuple[int, int]:
     """
-    解析增量消歧批次窗口。
+    解析增量消歧批次窗口
 
     """
     batch_start_chunk_id = max(0, current_chunk_id - disambig_interval + 1)
@@ -184,7 +184,7 @@ def inject_category_into_context(
     context_sentences: dict[str, str],
 ) -> None:
     """
-    将 protected 候选的分类标签注入到上下文字符串前缀。
+    将 protected 候选的分类标签注入到上下文字符串前缀
 
     """
     for cls in classifications:
@@ -197,7 +197,7 @@ def merge_deferred_candidates_into_state(
     deferred_candidates: list[NameCountCandidate],
 ) -> DisambiguationState:
     """
-    将延后处理的候选写回状态。
+    将延后处理的候选写回状态
 
     """
     if not deferred_candidates:
@@ -244,7 +244,7 @@ def merge_deferred_candidates_into_state(
 
 def collect_review_candidates(state: DisambiguationState) -> list[NameCountCandidate]:
     """
-    收集需要复审的已判决名字。
+    收集需要复审的已判决名字
 
     """
     review_dict = state.get_review_status_dict()
@@ -263,7 +263,7 @@ def build_shared_evidence_query_text(
     context_sentences: dict[str, str],
 ) -> str | None:
     """
-    将候选名字的例句上下文拼成共享取证查询文本。
+    将候选名字的例句上下文拼成共享取证查询文本
 
     """
     parts: list[str] = []
@@ -286,7 +286,7 @@ def _build_shared_evidence_request(
 ) -> EvidenceRequest:
     """
     shared evidence 统一走 identity objective；seed_entities 只来自当前待消歧候选，
-          已知 canonical 背景继续留在 existing_character_hint / graph_hint，不再反向污染 requested_names。
+          已知 canonical 背景继续留在 existing_character_hint / graph_hint，不再反向污染 requested_names
     """
     seed_entities: list[str] = []
     for name in names_in_chunk:
@@ -325,7 +325,7 @@ async def build_prompt_context_with_shared_evidence(
     active_entity_fallback_names: Iterable[str] | None = None,
 ) -> DisambiguationPromptContext | None:
     """
-    把共享 evidence renderer 输出补入消歧 prompt_context。
+    把共享 evidence renderer 输出补入消歧 prompt_context
 
 
 
@@ -372,9 +372,9 @@ async def plan_incremental_disambiguation(
     evidence_service: NarrativeEvidenceService | None,
 ) -> IncrementalDisambiguationPlan | None:
     """
-    规划增量消歧候选与 prompt 输入。
+    规划增量消歧候选与 prompt 输入
 
-    显式对应“候选计划”和“prompt 组装”两个阶段，返回后续模型决策所需的完整输入。
+    显式对应“候选计划”和“prompt 组装”两个阶段，返回后续模型决策所需的完整输入
     """
     batch_start_chunk_id, batch_end_chunk_id = resolve_incremental_batch_window(chunk_id, disambig_interval)
     alias_map_dict = state.get_alias_merges_dict()
@@ -467,9 +467,9 @@ def apply_incremental_disambiguation_result(
     context_sentences: dict[str, str],
 ) -> DisambiguationState:
     """
-    应用增量消歧模型决策。
+    应用增量消歧模型决策
 
-    显式对应“模型决策后状态应用”阶段，隔离状态机细节。
+    显式对应“模型决策后状态应用”阶段，隔离状态机细节
     """
     existing_names = list(state.known_canonical_names)
     validated_result = validate_confidence_with_evidence(result, existing_names, context_sentences)
@@ -517,9 +517,9 @@ def persist_incremental_checkpoint(
     new_state: DisambiguationState,
 ) -> None:
     """
-    持久化增量消歧 checkpoint。
+    持久化增量消歧 checkpoint
 
-    显式对应增量流程的 checkpoint 阶段，避免主流程混杂持久化判断。
+    显式对应增量流程的 checkpoint 阶段，避免主流程混杂持久化判断
     """
     if new_state == old_state:
         return
@@ -540,9 +540,9 @@ def plan_final_disambiguation(
     run_id: str,
 ) -> FinalDisambiguationPlan | None:
     """
-    规划最终消歧的候选集合。
+    规划最终消歧的候选集合
 
-    显式对应“候选收集”阶段，并把后续落库所需全量上下文一并准备好。
+    显式对应“候选收集”阶段，并把后续落库所需全量上下文一并准备好
     """
     pending_relations = list(state.pending_relations)
     existing_names = list(state.known_canonical_names)
@@ -641,9 +641,9 @@ async def assemble_final_prompt_context(
     evidence_service: NarrativeEvidenceService | None,
 ) -> FinalDisambiguationPlan:
     """
-    组装最终消歧 prompt 上下文。
+    组装最终消歧 prompt 上下文
 
-    显式对应终消歧的 prompt/evidence 组装阶段。
+    显式对应终消歧的 prompt/evidence 组装阶段
     """
     if not plan.candidate_payload:
         return plan
@@ -674,9 +674,9 @@ def apply_final_disambiguation_result(
     context_sentences: dict[str, str],
 ) -> DisambiguationState:
     """
-    应用最终消歧模型决策。
+    应用最终消歧模型决策
 
-    显式对应“canonical reselect 前的状态应用”阶段。
+    显式对应“canonical reselect 前的状态应用”阶段
     """
     existing_names = list(base_state.known_canonical_names)
     validated_result = validate_confidence_with_evidence(result, existing_names, context_sentences)
@@ -729,9 +729,9 @@ def persist_final_disambiguation(
     result: ExtendedDisambigResult,
 ) -> DisambiguationState:
     """
-    持久化最终消歧结果与 checkpoint。
+    持久化最终消歧结果与 checkpoint
 
-    显式对应终消歧的“实体落库、关系投影、checkpoint 保存”阶段。
+    显式对应终消歧的“实体落库、关系投影、checkpoint 保存”阶段
     """
     if new_state != previous_state:
         logger.info(
@@ -787,7 +787,7 @@ def _replace_final_disambiguation_chunk_relations(
 ) -> None:
     """
     2026-04-27，任务：graph final-disambiguation rebuild fixes
-    才能在 reset_graph_tables() 之后被统一重新投影出来。
+    才能在 reset_graph_tables() 之后被统一重新投影出来
     """
     final_chunk_id = conn.execute(
         select(func.max(ChunkModel.chunk_id)).where(ChunkModel.run_id == run_id)

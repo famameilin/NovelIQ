@@ -8,10 +8,10 @@ from sqlalchemy.orm import Session
 
 def _resolve_runtime_schema(session: Session) -> str:
     """
-    获取当前会话实际使用的 schema。
+    获取当前会话实际使用的 schema
 
     vector schema 不能再把对象写死到 public；
-          测试并发时需要跟随当前 search_path 进入各自隔离 schema。
+          测试并发时需要跟随当前 search_path 进入各自隔离 schema
     """
     schema = session.execute(text("SELECT current_schema()")).scalar_one_or_none() or "public"
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
@@ -21,11 +21,11 @@ def _resolve_runtime_schema(session: Session) -> str:
 
 def _resolve_visible_table_schema(session: Session, table_name: str) -> str:
     """
-    解析当前连接可见的目标表实际所在 schema。
+    解析当前连接可见的目标表实际所在 schema
 
     `chunk_embeddings` 可能按当前运行时 schema 创建，
-          但它依赖的 `chunks` / `analysis_runs` 在某些环境里未必和当前 schema 完全一致。
-          这里按当前 search_path 实际能解析到的表，反查其真实 schema，避免手写 DDL 把父表误绑到错误空间。
+          但它依赖的 `chunks` / `analysis_runs` 在某些环境里未必和当前 schema 完全一致
+          这里按当前 search_path 实际能解析到的表，反查其真实 schema，避免手写 DDL 把父表误绑到错误空间
     """
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
         raise ValueError(f"invalid table name: {table_name}")
@@ -50,11 +50,11 @@ def _resolve_visible_table_schema(session: Session, table_name: str) -> str:
 
 def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None:
     """
-    确保 `chunk_embeddings` 表在当前运行时 schema 下可用。
+    确保 `chunk_embeddings` 表在当前运行时 schema 下可用
 
 
     创建表时不再假设 `chunks` / `analysis_runs` 一定与当前 schema 同名同空间，
-    而是按当前 search_path 解析父表真实 schema，避免预处理在隔离 schema 下创建外键时报 UndefinedTable。
+    而是按当前 search_path 解析父表真实 schema，避免预处理在隔离 schema 下创建外键时报 UndefinedTable
     """
     if embedding_dim <= 0:
         raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
@@ -101,19 +101,19 @@ def ensure_chunk_embeddings_schema(session: Session, embedding_dim: int) -> None
         )
     )
     # Drop the legacy global ANN index so existing environments do not keep
-    # using an approximation path that mixes rows from different runs.
+    # using an approximation path that mixes rows from different runs
     session.execute(text(f"DROP INDEX IF EXISTS {runtime_schema}.idx_chunk_embeddings_vector"))
 
 
 def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
     """
-    确保 `paragraph_embeddings` 表在当前运行时 schema 下可用。
+    确保 `paragraph_embeddings` 表在当前运行时 schema 下可用
 
     paragraph embedding 只作为候选 chunk 内局部 rerank 数据源，
-          表结构保留 chunk_id 与 chunk 内字符范围，方便回溯和 prompt 局部展示。
+          表结构保留 chunk_id 与 chunk 内字符范围，方便回溯和 prompt 局部展示
 
     旧的 start_char/end_char 已替换为显式 local/global offset，
-              直接升级 paragraph_embeddings 的字段合同，不保留旧歧义字段。
+              直接升级 paragraph_embeddings 的字段合同，不保留旧歧义字段
     """
     if embedding_dim <= 0:
         raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
@@ -134,7 +134,7 @@ def ensure_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> 
         or not required_offset_columns.issubset(existing_columns)
     ):
         # 用户已明确不需要兼容旧 paragraph offset 字段；
-        # 发现旧结构时直接重建整张表，避免留下“列已半升级但约束/语义仍漂移”的状态。
+        # 发现旧结构时直接重建整张表，避免留下“列已半升级但约束/语义仍漂移”的状态
         session.execute(text(f"DROP TABLE {runtime_schema}.paragraph_embeddings"))
         table_exists = None
 
@@ -209,11 +209,11 @@ def validate_chunk_embeddings_schema(session: Session, embedding_dim: int) -> No
 
 def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -> None:
     """
-    校验 `paragraph_embeddings` 表与当前 embedding 维度一致。
+    校验 `paragraph_embeddings` 表与当前 embedding 维度一致
 
-    Level3 paragraph rerank 依赖同一 embedding 模型维度，启动检查应显式失败而不是静默降级。
+    Level3 paragraph rerank 依赖同一 embedding 模型维度，启动检查应显式失败而不是静默降级
 
-    同步要求 global offset 列存在，避免新代码读取全文坐标时只在运行期晚失败。
+    同步要求 global offset 列存在，避免新代码读取全文坐标时只在运行期晚失败
     """
     if embedding_dim <= 0:
         raise ValueError(f"embedding dimension must be positive, got {embedding_dim}")
@@ -248,19 +248,19 @@ def validate_paragraph_embeddings_schema(session: Session, embedding_dim: int) -
 
 def _get_chunk_embeddings_vector_type(session: Session) -> str | None:
     """
-    获取 chunk embedding 向量列类型。
+    获取 chunk embedding 向量列类型
 
-    保持旧函数名作为 chunk schema 调用入口，内部复用通用表类型查询。
+    保持旧函数名作为 chunk schema 调用入口，内部复用通用表类型查询
     """
     return _get_embedding_vector_type(session, "chunk_embeddings")
 
 
 def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
     """
-    获取指定 embedding 表的向量列类型。
+    获取指定 embedding 表的向量列类型
 
     chunk_embeddings 与 paragraph_embeddings 共享同一列名与维度校验逻辑，
-          这里统一封装，避免新增 paragraph schema 时复制 SQL。
+          这里统一封装，避免新增 paragraph schema 时复制 SQL
     """
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
         raise ValueError(f"invalid table name: {table_name}")
@@ -286,9 +286,9 @@ def _get_embedding_vector_type(session: Session, table_name: str) -> str | None:
 
 def _get_table_columns(session: Session, table_name: str) -> set[str]:
     """
-    获取当前运行时 schema 下表的列名集合。
+    获取当前运行时 schema 下表的列名集合
 
-    在 validate 阶段显式校验新列是否存在，避免旧库只升级了部分 schema 就被误判为可用。
+    在 validate 阶段显式校验新列是否存在，避免旧库只升级了部分 schema 就被误判为可用
     """
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
         raise ValueError(f"invalid table name: {table_name}")

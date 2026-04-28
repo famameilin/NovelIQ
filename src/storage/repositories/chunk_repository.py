@@ -12,7 +12,7 @@
 
 fetch_chunk_styles_full 返回 Sequence[Row] 支持字段名访问
 
-删除 culture 兼容接口，imagery_lexicon_density 统一走 ChunkStyle 主仓储链路。
+删除 culture 兼容接口，imagery_lexicon_density 统一走 ChunkStyle 主仓储链路
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
 
         插入前先删除该 run_id 的旧数据
 
-        将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象。
+        将 chunk 的真实全文起止坐标一并持久化，避免后续 paragraph global offset 只能依赖内存对象
         """
         self.session.execute(delete(ChunkModel).where(ChunkModel.run_id == run_id))
         models = [
@@ -261,7 +261,7 @@ class ChunkRepository(BaseRepository["ChunkModel"]):
             validate_paragraph_embeddings_schema(self.session, expected_dim)
         except ValueError:
             # 只要当前运行环境要求 Level3，而 schema 尚未就绪，就不能跳过 preprocess；
-            # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness。
+            # 否则会把缺向量的半成品 run 当成完成态，后续直接卡在 readiness
             return False
 
         if not has_embeddings(self.session, run_id):

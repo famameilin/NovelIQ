@@ -27,15 +27,15 @@ from src.storage.models import Chunk, ChunkAnnotation, ChunkEmbedding, Paragraph
 @dataclass(frozen=True)
 class SimilarChunkRow:
     """
-    收口 Level3 检索边界，避免向上游暴露匿名 dict，并统一使用具名字段访问。
+    收口 Level3 检索边界，避免向上游暴露匿名 dict，并统一使用具名字段访问
 
-    增补 query_kind 与 mention 元数据字段，供上层标记 mention 级召回来源。
+    增补 query_kind 与 mention 元数据字段，供上层标记 mention 级召回来源
 
-    增补确定性 mention rerank 的可解释字段，保留原始语义分并记录加权原因。
+    增补确定性 mention rerank 的可解释字段，保留原始语义分并记录加权原因
 
-    显式拆分 chunk/paragraph/business/final 四类分数，避免 `similarity` 在多阶段 rerank 中持续变义。
+    显式拆分 chunk/paragraph/business/final 四类分数，避免 `similarity` 在多阶段 rerank 中持续变义
 
-    增补 LLM mention source、query variant 与模型 rerank 观察字段，保持上层 metadata 合同可冻结。
+    增补 LLM mention source、query variant 与模型 rerank 观察字段，保持上层 metadata 合同可冻结
     """
 
     chunk_id: int
@@ -76,9 +76,9 @@ class SimilarChunkRow:
 @dataclass(frozen=True)
 class ParagraphEmbeddingRow:
     """
-    paragraph embedding 批量写入 DTO，所有字段使用具名属性，避免仓储层向上暴露匿名 dict。
+    paragraph embedding 批量写入 DTO，所有字段使用具名属性，避免仓储层向上暴露匿名 dict
 
-    同时携带 chunk 内 local offset 与 run 级 global offset，避免后续只能通过 chunk 表回推全文坐标。
+    同时携带 chunk 内 local offset 与 run 级 global offset，避免后续只能通过 chunk 表回推全文坐标
     """
 
     chunk_id: int
@@ -94,9 +94,9 @@ class ParagraphEmbeddingRow:
 @dataclass(frozen=True)
 class SimilarParagraphRow:
     """
-    候选 chunk 内 paragraph rerank 的结果 DTO，用于回填 SimilarChunkRow 的局部 evidence 字段。
+    候选 chunk 内 paragraph rerank 的结果 DTO，用于回填 SimilarChunkRow 的局部 evidence 字段
 
-    查询结果同时暴露 local/global offset，方便上游在保持兼容字段的同时新增全文定位能力。
+    查询结果同时暴露 local/global offset，方便上游在保持兼容字段的同时新增全文定位能力
     """
 
     chunk_id: int
@@ -153,10 +153,10 @@ def insert_paragraph_embeddings(
     rows: Iterable[ParagraphEmbeddingRow],
 ) -> int:
     """
-    批量写入 paragraph embedding。
+    批量写入 paragraph embedding
 
     每次 preprocess 重新生成当前 run_id 的 paragraph embeddings，
-          与 chunk_embeddings 保持同一恢复语义。
+          与 chunk_embeddings 保持同一恢复语义
     """
     session.execute(delete(ParagraphEmbedding).where(ParagraphEmbedding.run_id == run_id))
 
@@ -247,13 +247,13 @@ def search_similar_chunks(
     """
     使用 pgvector 进行向量相似度检索
 
-    额外回传 chunk 的 emotional_valence，避免上层为了情绪 exemplar 再单独查一轮数据库。
+    额外回传 chunk 的 emotional_valence，避免上层为了情绪 exemplar 再单独查一轮数据库
 
-    增加 max_chunk_id 历史截止边界，确保增量取证不会召回未来 chunk。
+    增加 max_chunk_id 历史截止边界，确保增量取证不会召回未来 chunk
 
-    回填时改用 SQLAlchemy Row 具名属性访问，遵守数据库访问语义化约束。
+    回填时改用 SQLAlchemy Row 具名属性访问，遵守数据库访问语义化约束
 
-    初始化显式分数字段，后续 paragraph / business rerank 在不丢失 chunk 语义分的前提下继续叠加。
+    初始化显式分数字段，后续 paragraph / business rerank 在不丢失 chunk 语义分的前提下继续叠加
 
     Args:
         session: SQLAlchemy Session 实例
@@ -290,7 +290,7 @@ def search_similar_chunks(
     if exclude_chunk_ids:
         run_scoped_chunks = run_scoped_chunks.where(ChunkEmbedding.chunk_id.not_in(list(exclude_chunk_ids)))
     if max_chunk_id is not None:
-        # 历史截止必须下沉到 SQL 层，避免上游新增 query 形态时绕过时间边界。
+        # 历史截止必须下沉到 SQL 层，避免上游新增 query 形态时绕过时间边界
         run_scoped_chunks = run_scoped_chunks.where(ChunkEmbedding.chunk_id <= max_chunk_id)
 
     run_scoped_chunks_subquery = run_scoped_chunks.subquery()
@@ -335,14 +335,14 @@ def search_similar_paragraphs_within_chunks(
     similarity_threshold: float = 0.7,
 ) -> list[SimilarParagraphRow]:
     """
-    在候选 chunk 内检索相似 paragraph。
+    在候选 chunk 内检索相似 paragraph
 
-    paragraph embedding 只允许在 chunk 粗召回结果内使用，避免第一版误开全库 paragraph 检索。
+    paragraph embedding 只允许在 chunk 粗召回结果内使用，避免第一版误开全库 paragraph 检索
 
     先在每个候选 chunk 内选出最佳 paragraph，再做 chunk 级全局排序，
-              避免全局 LIMIT 让部分候选 chunk 完全失去 paragraph rerank 机会。
+              避免全局 LIMIT 让部分候选 chunk 完全失去 paragraph rerank 机会
 
-    返回值改为显式 local/global offset，不再继续暴露歧义的 start_char/end_char 合同。
+    返回值改为显式 local/global offset，不再继续暴露歧义的 start_char/end_char 合同
     """
     scoped_chunk_ids = list(dict.fromkeys(int(chunk_id) for chunk_id in chunk_ids))
     if not scoped_chunk_ids:
@@ -386,7 +386,7 @@ def search_similar_paragraphs_within_chunks(
             ranked_candidates.c.similarity,
         )
         # 必须先按 chunk_id 选 best paragraph，再截断 top_k，
-        # 否则某个 chunk 的多个高分 paragraph 会挤掉其他候选 chunk。
+        # 否则某个 chunk 的多个高分 paragraph 会挤掉其他候选 chunk
         .where(ranked_candidates.c.paragraph_rank == 1)
         .order_by(ranked_candidates.c.similarity.desc(), ranked_candidates.c.chunk_id.asc())
         .limit(top_k)
@@ -426,9 +426,9 @@ def has_embeddings(session: Session, run_id: str) -> bool:
 
 def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
     """
-    检查指定 run_id 是否存在 paragraph embedding。
+    检查指定 run_id 是否存在 paragraph embedding
 
-    Level3 可在 paragraph 数据缺失时显式回退 chunk evidence，但不能静默假装已完成 rerank。
+    Level3 可在 paragraph 数据缺失时显式回退 chunk evidence，但不能静默假装已完成 rerank
     """
     stmt = select(ParagraphEmbedding.chunk_id).where(ParagraphEmbedding.run_id == run_id).limit(1)
     result = session.execute(stmt).scalar_one_or_none()
@@ -437,15 +437,15 @@ def has_paragraph_embeddings(session: Session, run_id: str) -> bool:
 
 def get_incomplete_paragraph_embedding_chunk_ids(session: Session, run_id: str) -> list[int]:
     """
-    查询 paragraph embedding 不完整的 chunk ID。
+    查询 paragraph embedding 不完整的 chunk ID
 
     readiness 不只检查是否有任意 paragraph row，还要发现：
           1. 某个 chunk 完全没有 paragraph embedding；
-          2. 某个 chunk 的 paragraph_index 没有从 0 开始连续落库。
+          2. 某个 chunk 的 paragraph_index 没有从 0 开始连续落库
 
-    将 `embedding_vector IS NULL` 视为不完整，避免 readiness 通过但检索阶段被 `IS NOT NULL` 过滤掉。
+    将 `embedding_vector IS NULL` 视为不完整，避免 readiness 通过但检索阶段被 `IS NOT NULL` 过滤掉
 
-    local/global 任一 offset 缺失都视为不完整，避免全文定位字段只升级了一半。
+    local/global 任一 offset 缺失都视为不完整，避免全文定位字段只升级了一半
     """
     paragraph_exists = exists().where(
         (ParagraphEmbedding.run_id == Chunk.run_id) & (ParagraphEmbedding.chunk_id == Chunk.chunk_id)

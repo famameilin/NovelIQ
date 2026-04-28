@@ -263,7 +263,7 @@ def fetch_pending_chunk_relations(
     to_chunk: int | None = None,
     limit: int = 200,
 ) -> list[ChunkRelation]:
-    """获取待重试投影的关系（pending）。"""
+    """获取待重试投影的关系（pending）"""
     stmt = select(ChunkRelation).where(
         ChunkRelation.run_id == run_id,
         ChunkRelation.projection_status == "pending",

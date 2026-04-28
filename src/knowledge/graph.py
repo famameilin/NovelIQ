@@ -14,9 +14,9 @@ def build_networkx_from_graph_tables(
     session=None,
 ) -> nx.Graph:
     """
-    从 graph_* 权威表临时构建 NetworkX 图。
+    从 graph_* 权威表临时构建 NetworkX 图
 
-    注意：该图仅用于计算，不做持久化。
+    注意：该图仅用于计算，不做持久化
     """
     if session is None:
         raise ValueError("session is required for build_networkx_from_graph_tables")

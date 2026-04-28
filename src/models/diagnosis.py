@@ -1,7 +1,7 @@
 """
 说明: 统一的诊断客户端，同时支持本地和云端
 
-本模块包含诊断客户端，负责对小说进行整体诊断分析。
+本模块包含诊断客户端，负责对小说进行整体诊断分析
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ class DiagnosisClient(BaseModelClient):
     """
     统一诊断客户端
 
-    负责对小说进行整体诊断分析，包括叙事类型、主题、价值观等。
-    同时支持本地和云端模型，通过 base_url 自动检测。
+    负责对小说进行整体诊断分析，包括叙事类型、主题、价值观等
+    同时支持本地和云端模型，通过 base_url 自动检测
     """
 
     RETRY_DELAY_SECONDS = 2
@@ -145,7 +145,7 @@ class DiagnosisClient(BaseModelClient):
         attempt_number: int = 1,
     ) -> CloudAnalysis:
         """
-        执行单次诊断结构化调用。
+        执行单次诊断结构化调用
         """
         start_time = time.time()
 
@@ -255,7 +255,7 @@ class DiagnosisClient(BaseModelClient):
 
     def _finalize_result(self, result: CloudAnalysis, novel_id: Any, *, payload: dict[str, Any]) -> CloudAnalysis:
         """
-        统一收口 diagnosis 结果的持久化前终态。
+        统一收口 diagnosis 结果的持久化前终态
         """
 
         updates: dict[str, Any] = {}
@@ -281,7 +281,7 @@ class DiagnosisClient(BaseModelClient):
             expected_topic_label_count = len(topic_words)
             actual_topic_label_count = len(result.topic_labels)
             # payload.topic_words 已经是本次真正发给 LLM 的主题头部列表，
-            # 所以这里校验的是“返回标签数 == 发送主题数”，而不是全文 total_topics。
+            # 所以这里校验的是“返回标签数 == 发送主题数”，而不是全文 total_topics
             if actual_topic_label_count != expected_topic_label_count:
                 raise ValueError(
                     "topic_labels count must match payload.topic_words count: "

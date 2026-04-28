@@ -2,7 +2,7 @@
 文本分块模块
 
 
-本模块包含文本分块相关的功能，支持按章节、段落、语义等多种分块策略。
+本模块包含文本分块相关的功能，支持按章节、段落、语义等多种分块策略
 """
 
 from __future__ import annotations
@@ -48,10 +48,10 @@ def _reindex(chunks: list[Chunk]) -> list[Chunk]:
 
 def _resolve_trimmed_span(text: str, start: int, end: int) -> tuple[int, int, str] | None:
     """
-    解析切片在原文中的真实字符范围，并返回去首尾空白后的文本。
+    解析切片在原文中的真实字符范围，并返回去首尾空白后的文本
 
     chunk/paragraph 最终落库和对外暴露的 offset 必须对应“实际保留下来的文本”，
-          不能继续沿用 strip() 之前的粗边界；否则全文 offset 会系统性偏移。
+          不能继续沿用 strip() 之前的粗边界；否则全文 offset 会系统性偏移
     """
     raw_text = text[start:end]
     stripped_text = raw_text.strip()
@@ -65,10 +65,10 @@ def _resolve_trimmed_span(text: str, start: int, end: int) -> tuple[int, int, st
 
 def _split_by_chapters_with_offsets(text: str) -> list[tuple[str | None, str, int, int]]:
     """
-    按章节分割文本，并保留章节正文在全文中的字符范围。
+    按章节分割文本，并保留章节正文在全文中的字符范围
 
     `split_by_chapters()` 旧接口只返回标题和正文，无法支撑全文 offset；
-          这里新增内部 helper，把章节正文的全文起止位置一并保留下来。
+          这里新增内部 helper，把章节正文的全文起止位置一并保留下来
     """
     chapters: list[tuple[str | None, str, int, int]] = []
     last_end = 0
@@ -143,9 +143,9 @@ def _detect_onomatopoeia(paragraphs: list[tuple[int, int, str]]) -> set[int]:
 
 def split_by_chapters(text: str) -> list[tuple[str | None, str]]:
     """
-    按章节分割文本。
+    按章节分割文本
 
-    继续保留旧返回签名，内部改为复用带 offset 的 helper，避免外围调用点被迫同步改签名。
+    继续保留旧返回签名，内部改为复用带 offset 的 helper，避免外围调用点被迫同步改签名
     """
     return [
         (chapter_title, chapter_text)
@@ -192,10 +192,10 @@ async def chunk_text(
 
 def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
     """
-    简单分块（不按章节）。
+    简单分块（不按章节）
 
     生成的 `Chunk.start/end` 改为最终保留文本的真实全文范围，
-              不再沿用 strip() 之前的粗切片边界。
+              不再沿用 strip() 之前的粗切片边界
     """
     chunks = []
     start = 0
@@ -227,9 +227,9 @@ def _chunk_simple(text: str, max_chars: int, overlap: int) -> list[Chunk]:
 
 def _chunk_by_chapters(text: str, max_chars: int, overlap: int) -> list[Chunk]:
     """
-    按章节分块。
+    按章节分块
 
-    章节内局部切片仍按正文处理，但写回 Chunk 时统一折算为整本文本的真实全文 offset。
+    章节内局部切片仍按正文处理，但写回 Chunk 时统一折算为整本文本的真实全文 offset
     """
     chapters = _split_by_chapters_with_offsets(text)
     chunks = []
@@ -328,17 +328,17 @@ class SemanticChunker:
 
     async def _emit_embedding_progress(self, completed_batches: int, total_batches: int, total_items: int) -> None:
         """
-        发射语义分块 paragraph embedding 的批次进度。
+        发射语义分块 paragraph embedding 的批次进度
 
         语义分块阶段本身没有 chunk 级循环，必须把 embed_texts 的批量完成信号翻译成 SSE，
-                  前端才能在长文本 paragraph 向量化时看到持续进度。
+                  前端才能在长文本 paragraph 向量化时看到持续进度
         """
         if self._emitter is None or total_batches <= 0:
             return
 
         sub_percent = (completed_batches / total_batches) * 100
         # 这里复用 preprocess/stage_progress 协议，不新增前端事件类型；
-        # current/total 表示“已完成批次/总批次”，message 单独说明这是 paragraph embedding。
+        # current/total 表示“已完成批次/总批次”，message 单独说明这是 paragraph embedding
         await self._emitter(
             StreamEvent(
                 action="progress",
@@ -356,10 +356,10 @@ class SemanticChunker:
 
     def _split_into_paragraphs(self, text: str) -> list[tuple[int, int, str]]:
         """
-        将文本分割成段落。
+        将文本分割成段落
 
         段落的 start/end 改为 strip 后正文在全文中的真实坐标，
-                  后续 semantic chunk 和 paragraph global offset 都直接复用这组坐标。
+                  后续 semantic chunk 和 paragraph global offset 都直接复用这组坐标
         """
         paragraphs = []
         start = 0
@@ -473,7 +473,7 @@ class SemanticChunker:
         """根据边界创建 chunks
 
 
-        依赖 paragraph 的真实全文坐标，确保 semantic chunk 最终也落成真实全文 offset。
+        依赖 paragraph 的真实全文坐标，确保 semantic chunk 最终也落成真实全文 offset
         """
         chunks: list[Chunk] = []
 
@@ -536,7 +536,7 @@ class SemanticChunker:
         - 保证每个子块不超过 max_chars
         - 如果无法找到合适的句子边界，则强制按字符分割
 
-        子块同样使用真实全文坐标，不再沿用 strip 前的粗边界。
+        子块同样使用真实全文坐标，不再沿用 strip 前的粗边界
         """
         chunks: list[Chunk] = []
         offset = 0
@@ -600,7 +600,7 @@ async def chunk_documents(
         所有文档的Chunk列表
 
     多文档场景下将每个文档的 chunk offset 折算为 run 级连续全文坐标；
-              这里不额外注入分隔符，run-global offset 口径定义为“按输入顺序直接拼接的规范化文档文本”。
+              这里不额外注入分隔符，run-global offset 口径定义为“按输入顺序直接拼接的规范化文档文本”
     """
     all_chunks = []
     chunk_index_offset = 0

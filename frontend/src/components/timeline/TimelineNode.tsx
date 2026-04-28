@@ -135,7 +135,7 @@ function calculateNodeSize(importanceScore: number): number {
 
 /**
  * 2026-04-21，任务：重设计叙事时间轴主视觉
- * 默认节点仍保留基于张力的轻微偏移，但轨道组件也可以显式覆盖为分层布局偏移。
+ * 默认节点仍保留基于张力的轻微偏移，但轨道组件也可以显式覆盖为分层布局偏移
  */
 function calculateDefaultVerticalOffset(tensionPercentile: number): number {
   const normalized = Math.min(Math.max(tensionPercentile, 0), 100);

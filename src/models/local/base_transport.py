@@ -1,7 +1,7 @@
 """
-BaseModelClient 传输层辅助模块。
+BaseModelClient 传输层辅助模块
 
-说明: 从 base.py 中拆出非流式/流式 transport 细节，让客户端主类聚焦上下文与兼容入口。
+说明: 从 base.py 中拆出非流式/流式 transport 细节，让客户端主类聚焦上下文与兼容入口
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ async def call_api[T: BaseModel](
     timeout: float | None = None,
 ) -> Any:
     """
-    执行非流式模型调用。
+    执行非流式模型调用
     """
     request_params = client._build_request_params(messages, enable_thinking=enable_thinking)
     if raw_response_format is not None:
@@ -49,7 +49,7 @@ async def call_api_stream(
     emitter: Any = None,
 ) -> Any:
     """
-    执行流式模型调用并聚合为标准响应对象。
+    执行流式模型调用并聚合为标准响应对象
     """
     request_params["stream"] = True
     logger.debug("Using streaming mode for API call")

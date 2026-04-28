@@ -3,7 +3,7 @@
 - Level1: 别名表精确匹配
 - Level2: 活跃实体候选
 - Level3: 向量语义相似度检索
-输出统一 EvidenceBundle，由下游 renderer 渲染为 prompt 内容。
+输出统一 EvidenceBundle，由下游 renderer 渲染为 prompt 内容
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def _merge_annotation_phase1_identity_and_emotion_bundles(
 ) -> EvidenceBundle:
     """
     说明: Phase1 需要 identity semantic recall + emotion exemplar；
-          overlay 合并在 service 内完成，workflow 不再自己拼两份 bundle。
+          overlay 合并在 service 内完成，workflow 不再自己拼两份 bundle
     """
     merged_semantic_evidence = list(identity_bundle.semantic_evidence)
     existing_emotion_keys = {
@@ -92,7 +92,7 @@ def _merge_annotation_phase1_identity_and_emotion_bundles(
 def _should_apply_annotation_phase1_overlay(request: EvidenceRequest) -> bool:
     """
     说明: Phase1 的 identity request 对外仍只暴露单一 EvidenceRequest；
-          若需要 emotion exemplar overlay，由 service 在 collect() 内部统一补齐。
+          若需要 emotion exemplar overlay，由 service 在 collect() 内部统一补齐
     """
     return request.consumer == "annotation_phase1" and request.objective == "identity" and request.need_level3
 
@@ -105,7 +105,7 @@ class NarrativeEvidenceService:
     - Level2: 近期活跃实体
     - Level3: 向量语义相似 chunk
 
-    prompt block 的文本渲染仍留在 renderer 层；service 只负责取证编排。
+    prompt block 的文本渲染仍留在 renderer 层；service 只负责取证编排
     """
 
     def __init__(
@@ -161,7 +161,7 @@ class NarrativeEvidenceService:
     async def _emit_level3_progress(self, current_chunk: int | None, message: str, _sub_percent: float) -> None:
         """
         说明: 复用现有 stage_progress 事件向前端暴露 Level3 长耗时节点；
-              这里只更新 message，不改全局 percent，避免进度条在 chunk 间跳动。
+              这里只更新 message，不改全局 percent，避免进度条在 chunk 间跳动
         """
         if self._progress_emitter is None:
             return
@@ -199,14 +199,14 @@ class NarrativeEvidenceService:
     def _build_structured_evidence(self, requested_names: list[str] | None = None) -> EvidenceBundle:
         """
         说明: Level1 只按 request.requested_names 过滤；
-              不再把 retrieval seed_entities 误当成“当前 consumer 真正要看的名字”。
+              不再把 retrieval seed_entities 误当成“当前 consumer 真正要看的名字”
         """
         snapshot = self._get_authority_snapshot()
         return self._bundle_builder.build_structured_bundle(snapshot, requested_names=requested_names)
 
     def _build_request_meta(self, request: EvidenceRequest) -> dict[str, Any]:
         """
-        说明: request_meta 直接记录调用方显式声明的输入边界，方便后续日志、回放和问题归因。
+        说明: request_meta 直接记录调用方显式声明的输入边界，方便后续日志、回放和问题归因
         """
         return {
             "consumer": request.consumer,
@@ -222,7 +222,7 @@ class NarrativeEvidenceService:
     def _build_generation_meta(self, request: EvidenceRequest) -> dict[str, Any]:
         """
         说明: generation_meta 统一承载本次 evidence 编排观察字段；
-              即使某条路径没有真正执行 Level3，也保留稳定键名，避免观察面继续分裂。
+              即使某条路径没有真正执行 Level3，也保留稳定键名，避免观察面继续分裂
         """
         return {
             "need_level1": request.need_level1,
@@ -243,7 +243,7 @@ class NarrativeEvidenceService:
     def _restore_cached_bundle(self, request: EvidenceRequest) -> EvidenceBundle | None:
         """
         说明: cache 只复用 evidence 内容本身；每次命中后仍用当前 request 的 meta 重新打戳，
-              避免 Phase1/Phase3 这类 consumer 复用时把上一跳标签带过去。
+              避免 Phase1/Phase3 这类 consumer 复用时把上一跳标签带过去
         """
         cache_key = build_evidence_request_fingerprint(request)
         cached_bundle = self._bundle_cache.get(cache_key)
@@ -258,14 +258,14 @@ class NarrativeEvidenceService:
 
     def _cache_bundle(self, request: EvidenceRequest, bundle: EvidenceBundle) -> None:
         """
-        说明: service 级 cache 只按真实取证语义复用，供同一 chunk 内的多 consumer 复用相同 bundle。
+        说明: service 级 cache 只按真实取证语义复用，供同一 chunk 内的多 consumer 复用相同 bundle
         """
         cache_key = build_evidence_request_fingerprint(request)
         self._bundle_cache[cache_key] = bundle.clone_with_meta()
 
     def _collect_base_evidence(self, request: EvidenceRequest) -> EvidenceBundle:
         """
-        收集 Level1/Level2 证据。
+        收集 Level1/Level2 证据
         """
         if request.need_level1:
             bundle = self._build_structured_evidence(requested_names=request.requested_names)
@@ -298,7 +298,7 @@ class NarrativeEvidenceService:
     def _build_annotation_phase1_emotion_request(self, request: EvidenceRequest) -> EvidenceRequest:
         """
         说明: Phase1 对外只暴露 identity request；
-              emotion overlay 的 query 由 service 内部派生，避免 workflow 再显式管理第二份 request。
+              emotion overlay 的 query 由 service 内部派生，避免 workflow 再显式管理第二份 request
         """
         return replace(
             request,
@@ -313,7 +313,7 @@ class NarrativeEvidenceService:
         """
         说明: Phase1 的 emotion overlay 只改变最终返回 bundle，不改变 identity base recall；
               这里显式派生一个“无 overlay content variant”的请求键，供 Phase3 等纯 identity consumer
-              复用同一份 Level3 base evidence，避免同 chunk 重复 embedding/检索/rerank。
+              复用同一份 Level3 base evidence，避免同 chunk 重复 embedding/检索/rerank
         """
         return replace(request, consumer="annotation_phase3")
 
@@ -326,7 +326,7 @@ class NarrativeEvidenceService:
     ) -> EvidenceBundle:
         """
         说明: 统一执行单条 EvidenceRequest，不处理 annotation Phase1 的 overlay 特例；
-              collect() 会在需要时用这个基础执行器拼出最终返回值。
+              collect() 会在需要时用这个基础执行器拼出最终返回值
         """
         if allow_cache:
             cached_bundle = self._restore_cached_bundle(request)
@@ -389,7 +389,7 @@ class NarrativeEvidenceService:
         except Level3NotReadyError as exc:
             if self.requires_level3():
                 # required Level3 语义下，入口已声明“没有 Level3 就不能继续”，
-                # 因此 async readiness 漂移必须 fail loudly，不能偷偷退回 Level1/2。
+                # 因此 async readiness 漂移必须 fail loudly，不能偷偷退回 Level1/2
                 logger.error("Level3 readiness drift surfaced on required path: {}", exc)
                 raise
             logger.warning("Level3 skipped during evidence collection: {}", exc)
@@ -439,7 +439,7 @@ class NarrativeEvidenceService:
 
     async def collect(self, request: EvidenceRequest) -> EvidenceBundle:
         """
-        收集统一 evidence bundle。
+        收集统一 evidence bundle
         """
         if not _should_apply_annotation_phase1_overlay(request):
             return await self._collect_request(request, allow_cache=True, store_cache=True)
@@ -453,7 +453,7 @@ class NarrativeEvidenceService:
         if identity_bundle is None:
             identity_bundle = await self._collect_request(request, allow_cache=False, store_cache=False)
             # 先把不带 emotion overlay 的 identity base 存进“普通 identity”缓存键，
-            # 后续 annotation_phase3 命中同语义请求时即可直接复用，不必再跑一轮 Level3 热路径。
+            # 后续 annotation_phase3 命中同语义请求时即可直接复用，不必再跑一轮 Level3 热路径
             self._cache_bundle(base_request, identity_bundle)
         if not identity_bundle.generation_meta.get("level3_executed"):
             self._cache_bundle(request, identity_bundle)
@@ -467,7 +467,7 @@ class NarrativeEvidenceService:
 
     async def build_level3_query_plan(self, request: EvidenceRequest) -> Level3QueryPlan:
         """
-        说明: 按消费者 objective 显式冻结 query planning 规则；高阶 query 只做增量增强，不替代 direct query。
+        说明: 按消费者 objective 显式冻结 query planning 规则；高阶 query 只做增量增强，不替代 direct query
         """
         mention_queries: list[MentionEvidenceQuery] = []
         dropped_queries: list[dict[str, str]] = []
@@ -504,7 +504,7 @@ class NarrativeEvidenceService:
         candidate_names: set[str],
     ) -> tuple[list[SimilarChunkRow], list[dict[str, object]]]:
         """
-        说明: 执行显式 query plan；retrieve / rerank / dedupe 仍保留在 provider 编排层，但不再直接耦合 workflow 弱参数。
+        说明: 执行显式 query plan；retrieve / rerank / dedupe 仍保留在 provider 编排层，但不再直接耦合 workflow 弱参数
         """
         return await self._collect_level3_results(
             plan=plan,
@@ -522,7 +522,7 @@ class NarrativeEvidenceService:
         candidate_names: set[str],
     ) -> tuple[list[SimilarChunkRow], list[dict[str, object]]]:
         """
-        说明: query planning 已外提后，这里只负责执行计划、重排候选并按请求预算裁剪。
+        说明: query planning 已外提后，这里只负责执行计划、重排候选并按请求预算裁剪
         """
         started_at = time.perf_counter()
         collected, failed_queries = await self._retrieve_candidates(
@@ -583,7 +583,7 @@ class NarrativeEvidenceService:
     ) -> tuple[list[MentionEvidenceQuery], list[dict[str, str]]]:
         """
         说明: 按 objective 构造高阶 query；identity 默认允许完整 hybrid，
-              relation 仅在显式允许时做受限扩展，其余目标保持 direct-only。
+              relation 仅在显式允许时做受限扩展，其余目标保持 direct-only
         """
         if not context_text or objective not in {"identity", "relation"}:
             return [], []
@@ -637,7 +637,7 @@ class NarrativeEvidenceService:
         objective: str,
     ) -> list[PersonMention]:
         """
-        说明: 调用 mention extraction service；LLM 失败时由 service 显式 fallback 到规则版。
+        说明: 调用 mention extraction service；LLM 失败时由 service 显式 fallback 到规则版
         """
         started_at = time.perf_counter()
         logger.info(
@@ -680,7 +680,7 @@ class NarrativeEvidenceService:
         request: EvidenceRequest,
     ) -> tuple[list[SimilarChunkRow], list[dict[str, object]]]:
         """
-        说明: 按 query plan 执行粗召回；候选池预算统一由 plan.candidate_pool_k 控制。
+        说明: 按 query plan 执行粗召回；候选池预算统一由 plan.candidate_pool_k 控制
         """
         collected: list[SimilarChunkRow] = []
         failed_queries: list[dict[str, object]] = []
@@ -783,7 +783,7 @@ class NarrativeEvidenceService:
     ) -> tuple[list[list[SimilarChunkRow]], list[dict[str, object]]]:
         """
         说明: 多 query 时统一走 batched Level3 检索，单 query 仍复用既有入口，
-              避免热路径继续逐条请求 embedding 服务。
+              避免热路径继续逐条请求 embedding 服务
         """
         if not query_texts:
             return [], []
@@ -817,7 +817,7 @@ class NarrativeEvidenceService:
         candidate_names: set[str],
     ) -> list[SimilarChunkRow]:
         """
-        说明: plan 决定是否存在高阶 query；只有 hybrid/high_order 情况才启用 deterministic mention rerank。
+        说明: plan 决定是否存在高阶 query；只有 hybrid/high_order 情况才启用 deterministic mention rerank
         """
         collected = results
         if plan.mention_queries:
@@ -871,7 +871,7 @@ class NarrativeEvidenceService:
 
     def _build_model_rerank_query_text(self, plan: Level3QueryPlan, request: EvidenceRequest) -> str:
         """
-        说明: 给模型 rerank 汇总原文 query 与 mention query，避免模型只看到压缩词而丢失当前语境。
+        说明: 给模型 rerank 汇总原文 query 与 mention query，避免模型只看到压缩词而丢失当前语境
         """
         max_chars = max(int(request.model_rerank_query_max_chars), 0)
         if max_chars <= 0:
@@ -883,7 +883,7 @@ class NarrativeEvidenceService:
     def _collect_model_rerank_query_segments(self, plan: Level3QueryPlan) -> list[tuple[str, str]]:
         """
         说明: 为 model rerank 组装 query summary 片段；base query 保留语境，
-              mention query 则优先选更短、更稳定的压缩/特征变体，避免重复拼入整段原文。
+              mention query 则优先选更短、更稳定的压缩/特征变体，避免重复拼入整段原文
         """
         segments: list[tuple[str, str]] = []
         base_query_text = " ".join(plan.base_query_text.split())
@@ -919,7 +919,7 @@ class NarrativeEvidenceService:
     def _render_model_rerank_query_segments(self, segments: list[tuple[str, str]], *, max_chars: int) -> str:
         """
         说明: 将 summary 片段压缩到固定字符预算内；这里按“每段至少保留最小摘要”的方式分配，
-              避免 base query 吞掉全部 budget，或后续 mention summary 完全挤不进去。
+              避免 base query 吞掉全部 budget，或后续 mention summary 完全挤不进去
         """
         if max_chars <= 0:
             return ""
@@ -969,7 +969,7 @@ class NarrativeEvidenceService:
 
     def _summarize_model_rerank_query_text(self, text: str, *, max_chars: int) -> str:
         """
-        说明: 对单条 rerank query 片段做最小压缩；优先保留前缀关键信息，超长时用省略号截断。
+        说明: 对单条 rerank query 片段做最小压缩；优先保留前缀关键信息，超长时用省略号截断
         """
         cleaned_text = " ".join(text.split())
         if max_chars <= 0 or not cleaned_text:
@@ -989,7 +989,7 @@ class NarrativeEvidenceService:
         top_k: int | None,
     ) -> list[SimilarChunkRow]:
         """
-        说明: 包装 Level3 query 调用；仅在 mention retrieval 需要扩大召回池时传入 top_k。
+        说明: 包装 Level3 query 调用；仅在 mention retrieval 需要扩大召回池时传入 top_k
         """
         if top_k is None:
             return await self._level3.search_similar_chunks(
@@ -1008,7 +1008,7 @@ class NarrativeEvidenceService:
 
     def _dedupe_level3_results(self, results: list[SimilarChunkRow], *, top_k: int) -> list[SimilarChunkRow]:
         """
-        说明: 对多 query 的 Level3 结果按 chunk_id 去重；同分时优先保留 mention 来源，方便后续观察。
+        说明: 对多 query 的 Level3 结果按 chunk_id 去重；同分时优先保留 mention 来源，方便后续观察
         """
         by_chunk_id: dict[int, SimilarChunkRow] = {}
         for result in results:
@@ -1029,7 +1029,7 @@ class NarrativeEvidenceService:
 
     def _level3_rank_score(self, result: SimilarChunkRow) -> float:
         """
-        说明: 统一读取 Level3 排序分，确保 rerank 与旧 similarity 排序路径共用同一比较逻辑。
+        说明: 统一读取 Level3 排序分，确保 rerank 与旧 similarity 排序路径共用同一比较逻辑
         """
         if result.final_rank_score is not None:
             return result.final_rank_score
@@ -1043,13 +1043,13 @@ class NarrativeEvidenceService:
 
     def _level3_pool_k(self, top_k: int) -> int:
         """
-        说明: Level3 候选池预算不再由各路径各自推断，而是统一从 final top_k 派生。
+        说明: Level3 候选池预算不再由各路径各自推断，而是统一从 final top_k 派生
         """
         return max(top_k * 4, 20)
 
     def _extract_active_entity_names(self, bundle: EvidenceBundle) -> set[str]:
         """
-        说明: 从 Level2 evidence 中提取活跃实体名，作为 rerank 加权输入，不额外查询数据库。
+        说明: 从 Level2 evidence 中提取活跃实体名，作为 rerank 加权输入，不额外查询数据库
         """
         names: set[str] = set()
         for item in bundle.local_evidence:
@@ -1066,7 +1066,7 @@ class NarrativeEvidenceService:
         return self._level3_enabled and self._level3.is_available()
 
     def requires_level3(self) -> bool:
-        """检查当前 provider 是否按当前流程配置要求启用 Level 3。"""
+        """检查当前 provider 是否按当前流程配置要求启用 Level 3"""
         return self._level3_enabled
 
     async def ensure_level3_ready(self) -> None:

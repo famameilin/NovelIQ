@@ -33,9 +33,9 @@ class AnalysisRun(Base):
 
     添加完整运行态字段，使 DB 成为任务唯一真相源
 
-    添加 started_at 字段，记录任务实际开始执行时间，完善运行态时间戳体系。
+    添加 started_at 字段，记录任务实际开始执行时间，完善运行态时间戳体系
 
-    为 novel_id 补充到 novels 表的外键约束，阻止 task 再次脱离小说主表。
+    为 novel_id 补充到 novels 表的外键约束，阻止 task 再次脱离小说主表
     """
 
     __tablename__ = "analysis_runs"
@@ -86,10 +86,10 @@ class DisambigCheckpoint(Base):
     """
     消歧检查点表
 
-    仅存储 DisambiguationState 的 JSON 快照，用于断点续传。
-    图投影进度通过 ChunkRelation.projection_status 查询，不在此表中记录。
+    仅存储 DisambiguationState 的 JSON 快照，用于断点续传
+    图投影进度通过 ChunkRelation.projection_status 查询，不在此表中记录
 
-    为 run_id 补充到 analysis_runs 的外键约束，确保检查点生命周期与任务一致。
+    为 run_id 补充到 analysis_runs 的外键约束，确保检查点生命周期与任务一致
     """
 
     __tablename__ = "disambig_checkpoint"

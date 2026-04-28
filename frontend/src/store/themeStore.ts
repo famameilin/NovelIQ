@@ -30,8 +30,8 @@ export const useThemeStore = create<ThemeState>()(
       name: "novel-viz-theme",
       version: THEME_STORE_VERSION,
       // 自动同步开启时，seedColor 属于任务上下文的派生结果，
-      // 不应跨会话持久化到首页；autoSyncEnabled 只用于组件展示页的临时试色，也不应持久化。
-      // 只有组件展示页手动试色时，才保留用户显式选择的颜色。
+      // 不应跨会话持久化到首页；autoSyncEnabled 只用于组件展示页的临时试色，也不应持久化
+      // 只有组件展示页手动试色时，才保留用户显式选择的颜色
       partialize: (state) => ({
         isDark: state.isDark,
         ...(state.autoSyncEnabled ? {} : { seedColor: state.seedColor }),
@@ -40,7 +40,7 @@ export const useThemeStore = create<ThemeState>()(
         const persistedThemeState = persistedState as Partial<ThemeState> | undefined;
 
         // 旧版本 localStorage 里可能残留任务页派生的 seedColor，
-        // 升级时要在自动同步模式下主动丢弃它，避免首页刷新后先被旧主题色 hydrate 回来。
+        // 升级时要在自动同步模式下主动丢弃它，避免首页刷新后先被旧主题色 hydrate 回来
         if (!persistedThemeState) {
           return persistedState;
         }

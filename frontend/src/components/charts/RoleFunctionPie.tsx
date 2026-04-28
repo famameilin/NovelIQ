@@ -41,17 +41,17 @@ export interface RoleFunctionPieProps {
 
 /**
  * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：统一人物页饼图卡片容器，使可视化区域与其他业务信息卡保持一致。
+ * 修改原因：统一人物页饼图卡片容器，使可视化区域与其他业务信息卡保持一致
  *
  * 2026-04-27，任务：protagonist-focus-contract
- * 修改原因：移除基于旧主角分阈值的兜底归类，避免旧中心度语义继续干扰角色功能分布。
+ * 修改原因：移除基于旧主角分阈值的兜底归类，避免旧中心度语义继续干扰角色功能分布
  */
 export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps) {
   const themeSignature = useChartThemeSignature();
   // 统计各功能角色数量
   const functionData = useMemo(() => {
     // 颜色值是从当前主题 CSS 变量即时解析出来的；
-    // 主题切换时即便 characters 不变，也必须重新计算扇区颜色。
+    // 主题切换时即便 characters 不变，也必须重新计算扇区颜色
     void themeSignature;
     const counts: Record<string, number> = {};
 
