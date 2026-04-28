@@ -395,6 +395,70 @@ async def test_parallel_multi_phase_stamps_llm_streams_with_explicit_phase_scope
 
 
 @pytest.mark.asyncio
+async def test_parallel_phase3_phase4_streams_keep_their_own_scope() -> None:
+    """
+    创建时间: 2026-04-28
+    任务: fix-annotation-stream-phase-scope
+    说明: phase3/phase4 会在同一轮 parallel gather 中并发执行；
+    若两边的 thinking/output 仍依赖共享 emitter 上下文，前端当前 scope 常会停在最后一次 phase_start 的 phase4，
+    从而把 phase3 文本错误并进 phase4。这里锁定两边都必须显式带回各自的 sub_stage/chunk_id。
+    """
+    emitted_events: list[StreamEvent] = []
+
+    async def _capture(event: StreamEvent) -> None:
+        emitted_events.append(event)
+
+    async def _fake_phase3(client, **_kwargs):
+        await client._emitter(StreamEvent(action="output", content="phase3-output"))
+        await client._emitter(StreamEvent(action="thinking", content="phase3-thinking"))
+        return SimpleNamespace(
+            dialogue_lengths=None,
+            dialogue_speakers=None,
+            dialogues=None,
+            dialogue_tones=None,
+            dialogue_identity_clues=None,
+        )
+
+    async def _fake_phase4(client, **_kwargs):
+        await client._emitter(StreamEvent(action="output", content="phase4-output"))
+        await client._emitter(StreamEvent(action="thinking", content="phase4-thinking"))
+        return []
+
+    with (
+        patch(
+            "src.models.local.annotation.multi_phase._run_phase1",
+            new=AsyncMock(return_value=_annotation_result()),
+        ),
+        patch(
+            "src.models.local.annotation.multi_phase._run_phase2",
+            new=AsyncMock(return_value=None),
+        ),
+        patch("src.models.local.annotation.multi_phase._run_phase3_if_needed", new=_fake_phase3),
+        patch("src.models.local.annotation.multi_phase.annotate_chunk_phase4", new=_fake_phase4),
+    ):
+        client = _PhaseScopedEmitterClient()
+        client._emitter = _capture
+        await annotate_chunk_parallel(
+            client=client,
+            text="白芷看向侯飞白。",
+            chunk_id=12,
+            emitter=_capture,
+        )
+
+    text_events = {
+        (event.sub_stage, event.action): (event.chunk_id, event.content)
+        for event in emitted_events
+        if event.action in {"thinking", "output"}
+    }
+    assert text_events == {
+        ("phase3", "output"): (12, "phase3-output"),
+        ("phase3", "thinking"): (12, "phase3-thinking"),
+        ("phase4", "output"): (12, "phase4-output"),
+        ("phase4", "thinking"): (12, "phase4-thinking"),
+    }
+
+
+@pytest.mark.asyncio
 async def test_serial_phase4_streams_keep_phase_scope_after_level3_progress() -> None:
     """
     创建时间: 2026-04-28
