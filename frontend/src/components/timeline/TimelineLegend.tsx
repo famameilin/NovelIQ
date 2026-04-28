@@ -14,13 +14,20 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
-import { getTimelineNodePresentation, TIMELINE_NODE_PRESENTATIONS } from "./timelineNodePresentation";
+import { getTimelineNodePresentation } from "./timelineNodePresentation";
 
 export interface TimelineLegendProps {
   className?: string;
 }
 
 export function TimelineLegend({ className }: TimelineLegendProps) {
+  const presentations = [
+    { key: "plot", nodeType: "plot", nodeSubtype: "plot" },
+    { key: "relation", nodeType: "relation", nodeSubtype: "新建" },
+    { key: "entry", nodeType: "lifecycle", nodeSubtype: "entry" },
+    { key: "exit", nodeType: "lifecycle", nodeSubtype: "exit" },
+  ] as const;
+
   return (
     <div
       className={cn(
@@ -28,22 +35,22 @@ export function TimelineLegend({ className }: TimelineLegendProps) {
         className
       )}
     >
-      {Object.entries(TIMELINE_NODE_PRESENTATIONS).map(([nodeType, presentation]) => {
+      {presentations.map(({ key, nodeType, nodeSubtype }) => {
+        const presentation = getTimelineNodePresentation(nodeType, nodeSubtype);
         const Icon = presentation.icon;
-        const semanticPresentation = getTimelineNodePresentation(nodeType);
         return (
           <div
-            key={nodeType}
+            key={key}
             className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-1.5"
             title={presentation.description}
           >
             <div
               className={cn(
                 "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
-                semanticPresentation.dotClassName
+                presentation.dotClassName
               )}
             >
-              <Icon className={cn("h-3.5 w-3.5", semanticPresentation.iconClassName)} />
+              <Icon className={cn("h-3.5 w-3.5", presentation.iconClassName)} />
             </div>
             <span className="text-xs font-medium text-text">{presentation.label}</span>
           </div>
