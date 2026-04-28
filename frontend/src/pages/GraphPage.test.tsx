@@ -147,6 +147,14 @@ function createQueryClient() {
   });
 }
 
+function createGraphEntityIds(taskLabel: string): { heroId: string; allyId: string } {
+  const base = taskLabel.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) * 10;
+  return {
+    heroId: String(base + 1),
+    allyId: String(base + 2),
+  };
+}
+
 function createGraphData(
   taskLabel: string,
   options: {
@@ -156,8 +164,7 @@ function createGraphData(
   },
 ): GraphData {
   const { eventNames, total, nextCursor } = options;
-  const heroId = `${taskLabel}-hero`;
-  const allyId = `${taskLabel}-ally`;
+  const { heroId, allyId } = createGraphEntityIds(taskLabel);
   return {
     nodes: [
       {
@@ -684,8 +691,9 @@ describe("GraphPage pagination", () => {
     await user.click(await screen.findByRole("button", { name: "选择第一个节点" }));
     await user.click(await screen.findByRole("button", { name: "查看首次登场" }));
 
+    const { heroId } = createGraphEntityIds("task-a");
     expect(navigateMock).toHaveBeenCalledWith(
-      "/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=lifecycle%3Aentry%3Atask-a-hero%3A1&selected_chunk=1"
+      `/novels/novel-1/timeline?task_id=task-a&max_level=3&view=composite&selected_node_id=lifecycle%3Aentry%3A${heroId}%3A1&selected_chunk=1`
     );
   });
 
