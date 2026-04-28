@@ -279,7 +279,7 @@ def test_fetch_graph_snapshot_keeps_page_summary_in_product_layer(monkeypatch) -
     assert snapshot["summary"] == {
         "node_count": 2,
         "edge_count": 1,
-        "density": 0.5,
+        "density": 0.0,
         "core_characters": ["沈砚", "陆明"],
         "key_relations": [{"from": "沈砚", "to": "陆明", "type": "盟友", "support_count": 3}],
     }
@@ -328,6 +328,61 @@ def test_fetch_graph_snapshot_core_characters_excludes_non_character_nodes(monke
 
     assert snapshot["summary"]["core_characters"] == ["沈砚", "陆明"]
     assert "天工阁" not in snapshot["summary"]["core_characters"]
+
+
+# 2026-04-28，任务：统一关系图谱密度口径。
+# 新建原因：锁住“重复关系对只算一条简单边，但孤立参与者仍进入分母”的回归语义。
+def test_fetch_graph_snapshot_density_deduplicates_same_pair_and_keeps_isolated_nodes(monkeypatch) -> None:
+    patch_graph_authority_service(
+        monkeypatch,
+        StaticGraphAuthorityService(
+            expected_run_id="run-graph-density-shape",
+            view=build_graph_authority_view(
+                participant_states=[
+                    participant_state(entity_id=1, name="沈砚", last_seen_chunk=9),
+                    participant_state(entity_id=2, name="陆明", last_seen_chunk=8),
+                    participant_state(entity_id=3, name="秦昭", last_seen_chunk=7),
+                    participant_state(entity_id=4, name="潘寒", last_seen_chunk=6),
+                ],
+                confirmed_relations=[
+                    ConfirmedRelation(
+                        from_name="沈砚",
+                        to_name="陆明",
+                        relation_type="盟友",
+                        from_entity_id=1,
+                        to_entity_id=2,
+                        support_count=3,
+                        last_seen_chunk=8,
+                    ),
+                    ConfirmedRelation(
+                        from_name="陆明",
+                        to_name="沈砚",
+                        relation_type="战友",
+                        from_entity_id=2,
+                        to_entity_id=1,
+                        support_count=2,
+                        last_seen_chunk=7,
+                    ),
+                    ConfirmedRelation(
+                        from_name="陆明",
+                        to_name="秦昭",
+                        relation_type="敌对",
+                        from_entity_id=2,
+                        to_entity_id=3,
+                        support_count=1,
+                        last_seen_chunk=6,
+                    ),
+                ],
+                relation_events=[],
+            ),
+        ),
+    )
+
+    snapshot = _fetch_graph_snapshot("run-graph-density-shape", create_graph_annotation_repo())
+
+    assert snapshot["summary"]["node_count"] == 4
+    assert snapshot["summary"]["edge_count"] == 2
+    assert snapshot["summary"]["density"] == 0.6667
 
 
 def test_fetch_graph_snapshot_core_characters_is_empty_without_character_nodes(monkeypatch) -> None:
@@ -912,6 +967,6 @@ def test_fetch_graph_snapshot_keeps_shared_counts_aligned_with_graph_report(monk
 
     assert snapshot["summary"]["node_count"] == 3
     assert snapshot["summary"]["edge_count"] == 2
-    assert snapshot["summary"]["density"] == 0.3333
+    assert snapshot["summary"]["density"] == 1.0
     assert snapshot["quality"]["conflict_count"] == 0
     assert snapshot["quality"]["low_confidence_count"] == 1

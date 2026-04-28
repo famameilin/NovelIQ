@@ -541,7 +541,7 @@ export function useDiagnosis(novelId: string, taskId: string) {
   ├─▶ useQuery(emotion) ────── fetchEmotionStats() ─── GET .../metrics/emotion-stats
   │     └─▶ DimensionMiniCard(情感)（pos_neg_ratio）
   ├─▶ useQuery(character) ──── fetchCharacterStatsAggregate() ─── GET .../metrics/character-stats
-  │     └─▶ DimensionMiniCard(人物)（network_density）
+  │     └─▶ DimensionMiniCard(人物)（network_density，字段名兼容，现语义为关系集中度）
   ├─▶ useQuery(style) ──────── fetchStyleStats() ─── GET .../metrics/style-stats
   │     └─▶ DimensionMiniCard(风格)（当前展示 vocab_breadth + dialogue_ratio）
   │
