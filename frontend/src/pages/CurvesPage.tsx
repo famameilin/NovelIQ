@@ -1,21 +1,4 @@
-/**
- * CurvesPage - 情绪/节奏曲线页面
- * 
- * 创建时间: 2026-04-04
- * 创建者: AI Assistant
- * 任务: Phase 1-D 情绪/节奏曲线
- * 说明: 展示情绪趋势曲线和节奏张力曲线，支持 X 轴缩放同步
- * 
- * 修改时间: 2026-04-04
- * 修改者: AI Assistant
- * 修改内容: 
- *   - 重构为使用 EmotionCurveChart 和 RhythmCurveChart 组件
- *   - 集成 CurveToolbar 工具栏
- *   - 删除未使用的 SkeletonCard 函数
- *   - 添加错误重试机制
- *   - 优化 URL 同步 useEffect，避免重复导航
- *   - 统一 borderColor 获取方式
- */
+/** 展示情绪趋势曲线和节奏张力曲线，并支持 X 轴缩放同步 */
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -33,15 +16,7 @@ import { EmotionCurveChart } from "@/components/charts/EmotionCurveChart";
 import { RhythmCurveChart } from "@/components/charts/RhythmCurveChart";
 import { Activity, RefreshCw } from "lucide-react";
 
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
-
 const STALE_TIME = 5 * 60 * 1000;
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
 
 type EmotionSeriesKey = "pos_density" | "neg_density" | "net_density" | "smoothed_density";
 type RhythmSeriesKey = "surface_tension" | "tension_composite";
@@ -50,10 +25,6 @@ interface VisibleSeriesState {
   emotion: Set<EmotionSeriesKey>;
   rhythm: Set<RhythmSeriesKey>;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
-/* ------------------------------------------------------------------ */
 
 export function CurvesPage() {
   const { novelId } = useParams<{ novelId: string }>();

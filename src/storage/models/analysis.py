@@ -1,8 +1,5 @@
 """
-创建时间: 2026-03-15
-创建者: TraeAI
-任务: postgresql-migration
-说明: 分析结果相关表 ORM 模型定义
+分析结果相关表 ORM 模型定义
 
 本模块定义分析结果相关的数据表：
 - CloudAnalysis: 云端分析结果表
@@ -11,9 +8,7 @@
 - GlobalContext: 全局上下文表
 - ChunkSummary: 分块摘要表
 
-修改时间: 2026-03-16
-修改者: TraeAI
-修改内容: 将 EmotionCurve, RhythmCurve, ChunkSummary 的主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
+将 EmotionCurve, RhythmCurve, ChunkSummary 的主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
 """
 
 from __future__ import annotations
@@ -28,21 +23,12 @@ class CloudAnalysis(Base):
     """
     云端分析结果表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储云端模型的分析结果
+    存储云端模型的分析结果
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-analysis-related-foreign-keys
-    修改内容: 为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表。
+    为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表
 
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改内容: 废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
-    以持久化 single / dual / ensemble 三类叙事焦点结构。
+    废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
+    以持久化 single / dual / ensemble 三类叙事焦点结构
     """
 
     __tablename__ = "cloud_analysis"
@@ -89,10 +75,7 @@ class ChunkCurve(Base):
     """
     分块曲线表（合并情绪曲线 + 节奏曲线）
 
-    创建时间: 2026-03-30
-    创建者: CodeBuddy
-    任务: db-schema-cleanup
-    说明: 将 emotion_curve 和 rhythm_curve 合并为 chunk_curves，统一管理所有分块级曲线数据
+    将 emotion_curve 和 rhythm_curve 合并为 chunk_curves，统一管理所有分块级曲线数据
     """
 
     __tablename__ = "chunk_curves"
@@ -128,15 +111,9 @@ class GlobalStats(Base):
     """
     全局统计表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储全局统计数据
+    存储全局统计数据
 
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: fix-global-stats-pk
-    修改内容: 将主键改为复合主键 (stat_name, run_id)，支持多 run 数据隔离
+    将主键改为复合主键 (stat_name, run_id)，支持多 run 数据隔离
     """
 
     __tablename__ = "global_stats"
@@ -155,15 +132,9 @@ class GlobalContext(Base):
     """
     全局上下文表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储小说的全局上下文信息
+    存储小说的全局上下文信息
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-analysis-related-foreign-keys
-    修改内容: 为 novel_id 补充到 novels 表的外键约束，确保全局上下文不会脱离小说主表。
+    为 novel_id 补充到 novels 表的外键约束，确保全局上下文不会脱离小说主表
     """
 
     __tablename__ = "global_context"
@@ -191,14 +162,9 @@ class ChunkSummary(Base):
     """
     分块摘要表
 
-    创建时间: 2026-03-15
-    创建者: TraeAI
-    任务: postgresql-migration
-    说明: 存储分块的摘要信息
+    存储分块的摘要信息
 
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    修改内容: 将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
+    将主键改为复合主键 (chunk_id, run_id)，使用复合外键引用 chunks 表
     """
 
     __tablename__ = "chunk_summaries"
@@ -230,20 +196,12 @@ class StageSummary(Base):
     """
     阶段性摘要表
 
-    创建时间: 2026-04-08
-    创建者: TraeAI
-    任务: fix-stage-summary-missing
-    说明: 存储增量消歧阶段生成的阶段性摘要
+    存储增量消歧阶段生成的阶段性摘要
 
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    修改内容: 修正主键为 stage_id 以匹配数据库实际结构
+    修正主键为 stage_id 以匹配数据库实际结构
 
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: fix-stage-summary-orm-duplicate-fk
-    修改内容: 删除与列级 ForeignKey 重复的同义 ForeignKeyConstraint，
-    避免 ORM 元数据重复声明同一条 run_id -> analysis_runs.run_id 外键。
+    删除与列级 ForeignKey 重复的同义 ForeignKeyConstraint，
+    避免 ORM 元数据重复声明同一条 run_id -> analysis_runs.run_id 外键
     """
 
     __tablename__ = "stage_summaries"

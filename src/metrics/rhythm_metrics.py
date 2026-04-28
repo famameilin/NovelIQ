@@ -1,20 +1,9 @@
 """
 张力代理指标计算模块
 
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 预处理流程
-说明: 计算战斗密度、感叹密度、问句密度等张力代理指标。
+计算战斗密度、感叹密度、问句密度等张力代理指标
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 词表与张力信号系统重构 - Task 2
-修改内容: 启用 fuzzy 模式匹配，支持分词变体（如"剑气"/"剑罡"）
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 清理向后兼容代码
-修改内容: fight_terms 参数类型改为 dict[str, int]，使用 fuzzy 模式匹配
 """
 
 from __future__ import annotations
@@ -25,7 +14,7 @@ from .text_utils import dialogue_length, split_sentences, tokenize_words
 
 def tension_proxy(text: str, fight_terms: dict[str, float]) -> dict[str, float]:
     """
-    计算张力代理指标。
+    计算张力代理指标
 
     使用 fuzzy 模式匹配，支持分词变体（如"剑气"/"剑罡"）
     - 子串匹配（如"冷笑"被分词为"冷"+"笑"时仍能匹配）
@@ -38,15 +27,7 @@ def tension_proxy(text: str, fight_terms: dict[str, float]) -> dict[str, float]:
     返回:
         dict[str, float]: 包含 fight_density, exclaim_density, question_density, dialogue_ratio, avg_sent_len
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 清理向后兼容代码
-    修改内容: fight_terms 参数类型改为 dict[str, int]
 
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: fix-emotion-curve-weighting
-    修改内容: 允许浮点权重字典透传，保持和加权词表集合的类型一致
     """
     if not text:
         return {
@@ -92,7 +73,7 @@ def tension_composite(
     avg_sent_len: float,
 ) -> float:
     """
-    计算张力综合指标。
+    计算张力综合指标
 
     公式:
             0.4 * fight_density

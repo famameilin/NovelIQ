@@ -1,16 +1,13 @@
 """
 统一事件模型与 Event Bus
 
-创建时间: 2026-04-09
-创建者: GLM-5
-任务: refactor/sse-unified-event-bus
 说明:
   - StreamEvent: 统一事件格式，所有 SSE 事件使用同一结构
   - AnalysisEventBus: 持有当前上下文，自动补全缺失字段，统一发送到 SSE
 
 核心设计:
   所有事件走同一条路径，Event Bus 持有 stage/sub_stage/chunk_id 上下文，
-  LLM 输出不再是旁路，自动获得完整上下文后统一发送。
+  LLM 输出不再是旁路，自动获得完整上下文后统一发送
 """
 
 from __future__ import annotations
@@ -56,8 +53,8 @@ class StreamEvent:
     """
     统一 SSE 事件格式
 
-    所有层发送的事件都使用此格式，只是字段填充不同。
-    Event Bus 会自动补全缺失的上下文字段。
+    所有层发送的事件都使用此格式，只是字段填充不同
+    Event Bus 会自动补全缺失的上下文字段
 
     action 语义:
         start    — 阶段/phase/chunk 开始
@@ -103,14 +100,14 @@ class StreamEvent:
 # 原因如下：
 #   1. 语义差异：映射表中的 5 个 action 是「进行中」事件，需要 EventBus 补全
 #      stage/sub_stage/chunk_id 等上下文字段；而终止类事件表示任务级终态，
-#      不需要也不应携带 chunk 级上下文。
+#      不需要也不应携带 chunk 级上下文
 #   2. 数据格式不同：终止类事件的 data 结构固定（如 {"error": ..., "stage": ...}），
 #      与 StreamEvent.to_dict() 的 10 字段格式不同，强行走 emit() 再翻译会丢失
-#      语义或产生冗余字段。
+#      语义或产生冗余字段
 #   3. 副作用控制：emit() 内部会同步调用 task_manager.update_task()，
-#      对终止事件而言这些更新既不必要也可能引发状态冲突。
+#      对终止事件而言这些更新既不必要也可能引发状态冲突
 # 因此 emit_task_complete / emit_task_error / emit_task_cancelled 直接调用
-# event_manager.send()，跳过 emit() 的上下文补全和 TaskManager 同步逻辑。
+# event_manager.send()，跳过 emit() 的上下文补全和 TaskManager 同步逻辑
 _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "start": StreamMessageType.stage_start.value,
     "progress": StreamMessageType.stage_progress.value,
@@ -119,8 +116,8 @@ _ACTION_TO_SSE_EVENT: dict[str, str] = {
     "thinking": StreamMessageType.llm_thinking.value,
 }
 
-# 中文注释：这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
-# 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志。
+# 这两个 preprocess 子阶段会按 embedding batch 高频发 progress 事件；
+# 若继续落到 INFO，会把控制台刷满并淹没真正有诊断价值的阶段切换日志
 _DEBUG_PROGRESS_SUB_STAGES = {
     "semantic_chunking_embedding",
     "paragraph_embedding",
@@ -174,13 +171,6 @@ class AnalysisEventBus:
         - 将 action 翻译为 SSE event type
         - 调用 event_manager.send() 唯一发送口
         - 同步更新 TaskManager
-
-        修改时间: 2026-04-20
-        修改任务: fix-eventbus-null-progress-write / demote-llm-output-eventbus-log
-        修改内容: 1. 区分“字段缺失”和“字段显式赋值”，避免把 current/total/progress 的 None
-                    误写回 DB 非空列，保持事件上下文补全语义与任务持久化语义一致。
-                  2. 将高频 LLM 原始流式事件（output / thinking）降为 DEBUG，避免 JSON 片段污染
-                    INFO 级运行日志，同时保留 start / progress / complete 这些业务阶段事件的可见性。
         """
         # 补全上下文：构建新事件对象，避免修改原始事件
         resolved_stage = event.stage or self._stage
@@ -240,8 +230,8 @@ class AnalysisEventBus:
             )
             sse_event_type = "message"
 
-        # 中文注释：LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
-        # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO。
+        # LLM 流式正文/思考片段，以及 embedding batch 这类高频 progress，
+        # 都降到 DEBUG，避免 INFO 被细粒度增量日志刷屏；普通阶段开始/完成仍保留 INFO
         log_level = (
             logger.debug
             if resolved_event.action in {"output", "thinking"}
@@ -268,15 +258,15 @@ class AnalysisEventBus:
 
         # 同步更新 TaskManager
         if resolved_event.action in ("start", "progress", "complete"):
-            # 中文注释：这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
-            # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源。
+            # 这里不能再吞掉异常；如果 DB 写回失败，就必须让任务主链感知并按失败路径收口，
+            # 否则会重新回到“内存继续跑、DB 状态滞后”的双真相源
             task_update_kwargs: dict[str, Any] = {
                 "stage": resolved_event.stage,
                 "sub_stage": resolved_event.sub_stage,
                 "message": resolved_event.message,
             }
-            # 中文注释：EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”。
-            # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库。
+            # EventBus 的 None 表示“当前事件未提供该字段”，不是“把数据库字段清空”
+            # 对非空进度列必须只在确实拿到值时才写回，避免 start 事件把 current=None 落库
             if resolved_event.current is not None:
                 task_update_kwargs["current"] = resolved_event.current
             if resolved_event.total is not None:
@@ -295,9 +285,6 @@ class AnalysisEventBus:
         """
         根据阶段和当前进度计算全局 percent
 
-        创建时间: 2026-04-11
-        创建者: GLM-5
-        任务: fix-thinking-percent-calculation
         说明: 当事件没有提供 percent 时，根据 current/total 和阶段范围自动计算
 
         各阶段进度范围:

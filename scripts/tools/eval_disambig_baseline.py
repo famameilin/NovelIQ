@@ -45,7 +45,7 @@ GOLD_DIR = Path(_project_root) / "data" / "gold_standards" / "disambiguation"
 
 
 def _resolve_run_ids(session, raw_ids: list[str]) -> dict[str, str]:
-    """将 task_id（8位）或 run_id（36位）统一解析为 run_id。"""
+    """将 task_id（8位）或 run_id（36位）统一解析为 run_id"""
     resolved: dict[str, str] = {}
     for rid in raw_ids:
         if len(rid) == 36 and "-" in rid:
@@ -60,7 +60,7 @@ def _resolve_run_ids(session, raw_ids: list[str]) -> dict[str, str]:
 
 
 def _get_git_info() -> tuple[str, str]:
-    """获取当前 git branch 和 commit。"""
+    """获取当前 git branch 和 commit"""
     try:
         branch = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],

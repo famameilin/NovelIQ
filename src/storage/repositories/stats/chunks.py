@@ -1,15 +1,9 @@
 """
 分块统计相关操作
 
-创建时间: 2026-03-17
-创建者: TraeAI
-任务: code-quality-refactor - 拆分stats_repository
-说明: 情绪曲线、节奏曲线、文化数据等分块相关操作
+情绪曲线、节奏曲线、文化数据等分块相关操作
 
-修改时间: 2026-03-30
-修改者: CodeBuddy
-任务: db-schema-cleanup
-修改内容: 合并 EmotionCurve + RhythmCurve 为 ChunkCurve
+合并 EmotionCurve + RhythmCurve 为 ChunkCurve
 """
 
 from __future__ import annotations
@@ -94,10 +88,7 @@ def fetch_chunk_culture(session: Session, run_id: str) -> Sequence[Row]:
     Returns:
         Row 对象序列，支持 row.imagery_lexicon_density 字段名访问
 
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: 简化文化指标系统
-    修改内容: 删除低价值词表密度字段，只返回 imagery_lexicon_density
+    删除低价值词表密度字段，只返回 imagery_lexicon_density
     """
     stmt = (
         select(
@@ -114,10 +105,7 @@ def fetch_chunk_curves_full(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取分块曲线完整数据（情绪 + 节奏）
 
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: refactor-hardcoded-index-access
-    修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
+    返回 Sequence[Row] 支持字段名访问，替代元组列表
 
     Args:
         session: 数据库会话
@@ -150,10 +138,7 @@ def fetch_emotion_densities(session: Session, run_id: str) -> Sequence[Row]:
     """
     获取情绪密度数据
 
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    任务: refactor-hardcoded-index-access
-    修改内容: 返回 Sequence[Row] 支持字段名访问，替代元组列表
+    返回 Sequence[Row] 支持字段名访问，替代元组列表
 
     Args:
         session: 数据库会话

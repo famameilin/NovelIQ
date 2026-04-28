@@ -1,32 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分annotation_client
 说明: Phase2 伏笔分析逻辑
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - Task 3 统一重试机制
-修改内容: 使用 AnnotationRetryHandler 统一重试逻辑
-
-修改时间: 2026-03-19
-修改者: TraeAI
-任务: 添加模型交互记录保存
-修改内容: 添加 save_model_interaction 工具函数
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: 创建统一的模型交互记录接口
-修改内容: 使用 record_model_interaction 替代本地 _save_interaction 函数
-
-修改时间: 2026-04-23
-任务: annotation-projector-runtime-landing
-修改内容: Phase2 单次结构化调用改为复用薄 phase runtime，避免重复维护交互记录与 token 估算。
-
-修改时间: 2026-04-26
-修改者: Codex
-任务: fix-phase2-setup-pool-review-findings
-修改内容: linked_setup_id 校验收紧为“池内存在且身份字段一致”，避免模型选错可见 thread 时静默污染 ledger
 """
 
 from __future__ import annotations
@@ -48,13 +21,7 @@ if TYPE_CHECKING:
 
 def _normalize_setup_summary_for_link_check(value: str) -> str:
     """
-    标准化 setup_summary，用于 linked_setup_id 身份一致性校验。
-
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    新建原因: Phase2 只要在可见池里选错 setup_id，就会把命中记到错误 thread；
-    这里用和仓储层一致的保守归一化规则先挡掉明显错链。
+    标准化 setup_summary，用于 linked_setup_id 身份一致性校验
     """
 
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
@@ -71,30 +38,6 @@ async def _do_phase2(
 ) -> ForeshadowingResult:
     """
     执行Phase2单次调用
-
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取Phase2单次调用逻辑
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: unify-estimated-token-accounting
-    修改内容: Phase2 token_usage 改为统一估算口径，不再依赖 provider usage
-
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-token-coverage-fallback-bucket
-    修改内容: fallback 标注客户端执行 Phase2 时，token_usage 仍归入 annotation 主业务桶，
-              避免 coverage 把已入账调用误判成缺口
-
-    修改时间: 2026-04-23
-    任务: annotation-projector-runtime-landing
-    修改内容: 委托 execute_phase_call 统一 response processing、thinking 持久化与 token usage。
     """
     is_cloud = client._is_cloud_api()
     client._log_annotation_start(is_cloud, text, prev_chunk_summary, chunk_id, "phase2")
@@ -142,23 +85,6 @@ async def annotate_chunk_phase2(
 ) -> ForeshadowingResult | None:
     """
     第二次调用：伏笔分析（带独立重试机制）
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: 重构 AnnotationClient 使用 async
-    修改内容: 改为 async def
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容:
-    - 删除 next_chunk_text 残留透传，避免 Phase2 接口继续暗示存在后文输入
-    - 增加共享 evidence 开关，支持在不改默认行为的前提下做 targeted ablation
-    - 删除 prev_chunk_text 兼容壳层，保持接口签名与真实 prompt 输入完全一致
     """
     from src.models.local.schema import ForeshadowingResult
     from src.storage.repositories import AnnotationRepository
@@ -178,17 +104,17 @@ async def annotate_chunk_phase2(
 
     active_setup_pool = []
     if run_id and chunk_id is not None and getattr(client, "_session", None) is not None and chunk_id > 0:
-        # 中文注释：活跃池只允许看到当前 chunk 之前已经落库的 thread，
-        # 这里固定读取 chunk_id-1 可见状态，避免 Phase2 因同 chunk 内的其他副作用“偷看现在”。
+        # 活跃池只允许看到当前 chunk 之前已经落库的 thread，
+        # 这里固定读取 chunk_id-1 可见状态，避免 Phase2 因同 chunk 内的其他副作用“偷看现在”
         active_setup_pool = AnnotationRepository(client._session).fetch_active_foreshadowing_threads_for_prompt(
             run_id,
             max_chunk_id=chunk_id - 1,
         )
 
-    # 中文注释：Phase2 只消费调用方已经准备好的 evidence_bundle，
-    # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界。
+    # Phase2 只消费调用方已经准备好的 evidence_bundle，
+    # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界
     # include_phase2_evidence=False 时只关闭 prompt 注入，不改上游取证与调度路径，
-    # 方便做方案文档要求的 targeted ablation。
+    # 方便做方案文档要求的 targeted ablation
     include_evidence_blocks = settings.analysis.multi_phase_annotation.include_phase2_evidence
     messages = _build_foreshadowing_messages(
         text=text,
@@ -229,17 +155,7 @@ def _validate_phase2_active_setup_link(
     active_setup_pool,
 ) -> None:
     """
-    校验 Phase2 返回的 linked_setup_id 是否来自当前可见活跃池。
-
-    创建时间: 2026-04-26
-    任务: phase2-setup-pool
-    新建原因: 无效 linked id 应该在 Phase2 重试阶段被显式打回，而不是拖到落库时才暴露。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    修改内容: 除了检查 linked id 是否可见，还要校验返回的 summary/kind/payoff family
-    是否与目标 thread 一致，避免模型在多个可见 setup 之间串线。
+    校验 Phase2 返回的 linked_setup_id 是否来自当前可见活跃池
     """
 
     if not result.has_foreshadowing or result.is_new_setup:

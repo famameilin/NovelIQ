@@ -1,10 +1,7 @@
 """
-主题查询组装器。
+主题查询组装器
 
-创建时间: 2026-04-23
-创建者: Codex
-任务: p1-api-route-service-decouple
-说明: 承载 topics 相关查询组装逻辑。
+说明: 承载 topics 相关查询组装逻辑
 """
 
 from __future__ import annotations
@@ -20,7 +17,7 @@ from .common import _normalize_name_list
 
 
 def _fetch_topics(run_id: str, chunk_repo: ChunkRepository, alias_map: dict[str, str] | None = None) -> list:
-    """获取主题数据。"""
+    """获取主题数据"""
     rows = chunk_repo.fetch_chunk_topics_agg(run_id)
 
     model_dir = Path("models") / "topic" / run_id

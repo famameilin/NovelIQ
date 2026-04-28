@@ -1,9 +1,7 @@
 """
-Level3 描述性人物 mention 抽取。
+Level3 描述性人物 mention 抽取
 
-创建时间: 2026-04-23
-任务: level3-mention-retrieval
-说明: 用保守规则抽取匿名/描述性人物指代，为 Level3 mention 级 query 提供结构化输入。
+用保守规则抽取匿名/描述性人物指代，为 Level3 mention 级 query 提供结构化输入
 """
 
 from __future__ import annotations
@@ -100,13 +98,9 @@ def _classify_mention(
     locations: list[str],
 ) -> str:
     """
-    创建时间: 2026-04-23
-    任务: level3-mention-retrieval
-    说明: 根据抽到的线索给 mention 分桶，便于后续 rerank 和离线评测观察。
+    根据抽到的线索给 mention 分桶，便于后续 rerank 和离线评测观察
 
-    修改时间: 2026-04-23
-    任务: level3-mention-review-fix
-    修改说明: 补充纯指代角色词与位置角色词分桶，避免“那个少女”一类泛 query 被误当成可用特征。
+    补充纯指代角色词与位置角色词分桶，避免“那个少女”一类泛 query 被误当成可用特征
     """
     if actions and appearance:
         return "feature_action"
@@ -123,13 +117,9 @@ def _classify_mention(
 
 def _build_mention(raw_text: str, role_word: str, sentence_text: str) -> PersonMention:
     """
-    创建时间: 2026-04-23
-    任务: level3-mention-retrieval
-    说明: 将正则命中的原文片段转换为 PersonMention，并抽取外貌/动作线索。
+    将正则命中的原文片段转换为 PersonMention，并抽取外貌/动作线索
 
-    修改时间: 2026-04-23
-    任务: level3-mention-review-fix
-    修改说明: 增补位置线索，并让纯指代角色词保留指示词以便正确分桶。
+    增补位置线索，并让纯指代角色词保留指示词以便正确分桶
     """
     return _build_mention_from_cue_text(raw_text, role_word, sentence_text, raw_text)
 
@@ -141,9 +131,7 @@ def _build_mention_from_cue_text(
     cue_text: str,
 ) -> PersonMention:
     """
-    创建时间: 2026-04-24
-    任务: fix-mention-local-cue-scope
-    说明: 基于当前 mention 的局部文本抽取线索，避免同一句其他人物的动作被误绑到本 mention。
+    基于当前 mention 的局部文本抽取线索，避免同一句其他人物的动作被误绑到本 mention
     """
     appearance = [cue for cue in APPEARANCE_CUES if cue in raw_text or cue in cue_text]
     actions = [cue for cue in ACTION_CUES if cue in raw_text or cue in cue_text]
@@ -165,9 +153,7 @@ def _build_mention_from_cue_text(
 
 def _build_mention_cue_text(sentence_text: str, start: int, end: int) -> str:
     """
-    创建时间: 2026-04-24
-    任务: fix-mention-local-cue-scope
-    说明: 截取当前 mention 到下一个人物 mention 前的局部文本，作为动作/外貌线索扫描范围。
+    截取当前 mention 到下一个人物 mention 前的局部文本，作为动作/外貌线索扫描范围
     """
     next_start: int | None = None
     for pattern in _MENTION_PATTERNS:
@@ -181,26 +167,18 @@ def _build_mention_cue_text(sentence_text: str, start: int, end: int) -> str:
 
 def _spans_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
     """
-    创建时间: 2026-04-24
-    任务: fix-bare-compound-mention-extraction
-    说明: 判断两个 mention 命中范围是否重叠，用于保留更完整的上游命中，避免“那个灰衣人/灰衣人”重复出证。
+    判断两个 mention 命中范围是否重叠，用于保留更完整的上游命中，避免“那个灰衣人/灰衣人”重复出证
     """
     return left[0] < right[1] and right[0] < left[1]
 
 
 def extract_person_mentions(text: str) -> list[PersonMention]:
     """
-    创建时间: 2026-04-23
-    任务: level3-mention-retrieval
-    说明: 从文本中保守抽取描述性人物 mention；规则宁窄勿宽，避免高频上游噪声。
+    从文本中保守抽取描述性人物 mention；规则宁窄勿宽，避免高频上游噪声
 
-    修改时间: 2026-04-24
-    任务: fix-mention-local-cue-scope
-    修改说明: 每个 mention 只从局部 cue_text 抽动作/外貌线索，避免多人物共句时互相污染。
+    每个 mention 只从局部 cue_text 抽动作/外貌线索，避免多人物共句时互相污染
 
-    修改时间: 2026-04-24
-    任务: fix-bare-compound-mention-extraction
-    修改说明: 增补“灰衣人/黑衣人”等裸露复合角色词的窄规则，并用 span overlap 避免重复抽取子串。
+    增补“灰衣人/黑衣人”等裸露复合角色词的窄规则，并用 span overlap 避免重复抽取子串
     """
     mentions: list[PersonMention] = []
     seen: set[tuple[str, str]] = set()

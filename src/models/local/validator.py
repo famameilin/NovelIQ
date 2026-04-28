@@ -1,30 +1,3 @@
-"""
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 人名验证和匿名占位符处理
-
-修改时间: 2026-03-11
-修改者: TraeAI
-修改内容:
-1. 添加 is_anonymous_name 函数判断匿名占位名
-2. 验证时跳过匿名占位符（匿名_C{id}_{index} 格式）
-3. 添加详细的调试日志，便于排查验证问题
-
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: fix-validate-names-from-character-appearances
-修改内容: 增加 character_appearances 检查，支持名字变体验证
-
-修改时间: 2026-03-27
-修改者: TraeAI
-任务: fix-character-dangling-reference
-修改内容: 新增 validate_character_appearances_sync 和 validate_chunk_annotation 校验函数
-
-修改时间: 2026-03-29
-修改者: TraeAI
-任务: remove-unused-annotation-fields
-修改内容: 移除 relations、character_appearances、chunk_summary 相关验证逻辑
-"""
 
 from __future__ import annotations
 
@@ -144,15 +117,6 @@ def validate_names_in_sources(names: list[str], sources: dict) -> list[str]:
     """
     验证人名是否在合法来源中出现
 
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: fix-validate-names-from-character-appearances
-    修改内容: 增加 character_appearances 检查，支持名字变体验证
-
     Args:
         names: 需要验证的人名列表
         sources: 包含以下键的字典
@@ -270,15 +234,6 @@ def replace_invalid_names_with_anonymous(
     """
     将无效人名替换为匿名占位符
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 人名验证和匿名占位符处理
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: 迁移数据模型至 Pydantic
-    修改内容: 从 dataclass 迁移至 Pydantic BaseModel
-
     Args:
         annotation: 分块标注数据
         invalid_names: 无效人名列表
@@ -344,11 +299,8 @@ def validate_character_appearances_sync(
     """
     校验 character_appearances 中明确人名线索是否同步到 characters 列表
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: fix-character-dangling-reference
     说明: 检查 character_appearances 中 named_by_other / self_introduction / alias_revealed 类型
-         的名字是否出现在 characters 列表中，如果没有则返回缺失列表。
+         的名字是否出现在 characters 列表中，如果没有则返回缺失列表
 
     Args:
         character_appearances: 角色出场信息列表
@@ -406,15 +358,7 @@ def validate_chunk_annotation(
     """
     校验单个 chunk 标注的一致性
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: fix-character-dangling-reference
     说明: 检查 characters, dialogues 中引用的角色是否都在 existing_characters 中
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: remove-unused-annotation-fields
-    修改内容: 移除 relations 验证逻辑
 
     Args:
         annotation: Chunk 标注数据

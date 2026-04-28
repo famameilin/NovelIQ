@@ -1,39 +1,12 @@
 """
 标注辅助函数模块 - 例句构建和全局上下文
 
-创建时间: 2026-03-13
-创建者: TraeAI
-任务: 项目文件结构整理与拆分
 
-修改历史:
-- 2026-03-14: 从 cli.annotate_helpers 迁移，解决循环依赖
-- 2026-03-14: 添加 run_id 参数支持，使用 Repository 模式
-- 2026-03-15: 使用 SQLAlchemy text() 包装 SQL 语句
-- 2026-03-16: 添加变体反查表实现变体匹配
 
-修改时间: 2026-03-21
-修改者: TraeAI
-任务: refactor-phase3-to-annotation-layer
-修改内容: 将对话归属判断相关函数迁移到 models/local/annotation/phase3.py，
-         保留向后兼容的导入
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 移除向后兼容代码
-修改内容: 移除 _load_alias_keywords 死代码和旧 loader 导入
 
-修改时间: 2026-04-20
-修改者: Codex
-任务: runtime-prev-chunks-windowing
-修改内容: 将 runtime.annotation.prev_chunks 接入例句池和身份线索窗口
 
-修改时间: 2026-04-21
-修改者: Codex
-任务: align-incremental-disambig-batch-window
-修改内容: 支持由调用方显式传入 chunk_start_id/chunk_end_id，
-         避免增量消歧批次语义被 runtime.annotation.prev_chunks 隐式截断
-
-说明: 本模块包含例句构建、全局上下文抽取等辅助函数。
+本模块包含例句构建、全局上下文抽取等辅助函数
 """
 
 from __future__ import annotations
@@ -84,19 +57,11 @@ def _resolve_chunk_window(
     chunk_start_id: int | None = None,
     chunk_end_id: int | None = None,
 ) -> tuple[int | None, int | None]:
-    """解析上下文检索使用的 chunk 窗口。
+    """解析上下文检索使用的 chunk 窗口
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: runtime-prev-chunks-windowing
-    说明: 只有增量消歧这类带 current chunk 锚点的场景才按 prev_chunks 回看；
-         没有当前 chunk 时继续保留全量历史，避免截断 final 阶段证据。
+    只有增量消歧这类带 current chunk 锚点的场景才按 prev_chunks 回看；
+         没有当前 chunk 时继续保留全量历史，避免截断 final 阶段证据
 
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: align-incremental-disambig-batch-window
-    修改内容: 新增显式 chunk_start_id/chunk_end_id 优先级，允许上层直接按业务批次
-             指定上下文窗口，不再被 prev_chunks 隐式改写。
     """
     if chunk_start_id is not None or chunk_end_id is not None:
         if chunk_start_id is None or chunk_end_id is None:
@@ -131,21 +96,8 @@ def build_context_sentences(
 ) -> dict[str, str]:
     """为候选名构建上下文句子
 
-    修改时间: 2026-03-30
-    修改者: TraeAI
-    任务: feature/chunk-summary-timeline-only
-    修改内容: 移除 _add_prev_summaries 调用，summary 仅用于 Timeline 展示，不参与消歧证据链
 
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-prev-chunks-windowing
-    修改内容: 将 runtime.annotation.prev_chunks 接入上下文检索窗口
 
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: align-incremental-disambig-batch-window
-    修改内容: 支持调用方显式传入 chunk_start_id/chunk_end_id，让增量消歧按批次窗口
-             取上下文，而不是隐式走 prev_chunks。
     """
     if not run_id:
         raise ValueError("run_id is required for build_context_sentences")
@@ -231,10 +183,10 @@ async def _extract_and_save_global_context(
 
 def _get_name_variants(name: str, name_set: set[str]) -> list[str]:
     """
-    生成候选名的字符串变体。
+    生成候选名的字符串变体
 
-    三字及以上的名字，额外加一个去掉第一个字（通常是姓）的版本。
-    短形式已作为独立候选名存在时，不展开，避免污染两个不同人物的参考池。
+    三字及以上的名字，额外加一个去掉第一个字（通常是姓）的版本
+    短形式已作为独立候选名存在时，不展开，避免污染两个不同人物的参考池
 
     示例：
       贺重明, {"贺重明", "伯安"}     → ["贺重明", "重明"]
@@ -259,22 +211,10 @@ def _build_sentence_pool(
     chunk_start_id: int | None = None,
     chunk_end_id: int | None = None,
 ) -> dict[str, str]:
-    """构建句子池。
+    """构建句子池
 
-    修改时间: 2026-04-01
-    修改者: CodeBuddy
-    任务: P1 候选质量治理 - 例句池优先级优化
-    修改内容: 分离高优命名句和普通句，命名句优先入选
 
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-prev-chunks-windowing
-    修改内容: 在带 max_chunk_id 的场景下，仅扫描最近 prev_chunks 个 chunk
 
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: align-incremental-disambig-batch-window
-    修改内容: 显式批次窗口优先于 prev_chunks，供增量消歧主流程按业务批次指定范围。
     """
     from src.metrics.text_utils import split_sentences
 
@@ -431,25 +371,9 @@ def _add_identity_clues(
 ) -> None:
     """添加身份线索
 
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: use-phase3-identity-clue-in-disambiguation
-    修改内容: 从 chunk_dialogues 表获取 Phase 3 提取的身份线索，替代 character_appearances 表
 
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: fix-multi-speaker-support
-    修改内容: speaker 改为 text[] 数组，使用 ORM 查询替代 unnest() SQL
 
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: runtime-prev-chunks-windowing
-    修改内容: 身份线索查询与例句池使用同一个 chunk 窗口
 
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: align-incremental-disambig-batch-window
-    修改内容: 显式批次窗口优先于 prev_chunks，避免身份线索窗口与增量批次语义脱节。
     """
     if not name_list:
         return

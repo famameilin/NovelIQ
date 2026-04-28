@@ -1,11 +1,4 @@
-"""
-消歧状态数据结构
-
-创建时间: 2026-03-27
-创建者: TraeAI
-任务: disambiguation-state-three-layer - Task 1 定义新的数据结构
-说明: 定义不可变的 NameReviewState 和 DisambiguationState 数据类，使用 copy-on-write 模式更新状态
-"""
+"""消歧状态数据结构"""
 
 from __future__ import annotations
 
@@ -16,19 +9,7 @@ from typing import Literal
 
 @dataclass(frozen=True)
 class NameReviewState:
-    """
-    名字复审状态
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 记录单个名字的消歧状态和置信度
-
-    修改时间: 2026-04-01
-    修改者: CodeBuddy
-    任务: P0 评测基线 + P1.5 复审审计
-    修改内容: 新增 decision_evidence_count/types/chunks/source/timestamp 审计字段
-    """
+    """记录单个名字的复审状态和置信度"""
 
     status: Literal["resolved", "review", "unresolved"]
     confidence: Literal["low", "medium", "high"]
@@ -47,20 +28,12 @@ class DisambiguationState:
     """
     消歧状态（不可变对象）
 
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 使用 copy-on-write 模式更新状态，每次更新返回新实例
+    使用 copy-on-write 模式更新状态，每次更新返回新实例
 
     三层状态分离：
     - discovered_names: 系统已经见过的所有名字（包括别名和规范名）
     - known_canonical_names: 系统确认存在的规范角色名
     - alias_merges: 真实别名合并映射，禁止自映射（A -> A）
-
-    修改时间: 2026-04-02
-    修改者: TraeAI
-    任务: fix-disambiguation-code-quality
-    修改内容: entity_types 从 dict[str, str] 改为 tuple[tuple[str, str], ...] 保持不可变语义
     """
 
     discovered_names: frozenset[str] = frozenset()
@@ -147,7 +120,7 @@ class DisambiguationState:
 
     @classmethod
     def _parse_review_state(cls, item: dict, version: int) -> NameReviewState:
-        """解析单条 review_status 为 NameReviewState，支持 v1/v2。"""
+        """解析单条 review_status 为 NameReviewState，支持 v1/v2"""
         s = item["state"]
         if version >= 2 and "decision_source" in s:
             return NameReviewState(
@@ -216,17 +189,7 @@ class DisambiguationState:
 
 
 def validate_state_invariants(state: DisambiguationState) -> bool:
-    """
-    校验状态不变量
-
-    创建时间: 2026-03-27
-    创建者: TraeAI
-    任务: disambiguation-state-three-layer
-    说明: 校验 DisambiguationState 的三个核心不变量
-
-    Returns:
-        True 如果所有不变量满足，否则抛出 ValueError
-    """
+    """校验 DisambiguationState 的核心不变量"""
     alias_merges_dict = state.get_alias_merges_dict()
 
     for alias, canonical in alias_merges_dict.items():

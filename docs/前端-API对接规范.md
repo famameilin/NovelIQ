@@ -12,36 +12,28 @@
 
 | 环境 | 配置 |
 |------|------|
-| 开发环境 | `VITE_API_BASE_URL=http://localhost:8000` |
-| 生产环境 | 通过 nginx 反向代理，前端使用相对路径 `/api` |
+| 开发环境 | 当前默认使用源码内 `appConfig.apiBaseUrl` |
+| 生产环境 | 由部署层决定 `appConfig.apiBaseUrl`，不依赖 `VITE_*` 构建时注入 |
 
 ### 1.2 Axios 实例配置
 
 ```typescript
 // api/client.ts
 import axios from "axios";
+import { appConfig } from "@/config";
 
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "",
+  baseURL: appConfig.apiBaseUrl,
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// 响应拦截器：统一错误处理
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response) {
-      const { status, data } = error.response;
-      // 后端统一错误格式: { detail, error_type, status_code }
-      const message = data?.detail || `请求失败 (${status})`;
-      console.error(`[API Error] ${status}: ${message}`);
-    }
-    return Promise.reject(error);
-  }
-);
+// 说明：
+// - 当前前端不依赖 VITE_API_BASE_URL
+// - 结果链路的 409 可能返回结构化 detail={ code, message, reason }
+// - 前端错误解析需兼容字符串 detail 与对象 detail 两种形状
 ```
 
 ### 1.3 请求规范
@@ -58,258 +50,110 @@ apiClient.interceptors.response.use(
 
 ## 二、TypeScript 类型定义
 
-以下类型定义对应后端 `src/api/models/responses.py` 中的 Pydantic 模型。
+以下类型定义为**当前前端 contract 摘要**。
+完整 truth source 以 `frontend/src/api/types.ts` 为准。
 
 ```typescript
-// api/types.ts
-
 // ========== 小说管理 ==========
 
-export interface NovelInfo {
+export interface Novel {
   novel_id: string;
+  title: string;
   filename: string;
-  status?: string;
-  created_at?: string;
+  author?: string;
+  upload_time: string | null;
+  file_size: number;
 }
 
-export interface UploadResponse {
-  novel_id: string;
-  filename: string;
-  status: string;   // "uploaded"
-  message: string;
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 // ========== 分析任务 ==========
 
-export type TaskStatus = "pending" | "running" | "completed" | "failed";
+export type TaskStatus =
+  | "pending"
+  | "running"
+  | "cancelling"
+  | "cancelled"
+  | "completed"
+  | "failed";
 
-export interface AnalyzeResponse {
+export interface AnalysisStartResponse {
   novel_id: string;
   task_id: string;
-  status: TaskStatus;
   message: string;
 }
 
-export interface ReanalyzeResponse {
+export interface TaskStatusResponse {
   novel_id: string;
   task_id: string;
   status: TaskStatus;
-  message: string;
-}
-
-export interface TaskInfo {
-  task_id: string;
-  novel_id: string;
-  status: string;
-  created_at?: string;
-}
-
-export interface TaskListResponse {
-  novel_id: string;
-  tasks: TaskInfo[];
-}
-
-export interface StatusResponse {
-  novel_id: string;
-  task_id?: string;
-  status: TaskStatus;
-  progress: number;    // 0-100
+  progress: number;
+  current_step: string;
   stage?: string;
+  sub_stage?: string;
+  current?: number;
+  total?: number;
+  message?: string;
   error?: string;
-  started_at?: string;
-  completed_at?: string;
 }
 
-// ========== 曲线数据 ==========
+// ========== 主题与诊断 ==========
 
-export interface ChunkCurvePoint {
-  chunk_id: number;
-  pos_density?: number;
-  neg_density?: number;
-  net_density?: number;
-  smoothed_density?: number;
-  tension_proxy?: number;
-  tension_composite?: number;
-}
-
-// ========== 角色数据 ==========
-
-export interface CharacterStats {
-  name: string;
-  appearance_count: number;
-  dominant_role_function: string;
-  role_function_distribution: Record<string, number>;
-  dominant_role_ratio: number;
-  narrative_focus_score?: number;
-  is_focus_character: boolean;
-  avg_emotion_score?: number;
-}
-
-// ========== 主题数据 ==========
-
-export interface TopicInfo {
+export interface Topic {
   topic_id: number;
   words: string[];
   weight: number;
+  label?: string;
 }
-
-// ========== 诊断数据 ==========
 
 export interface DiagnosisResult {
+  rerun_required?: boolean;
+  rerun_reason?: string | null;
+  narrative_type?: string | null;
   foreshadow_expectation?: number | null;
-  arc_scores?: Record<string, number>;
-  narrative_type?: string;
-  topic_labels?: string[];
-  diagnosis?: string;
-  value_logic_type?: string;
-  value_logic_reason?: string;
-  power_stance_score?: number;
-  power_stance_reason?: string;
-  common_people_dignity?: number;
-  dignity_reason?: string;
-  cultural_depth_score?: number;
-  cultural_depth_reason?: string;
-  narrative_arc_type?: string;
-  focus_structure?: "single" | "dual" | "ensemble";
-  focus_characters?: string[];
-  main_characters?: string[];
-  core_cast?: string[];
-  theme_color?: string;              // 新增：主题色（十六进制）
+  narrative_arc_type?: string | null;
+  arc_scores?: Record<string, number> | null;
+  focus_structure?: "single" | "dual" | "ensemble" | null;
+  focus_characters?: string[] | null;
+  main_characters?: string[] | null;
+  core_cast?: string[] | null;
+  topic_labels?: string[] | null;
+  theme_color?: string | null;
 }
 
-// ========== 知识图谱 ==========
+// ========== 图谱 ==========
 
-export interface GraphNode {
-  id: string;
-  type: string;    // "character" | "group" | "organization"
-}
-
-export interface GraphEdge {
-  source: string;
-  target: string;
-  relation: string;
-}
-
-export interface GraphSnapshot {
+export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  events: GraphEvent[];
+  events_page: GraphEventsPageInfo;
+  summary: GraphPageSummary;
+  quality: GraphPageQualityReport;
 }
 
-// ========== 叙事时间轴 ==========
-
-export interface RelationChangeEvent {
-  from_char: string;
-  to_char: string;
-  relation_type: string;
-  change_type: string;
-  evidence?: string;
-}
-
-export interface TimelinePhase {
-  name: string;     // "引入期" | "发展期" | "高潮期" | "收束期"
-  start: number;
-  end: number;
-  ratio: number;
-}
-
-export interface TimelineNode {
-  chunk_id: number;
-  progress: number;
-  importance_score: number;
-  level: number;          // 1=重要, 2=较重要, 3=一般
-  event: string;
-  characters: string[];
-  is_pivot: boolean;
-  is_cliffhanger: boolean;
-  tension_percentile: number;
-  node_type: string;      // "pivot" | "cliffhanger" | "character_entry" | "character_exit" | "relation_change" | "normal"
-  relation_changes?: RelationChangeEvent[];
-  character_entries?: string[];
-  character_exits?: string[];
-}
-
-export interface TimelineMeta {
-  novel_id: string;
-  novel_name: string;
-  total_chunks: number;
-}
+// ========== 时间轴 ==========
 
 export interface TimelineResponse {
   meta: TimelineMeta;
   phases: TimelinePhase[];
-  nodes: TimelineNode[];
+  composite_nodes: TimelineCompositeNode[];
+  atomic_nodes: TimelineNode[];
   tension_curve?: number[];
 }
 
-// ========== 聚合指标 ==========
+// ========== 错误 ==========
 
-export interface NarrativeStructureStats {
-  act1_ratio?: number;
-  act2_ratio?: number;
-  act3_ratio?: number;
-  climax_spacing?: number;
-  middle_collapse_index?: number;
-  event_density?: Record<string, number>;
-  cliffhanger_rate?: number;
-  climax_count?: number;
-  climax_positions?: number[];
-  climax_heights?: number[];
-  peak_escalation?: string;
-  dominant_climax_pos?: number;
-}
-
-export interface EmotionStats {
-  pos_neg_ratio?: number;
-  positive_ratio?: number;
-  negative_ratio?: number;
-  neutral_ratio?: number;
-  recovery_speed?: number;
-  pivot_moment_density?: number;
-  lexical_emotion_trend?: string;   // "rising" | "falling" | "stable" | "volatile"
-}
-
-export interface CharacterStatsAggregate {
-  network_density?: number;
-  greimas_coverage?: number;
-  function_coverage_distribution?: Record<string, number>;
-  antagonist_strength_gap?: number;
-  relation_change_freq?: number;
-  degree_centrality?: Record<string, number>;
-}
-
-export interface StyleStats {
-  tone_distribution?: Record<string, number>;
-  vocab_breadth?: number;
-  avg_sent_len?: number;
-  avg_word_len?: number;
-  sent_len_std?: number;
-  dialogue_ratio?: number;
-  function_word_vector?: Record<string, number>;
-  category_density?: Record<string, number>;
-}
-
-// 说明：这里给出的是推荐的完整接口形状。
-// 当前仓库中的前端本地类型/页面只收敛并展示常用子集：
-// - 类型层已保留：vocab_breadth / avg_sent_len / dialogue_ratio
-// - 详情页卡片当前实际展示：vocab_breadth / dialogue_ratio
-
-// ========== 错误响应 ==========
-
-export interface ErrorResponse {
-  detail: string;
-  error_type: string;
-  status_code: number;
-}
-
-// ========== 批量操作 ==========
-
-export interface BatchDeleteResponse {
-  success: boolean;
-  message: string;
-  deleted_count: number;
-  failed_count: number;
-  deleted_ids: string[];
-  failed_ids: Array<{ [key: string]: string }>;
+export interface ApiError {
+  detail: string | { code: string; message: string; reason?: string };
+  error_type?: string;
+  status_code?: number;
 }
 ```
 
@@ -324,9 +168,12 @@ export interface BatchDeleteResponse {
 import { apiClient } from "./client";
 import type { NovelInfo, UploadResponse, BatchDeleteResponse } from "./types";
 
-/** 列出所有小说 */
-export async function fetchNovels(): Promise<NovelInfo[]> {
-  const { data } = await apiClient.get("/api/novels/");
+/** 分页列出小说 */
+export async function getNovels(params: { page?: number; page_size?: number } = {}): Promise<PaginatedResponse<Novel>> {
+  const { page = 1, page_size = 12 } = params;
+  const { data } = await apiClient.get("/api/novels/", {
+    params: { page, page_size },
+  });
   return data;
 }
 
@@ -358,55 +205,41 @@ export async function batchDeleteNovels(novelIds: string[]): Promise<BatchDelete
 // api/analysis.ts
 import { apiClient } from "./client";
 import type {
-  AnalyzeResponse,
-  ReanalyzeResponse,
-  StatusResponse,
-  TaskListResponse,
-  BatchDeleteResponse,
+  AnalysisStartResponse,
+  TaskStatusResponse,
+  BatchDeleteTasksResponse,
 } from "./types";
 
-/** 启动分析 */
-export async function startAnalysis(
-  novelId: string,
-  taskId?: string
-): Promise<AnalyzeResponse> {
-  const { data } = await apiClient.post(`/api/novels/${novelId}/analyze`, {
-    task_id: taskId ?? null,
-  });
+/** 创建并启动新任务 */
+export async function createAnalysisTask(novelId: string): Promise<AnalysisStartResponse> {
+  const { data } = await apiClient.post(`/api/novels/${novelId}/tasks`);
   return data;
 }
 
-/** 重新分析 */
-export async function startReanalysis(
+/** 继续指定 pending/failed 任务 */
+export async function resumeAnalysisTask(
   novelId: string,
-  options?: {
-    force_preprocess?: boolean;
-    force_annotate?: boolean;
-    force_aggregate?: boolean;
-    force_topic_model?: boolean;
-    force_diagnose?: boolean;
-    num_topics?: number;
-    label?: string;
-  }
-): Promise<ReanalyzeResponse> {
-  const { data } = await apiClient.post(`/api/novels/${novelId}/reanalyze`, options ?? {});
+  taskId: string
+): Promise<AnalysisStartResponse> {
+  const { data } = await apiClient.post(`/api/novels/${novelId}/tasks/${taskId}/resume`);
   return data;
 }
 
-/** 查询分析状态 */
-export async function fetchStatus(
-  novelId: string,
-  taskId?: string
-): Promise<StatusResponse> {
-  const { data } = await apiClient.get(`/api/novels/${novelId}/status`, {
-    params: taskId ? { task_id: taskId } : {},
-  });
+/** 查询单任务状态 */
+export async function getTaskStatus(novelId: string, taskId: string): Promise<TaskStatusResponse> {
+  const { data } = await apiClient.get(`/api/novels/${novelId}/tasks/${taskId}/status`);
   return data;
 }
 
 /** 获取任务列表 */
-export async function fetchTasks(novelId: string): Promise<TaskListResponse> {
+export async function getAnalysisTasks(novelId: string) {
   const { data } = await apiClient.get(`/api/novels/${novelId}/tasks`);
+  return data.tasks;
+}
+
+/** 取消任务 */
+export async function cancelAnalysisTask(novelId: string, taskId: string) {
+  const { data } = await apiClient.post(`/api/novels/${novelId}/tasks/${taskId}/cancel`);
   return data;
 }
 
@@ -419,7 +252,7 @@ export async function deleteTask(novelId: string, taskId: string): Promise<void>
 export async function batchDeleteTasks(
   novelId: string,
   taskIds: string[]
-): Promise<BatchDeleteResponse> {
+): Promise<BatchDeleteTasksResponse> {
   const { data } = await apiClient.post(`/api/novels/${novelId}/tasks/batch-delete`, {
     task_ids: taskIds,
   });
@@ -434,15 +267,16 @@ export async function batchDeleteTasks(
 import { apiClient } from "./client";
 import type {
   ChunkCurvePoint,
-  CharacterStats,
-  TopicInfo,
+  Character,
+  Topic,
   DiagnosisResult,
-  GraphSnapshot,
+  GraphData,
+  GraphEventsPageResponse,
   TimelineResponse,
-  NarrativeStructureStats,
-  EmotionStats,
-  CharacterStatsAggregate,
-  StyleStats,
+  NarrativeStructureMetrics,
+  EmotionStatsMetrics,
+  CharacterStatsMetrics,
+  StyleStatsMetrics,
 } from "./types";
 
 // ---- 基础结果数据 ----
@@ -459,10 +293,10 @@ export async function fetchChunkCurves(
 }
 
 /** 获取角色统计 */
-export async function fetchCharacters(
+export async function getCharacters(
   novelId: string,
   taskId: string
-): Promise<CharacterStats[]> {
+): Promise<Character[]> {
   const { data } = await apiClient.get(`/api/novels/${novelId}/characters`, {
     params: { task_id: taskId },
   });
@@ -470,10 +304,10 @@ export async function fetchCharacters(
 }
 
 /** 获取主题分布 */
-export async function fetchTopics(
+export async function getTopics(
   novelId: string,
   taskId: string
-): Promise<TopicInfo[]> {
+): Promise<Topic[]> {
   const { data } = await apiClient.get(`/api/novels/${novelId}/topics`, {
     params: { task_id: taskId },
   });
@@ -481,10 +315,10 @@ export async function fetchTopics(
 }
 
 /** 获取诊断数据 */
-export async function fetchDiagnosis(
+export async function getDiagnosis(
   novelId: string,
   taskId: string
-): Promise<DiagnosisResult | null> {
+): Promise<DiagnosisResult> {
   const { data } = await apiClient.get(`/api/novels/${novelId}/diagnosis`, {
     params: { task_id: taskId },
   });
@@ -492,27 +326,42 @@ export async function fetchDiagnosis(
 }
 
 /** 获取知识图谱 */
-export async function fetchGraph(
+export async function getGraph(
   novelId: string,
   taskId: string
-): Promise<GraphSnapshot> {
+): Promise<GraphData> {
   const { data } = await apiClient.get(`/api/novels/${novelId}/graph`, {
     params: { task_id: taskId },
   });
   return data;
 }
 
-/** 获取叙事时间轴 */
-export async function fetchTimeline(
+/** 获取图谱关系事件分页 */
+export async function getGraphEvents(
   novelId: string,
   taskId: string,
-  options?: { include_curve?: boolean; max_level?: number }
+  options?: { eventsCursor?: string | null; eventsLimit?: number }
+): Promise<GraphEventsPageResponse> {
+  const { data } = await apiClient.get(`/api/novels/${novelId}/graph/events`, {
+    params: {
+      task_id: taskId,
+      ...(options?.eventsCursor ? { events_cursor: options.eventsCursor } : {}),
+      ...(options?.eventsLimit != null ? { events_limit: options.eventsLimit } : {}),
+    },
+  });
+  return data;
+}
+
+/** 获取叙事时间轴 */
+export async function getTimeline(
+  novelId: string,
+  taskId: string,
+  options?: { includeCurve?: boolean }
 ): Promise<TimelineResponse> {
   const { data } = await apiClient.get(`/api/novels/${novelId}/timeline`, {
     params: {
       task_id: taskId,
-      include_curve: options?.include_curve ?? false,
-      max_level: options?.max_level ?? 3,
+      include_curve: options?.includeCurve ?? true,
     },
   });
   return data;
@@ -521,10 +370,10 @@ export async function fetchTimeline(
 // ---- 聚合指标 ----
 
 /** 获取叙事结构指标 */
-export async function fetchNarrativeStructure(
+export async function getNarrativeStructure(
   novelId: string,
   taskId: string
-): Promise<NarrativeStructureStats> {
+): Promise<NarrativeStructureMetrics> {
   const { data } = await apiClient.get(
     `/api/novels/${novelId}/metrics/narrative-structure`,
     { params: { task_id: taskId } }
@@ -533,10 +382,10 @@ export async function fetchNarrativeStructure(
 }
 
 /** 获取情感统计指标 */
-export async function fetchEmotionStats(
+export async function getEmotionStats(
   novelId: string,
   taskId: string
-): Promise<EmotionStats> {
+): Promise<EmotionStatsMetrics> {
   const { data } = await apiClient.get(
     `/api/novels/${novelId}/metrics/emotion-stats`,
     { params: { task_id: taskId } }
@@ -545,10 +394,10 @@ export async function fetchEmotionStats(
 }
 
 /** 获取人物统计指标 */
-export async function fetchCharacterStatsAggregate(
+export async function getCharacterStats(
   novelId: string,
   taskId: string
-): Promise<CharacterStatsAggregate> {
+): Promise<CharacterStatsMetrics> {
   const { data } = await apiClient.get(
     `/api/novels/${novelId}/metrics/character-stats`,
     { params: { task_id: taskId } }
@@ -557,10 +406,10 @@ export async function fetchCharacterStatsAggregate(
 }
 
 /** 获取风格统计指标 */
-export async function fetchStyleStats(
+export async function getStyleStats(
   novelId: string,
   taskId: string
-): Promise<StyleStats> {
+): Promise<StyleStatsMetrics> {
   const { data } = await apiClient.get(
     `/api/novels/${novelId}/metrics/style-stats`,
     { params: { task_id: taskId } }
@@ -582,7 +431,7 @@ const queryKeys = {
     all:      ["novels"] as const,
     detail:   (id: string) => ["novels", id] as const,
     tasks:    (id: string) => ["novels", id, "tasks"] as const,
-    status:   (id: string, taskId: string) => ["novels", id, "status", taskId] as const,
+    status:   (id: string, taskId: string) => ["task-status", id, taskId] as const,
   },
   results: {
     curves:     (id: string, taskId: string) => ["results", id, taskId, "curves"] as const,
@@ -597,7 +446,6 @@ const queryKeys = {
     emotion:    (id: string, taskId: string) => ["metrics", id, taskId, "emotion"] as const,
     character:  (id: string, taskId: string) => ["metrics", id, taskId, "character"] as const,
     style:      (id: string, taskId: string) => ["metrics", id, taskId, "style"] as const,
-    culture:    (id: string, taskId: string) => ["metrics", id, taskId, "culture"] as const,
   },
 };
 ```
@@ -607,7 +455,7 @@ const queryKeys = {
 ```typescript
 // hooks/useAnalysisStatus.ts
 import { useQuery } from "@tanstack/react-query";
-import { fetchStatus } from "@/api/analysis";
+import { getTaskStatus } from "@/api/analysis";
 
 /**
  * 分析状态轮询 Hook
@@ -616,8 +464,8 @@ import { fetchStatus } from "@/api/analysis";
  */
 export function useAnalysisStatus(novelId: string, taskId: string) {
   return useQuery({
-    queryKey: ["novels", novelId, "status", taskId],
-    queryFn: () => fetchStatus(novelId, taskId),
+    queryKey: ["task-status", novelId, taskId],
+    queryFn: () => getTaskStatus(novelId, taskId),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       if (status === "running" || status === "pending") return 3000;
@@ -664,20 +512,16 @@ export function useDiagnosis(novelId: string, taskId: string) {
 ```
 组件挂载
   │
-  ├─▶ useQuery(["novels"]) ─── fetchNovels() ─── GET /api/novels/
-  │     └─▶ NovelGrid 渲染小说卡片列表
+  ├─▶ useQuery(["novels", page]) ─── getNovels({ page, page_size }) ─── GET /api/novels/
+  │     └─▶ 返回分页对象 { items, total, page, page_size, total_pages }
   │
   ├─▶ [用户上传文件]
   │     └─▶ useMutation ─── uploadNovel(file) ─── POST /api/novels/upload
-  │           └─▶ invalidateQueries(["novels"])  // 刷新列表
+  │           └─▶ invalidateQueries(["novels"])
   │
-  ├─▶ [用户点击"分析"]
-  │     └─▶ useMutation ─── startAnalysis(novelId) ─── POST .../analyze
-  │           └─▶ 返回 task_id，开始状态轮询
-  │
-  └─▶ [分析进行中]
-        └─▶ useAnalysisStatus(novelId, taskId) ─── 轮询 GET .../status
-              └─▶ 更新 NovelCard 上的进度环
+  └─▶ [悬浮/点击小说卡片]
+        ├─▶ prefetchNovel() ─── GET /api/novels/
+        └─▶ navigate("/novels/:novelId")
 ```
 
 ### 5.2 NovelDetailPage 数据流
@@ -741,11 +585,15 @@ diagnosis 请求返回
 ```
 组件挂载
   │
-  ├─▶ useQuery(graph) ──── fetchGraph() ─── GET .../graph
-  │     └─▶ 转换为 ForceGraph 数据格式
-  │           └─▶ ForceGraph 渲染力导向图
+  ├─▶ useQuery(graph) ──── getGraph() ─── GET .../graph
+  │     ├─▶ 主合同要求 nodes + edges + events + events_page + summary + quality
+  │     ├─▶ 缺少 summary/quality/events_page 会被页面视为 contract break
+  │     └─▶ 初始 events 交给图谱工作区渲染
   │
-  └─▶ useQuery(characters) ── fetchCharacters() ─── GET .../characters
+  ├─▶ useGraphEventPagination()
+  │     └─▶ GET .../graph/events?events_cursor=...&events_limit=...
+  │
+  └─▶ useQuery(characters) ── getCharacters() ─── GET .../characters
         └─▶ 补充节点属性（出场次数 → 节点大小）
 ```
 
@@ -754,12 +602,13 @@ diagnosis 请求返回
 ```
 组件挂载
   │
-  └─▶ useQuery(timeline) ── fetchTimeline(include_curve=true, max_level=3)
-        │                       └── GET .../timeline?task_id=...&include_curve=true&max_level=3
+  └─▶ useQuery(timeline) ── getTimeline(includeCurve=true)
+        │                    └── GET .../timeline?task_id=...&include_curve=true
         │
         ├─▶ response.phases → PhaseBar
-        ├─▶ response.nodes → TimelineTrack + TimelineNode
-        └─▶ response.tension_curve → TensionOverlay (可选)
+        ├─▶ response.composite_nodes / atomic_nodes → TimelineTrack
+        ├─▶ response.tension_curve → TensionOverlay
+        └─▶ URL 本地状态：task_id / max_level / view / selected_node_id / selected_chunk / relation_event_id
 ```
 
 ---
@@ -776,14 +625,28 @@ diagnosis 请求返回
 }
 ```
 
+或（结果链路 409）：
+
+```json
+{
+  "detail": {
+    "code": "diagnosis_rerun_required",
+    "message": "当前结果需要重新分析",
+    "reason": "focus_contract_incomplete"
+  }
+}
+```
+
 ### 6.2 前端错误处理策略
 
 | HTTP 状态码 | error_type | 前端处理 |
 |------------|-----------|---------|
-| 404 | `NovelNotFoundError` | 显示"小说不存在"提示，引导返回首页 |
-| 400 | `AnalysisNotCompleteError` | 显示"分析未完成"提示，显示当前状态 |
+| 404 | `NovelNotFoundError` | 显示“小说不存在”提示，引导返回首页 |
+| 400 | `AnalysisNotCompleteError` | 显示“分析未完成”提示，显示当前状态 |
 | 400 | `FileUploadError` | 上传弹窗中显示错误信息 |
-| 500 | `AnalysisError` | Toast 错误提示 + 建议重试 |
+| 409 | `detail.code=diagnosis_rerun_required` | 进入 rerun-required UI，不继续渲染半成品页面 |
+| 409 | `GraphReadinessError` | 图谱/时间轴结果不可读，提示重跑或等待主链完成 |
+| 500 | `InternalServerError` / `AnalysisError` | Toast 错误提示 + 建议重试 |
 | 网络错误 | - | Toast "网络连接失败" + 自动重试（TanStack Query 默认3次） |
 | 超时 | - | Toast "请求超时" + 手动重试按钮 |
 
@@ -827,17 +690,22 @@ const queryClient = new QueryClient({
 
 | 页面 | 接口 | 方法 | 说明 |
 |------|------|------|------|
-| **HomePage** | `/api/novels/` | GET | 小说列表 |
+| **HomePage** | `/api/novels/` | GET | 分页小说列表 |
 | | `/api/novels/upload` | POST | 上传小说 |
-| | `/api/novels/{id}/analyze` | POST | 启动分析 |
-| | `/api/novels/{id}/status` | GET | 轮询状态 |
 | | `/api/novels/{id}` | DELETE | 删除小说 |
+| **Task APIs** | `/api/novels/{id}/tasks` | POST | 创建并启动新任务 |
+| | `/api/novels/{id}/tasks/{task_id}/resume` | POST | 继续 pending/failed 任务 |
+| | `/api/novels/{id}/tasks/{task_id}/status` | GET | 查询单任务状态 |
+| | `/api/novels/{id}/tasks/{task_id}/cancel` | POST | 取消任务 |
 | **NovelDetailPage** | `/api/novels/{id}/tasks` | GET | 任务列表 |
 | | `/api/novels/{id}/diagnosis` | GET | 诊断数据 + 主题色 |
 | | `/api/novels/{id}/metrics/*` | GET | 五维聚合指标（5个接口） |
 | | `/api/novels/{id}/chunk-curves` | GET | 曲线缩略 |
 | **CurvesPage** | `/api/novels/{id}/chunk-curves` | GET | 完整曲线 |
 | | `/api/novels/{id}/metrics/narrative-structure` | GET | 三幕分界 |
+| **GraphPage** | `/api/novels/{id}/graph` | GET | graph snapshot（含 summary/quality/events_page） |
+| | `/api/novels/{id}/graph/events` | GET | relation events 分页 |
+| **TimelinePage** | `/api/novels/{id}/timeline` | GET | 双层节点时间轴 |
 | **CharactersPage** | `/api/novels/{id}/characters` | GET | 角色列表 |
 | | `/api/novels/{id}/diagnosis` | GET | 主角/弧线分 |
 | **GraphPage** | `/api/novels/{id}/graph` | GET | 图谱数据 |

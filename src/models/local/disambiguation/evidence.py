@@ -1,4 +1,4 @@
-"""消歧证据画像工具。"""
+"""消歧证据画像工具"""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ _APPEARANCE_ONLY_PATTERN = re.compile(r"(灰衣人|白发少女|黑衣人|青衣
 
 @dataclass(frozen=True)
 class EvidenceProfile:
-    """候选称呼的程序化证据画像。"""
+    """候选称呼的程序化证据画像"""
 
     has_original_sentence: bool = False
     has_identity_clue: bool = False
@@ -100,7 +100,7 @@ def _classify_signal(segment: str) -> str | None:
 
 
 def build_evidence_profile(context: str) -> EvidenceProfile:
-    """根据上下文构建证据画像。"""
+    """根据上下文构建证据画像"""
 
     has_original_sentence = False
     has_identity_clue = False
@@ -152,7 +152,7 @@ def build_evidence_profile(context: str) -> EvidenceProfile:
 
 
 def format_evidence_profile(profile: EvidenceProfile) -> str:
-    """将证据画像格式化为 prompt 可读文本。"""
+    """将证据画像格式化为 prompt 可读文本"""
 
     signal_text = "、".join(profile.strong_signals) if profile.strong_signals else "无"
     return (

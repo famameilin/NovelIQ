@@ -1,20 +1,7 @@
 """
 消歧结果构建模块
 
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
 说明: 提取消歧结果构建逻辑
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: entity-type-relation-extraction
-修改内容: 新增 ExtendedDisambigResult 数据类和 build_extended_result_from_response 函数
-
-修改时间: 2026-03-26
-修改者: TraeAI
-任务: disambiguation-evidence-grading
-修改内容: 添加 evidence_sources 字段，支持证据来源追踪
 """
 
 from __future__ import annotations
@@ -34,30 +21,7 @@ class ExtendedDisambigResult:
     """
     扩展消歧结果数据类
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
     说明: 包含别名映射、实体类型和实体关系的完整消歧结果
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: fix/disambig-thinking-save
-    修改内容: 添加 _thinking_content 字段保存 thinking 内容
-
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: disambiguation-evidence-grading
-    修改内容: 添加 evidence_sources 字段。支持证据来源追踪
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 简化消歧响应模型
-    修改内容: 删除 common_name_map 字段，将 merge_target_map 重命名为 alias_map
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 将 alias_map 重命名为 canonical_decisions，明确表达模型判断而非运行时状态
     """
 
     canonical_decisions: dict[str, str]
@@ -79,13 +43,10 @@ def normalize_disambiguate_response(
     response_data: DisambiguateResponseModel | CloudDisambiguateResponseModel,
 ) -> DisambiguateResponseModel:
     """
-    将云端兼容响应归一化为内部标准消歧模型。
+    将云端兼容响应归一化为内部标准消歧模型
 
-    创建时间: 2026-04-20
-    创建者: Codex
-    任务: fix-cloud-disambig-mapping-schema
     说明: 运行时内部逻辑仍以 dict 结构消费消歧结果，因此在 API 入口把
-          CloudDisambiguateResponseModel 转回 DisambiguateResponseModel，避免影响下游状态机。
+          CloudDisambiguateResponseModel 转回 DisambiguateResponseModel，避免影响下游状态机
     """
     if isinstance(response_data, DisambiguateResponseModel):
         return response_data
@@ -135,25 +96,6 @@ def build_result_from_response(
 ) -> dict[str, str]:
     """
     从 DisambiguateResponseModel 构建结果字典，确保所有候选名都有映射
-
-    创建时间: 2026-03-16
-    创建者: TraeAI
-    任务: 重构本地消歧客户端集成 Instructor
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 9 拆分disambiguation_client.py
-    修改内容: 提取为独立模块函数
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: fix-type-errors
-    修改内容: 支持 list[str] 类型参数，用于匿名消歧场景
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: 简化消歧响应模型
-    修改内容: 将 alias_map 改为 canonical_decisions
     """
     normalized_response = normalize_disambiguate_response(response_data)
     name_list = _candidate_names(candidates)
@@ -175,25 +117,7 @@ def build_extended_result_from_response(
     """
     从 DisambiguateResponseModel 构建扩展结果，包含别名映射、实体类型和实体关系
 
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: entity-type-relation-extraction
     说明: 返回完整的消歧结果，包括alias_map、entity_types和entity_relations
-
-    修改时间: 2026-03-23
-    修改者: TraeAI
-    任务: fix/disambig-thinking-save
-    修改内容: 复制 _thinking_content 到 ExtendedDisambigResult
-
-    修改时间: 2026-03-26
-    修改者: TraeAI
-    任务: disambiguation-evidence-grading
-    修改内容: 提取 evidence_sources 字段
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: disambiguation-state-three-layer
-    修改内容: 将 alias_map 改为 canonical_decisions，明确表达模型判断而非运行时状态
     """
     normalized_response = normalize_disambiguate_response(response_data)
     canonical_decisions = build_result_from_response(normalized_response, candidates)
@@ -249,18 +173,17 @@ def align_canonical_by_frequency(
     min_ratio: float = 1.5,
     global_freq: dict[str, int] | None = None,
 ) -> ExtendedDisambigResult:
-    """基于原文频次对齐 canonical 方向，确保高频名作为 canonical。
-
+    """基于原文频次对齐 canonical 方向，确保高频名作为 canonical
     遍历 result.canonical_decisions 中每个 (alias, canonical) 对，
     如果 alias 频次高于 canonical 且比例 > min_ratio，
-    则交换方向使高频名成为 canonical。
+    则交换方向使高频名成为 canonical
 
     Args:
         result: LLM 消歧结果
         candidates: 候选人名及频次列表（当前批次）
         min_ratio: 触发翻转的最小频次比（alias_count / canonical_count）
         global_freq: 全量名字频次表。当 canonical 不在 candidates 中时
-            从此表查找频次，避免 canonical_count=0 导致翻转被跳过。
+            从此表查找频次，避免 canonical_count=0 导致翻转被跳过
 
     Returns:
         修改后的 ExtendedDisambigResult（原地修改并返回）

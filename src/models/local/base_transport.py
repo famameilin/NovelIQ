@@ -1,9 +1,7 @@
 """
-BaseModelClient 传输层辅助模块。
+BaseModelClient 传输层辅助模块
 
-创建时间: 2026-04-23
-任务: p2-base-model-client-split
-说明: 从 base.py 中拆出非流式/流式 transport 细节，让客户端主类聚焦上下文与兼容入口。
+说明: 从 base.py 中拆出非流式/流式 transport 细节，让客户端主类聚焦上下文与兼容入口
 """
 
 from __future__ import annotations
@@ -31,21 +29,7 @@ async def call_api[T: BaseModel](
     timeout: float | None = None,
 ) -> Any:
     """
-    执行非流式模型调用。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将 request_params 组装与 SDK 调用从 BaseModelClient 主类中拆离。
-
-    修改时间: 2026-04-24
-    修改者: Codex
-    任务: fix-llm-call-timeout
-    修改内容: 添加显式 timeout 参数，避免调用层因默认超时未设置而长时间阻塞。
-
-    修改时间: 2026-04-24
-    任务: deepseek-json-object-compat
-    修改内容: 支持调用方显式传入 response_format，兼容只支持 json_object、
-              不支持 strict json_schema 的服务商。
+    执行非流式模型调用
     """
     request_params = client._build_request_params(messages, enable_thinking=enable_thinking)
     if raw_response_format is not None:
@@ -65,11 +49,7 @@ async def call_api_stream(
     emitter: Any = None,
 ) -> Any:
     """
-    执行流式模型调用并聚合为标准响应对象。
-
-    创建时间: 2026-04-23
-    任务: p2-base-model-client-split
-    新建原因: 将 stream transport 主循环从 BaseModelClient 主类中抽离。
+    执行流式模型调用并聚合为标准响应对象
     """
     request_params["stream"] = True
     logger.debug("Using streaming mode for API call")

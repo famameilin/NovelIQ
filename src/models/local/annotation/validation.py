@@ -1,7 +1,4 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: 标注结果验证和重试逻辑
 """
 
@@ -28,15 +25,7 @@ def validate_annotation_names(
     """
     验证标注结果中的名字
 
-    创建时间: 2026-03-17
-    创建者: TraeAI
-    任务: code-quality-refactor - 提取名字验证逻辑
     说明: 提取名字并验证是否在有效来源中
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
 
     Args:
         annotation: 标注结果对象
@@ -62,19 +51,6 @@ def retry_with_validation(
 ) -> tuple[ChunkAnnotation, list[str]]:
     """
     名字验证失败后的内部重试
-
-    修改时间: 2026-03-17
-    修改者: TraeAI
-    任务: code-quality-refactor - 重构_retry_with_validation
-    修改内容:
-    - 提取_execute_validation_retry_call方法
-    - 提取_validate_annotation_names方法
-    - 简化主函数逻辑
-
-    修改时间: 2026-03-18
-    修改者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-    修改内容: 从 AnnotationClient 类方法提取为独立函数
 
     Args:
         original_user_prompt: 原始用户提示

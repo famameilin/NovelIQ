@@ -18,15 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Users } from "lucide-react";
 
-/* ------------------------------------------------------------------ */
-/*  Constants                                                         */
-/* ------------------------------------------------------------------ */
-
 const STALE_TIME = 5 * 60 * 1000;
-
-/* ------------------------------------------------------------------ */
-/*  Skeleton                                                          */
-/* ------------------------------------------------------------------ */
 
 function SkeletonGrid() {
   return (
@@ -69,11 +61,8 @@ function SkeletonGrid() {
 }
 
 /**
- * 创建时间: 2026-04-27
- * 创建者: Codex
- * 任务: protagonist-focus-contract-review-fixes
- * 说明: 角色页依赖完整 focus contract 才能解释“焦点人物”和“叙事中心度”；
- * 若 diagnosis 只有半成品焦点数据，就必须明确提示重跑，而不是继续渲染空焦点区。
+ * 角色页依赖完整 focus contract 才能解释“焦点人物”和“叙事中心度”；
+ * 若 diagnosis 只有半成品焦点数据，就必须明确提示重跑，而不是继续渲染空焦点区
  */
 function IncompleteFocusContractState() {
   return (
@@ -92,12 +81,9 @@ function IncompleteFocusContractState() {
 }
 
 /**
- * 创建时间: 2026-04-27
- * 创建者: Codex
- * 任务: protagonist-focus-contract-compat-cleanup
- * 说明: 角色页现在以 diagnosis 新合同为前置条件；
+ * 角色页现在以 diagnosis 新合同为前置条件；
  * diagnosis 尚未产出时，不再提前渲染仅靠 annotation 聚合得到的角色表，
- * 避免页面继续对“无 diagnosis 的旧路径”做静默兼容。
+ * 避免页面继续对“无 diagnosis 的旧路径”做静默兼容
  */
 function EmptyDiagnosisState() {
   return (
@@ -120,7 +106,7 @@ function EmptyDiagnosisState() {
 /**
  * 2026-04-27，任务：protagonist-focus-contract
  * 修改原因：角色页主展示逻辑改为消费 `focus_structure` / `focus_characters`，
- * 并用新的 FocusCastCard 与多焦点高亮替代旧单主角页面。
+ * 并用新的 FocusCastCard 与多焦点高亮替代旧单主角页面
  */
 export function CharactersPage() {
   const { novelId } = useParams<{ novelId: string }>();

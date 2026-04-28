@@ -43,14 +43,6 @@ def setup_logging(config: LoggingConfig | None = None, verbose: bool = False, de
     """
     设置日志系统
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 小说量化分析 API 服务
-
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    修改内容: 添加终端日志文件支持，将终端显示的日志单独保存到文件
-
     返回: (file_handler_id, console_file_handler_id) 文件日志处理器ID和终端日志文件处理器ID
     """
     cfg = config or LoggingConfig.from_file()

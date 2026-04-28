@@ -1,27 +1,4 @@
-"""
-指标统计相关操作
-
-创建时间: 2026-03-17
-创建者: TraeAI
-任务: code-quality-refactor - 拆分stats_repository
-说明: 全局统计和Token使用统计相关操作
-
-修改时间: 2026-03-18
-修改者: TraeAI
-任务: code-quality-refactor - 补充遗漏方法
-修改内容: 添加 insert_cloud_analysis, insert_global_context,
-    fetch_global_context, update_global_context, fetch_novel_title
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: fix-token-usage-metrics-typecheck
-修改内容: 避免 SQL 聚合列与 Python `count()` 方法重名，修复 token metrics 聚合的类型检查报错
-
-修改时间: 2026-04-22
-修改者: Codex
-任务: fix-token-coverage-status
-修改内容: coverage 只统计真正成功的模型响应，避免重试错误占位记录把结果页误报为 partial
-"""
+"""全局统计、token 使用与 diagnosis 落库相关操作"""
 
 from __future__ import annotations
 
@@ -171,9 +148,9 @@ def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dic
     by_call_type = _fetch_usage_by_call_type(session, run_id, novel_id)
     by_model = _fetch_usage_by_model(session, run_id, novel_id)
     coverage_gaps = _detect_token_coverage_gaps(session, run_id, by_call_type)
-    # 中文注释：这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
+    # 这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
     # 并不强制每一条记录都来自本地估算；像 embedding 这类 provider 能稳定返回 usage 的链路，
-    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息。
+    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息
     summary["accounting_method"] = "estimated"
     summary["coverage_status"] = "partial" if coverage_gaps else "complete"
     return {
@@ -232,34 +209,26 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     for row in result:
         normalized_task_type = _normalize_token_usage_task_type(row.task_type)
         bucket = aggregated.setdefault(normalized_task_type, {"call_count": 0, "total_tokens": 0})
-        # 中文注释：不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列。
+        # 不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列
         bucket["call_count"] += int(row.call_count or 0)
         bucket["total_tokens"] += int(row.total_tokens or 0)
     return aggregated
 
 
 def _build_call_type_key(task_type: str, call_type: str) -> str:
-    """构建对外统一的调用桶 key。"""
+    """构建对外统一的调用桶 key"""
     return f"{task_type}.{call_type}"
 
 
 def _normalize_token_usage_task_type(task_type: str) -> str:
-    """
-    归一 token_usage 里的任务类型桶。
-
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-token-coverage-fallback-bucket
-    说明: annotation_fallback 只是执行通道，不是新的业务任务类型；
-          对外统计与 coverage 比较都应把它并回 annotation 主桶。
-    """
+    """归一 token_usage 的任务类型桶。annotation_fallback 对外仍归并到 annotation"""
     if task_type == "annotation_fallback":
         return "annotation"
     return task_type
 
 
 def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
-    """按 task_type + call_type 获取使用量。"""
+    """按 task_type + call_type 获取使用量"""
     stmt = (
         select(
             TokenUsage.task_type,
@@ -311,12 +280,7 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
 
 
 def _normalize_model_interaction_call_key(interaction_type: str, phase: str | None) -> str:
-    """
-    将 model_interactions 里的类型归一到 token_usage 的调用桶 key。
-
-    中文注释：旧 run 没有完整 token_usage 时，只能依赖 model_interactions 判断
-    “哪些调用真实发生过”。这里必须把两张表映射到同一组 key，才能做覆盖度比较。
-    """
+    """将 model_interactions 的类型映射到 token_usage 使用的调用桶 key"""
     normalized_phase = phase or "unknown"
     if interaction_type == "annotate":
         return _build_call_type_key("annotation", normalized_phase)
@@ -340,15 +304,7 @@ def _normalize_model_interaction_call_key(interaction_type: str, phase: str | No
 
 
 def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[str, int]:
-    """
-    按归一后的调用桶统计真实发生过的成功模型调用次数。
-
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-token-coverage-status
-    说明: coverage 要比较的是“拿到有效响应的调用”与“已落 token_usage 的调用”。
-          对重试里的无响应 error 占位记录，不能再算进应记账分母。
-    """
+    """统计真实成功的模型调用次数，供 token coverage 对比使用"""
     stmt = (
         select(
             ModelInteraction.interaction_type,
@@ -374,7 +330,7 @@ def _detect_token_coverage_gaps(
     run_id: str,
     by_call_type: dict[str, Any],
 ) -> list[str]:
-    """比较真实调用与已记账调用，找出 token 覆盖缺口。"""
+    """比较真实调用与已记账调用，找出 token 覆盖缺口"""
     interaction_counts = _fetch_model_interaction_call_counts(session, run_id)
     gaps: list[str] = []
     for call_key in sorted(interaction_counts.keys()):
@@ -389,16 +345,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
     """
     插入云端分析结果
 
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: `cloud_analysis` 已切到焦点合同；这里需要落库
-    `focus_structure` / `focus_characters`，并彻底停止写入旧 `protagonist` 列。
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-        analysis: 云端分析数据
+    `cloud_analysis` 统一落库焦点合同字段，不再写入旧 `protagonist` 列
     """
     arc_scores_json = json.dumps(dict(analysis.arc_scores), ensure_ascii=False)
     topic_labels_json = json.dumps(list(analysis.topic_labels), ensure_ascii=False)
@@ -434,22 +381,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
 
 
 def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
-    """
-    获取云端分析结果
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改原因: 结果读取链路现在只返回焦点合同字段，不再对外暴露旧单主角字段。
-
-    Args:
-        session: 数据库会话
-        novel_id: 小说ID
-        run_id: 运行ID
-
-    Returns:
-        云端分析结果字典，不存在则返回 None
-    """
+    """获取云端分析结果，只返回当前焦点合同字段"""
     stmt = (
         select(CloudAnalysis)
         .where(
@@ -625,20 +557,7 @@ def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | Non
 
 
 def has_global_context(session: Session, run_id: str) -> bool:
-    """
-    检查是否已存在 global_context 记录
-
-    创建时间: 2026-03-25
-    创建者: TraeAI
-    任务: fix-resume-feature - 断点续传功能修复
-
-    Args:
-        session: 数据库会话
-        run_id: 运行ID
-
-    Returns:
-        是否存在 global_context 记录
-    """
+    """检查是否已存在 global_context 记录"""
     stmt = select(GlobalContext).where(GlobalContext.run_id == run_id).limit(1)
     result = session.execute(stmt).scalar_one_or_none()
     return result is not None

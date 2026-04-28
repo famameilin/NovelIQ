@@ -1,15 +1,7 @@
 """
 Metrics 模块入口
 
-修改时间: 2026-03-28
-修改者: TraeAI
-任务: consolidate-codebase-architecture
-修改内容: PROPP_FUNCTIONS, CLASSICAL_PATTERNS 改为从 src.config.constants 导入
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 移除向后兼容代码
-修改内容: 移除 count_hits, count_token_hits, density, term_counts, token_density 导出
 """
 
 from src.config.constants import CLASSICAL_PATTERNS, PROPP_FUNCTIONS

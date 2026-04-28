@@ -1,17 +1,9 @@
 """
-Core annotate workflow.
+Core annotate workflow
 
-Extracted from CLI to workflows to reduce coupling.
+Extracted from CLI to workflows to reduce coupling
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id/session 参数支持，使用 ChunkRepository/AnnotationRepository 替代直接调用 operations 函数
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 移除向后兼容代码，只保留 Repository 模式
 """
 
 from __future__ import annotations
@@ -47,44 +39,13 @@ async def run_annotate(
     """
     执行小说标注流程
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 标注流程
 
-    修改时间: 2026-03-12
-    修改者: TraeAI
-    任务: fix-annotation-disambiguation-issues
-    修改内容: 添加 novel_title 参数，用于保存到 global_context 表
 
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: refactor-analysis-layer-functions
-    修改内容: 重构函数，使用辅助函数拆解职责，确保函数行数不超过 200 行
 
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: refactor-cli-layer-functions
-    修改内容: 进一步重构，使用 _init_annotation_phase、_process_chunks_phase、_run_disambiguation_phase
 
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
-    修改时间: 2026-03-15
-    修改者: TraeAI
-    任务: storage-layer-decoupling
-    修改内容: 添加 incremental_disambig_client 和 full_disambig_client 参数，支持测试注入 mock
 
-    修改时间: 2026-04-09
-    修改者: TraeAI
-    任务: refactor/annotate-async
-    修改内容: 改为 async def
 
-    修改时间: 2026-04-25
-    修改者: Codex
-    任务: remove-unused-workflow-cache-hooks
-    修改内容: 删除未被主链实际消费的 cache_path 参数，避免保留无效接口。
 
     Args:
         run_id: 运行ID
@@ -159,7 +120,7 @@ async def run_annotate(
 
     state = await _run_disambiguation_phase(session, state, phase_result, novel_id, use_rag, run_id=run_id)
 
-    # 最终消歧可能改变别名归一化规则，强制重建 graph_* 以避免旧投影残留。
+    # 最终消歧可能改变别名归一化规则，强制重建 graph_* 以避免旧投影残留
     if all_chunks:
         final_chunk_id = all_chunks[-1][0]
         project_graph_tables(

@@ -102,7 +102,7 @@ def render_annotation_alias_map_text(
 
 
 def render_annotation_evidence_blocks(bundle: EvidenceBundle) -> list[str]:
-    """将 EvidenceBundle 渲染为 Phase 2 可消费的结构化证据块列表。"""
+    """将 EvidenceBundle 渲染为 Phase 2 可消费的结构化证据块列表"""
     shared_sections = render_shared_evidence_sections(bundle)
     return select_shared_evidence_sections(
         shared_sections,
@@ -118,8 +118,8 @@ def _render_task_scoped_shared_sections(
     priority_candidate_names: list[str] | None = None,
     exclude_vector_chunks_with_emotion_exemplars: bool = False,
 ):
-    # 中文注释：task renderer 只在这里声明“每个任务最多吃多少共享证据”，
-    # 具体 evidence 语义仍由 shared renderer 统一维护，避免 phase 代码各自长出一套裁剪规则。
+    # task renderer 只在这里声明“每个任务最多吃多少共享证据”，
+    # 具体 evidence 语义仍由 shared renderer 统一维护，避免 phase 代码各自长出一套裁剪规则
     return render_shared_evidence_sections(
         bundle,
         include_level1_alias_mappings=include_level1_alias_mappings,
@@ -153,9 +153,9 @@ def render_annotation_prompt_blocks(
         shared_sections,
         ("level1_facts", "disambig_candidates", "emotion_exemplars", "vector_evidence"),
     )
-    # 中文注释：annotation 主 prompt 当前只接收 active_entities + disambig_context 两个入口，
+    # annotation 主 prompt 当前只接收 active_entities + disambig_context 两个入口，
     # 因此这里显式把 Level 1 结构化事实、情绪 exemplar 和通用向量证据一并并入 disambig_context，
-    # 保证 Phase1 在统一 evidence path 内同时看到身份线索与情绪案例。
+    # 保证 Phase1 在统一 evidence path 内同时看到身份线索与情绪案例
     combined_disambig = "\n\n".join(prompt_sections) if prompt_sections else None
 
     return AnnotationPromptBlocks(
@@ -170,7 +170,7 @@ def render_annotation_prompt_blocks(
 def render_relation_extraction_evidence_sections(
     evidence_bundle: EvidenceBundle | None,
 ) -> list[str]:
-    """渲染 Phase 4 关系抽取可消费的共享证据区段。"""
+    """渲染 Phase 4 关系抽取可消费的共享证据区段"""
 
     if evidence_bundle is None:
         return []
@@ -180,8 +180,8 @@ def render_relation_extraction_evidence_sections(
         include_level1_alias_mappings=False,
         policy=_PHASE4_EVIDENCE_POLICY,
     )
-    # 中文注释：Phase4 只选择稳定事实、局部活跃实体和历史语义召回三类 section；
-    # 不把消歧候选或 raw structured block 带进去，避免把候选身份和重复事实噪音注入关系抽取。
+    # Phase4 只选择稳定事实、局部活跃实体和历史语义召回三类 section；
+    # 不把消歧候选或 raw structured block 带进去，避免把候选身份和重复事实噪音注入关系抽取
     return select_shared_evidence_sections(
         shared_sections,
         ("level1_facts", "active_entities", "vector_evidence"),
@@ -195,7 +195,7 @@ def render_dialogue_attribution_evidence_sections(
     active_entities: str | None = None,
     priority_candidate_names: list[str] | None = None,
 ) -> list[str]:
-    """渲染 Phase 3 对话归属可消费的共享证据区段。"""
+    """渲染 Phase 3 对话归属可消费的共享证据区段"""
 
     if evidence_bundle is None and active_entities is None:
         return []
@@ -212,9 +212,9 @@ def render_dialogue_attribution_evidence_sections(
     )
 
     sections: list[str] = []
-    # 中文注释：active_entities 属于任务侧输入，不属于 EvidenceBundle 本体；
-    # 如果上游已经给出带 fallback 的活跃实体上下文，就优先沿用，不再让 renderer 从 bundle 反推覆盖它。
-    # 显式传入空字符串时，表示调用方要抑制该区段；这时也不应再回退 bundle 里的活跃实体。
+    # active_entities 属于任务侧输入，不属于 EvidenceBundle 本体；
+    # 如果上游已经给出带 fallback 的活跃实体上下文，就优先沿用，不再让 renderer 从 bundle 反推覆盖它
+    # 显式传入空字符串时，表示调用方要抑制该区段；这时也不应再回退 bundle 里的活跃实体
     if active_entities is not None:
         trimmed_active_entities = trim_active_entities_section(
             active_entities,

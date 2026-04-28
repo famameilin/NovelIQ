@@ -1,6 +1,4 @@
-// ============================================================
 // Novel
-// ============================================================
 
 export interface Novel {
   novel_id: string;
@@ -17,9 +15,7 @@ export interface NovelUploadResponse {
   message: string;
 }
 
-// ============================================================
-// Analysis Task
-// ============================================================
+// Analysis tasks
 
 export type TaskStatus =
   | "pending"
@@ -73,9 +69,7 @@ export interface BatchDeleteTasksResponse {
   failed_ids: BatchDeleteTaskFailure[];
 }
 
-// ============================================================
 // Characters
-// ============================================================
 
 export interface Character {
   name: string;
@@ -88,9 +82,7 @@ export interface Character {
   avg_emotion_score?: number | null;
 }
 
-// ============================================================
-// Chunk Curves
-// ============================================================
+// Chunk curves
 
 export interface ChunkCurvePoint {
   chunk_id: number;
@@ -156,15 +148,10 @@ export interface ChunkAnnotation {
   dialogues: ChunkDialogue[];
 }
 
-// ============================================================
 // Topics
-// ============================================================
 
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-C 主题分布
-// 说明: LDA 主题建模结果类型定义。label 字段为可选预留字段，
-//       后端当前不返回，供未来 LLM 诊断阶段生成主题命名时使用。
+// LDA 主题建模结果类型定义。label 字段为可选预留字段，
+//       后端当前不返回，供未来 LLM 诊断阶段生成主题命名时使用
 
 export interface Topic {
   topic_id: number;
@@ -174,9 +161,7 @@ export interface Topic {
   label?: string;
 }
 
-// ============================================================
 // Diagnosis
-// ============================================================
 
 export interface DiagnosisResult {
   rerun_required?: boolean;
@@ -218,14 +203,9 @@ export interface ForeshadowingThread {
   latest_why_unresolved_now?: string | null;
 }
 
-// ============================================================
 // Knowledge Graph
-// ============================================================
 
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-A 人物关系图谱 API 类型定义
-// 说明: 更新图谱节点类型，添加实体详细信息字段
+// 更新图谱节点类型，添加实体详细信息字段
 
 export interface GraphNode {
   entity_id: string;
@@ -237,10 +217,7 @@ export interface GraphNode {
   status?: string;
 }
 
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-A 人物关系图谱 API 类型定义
-// 说明: 更新图谱边类型，relation_type 改为可选
+// 更新图谱边类型，relation_type 改为可选
 
 export interface GraphEdge {
   source: string;
@@ -254,10 +231,7 @@ export interface GraphEdge {
   is_active?: boolean;
 }
 
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-A 人物关系图谱 API 类型定义
-// 说明: 添加图谱事件类型定义
+// 添加图谱事件类型定义
 
 export interface GraphEvent {
   relation_event_id: number;
@@ -282,7 +256,7 @@ export interface GraphKeyRelation {
 }
 
 // Graph page owns these display summaries; diagnosis/export reuse a narrower
-// aggregate-only graph report on the backend and should not share this shape.
+// aggregate-only graph report on the backend and should not share this shape
 export interface GraphPageSummary {
   node_count: number;
   edge_count: number;
@@ -324,10 +298,7 @@ export interface GraphEventsPageInfo {
   next_cursor?: string | null;
 }
 
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-A 人物关系图谱 API 类型定义
-// 说明: 更新图谱数据类型，添加 events, summary, quality 字段
+// 更新图谱数据类型，添加 events, summary, quality 字段
 
 export interface GraphData {
   nodes: GraphNode[];
@@ -343,14 +314,9 @@ export interface GraphEventsPageResponse {
   page_info: GraphEventsPageInfo;
 }
 
-// ============================================================
 // Timeline
-// ============================================================
 
-// 创建时间: 2026-04-05
-// 创建者: GLM-5
-// 任务: Phase 2-B 叙事时间轴
-// 说明: 更新 Timeline 类型定义，与后端 API 响应结构对齐
+// 更新 Timeline 类型定义，与后端 API 响应结构对齐
 
 export interface TimelineMeta {
   novel_id: string;
@@ -432,9 +398,7 @@ export interface TimelineResponse {
   tension_curve?: number[];
 }
 
-// ============================================================
 // Metrics
-// ============================================================
 
 export interface NarrativeStructureMetrics {
   act1_ratio?: number;
@@ -476,17 +440,13 @@ export interface StyleStatsMetrics {
   dialogue_ratio: number;
 }
 
-// ============================================================
 // Common
-// ============================================================
 
 export interface ApiError {
   detail: string;
 }
 
-// ============================================================
 // Pagination
-// ============================================================
 
 export interface PaginatedResponse<T> {
   items: T[];

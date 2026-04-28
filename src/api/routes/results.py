@@ -1,28 +1,5 @@
 """
-创建时间: 2026-03-11
-创建者: Claude
-任务: API 路由 - 结果导出
 说明: 提供分析结果导出和查询接口
-
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: refactor-routes-use-repository
-修改内容: 重构为使用 Repository 模式，所有路由添加 run_id 参数支持
-
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: postgresql-migration
-修改内容: 移除 has_db/get_db_path 等 SQLite 特有方法，使用单一 PostgreSQL 数据库
-
-修改时间: 2026-03-28
-修改者: TraeAI
-任务: consolidate-codebase-architecture
-修改内容: 使用 ResultsExportService 简化路由层
-
-修改时间: 2026-03-30
-修改者: CodeBuddy
-任务: refactor-session-management
-修改内容: 统一使用 FastAPI Depends 注入模式，删除手动 session 管理
 """
 
 from __future__ import annotations
@@ -79,13 +56,7 @@ READABLE_RUN_STATUSES = ("completed", "aggregated", "diagnosed")
 
 def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict[str, Any]:
     """
-    校验 run_id 存在且属于当前小说。
-
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    新建原因: 结果接口此前只解析了 `task_id -> run_id`，却没有统一校验
-    URL 里的 `novel_id` 与该 run 的归属关系，导致跨小说 task_id 仍可能读到结果。
+    校验 run_id 存在且属于当前小说
     """
     run_repo = RunRepository(session)
     run = run_repo.get_run(run_id)
@@ -103,22 +74,15 @@ def _require_run_for_novel(session: Session, novel_id: str, run_id: str) -> dict
 
 
 def _require_readable_run_status(run: dict[str, Any]) -> None:
-    """
-    2026-04-27，任务：graph run-state gate fixes
-    新建原因：graph 与 results/timeline 一样只允许读取终态 run，不能把未完成任务拆成另一套半图语义。
-    """
     if run["status"] not in READABLE_RUN_STATUSES:
         raise AnalysisNotCompleteError(f"分析未完成，当前状态: {run['status']}")
 
 
 def _raise_rerun_required_for_focus_contract(diagnosis: DiagnosisResult) -> None:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-compat-cleanup
     说明: 当前分支已经明确不兼容旧 diagnosis 合同；
     只要结果读取命中 rerun-required diagnosis，就应在 API 层显式中止，
-    不能继续把旧 run 包装成“成功但无焦点数据”的静默降级结果。
+    不能继续把旧 run 包装成“成功但无焦点数据”的静默降级结果
     """
     raise HTTPException(
         status_code=409,
@@ -139,12 +103,9 @@ def _fetch_and_require_valid_diagnosis(
     alias_map: dict[str, str] | None = None,
 ) -> DiagnosisResult:
     """
-    创建时间: 2026-04-27
-    创建者: Codex
-    任务: protagonist-focus-contract-final-gates
     说明: 部分结果接口虽然不直接返回 diagnosis，但它们的页面语义已经依赖
     新焦点合同是否有效；这里统一在路由层短路旧 run，避免不同页面对同一 run
-    同时出现“需要重跑”和“还能继续看”的分裂状态。
+    同时出现“需要重跑”和“还能继续看”的分裂状态
     """
     diagnosis = _fetch_diagnosis(
         run_id,
@@ -235,15 +196,6 @@ async def get_results(
     session: Annotated[Session, Depends(get_db_session)],
     novel_service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> ResultsWriteResponse:
-    """
-    2026-03-12: Claude修改，检查任务状态是否为completed，如果任务未完成，抛出AnalysisNotCompleteError
-    2026-03-13: TraeAI重构，提取数据获取和响应构建逻辑到独立函数
-    2026-03-14: TraeAI重构，使用 Repository 模式
-    2026-03-15: TraeAI重构，移除 has_db/get_db_path 等 SQLite 特有方法
-    2026-03-17: TraeAI重构，将task_id改为run_id，使用完整UUID查询
-    2026-03-19: TraeAI重构，将run_id参数改为task_id，内部转换为run_id
-    2026-03-30: CodeBuddy重构，使用 Depends 注入 session
-    """
     run = _require_run_for_novel(session, novel_id, run_id)
 
     _require_readable_run_status(run)
@@ -278,7 +230,6 @@ def _build_results_response(
     file_path: str, novel_id: str, novel_name: str | None, missing_fields: list[str]
 ) -> ResultsWriteResponse:
     """
-    2026-03-13: TraeAI创建，任务refactor-api-layer-functions
     构建结果响应对象
     """
     return ResultsWriteResponse(
@@ -313,11 +264,6 @@ async def get_chunk_curves(
 ) -> list:
     """
     获取分块曲线数据（情绪 + 节奏）
-
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: fuse-display-emotion-curve
-    修改内容: 返回展示层融合后的单曲线结果，保持前端仍只消费一个 chunk_curves 接口
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -337,12 +283,7 @@ async def get_chunk_annotations(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list[ChunkAnnotationResponse]:
     """
-    获取分块标注与伏笔详情数据。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 暴露 chunk_annotations 结果接口，便于前端后续新增伏笔展示页直接消费强伏笔结构化字段。
+    获取分块标注与伏笔详情数据
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -364,17 +305,6 @@ async def get_characters(
 ) -> list:
     """
     获取角色统计数据
-
-    修改时间: 2026-03-27
-    修改者: TraeAI
-    任务: protagonist-score-fusion
-    修改内容: 先获取 diagnosis，传递 arc_scores 和 main_characters 给 _fetch_characters
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract
-    修改内容: 角色页改为消费 `focus_characters` + `narrative_focus_score`，
-    不再从 diagnosis.protagonist 推导唯一主角。
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -445,12 +375,9 @@ async def get_foreshadowing_threads(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> list[ForeshadowingThreadResponse]:
     """
-    获取跨 chunk 的 setup thread 台账。
+    获取跨 chunk 的 setup thread 台账
 
-    创建时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-setup-pool
-    说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用。
+    说明: 返回 full setup ledger + active 状态，供 diagnosis drill-down 与导出复用
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -465,13 +392,7 @@ async def get_graph(
     session: Annotated[Session, Depends(get_db_session)],
 ) -> dict:
     """
-    获取知识图谱快照。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract-review-fixes-round5
-    修改原因: 本分支已经明确旧 diagnosis 合同不再兼容；
-    图谱页也必须和 characters/topics/results 一样，命中失效 focus contract 时直接要求重跑。
+    获取知识图谱快照
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)
@@ -497,13 +418,7 @@ async def get_graph_events(
     events_limit: Annotated[int, Query(ge=1, le=GRAPH_PAGE_EVENT_LIMIT)] = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict:
     """
-    获取 graph page relation events 的增量分页结果。
-
-    修改时间: 2026-04-27
-    修改者: Codex
-    任务: protagonist-focus-contract-review-fixes-round5
-    修改原因: graph events 是 graph page 的同一结果链路；
-    旧 diagnosis 合同失效时，这里也必须统一走 rerun gate，不能继续把旧 run 当成可读分页结果。
+    获取 graph page relation events 的增量分页结果
     """
     run = _require_run_for_novel(session, novel_id, run_id)
     _require_readable_run_status(run)

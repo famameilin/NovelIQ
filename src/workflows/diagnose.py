@@ -1,25 +1,10 @@
 """
 诊断工作流模块
 
-创建时间: 2026-03-14
-创建者: TraeAI
-任务: 从 cli 层提取核心业务逻辑到 workflows 模块
-说明: 本文件从 src/cli/diagnose.py 提取核心业务逻辑，作为 workflows 模块的诊断工作流实现
+本文件从 src/cli/diagnose.py 提取核心业务逻辑，作为 workflows 模块的诊断工作流实现
 
-修改时间: 2026-03-14
-修改者: TraeAI
-任务: workflows 使用 Repository 模式重构
-修改内容: 添加 run_id/session 参数支持，使用 DiagnosisRepository/StatsRepository 替代直接调用 operations 函数
 
-修改时间: 2026-03-15
-修改者: TraeAI
-任务: storage-layer-decoupling
-修改内容: 移除向后兼容代码，只保留 Repository 模式
 
-修改时间: 2026-04-09
-修改者: TraeAI
-任务: 重构其他 workflow 为 async
-修改内容: run_diagnose 改为 async def，所有内部调用改为 await
 """
 
 from __future__ import annotations
@@ -46,10 +31,7 @@ def _setup_diagnose_callback(
     """
     设置诊断token回调
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 从 run_diagnose 中提取，负责设置token使用记录回调
+    从 run_diagnose 中提取，负责设置token使用记录回调
     """
 
     def _token_usage_callback(
@@ -87,10 +69,7 @@ def _log_diagnosis_results(result: CloudAnalysis) -> None:
     """
     输出诊断结果日志
 
-    创建时间: 2026-03-13
-    创建者: TraeAI
-    任务: refactor-cli-layer-functions
-    说明: 从 run_diagnose 中提取，负责输出诊断结果日志
+    从 run_diagnose 中提取，负责输出诊断结果日志
     """
     logger.info("\n=== Diagnosis Summary ===")
     logger.info(f"Novel ID: {result.novel_id}")
@@ -123,29 +102,9 @@ async def run_diagnose(
     """
     执行诊断流程
 
-    创建时间: 2025-03-11
-    创建者: TraeAI
-    任务: 诊断流程
 
-    修改时间: 2026-03-13
-    修改者: TraeAI
-    任务: refactor-cli-layer-functions
-    修改内容: 提取 token 回调设置为 _setup_diagnose_callback，提取日志输出为 _log_diagnosis_results
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    任务: workflows 使用 Repository 模式重构
-    修改内容: 添加 run_id/session 参数，支持 Repository 模式
 
-    修改时间: 2026-04-22
-    修改者: Codex
-    任务: fix-token-usage-unknown-novel-id
-    修改内容: 改为从 analysis_runs 获取 novel_id，禁止 diagnosis 链路再把 unknown 传播进 cloud_analysis / token_usage。
 
-    修改时间: 2026-04-25
-    修改者: Codex
-    任务: remove-diagnosis-cache-and-fix-interaction-persistence
-    修改内容: 删除未被主链实际复用的 diagnosis 结果缓存，
-              并把 run_id 显式传给 DiagnosisClient，确保 diagnose 调用能落库到 model_interactions。
 
     Args:
         run_id: 运行ID

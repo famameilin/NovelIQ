@@ -27,10 +27,10 @@ function getFocusStructureLabel(focusStructure?: "single" | "dual" | "ensemble")
 
 /**
  * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：统一诊断页角色阵容卡的容器和标签层次，让它与仪表盘卡片保持一致。
+ * 修改原因：统一诊断页角色阵容卡的容器和标签层次，让它与仪表盘卡片保持一致
  *
  * 2026-04-27，任务：protagonist-focus-contract
- * 修改原因：角色阵容卡改为展示焦点结构与焦点人物列表，不再假定 diagnosis 只会给出单个主角。
+ * 修改原因：角色阵容卡改为展示焦点结构与焦点人物列表，不再假定 diagnosis 只会给出单个主角
  */
 export function CharacterCastCard({
   focusStructure,

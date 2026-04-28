@@ -1,9 +1,6 @@
 """
 API 统一依赖注入模块
 
-创建时间: 2026-03-30
-创建者: CodeBuddy
-任务: refactor-session-management
 说明: 统一 FastAPI 依赖注入函数，替代手动 session 管理
 """
 
@@ -40,7 +37,7 @@ def _get_novel_service_instance() -> NovelService:
 
 def get_novel_service() -> NovelService:
     """
-    获取小说服务的依赖函数。
+    获取小说服务的依赖函数
 
     Returns:
         NovelService 实例
@@ -50,26 +47,20 @@ def get_novel_service() -> NovelService:
 
 def get_task_manager() -> TaskManager:
     """
-    获取任务执行缓存管理器单例。
+    获取任务执行缓存管理器单例
 
-    创建时间: 2026-04-22
-    创建者: Codex
-    任务: fix-novel-task-delete-consistency
     说明: TaskManager 仍只负责执行缓存；这里统一暴露依赖入口，
-          避免 novel/task 删除路径各自维护不同的单例来源。
+          避免 novel/task 删除路径各自维护不同的单例来源
     """
     return _task_manager
 
 
 def get_metrics_service() -> MetricsService:
     """
-    获取聚合指标服务单例。
+    获取聚合指标服务单例
 
-    创建时间: 2026-04-22
-    创建者: TraeAI
-    任务: metrics接口重复计算问题重构
     说明: MetricsService 提供聚合指标的统一获取和缓存，
-          消除重复计算和代码重复。
+          消除重复计算和代码重复
     """
     global _metrics_service_instance
     if _metrics_service_instance is None:
@@ -79,10 +70,10 @@ def get_metrics_service() -> MetricsService:
 
 def get_db_session() -> Generator[Session, None, None]:
     """
-    获取数据库会话的依赖函数。
+    获取数据库会话的依赖函数
 
-    使用 yield 模式确保 session 在使用后自动关闭。
-    这是 FastAPI 推荐的依赖注入模式。
+    使用 yield 模式确保 session 在使用后自动关闭
+    这是 FastAPI 推荐的依赖注入模式
 
     Yields:
         SQLAlchemy Session 实例
@@ -100,7 +91,7 @@ async def resolve_run_id(
     novel_service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> str:
     """
-    从 task_id 解析出 run_id，无效时抛 NovelNotFoundError (404)。
+    从 task_id 解析出 run_id，无效时抛 NovelNotFoundError (404)
 
     Args:
         task_id: 分析任务ID（run_id 的前8位）

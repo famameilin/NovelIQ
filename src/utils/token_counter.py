@@ -1,13 +1,10 @@
 """
 Token计数工具模块
 
-创建时间: 2026-03-17
-创建者: TraeAI
-任务: 使用tiktoken估算token数量
 说明: 为流式API提供token使用估算功能
 
-本模块提供基于tiktoken的token计数功能，支持多种模型编码器。
-对于中文内容，使用cl100k_base编码器（GPT-4/GPT-3.5-turbo使用的编码器）。
+本模块提供基于tiktoken的token计数功能，支持多种模型编码器
+对于中文内容，使用cl100k_base编码器（GPT-4/GPT-3.5-turbo使用的编码器）
 """
 
 from __future__ import annotations

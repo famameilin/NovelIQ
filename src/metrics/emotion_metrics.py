@@ -1,30 +1,11 @@
 """
 情感密度计算模块
 
-创建时间: 2025-03-11
-创建者: TraeAI
-任务: 预处理流程
-说明: 计算文本的情感密度指标。
+计算文本的情感密度指标
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 词表与张力信号系统重构 - Task 1
-修改内容: 启用 phrase 模式匹配，支持未登录词（如"冷笑""道心破碎"）
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 否定词翻转逻辑实现
-修改内容: 新增否定词加载、检测函数，更新 lexical_sentiment_density 支持否定词翻转
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 支持加权计数
-修改内容: 支持带权重的词典，使用 count_weighted_hits 计算加权密度
 
-修改时间: 2026-04-06
-修改者: GLM-5
-任务: 清理向后兼容代码
-修改内容: 移除 moving_average 函数、_normalize_to_weighted_dict 函数，参数类型改为 dict[str, int]
 """
 
 from __future__ import annotations
@@ -38,12 +19,9 @@ from .text_utils import tokenize_words
 
 def load_negation_words(filepath: str = "data/lexicons/negation_words.txt") -> set[str]:
     """
-    加载否定词表。
+    加载否定词表
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 否定词翻转逻辑实现
-    说明: 从文件加载否定词集合，跳过注释行和空行。
+    从文件加载否定词集合，跳过注释行和空行
 
     参数:
         filepath: 否定词表文件路径
@@ -67,12 +45,9 @@ def load_negation_words(filepath: str = "data/lexicons/negation_words.txt") -> s
 
 def find_negation_context(text: str, emotion_pos: int, negation_words: set[str], window: int = 3) -> bool:
     """
-    检测情感词前是否存在否定词。
+    检测情感词前是否存在否定词
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 否定词翻转逻辑实现
-    说明: 在情感词前 window 个字符范围内检测是否存在否定词。
+    在情感词前 window 个字符范围内检测是否存在否定词
 
     参数:
         text: 原始文本
@@ -102,12 +77,9 @@ def find_negation_context(text: str, emotion_pos: int, negation_words: set[str],
 
 def count_negations_before(text: str, emotion_pos: int, negation_words: set[str], window: int = 6) -> int:
     """
-    统计情感词前的否定词数量。
+    统计情感词前的否定词数量
 
-    创建时间: 2026-04-06
-    创建者: GLM-5
-    任务: 否定词翻转逻辑实现
-    说明: 在情感词前 window 个字符范围内统计否定词出现次数，用于双重否定检测。
+    在情感词前 window 个字符范围内统计否定词出现次数，用于双重否定检测
 
     参数:
         text: 原始文本
@@ -144,7 +116,7 @@ def lexical_sentiment_density(
     enable_negation: bool = True,
 ) -> dict[str, float]:
     """
-    计算词汇情感密度（支持否定词翻转和加权计数）。
+    计算词汇情感密度（支持否定词翻转和加权计数）
 
     使用 phrase 模式匹配，支持：
     - token 级匹配（如"快乐"）
@@ -162,30 +134,10 @@ def lexical_sentiment_density(
     返回:
         dict[str, float]: 包含 pos_density, neg_density, net_density
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 词表与张力信号系统重构 - Task 1
-    修改内容: 从 count_token_hits 改为 count_mixed_hits，启用 phrase 模式
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 否定词翻转逻辑实现
-    修改内容: 集成否定词翻转逻辑，单重否定翻转极性，双重否定还原极性
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 支持加权计数
-    修改内容: 支持带权重的词典，使用 count_weighted_hits 计算加权密度
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 清理向后兼容代码
-    修改内容: 参数类型改为 dict[str, int]，移除 Iterable[str] 支持
 
-    修改时间: 2026-04-21
-    修改者: Codex
-    任务: fix-emotion-curve-weighting
-    修改内容: 允许浮点权重参与密度计算，避免多 genre 加权后被整型截断
     """
     if not text:
         return {"pos_density": 0.0, "neg_density": 0.0, "net_density": 0.0}
@@ -231,17 +183,9 @@ def lexical_sentiment_density(
 
 def pos_neg_ratio(text: str, pos_terms: dict[str, int], neg_terms: dict[str, int]) -> float:
     """
-    计算正负情感词比例。
+    计算正负情感词比例
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 词表与张力信号系统重构 - Task 1
-    修改内容: 从 count_token_hits 改为 count_mixed_hits，启用 phrase 模式
 
-    修改时间: 2026-04-06
-    修改者: GLM-5
-    任务: 清理向后兼容代码
-    修改内容: 参数类型改为 dict[str, int]
     """
     if not text:
         return 0.0

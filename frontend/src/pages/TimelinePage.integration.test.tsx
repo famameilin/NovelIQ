@@ -18,7 +18,7 @@ const navigateMock = vi.fn();
 let currentTimelineSearchParams = "task_id=task-integration&selected_chunk=8&relation_event_id=31";
 let currentTimelineNovelId = "novel-1";
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。集成测试保留真实 timeline 组件，仅替换动画属性。
+// 2026-04-23，任务：复杂度与耦合审查 P2。集成测试保留真实 timeline 组件，仅替换动画属性
 function motionElement(tagName: string) {
   const Component = (props: {
     children?: ReactNode;
@@ -82,7 +82,7 @@ vi.mock("@/api/analysis", () => ({
   getAnalysisTasks: (...args: unknown[]) => getAnalysisTasksMock(...args),
 }));
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。创建独立 QueryClient，验证页面级组件真实组合。
+// 2026-04-23，任务：复杂度与耦合审查 P2。创建独立 QueryClient，验证页面级组件真实组合
 function renderTimelinePage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -96,7 +96,7 @@ function renderTimelinePage() {
   );
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation node 的时间轴响应，覆盖图谱联动路径。
+// 2026-04-23，任务：复杂度与耦合审查 P2。构造含 relation node 的时间轴响应，覆盖图谱联动路径
 function createTimelineResponse(): TimelineResponse {
   return {
     meta: {
@@ -163,8 +163,8 @@ function createTimelineResponse(): TimelineResponse {
   };
 }
 
-// 2026-04-27，任务：fix-timeline-selected-node-relation-event-conflict。
-// 构造两个 relation 节点，验证 selected_node_id 与 relation_event_id 冲突时页面不会把错误事件带回图谱。
+// 2026-04-27，任务：fix-timeline-selected-node-relation-event-conflict
+// 构造两个 relation 节点，验证 selected_node_id 与 relation_event_id 冲突时页面不会把错误事件带回图谱
 function createConflictingTimelineResponse(): TimelineResponse {
   return {
     ...createTimelineResponse(),
@@ -217,7 +217,7 @@ function createConflictingTimelineResponse(): TimelineResponse {
   };
 }
 
-// 2026-04-23，任务：复杂度与耦合审查 P2。构造真实 NovelHeader 查询所需小说对象。
+// 2026-04-23，任务：复杂度与耦合审查 P2。构造真实 NovelHeader 查询所需小说对象
 function createNovel(): Novel {
   return {
     novel_id: "novel-1",

@@ -1,15 +1,7 @@
 """
 分析阶段执行服务
 
-创建时间: 2026-04-07
-创建者: GLM-5
-任务: AnalysisService 重构 - 提取阶段执行职责
 说明: 负责执行分析的各个阶段（预处理、标注、聚合、主题建模、诊断）
-
-修改时间: 2026-04-09
-创建者: GLM-5
-任务: refactor/sse-unified-event-bus
-修改内容: emitter (StreamEvent 统一回调)
 """
 
 from __future__ import annotations
@@ -106,16 +98,6 @@ class StageExecutor:
     ) -> None:
         """
         执行诊断阶段
-
-        修改时间: 2026-04-08
-        修改者: TraeAI
-        任务: 修复诊断交互记录未保存问题
-        修改内容: 创建 DiagnosisClient 时传递 session 参数
-
-        修改时间: 2026-04-20
-        修改者: Codex (GPT-5)
-        任务: remove-compat-layers
-        修改内容: 删除 ConfiguredCloudModelClient 兼容壳，诊断阶段直接使用 DiagnosisClient。
         """
         from src.models.diagnosis import DiagnosisClient
         from src.workflows import run_diagnose

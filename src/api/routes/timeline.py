@@ -1,25 +1,7 @@
 """
-叙事时间轴 API 路由。
+叙事时间轴 API 路由
 
-创建时间: 2026-03-30
-创建者: CodeBuddy
-任务: 实现叙事时间轴功能
 说明: 提供时间轴数据查询接口，支持四阶段划分、节点筛选和张力曲线
-
-修改时间: 2026-04-27
-修改者: Codex
-任务: 时间轴合同重构
-修改内容:
-- 改为直接消费新的 build_timeline_plan() 结果
-- 删除 route-owned relation enrichment，统一使用 shared timeline contract
-- 时间轴节点响应切换到 node_id / anchor_chunk_id 新结构
-
-修改时间: 2026-04-28
-修改者: Codex
-任务: 时间轴合同重构第二轮
-修改内容:
-- API 响应升级为 `composite_nodes + atomic_nodes` 双层节点结构
-- route 不再按 `max_level` 裁剪节点，默认展示密度交给前端本地筛选
 """
 
 from __future__ import annotations
@@ -84,10 +66,10 @@ async def get_timeline(
     include_curve: Annotated[bool, Query(description="是否包含张力曲线数据")] = False,
 ) -> TimelineResponse:
     """
-    获取叙事时间轴数据。
+    获取叙事时间轴数据
 
     时间轴节点由 authority-backed timeline plan 直接生成，route 不再维护
-    route-owned relation locator 补丁，避免 shared/export/frontend 再次漂移。
+    route-owned relation locator 补丁，避免 shared/export/frontend 再次漂移
     """
 
     novels = service.list_novels()

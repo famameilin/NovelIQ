@@ -1,14 +1,5 @@
 """
-创建时间: 2026-03-12
-创建者: TraeAI
-任务: 项目文件结构整理与拆解 - 从 settings.py 拆分分析相关配置类
-
-本模块包含分析相关的配置数据类。
-
-修改时间: 2026-04-20
-修改者: Codex
-任务: refactor-role-based-model-client-names
-修改内容: 将 cloud_annotation_fallback_enabled 重命名为 annotation_fallback_enabled，强调它控制的是标注兜底角色
+本模块包含分析相关的配置数据类
 """
 
 from __future__ import annotations
@@ -37,11 +28,6 @@ class ChunkingSettings:
 class DatabaseSettings:
     """
     PostgreSQL 数据库连接池配置
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: postgresql-migration-cleanup
-    修改内容: 移除 SQLite 特有配置，替换为 PostgreSQL 连接池配置
     """
 
     pool_size: int = 5
@@ -56,9 +42,6 @@ class StageProgressRange:
     """
     阶段进度范围配置
 
-    创建时间: 2026-04-08
-    创建者: TraeAI
-    任务: 统一前后端进度配置
     说明: 定义每个阶段的进度百分比范围 [start, end]
     """
 
@@ -70,11 +53,6 @@ class StageProgressRange:
 class ProgressSettings:
     """
     分析进度配置
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: 统一前后端进度配置
-    修改内容: 将单一进度值改为范围配置，支持更精确的进度计算
     """
 
     preprocess: StageProgressRange = field(default_factory=lambda: StageProgressRange(0, 10))
@@ -88,31 +66,6 @@ class ProgressSettings:
 class MultiPhaseAnnotationSettings:
     """
     多阶段标注配置
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: 移除单次调用模式，仅保留双次调用
-    修改内容: 移除 enabled 字段，保留 parallel 字段控制并行/串行执行模式
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: rename-two-phase-to-multi-phase
-    修改内容: 重命名为 MultiPhaseAnnotationSettings
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 新增 include_phase2_evidence 开关，支持对 Phase2 共享 evidence 做 targeted ablation，
-    默认关闭，确保热路径先满足 current-text-only 的强伏笔边界。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    修改内容: 新增 active_setup_pool_limit，让 setup 池上限改为 settings 可配置项。
     """
 
     parallel: bool = False
@@ -124,19 +77,6 @@ class MultiPhaseAnnotationSettings:
 class AnalysisSettings:
     """
     分析配置
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    修改内容: 添加双次调用标注配置
-    - multi_phase_annotation: 多阶段标注配置
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    修改内容: 添加有效层级关系类型配置
-
-    修改时间: 2026-03-31
-    修改者: TraeAI
-    修改内容: 统一关系配置为valid_relation_types(中文)
     """
 
     incremental_disambig_interval: int = 10
@@ -221,11 +161,6 @@ class TopicModelSettings:
 class TextLimitsSettings:
     """
     文本截断限制配置
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: 移除未使用的 summary 配置
-    修改内容: 移除 summary 字段，该字段仅用于已删除的 build_cloud_payload 函数
     """
 
     pivot_block: int = 300
@@ -252,11 +187,6 @@ class DiagnosisSettings:
 class MetricsSettings:
     """
     指标计算配置
-
-    修改时间: 2026-04-07
-    修改者: GLM-5
-    任务: 张力曲线傅里叶平滑 - 配置抽离
-    修改内容: 添加 fourier_smooth_keep_ratio 参数
     """
 
     mtld_threshold: float = 0.72
@@ -308,11 +238,6 @@ def _parse_chunking_settings(data: dict[str, Any] | None) -> ChunkingSettings:
 def _parse_database_settings(data: dict[str, Any] | None) -> DatabaseSettings:
     """
     解析数据库配置
-
-    修改时间: 2026-03-16
-    修改者: TraeAI
-    任务: postgresql-migration-cleanup
-    修改内容: 替换为 PostgreSQL 连接池配置解析
     """
     if not data:
         return DatabaseSettings()
@@ -332,10 +257,6 @@ def _parse_stage_progress_range(
 ) -> StageProgressRange:
     """
     解析阶段进度范围配置
-
-    创建时间: 2026-04-08
-    创建者: TraeAI
-    任务: 统一前后端进度配置
     """
     if data is None:
         return StageProgressRange(default_start, default_end)
@@ -348,11 +269,6 @@ def _parse_stage_progress_range(
 def _parse_progress_settings(data: dict[str, Any] | None) -> ProgressSettings:
     """
     解析进度配置
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: 统一前后端进度配置
-    修改内容: 支持解析范围配置
     """
     if not data:
         return ProgressSettings()
@@ -368,31 +284,6 @@ def _parse_progress_settings(data: dict[str, Any] | None) -> ProgressSettings:
 def _parse_multi_phase_annotation_settings(data: dict[str, Any] | None) -> MultiPhaseAnnotationSettings:
     """
     解析多阶段标注配置
-
-    创建时间: 2026-03-14
-    创建者: TraeAI
-    任务: Chunk 双次调用分析拆分
-
-    修改时间: 2026-03-21
-    修改者: TraeAI
-    任务: 移除单次调用模式，仅保留双次调用
-    修改内容: 删除 enabled 字段解析
-
-    修改时间: 2026-03-22
-    修改者: TraeAI
-    任务: rename-two-phase-to-multi-phase
-    修改内容: 重命名为 _parse_multi_phase_annotation_settings
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 解析 include_phase2_evidence，默认关闭共享 evidence 注入，
-    只在显式配置时启用 targeted ablation。
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: fix-phase2-setup-pool-review-findings
-    修改内容: 解析 active_setup_pool_limit，并对非法非正值回退到默认 30。
     """
     if not data:
         return MultiPhaseAnnotationSettings()
@@ -413,19 +304,6 @@ def _parse_multi_phase_annotation_settings(data: dict[str, Any] | None) -> Multi
 def _parse_analysis_settings(data: dict[str, Any] | None) -> AnalysisSettings:
     """
     解析分析配置
-
-    修改时间: 2026-03-14
-    修改者: TraeAI
-    修改内容: 添加双次调用标注配置解析
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    修改内容: 添加有效层级关系类型配置解析
-
-    修改时间: 2026-04-20
-    修改者: Codex
-    任务: refactor-role-based-model-client-names
-    修改内容: 将 cloud_annotation_fallback_enabled 重命名为 annotation_fallback_enabled
     """
     if not data:
         return AnalysisSettings()
@@ -511,11 +389,6 @@ def _parse_topic_model_settings(data: dict[str, Any] | None) -> TopicModelSettin
 def _parse_diagnosis_settings(data: dict[str, Any] | None) -> DiagnosisSettings:
     """
     解析诊断配置
-
-    修改时间: 2026-04-08
-    修改者: TraeAI
-    任务: 移除未使用的 summary 配置
-    修改内容: 移除 summary 参数解析
     """
     if not data:
         return DiagnosisSettings()
@@ -543,11 +416,6 @@ def _parse_diagnosis_settings(data: dict[str, Any] | None) -> DiagnosisSettings:
 def _parse_metrics_settings(data: dict[str, Any] | None) -> MetricsSettings:
     """
     解析指标配置
-
-    修改时间: 2026-04-07
-    修改者: GLM-5
-    任务: 张力曲线傅里叶平滑 - 配置抽离
-    修改内容: 添加 fourier_smooth_keep_ratio 解析
     """
     if not data:
         return MetricsSettings()

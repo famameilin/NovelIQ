@@ -1,18 +1,5 @@
 """
-创建时间: 2026-03-18
-创建者: TraeAI
-任务: code-quality-refactor - Task 8 拆分annotation_client
 说明: Phase1/Phase2标注逻辑
-
-修改时间: 2026-03-29
-修改者: TraeAI
-任务: refactor-phase1-identity-extraction
-修改内容: 移除 character_appearances 参数
-
-修改时间: 2026-03-29
-修改者: TraeAI
-任务: simplify-phase1-prompt
-修改内容: 移除 Phase1 的 prev_chunk_text 和 next_chunk_text 参数
 """
 
 from __future__ import annotations
@@ -38,20 +25,6 @@ def build_phase1_messages(
 ) -> list[dict]:
     """
     构建Phase1消息
-
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: refactor-phase1-identity-extraction
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     return _build_annotation_messages_v2(
         text=text,
@@ -81,16 +54,6 @@ def build_phase2_messages(
 ) -> list[dict]:
     """
     构建Phase2消息
-
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-
-    修改时间: 2026-04-26
-    修改者: Codex
-    任务: phase2-strong-foreshadowing
-    修改内容: 与 Phase2 主链保持一致，默认走 current-text-only 输入边界；
-    共享 evidence 仅在显式 opt-in 时注入。
     """
     return _build_foreshadowing_messages(
         text=text,
@@ -114,24 +77,6 @@ def build_validation_sources(
 ) -> dict:
     """
     构建验证来源字典
-
-    创建时间: 2026-03-18
-    创建者: TraeAI
-    任务: code-quality-refactor - Task 8 拆分annotation_client
-
-    修改时间: 2026-03-19
-    修改者: TraeAI
-    任务: 统一字段命名，使用 prev_chunk_text 和 next_chunk_text
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: refactor-phase1-identity-extraction
-    修改内容: 移除 character_appearances 参数
-
-    修改时间: 2026-03-29
-    修改者: TraeAI
-    任务: simplify-phase1-prompt
-    修改内容: 移除 prev_chunk_text 和 next_chunk_text 参数
     """
     return {
         "text": text,
