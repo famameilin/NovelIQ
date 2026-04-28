@@ -160,6 +160,9 @@ def fetch_character_data(
     )
 
 
+# 2026-04-28，任务：统一关系图谱密度口径。
+# 修改原因：aggregate 之前只看有边的节点，导致孤立参与者不会进入密度分母，
+# 和 graph page 基于整张参与者子图的展示口径对不上。
 def fetch_relation_data(
     annotation_repo: AnnotationRepository,
     run_id: str,
@@ -174,6 +177,7 @@ def fetch_relation_data(
         full_relations=[
             (event.from_name, event.to_name, event.relation_type, event.change_type) for event in relation_events
         ],
+        participant_names=[state.name for state in graph_view.participant_states if state.name],
     )
 
 

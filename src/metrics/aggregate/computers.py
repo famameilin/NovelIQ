@@ -126,6 +126,9 @@ def compute_emotion_curve_metrics(
     }
 
 
+# 2026-04-28，任务：统一关系图谱密度口径。
+# 修改原因：人物聚合指标里的 `network_density` 需要和 graph page 共享同一批参与者，
+# 避免孤点被排除后把密度抬高。
 def compute_character_relation_metrics(
     relation_data: RelationData,
     char_data: CharacterData,
@@ -135,7 +138,10 @@ def compute_character_relation_metrics(
     relation_input = relation_data.relations
     relation_graph = build_character_graph(relation_input) if relation_input else None
     result: dict[str, Any] = {
-        "network_density": compute_relation_network_density(relation_input, graph=relation_graph),
+        "network_density": compute_relation_network_density(
+            relation_input,
+            node_names=relation_data.participant_names,
+        ),
         "antagonist_strength_gap": compute_antagonist_strength_gap(char_data.characters),
         "average_clustering": compute_average_clustering(relation_input, graph=relation_graph),
         "num_connected_components": float(compute_number_of_connected_components(relation_input, graph=relation_graph)),

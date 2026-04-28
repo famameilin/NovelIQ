@@ -58,12 +58,12 @@ export function GraphOverviewSection({
           accent="chart-2"
         />
         <MetricCard
-          label="网络紧密度"
+          label="网络密度"
           value={graphSummary?.density ?? 0}
           format="raw"
           decimals={4}
           icon={<Activity className="h-5 w-5" />}
-          description="角色之间连接的紧密程度"
+          description="关系是否集中在少数核心角色身上"
           accent="chart-4"
         />
         <MetricCard

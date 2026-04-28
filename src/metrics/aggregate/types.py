@@ -59,6 +59,7 @@ class RelationData:
 
     relations: list[tuple[str, str]]
     full_relations: list[tuple[str, str, str, str]]
+    participant_names: list[str] = field(default_factory=list)
 
 
 @dataclass

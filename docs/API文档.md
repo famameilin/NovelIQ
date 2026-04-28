@@ -1194,6 +1194,9 @@ GET /api/novels/10960c77/metrics/emotion-stats?task_id=a1b2c3d4
 
 获取人物统计聚合指标。
 
+> 说明：`network_density` 字段名保持兼容，但当前口径表示**关系集中度**（degree centralization），
+> 基于图谱当前参与者与当前有效关系计算，不再表示旧版 `networkx.density(G)` 图论密度。
+
 **查询参数**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -1207,7 +1210,7 @@ GET /api/novels/10960c77/metrics/character-stats?task_id=a1b2c3d4
 **响应示例**:
 ```json
 {
-  "network_density": 0.32,
+  "network_density": 0.25,
   "degree_centrality": {
     "贺重明": 0.85,
     "侯飞白": 0.72,

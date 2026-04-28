@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from src.relation_network_metrics import summarize_relation_network
+
 from .types import (
     ConfirmedRelation,
     GraphConflictSample,
@@ -20,17 +22,19 @@ GRAPH_PAGE_CORE_CHARACTER_LIMIT = 5
 GRAPH_PAGE_KEY_RELATION_LIMIT = 5
 
 
+# 2026-04-28，任务：将“网络密度”改为关系集中度口径。
+# 修改原因：graph page 顶部指标要和用户看到的关系结构一致，因此这里改成
+# 基于唯一人物对关系的集中度统计，而不是继续输出旧的图论密度。
 def build_graph_shared_summary(
     participant_states: list[ParticipantState],
     confirmed_relations: list[ConfirmedRelation],
 ) -> GraphSharedSummary:
     """Compute aggregate-only graph summary counters for shared downstream consumers"""
 
-    node_count = len(participant_states)
-    edge_count = len(confirmed_relations)
-    density = 0.0
-    if node_count > 1:
-        density = float(edge_count) / float(node_count * (node_count - 1))
+    node_count, edge_count, density = summarize_relation_network(
+        [(relation.from_name, relation.to_name) for relation in confirmed_relations],
+        node_names=[state.name for state in participant_states if state.name],
+    )
 
     return GraphSharedSummary(
         node_count=node_count,
