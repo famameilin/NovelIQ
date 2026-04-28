@@ -45,6 +45,12 @@ FastAPI 应用入口模块
 修改者: Codex
 任务: fix-phase2-setup-pool-review-findings
 修改内容: shutdown 时不再取消运行中的分析任务，避免正常停服被误记为“用户取消”
+
+修改时间: 2026-04-28
+修改者: Codex
+任务: fix-startup-schema-guard-boundary
+修改内容: 将数据库 schema 校验与孤儿任务恢复拆开处理，确保 focus-contract
+          fail-closed 异常不会被误降级成 zombie cleanup warning。
 """
 
 from __future__ import annotations
@@ -121,11 +127,14 @@ async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
 
     # 中文注释：当前仓库以最新 schema 为唯一真相，启动时只初始化缺失表，
-    # 然后再做孤儿任务恢复。
-    try:
-        from src.storage.db import init_db
+    # 其中 schema guard 失败必须直接阻断启动，不能被误记成“僵尸任务清理失败”。
+    from src.storage.db import init_db
 
-        init_db()
+    init_db()
+
+    # 中文注释：真正允许降级的只有孤儿任务恢复链路；
+    # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误。
+    try:
         failed_count, cancelled_count = _recover_orphaned_tasks()
         scheduled_pending_count, cancelled_pending_count = await _resume_pending_tasks()
         if failed_count > 0:
