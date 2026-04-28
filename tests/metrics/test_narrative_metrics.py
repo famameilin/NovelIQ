@@ -11,6 +11,7 @@ from src.metrics.narrative_metrics import (
     compute_middle_collapse_index,
     compute_three_act_ratio,
     compute_three_act_ratio_by_tension,
+    find_dominant_climax_peak,
     find_global_peak,
     find_local_peaks,
     find_valley_before_peak,
@@ -93,6 +94,18 @@ class TestThreeActRatioByTension(unittest.TestCase):
         total = sum(result.values())
         self.assertAlmostEqual(total, 1.0, places=3)
 
+    def test_multi_peak_curve_prefers_late_dominant_climax(self) -> None:
+        tension_scores = [0.2] * 255
+        tension_scores[5] = 0.95
+        tension_scores[112] = 0.01
+        tension_scores[174] = 0.90
+
+        result = compute_three_act_ratio_by_tension(tension_scores)
+
+        self.assertAlmostEqual(result["act1_ratio"], 0.4392, places=4)
+        self.assertAlmostEqual(result["act2_ratio"], 0.2431, places=4)
+        self.assertAlmostEqual(result["act3_ratio"], 0.3176, places=4)
+
 
 class TestFindGlobalPeak(unittest.TestCase):
     def test_empty_scores(self) -> None:
@@ -110,6 +123,22 @@ class TestFindGlobalPeak(unittest.TestCase):
     def test_peak_at_middle(self) -> None:
         result = find_global_peak([0.1, 0.9, 0.2])
         self.assertEqual(result, 1)
+
+
+class TestFindDominantClimaxPeak(unittest.TestCase):
+    def test_returns_global_peak_when_curve_has_no_local_peak(self) -> None:
+        result = find_dominant_climax_peak([0.1, 0.2, 0.3, 0.4, 0.5])
+        self.assertEqual(result, 4)
+
+    def test_prefers_late_peak_over_early_stronger_spike(self) -> None:
+        scores = [0.2] * 255
+        scores[5] = 0.95
+        scores[112] = 0.01
+        scores[174] = 0.90
+
+        result = find_dominant_climax_peak(scores)
+
+        self.assertEqual(result, 174)
 
 
 class TestFindValleyBeforePeak(unittest.TestCase):
