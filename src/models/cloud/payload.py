@@ -13,10 +13,10 @@ from src.storage.repositories.diagnosis_repository import DiagnosisRepository
 
 def _build_graph_signal_payload(conn: Session, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """
-    构建 diagnosis 允许复用的共享 graph signals。
+    构建 diagnosis 允许复用的共享 graph signals
 
     diagnosis payload 只搬运 GraphAuthorityReport 的白名单字段，
-    不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入。
+    不在这里推导 graph diagnosis 结论，也不允许 page-only 字段渗入
     """
 
     graph_report = KnowledgeGraphAuthorityService.from_session(conn).build_graph_report(run_id)
@@ -156,7 +156,7 @@ def build_diagnosis_payload(conn: Session, novel_id: str | None = None, run_id: 
 
 def _get_total_topic_count(run_id: str, repo: DiagnosisRepository) -> int:
     """
-    获取实际主题总数（用于判断 LLM 需要命名多少个主题）。
+    获取实际主题总数（用于判断 LLM 需要命名多少个主题）
 
     单书模式（~25 个）：全部发给 LLM，全部需要命名
     多书模式（100+ 个）：只发头部，LLM 只需命名发送的那些

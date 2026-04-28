@@ -17,8 +17,8 @@ class BaseRepository[T]:
     """
     Repository 基类
 
-    所有 Repository 实现类的基类，封装数据库连接。
-    使用泛型 T 表示操作的实体类型。
+    所有 Repository 实现类的基类，封装数据库连接
+    使用泛型 T 表示操作的实体类型
 
     从 sqlite3.Connection 迁移到 SQLAlchemy Session
     """

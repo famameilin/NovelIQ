@@ -25,10 +25,10 @@ class CloudAnalysis(Base):
 
     存储云端模型的分析结果
 
-    为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表。
+    为 novel_id 补充到 novels 表的外键约束，避免诊断结果脱离小说主表
 
     废弃旧 `protagonist` 单主角列，新增 `focus_structure` / `focus_characters`
-    以持久化 single / dual / ensemble 三类叙事焦点结构。
+    以持久化 single / dual / ensemble 三类叙事焦点结构
     """
 
     __tablename__ = "cloud_analysis"
@@ -134,7 +134,7 @@ class GlobalContext(Base):
 
     存储小说的全局上下文信息
 
-    为 novel_id 补充到 novels 表的外键约束，确保全局上下文不会脱离小说主表。
+    为 novel_id 补充到 novels 表的外键约束，确保全局上下文不会脱离小说主表
     """
 
     __tablename__ = "global_context"
@@ -201,7 +201,7 @@ class StageSummary(Base):
     修正主键为 stage_id 以匹配数据库实际结构
 
     删除与列级 ForeignKey 重复的同义 ForeignKeyConstraint，
-    避免 ORM 元数据重复声明同一条 run_id -> analysis_runs.run_id 外键。
+    避免 ORM 元数据重复声明同一条 run_id -> analysis_runs.run_id 外键
     """
 
     __tablename__ = "stage_summaries"

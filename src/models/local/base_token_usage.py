@@ -1,7 +1,7 @@
 """
-BaseModelClient token 记账辅助模块。
+BaseModelClient token 记账辅助模块
 
-说明: 从 base.py 中拆出 token 使用量估算、补记与 novel_id 解析逻辑。
+说明: 从 base.py 中拆出 token 使用量估算、补记与 novel_id 解析逻辑
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from src.utils.token_counter import count_messages_tokens, count_tokens
 
 def resolve_token_usage_novel_id(client: Any, call_type: str) -> str | None:
     """
-    解析 token 记账使用的 novel_id。
+    解析 token 记账使用的 novel_id
     """
     novel_id = getattr(client, "_novel_id", None)
     if novel_id:
@@ -30,7 +30,7 @@ def resolve_token_usage_novel_id(client: Any, call_type: str) -> str | None:
 
 def extract_reasoning_tokens(response: Any) -> int | None:
     """
-    从响应对象中提取 reasoning token 数。
+    从响应对象中提取 reasoning token 数
     """
 
     def _read_attr_or_key(obj: Any, name: str) -> Any:
@@ -54,7 +54,7 @@ def extract_reasoning_tokens(response: Any) -> int | None:
 
 def record_token_usage(client: Any, response: Any, call_type: str, chunk_id: int | None = None) -> None:
     """
-    记录 provider 返回的 token 用量。
+    记录 provider 返回的 token 用量
     """
     resolved_novel_id = resolve_token_usage_novel_id(client, call_type)
     if resolved_novel_id is None:
@@ -81,7 +81,7 @@ def record_token_usage_estimated(
     chunk_id: int | None = None,
 ) -> None:
     """
-    写入估算 token 用量。
+    写入估算 token 用量
     """
     resolved_novel_id = resolve_token_usage_novel_id(client, call_type)
     if resolved_novel_id is None:
@@ -110,7 +110,7 @@ def record_estimated_token_usage_from_messages(
     model_name: str | None = None,
 ) -> None:
     """
-    基于 prompt/response 文本统一记录估算 token。
+    基于 prompt/response 文本统一记录估算 token
     """
     if not client._token_usage_callback:
         return
@@ -132,7 +132,7 @@ def record_estimated_token_usage_from_messages(
     total_tokens = prompt_tokens + completion_tokens
 
     # 这里显式传 model/task_type，避免共享 callback 再偷用 annotation client
-    # 的模型名，把 disambiguation / fallback / embedding 的账混写到同一个 model 维度。
+    # 的模型名，把 disambiguation / fallback / embedding 的账混写到同一个 model 维度
     client._token_usage_callback(
         resolved_novel_id,
         task_type or client._task_type,
@@ -147,7 +147,7 @@ def record_estimated_token_usage_from_messages(
 
 def extract_response_text_for_token_usage(client: Any, response: Any) -> str:
     """
-    从响应对象中提取可用于 token 估算的文本。
+    从响应对象中提取可用于 token 估算的文本
     """
     if response is None or not hasattr(response, "choices") or not response.choices:
         return ""
@@ -172,7 +172,7 @@ def record_estimated_token_usage_from_response(
     model_name: str | None = None,
 ) -> None:
     """
-    基于响应对象补记统一估算 token。
+    基于响应对象补记统一估算 token
     """
     response_text = extract_response_text_for_token_usage(client, response)
     record_estimated_token_usage_from_messages(

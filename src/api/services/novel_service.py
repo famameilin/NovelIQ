@@ -3,7 +3,7 @@
 
 修改历史:
 
-说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储小说元数据和分析任务。
+说明: 管理小说文件上传、任务创建和状态查询，使用 PostgreSQL 数据库存储小说元数据和分析任务
 """
 
 from __future__ import annotations
@@ -300,19 +300,19 @@ class NovelService:
 
     def _delete_novel_source_file(self, file_path: str | None) -> None:
         """
-        删除小说源文件。
+        删除小说源文件
 
         说明: 仅在文件真实存在时删除，缺失文件不报错；
-              若遇到真实 IO 异常则继续上抛，避免把磁盘问题静默吞掉。
+              若遇到真实 IO 异常则继续上抛，避免把磁盘问题静默吞掉
         """
         self._artifact_gc_service.delete_novel_source_file(file_path)
 
     def _delete_task_artifacts(self, task_id: str, run_id: str) -> None:
         """
-        删除任务对应的日志与导出文件。
+        删除任务对应的日志与导出文件
 
         说明: 输出文件按 task_id 命名，日志目录按 run_id 命名；
-              为兼容历史短 run_id 目录，run_id != task_id 时会额外检查短目录。
+              为兼容历史短 run_id 目录，run_id != task_id 时会额外检查短目录
         """
         self._artifact_gc_service.delete_task_artifacts(task_id, run_id)
 
@@ -322,9 +322,9 @@ class NovelService:
         session: Session | None = None,
     ) -> tuple[Novel, list[dict]]:
         """
-        收集删除小说前需要的上下文。
+        收集删除小说前需要的上下文
 
-        说明: 先一次性读出小说记录与其全部任务，后续删除阶段不再靠猜测接口状态。
+        说明: 先一次性读出小说记录与其全部任务，后续删除阶段不再靠猜测接口状态
         """
         with self._get_session(session) as sess:
             novel = sess.get(Novel, novel_id)
@@ -336,9 +336,9 @@ class NovelService:
 
     def _ensure_novel_tasks_deletable(self, novel_id: str, runs: list[dict]) -> None:
         """
-        校验小说下的任务是否都允许删除。
+        校验小说下的任务是否都允许删除
 
-        说明: novel 级删除沿用 task 删除状态机，不允许绕过 pending/running/cancelling 护栏。
+        说明: novel 级删除沿用 task 删除状态机，不允许绕过 pending/running/cancelling 护栏
         """
         for run in runs:
             status = str(run.get("status", ""))
@@ -348,10 +348,10 @@ class NovelService:
 
     def _delete_run_data(self, run_id: str, session: Session | None = None) -> None:
         """
-        删除单个 run 的数据库数据与文件产物。
+        删除单个 run 的数据库数据与文件产物
 
         说明: DB 删除仍复用 RunRepository.delete_run；文件侧统一删除 outputs/task_id.json
-              与 logs/run_id 目录，兼容历史 full run_id 日志目录。
+              与 logs/run_id 目录，兼容历史 full run_id 日志目录
         """
         task_id = run_id_to_task_id(run_id)
 
@@ -368,7 +368,7 @@ class NovelService:
         task_manager: TaskManager | None = None,
     ) -> bool:
         """
-        级联删除小说及其全部任务数据。
+        级联删除小说及其全部任务数据
         """
         novel, runs = self._collect_novel_delete_context(novel_id, session)
         self._ensure_novel_tasks_deletable(novel_id, runs)
@@ -394,7 +394,7 @@ class NovelService:
         task_manager: TaskManager | None = None,
     ) -> bool:
         """
-        删除任务及其数据库/文件产物。
+        删除任务及其数据库/文件产物
         """
         run_id: str | None = None
         with self._get_session(session) as sess:
@@ -405,7 +405,7 @@ class NovelService:
 
         if task_manager is not None:
             # TaskManager 只负责当前进程的执行缓存，删除 task 时顺手清掉缓存，
-            # 避免 DB 已删除但本进程里还残留已终态任务对象。
+            # 避免 DB 已删除但本进程里还残留已终态任务对象
             task_manager.delete_task(task_id)
 
         if run_id is not None:

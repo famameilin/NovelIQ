@@ -6,7 +6,7 @@ from src.storage.db import get_session_factory
 
 
 def insert_test_novel(novel_id: str, *, session=None, title: str | None = None) -> None:
-    """为直接造 run 的 API 测试补 novels 主表记录。"""
+    """为直接造 run 的 API 测试补 novels 主表记录"""
     if len(novel_id) > 8:
         raise ValueError(f"test novel_id must be 8 chars or fewer, got: {novel_id}")
 

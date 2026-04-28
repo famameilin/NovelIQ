@@ -47,10 +47,10 @@ def get_database_url() -> str:
 
 def get_database_schema() -> str | None:
     """
-    获取数据库 schema 名称。
+    获取数据库 schema 名称
 
     说明: 运行时默认不指定 schema；
-          测试环境可通过 DATABASE_SCHEMA 把所有未限定表名收敛到独立 schema。
+          测试环境可通过 DATABASE_SCHEMA 把所有未限定表名收敛到独立 schema
     """
     schema = os.environ.get("DATABASE_SCHEMA")
     if not schema:
@@ -117,7 +117,7 @@ def get_engine():
             cursor.execute("SET TIME ZONE 'UTC'")
             if database_schema:
                 # 连接池里的连接被复用时，仍要确保 search_path 固定在当前运行时 schema，
-                # 避免测试并发时把 ORM/原生 SQL 混写回 public 或其他进程的隔离空间。
+                # 避免测试并发时把 ORM/原生 SQL 混写回 public 或其他进程的隔离空间
                 cursor.execute(f"SET search_path TO {database_schema}, public")
             cursor.close()
 
@@ -170,10 +170,10 @@ SessionLocal = get_session_factory
 
 def _constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
     """
-    检查当前 schema 下是否已存在指定约束。
+    检查当前 schema 下是否已存在指定约束
 
     说明: 运行时补约束前必须先做显式存在性检查，
-          避免旧库增量迁移与新库 create_all 在启动时互相撞重复 DDL。
+          避免旧库增量迁移与新库 create_all 在启动时互相撞重复 DDL
     """
     return bool(
         connection.execute(
@@ -194,7 +194,7 @@ def _constraint_exists(connection: Connection, table_name: str, constraint_name:
 
 def _table_exists(connection: Connection, table_name: str) -> bool:
     """
-    检查当前 schema 下是否存在指定表。
+    检查当前 schema 下是否存在指定表
     """
 
     return bool(
@@ -216,7 +216,7 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
 def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
     """
     说明: 启动期需要对关键表做正式合同校验，这里统一读取当前 schema 下的列集合，
-    避免后续把“旧表还能跑”误当成可接受状态。
+    避免后续把“旧表还能跑”误当成可接受状态
     """
 
     rows = connection.execute(
@@ -235,10 +235,10 @@ def _get_table_columns(connection: Connection, table_name: str) -> set[str]:
 
 def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> None:
     """
-    在补外键前校验目标子表没有孤儿数据。
+    在补外键前校验目标子表没有孤儿数据
 
     说明: 当前仓库不接受“发现脏数据但继续跳过”的静默策略；
-          若仍有孤儿行，直接抛错阻止把不一致状态带入更深处。
+          若仍有孤儿行，直接抛错阻止把不一致状态带入更深处
     """
     orphan_count = int(connection.execute(text(sql)).scalar_one())
     if orphan_count > 0:
@@ -247,11 +247,11 @@ def _assert_no_orphans(connection: Connection, sql: str, *, context: str) -> Non
 
 def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
     """
-    基于 analysis_runs 回填历史表里漂移的 novel_id。
+    基于 analysis_runs 回填历史表里漂移的 novel_id
 
     说明: `cloud_analysis` / `token_usage` / `chunk_locations` 的 novel_id
           实际是 run 侧信息的冗余镜像；补外键前先对齐到 analysis_runs，
-          可以安全修复历史 `unknown` 或旧值漂移，而不需要删数据。
+          可以安全修复历史 `unknown` 或旧值漂移，而不需要删数据
     """
     statements = [
         """
@@ -283,12 +283,12 @@ def _normalize_analysis_related_novel_ids(connection: Connection) -> None:
 
 def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
     """
-    为历史 PostgreSQL 表补齐分析链路缺失的外键约束。
+    为历史 PostgreSQL 表补齐分析链路缺失的外键约束
 
-    说明: 这批约束都属于“旧库缺失、新库 ORM 已声明”的收口项。
-          先做可安全回填的 novel_id 对齐，再显式校验孤儿数据，最后补约束。
+    说明: 这批约束都属于“旧库缺失、新库 ORM 已声明”的收口项
+          先做可安全回填的 novel_id 对齐，再显式校验孤儿数据，最后补约束
           其中 analysis_runs.novel_id 是整条分析链路的父约束，必须一并补齐，
-          否则旧库仍能继续写入悬空 novel_id。
+          否则旧库仍能继续写入悬空 novel_id
     """
     _normalize_analysis_related_novel_ids(connection)
 
@@ -426,10 +426,10 @@ def _ensure_analysis_related_foreign_keys(connection: Connection) -> None:
 
 def _ensure_runtime_schema(engine: Engine) -> None:
     """
-    为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema。
+    为历史 PostgreSQL 表补齐运行时需要的非破坏性 schema
 
-    说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进。
-          这里仅做“补列 / 补索引”这类非破坏性修复，不在应用启动时静默删除列或重建约束。
+    说明: 当前项目仍以 create_all 为主，旧库不会自动跟随 ORM 演进
+          这里仅做“补列 / 补索引”这类非破坏性修复，不在应用启动时静默删除列或重建约束
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -470,7 +470,7 @@ def _ensure_runtime_schema(engine: Engine) -> None:
 def _assert_focus_contract_schema(engine: Engine) -> None:
     """
     说明: 本次主角合同重构明确不兼容旧库，因此启动时必须显式检查
-    `cloud_analysis` 是否已切到焦点合同；若仍停留在旧 `protagonist` 结构，直接阻断启动。
+    `cloud_analysis` 是否已切到焦点合同；若仍停留在旧 `protagonist` 结构，直接阻断启动
     """
     dialect_name = getattr(getattr(engine, "dialect", None), "name", "")
     if dialect_name != "postgresql":
@@ -549,7 +549,7 @@ def init_db(include_level3_tables: bool = False) -> None:
     tables = list(Base.metadata.sorted_tables)
     if not include_level3_tables:
         # Level3 的 pgvector 表由 preprocess 按需 ensure；
-        # 普通启动不主动创建，避免未启用 RAG 的环境被向量扩展约束牵连。
+        # 普通启动不主动创建，避免未启用 RAG 的环境被向量扩展约束牵连
         tables = [table for table in tables if table.name not in {"chunk_embeddings", "paragraph_embeddings"}]
     Base.metadata.create_all(bind=engine, tables=tables)
     _ensure_runtime_schema(engine)

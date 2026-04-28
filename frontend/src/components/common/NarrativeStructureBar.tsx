@@ -27,7 +27,7 @@ export interface NarrativeStructureBarProps {
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：保留叙事结构摘要文案的拼接逻辑，同时配合新的卡片壳展示。
+ * 修改原因：保留叙事结构摘要文案的拼接逻辑，同时配合新的卡片壳展示
  */
 function formatEventDensity(density: Record<string, number> | null | undefined): string | null {
   if (!density || Object.keys(density).length === 0) {
@@ -44,7 +44,7 @@ function formatEventDensity(density: Record<string, number> | null | undefined):
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：统一叙事结构卡的数据可用性判断，避免外观重构时误改展示边界。
+ * 修改原因：统一叙事结构卡的数据可用性判断，避免外观重构时误改展示边界
  */
 function hasActData(
   act1: number | null | undefined,
@@ -60,7 +60,7 @@ function hasActData(
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：让叙事结构概览卡复用共享卡片壳，与其他仪表盘业务卡片保持一致。
+ * 修改原因：让叙事结构概览卡复用共享卡片壳，与其他仪表盘业务卡片保持一致
  */
 export function NarrativeStructureBar({
   act1Ratio,

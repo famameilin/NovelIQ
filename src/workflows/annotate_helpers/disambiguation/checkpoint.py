@@ -1,7 +1,7 @@
 """
 检查点保存和加载
 
-仅保存/加载 DisambiguationState，不存储图投影进度等元数据。
+仅保存/加载 DisambiguationState，不存储图投影进度等元数据
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ def _save_disambig_checkpoint(
     run_id: str,
     state: DisambiguationState,
 ) -> None:
-    """保存消歧检查点到数据库（upsert）。"""
+    """保存消歧检查点到数据库（upsert）"""
     state_dict = state.to_dict()
     conn.execute(
         text("""
@@ -48,7 +48,7 @@ def _load_disambig_checkpoint(
     run_id: str,
 ) -> DisambiguationState:
     """
-    从数据库加载消歧检查点。
+    从数据库加载消歧检查点
 
     Returns:
         DisambiguationState: 完整的消歧状态

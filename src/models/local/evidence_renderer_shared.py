@@ -38,7 +38,7 @@ def _resolve_level1_relevant_names(
 ) -> set[str]:
     """
     说明: snapshot fallback 也必须遵守 request 边界；
-          这里只保留当前 consumer 明确请求的名字，并在 alias 命中时补齐关联 canonical。
+          这里只保留当前 consumer 明确请求的名字，并在 alias 命中时补齐关联 canonical
     """
     if requested_names is None:
         return set()
@@ -178,7 +178,7 @@ def _collect_level1_lines_from_snapshot(
 ) -> Level1EvidenceBuckets:
     """
     说明: 当 renderer 只能从 snapshot 回退时，也要按 request 边界过滤；
-          显式空请求或完全不命中时，不能重新渲染整本书的 Level1 事实。
+          显式空请求或完全不命中时，不能重新渲染整本书的 Level1 事实
     """
     alias_lines: list[str] = []
     entity_lines: list[str] = []
@@ -248,7 +248,7 @@ def render_level1_facts(
 ) -> str | None:
     """
     修改说明: renderer fallback 到 `level1_snapshot` 时也要按 `bundle.requested_names`
-              过滤，显式空请求或快照 miss 都不允许回退成全量 Level1 注入。
+              过滤，显式空请求或快照 miss 都不允许回退成全量 Level1 注入
     """
     buckets = (
         _collect_level1_lines_from_structured(bundle, include_alias_mappings=include_alias_mappings)
@@ -361,7 +361,7 @@ def render_disambig_candidates(
     priority_names: Iterable[str] | None = None,
 ) -> str | None:
     # 这里是共享 evidence 渲染层，只把 bundle 中已有的结构转成 prompt block，
-    # 不承担 provider 侧的取证职责。
+    # 不承担 provider 侧的取证职责
     candidate_lines = [item.content for item in bundle.local_evidence if item.evidence_type == "disambig_candidate"]
     if not candidate_lines and bundle.requested_names:
         fallback_name_set = (
@@ -421,7 +421,7 @@ def _prioritize_semantic_items(
 ) -> list[EvidenceItem]:
     """
     说明: `background_entities` 只作为 renderer 侧背景 hint 使用；
-          这里仅调整 vector evidence 的展示顺序，不回流到 requested_names/candidate_names。
+          这里仅调整 vector evidence 的展示顺序，不回流到 requested_names/candidate_names
     """
     if not priority_names:
         return items
@@ -453,9 +453,9 @@ def render_vector_evidence(
     exclude_chunk_ids: set[int] | None = None,
     priority_names: Iterable[str] | None = None,
 ) -> str | None:
-    # 这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者。
-    # 若 Phase1 已单独渲染 emotion exemplar，则再按 chunk_id 排除重复项，避免同一条历史片段占掉两类证据预算。
-    # 修改说明: paragraph rerank 可提供 local_preview；渲染时优先展示局部 evidence，chunk 全文仍保留在 metadata 里兜底。
+    # 这里仅渲染通用 semantic recall，避免把专门给情绪判断的 exemplar 混入旧的向量证据消费者
+    # 若 Phase1 已单独渲染 emotion exemplar，则再按 chunk_id 排除重复项，避免同一条历史片段占掉两类证据预算
+    # 修改说明: paragraph rerank 可提供 local_preview；渲染时优先展示局部 evidence，chunk 全文仍保留在 metadata 里兜底
     selected_items = _select_semantic_items(
         bundle,
         evidence_types={"semantic_recall", "vector_evidence"},

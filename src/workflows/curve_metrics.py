@@ -1,7 +1,7 @@
 """
 曲线/统计相关的度量计算（从 preprocess 中拆出）
 
-聚合与预处理都会用到的通用计算放在这里，减少模块间交叉依赖。
+聚合与预处理都会用到的通用计算放在这里，减少模块间交叉依赖
 
 
 
@@ -37,7 +37,7 @@ def _compute_emotion_curve_raw(
     neg_terms: Mapping[str, float],
 ) -> tuple[list[tuple[int, float, float, float]], list[float]]:
     """
-    计算未平滑的情感密度序列。
+    计算未平滑的情感密度序列
 
     """
     from src.metrics.emotion_metrics import lexical_sentiment_density
@@ -85,9 +85,9 @@ def compute_emotion_curve_weighted(
     weighted_lexicons: list[WeightedLexiconSet],
 ) -> tuple[list[tuple[int, float, float, float, float]], list[float]]:
     """
-    计算加权情感曲线（多类型词表混合）。
+    计算加权情感曲线（多类型词表混合）
 
-    优化策略：合并所有类型的词典，一次计算，避免重复匹配。
+    优化策略：合并所有类型的词典，一次计算，避免重复匹配
 
     Args:
         chunk_texts: chunk 列表，格式 [(chunk_id, text), ...]
@@ -121,8 +121,8 @@ def compute_emotion_curve_weighted(
     combined_rows: list[tuple[int, float, float, float, float]] = []
     raw_densities: list[float] = []
 
-    # 这里必须先按 genre 各自完成词表命中，再在 chunk 结果层做加权。
-    # 否则像 0.25 这类低权重词条在总词表阶段就会被压成 0，命中了也不再贡献任何情绪值。
+    # 这里必须先按 genre 各自完成词表命中，再在 chunk 结果层做加权
+    # 否则像 0.25 这类低权重词条在总词表阶段就会被压成 0，命中了也不再贡献任何情绪值
     for chunk_index, (chunk_id, _text) in enumerate(chunk_texts):
         pos_density = 0.0
         neg_density = 0.0

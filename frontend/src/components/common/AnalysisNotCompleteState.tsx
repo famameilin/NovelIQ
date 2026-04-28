@@ -9,7 +9,7 @@ type AnalysisNotCompleteStateProps = {
 
 /**
  * 结果子页面需要把 `AnalysisNotCompleteError` 渲染成明确的状态机提示，
- * 不能再混成通用“加载失败”；这里抽成共享卡片，保证多页文案和视觉保持一致。
+ * 不能再混成通用“加载失败”；这里抽成共享卡片，保证多页文案和视觉保持一致
  */
 export function AnalysisNotCompleteState({
   title = "分析尚未完成",

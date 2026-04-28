@@ -1,5 +1,5 @@
 """
-叙事时间轴 API 响应模型。
+叙事时间轴 API 响应模型
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class TimelineMeta(BaseModel):
-    """时间轴元信息。"""
+    """时间轴元信息"""
 
     novel_id: str = Field(description="小说 ID")
     novel_name: str = Field(description="小说名称")
@@ -18,7 +18,7 @@ class TimelineMeta(BaseModel):
 
 
 class TimelinePhase(BaseModel):
-    """时间轴阶段。"""
+    """时间轴阶段"""
 
     name: Literal["引入期", "发展期", "高潮期", "收束期"] = Field(description="阶段名称")
     start: int = Field(description="起始 chunk_id")
@@ -27,7 +27,7 @@ class TimelinePhase(BaseModel):
 
 
 class PlotFlags(BaseModel):
-    """剧情节点附加标记。"""
+    """剧情节点附加标记"""
 
     is_pivot: bool = Field(description="是否为转折点")
     is_cliffhanger: bool = Field(description="是否为悬念点")
@@ -35,7 +35,7 @@ class PlotFlags(BaseModel):
 
 
 class RelationTimelineEvent(BaseModel):
-    """关系变化事件。"""
+    """关系变化事件"""
 
     relation_event_id: int = Field(description="关系事件 ID")
     from_char: str = Field(description="源角色名称")
@@ -48,7 +48,7 @@ class RelationTimelineEvent(BaseModel):
 
 
 class LifecycleTimelineEvent(BaseModel):
-    """角色生命周期事件。"""
+    """角色生命周期事件"""
 
     entity_id: int = Field(description="角色实体 ID")
     character_name: str = Field(description="角色名称")
@@ -56,7 +56,7 @@ class LifecycleTimelineEvent(BaseModel):
 
 
 class TimelineNode(BaseModel):
-    """时间轴节点。"""
+    """时间轴节点"""
 
     node_id: str = Field(description="节点唯一标识")
     anchor_chunk_id: int = Field(description="节点主锚点 chunk ID")
@@ -75,7 +75,7 @@ class TimelineNode(BaseModel):
 
 
 class TimelineCompositeNode(BaseModel):
-    """时间轴复合节点。"""
+    """时间轴复合节点"""
 
     node_id: str = Field(description="复合节点唯一标识")
     anchor_chunk_id: int = Field(description="复合节点主锚点 chunk ID")
@@ -96,7 +96,7 @@ class TimelineCompositeNode(BaseModel):
 
 
 class TimelineResponse(BaseModel):
-    """时间轴 API 响应。"""
+    """时间轴 API 响应"""
 
     meta: TimelineMeta = Field(description="时间轴元信息")
     phases: list[TimelinePhase] = Field(description="四阶段划分")

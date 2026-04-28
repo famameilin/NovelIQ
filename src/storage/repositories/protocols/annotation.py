@@ -1,7 +1,7 @@
 """
 标注数据协议接口
 
-使用 AnnotationRecord 替代动态字典，收窄协议边界。
+使用 AnnotationRecord 替代动态字典，收窄协议边界
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ class AnnotationRepositoryProtocol(Protocol):
     """
     标注数据接口
 
-    管理小说标注数据的存储和检索。
+    管理小说标注数据的存储和检索
     """
 
     def get_annotations(self, novel_id: str) -> list[AnnotationRecord]:

@@ -1,5 +1,5 @@
 """
-说明: Phase4 关系抽取结果投影器，负责 RelationExtractionResult 到 RelationChangeSnapshot 的转换。
+说明: Phase4 关系抽取结果投影器，负责 RelationExtractionResult 到 RelationChangeSnapshot 的转换
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ def convert_relation_result_to_snapshots(
     source_model: str,
 ) -> list[RelationChangeSnapshot]:
     """
-    将 LLM 关系抽取结果转换为关系变化快照。
+    将 LLM 关系抽取结果转换为关系变化快照
     """
     snapshots: list[RelationChangeSnapshot] = []
     seen_keys: set[tuple[str, str, str]] = set()

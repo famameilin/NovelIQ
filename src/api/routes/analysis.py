@@ -71,7 +71,7 @@ def _resolve_task_for_novel(
     task_id: str,
 ) -> dict[str, Any]:
     """
-    获取并校验任务是否属于指定小说（DB-only 查询）。
+    获取并校验任务是否属于指定小说（DB-only 查询）
     """
     try:
         task = novel_service.get_task(task_id)
@@ -85,7 +85,7 @@ def _resolve_task_for_novel(
 
 def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
     """
-    构建单任务状态响应（DB-only 查询）。
+    构建单任务状态响应（DB-only 查询）
     """
     run = _get_task_detail_from_db(task_id)
     if run is None:
@@ -113,7 +113,7 @@ def _build_status_response(novel_id: str, task_id: str) -> StatusResponse:
 
 def _raise_cancel_not_allowed(task_status: str) -> None:
     """
-    统一校验任务是否允许进入取消流程。
+    统一校验任务是否允许进入取消流程
     """
     if task_status in ("completed", "cancelled", "cancelling"):
         raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
@@ -123,7 +123,7 @@ def _raise_cancel_not_allowed(task_status: str) -> None:
 
 def _persist_task_cancellation_request(task_id: str) -> str:
     """
-    将取消请求可靠写入数据库。
+    将取消请求可靠写入数据库
     """
     session_factory = get_session_factory()
     try:
@@ -144,7 +144,7 @@ def _persist_task_cancellation_request(task_id: str) -> str:
 
 def _cancel_unclaimed_pending_task(task_id: str) -> bool:
     """
-    直接终结尚未被任何 worker 领取的 pending 任务。
+    直接终结尚未被任何 worker 领取的 pending 任务
     """
     session_factory = get_session_factory()
     try:
@@ -164,9 +164,9 @@ def _cancel_unclaimed_pending_task(task_id: str) -> bool:
 
 async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
     """
-    删除任务前清理运行态缓存与后台协程。
+    删除任务前清理运行态缓存与后台协程
 
-    说明: 统一单删与批删的运行态停止逻辑，避免删除后后台协程继续写状态。
+    说明: 统一单删与批删的运行态停止逻辑，避免删除后后台协程继续写状态
     """
     task_info = task_manager.get_task(task_id)
     if task_info is None:
@@ -175,8 +175,8 @@ async def _cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMa
     # 设置内存取消信号
     task_manager.cancel_task(task_id)
 
-    # 这里只是删除前的运行态清理，DB 真相必须仍然遵守同一套状态机护栏。
-    # 如果 DB 已经是 completed/failed/cancelled，原子取消操作会返回最新终态，不会破坏 DB 状态。
+    # 这里只是删除前的运行态清理，DB 真相必须仍然遵守同一套状态机护栏
+    # 如果 DB 已经是 completed/failed/cancelled，原子取消操作会返回最新终态，不会破坏 DB 状态
     session_factory = get_session_factory()
     try:
         with session_factory() as session:
@@ -215,7 +215,7 @@ async def create_and_start_task(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> CreateTaskResponse:
     """
-    创建并启动一个新的分析任务。
+    创建并启动一个新的分析任务
     """
     analysis_service = AnalysisService(novel_service, task_manager)
     task_id = await analysis_service.create_task_and_start(novel_id)
@@ -230,7 +230,7 @@ async def resume_task(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> ResumeTaskResponse:
     """
-    继续执行指定的 pending/failed 任务。
+    继续执行指定的 pending/failed 任务
     """
     task_application_service = TaskApplicationService(novel_service, task_manager)
     resumed_task_id = await task_application_service.resume_task(novel_id, task_id)
@@ -277,7 +277,7 @@ async def delete_task(
     task_manager: TaskManager = Depends(get_task_manager),
 ):
     """
-    删除单个分析任务。
+    删除单个分析任务
 
     删除顺序:
         1. DB 状态判断（任务是否存在、是否属于该小说、是否运行中）
@@ -297,7 +297,7 @@ async def get_task_status(
     task_manager: TaskManager = Depends(get_task_manager),
 ) -> StatusResponse:
     """
-    查询单个任务状态（推荐入口）。
+    查询单个任务状态（推荐入口）
     """
     _resolve_task_for_novel(novel_service, novel_id, task_id)
     return _build_status_response(novel_id, task_id)
@@ -327,9 +327,9 @@ async def batch_delete_tasks(
     task_manager: TaskManager = Depends(get_task_manager),  # noqa: B008
 ) -> BatchDeleteTasksResponse:
     """
-    批量删除指定的分析任务。
+    批量删除指定的分析任务
 
-    即使部分删除失败，也会继续处理其他任务。
+    即使部分删除失败，也会继续处理其他任务
     """
     deleted_ids: list[str] = []
     failed_ids: list[dict[str, str]] = []

@@ -28,8 +28,8 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
     """
     标注数据 Repository
 
-    管理分块标注、角色、对话、关系等数据。
-    所有操作都基于 run_id 进行数据隔离。
+    管理分块标注、角色、对话、关系等数据
+    所有操作都基于 run_id 进行数据隔离
 
     使用函数组合方式重组代码结构，拆分为3个模块：
         - inserts: 标注数据插入操作
@@ -81,7 +81,7 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         source_model: str,
         commit: bool = True,
     ) -> None:
-        """替换指定 source_model 生成的分块关系数据。"""
+        """替换指定 source_model 生成的分块关系数据"""
         return inserts.replace_chunk_relations_for_source_model(
             self.session,
             run_id,
@@ -122,10 +122,10 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         limit: int | None = None,
     ) -> list[foreshadowing_threads.ActiveSetupPoolEntry]:
         """
-        获取当前 chunk 可见的活跃 setup 池摘要。
+        获取当前 chunk 可见的活跃 setup 池摘要
 
         active setup pool limit 已改为运行时读取 settings；
-        wrapper 不能再用默认参数把模块导入时的旧值固化回 30。
+        wrapper 不能再用默认参数把模块导入时的旧值固化回 30
         """
         return foreshadowing_threads.fetch_active_foreshadowing_threads_for_prompt(
             self.session,
@@ -141,7 +141,7 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         chunk_id: int,
         result: ForeshadowingResult,
     ) -> foreshadowing_threads.ForeshadowingThreadProjection:
-        """同步一条 positive 伏笔结果到 thread ledger。"""
+        """同步一条 positive 伏笔结果到 thread ledger"""
         return foreshadowing_threads.sync_foreshadowing_thread(
             self.session,
             run_id=run_id,
@@ -150,11 +150,11 @@ class AnnotationRepository(BaseRepository[dict[str, Any]]):
         )
 
     def calculate_foreshadow_expectation(self, run_id: str) -> float | None:
-        """基于 setup ledger 计算伏笔回收预期。"""
+        """基于 setup ledger 计算伏笔回收预期"""
         return foreshadowing_threads.calculate_foreshadow_expectation(self.session, run_id)
 
     def fetch_foreshadowing_threads(self, run_id: str) -> list[foreshadowing_threads.ForeshadowingThreadView]:
-        """获取完整的 setup thread 汇总视图。"""
+        """获取完整的 setup thread 汇总视图"""
         return foreshadowing_threads.fetch_foreshadowing_threads(self.session, run_id)
 
     # ==================== queries 模块方法 ====================

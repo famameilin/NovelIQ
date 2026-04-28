@@ -26,9 +26,9 @@ def fetch_chunk_styles(session: Session, run_id: str) -> Sequence[Row]:
         run_id: 运行ID
 
     Returns:
-        Row 对象序列，支持 row.chunk_id / row.dialogue_ratio / row.sent_len_std / row.avg_sent_len。
+        Row 对象序列，支持 row.chunk_id / row.dialogue_ratio / row.sent_len_std / row.avg_sent_len
 
-    不再转换成 tuple，下游通过字段名读取风格指标，避免列顺序错位。
+    不再转换成 tuple，下游通过字段名读取风格指标，避免列顺序错位
     """
     stmt = select(
         ChunkStyle.chunk_id,
@@ -100,9 +100,9 @@ def fetch_chunk_styles_full(session: Session, run_id: str) -> Sequence[Row]:
 
 def fetch_chunk_imagery_lexicon_densities(session: Session, run_id: str) -> list[tuple[int, float | None]]:
     """
-    获取每个 chunk 的 imagery_lexicon_density。
+    获取每个 chunk 的 imagery_lexicon_density
 
-    直接从 chunk_style 读取 imagery 字段，替代历史 culture 兼容接口。
+    直接从 chunk_style 读取 imagery 字段，替代历史 culture 兼容接口
     """
     stmt = (
         select(

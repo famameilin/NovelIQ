@@ -11,12 +11,12 @@ from src.rag import EvidenceBundle
 
 
 def candidates(*names: str) -> list[dict[str, int | str]]:
-    """统一生成消歧候选输入。"""
+    """统一生成消歧候选输入"""
     return [{"name": name, "count": 1} for name in names]
 
 
 class FakeDisambigClient:
-    """供消歧 pipeline 测试复用的轻量 client。"""
+    """供消歧 pipeline 测试复用的轻量 client"""
 
     def __init__(self) -> None:
         self._config = SimpleNamespace(model="test-model", thinking_enabled=True)
@@ -58,7 +58,7 @@ class FakeDisambigClient:
 
 
 class FakeNarrativeEvidenceService:
-    """RAG evidence provider 假实现，显式记录各级证据收集参数。"""
+    """RAG evidence provider 假实现，显式记录各级证据收集参数"""
 
     def __init__(
         self,
@@ -79,7 +79,7 @@ class FakeNarrativeEvidenceService:
         return self.level3_available
 
     async def collect(self, request):
-        """记录 collect(request) 的关键输入，供测试断言真实请求合同。"""
+        """记录 collect(request) 的关键输入，供测试断言真实请求合同"""
         self.calls.append(
             {
                 "method": "collect",

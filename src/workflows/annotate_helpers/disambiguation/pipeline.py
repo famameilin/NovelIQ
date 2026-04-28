@@ -110,10 +110,10 @@ async def _retry_canonical_reselect(
     run_id: str | None = None,
 ) -> Any:
     """
-    带重试的最终代表名重选调用。
+    带重试的最终代表名重选调用
 
     终消歧后的额外重选必须继续走模型，而不是回退到本地 heuristic；
-          这里复用统一的交互记录，但消息体按“已确认 cluster 的代表名选择”单独构造。
+          这里复用统一的交互记录，但消息体按“已确认 cluster 的代表名选择”单独构造
 
     """
     call_spec = build_canonical_reselect_call_spec(
@@ -141,11 +141,11 @@ async def _run_final_canonical_reselect(
     run_id: str,
 ) -> DisambiguationState:
     """
-    在最终消歧后追加一次模型代表名重选。
+    在最终消歧后追加一次模型代表名重选
 
     第一轮终消歧继续允许“高频常用名做 canonical”来简化配对；
           但真正落库前，必须再让模型基于已确认 cluster 选择最终代表名，
-          避免本地 heuristic 代替模型做这一步。
+          避免本地 heuristic 代替模型做这一步
 
     """
     alias_clusters = _collect_alias_clusters(state.get_alias_merges_dict())
@@ -180,7 +180,7 @@ async def _run_final_canonical_reselect(
         return reselect_cluster_canonicals(state, name_counts=name_counts)
 
     # 这里显式要求模型输出覆盖 cluster 内的所有名字；
-    # 若缺项或跨组指向，直接抛错，避免静默退回 heuristic 后再次把最终图谱写偏。
+    # 若缺项或跨组指向，直接抛错，避免静默退回 heuristic 后再次把最终图谱写偏
     return apply_model_reselected_canonicals(
         state,
         reselect_result.canonical_decisions,
@@ -321,7 +321,7 @@ async def _run_final_disambiguation_with_state(
     )
     if new_state.alias_merges:
         # 只有“本轮 final 确实拿到了新的模型 alias 决策”时，才追加一次模型代表名重选；
-        # 如果这轮没有新决策，就沿用既有 state + 全量频次做本地纠偏，避免无意义查库和额外模型调用。
+        # 如果这轮没有新决策，就沿用既有 state + 全量频次做本地纠偏，避免无意义查库和额外模型调用
         if result.canonical_decisions:
             new_state = await _run_final_canonical_reselect(
                 conn,

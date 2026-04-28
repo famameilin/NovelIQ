@@ -129,7 +129,7 @@ export function ComponentShowcase() {
   const { seedColor, setSeedColor, setAutoSyncEnabled } = useThemeStore();
   const [progress, setProgress] = useState(66);
 
-  // 组件展示页允许手动试色，挂载期间临时关闭“按任务自动回填主题色”。
+  // 组件展示页允许手动试色，挂载期间临时关闭“按任务自动回填主题色”
   useEffect(() => {
     setAutoSyncEnabled(false);
     return () => {

@@ -71,7 +71,7 @@ _SENTENCE_BOUNDARY_CHARS = "。！？!?；;\n"
 @dataclass(frozen=True)
 class _QuoteMatch:
     """
-    Phase3 引号匹配结果。
+    Phase3 引号匹配结果
     """
 
     index: int
@@ -83,7 +83,7 @@ class _QuoteMatch:
 @dataclass(frozen=True)
 class _QuoteContext:
     """
-    Phase3 fastpath 使用的引号上下文。
+    Phase3 fastpath 使用的引号上下文
     """
 
     index: int
@@ -96,7 +96,7 @@ class _QuoteContext:
 @dataclass(frozen=True)
 class _FastpathEvaluation:
     """
-    单个候选的 fastpath 判断结果。
+    单个候选的 fastpath 判断结果
     """
 
     record: DialogueRecordSchema | None
@@ -106,7 +106,7 @@ class _FastpathEvaluation:
 
 def _collect_quote_matches(text: str) -> list[_QuoteMatch]:
     """
-    提取按原文顺序排列的引号匹配结果。
+    提取按原文顺序排列的引号匹配结果
     """
     seen_positions: set[int] = set()
     all_matches: list[re.Match[str]] = []
@@ -131,7 +131,7 @@ def _collect_quote_matches(text: str) -> list[_QuoteMatch]:
 
 def _find_sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     """
-    计算候选所在的局部句子边界。
+    计算候选所在的局部句子边界
     """
     sentence_start = start
     while sentence_start > 0 and text[sentence_start - 1] not in _SENTENCE_BOUNDARY_CHARS:
@@ -147,7 +147,7 @@ def _find_sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
 
 def _build_quote_contexts(text: str) -> dict[int, _QuoteContext]:
     """
-    为每个非空候选构建 fastpath 所需的上下文字段。
+    为每个非空候选构建 fastpath 所需的上下文字段
     """
     contexts: dict[int, _QuoteContext] = {}
     for match in _collect_quote_matches(text):
@@ -169,7 +169,7 @@ def _build_fastpath_name_hints(
     alias_map: dict[str, str] | None,
 ) -> list[str]:
     """
-    收集 fastpath 可安全使用的人名提示集。
+    收集 fastpath 可安全使用的人名提示集
     """
     name_hints: set[str] = set()
     for name in known_characters or []:
@@ -191,7 +191,7 @@ def _collect_non_overlapping_name_spans(
     name_hints: list[str],
 ) -> list[tuple[int, int, str]]:
     """
-    提取句子中不重叠的人名提示命中。
+    提取句子中不重叠的人名提示命中
     """
     spans: list[tuple[int, int, str]] = []
     for name in name_hints:
@@ -206,7 +206,7 @@ def _collect_non_overlapping_name_spans(
 
 def _collect_unique_names(text: str, name_hints: list[str]) -> set[str]:
     """
-    收集文本中的唯一人名提示命中。
+    收集文本中的唯一人名提示命中
     """
     return {name for _, _, name in _collect_non_overlapping_name_spans(text, name_hints)}
 
@@ -216,7 +216,7 @@ def _build_fastpath_speech_tag_matches(
     name_hints: list[str],
 ) -> tuple[re.Match[str] | None, re.Match[str] | None]:
     """
-    构造 prefix / suffix speech tag 匹配结果。
+    构造 prefix / suffix speech tag 匹配结果
     """
     names_pattern = "|".join(re.escape(name) for name in name_hints)
     verbs_pattern = "|".join(re.escape(verb) for verb in _FASTPATH_SPEECH_VERBS)
@@ -236,7 +236,7 @@ def _build_fastpath_speech_tag_matches(
 
 def _is_safe_fastpath_modifier(modifier_text: str, name_hints: list[str]) -> bool:
     """
-    判断 speech tag 中名字与说话动词之间的修饰语是否安全。
+    判断 speech tag 中名字与说话动词之间的修饰语是否安全
     """
     normalized = modifier_text.strip()
     if not normalized:
@@ -257,7 +257,7 @@ def _evaluate_proof_only_fastpath(
     name_hints: list[str],
 ) -> _FastpathEvaluation:
     """
-    判断单个候选是否满足 proof-only fastpath。
+    判断单个候选是否满足 proof-only fastpath
     """
     if not name_hints:
         return _FastpathEvaluation(record=None, reject_reason="no_name_hints")
@@ -337,7 +337,7 @@ def _resolve_phase3_fastpath_candidates(
     alias_map: dict[str, str] | None,
 ) -> tuple[list[DialogueRecordSchema], list[QuoteCandidate], Counter[str], Counter[str]]:
     """
-    将候选拆分为 fastpath 命中和需要走 LLM 的两组。
+    将候选拆分为 fastpath 命中和需要走 LLM 的两组
     """
     contexts = _build_quote_contexts(chunk_text)
     name_hints = _build_fastpath_name_hints(known_characters, alias_map)
@@ -370,7 +370,7 @@ def _collect_fastpath_metadata_candidates(
     candidates: list[QuoteCandidate],
 ) -> list[QuoteCandidate]:
     """
-    收集需要补充 metadata 的 fastpath 命中候选。
+    收集需要补充 metadata 的 fastpath 命中候选
     """
     candidate_by_index = {candidate.index: candidate for candidate in candidates}
     return [candidate_by_index[record.index] for record in fastpath_records if record.index in candidate_by_index]
@@ -382,7 +382,7 @@ def _collect_fastpath_metadata_known_characters(
     fallback_known_characters: list[str] | None,
 ) -> list[str] | None:
     """
-    为 fastpath metadata enrichment 收敛当前 batch 的已知说话者提示。
+    为 fastpath metadata enrichment 收敛当前 batch 的已知说话者提示
     """
     speaker_by_index = {record.index: record.speaker or [] for record in fastpath_records}
     ordered_speakers: list[str] = []
@@ -400,7 +400,7 @@ def _merge_fastpath_metadata_records(
     require_identity_clues: bool,
 ) -> list[DialogueRecord]:
     """
-    将 LLM metadata enrichment 结果合并回 fastpath 记录。
+    将 LLM metadata enrichment 结果合并回 fastpath 记录
     """
     metadata_by_index = {record.index: record for record in metadata_records}
     merged_records: list[DialogueRecord] = []
@@ -431,7 +431,7 @@ async def _gather_batch_tasks_or_cancel(
     tasks: list[asyncio.Task[tuple[str, int, list[DialogueRecord]]]],
 ) -> list[tuple[str, int, list[DialogueRecord]]]:
     """
-    收集并行 batch 结果，并在首个失败时取消其余任务。
+    收集并行 batch 结果，并在首个失败时取消其余任务
     """
     if not tasks:
         return []
@@ -466,7 +466,7 @@ async def _gather_batch_tasks_or_cancel(
 
 def _build_phase3_parallel_stream_id(chunk_id: int | None, batch_index: int) -> str:
     """
-    为 Phase3 并行 batch 生成稳定的流分组标识。
+    为 Phase3 并行 batch 生成稳定的流分组标识
     """
     chunk_token = chunk_id if chunk_id is not None else "global"
     return f"phase3-{chunk_token}-{batch_index + 1}"
@@ -477,7 +477,7 @@ def _clone_annotation_client_for_parallel(
     stream_id: str | None = None,
 ) -> AnnotationClient:
     """
-    为并行 batch 构造无共享 session 的轻量客户端副本。
+    为并行 batch 构造无共享 session 的轻量客户端副本
     """
     if client.__class__.__module__.startswith("unittest.mock"):
         return client
@@ -500,7 +500,7 @@ def _clone_annotation_client_for_parallel(
         parent_emitter = getattr(client, "_emitter", None)
         if callable(parent_emitter) and stream_id:
             async def _emit_with_stream_id(event: StreamEvent) -> None:
-                # 只有真正的 LLM 文本/思维片段才需要分流；阶段级进度事件仍保留原来的 chunk 级单流语义。
+                # 只有真正的 LLM 文本/思维片段才需要分流；阶段级进度事件仍保留原来的 chunk 级单流语义
                 if event.action in {"output", "thinking"} and not event.stream_id:
                     event = replace(event, stream_id=stream_id)
                 await parent_emitter(event)
@@ -536,9 +536,9 @@ def _collect_priority_candidate_names(
     batch_candidates: list[QuoteCandidate],
 ) -> list[str] | None:
     """
-    收集当前 batch 真正提到的优先候选名。
+    收集当前 batch 真正提到的优先候选名
 
-    说明: 只把当前 batch 文本里出现过的候选名上推给 evidence renderer，避免前几个候选长期占满共享证据窗口。
+    说明: 只把当前 batch 文本里出现过的候选名上推给 evidence renderer，避免前几个候选长期占满共享证据窗口
     """
     if evidence_bundle is None or not evidence_bundle.requested_names:
         return None
@@ -597,7 +597,7 @@ async def attribute_dialogues_with_llm(
         evidence_sections: list[str] = []
         if include_evidence:
             # Phase3 的共享 evidence 需要按当前 batch 重新裁剪，
-            # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选。
+            # 否则整段 chunk 的前几个候选会长期挤占 prompt，后续 batch 看不到真正相关的别名候选
             evidence_sections = render_dialogue_attribution_evidence_sections(
                 evidence_bundle,
                 alias_map=alias_map,
@@ -615,7 +615,7 @@ async def attribute_dialogues_with_llm(
         )
         if evidence_sections:
             # Phase3 只消费上游已经准备好的共享 evidence blocks，
-            # 不在对话归属阶段重新发起取证，避免 Phase3 再次长成独立上下文体系。
+            # 不在对话归属阶段重新发起取证，避免 Phase3 再次长成独立上下文体系
             user_prompt += "\n\n" + "\n\n".join(evidence_sections)
 
         messages = [
@@ -702,7 +702,7 @@ async def attribute_dialogues_with_llm(
                     chunk_id=chunk_id,
                 )
                 # 并行 worker 复用同一个 SDK client，但显式去掉 _session，
-                # 避免多个 batch 协程同时写同一个 SQLAlchemy session。
+                # 避免多个 batch 协程同时写同一个 SQLAlchemy session
                 primary_worker = _clone_annotation_client_for_parallel(current_client, stream_id=stream_id)
                 fallback_worker = (
                     _clone_annotation_client_for_parallel(fallback_client, stream_id=stream_id)
@@ -723,7 +723,7 @@ async def attribute_dialogues_with_llm(
                     tb: int = total_batches,
                 ) -> list[DialogueRecordSchema]:
                     # 重试器可能把执行客户端切到 fallback_worker，这里必须消费传入的 working_client，
-                    # 不能闭包捕获 primary_worker，否则兜底分支仍会错误走主客户端。
+                    # 不能闭包捕获 primary_worker，否则兜底分支仍会错误走主客户端
                     return await _execute_single_batch(
                         working_client,
                         bc,
@@ -737,7 +737,7 @@ async def attribute_dialogues_with_llm(
 
                 batch_results = await retry_handler.execute(batch_operation)
                 # 每个 batch 都必须先按自己的候选集合校验返回 index，
-                # 避免跨 batch 的全局合法 index 在最终汇总时混进错误结果。
+                # 避免跨 batch 的全局合法 index 在最终汇总时混进错误结果
                 batch_records = _post_process_validation(
                     batch_results or [],
                     batch_candidates,
@@ -801,7 +801,7 @@ async def attribute_dialogues_with_llm(
         )
         ordered_records.extend(llm_records)
         # 各 batch 已各自完成 index 校验，这里只按全局 index 排序，
-        # 保证 fastpath 与 LLM 混合结果对 projector 来说仍是稳定的原文顺序。
+        # 保证 fastpath 与 LLM 混合结果对 projector 来说仍是稳定的原文顺序
         ordered_records.sort(key=lambda record: record.index)
         return ordered_records
 
@@ -821,11 +821,11 @@ def _post_process_validation(
     chunk_id: int | None,
 ) -> list[DialogueRecord]:
     """
-    后处理验证：验证 index 范围、别名归一化。
+    后处理验证：验证 index 范围、别名归一化
 
     设计决策（2026-04-10）：
     ─────────────────────────────
-    此函数只做两件事：1) 校验 index 有效性；2) 别名归一化。
+    此函数只做两件事：1) 校验 index 有效性；2) 别名归一化
     不对 speaker 做任何丢弃或修正。原因：
 
     1. 漏标注(null) > 错标注(A→B)：

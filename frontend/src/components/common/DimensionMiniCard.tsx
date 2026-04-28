@@ -395,7 +395,7 @@ function EmptyState() {
 
 /**
  * 2026-04-21，任务：仪表盘组件视觉重构
- * 修改原因：让五维速览卡片直接复用共享卡片壳，和 MetricCard 保持统一的外观反馈。
+ * 修改原因：让五维速览卡片直接复用共享卡片壳，和 MetricCard 保持统一的外观反馈
  */
 export function DimensionMiniCard({
   dimension,

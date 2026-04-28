@@ -61,9 +61,9 @@ class AnalysisErrorHandler:
         run_repo.update_run_status(run_id, "completed")
         session.commit()
 
-        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效。
+        # 任务完成后失效聚合指标缓存，确保新分析结果立即生效
         # 这里必须命中 api.dependencies 中维护的同一 MetricsService 单例，
-        # 否则只会失效一个临时新实例上的空缓存，路由真实读取的缓存仍然保留旧值。
+        # 否则只会失效一个临时新实例上的空缓存，路由真实读取的缓存仍然保留旧值
         try:
             from src.api.dependencies import get_metrics_service
 
@@ -108,7 +108,7 @@ class AnalysisErrorHandler:
         self.task_manager.complete_task(task_id, success=False, error=str(error))
 
         # 这里必须先清掉失败现场遗留的未提交事务，
-        # 再写 run 状态；否则后续 commit 会把半成品业务数据一并刷进数据库。
+        # 再写 run 状态；否则后续 commit 会把半成品业务数据一并刷进数据库
         session.rollback()
         run_repo = RunRepository(session)
         run_repo.update_run_status(run_id, "failed")
@@ -133,7 +133,7 @@ class AnalysisErrorHandler:
         self.novel_service.update_task_status(task_id, "cancelled")
 
         # 取消路径与失败路径一样，共享同一个 session；
-        # 若不先 rollback，commit cancel 状态时仍会把之前残留的脏写入一起提交。
+        # 若不先 rollback，commit cancel 状态时仍会把之前残留的脏写入一起提交
         session.rollback()
         run_repo = RunRepository(session)
         run_repo.update_run_task_fields(

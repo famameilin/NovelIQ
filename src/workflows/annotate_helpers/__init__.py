@@ -1,9 +1,9 @@
 """
 
-本模块从 src.cli.annotate_helpers 迁移而来，用于解决 workflows 与 cli 之间的循环依赖问题。
-      所有导入路径已更新为指向 workflows 模块。
+本模块从 src.cli.annotate_helpers 迁移而来，用于解决 workflows 与 cli 之间的循环依赖问题
+      所有导入路径已更新为指向 workflows 模块
 
-本模块将原 annotate_helpers.py 中的函数按功能分类拆分到不同的子模块中。
+本模块将原 annotate_helpers.py 中的函数按功能分类拆分到不同的子模块中
 
 子模块说明：
 - client_init.py: 客户端初始化相关

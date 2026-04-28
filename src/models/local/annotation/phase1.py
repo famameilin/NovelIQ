@@ -53,7 +53,7 @@ async def execute_phase1_call(
         )
     except Exception:
         # 这里的异常说明模型响应已经返回，但响应清洗/重复输出检测失败；
-        # 这种场景同样已经真实消耗了 token，需要按响应对象补记成本。
+        # 这种场景同样已经真实消耗了 token，需要按响应对象补记成本
         client._record_estimated_token_usage_from_response(
             current_messages,
             response,
@@ -99,7 +99,7 @@ async def execute_phase1_call(
         result = client._validate_annotation(result, sources, chunk_id, content_clean)
     except Exception:
         # phase1 的失败经常发生在 JSON 解析或业务校验阶段，
-        # 但此时模型响应已经拿到了，仍需要把本次尝试的 token 成本记下来。
+        # 但此时模型响应已经拿到了，仍需要把本次尝试的 token 成本记下来
         client._record_estimated_token_usage_from_messages(
             current_messages,
             content_clean,
@@ -109,7 +109,7 @@ async def execute_phase1_call(
         )
         raise
 
-    # fallback client 只是执行通道切换，不应把业务口径拆成 annotation_fallback.phase1。
+    # fallback client 只是执行通道切换，不应把业务口径拆成 annotation_fallback.phase1
     client._record_estimated_token_usage_from_messages(
         current_messages,
         content_clean,

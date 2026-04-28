@@ -45,7 +45,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 /**
- * 主视图和弹窗都要复用“仅保留最近 N 行”的裁剪逻辑，避免并行流文本无限增长。
+ * 主视图和弹窗都要复用“仅保留最近 N 行”的裁剪逻辑，避免并行流文本无限增长
  */
 function _limitMarkdownLines(content: string, maxLines: number): string {
   const allLines = content.split("\n");
@@ -53,14 +53,14 @@ function _limitMarkdownLines(content: string, maxLines: number): string {
 }
 
 /**
- * UI 不直接暴露后端 batch 编号，而是按当前 scope 首次出现顺序生成稳定的“并行流 N”标签。
+ * UI 不直接暴露后端 batch 编号，而是按当前 scope 首次出现顺序生成稳定的“并行流 N”标签
  */
 function _buildStreamLabel(streamNumber: number): string {
   return `并行流 ${streamNumber}`;
 }
 
 /**
- * Markdown 详情面板需要在流式追加时自动滚到末尾，但不影响主页面整体布局高度。
+ * Markdown 详情面板需要在流式追加时自动滚到末尾，但不影响主页面整体布局高度
  */
 function StreamMarkdownPanel({
   content,
@@ -92,7 +92,7 @@ function StreamMarkdownPanel({
 }
 
 /**
- * 单条流在主面板和弹窗详情里都要以相同方式呈现 output/thinking 双视图。
+ * 单条流在主面板和弹窗详情里都要以相同方式呈现 output/thinking 双视图
  */
 function StreamGroupDetail({
   group,

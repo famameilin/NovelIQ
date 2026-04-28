@@ -1,7 +1,7 @@
 """
-类型检测采样与文件读取辅助。
+类型检测采样与文件读取辅助
 
-拆出文件采样、分段切片和 weighted 采样索引计算逻辑。
+拆出文件采样、分段切片和 weighted 采样索引计算逻辑
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 
 def read_text_with_fallback(file_path: Path, limit: int | None = None) -> str | None:
     """
-    用多编码兜底读取文本。
+    用多编码兜底读取文本
 
-    统一处理 genre detect 的文件读取分支，避免多个入口重复维护编码兜底。
+    统一处理 genre detect 的文件读取分支，避免多个入口重复维护编码兜底
     """
     encodings = ["utf-8", "gbk", "gb2312"]
     for encoding in encodings:
@@ -34,9 +34,9 @@ def build_text_segments(
     overlap: int,
 ) -> list[tuple[int, int, str]]:
     """
-    构建分段检测的文本窗口。
+    构建分段检测的文本窗口
 
-    把分段切片逻辑单独抽出，便于 sequence detect 复用与测试。
+    把分段切片逻辑单独抽出，便于 sequence detect 复用与测试
     """
     segments: list[tuple[int, int, str]] = []
     text_len = len(text)
@@ -54,9 +54,9 @@ def sample_weighted_chunk_indices(
     min_samples: int,
 ) -> list[int]:
     """
-    计算 weighted detect 的均匀采样索引。
+    计算 weighted detect 的均匀采样索引
 
-    将 weighted 采样策略单独抽出，降低 detect 主函数的流程复杂度。
+    将 weighted 采样策略单独抽出，降低 detect 主函数的流程复杂度
     """
     if total_chunks <= 0:
         return []

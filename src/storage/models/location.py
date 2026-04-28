@@ -18,7 +18,7 @@ class ChunkLocation(Base):
 
     存储每个 chunk 中出现的地点
 
-    为 novel_id 与 (chunk_id, run_id) 补充外键约束，避免地点记录脱离小说和 chunk 主表。
+    为 novel_id 与 (chunk_id, run_id) 补充外键约束，避免地点记录脱离小说和 chunk 主表
     """
 
     __tablename__ = "chunk_locations"

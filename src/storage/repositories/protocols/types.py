@@ -1,7 +1,7 @@
 """
-Repository protocol 语义类型。
+Repository protocol 语义类型
 
-为协议层提供命名 DTO，避免继续暴露过宽的动态类型与无语义裸结构返回值。
+为协议层提供命名 DTO，避免继续暴露过宽的动态类型与无语义裸结构返回值
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ type TokenUsageStatsRecord = RepositoryRecord
 
 
 class RunRecord(TypedDict, total=False):
-    """运行记录协议 DTO。"""
+    """运行记录协议 DTO"""
 
     run_id: str
     novel_id: str
@@ -46,7 +46,7 @@ class RunRecord(TypedDict, total=False):
 
 @dataclass(frozen=True, slots=True)
 class ChunkTextRow:
-    """分块文本行。"""
+    """分块文本行"""
 
     chunk_id: int
     text: str
@@ -54,7 +54,7 @@ class ChunkTextRow:
 
 @dataclass(frozen=True, slots=True)
 class ChunkCounts:
-    """分块统计结果。"""
+    """分块统计结果"""
 
     total_chunks: int
     total_chars: int
@@ -62,7 +62,7 @@ class ChunkCounts:
 
 @dataclass(frozen=True, slots=True)
 class ChunkTopicWeight:
-    """分块主题权重写入行。"""
+    """分块主题权重写入行"""
 
     chunk_id: int
     topic_id: int
@@ -71,7 +71,7 @@ class ChunkTopicWeight:
 
 @dataclass(frozen=True, slots=True)
 class ChunkCurveRow:
-    """分块曲线写入行。"""
+    """分块曲线写入行"""
 
     chunk_id: int
     pos_density: float
@@ -84,7 +84,7 @@ class ChunkCurveRow:
 
 @dataclass(frozen=True, slots=True)
 class GlobalStatValue:
-    """全局统计写入/读取行。"""
+    """全局统计写入/读取行"""
 
     stat_name: str
     stat_value: float
@@ -92,7 +92,7 @@ class GlobalStatValue:
 
 @dataclass(frozen=True, slots=True)
 class GlobalContextRecord:
-    """全局上下文读取结果。"""
+    """全局上下文读取结果"""
 
     novel_title: str
     core_characters: str
@@ -102,7 +102,7 @@ class GlobalContextRecord:
 
 @dataclass(frozen=True, slots=True)
 class CharacterDisambigData:
-    """角色消歧 checkpoint 读取结果。"""
+    """角色消歧 checkpoint 读取结果"""
 
     known_characters: list[str]
     alias_merges: dict[str, str]
@@ -110,7 +110,7 @@ class CharacterDisambigData:
 
 @dataclass(frozen=True, slots=True)
 class PivotBlock:
-    """诊断转折点分块。"""
+    """诊断转折点分块"""
 
     chunk_id: int
     text: str
@@ -119,7 +119,7 @@ class PivotBlock:
 
 @dataclass(frozen=True, slots=True)
 class HighTensionChunk:
-    """高张力分块。"""
+    """高张力分块"""
 
     chunk_id: int
     text: str
@@ -128,7 +128,7 @@ class HighTensionChunk:
 
 @dataclass(frozen=True, slots=True)
 class RelationChangeRow:
-    """关系变更诊断行。"""
+    """关系变更诊断行"""
 
     chunk_id: int
     from_char: str
@@ -139,7 +139,7 @@ class RelationChangeRow:
 
 @dataclass(frozen=True, slots=True)
 class ForeshadowingChunk:
-    """伏笔诊断分块。"""
+    """伏笔诊断分块"""
 
     chunk_id: int
     text: str
@@ -149,7 +149,7 @@ class ForeshadowingChunk:
 
 @dataclass(frozen=True, slots=True)
 class PivotMoment:
-    """高潮时刻分块。"""
+    """高潮时刻分块"""
 
     chunk_id: int
     text: str

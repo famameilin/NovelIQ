@@ -1,7 +1,7 @@
 """
-数据获取函数兼容转发层。
+数据获取函数兼容转发层
 
-说明: 现仅保留向 services.results_queries 的兼容转发，避免 service 反向依赖 route。
+说明: 现仅保留向 services.results_queries 的兼容转发，避免 service 反向依赖 route
 """
 
 from src.api.services.results_queries import (

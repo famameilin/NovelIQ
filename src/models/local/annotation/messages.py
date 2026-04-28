@@ -24,7 +24,7 @@ from src.models.local.prompts import (
 
 def _render_active_setup_pool_block(active_setup_pool: Sequence[object] | None) -> str:
     """
-    渲染 Phase2 活跃 setup 池摘要块。
+    渲染 Phase2 活跃 setup 池摘要块
     """
     if not active_setup_pool:
         return ""
@@ -83,10 +83,10 @@ def _build_annotation_messages_v2(
             evidence_bundle,
             include_level1_alias_mappings=alias_map is None,
         )
-        # EvidenceBundle 是新的主语义入口。
-        # 兼容层字符串只在 bundle 没有产出对应 prompt block 时兜底，避免旧字段反向覆盖新设计。
+        # EvidenceBundle 是新的主语义入口
+        # 兼容层字符串只在 bundle 没有产出对应 prompt block 时兜底，避免旧字段反向覆盖新设计
         # 如果调用方显式给了 alias_map（包括空 dict），就不再把 bundle 里的 Level 1 别名裁决
-        # 通过 disambig_context 反向注入，避免新旧入口共存时出现优先级错位。
+        # 通过 disambig_context 反向注入，避免新旧入口共存时出现优先级错位
         if blocks.active_entities is not None:
             active_entities = blocks.active_entities
         if blocks.disambig_context is not None:
@@ -150,7 +150,7 @@ def _build_foreshadowing_messages(
 
     if include_evidence_blocks and evidence_bundle is not None:
         # Phase 2 只被动复用共享 evidence block，
-        # 不再引入 narrative 专用的二次渲染协议，避免这轮收口任务继续外扩。
+        # 不再引入 narrative 专用的二次渲染协议，避免这轮收口任务继续外扩
         evidence_sections = render_annotation_evidence_blocks(evidence_bundle)
         if evidence_sections:
             user_content += "\n\n" + "\n\n".join(evidence_sections)

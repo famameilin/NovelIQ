@@ -20,9 +20,9 @@ from src.storage.repositories.base import BaseRepository
 
 @dataclass(frozen=True)
 class ActiveEntityRow:
-    """GraphRepository 活跃实体查询 DTO。
+    """GraphRepository 活跃实体查询 DTO
 
-    替代 raw dict 返回值，让下游通过具名字段消费 graph repository 边界。
+    替代 raw dict 返回值，让下游通过具名字段消费 graph repository 边界
     """
 
     entity_id: int | None
@@ -38,9 +38,9 @@ class ActiveEntityRow:
 
 @dataclass(frozen=True)
 class CurrentRelationRow:
-    """GraphRepository 当前关系查询 DTO。
+    """GraphRepository 当前关系查询 DTO
 
-    明确当前关系快照的字段集合，避免下游依赖 dict[str, Any] 形状。
+    明确当前关系快照的字段集合，避免下游依赖 dict[str, Any] 形状
     """
 
     relation_id: int | None
@@ -60,9 +60,9 @@ class CurrentRelationRow:
 
 @dataclass(frozen=True)
 class RelationEventRow:
-    """GraphRepository 关系事件查询 DTO。
+    """GraphRepository 关系事件查询 DTO
 
-    让关系事件历史以具名字段跨 repository 边界传递。
+    让关系事件历史以具名字段跨 repository 边界传递
     """
 
     relation_event_id: int
@@ -81,7 +81,7 @@ class RelationEventRow:
 
 @dataclass(frozen=True)
 class LowConfidenceRelationEventRow:
-    """GraphRepository 低置信度关系事件 DTO。"""
+    """GraphRepository 低置信度关系事件 DTO"""
 
     relation_event_id: int
     chunk_id: int
@@ -99,7 +99,7 @@ class LowConfidenceRelationEventRow:
 
 @dataclass(frozen=True)
 class RelationConflictRow:
-    """GraphRepository 关系冲突 DTO。"""
+    """GraphRepository 关系冲突 DTO"""
 
     entity_pair: tuple[int, int]
     entity_names: list[str]
@@ -110,7 +110,7 @@ class RelationConflictRow:
 
 @dataclass(frozen=True)
 class ParticipantEntityRow:
-    """GraphRepository 图谱参与者查询 DTO。"""
+    """GraphRepository 图谱参与者查询 DTO"""
 
     entity_id: int
     name: str
@@ -135,7 +135,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         2026-04-27，任务：graph final-disambiguation history semantics fixes
         终消歧补关系需要影响 current relation，但不能伪造成 chunk 级历史事件；
-        因此 graph history surface 要排除特定 source_model 的 synthetic relation rows。
+        因此 graph history surface 要排除特定 source_model 的 synthetic relation rows
         """
         return (
             select(GraphRelationEvent)
@@ -157,9 +157,9 @@ class GraphRepository(BaseRepository["GraphRepository"]):
 
     def reset_graph_tables(self, run_id: str) -> None:
         """
-        清空指定 run 的 graph_* 权威表数据。
+        清空指定 run 的 graph_* 权威表数据
 
-        用于在别名归一化规则发生显著变化后执行全量重建，避免旧投影残留。
+        用于在别名归一化规则发生显著变化后执行全量重建，避免旧投影残留
         """
         self.session.execute(delete(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id))
         self.session.execute(delete(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id))
@@ -321,7 +321,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         2026-04-27，任务：fix-graph-projection-no-change-refresh
         当某条 ChunkRelation 被修正为“无变化”时，必须显式删除旧的 graph relation event，
-        并把受影响的实体 pair 回刷给 current relation / participant projection。
+        并把受影响的实体 pair 回刷给 current relation / participant projection
         """
         event = self.session.execute(
             select(GraphRelationEvent).where(
@@ -341,7 +341,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         2026-04-27，任务：fix-graph-projection-no-change-refresh
         当关系历史被删空时，current relation 也必须同步删除；
-        否则 graph / authority / timeline 会继续读到已经失效的旧关系快照。
+        否则 graph / authority / timeline 会继续读到已经失效的旧关系快照
         """
         events = list(
             self.session.execute(
@@ -422,7 +422,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         2026-04-27，任务：graph participant projection consistency fixes
         关系写入后必须把 current relation 和 participant projection 一起刷新，
-        避免调用方只补其中一层导致图谱节点与关系历史失配。
+        避免调用方只补其中一层导致图谱节点与关系历史失配
         """
         normalized_pairs = sorted(
             {
@@ -445,7 +445,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
     def refresh_entity_participants(self, run_id: str, entity_ids: Iterable[int]) -> None:
         """
         2026-04-26，任务：图谱参与者层落地
-        图谱参与者表是最终人物图谱节点资格的持久投影，必须在关系投影后按受影响实体增量刷新。
+        图谱参与者表是最终人物图谱节点资格的持久投影，必须在关系投影后按受影响实体增量刷新
         """
         normalized_entity_ids = sorted({int(entity_id) for entity_id in entity_ids if entity_id is not None})
         if not normalized_entity_ids:
@@ -563,9 +563,9 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         run_id: str | None = None,
     ) -> list[ActiveEntityRow]:
         """
-        查询近期活跃实体。
+        查询近期活跃实体
 
-        返回 ActiveEntityRow DTO，替代 raw dict[str, Any]。
+        返回 ActiveEntityRow DTO，替代 raw dict[str, Any]
         """
         if run_id is None:
             return []
@@ -606,9 +606,9 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         active_only: bool = True,
     ) -> list[CurrentRelationRow]:
         """
-        查询当前关系快照。
+        查询当前关系快照
 
-        返回 CurrentRelationRow DTO，替代 raw dict[str, Any]。
+        返回 CurrentRelationRow DTO，替代 raw dict[str, Any]
         """
         stmt = select(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
         if active_only:
@@ -644,7 +644,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         return result
 
     def count_current_relations(self, run_id: str, active_only: bool | None = None) -> int:
-        """返回指定运行的当前关系总数。"""
+        """返回指定运行的当前关系总数"""
         stmt = select(func.count()).select_from(GraphRelationCurrent).where(GraphRelationCurrent.run_id == run_id)
         if active_only is True:
             stmt = stmt.where(GraphRelationCurrent.is_active.is_(True))
@@ -653,7 +653,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         return int(self.session.execute(stmt).scalar() or 0)
 
     def count_entity_participants(self, run_id: str) -> int:
-        """返回指定运行的图谱参与者总数。"""
+        """返回指定运行的图谱参与者总数"""
         return int(
             self.session.execute(
                 select(func.count()).select_from(GraphEntityParticipant).where(GraphEntityParticipant.run_id == run_id)
@@ -662,7 +662,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         )
 
     def fetch_relation_endpoint_entity_ids(self, run_id: str) -> set[int]:
-        """返回关系历史和当前关系中涉及到的全部实体 ID。"""
+        """返回关系历史和当前关系中涉及到的全部实体 ID"""
         event_ids = {
             int(entity_id)
             for entity_id in self.session.execute(
@@ -692,7 +692,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         return event_ids | current_ids
 
     def count_relation_events(self, run_id: str) -> int:
-        """返回指定运行的关系事件总数。"""
+        """返回指定运行的关系事件总数"""
         return int(
             self.session.execute(
                 select(func.count()).select_from(self._relation_history_stmt(run_id).subquery())
@@ -707,9 +707,9 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         offset: int = 0,
     ) -> list[RelationEventRow]:
         """
-        查询关系事件历史。
+        查询关系事件历史
 
-        返回 RelationEventRow DTO，替代 raw dict[str, Any]。
+        返回 RelationEventRow DTO，替代 raw dict[str, Any]
         """
         entity_names = {
             row.entity_id: row.canonical_name
@@ -810,7 +810,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         status: str | None = None,
     ) -> list[GraphEntity]:
         """
-        获取指定运行的图谱实体（ORM 对象）。
+        获取指定运行的图谱实体（ORM 对象）
 
         新增 status 参数支持按状态过滤
 
@@ -838,7 +838,7 @@ class GraphRepository(BaseRepository["GraphRepository"]):
         """
         2026-04-26，任务：图谱参与者层落地
         最终人物图谱、graph authority report 等 consumer
-        需要稳定读取“有关系资格”的参与者集合，而不是全量人物。
+        需要稳定读取“有关系资格”的参与者集合，而不是全量人物
         """
         stmt = (
             select(GraphEntityParticipant, GraphEntity)
@@ -877,10 +877,10 @@ class GraphRepository(BaseRepository["GraphRepository"]):
 
     def fetch_relation_event_models(self, run_id: str) -> list[GraphRelationEvent]:
         """
-        获取指定运行的关系事件（ORM 对象）。
+        获取指定运行的关系事件（ORM 对象）
 
         与 fetch_relation_events() 不同，本方法返回 ORM 对象而非 dict，
-        适用于需要访问原始属性（如 chunk_id、from_entity_id）的场景。
+        适用于需要访问原始属性（如 chunk_id、from_entity_id）的场景
 
         Args:
             run_id: 运行ID

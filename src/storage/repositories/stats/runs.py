@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 def _parse_json_text_field(value: str | None) -> object | None:
     """
     diagnosis 完成态现在必须校验新焦点合同；
-    这里在 storage 层做最小 JSON 解析，避免只按“表里有行”误判完成。
+    这里在 storage 层做最小 JSON 解析，避免只按“表里有行”误判完成
     """
     if value is None:
         return None
@@ -36,7 +36,7 @@ def _parse_json_text_field(value: str | None) -> object | None:
 def _row_has_valid_diagnosis_contract(row: CloudAnalysis) -> bool:
     """
     旧 row、半成品 row 或迁移前残留 row 不应再把 diagnosis 阶段标成已完成；
-    只有能通过新 CloudAnalysis 合同校验的行，才算真正的 diagnosis 结果。
+    只有能通过新 CloudAnalysis 合同校验的行，才算真正的 diagnosis 结果
     """
     raw_focus_characters = _parse_json_text_field(row.focus_characters)
     raw_main_characters = _parse_json_text_field(row.main_characters)

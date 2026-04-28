@@ -2,7 +2,7 @@
 标注辅助函数模块 - 客户端初始化
 
 
-本模块包含标注相关的客户端初始化函数。
+本模块包含标注相关的客户端初始化函数
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from src.models.local.disambiguation import DisambiguationPromptContext, Extende
 
 
 class _NoopDisambiguationClient:
-    """Fallback disambiguation client for injected lightweight annotation stubs."""
+    """Fallback disambiguation client for injected lightweight annotation stubs"""
 
     def __init__(self, config: Any) -> None:
         self._config = config
@@ -55,10 +55,10 @@ class _NoopDisambiguationClient:
         review_states: dict[str, Any] | None = None,
     ) -> ExtendedDisambigResult:
         """
-        为 lightweight stub 提供空实现的最终代表名重选接口。
+        为 lightweight stub 提供空实现的最终代表名重选接口
 
         DisambiguationLike 协议新增该方法后，no-op fallback 也必须同步补齐，
-              否则 runtime protocol check 会把 fallback client 判成不兼容。
+              否则 runtime protocol check 会把 fallback client 判成不兼容
         """
         return ExtendedDisambigResult(canonical_decisions={}, entity_types={}, entity_relations=[])
 
@@ -67,10 +67,10 @@ class _NoopDisambiguationClient:
 
     def supports_canonical_reselect(self) -> bool:
         """
-        声明 lightweight fallback 不支持额外模型代表名重选。
+        声明 lightweight fallback 不支持额外模型代表名重选
 
         终消歧后的额外重选依赖真实模型输出；no-op fallback 只能提供空实现，
-              因此这里显式暴露能力标记，供主流程安全回退到本地 heuristic。
+              因此这里显式暴露能力标记，供主流程安全回退到本地 heuristic
         """
         return False
 
@@ -114,7 +114,7 @@ def _resolve_disambiguation_fallback(
 
 
 def _get_model_name(client: AnnotationLike) -> str:
-    """获取模型名称（兼容不同客户端实现）。"""
+    """获取模型名称（兼容不同客户端实现）"""
     config = getattr(client, "_config", None)
     model = getattr(config, "model", None) if config is not None else None
     return model or "unknown"

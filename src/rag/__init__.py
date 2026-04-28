@@ -3,9 +3,9 @@
 
 重新导出 Level3VectorEvidence
 
-导出 LLM mention extraction service 与模型 rerank 边界类型，供上层按需注入。
+导出 LLM mention extraction service 与模型 rerank 边界类型，供上层按需注入
 
-公开语义切换到 NarrativeEvidenceService；不再导出 DisambigContextProvider 旧命名。
+公开语义切换到 NarrativeEvidenceService；不再导出 DisambigContextProvider 旧命名
 """
 
 from src.rag.authority import Level1AuthorityProvider

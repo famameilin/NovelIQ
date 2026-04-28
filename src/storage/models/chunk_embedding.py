@@ -25,8 +25,8 @@ class ChunkEmbedding(Base):
 
     存储 chunk 文本的向量嵌入，用于 Level 3 向量检索
 
-    使用 pgvector 扩展进行向量相似度搜索。
-    向量维度为 1536，与 EmbeddingClient 配置一致。
+    使用 pgvector 扩展进行向量相似度搜索
+    向量维度为 1536，与 EmbeddingClient 配置一致
     """
 
     __tablename__ = "chunk_embeddings"
@@ -59,10 +59,10 @@ class ParagraphEmbedding(Base):
     Paragraph 向量嵌入表
 
     存储 chunk 内 paragraph 的文本、局部字符范围与 embedding，
-          仅用于命中 chunk 范围内的局部 evidence rerank，不承担全库召回入口。
+          仅用于命中 chunk 范围内的局部 evidence rerank，不承担全库召回入口
 
     旧的 start_char/end_char 字段已替换为显式 local/global offset，
-              避免继续使用含义模糊的字段名。
+              避免继续使用含义模糊的字段名
     """
 
     __tablename__ = "paragraph_embeddings"

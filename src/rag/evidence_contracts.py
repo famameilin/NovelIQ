@@ -1,11 +1,11 @@
 """
-Evidence / Level3 消费者意图驱动合同。
+Evidence / Level3 消费者意图驱动合同
 
-收口 EvidenceRequest / Level3QueryPlan / 请求指纹，避免 workflow/provider 继续通过弱语义参数耦合。
+收口 EvidenceRequest / Level3QueryPlan / 请求指纹，避免 workflow/provider 继续通过弱语义参数耦合
 
 将 EvidenceRequest 定义为整个 evidence 层的统一输入合同；
           新增 consumer/requested_names/background_entities/need_level*，
-          显式区分“当前要处理的名字”“可用于检索的锚点”和“仅作为背景存在的名字”。
+          显式区分“当前要处理的名字”“可用于检索的锚点”和“仅作为背景存在的名字”
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ Level3QueryMode = Literal["direct", "high_order", "hybrid"]
 def _normalize_name_list(values: list[str]) -> list[str]:
     """
     统一清洗显式名字输入；consumer 传进来的请求名单必须稳定去重，
-          避免 workflow 因重复/空字符串把 request 语义悄悄放大。
+          避免 workflow 因重复/空字符串把 request 语义悄悄放大
     """
 
     normalized: list[str] = []
@@ -43,7 +43,7 @@ def _normalize_name_list(values: list[str]) -> list[str]:
 
 def _normalize_int_list(values: list[int]) -> list[int]:
     """
-    exclude_chunk_ids 也需要稳定去重，保证 request 指纹不会因为重复 cutoff 噪音而失真。
+    exclude_chunk_ids 也需要稳定去重，保证 request 指纹不会因为重复 cutoff 噪音而失真
     """
 
     normalized: list[int] = []
@@ -57,7 +57,7 @@ def _build_evidence_cache_content_variant(request: EvidenceRequest) -> str:
     """
     cache key 仍尽量忽略纯标签差异，但若某个 consumer 会真的改变 bundle 内容，
           就必须显式打出 content variant；当前仅 annotation_phase1 的 identity+Level3
-          会额外合并 emotion overlay，不能再与普通 identity request 共用同一 cache 键。
+          会额外合并 emotion overlay，不能再与普通 identity request 共用同一 cache 键
     """
 
     if request.consumer == "annotation_phase1" and request.objective == "identity" and request.need_level3:
@@ -69,7 +69,7 @@ def _build_evidence_cache_content_variant(request: EvidenceRequest) -> str:
 class EvidenceRequest:
     """
     evidence 层唯一正式输入合同；消费者必须显式声明目标、名字边界、
-          层级需求、预算和是否允许 LLM query expansion。
+          层级需求、预算和是否允许 LLM query expansion
     """
 
     consumer: EvidenceConsumer
@@ -92,7 +92,7 @@ class EvidenceRequest:
     def __post_init__(self) -> None:
         """
         frozen dataclass 仍在入口统一做 strip/dedupe；
-              这样后续 fingerprint、cache 与日志观察字段都能直接消费稳定值。
+              这样后续 fingerprint、cache 与日志观察字段都能直接消费稳定值
         """
 
         object.__setattr__(self, "query_text", self.query_text.strip())
@@ -105,7 +105,7 @@ class EvidenceRequest:
 @dataclass(frozen=True, slots=True)
 class Level3QueryPlan:
     """
-    将 query planning 与 retrieval execution 解耦；plan 只描述如何检索，不负责真正执行。
+    将 query planning 与 retrieval execution 解耦；plan 只描述如何检索，不负责真正执行
     """
 
     mode: Level3QueryMode
@@ -119,10 +119,10 @@ class Level3QueryPlan:
 def build_evidence_request_fingerprint(request: EvidenceRequest) -> tuple[object, ...]:
     """
     指纹服务于 evidence 复用，因此只保留会影响实际取证结果的字段；
-              consumer/background_entities 不改变 bundle 内容时，不应阻止 cache reuse。
+              consumer/background_entities 不改变 bundle 内容时，不应阻止 cache reuse
 
     若某个 consumer 会额外改变 bundle 内容，则要把该 content variant
-              纳入 fingerprint，避免 annotation_phase1 的 emotion overlay 污染其他 identity consumer。
+              纳入 fingerprint，避免 annotation_phase1 的 emotion overlay 污染其他 identity consumer
     """
     return (
         _build_evidence_cache_content_variant(request),

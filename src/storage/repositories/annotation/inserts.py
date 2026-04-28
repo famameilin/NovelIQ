@@ -154,7 +154,7 @@ def replace_chunk_relations_for_source_model(
     """
     2026-04-27，任务：graph final-disambiguation rebuild fixes
     终消歧生成的层级关系需要先稳定回写到 chunk_relations，再交给后续 rebuild 统一投影，
-    否则直接写进 graph_* 表的结果会在 reset_graph_tables() 后丢失。
+    否则直接写进 graph_* 表的结果会在 reset_graph_tables() 后丢失
     """
     session.execute(
         delete(ChunkRelation).where(
@@ -200,7 +200,7 @@ def update_relation_projection_status(
     projected_at: datetime | None = None,
     projection_error: str | None = None,
 ) -> None:
-    """更新单条关系的投影状态。"""
+    """更新单条关系的投影状态"""
     stmt = (
         update(ChunkRelation)
         .where(ChunkRelation.id == relation_id)

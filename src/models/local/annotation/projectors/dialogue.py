@@ -1,5 +1,5 @@
 """
-说明: Phase3 对话归属结果投影器，负责校验、归一化、长度派生与 storage-ready 快照。
+说明: Phase3 对话归属结果投影器，负责校验、归一化、长度派生与 storage-ready 快照
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from src.models.local.schema import DialogueRecord, DialogueRecordSchema, Dialog
 @dataclass
 class DialogueLengthResult:
     """
-    Phase3 对话投影结果。
+    Phase3 对话投影结果
     """
 
     speaker_lengths: dict[str, int] = field(default_factory=dict)
@@ -33,7 +33,7 @@ def normalize_dialogue_records(
     chunk_id: int | None,
 ) -> list[DialogueRecord]:
     """
-    校验 Phase3 raw records 并完成 speaker 别名归一化。
+    校验 Phase3 raw records 并完成 speaker 别名归一化
     """
     valid_records: list[DialogueRecord] = []
     candidate_indices = {c.index for c in candidates}
@@ -104,7 +104,7 @@ def project_dialogue_lengths(
     return_identity_clues: bool = False,
 ) -> DialogueLengthResult:
     """
-    将归一化后的 Phase3 records 投影为长度、归属和对话元数据。
+    将归一化后的 Phase3 records 投影为长度、归属和对话元数据
     """
     speaker_lengths: dict[str, int] = {}
     canonical_attribution: dict[int, list[str]] = {}
@@ -158,7 +158,7 @@ def build_dialogue_snapshots(
     dialogue_identity_clues: dict[int, str | None] | None = None,
 ) -> tuple[list[DialogueSnapshot], list[int]]:
     """
-    将 Phase3 投影结果转换为可落库的 DialogueSnapshot 列表。
+    将 Phase3 投影结果转换为可落库的 DialogueSnapshot 列表
     """
     if not dialogues:
         return [], []

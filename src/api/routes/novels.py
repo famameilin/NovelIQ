@@ -67,8 +67,8 @@ async def batch_delete_novels(
     """
     批量删除小说
 
-    批量删除指定的小说及其相关数据。
-    即使部分删除失败，也会继续处理其他小说。
+    批量删除指定的小说及其相关数据
+    即使部分删除失败，也会继续处理其他小说
     """
     deleted_ids: list[str] = []
     failed_ids: list[dict[str, str]] = []

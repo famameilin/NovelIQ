@@ -6,7 +6,7 @@
  * - 移除伪状态 (chunking/annotating/...)，统一使用后端 TaskStatus
  * - 运行中任务从 streamStore 读取 progress.stage 显示具体阶段
  *
- * 为 pending 任务补齐继续入口，并把“实时流式中”语义收窄到 running/cancelling，避免把可恢复任务误显示成运行中。
+ * 为 pending 任务补齐继续入口，并把“实时流式中”语义收窄到 running/cancelling，避免把可恢复任务误显示成运行中
  */
 import { Circle, CheckCircle, XCircle, Loader2, Square, Eye, Trash2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -59,8 +59,8 @@ function getStatusIcon(status: TaskStatus) {
 
 function formatRelativeTime(dateStr: string | null): string {
 
-  // 与 TaskRowProps.created_at 的可空语义保持一致，避免严格类型检查构建失败。
-  // 列表接口历史上可能漏传 created_at，前端需要兜底避免显示 epoch 假时间。
+  // 与 TaskRowProps.created_at 的可空语义保持一致，避免严格类型检查构建失败
+  // 列表接口历史上可能漏传 created_at，前端需要兜底避免显示 epoch 假时间
   if (!dateStr) return "未知时间";
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return "未知时间";

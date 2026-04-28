@@ -1,7 +1,7 @@
 """
-图谱查询组装器。
+图谱查询组装器
 
-说明: 承载 graph 相关查询组装逻辑。
+说明: 承载 graph 相关查询组装逻辑
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def _serialize_graph_event(event: Any) -> dict[str, Any]:
 
 
 def _serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
-    """Convert graph-page summary facts into the public DTO."""
+    """Convert graph-page summary facts into the public DTO"""
     return {
         "node_count": summary.node_count,
         "edge_count": summary.edge_count,
@@ -88,7 +88,7 @@ def _serialize_graph_page_summary(summary: GraphPageSummary) -> dict[str, Any]:
 
 
 def _serialize_graph_page_quality(quality: GraphPageQualityDetails) -> dict[str, Any]:
-    """Convert graph-page quality facts into the public DTO."""
+    """Convert graph-page quality facts into the public DTO"""
     return {
         "conflict_count": quality.conflict_count,
         "low_confidence_count": quality.low_confidence_count,
@@ -200,7 +200,7 @@ def _fetch_character_relations(
     valid_character_names: set[str] | None = None,
     export_graph_view: ExportGraphAuthorityView | None = None,
 ) -> list:
-    """获取角色关系数据。"""
+    """获取角色关系数据"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     authority_service.assert_graph_projection_ready(run_id)
     if export_graph_view is None:
@@ -244,7 +244,7 @@ def _fetch_hierarchical_relations(
     alias_map: dict[str, str] | None = None,
     valid_character_names: set[str] | None = None,
 ) -> list:
-    """获取层级关系数据。"""
+    """获取层级关系数据"""
     hierarchical_types = set(settings.analysis.valid_hierarchical_relation_types)
     valid_entity_names = {
         entity.name for entity in export_graph_view.canonical_entities if getattr(entity, "name", None)
@@ -288,7 +288,7 @@ def _fetch_graph_snapshot(
     events_cursor: str | None = None,
     events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
-    """获取知识图谱快照（nodes/edges/events/summary）。"""
+    """获取知识图谱快照（nodes/edges/events/summary）"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     graph_view = authority_service.build_graph_view(run_id)
     participant_states, confirmed_relations, relation_events = _resolve_graph_page_authority_contract(graph_view)
@@ -345,7 +345,7 @@ def _fetch_graph_events_page(
     events_cursor: str | None = None,
     events_limit: int = GRAPH_PAGE_EVENT_LIMIT,
 ) -> dict[str, Any]:
-    """获取 graph page relation events 的增量分页结果。"""
+    """获取 graph page relation events 的增量分页结果"""
     authority_service = KnowledgeGraphAuthorityService.from_session(annotation_repo.session)
     start = _decode_graph_events_cursor(events_cursor)
     page_limit = max(1, min(events_limit, GRAPH_PAGE_EVENT_LIMIT))

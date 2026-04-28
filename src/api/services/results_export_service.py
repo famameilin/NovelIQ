@@ -68,7 +68,7 @@ def load_core_results(
     missing_fields: list[str] = []
 
     # results export 是复盘/比对用 payload，这里必须返回数据库中持久化的
-    # chunk_curves 原值，不能复用展示层融合后的单曲线，否则字段名不变但语义会被静默替换。
+    # chunk_curves 原值，不能复用展示层融合后的单曲线，否则字段名不变但语义会被静默替换
     chunk_curves = _fetch_raw_chunk_curves(run_id, stats_repo)
     if not chunk_curves:
         missing_fields.append("chunk_curves")
@@ -114,7 +114,7 @@ def load_character_bundle(
         missing_fields.append("characters")
     valid_character_names = {character.name for character in characters}
     # export 过滤口径必须和同一份 authority view 对齐，避免这里再回退到
-    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉。
+    # GraphRepository 原始查询，导致 dangling 过滤与 export graph payload 分叉
     valid_character_names = valid_character_names | {
         entity.name for entity in export_graph_view.canonical_entities if entity.entity_type == "character"
     }
@@ -161,10 +161,10 @@ def load_graph_signal_bundle(
     graph_report: GraphAuthorityReport,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
-    加载 graph authority 输入信号。
+    加载 graph authority 输入信号
 
     graph_summary / graph_quality_report 在 export 里只是 graph-owned
-    input signals，不承担最终诊断或聚合结论语义。
+    input signals，不承担最终诊断或聚合结论语义
     """
     return serialize_graph_report_signals(graph_report)
 
@@ -177,10 +177,10 @@ def load_aggregate_metrics_bundle(
     chunk_repo: ChunkRepository,
 ) -> tuple[Any, Any, dict[str, Any]]:
     """
-    加载非 graph 的聚合结论。
+    加载非 graph 的聚合结论
 
     aggregate_metrics 与 /metrics/* 现在统一复用 MetricsService 的缓存入口，
-    避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()。
+    避免 export 和 metrics 各自重复跑一遍 aggregate_all_metrics()
     """
 
     global_stats = _fetch_global_stats(run_id, stats_repo, chunk_repo)
@@ -265,7 +265,7 @@ def _fetch_timeline_data(
     Contract note:
         Export intentionally reuses the same authority-backed timeline helper
         as the /timeline route so both surfaces stay aligned on character
-        lifecycles and character-character relation history.
+        lifecycles and character-character relation history
     """
     try:
         timeline_plan = build_timeline_plan(
@@ -318,7 +318,7 @@ def build_export_payload(
     构建导出 payload
     """
     # export payload 中的 aggregate_metrics 只允许保留 aggregate 结论，
-    # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去。
+    # 这里在最终装配前再次做运行时校验，防止后续改动把 graph signals 混回去
     validate_aggregate_metrics_contract(aggregate_metrics)
     return {
         "task_id": task_id,
@@ -424,7 +424,7 @@ def fetch_all_results_data(
         missing_fields.append("timeline")
 
     # missing_fields 对外语义是“缺哪些字段”，不是“缺了几次”；
-    # 这里在最终返回前按插入顺序去重，避免 diagnosis 被重复追加。
+    # 这里在最终返回前按插入顺序去重，避免 diagnosis 被重复追加
     missing_fields = list(dict.fromkeys(missing_fields))
 
     results_data = build_export_payload(

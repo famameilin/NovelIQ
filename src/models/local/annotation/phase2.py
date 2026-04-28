@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 def _normalize_setup_summary_for_link_check(value: str) -> str:
     """
-    标准化 setup_summary，用于 linked_setup_id 身份一致性校验。
+    标准化 setup_summary，用于 linked_setup_id 身份一致性校验
     """
 
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
@@ -105,16 +105,16 @@ async def annotate_chunk_phase2(
     active_setup_pool = []
     if run_id and chunk_id is not None and getattr(client, "_session", None) is not None and chunk_id > 0:
         # 活跃池只允许看到当前 chunk 之前已经落库的 thread，
-        # 这里固定读取 chunk_id-1 可见状态，避免 Phase2 因同 chunk 内的其他副作用“偷看现在”。
+        # 这里固定读取 chunk_id-1 可见状态，避免 Phase2 因同 chunk 内的其他副作用“偷看现在”
         active_setup_pool = AnnotationRepository(client._session).fetch_active_foreshadowing_threads_for_prompt(
             run_id,
             max_chunk_id=chunk_id - 1,
         )
 
     # Phase2 只消费调用方已经准备好的 evidence_bundle，
-    # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界。
+    # 避免在本阶段继续分叉出新的取证链路，扩大这轮收口任务的边界
     # include_phase2_evidence=False 时只关闭 prompt 注入，不改上游取证与调度路径，
-    # 方便做方案文档要求的 targeted ablation。
+    # 方便做方案文档要求的 targeted ablation
     include_evidence_blocks = settings.analysis.multi_phase_annotation.include_phase2_evidence
     messages = _build_foreshadowing_messages(
         text=text,
@@ -155,7 +155,7 @@ def _validate_phase2_active_setup_link(
     active_setup_pool,
 ) -> None:
     """
-    校验 Phase2 返回的 linked_setup_id 是否来自当前可见活跃池。
+    校验 Phase2 返回的 linked_setup_id 是否来自当前可见活跃池
     """
 
     if not result.has_foreshadowing or result.is_new_setup:

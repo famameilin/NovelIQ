@@ -1,7 +1,7 @@
 """
 词表注册中心 (Lexicon Registry v2)
 
-基于 registry.yaml + conflict_matrix.yaml 的分层词表加载系统。
+基于 registry.yaml + conflict_matrix.yaml 的分层词表加载系统
 
 核心能力:
   - 从 registry.yaml 读取词表分层归属与元信息
@@ -76,7 +76,7 @@ class LexiconRegistry:
 
     def get(self, key: str, exclude_borrowed: bool = False) -> list[str]:
         """
-        获取指定词表。
+        获取指定词表
 
         Args:
             key: 词表标识，格式 "layer.lexicon"，如 "emotion.positive"
@@ -102,9 +102,9 @@ class LexiconRegistry:
         self, key: str, domain_tags: list[str] | None = None, exclude_borrowed: bool = False
     ) -> list[str]:
         """
-        获取词表 + 领域扩展。
+        获取词表 + 领域扩展
 
-        基础词表与 domain 扩展的并集去重，domain 是增量叠加而非替换。
+        基础词表与 domain 扩展的并集去重，domain 是增量叠加而非替换
 
         Args:
             key: 词表标识
@@ -201,11 +201,11 @@ class LexiconRegistry:
 
     def _load_lexicon_file(self, key: str) -> list[str]:
         """
-        从 .txt 文件加载原始词条。
+        从 .txt 文件加载原始词条
 
         支持两种格式：
         - 纯词条格式：每行一个词条
-        - 加权格式：每行 "词条\\t权重"，只取词条部分
+        - 加权格式：每行 "词条\t权重"，只取词条部分
 
 
         """
@@ -218,11 +218,11 @@ class LexiconRegistry:
 
     def _load_domain_lexicon(self, tag: str) -> list[str]:
         """
-        加载领域扩展词表。
+        加载领域扩展词表
 
         支持两种格式：
         - 纯词条格式：每行一个词条
-        - 加权格式：每行 "词条\\t权重"，只取词条部分
+        - 加权格式：每行 "词条\t权重"，只取词条部分
 
 
         """
@@ -236,11 +236,11 @@ class LexiconRegistry:
 
     def _exclude_borrowed(self, primary_key: str, terms: list[str]) -> list[str]:
         """
-        排除被声明为「从主属表借用」的词条。
+        排除被声明为「从主属表借用」的词条
 
         当 A 表是某词条的主属表、B 表只是借用时，
         如果调用方请求 B 表且 exclude_borrowed=True，
-        则该词条从 B 的返回结果中移除。
+        则该词条从 B 的返回结果中移除
 
         """
         borrowed: set[str] = set()
@@ -287,9 +287,9 @@ def get_weighted_lexicon_set(
     fight_domains: list[str] | None = None,
 ) -> WeightedLexiconSet:
     """
-    获取完整的加权词表集合。
+    获取完整的加权词表集合
 
-    使用 load_weighted_lexicon 加载词典。
+    使用 load_weighted_lexicon 加载词典
 
     """
     from src.workflows.curve_metrics import WeightedLexiconSet

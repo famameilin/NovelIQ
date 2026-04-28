@@ -1,5 +1,5 @@
 """
-说明: Phase2 伏笔结果投影器，负责校验与 ChunkAnnotation 伏笔视图合并。
+说明: Phase2 伏笔结果投影器，负责校验与 ChunkAnnotation 伏笔视图合并
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ def normalize_foreshadowing_result(
     chunk_id: int | None,
 ) -> ForeshadowingResult | None:
     """
-    校验并归一化 Phase2 伏笔结果。
+    校验并归一化 Phase2 伏笔结果
     """
     if not foreshadowing:
         return None
@@ -41,7 +41,7 @@ def merge_annotation_foreshadowing(
     resolved_payoff_likelihood: str | None = None,
 ) -> ChunkAnnotation:
     """
-    将 Phase2 伏笔结果投影回 ChunkAnnotation 写入视图。
+    将 Phase2 伏笔结果投影回 ChunkAnnotation 写入视图
     """
     if foreshadowing is None:
         return annotation

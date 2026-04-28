@@ -46,7 +46,7 @@ export function AppLayout({ mode = "default" }: AppLayoutProps) {
 
   /**
    * 修改原因: 首页不对应具体小说任务；进入首页布局时需要清空当前小说/任务选择，
-   * 避免全局主题 hook 继续沿用上一次任务的 diagnosis 主题色。
+   * 避免全局主题 hook 继续沿用上一次任务的 diagnosis 主题色
    */
   useEffect(() => {
     if (mode !== "with-hero-panel") {

@@ -62,7 +62,7 @@ def _merge_relations_for_projection(
 
 
 def _get_last_projected_chunk(session, run_id: str) -> int:
-    """查询 ChunkRelation 表中已投影的最大 chunk_id。"""
+    """查询 ChunkRelation 表中已投影的最大 chunk_id"""
     result = session.execute(
         text("""
             SELECT COALESCE(MAX(chunk_id), -1) AS max_chunk_id

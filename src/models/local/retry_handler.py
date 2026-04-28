@@ -123,7 +123,7 @@ class AnnotationRetryHandler[T]:
         build_retry_messages: Callable[[], Any] | None = None,
     ) -> T:
         """
-        尝试兜底客户端。
+        尝试兜底客户端
         """
         logger.warning(
             "{} primary client failed after {} attempts, falling back to fallback client chunk_id={}",

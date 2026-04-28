@@ -25,7 +25,7 @@ function subscribe(query: string, callback: () => void): () => void {
 }
 
 /**
- * React hook that tracks a CSS media query match state.
+ * React hook that tracks a CSS media query match state
  */
 export function useMediaQuery(query: string): boolean {
   const matches = useSyncExternalStore(

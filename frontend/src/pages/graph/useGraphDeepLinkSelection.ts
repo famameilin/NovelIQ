@@ -29,7 +29,7 @@ function getUniqueChunkEvent(events: GraphEvent[], chunkId: number | null): Grap
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 把 deep-link 解析、回退提示和 URL 同步独立出来，避免分页与跳转状态交叉耦合。
+// 把 deep-link 解析、回退提示和 URL 同步独立出来，避免分页与跳转状态交叉耦合
 export function useGraphDeepLinkSelection({
   novelId,
   taskScopeId,

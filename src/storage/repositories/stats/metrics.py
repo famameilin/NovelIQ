@@ -1,4 +1,4 @@
-"""全局统计、token 使用与 diagnosis 落库相关操作。"""
+"""全局统计、token 使用与 diagnosis 落库相关操作"""
 
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ def fetch_token_usage_stats(session: Session, run_id: str, novel_id: str) -> dic
     coverage_gaps = _detect_token_coverage_gaps(session, run_id, by_call_type)
     # 这里的 estimated 表示“整套 token 统计只能作为近似成本信号”，
     # 并不强制每一条记录都来自本地估算；像 embedding 这类 provider 能稳定返回 usage 的链路，
-    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息。
+    # 仍然优先复用实报值，避免为了统一字面口径反而丢掉更好的原始信息
     summary["accounting_method"] = "estimated"
     summary["coverage_status"] = "partial" if coverage_gaps else "complete"
     return {
@@ -209,26 +209,26 @@ def _fetch_usage_by_task(session: Session, run_id: str, novel_id: str) -> dict[s
     for row in result:
         normalized_task_type = _normalize_token_usage_task_type(row.task_type)
         bucket = aggregated.setdefault(normalized_task_type, {"call_count": 0, "total_tokens": 0})
-        # 不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列。
+        # 不要再用 `row.count` 这类名字，mypy 会把它当成序列方法而不是 SQL 列
         bucket["call_count"] += int(row.call_count or 0)
         bucket["total_tokens"] += int(row.total_tokens or 0)
     return aggregated
 
 
 def _build_call_type_key(task_type: str, call_type: str) -> str:
-    """构建对外统一的调用桶 key。"""
+    """构建对外统一的调用桶 key"""
     return f"{task_type}.{call_type}"
 
 
 def _normalize_token_usage_task_type(task_type: str) -> str:
-    """归一 token_usage 的任务类型桶。annotation_fallback 对外仍归并到 annotation。"""
+    """归一 token_usage 的任务类型桶。annotation_fallback 对外仍归并到 annotation"""
     if task_type == "annotation_fallback":
         return "annotation"
     return task_type
 
 
 def _fetch_usage_by_call_type(session: Session, run_id: str, novel_id: str) -> dict[str, Any]:
-    """按 task_type + call_type 获取使用量。"""
+    """按 task_type + call_type 获取使用量"""
     stmt = (
         select(
             TokenUsage.task_type,
@@ -280,7 +280,7 @@ def _fetch_usage_by_model(session: Session, run_id: str, novel_id: str) -> dict[
 
 
 def _normalize_model_interaction_call_key(interaction_type: str, phase: str | None) -> str:
-    """将 model_interactions 的类型映射到 token_usage 使用的调用桶 key。"""
+    """将 model_interactions 的类型映射到 token_usage 使用的调用桶 key"""
     normalized_phase = phase or "unknown"
     if interaction_type == "annotate":
         return _build_call_type_key("annotation", normalized_phase)
@@ -304,7 +304,7 @@ def _normalize_model_interaction_call_key(interaction_type: str, phase: str | No
 
 
 def _fetch_model_interaction_call_counts(session: Session, run_id: str) -> dict[str, int]:
-    """统计真实成功的模型调用次数，供 token coverage 对比使用。"""
+    """统计真实成功的模型调用次数，供 token coverage 对比使用"""
     stmt = (
         select(
             ModelInteraction.interaction_type,
@@ -330,7 +330,7 @@ def _detect_token_coverage_gaps(
     run_id: str,
     by_call_type: dict[str, Any],
 ) -> list[str]:
-    """比较真实调用与已记账调用，找出 token 覆盖缺口。"""
+    """比较真实调用与已记账调用，找出 token 覆盖缺口"""
     interaction_counts = _fetch_model_interaction_call_counts(session, run_id)
     gaps: list[str] = []
     for call_key in sorted(interaction_counts.keys()):
@@ -343,9 +343,9 @@ def _detect_token_coverage_gaps(
 
 def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysisSchema) -> None:
     """
-    插入云端分析结果。
+    插入云端分析结果
 
-    `cloud_analysis` 统一落库焦点合同字段，不再写入旧 `protagonist` 列。
+    `cloud_analysis` 统一落库焦点合同字段，不再写入旧 `protagonist` 列
     """
     arc_scores_json = json.dumps(dict(analysis.arc_scores), ensure_ascii=False)
     topic_labels_json = json.dumps(list(analysis.topic_labels), ensure_ascii=False)
@@ -381,7 +381,7 @@ def insert_cloud_analysis(session: Session, run_id: str, analysis: CloudAnalysis
 
 
 def fetch_cloud_analysis(session: Session, novel_id: str, run_id: str) -> dict[str, Any] | None:
-    """获取云端分析结果，只返回当前焦点合同字段。"""
+    """获取云端分析结果，只返回当前焦点合同字段"""
     stmt = (
         select(CloudAnalysis)
         .where(
@@ -557,7 +557,7 @@ def fetch_novel_title(session: Session, novel_id: str, run_id: str) -> str | Non
 
 
 def has_global_context(session: Session, run_id: str) -> bool:
-    """检查是否已存在 global_context 记录。"""
+    """检查是否已存在 global_context 记录"""
     stmt = select(GlobalContext).where(GlobalContext.run_id == run_id).limit(1)
     result = session.execute(stmt).scalar_one_or_none()
     return result is not None

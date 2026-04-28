@@ -1,7 +1,7 @@
 """
-角色查询组装器。
+角色查询组装器
 
-说明: 承载 characters 相关查询组装逻辑。
+说明: 承载 characters 相关查询组装逻辑
 """
 
 from __future__ import annotations

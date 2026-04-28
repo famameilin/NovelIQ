@@ -10,7 +10,7 @@ const PERIPHERAL_RING_RATIO = 0.54;
 const ISOLATED_RING_RATIO = 0.62;
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 把 G6 力导布局配置独立出来，避免组件生命周期和布局参数相互缠绕。
+// 把 G6 力导布局配置独立出来，避免组件生命周期和布局参数相互缠绕
 export function buildForceLayoutConfig(width: number, height: number, nodeCount: number) {
   const densityScale = nodeCount >= 30 ? 1.25 : nodeCount >= 20 ? 1.1 : 1;
   return {
@@ -89,7 +89,7 @@ function positionNodesInRings(
 }
 
 // 2026-04-23，任务：复杂度与耦合审查 P1
-// 把初始布局坐标生成从 G6 生命周期中抽出，便于独立维护布局策略。
+// 把初始布局坐标生成从 G6 生命周期中抽出，便于独立维护布局策略
 export function buildInitialGraphPayload(model: ForceGraphModel, width: number, height: number) {
   const { centerX, centerY, positionedNodes } = positionNodesInRings(
     model.orderedLayoutNodes,

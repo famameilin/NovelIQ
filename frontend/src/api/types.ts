@@ -151,7 +151,7 @@ export interface ChunkAnnotation {
 // Topics
 
 // LDA 主题建模结果类型定义。label 字段为可选预留字段，
-//       后端当前不返回，供未来 LLM 诊断阶段生成主题命名时使用。
+//       后端当前不返回，供未来 LLM 诊断阶段生成主题命名时使用
 
 export interface Topic {
   topic_id: number;
@@ -256,7 +256,7 @@ export interface GraphKeyRelation {
 }
 
 // Graph page owns these display summaries; diagnosis/export reuse a narrower
-// aggregate-only graph report on the backend and should not share this shape.
+// aggregate-only graph report on the backend and should not share this shape
 export interface GraphPageSummary {
   node_count: number;
   edge_count: number;

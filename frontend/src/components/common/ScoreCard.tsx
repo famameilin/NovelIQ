@@ -21,7 +21,7 @@ export interface ScoreCardProps {
 
 /**
  * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：将诊断页评分卡接入共享卡片壳，统一视觉层级、hover 反馈和主题 accent 表达。
+ * 修改原因：将诊断页评分卡接入共享卡片壳，统一视觉层级、hover 反馈和主题 accent 表达
  */
 export function ScoreCard({
   title,

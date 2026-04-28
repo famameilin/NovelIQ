@@ -1,5 +1,5 @@
 """
-说明: foreshadowing thread 结果查询组装器。
+说明: foreshadowing thread 结果查询组装器
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ def _fetch_foreshadowing_threads(
     annotation_repo: AnnotationRepository,
 ) -> list[ForeshadowingThreadResponse]:
     """
-    获取 setup thread 汇总视图。
+    获取 setup thread 汇总视图
     """
 
     rows = annotation_repo.fetch_foreshadowing_threads(run_id)

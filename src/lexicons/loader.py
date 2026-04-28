@@ -12,7 +12,7 @@ def _default_lexicon_dir() -> Path:
 
 def _clean_line(line: str) -> str:
     """
-    清理词表行。
+    清理词表行
 
     """
     return parse_lexicon_term(line)
@@ -20,7 +20,7 @@ def _clean_line(line: str) -> str:
 
 def load_lexicon(name: str, base_dir: Path | None = None) -> list[str]:
     """
-    加载指定名称的词表。
+    加载指定名称的词表
 
     """
     lexicon_dir = base_dir or _default_lexicon_dir()

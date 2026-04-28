@@ -27,7 +27,7 @@ class Chunk(Base):
 
     将主键改为复合主键 (chunk_id, run_id)，支持多 run_id 数据隔离
 
-    持久化 chunk 的全文起止坐标，供 paragraph global offset 和后续原文定位复用。
+    持久化 chunk 的全文起止坐标，供 paragraph global offset 和后续原文定位复用
     """
 
     __tablename__ = "chunks"

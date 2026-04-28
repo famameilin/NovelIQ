@@ -20,7 +20,7 @@ def _normalize_name(name: str | None, alias_map: dict[str, str] | None) -> str |
     别名归一化函数
 
     如果提供了 alias_map 且 name 存在于映射中，则返回规范名；
-    否则返回原始名称。
+    否则返回原始名称
 
     Args:
         name: 待归一化的名称
@@ -68,7 +68,7 @@ def _normalize_text_by_alias_map(text: str | None, alias_map: dict[str, str] | N
 
     说明:
         仅对 alias_map 中 alias != canonical 的条目做精确替换，
-        并按别名长度倒序处理，尽量避免较短别名误伤较长名称。
+        并按别名长度倒序处理，尽量避免较短别名误伤较长名称
     """
     if not text or not alias_map:
         return text

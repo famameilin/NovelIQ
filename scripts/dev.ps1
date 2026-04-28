@@ -12,11 +12,11 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
 
-# Keep uv state inside the repo to avoid user-profile permission issues.
+# Keep uv state inside the repo to avoid user-profile permission issues
 $env:UV_CACHE_DIR = Join-Path $RepoRoot ".uv-cache"
 $env:UV_PYTHON_INSTALL_DIR = Join-Path $RepoRoot ".uv-python"
 
-# Normalize remaining args so strict mode does not trip on null/object values.
+# Normalize remaining args so strict mode does not trip on null/object values
 $CommandArgs = @(
     $CommandArgs |
     Where-Object { $null -ne $_ -and $_ -ne "" } |

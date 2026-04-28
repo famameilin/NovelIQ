@@ -30,7 +30,7 @@ ORPHAN_TASK_HEARTBEAT_TIMEOUT = timedelta(minutes=5)
 
 def _recover_orphaned_tasks() -> tuple[int, int]:
     """
-    启动时收口上次进程遗留的孤儿任务。
+    启动时收口上次进程遗留的孤儿任务
 
     Returns:
         tuple[int, int]: (failed_count, cancelled_count)
@@ -48,7 +48,7 @@ def _recover_orphaned_tasks() -> tuple[int, int]:
 
 async def _resume_pending_tasks() -> tuple[int, int]:
     """
-    启动时把 DB 中可恢复的 pending 任务重新接回执行器。
+    启动时把 DB 中可恢复的 pending 任务重新接回执行器
 
     Returns:
         tuple[int, int]: (scheduled_count, cancelled_count)
@@ -66,13 +66,13 @@ async def lifespan(app: FastAPI):
     logger.info("FastAPI application starting up...")
 
     # 当前仓库以最新 schema 为唯一真相，启动时只初始化缺失表，
-    # 其中 schema guard 失败必须直接阻断启动，不能被误记成“僵尸任务清理失败”。
+    # 其中 schema guard 失败必须直接阻断启动，不能被误记成“僵尸任务清理失败”
     from src.storage.db import init_db
 
     init_db()
 
     # 真正允许降级的只有孤儿任务恢复链路；
-    # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误。
+    # 即便这里失败，也不应掩盖数据库初始化阶段的结构性错误
     try:
         failed_count, cancelled_count = _recover_orphaned_tasks()
         scheduled_pending_count, cancelled_pending_count = await _resume_pending_tasks()
@@ -96,9 +96,9 @@ async def lifespan(app: FastAPI):
         try:
             from src.api.services.event_manager import event_manager
 
-            # 正常应用 shutdown 不能把仍在运行的分析任务收口成“用户取消”。
+            # 正常应用 shutdown 不能把仍在运行的分析任务收口成“用户取消”
             # TaskManager 的运行态缓存仅供当前进程使用，生产停服时由进程退出自然结束；
-            # 测试里的单例清理由 fixture 显式调用 reset_for_testing() 处理。
+            # 测试里的单例清理由 fixture 显式调用 reset_for_testing() 处理
             await event_manager.shutdown()
         except Exception as exc:
             logger.warning(f"Failed to cleanly shut down runtime singletons: {exc}")

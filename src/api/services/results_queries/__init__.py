@@ -1,7 +1,7 @@
 """
-结果查询共享包。
+结果查询共享包
 
-说明: 为 route 与 service 提供统一的结果查询组装器，纠正原先 service 反向依赖 route 的问题。
+说明: 为 route 与 service 提供统一的结果查询组装器，纠正原先 service 反向依赖 route 的问题
 """
 
 from .characters import _fetch_characters

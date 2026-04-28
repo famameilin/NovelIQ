@@ -100,7 +100,7 @@ class EmbeddingClient:
         *args,
     ) -> None:
         """
-        统一处理日志记录，根据是否为云端API选择不同的日志级别和消息格式。
+        统一处理日志记录，根据是否为云端API选择不同的日志级别和消息格式
 
         Args:
             level: 日志级别 ("info", "debug", "error", "warning")
@@ -188,7 +188,7 @@ class EmbeddingClient:
             if self._token_usage_callback and response.usage:
                 # embedding 接口通常能稳定返回 provider usage，
                 # 这里优先保留实报值；汇总层对外仍标 estimated，是因为整条分析链路整体只承诺近似统计，
-                # 而不是要求每一笔都必须退化成本地估算。
+                # 而不是要求每一笔都必须退化成本地估算
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",
@@ -323,7 +323,7 @@ class EmbeddingClient:
                     f"embedding batch result count mismatch: expected {len(batch_items)}, got {len(response_items)}"
                 )
 
-            # 批量接口返回后仍按 index 回填到原始位置，避免上层语义分块逻辑感知到请求模式变化。
+            # 批量接口返回后仍按 index 回填到原始位置，避免上层语义分块逻辑感知到请求模式变化
             for (original_idx, _), item in zip(batch_items, response_items, strict=True):
                 embedding = item.embedding
                 self._validate_embedding_dimension(embedding)
@@ -331,7 +331,7 @@ class EmbeddingClient:
 
             if self._token_usage_callback and response.usage:
                 # 批量 embedding 与单条 embedding 口径一致，
-                # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平。
+                # provider 已返回 usage 时直接记实报，避免额外估算把更好的原始数据抹平
                 self._token_usage_callback(
                     self._novel_id or "unknown",
                     "embedding",

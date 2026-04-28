@@ -1,8 +1,8 @@
 """
-任务应用服务。
+任务应用服务
 
 说明: 将 analysis 路由中的取消、删除、恢复状态机下沉到 service 层，
-      让 route 只保留 HTTP 参数绑定与响应装配职责。
+      让 route 只保留 HTTP 参数绑定与响应装配职责
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def resolve_task_for_novel(
     task_id: str,
 ) -> dict[str, Any]:
     """
-    获取并校验任务是否属于指定小说。
+    获取并校验任务是否属于指定小说
     """
     try:
         task = novel_service.get_task(task_id)
@@ -42,7 +42,7 @@ def resolve_task_for_novel(
 
 def raise_cancel_not_allowed(task_status: str) -> None:
     """
-    统一校验任务是否允许进入取消流程。
+    统一校验任务是否允许进入取消流程
     """
     if task_status in ("completed", "cancelled", "cancelling"):
         raise HTTPException(status_code=400, detail=f"任务已{task_status}，无需取消")
@@ -52,7 +52,7 @@ def raise_cancel_not_allowed(task_status: str) -> None:
 
 def persist_task_cancellation_request(task_id: str) -> str:
     """
-    将取消请求可靠写入数据库。
+    将取消请求可靠写入数据库
     """
     session_factory = get_session_factory()
     try:
@@ -73,7 +73,7 @@ def persist_task_cancellation_request(task_id: str) -> str:
 
 def cancel_unclaimed_pending_task(task_id: str) -> bool:
     """
-    直接终结尚未被任何 worker 领取的 pending 任务。
+    直接终结尚未被任何 worker 领取的 pending 任务
     """
     session_factory = get_session_factory()
     try:
@@ -93,7 +93,7 @@ def cancel_unclaimed_pending_task(task_id: str) -> bool:
 
 async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskManager) -> None:
     """
-    删除任务前清理运行态缓存与后台协程。
+    删除任务前清理运行态缓存与后台协程
     """
     task_info = task_manager.get_task(task_id)
     if task_info is None:
@@ -102,7 +102,7 @@ async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMan
     task_manager.cancel_task(task_id)
 
     # 删除前的清理仍然要遵守 DB-first 状态机；
-    # 若 DB 已先进入终态，这里的原子取消请求只会读到赢家状态，不会把终态覆写回 cancelling。
+    # 若 DB 已先进入终态，这里的原子取消请求只会读到赢家状态，不会把终态覆写回 cancelling
     session_factory = get_session_factory()
     try:
         with session_factory() as session:
@@ -136,14 +136,14 @@ async def cleanup_task_runtime_before_delete(task_id: str, task_manager: TaskMan
 
 class TaskApplicationService:
     """
-    任务应用服务。
+    任务应用服务
 
-    说明: 面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程。
+    说明: 面向 API 编排任务恢复、取消、删除等跨 DB/运行态的流程
     """
 
     def __init__(self, novel_service: NovelService, task_manager: TaskManager):
         """
-        初始化任务应用服务。
+        初始化任务应用服务
         """
         self.novel_service = novel_service
         self.task_manager = task_manager
@@ -151,7 +151,7 @@ class TaskApplicationService:
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行指定任务。
+        继续执行指定任务
         """
         try:
             return await self.analysis_service.resume_task(novel_id, task_id)
@@ -160,7 +160,7 @@ class TaskApplicationService:
 
     async def delete_task(self, novel_id: str, task_id: str) -> dict[str, str]:
         """
-        删除单个分析任务。
+        删除单个分析任务
         """
         task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
         task_status = task.get("status", "")
@@ -173,7 +173,7 @@ class TaskApplicationService:
 
     async def cancel_task(self, novel_id: str, task_id: str) -> dict[str, str]:
         """
-        取消指定分析任务。
+        取消指定分析任务
         """
         task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
         task_status = task.get("status", "")
@@ -187,7 +187,7 @@ class TaskApplicationService:
                 return {"task_id": task_id, "status": "cancelled", "message": "任务尚未启动，已直接取消"}
 
             # 如果原子 pending 取消没赢，说明别的执行方已经推进了 DB 真相；
-            # 这里必须重新读库，以赢家状态继续判断，不能沿用旧快照。
+            # 这里必须重新读库，以赢家状态继续判断，不能沿用旧快照
             task = resolve_task_for_novel(self.novel_service, novel_id, task_id)
             task_status = task.get("status", "")
             raise_cancel_not_allowed(task_status)

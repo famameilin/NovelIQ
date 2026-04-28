@@ -12,7 +12,7 @@ export interface ValueLogicCardProps {
 
 /**
  * 2026-04-21，任务：多页面卡片风格统一
- * 修改原因：让诊断页的价值逻辑卡复用共享卡片壳，避免继续保留普通 Card 的旧视觉。
+ * 修改原因：让诊断页的价值逻辑卡复用共享卡片壳，避免继续保留普通 Card 的旧视觉
  */
 export function ValueLogicCard({
   valueLogicType,

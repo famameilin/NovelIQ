@@ -1,7 +1,7 @@
 """
 统计数据协议接口
 
-使用语义 DTO 和 RepositoryRecord，清理协议层动态类型与裸结构暴露。
+使用语义 DTO 和 RepositoryRecord，清理协议层动态类型与裸结构暴露
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class StatsRepositoryProtocol(Protocol):
     """
     统计数据接口
 
-    管理小说分析统计数据的存储和检索。
+    管理小说分析统计数据的存储和检索
     """
 
     def get_character_stats(self, novel_id: str) -> list[RepositoryRecord]:

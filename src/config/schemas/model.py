@@ -1,5 +1,5 @@
 """
-本模块包含模型相关的配置数据类。
+本模块包含模型相关的配置数据类
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ class ThinkingSettings:
 
     def validate(self) -> None:
         """
-        验证配置。
+        验证配置
         """
         if not isinstance(self.phase3_candidates_per_batch, int) or isinstance(self.phase3_candidates_per_batch, bool):
             raise ValueError("thinking.phase3_candidates_per_batch 必须是大于等于 1 的整数")
@@ -112,10 +112,10 @@ class StreamingSettings:
 @dataclass
 class StructuredOutputSettings:
     """
-    结构化输出模式配置。
+    结构化输出模式配置
 
     说明: 集中配置各任务默认使用 json_schema / json_object，
-          并允许按 provider marker 覆盖，避免业务模块散落 provider 兼容判断。
+          并允许按 provider marker 覆盖，避免业务模块散落 provider 兼容判断
     """
 
     annotation: str = "json_schema"
@@ -133,7 +133,7 @@ _STRUCTURED_OUTPUT_ALLOWED_MODES = {"json_schema", "json_object"}
 
 def _parse_structured_output_mode(data: dict[str, Any], key: str, default: str) -> str:
     """
-    解析单个结构化输出模式。
+    解析单个结构化输出模式
     """
     mode = data.get(key, default)
     if mode not in _STRUCTURED_OUTPUT_ALLOWED_MODES:
@@ -144,7 +144,7 @@ def _parse_structured_output_mode(data: dict[str, Any], key: str, default: str) 
 
 def _parse_structured_output_settings(data: dict[str, Any] | None) -> StructuredOutputSettings:
     """
-    解析结构化输出模式配置。
+    解析结构化输出模式配置
     """
     json_data = data or {}
     defaults = StructuredOutputSettings()

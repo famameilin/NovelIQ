@@ -40,7 +40,7 @@ def build_disambiguation_prompt_context(
     graph_hint: str | None = None,
     shared_evidence_context: str | None = None,
 ) -> DisambiguationPromptContext | None:
-    """构建消歧任务上下文对象。"""
+    """构建消歧任务上下文对象"""
 
     if not any((existing_character_hint, graph_hint, shared_evidence_context)):
         return None
@@ -186,7 +186,7 @@ def render_existing_character_hint(
     candidate_names: Iterable[str] | None = None,
     max_entities: int | None = None,
 ) -> str | None:
-    """构建与当前 candidate 集强相关的已有角色锚点。"""
+    """构建与当前 candidate 集强相关的已有角色锚点"""
 
     if not existing_names:
         return None
@@ -221,9 +221,9 @@ def render_existing_character_hint(
 def render_disambiguation_prompt_context_sections(
     prompt_context: DisambiguationPromptContext | None,
 ) -> list[str]:
-    """按固定顺序渲染消歧任务上下文。
+    """按固定顺序渲染消歧任务上下文
     这里的顺序就是消歧公共接口的正式消费顺序，
-    先放已有角色锚点，再放图谱提示，最后放共享 evidence block。
+    先放已有角色锚点，再放图谱提示，最后放共享 evidence block
     """
 
     if prompt_context is None:
@@ -256,7 +256,7 @@ def render_disambig_prompt_context(
     fallback_requested_names: Iterable[str] | None = None,
     priority_names: Iterable[str] | None = None,
 ) -> str | None:
-    # 消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法。
+    # 消歧 prompt 只消费共享 renderer 产出的 block，不再回读 bundle 上的渲染方法
     shared_sections = render_shared_evidence_sections(
         bundle,
         fallback_requested_names=fallback_requested_names,
@@ -280,16 +280,16 @@ def render_disambiguation_graph_hint(
     candidate_names: Iterable[str] | None = None,
     max_lines: int | None = None,
 ) -> str | None:
-    """将图谱权威数据渲染为消歧专用提示。
+    """将图谱权威数据渲染为消歧专用提示
     说明: 将 build_graph_feedback_hint 逻辑从 DisambigContextProvider 迁移至 renderer 层，
-          符合 evidence layer 的 provider/renderer 职责分离原则。
+          符合 evidence layer 的 provider/renderer 职责分离原则
     """
 
     def _relation_field(relation: object, field_name: str) -> object:
         """
-        读取关系提示字段。
+        读取关系提示字段
 
-        说明: 正式路径读取 CurrentRelationRow DTO；保留 dict 读取仅用于旧测试 stub。
+        说明: 正式路径读取 CurrentRelationRow DTO；保留 dict 读取仅用于旧测试 stub
         """
         if isinstance(relation, dict):
             legacy_name = "type" if field_name == "relation_type" else field_name

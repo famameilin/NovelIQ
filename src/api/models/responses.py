@@ -25,7 +25,7 @@ class CreateTaskResponse(BaseModel):
     """
     创建并启动任务响应
 
-    说明: 对应 POST /api/novels/{novel_id}/tasks。
+    说明: 对应 POST /api/novels/{novel_id}/tasks
     """
 
     novel_id: str
@@ -38,7 +38,7 @@ class ResumeTaskResponse(BaseModel):
     """
     继续任务响应
 
-    说明: 对应 POST /api/novels/{novel_id}/tasks/{task_id}/resume。
+    说明: 对应 POST /api/novels/{novel_id}/tasks/{task_id}/resume
     """
 
     novel_id: str
@@ -163,9 +163,9 @@ class ChunkAnnotation(BaseModel):
 
 class ForeshadowingThreadResponse(BaseModel):
     """
-    Setup thread 结果视图。
+    Setup thread 结果视图
 
-    说明: 提供 setup ledger 的稳定 API 响应模型，供诊断 drill-down 和结果导出复用。
+    说明: 提供 setup ledger 的稳定 API 响应模型，供诊断 drill-down 和结果导出复用
     """
 
     setup_id: str

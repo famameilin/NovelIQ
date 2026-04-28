@@ -81,7 +81,7 @@ def __getattr__(name: str) -> Any:
 
     module_name, attr_name = _EXPORTS[name]
     # 按需导入子模块，既保留 `from ... import X` 的兼容接口，
-    # 也避免 `__init__` 在包初始化阶段把整条消歧依赖链一次性拉起。
+    # 也避免 `__init__` 在包初始化阶段把整条消歧依赖链一次性拉起
     module = import_module(module_name, __name__)
     value = getattr(module, attr_name)
     globals()[name] = value

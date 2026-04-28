@@ -1,11 +1,11 @@
 """
-为结果展示层构建表层张力曲线，保持 raw tension_proxy 导出语义不变。
+为结果展示层构建表层张力曲线，保持 raw tension_proxy 导出语义不变
 
 本模块不改写 chunk_curves 表中的 tension_proxy，仅基于已有的：
 - chunk_style 的 fight/exclaim/question/dialogue/sentence variance/sensory 信号
 - chunk_curves 的 raw tension_proxy
 
-构建面向前端展示的 surface_tension。
+构建面向前端展示的 surface_tension
 """
 
 from __future__ import annotations
@@ -29,14 +29,14 @@ _RAW_PROXY_BLEND = 0.15
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     """
-    约束展示层张力值范围，避免平滑后轻微越界。
+    约束展示层张力值范围，避免平滑后轻微越界
     """
     return max(low, min(high, value))
 
 
 def _normalize_feature_series(values: Mapping[int, float]) -> dict[int, float]:
     """
-    对单个特征按全书 chunk 做 min-max 归一化，强调相对起伏而非绝对量纲。
+    对单个特征按全书 chunk 做 min-max 归一化，强调相对起伏而非绝对量纲
     """
     if not values:
         return {}
@@ -54,7 +54,7 @@ def build_display_surface_tension(
     style_rows: Sequence[Any],
 ) -> dict[int, float]:
     """
-    构建面向结果展示的表层张力曲线。
+    构建面向结果展示的表层张力曲线
 
     融合策略：
     - 以 chunk_style 的表层信号为主，按 chunk 级做归一化后加权
@@ -89,7 +89,7 @@ def build_display_surface_tension(
         raw_proxy_signal = normalized_raw_proxy.get(chunk_id, 0.0)
 
         # 表层张力以 style 信号为主，只借用 raw proxy 保持缺失样本和历史 run 的连续性，
-        # 避免重新把旧的粗糙 proxy 当成主导指标。
+        # 避免重新把旧的粗糙 proxy 当成主导指标
         if style_row is None:
             score = raw_proxy_signal
         else:

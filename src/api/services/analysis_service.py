@@ -29,7 +29,7 @@ from src.storage.session import SessionFactory
 
 class CancellationStateCheckError(RuntimeError):
     """
-    取消状态检查失败异常。
+    取消状态检查失败异常
     """
 
 
@@ -83,7 +83,7 @@ class AnalysisService:
         overlap: int = 200,
     ) -> None:
         """
-        执行各分析阶段。
+        执行各分析阶段
         """
         task_id = bus.task_id
 
@@ -205,12 +205,12 @@ class AnalysisService:
             try:
                 db_session = self.session_factory.get_session()
                 with db_session:
-                    # 使用底层 SQLAlchemy Session。
+                    # 使用底层 SQLAlchemy Session
                     sql_session = db_session.connection
                     try:
                         run_id = task_id_to_run_id(task_id, sql_session)
                     except (TaskIDNotFoundError, ValueError):
-                        # 不存在对应 run 记录时，说明没有可持久化的取消请求。
+                        # 不存在对应 run 记录时，说明没有可持久化的取消请求
                         return False
 
                     run_repo = RunRepository(sql_session)
@@ -238,7 +238,7 @@ class AnalysisService:
         novel_id: str,
         analysis_logger: AnalysisLogger | None,
     ) -> None:
-        """处理已完成的分析任务，确保 DB 状态一致。
+        """处理已完成的分析任务，确保 DB 状态一致
         """
         logger.info(f"Task {task_id} already completed, no action needed")
         self.novel_service.update_task_status(task_id, "completed")
@@ -275,11 +275,11 @@ class AnalysisService:
 
     def _write_failure_to_db(self, task_id: str, error_message: str) -> None:
         """
-        将任务失败状态写入 DB（兜底路径专用）。
+        将任务失败状态写入 DB（兜底路径专用）
 
         说明: 当 session 或 run_id 为 None 时（环境初始化失败），无法走常规 error_handler 路径，
-              此方法通过 task_id 直接查询 run_id 并写入 DB 终态，确保 DB 状态一致性。
-              这是极端异常路径的兜底保护。
+              此方法通过 task_id 直接查询 run_id 并写入 DB 终态，确保 DB 状态一致性
+              这是极端异常路径的兜底保护
         """
         from src.storage.id_mapping import TaskIDNotFoundError, task_id_to_run_id
         from src.storage.repositories import RunRepository
@@ -337,7 +337,7 @@ class AnalysisService:
 
     def _build_reanalysis_request_payload(self, request: ReanalyzeRequest | None) -> dict[str, object] | None:
         """
-        构建可持久化的重分析请求载荷。
+        构建可持久化的重分析请求载荷
         """
         if request is None:
             return None
@@ -345,7 +345,7 @@ class AnalysisService:
 
     def _restore_execution_request(self, task: dict) -> tuple[str, ReanalyzeRequest | None]:
         """
-        从任务元数据恢复执行类型与请求参数。
+        从任务元数据恢复执行类型与请求参数
         """
         task_kind = task["task_kind"]
         if task_kind == TASK_KIND_ANALYSIS:
@@ -359,7 +359,7 @@ class AnalysisService:
 
     def _prepare_task_execution_claim(self, task_id: str) -> str:
         """
-        在真正启动分析前，先把任务从 DB 侧收口到可执行状态。
+        在真正启动分析前，先把任务从 DB 侧收口到可执行状态
 
         Returns:
             claimed: 当前 worker 已成功领取任务，可继续执行
@@ -389,7 +389,7 @@ class AnalysisService:
                 if status == "pending":
                     if cancel_requested:
                         # 用户在 worker 真正领取前就已经点了取消，此时直接落终态，
-                        # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义。
+                        # 比先进入 cancelling 再等待一个不存在的执行方收尾更符合 DB-first 语义
                         run_repo.cancel_unclaimed_pending_run(run_id, message="任务在启动前已取消")
                         return "cancelled"
 
@@ -408,7 +408,7 @@ class AnalysisService:
 
                 if status == "cancelling" and cancel_requested:
                     # 这类任务没有真实 worker 可收尾时，直接在启动前完成取消收口，
-                    # 避免卡在无 owner 的 cancelling 历史脏状态。
+                    # 避免卡在无 owner 的 cancelling 历史脏状态
                     if refreshed_worker_id := run.get("worker_id"):
                         logger.info(
                             "Task {} is cancelling under worker {}, current worker skips execution claim",
@@ -440,10 +440,10 @@ class AnalysisService:
 
     async def recover_pending_tasks(self) -> tuple[int, int]:
         """
-        启动时把 DB 中的 pending 任务重新接回当前执行器。
+        启动时把 DB 中的 pending 任务重新接回当前执行器
 
         修改原因: startup recovery 需要按任务级隔离异常；
-        单个 pending 恢复失败不能把后续 pending 任务整轮拦死。
+        单个 pending 恢复失败不能把后续 pending 任务整轮拦死
 
         Returns:
             tuple[int, int]: (scheduled_count, cancelled_count)
@@ -485,16 +485,16 @@ class AnalysisService:
 
     def _schedule_analysis_task(self, task_id: str, novel: dict) -> None:
         """
-        安排分析协程并记录 asyncio.Task 引用。
+        安排分析协程并记录 asyncio.Task 引用
 
-        说明: 统一 create/resume 两条路径的协程调度，避免重复代码。
+        说明: 统一 create/resume 两条路径的协程调度，避免重复代码
         """
         task = asyncio.create_task(self._run_analysis(task_id, novel))
         self.task_manager.store_asyncio_task(task_id, task)
 
     def _schedule_reanalysis_task(self, task_id: str, novel: dict, request: ReanalyzeRequest | None = None) -> None:
         """
-        安排重分析协程并记录 asyncio.Task 引用。
+        安排重分析协程并记录 asyncio.Task 引用
         """
         task = asyncio.create_task(self._run_reanalysis(task_id, novel, request))
         self.task_manager.store_asyncio_task(task_id, task)
@@ -507,7 +507,7 @@ class AnalysisService:
         request: ReanalyzeRequest | None,
     ) -> None:
         """
-        按任务类型调度执行协程。
+        按任务类型调度执行协程
         """
         if task_kind == TASK_KIND_ANALYSIS:
             self._schedule_analysis_task(task_id, novel)
@@ -519,9 +519,9 @@ class AnalysisService:
 
     async def create_task_and_start(self, novel_id: str) -> str:
         """
-        创建新任务并立即启动分析。
+        创建新任务并立即启动分析
 
-        说明: 只负责“创建+启动”，不做复用/猜测行为。
+        说明: 只负责“创建+启动”，不做复用/猜测行为
         """
         novel = self.novel_service.get_novel(novel_id)
         task_id = self.novel_service.create_task(novel_id, task_kind=TASK_KIND_ANALYSIS)
@@ -531,9 +531,9 @@ class AnalysisService:
 
     async def resume_task(self, novel_id: str, task_id: str) -> str:
         """
-        继续执行 pending/failed 任务。
+        继续执行 pending/failed 任务
 
-        说明: 只负责“继续已有任务”，不创建新任务。
+        说明: 只负责“继续已有任务”，不创建新任务
         """
         novel = self.novel_service.get_novel(novel_id)
         task = self.novel_service.get_task(task_id)
@@ -552,7 +552,7 @@ class AnalysisService:
         if task_info is None:
             self.task_manager.create_task(task_id, novel_id)
 
-        # 重置内存态与 DB 运行态，避免 DB-only 状态接口短暂暴露上一轮失败残留。
+        # 重置内存态与 DB 运行态，避免 DB-only 状态接口短暂暴露上一轮失败残留
         self.task_manager.update_task(
             task_id,
             status=TaskStatus.PENDING,
@@ -649,9 +649,9 @@ class AnalysisService:
         overlap: int | None = None,
     ) -> None:
         """
-        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数。
+        调用 _execute_analysis_stages，根据条件添加 max_chars/overlap 参数
 
-        说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑。
+        说明: 消除 _run_analysis_core 中重复的 _execute_analysis_stages 调用逻辑
         """
         if max_chars is not None and overlap is not None:
             await self._execute_analysis_stages(
@@ -795,7 +795,7 @@ class AnalysisService:
             try:
                 cancelled = self._is_cancelled(task_id)
             except CancellationStateCheckError as cancel_check_error:
-                # 原始异常已经存在时，取消状态检查失败不应覆盖原始失败，只记录并按失败路径收口。
+                # 原始异常已经存在时，取消状态检查失败不应覆盖原始失败，只记录并按失败路径收口
                 logger.error(f"Failed to re-check cancellation state for task {task_id}: {cancel_check_error}")
 
             if cancelled and session and run_id:
@@ -825,9 +825,9 @@ class AnalysisService:
 
     def get_task_status(self, task_id: str) -> dict | None:
         """
-        获取任务状态（DB-only 查询）。
+        获取任务状态（DB-only 查询）
 
-        说明: 从数据库查询任务状态，不再依赖内存中的 TaskManager。
+        说明: 从数据库查询任务状态，不再依赖内存中的 TaskManager
         """
         task = self.novel_service.get_run_by_task_id(task_id)
         if not task:
@@ -841,9 +841,9 @@ class AnalysisService:
 
     def get_novel_tasks(self, novel_id: str) -> list[dict]:
         """
-        获取小说的所有任务（DB-only 查询）。
+        获取小说的所有任务（DB-only 查询）
 
-        说明: 从数据库查询小说的任务列表，不再依赖内存中的 TaskManager。
+        说明: 从数据库查询小说的任务列表，不再依赖内存中的 TaskManager
         """
         tasks = self.novel_service.get_tasks_by_novel(novel_id)
         return tasks

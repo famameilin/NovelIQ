@@ -1,7 +1,7 @@
 """
 小说类型自动检测模块
 
-根据领域词表命中模式自动识别小说类型。
+根据领域词表命中模式自动识别小说类型
 
 支持的类型:
 - xianxia: 修仙/仙侠类
@@ -86,7 +86,7 @@ def detect_genre(
     min_confidence: float = MIN_CONFIDENCE,
 ) -> GenreDetectionResult:
     """
-    检测小说类型。
+    检测小说类型
 
     Args:
         text: 待检测文本（建议使用前 5000-10000 字）
@@ -162,7 +162,7 @@ def detect_genre_from_file(
     registry: LexiconRegistry | None = None,
 ) -> GenreDetectionResult:
     """
-    从文件检测小说类型。
+    从文件检测小说类型
 
     Args:
         file_path: 小说文件路径
@@ -191,9 +191,9 @@ def detect_genre_sequence(
     registry: LexiconRegistry | None = None,
 ) -> GenreSequenceResult:
     """
-    分段检测小说类型，输出类型序列。
+    分段检测小说类型，输出类型序列
 
-    用于处理"前期都市后期修仙"等类型变化的场景。
+    用于处理"前期都市后期修仙"等类型变化的场景
 
     Args:
         text: 完整文本
@@ -255,7 +255,7 @@ def detect_genre_sequence_from_file(
     registry: LexiconRegistry | None = None,
 ) -> GenreSequenceResult:
     """
-    从文件分段检测小说类型。
+    从文件分段检测小说类型
 
     Args:
         file_path: 小说文件路径
@@ -283,9 +283,9 @@ def get_dynamic_lexicons(
     registry: LexiconRegistry | None = None,
 ) -> dict[str, set[str]]:
     """
-    根据文本内容动态检测类型并加载对应词表。
+    根据文本内容动态检测类型并加载对应词表
 
-    用于处理"前期都市后期修仙"等类型变化的场景。
+    用于处理"前期都市后期修仙"等类型变化的场景
 
     Args:
         text: 待分析文本
@@ -336,7 +336,7 @@ def get_dynamic_lexicons_for_chunk(
     registry: LexiconRegistry | None = None,
 ) -> tuple[dict[str, set[str]], str]:
     """
-    为单个 chunk 动态加载词表。
+    为单个 chunk 动态加载词表
 
     Args:
         chunk_text: chunk 文本
@@ -363,7 +363,7 @@ def detect_genre_weighted(
     registry: LexiconRegistry | None = None,
 ) -> WeightedGenreResult:
     """
-    多类型加权检测：均匀采样 chunk，返回加权类型列表。
+    多类型加权检测：均匀采样 chunk，返回加权类型列表
 
     策略:
       1. 均匀采样 sample_ratio 比例的 chunk（至少 min_samples）
@@ -397,7 +397,7 @@ def get_weighted_lexicon_config(
     genre_weights: list[tuple[str, float]],
 ) -> list[tuple[str, dict[str, list[str]], float]]:
     """
-    根据加权类型列表获取词表配置。
+    根据加权类型列表获取词表配置
 
     Args:
         genre_weights: 类型权重列表，格式 [(genre, weight), ...]

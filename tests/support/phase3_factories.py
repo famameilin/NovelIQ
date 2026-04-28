@@ -4,7 +4,7 @@ from src.rag.evidence_types import EvidenceBundle, EvidenceItem
 
 
 def build_phase3_bundle() -> EvidenceBundle:
-    """构造 Phase3 对话归属共享证据。"""
+    """构造 Phase3 对话归属共享证据"""
     return EvidenceBundle(
         structured_evidence=[
             EvidenceItem(
@@ -56,7 +56,7 @@ def build_phase3_bundle() -> EvidenceBundle:
 
 
 def build_phase3_overflow_bundle() -> EvidenceBundle:
-    """构造超过渲染上限的 evidence bundle，用来锁定证据裁剪规则。"""
+    """构造超过渲染上限的 evidence bundle，用来锁定证据裁剪规则"""
     structured = [
         EvidenceItem(
             evidence_type="alias_mapping",
@@ -143,7 +143,7 @@ def build_phase3_overflow_bundle() -> EvidenceBundle:
 
 
 def build_phase3_priority_bundle() -> EvidenceBundle:
-    """构造可验证候选优先级的证据。"""
+    """构造可验证候选优先级的证据"""
     return EvidenceBundle(
         local_evidence=[
             EvidenceItem(

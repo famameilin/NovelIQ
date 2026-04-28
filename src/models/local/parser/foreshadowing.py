@@ -127,21 +127,21 @@ _SETUP_KIND_HOOK_MARKERS: dict[str, tuple[str, ...]] = {
 
 def _normalize_setup_summary_text(value: str) -> str:
     """
-    归一化 setup_summary 文本，用于 exact-match 去重。
+    归一化 setup_summary 文本，用于 exact-match 去重
     """
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).strip().lower()
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     """
-    判断文本是否命中任一关键短语。
+    判断文本是否命中任一关键短语
     """
     return any(marker in text for marker in markers)
 
 
 def _coerce_boolean_field(field_name: str, value: Any, default: bool = False) -> bool:
     """
-    严格归一化结构化输出里的布尔字段。
+    严格归一化结构化输出里的布尔字段
     """
     if value is None:
         return default
@@ -170,7 +170,7 @@ def _coerce_boolean_field(field_name: str, value: Any, default: bool = False) ->
 
 def _extract_reason_sections(reason: str) -> tuple[str | None, str | None]:
     """
-    从 anchor_reason 中提取“具体钩子/未闭合原因”两段。
+    从 anchor_reason 中提取“具体钩子/未闭合原因”两段
     """
     normalized = reason.strip()
     hook_index = normalized.find(_HOOK_LABEL)
@@ -187,7 +187,7 @@ def _extract_reason_sections(reason: str) -> tuple[str | None, str | None]:
 
 def _has_concrete_setup_signal(hook_text: str, unresolved_text: str) -> bool:
     """
-    判断理由里是否真的出现了强 setup 所需的具体信号。
+    判断理由里是否真的出现了强 setup 所需的具体信号
     """
     combined = f"{hook_text} {unresolved_text}"
     return _contains_any(hook_text, _ANOMALY_HOOK_MARKERS) or _contains_any(combined, _STRONG_SETUP_TARGET_MARKERS)
@@ -195,7 +195,7 @@ def _has_concrete_setup_signal(hook_text: str, unresolved_text: str) -> bool:
 
 def _has_setup_kind_consistent_signal(setup_kind: str, hook_text: str, unresolved_text: str) -> bool:
     """
-    判断 setup_kind 是否得到了文本理由里的具体信号支撑。
+    判断 setup_kind 是否得到了文本理由里的具体信号支撑
     """
     if setup_kind == "其他":
         return _has_concrete_setup_signal(hook_text, unresolved_text)
@@ -206,13 +206,13 @@ def _has_setup_kind_consistent_signal(setup_kind: str, hook_text: str, unresolve
         return True
 
     # 模型就算挑了正式 setup_kind，也仍然要回到文本理由里确认
-    # “具体钩子到底是什么”；否则普通决定被误标成“明确承诺”时会直接绕过强伏笔 gate。
+    # “具体钩子到底是什么”；否则普通决定被误标成“明确承诺”时会直接绕过强伏笔 gate
     return _has_concrete_setup_signal(hook_text, unresolved_text)
 
 
 def _is_generic_future_speculation(text: str) -> bool:
     """
-    判断文本是否只是泛化的未来推测。
+    判断文本是否只是泛化的未来推测
     """
     return _contains_any(text, _GENERIC_FUTURE_SPECULATION_MARKERS) and not _contains_any(
         text,
@@ -222,7 +222,7 @@ def _is_generic_future_speculation(text: str) -> bool:
 
 def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
     """
-    判断 anchor_reason 是否满足强伏笔的最小语义门槛。
+    判断 anchor_reason 是否满足强伏笔的最小语义门槛
     """
     hook_text, anchor_unresolved_text = _extract_reason_sections(result.anchor_reason)
     if hook_text is None or anchor_unresolved_text is None:
@@ -245,7 +245,7 @@ def _has_strong_hook_reason(result: ForeshadowingResult) -> bool:
         return False
 
     # 允许“后续可能揭示用途”这类带 future wording 的表述，
-    # 前提是它确实指向了具体的未闭合对象；纯“可能有影响/可能出事”仍然拒绝。
+    # 前提是它确实指向了具体的未闭合对象；纯“可能有影响/可能出事”仍然拒绝
     if _is_generic_future_speculation(hook_text):
         return False
 
@@ -275,9 +275,9 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     )
     degrade_to_negative = raw_has_foreshadowing and not raw_is_strong_setup
 
-    # 弱阳性是当前 Phase2 最常见的脏输出之一。
+    # 弱阳性是当前 Phase2 最常见的脏输出之一
     # 这里先把它归一化成 negative，再交给 validator/projector 做后续筛除，
-    # 避免 schema 校验把“应丢弃的边缘样本”升级成整次 phase 失败。
+    # 避免 schema 校验把“应丢弃的边缘样本”升级成整次 phase 失败
     has_foreshadowing = raw_has_foreshadowing and not degrade_to_negative
     is_strong_setup = raw_is_strong_setup if has_foreshadowing else False
 
@@ -319,8 +319,8 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
     linked_setup_id_raw = data.get("linked_setup_id")
     linked_setup_id = str(linked_setup_id_raw).strip() if has_foreshadowing and linked_setup_id_raw else None
 
-    # 强伏笔池只接受显式 high。
-    # provider 如果漏掉 confidence，宁可降为 low 丢弃，也不能静默补成 high 放行。
+    # 强伏笔池只接受显式 high
+    # provider 如果漏掉 confidence，宁可降为 low 丢弃，也不能静默补成 high 放行
     confidence_raw = data.get("confidence", "low")
     confidence: ForeshadowingConfidence = confidence_raw if confidence_raw in _VALID_CONFIDENCES else "low"
     if degrade_to_negative:
@@ -346,9 +346,9 @@ def parse_foreshadowing_result(data: dict[str, Any]) -> ForeshadowingResult:
 
 def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) -> bool:
     """
-    硬校验：anchor_text 必须是原文的真实子串。
+    硬校验：anchor_text 必须是原文的真实子串
 
-    返回 False 则丢弃该条记录，不入库。
+    返回 False 则丢弃该条记录，不入库
     """
     if not result.has_foreshadowing:
         if result.is_strong_setup:
@@ -410,7 +410,7 @@ def validate_foreshadowing_result(result: ForeshadowingResult, chunk_text: str) 
             return False
 
     # setup 池的 exact-match 去重要依赖标准化 summary；
-    # 如果归一化后为空，说明模型没有给出真正可池化的 thread 摘要。
+    # 如果归一化后为空，说明模型没有给出真正可池化的 thread 摘要
     if not _normalize_setup_summary_text(result.setup_summary):
         return False
 

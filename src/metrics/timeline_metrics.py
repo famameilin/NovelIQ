@@ -1,7 +1,7 @@
 """
-叙事时间轴核心算法模块。
+叙事时间轴核心算法模块
 
-负责从 authority 数据构建 atomic/composite 时间轴节点、阶段划分和序列化结果。
+负责从 authority 数据构建 atomic/composite 时间轴节点、阶段划分和序列化结果
 """
 
 from __future__ import annotations
@@ -233,7 +233,7 @@ def calculate_tension_percentile(
     all_tensions: list[float],
 ) -> int:
     """
-    计算张力百分位排名。
+    计算张力百分位排名
 
     Args:
         tension_score: 当前张力分数
@@ -255,10 +255,10 @@ def compute_four_phases(
     chunk_ids: list[int],
 ) -> list[NarrativePhase]:
     """
-    计算四阶段划分（多峰模型）。
+    计算四阶段划分（多峰模型）
 
     基于 Freytag 金字塔理论 + 网络小说多波次叠加结构，使用局部峰值
-    检测确定高潮位置，而非单一全局峰值。
+    检测确定高潮位置，而非单一全局峰值
     """
     if not tension_scores or not chunk_ids:
         return []
@@ -369,7 +369,7 @@ def convert_to_timeline_phases(phases: list[NarrativePhase]) -> list[TimelinePha
 
 def compute_importance_score(score_breakdown: dict[str, float]) -> tuple[float, ImportanceLevel]:
     """
-    根据分项得分计算节点总分与等级。
+    根据分项得分计算节点总分与等级
 
     Args:
         score_breakdown: 节点分项得分
@@ -389,7 +389,7 @@ def compute_importance_score(score_breakdown: dict[str, float]) -> tuple[float, 
 
 def _resolve_timeline_authority_contract(timeline_view: Any) -> tuple[list[Any], list[Any], dict[int, str]]:
     """
-    Validate the authority-backed timeline contract before building timeline plans.
+    Validate the authority-backed timeline contract before building timeline plans
     """
 
     character_entities = list(timeline_view.character_entities)
@@ -1074,7 +1074,7 @@ def compose_composite_timeline_nodes(
     atomic_nodes: list[TimelineNodeDTO],
     phases: list[TimelinePhaseDTO],
 ) -> list[TimelineCompositeNodeDTO]:
-    del phases  # 当前复合分组直接使用 atomic node 自带的 phase_name，不额外重算阶段归属。
+    del phases  # 当前复合分组直接使用 atomic node 自带的 phase_name，不额外重算阶段归属
 
     composite_nodes = [
         *_build_plot_composite_nodes(atomic_nodes),

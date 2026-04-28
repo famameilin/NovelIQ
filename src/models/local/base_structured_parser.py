@@ -1,7 +1,7 @@
 """
-BaseModelClient 结构化解析辅助模块。
+BaseModelClient 结构化解析辅助模块
 
-说明: 从 base.py 中拆出响应内容提取、JSON 兼容解析与结构化校验逻辑。
+说明: 从 base.py 中拆出响应内容提取、JSON 兼容解析与结构化校验逻辑
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from src.models.local.schema import ForeshadowingResult
 
 def parse_structured_response[T: BaseModel](response: Any, response_model: type[T]) -> T:
     """
-    将模型响应解析并校验为指定 Pydantic 模型。
+    将模型响应解析并校验为指定 Pydantic 模型
     """
     if not response.choices:
         raise ValueError("Empty response from API")
@@ -41,7 +41,7 @@ def parse_structured_response[T: BaseModel](response: Any, response_model: type[
         if response_model is ForeshadowingResult:
             # Phase2 需要先经过专用归一化，
             # 把“弱阳性但非强 setup”的热路径脏输出降级成合法 negative，
-            # 避免通用 model_validate 直接抛错后触发整轮重试。
+            # 避免通用 model_validate 直接抛错后触发整轮重试
             return parse_foreshadowing_result(json_data)  # type: ignore[return-value]
         return response_model.model_validate(json_data)
     except Exception as exc:
@@ -57,7 +57,7 @@ def parse_structured_response[T: BaseModel](response: Any, response_model: type[
 
 def extract_response_content(message: Any) -> tuple[str, str | None]:
     """
-    从 message 中提取正文与 thinking 内容。
+    从 message 中提取正文与 thinking 内容
     """
     content = message.content or ""
     extraction = extract_thinking_unified(
@@ -71,7 +71,7 @@ def extract_response_content(message: Any) -> tuple[str, str | None]:
 
 def parse_response(content: str) -> dict[str, Any] | None:
     """
-    兼容 markdown 代码块与混合文本场景下的 JSON 解析。
+    兼容 markdown 代码块与混合文本场景下的 JSON 解析
     """
     content_to_parse = content.strip()
     if not content_to_parse:
