@@ -33,7 +33,10 @@ const model = {
   weightRange: { min: 0, max: 0 },
 };
 
-const buildForceGraphModelMock = vi.fn((_args: unknown) => model);
+const buildForceGraphModelMock = vi.fn((args: unknown) => {
+  void args;
+  return model;
+});
 const createForceGraphPaletteMock = vi.fn(() => palette);
 const useG6ForceGraphMock = vi.fn((args: unknown) => {
   const options = args as { onGraphReady: (graph: typeof graphInstance) => void };

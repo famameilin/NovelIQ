@@ -16,8 +16,7 @@ import { getCharacters, getGraph } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { NovelHeader } from "@/components/common/NovelHeader";
+import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { NodeDetailPanel, type RelatedNodeInfo } from "@/components/charts/NodeDetailPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -55,6 +54,10 @@ function getEdgeDisplayNames(edge: GraphEdge, nodeNameMap: Map<string, string>):
   };
 }
 
+/**
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：图谱页改为画布优先的 tab 工作台，关系变化和摘要不再挤占首屏画布空间
+ */
 export function GraphPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -379,58 +382,71 @@ export function GraphPage() {
     </motion.section>
   );
 
+  // 2026-04-28，任务：分析详情页单屏 Tabs 改造
+  // 修改原因：图谱页默认展示关系画布，关系变化和摘要拆入后续 tab，避免 overview 把画布挤到首屏之外
+  const graphWorkspaceProps = {
+    graphData: graphData!,
+    forceGraphRef,
+    onNodeClick: handleNodeClick,
+    searchQuery,
+    selectedRelationTypes,
+    appearanceCountMap,
+    entityTypes,
+    relationTypes,
+    onZoomIn: handleZoomIn,
+    onZoomOut: handleZoomOut,
+    onFitToScreen: handleFitToScreen,
+    onCenter: handleCenter,
+    onRelationTypeChange: handleRelationTypeChange,
+    onSearchChange: handleSearchChange,
+    totalEventCount,
+    loadedEventCount,
+    hasMoreEvents,
+    isEventsLoading,
+    eventsLoadError,
+    graphSelectionHint,
+    sortedEvents,
+    activeSelectedEventId,
+    onSelectEvent: handleSelectEvent,
+    onLoadMoreEvents: handleLoadMoreEvents,
+    onGoTimeline: handleGoTimeline,
+    timelineUrl,
+    selectedNode,
+    onOpenTimelineChunk: handleOpenTimelineChunk,
+    selectedEvent,
+    pageSectionVariants,
+    getChangeTypeLabel,
+  };
+
   const renderLoadedContent = () => (
-    <>
-      <GraphOverviewSection
-        graphSummary={graphSummary}
-        activeRelationCount={activeRelationCount}
-        inactiveRelationCount={inactiveRelationCount}
-        loadedEventCount={loadedEventCount}
-        totalEventCount={totalEventCount}
-        weakRelations={weakRelations}
-        pageSectionVariants={pageSectionVariants}
-      />
-      <GraphWorkspaceSection
-        graphData={graphData!}
-        forceGraphRef={forceGraphRef}
-        onNodeClick={handleNodeClick}
-        searchQuery={searchQuery}
-        selectedRelationTypes={selectedRelationTypes}
-        appearanceCountMap={appearanceCountMap}
-        entityTypes={entityTypes}
-        relationTypes={relationTypes}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onFitToScreen={handleFitToScreen}
-        onCenter={handleCenter}
-        onRelationTypeChange={handleRelationTypeChange}
-        onSearchChange={handleSearchChange}
-        totalEventCount={totalEventCount}
-        loadedEventCount={loadedEventCount}
-        hasMoreEvents={hasMoreEvents}
-        isEventsLoading={isEventsLoading}
-        eventsLoadError={eventsLoadError}
-        graphSelectionHint={graphSelectionHint}
-        sortedEvents={sortedEvents}
-        activeSelectedEventId={activeSelectedEventId}
-        onSelectEvent={handleSelectEvent}
-        onLoadMoreEvents={handleLoadMoreEvents}
-        onGoTimeline={handleGoTimeline}
-        timelineUrl={timelineUrl}
-        selectedNode={selectedNode}
-        onOpenTimelineChunk={handleOpenTimelineChunk}
-        selectedEvent={selectedEvent}
-        pageSectionVariants={pageSectionVariants}
-        getChangeTypeLabel={getChangeTypeLabel}
-      />
-    </>
+    <AnalysisWorkspace.Tabs defaultValue="graph">
+      <AnalysisWorkspace.Tab value="graph" label="关系图谱">
+        <GraphWorkspaceSection {...graphWorkspaceProps} view="graph" />
+      </AnalysisWorkspace.Tab>
+      <AnalysisWorkspace.Tab value="events" label="关系变化">
+        <GraphWorkspaceSection {...graphWorkspaceProps} view="events" />
+      </AnalysisWorkspace.Tab>
+      <AnalysisWorkspace.Tab value="summary" label="关系摘要">
+        <div className="h-full overflow-hidden">
+          <GraphOverviewSection
+            graphSummary={graphSummary}
+            activeRelationCount={activeRelationCount}
+            inactiveRelationCount={inactiveRelationCount}
+            loadedEventCount={loadedEventCount}
+            totalEventCount={totalEventCount}
+            weakRelations={weakRelations}
+            pageSectionVariants={pageSectionVariants}
+          />
+        </div>
+      </AnalysisWorkspace.Tab>
+    </AnalysisWorkspace.Tabs>
   );
 
   // GraphPage 也需要和 TimelinePage 一样先兜住路由缺参空态，
   // 避免 novelId 缺失时继续渲染图谱分析入口，造成“页面存在但上下文不存在”的假象
   if (!novelId) {
     return (
-      <PageContainer>
+      <AnalysisWorkspace title="图谱分析">
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">小说不存在</h3>
@@ -439,14 +455,13 @@ export function GraphPage() {
             </p>
           </div>
         </div>
-      </PageContainer>
+      </AnalysisWorkspace>
     );
   }
 
   if (!taskScopeId) {
     return (
-      <PageContainer>
-        <NovelHeader title={novelTitle} />
+      <AnalysisWorkspace title={novelTitle}>
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">请先选择分析任务</h3>
@@ -455,15 +470,13 @@ export function GraphPage() {
             </p>
           </div>
         </div>
-      </PageContainer>
+      </AnalysisWorkspace>
     );
   }
 
   return (
-    <PageContainer className="flex flex-col">
-      <NovelHeader title={novelTitle} />
-
-      <div className="mt-4 space-y-6">
+    <AnalysisWorkspace title={novelTitle}>
+      <div className="flex min-h-0 flex-1 flex-col">
         {isLoading ? (
           <motion.section
             variants={pageSectionVariants}
@@ -573,7 +586,7 @@ export function GraphPage() {
         isOpen={isPanelOpen}
         onClose={() => setIsPanelOpen(false)}
       />
-    </PageContainer>
+    </AnalysisWorkspace>
   );
 }
 

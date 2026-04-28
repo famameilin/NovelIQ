@@ -24,8 +24,7 @@ import {
 } from "@/api/analysis";
 import { useNovelStore } from "@/store/novelStore";
 import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { NovelHeader } from "@/components/common/NovelHeader";
+import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DiagnosisSummaryCard } from "@/components/common/DiagnosisSummaryCard";
 import { ScoreOverviewCard } from "@/components/common/ScoreOverviewCard";
 import { DimensionMiniCard } from "@/components/common/DimensionMiniCard";
@@ -130,10 +129,10 @@ function RerunRequiredState() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
-/* ------------------------------------------------------------------ */
-
+/**
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：仪表盘页补齐统一单屏 tab 工作区，默认总览优先，结构与曲线进入第二 tab
+ */
 export function NovelDetailPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -378,17 +377,22 @@ export function NovelDetailPage() {
   // ---------- Render ----------
 
   return (
-    <PageContainer className="px-5 py-4">
-      {/* Header */}
-      <NovelHeader
-        title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
-        novelId={novelId}
-        onCreateTask={handleCreateTask}
-        onResumeTask={handleResumeTask}
-        onDeleteCurrentTask={currentTaskId ? handleDeleteTask : undefined}
-        isResuming={effectiveIsAnalyzing}
-        className="mb-3"
-      />
+    <AnalysisWorkspace
+      title={novelQuery.data?.title ?? (novelId ? `小说 ${novelId.slice(0, 8)}` : "小说分析")}
+      headerProps={{
+        novelId,
+        onCreateTask: handleCreateTask,
+        onResumeTask: handleResumeTask,
+        onDeleteCurrentTask: currentTaskId ? handleDeleteTask : undefined,
+        isResuming: effectiveIsAnalyzing,
+      }}
+      className="px-5 py-4"
+      headerClassName="mb-3"
+    >
+      {/* 
+        2026-04-28，任务：分析详情页单屏 Tabs 改造
+        修改原因：仪表盘主内容改为 tab 工作区，后续新增模块统一接受单屏边界约束。
+      */}
 
       {/* No task selected — offer start analysis */}
       {!currentTaskId && (
@@ -422,105 +426,73 @@ export function NovelDetailPage() {
 
       {/* Main content - only when not analyzing */}
       {!effectiveIsAnalyzing && allMetricsLoaded && !isLoading && currentTaskId && !diagnosisRequiresRerun && (
-        <div className="space-y-4">
-          {/* Row 1: 诊断画像 + 评分速览 */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.15 }}
-            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
-          >
-            {diagnosisQuery.data ? (
-              <DiagnosisSummaryCard
-                diagnosis={diagnosisQuery.data}
+        <AnalysisWorkspace.Tabs defaultValue="overview">
+          <AnalysisWorkspace.Tab value="overview" label="总览">
+            <div className="flex h-full min-h-0 flex-col gap-4">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                {diagnosisQuery.data ? (
+                  <DiagnosisSummaryCard diagnosis={diagnosisQuery.data} novelId={novelId!} className="h-full" />
+                ) : (
+                  <Card className="flex h-full items-center justify-center">
+                    <p className="text-sm text-text-muted">暂无诊断数据</p>
+                  </Card>
+                )}
+
+                <ScoreOverviewCard
+                  foreshadowExpectation={diagnosisQuery.data?.foreshadow_expectation}
+                  powerStance={diagnosisQuery.data?.power_stance_score}
+                  civilianDignity={diagnosisQuery.data?.common_people_dignity}
+                  culturalDepth={diagnosisQuery.data?.cultural_depth_score}
+                  novelId={novelId!}
+                  className="h-full"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+                <DimensionMiniCard dimension="narrative" data={narrativeQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/timeline`} />
+                <DimensionMiniCard
+                  dimension="emotion"
+                  data={{
+                    pos_neg_ratio: emotionQuery.data?.pos_neg_ratio,
+                    positive_ratio: emotionQuery.data?.positive_ratio,
+                    negative_ratio: emotionQuery.data?.negative_ratio,
+                  }}
+                  novelId={novelId!}
+                  linkTo={`/novels/${novelId}/curves`}
+                />
+                <DimensionMiniCard dimension="character" data={characterQuery.data ?? {}} novelId={novelId!} linkTo={`/novels/${novelId}/graph`} />
+                <DimensionMiniCard dimension="style" data={styleQuery.data ?? {}} novelId={novelId!} />
+                <DimensionMiniCard
+                  dimension="topic"
+                  data={{
+                    topic_count: Array.isArray(topicsQuery.data) ? topicsQuery.data.length : 0,
+                    top_topics: Array.isArray(topicsQuery.data)
+                      ? topicsQuery.data.slice(0, 3).map((t) => ({
+                          words: t.words,
+                          weight: t.weight,
+                        }))
+                      : [],
+                  }}
+                  novelId={novelId!}
+                  linkTo={`/novels/${novelId}/topics`}
+                />
+              </div>
+            </div>
+          </AnalysisWorkspace.Tab>
+          <AnalysisWorkspace.Tab value="structure" label="结构与曲线">
+            <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-2">
+              <NarrativeStructureBar
+                act1Ratio={narrativeQuery.data?.act1_ratio}
+                act2Ratio={narrativeQuery.data?.act2_ratio}
+                act3Ratio={narrativeQuery.data?.act3_ratio}
+                eventDensity={narrativeQuery.data?.event_density}
                 novelId={novelId!}
-                className="h-full"
               />
-            ) : (
-              <Card className="flex h-full items-center justify-center">
-                <p className="text-sm text-text-muted">暂无诊断数据</p>
-              </Card>
-            )}
-
-            <ScoreOverviewCard
-              foreshadowExpectation={diagnosisQuery.data?.foreshadow_expectation}
-              powerStance={diagnosisQuery.data?.power_stance_score}
-              civilianDignity={diagnosisQuery.data?.common_people_dignity}
-              culturalDepth={diagnosisQuery.data?.cultural_depth_score}
-              novelId={novelId!}
-              className="h-full"
-            />
-          </motion.div>
-
-          {/* Row 2: 五维速览 */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.15, delay: 0.1 }}
-            className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5"
-          >
-            <DimensionMiniCard
-              dimension="narrative"
-              data={narrativeQuery.data ?? {}}
-              novelId={novelId!}
-              linkTo={`/novels/${novelId}/timeline`}
-            />
-            <DimensionMiniCard
-              dimension="emotion"
-              data={{
-                pos_neg_ratio: emotionQuery.data?.pos_neg_ratio,
-                positive_ratio: emotionQuery.data?.positive_ratio,
-                negative_ratio: emotionQuery.data?.negative_ratio,
-              }}
-              novelId={novelId!}
-              linkTo={`/novels/${novelId}/curves`}
-            />
-            <DimensionMiniCard
-              dimension="character"
-              data={characterQuery.data ?? {}}
-              novelId={novelId!}
-              linkTo={`/novels/${novelId}/graph`}
-            />
-            <DimensionMiniCard
-              dimension="style"
-              data={styleQuery.data ?? {}}
-              novelId={novelId!}
-            />
-            <DimensionMiniCard
-              dimension="topic"
-              data={{
-                topic_count: Array.isArray(topicsQuery.data) ? topicsQuery.data.length : 0,
-                top_topics: Array.isArray(topicsQuery.data) ? topicsQuery.data.slice(0, 3).map(t => ({
-                  words: t.words,
-                  weight: t.weight,
-                })) : [],
-              }}
-              novelId={novelId!}
-              linkTo={`/novels/${novelId}/topics`}
-            />
-          </motion.div>
-
-          {/* Row 3: 结构概览 + 曲线预览 */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.15, delay: 0.2 }}
-            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
-          >
-            <NarrativeStructureBar
-              act1Ratio={narrativeQuery.data?.act1_ratio}
-              act2Ratio={narrativeQuery.data?.act2_ratio}
-              act3Ratio={narrativeQuery.data?.act3_ratio}
-              eventDensity={narrativeQuery.data?.event_density}
-              novelId={novelId!}
-            />
-            <MiniCurvePreview
-              data={curvesQuery.data ?? []}
-              novelId={novelId!}
-            />
-          </motion.div>
-        </div>
+              <MiniCurvePreview data={curvesQuery.data ?? []} novelId={novelId!} />
+            </div>
+          </AnalysisWorkspace.Tab>
+        </AnalysisWorkspace.Tabs>
       )}
-    </PageContainer>
+    </AnalysisWorkspace>
   );
 }

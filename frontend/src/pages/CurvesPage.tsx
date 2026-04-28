@@ -2,13 +2,11 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import ReactEChartsCore from "echarts-for-react";
 import { getChunkCurves, getNarrativeStructure } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { NovelHeader } from "@/components/common/NovelHeader";
+import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
 import { CurveToolbar } from "@/components/charts/CurveToolbar";
@@ -26,6 +24,10 @@ interface VisibleSeriesState {
   rhythm: Set<RhythmSeriesKey>;
 }
 
+/**
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：曲线页改为情绪优先的 tab 工作台，避免两张大图上下堆叠超出屏幕高度
+ */
 export function CurvesPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -178,8 +180,7 @@ export function CurvesPage() {
 
   if (!currentTaskId) {
     return (
-      <PageContainer>
-        <NovelHeader title={novelTitle} className="mb-6" />
+      <AnalysisWorkspace title={novelTitle}>
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">请先选择分析任务</h3>
@@ -188,25 +189,26 @@ export function CurvesPage() {
             </p>
           </div>
         </div>
-      </PageContainer>
+      </AnalysisWorkspace>
     );
   }
 
   return (
-    <PageContainer>
-      <NovelHeader title={novelTitle} className="mb-6" />
-
-      <div className="space-y-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
+    <AnalysisWorkspace title={novelTitle}>
+      {/*
+        2026-04-28，任务：分析详情页单屏 Tabs 改造
+        修改原因：曲线页从上下堆叠改为 tab，默认展示最重要的情绪趋势，图表由单屏工作区统一约束。
+      */}
+      <AnalysisWorkspace.Tabs defaultValue="emotion">
+        <AnalysisWorkspace.Tab value="emotion" label="情绪趋势">
           <DashboardCardShell
             title="情绪趋势曲线"
             icon={<Activity className="h-4 w-4" />}
             accent="primary"
             showOrb
+            className="h-full"
+            contentClassName="flex h-full flex-col"
+            bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
               <CurveToolbar
                 onZoomIn={handleZoomIn}
@@ -216,28 +218,20 @@ export function CurvesPage() {
                 disabled={isLoading || isError || curvesData.length === 0}
               />
             }
-            bodyClassName="gap-3"
           >
-            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
+            <div className="min-h-[320px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
-                <div className="h-[350px] w-full animate-pulse rounded bg-surface-hover" />
+                <div className="h-full w-full animate-pulse rounded bg-surface-hover" />
               ) : isError ? (
-                <div className="flex h-[350px] flex-col items-center justify-center gap-3 text-sm text-text-muted">
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted">
                   <span>加载失败</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleRetry}
-                    className="gap-2"
-                  >
+                  <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2">
                     <RefreshCw className="h-4 w-4" />
                     重试
                   </Button>
                 </div>
               ) : curvesData.length === 0 ? (
-                <div className="flex h-[350px] items-center justify-center text-sm text-text-muted">
-                  暂无曲线数据
-                </div>
+                <div className="flex h-full items-center justify-center text-sm text-text-muted">暂无曲线数据</div>
               ) : (
                 <EmotionCurveChart
                   ref={emotionChartRef}
@@ -246,22 +240,21 @@ export function CurvesPage() {
                   onSeriesToggle={handleEmotionSeriesToggle}
                   zoomRange={zoomRange}
                   onZoomChange={handleZoomChange}
-                  height={350}
+                  height="100%"
+                  className="h-full"
                 />
               )}
             </div>
           </DashboardCardShell>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
-        >
+        </AnalysisWorkspace.Tab>
+        <AnalysisWorkspace.Tab value="rhythm" label="节奏张力">
           <DashboardCardShell
             title="节奏张力曲线"
             icon={<Activity className="h-4 w-4" />}
             accent="chart-3"
+            className="h-full"
+            contentClassName="flex h-full flex-col"
+            bodyClassName="min-h-0 flex-1 gap-3"
             headerRight={
               <CurveToolbar
                 onZoomIn={handleZoomIn}
@@ -271,28 +264,20 @@ export function CurvesPage() {
                 disabled={isLoading || isError || curvesData.length === 0}
               />
             }
-            bodyClassName="gap-3"
           >
-            <div className="rounded-2xl border border-border/60 bg-surface/70 p-4">
+            <div className="min-h-[320px] flex-1 rounded-2xl border border-border/60 bg-surface/70 p-4">
               {isLoading ? (
-                <div className="h-[350px] w-full animate-pulse rounded bg-surface-hover" />
+                <div className="h-full w-full animate-pulse rounded bg-surface-hover" />
               ) : isError ? (
-                <div className="flex h-[350px] flex-col items-center justify-center gap-3 text-sm text-text-muted">
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted">
                   <span>加载失败</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleRetry}
-                    className="gap-2"
-                  >
+                  <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2">
                     <RefreshCw className="h-4 w-4" />
                     重试
                   </Button>
                 </div>
               ) : curvesData.length === 0 ? (
-                <div className="flex h-[350px] items-center justify-center text-sm text-text-muted">
-                  暂无曲线数据
-                </div>
+                <div className="flex h-full items-center justify-center text-sm text-text-muted">暂无曲线数据</div>
               ) : (
                 <RhythmCurveChart
                   ref={rhythmChartRef}
@@ -302,13 +287,14 @@ export function CurvesPage() {
                   onSeriesToggle={handleRhythmSeriesToggle}
                   zoomRange={zoomRange}
                   onZoomChange={handleZoomChange}
-                  height={350}
+                  height="100%"
+                  className="h-full"
                 />
               )}
             </div>
           </DashboardCardShell>
-        </motion.div>
-      </div>
-    </PageContainer>
+        </AnalysisWorkspace.Tab>
+      </AnalysisWorkspace.Tabs>
+    </AnalysisWorkspace>
   );
 }

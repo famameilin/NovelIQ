@@ -31,6 +31,9 @@ export interface CharacterRankingBarProps {
  * 2026-04-27，任务：protagonist-focus-contract
  * 修改原因：人物页现在支持多焦点高亮；排名图直接消费 `is_focus_character`
  * 做强调显示，不再依赖额外的焦点名称列表，也不再假定只有一个 protagonist
+ *
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：图表卡片需要在 tab 工作区内跟随父容器高度伸缩，避免固定高度撑破单屏布局
  */
 export function CharacterRankingBar({
   characters,
@@ -137,9 +140,10 @@ export function CharacterRankingBar({
       accent="primary"
       showOrb
       className={cn(className)}
-      bodyClassName="gap-3"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-3"
     >
-      <div className="h-[400px] w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+      <div className="min-h-[260px] flex-1 w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
         {hasData ? (
           <ReactEChartsCore
             key={themeSignature}

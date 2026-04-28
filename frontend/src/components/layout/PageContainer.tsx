@@ -13,6 +13,10 @@ interface PageContainerProps {
   className?: string;
 }
 
+/**
+ * 2026-04-28，任务：分析详情页单屏布局收口
+ * 修改原因：移除全局纵向内边距，让具体页面自行决定顶部/底部留白，避免和 tabs 工作区重复叠加。
+ */
 export function PageContainer({ children, className }: PageContainerProps) {
   return (
     <motion.main
@@ -20,7 +24,7 @@ export function PageContainer({ children, className }: PageContainerProps) {
       initial="initial"
       animate="animate"
       exit="exit"
-      className={cn("mx-auto flex h-full w-full max-w-[1400px] flex-col px-6 py-6", className)}
+      className={cn("mx-auto flex h-full w-full max-w-[1400px] flex-col px-6", className)}
     >
       {children}
     </motion.main>

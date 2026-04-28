@@ -39,6 +39,9 @@ function SortIcon({
  * 2026-04-27，任务：protagonist-focus-contract
  * 修改原因：表格列和高亮逻辑统一切到焦点合同，展示 `narrative_focus_score`，
  * 并直接消费角色结果里的 `is_focus_character`，不再依赖额外的名称列表高亮
+ *
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：角色表进入 tab 后必须使用内部滚动，不能继续依赖固定 max-height 撑开页面
  */
 export function CharacterTable({
   characters,
@@ -102,9 +105,10 @@ export function CharacterTable({
       icon={<User className="h-4 w-4" />}
       accent="chart-4"
       className={cn(className)}
-      bodyClassName="gap-3"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-3"
     >
-      <div className="max-h-[400px] overflow-auto rounded-xl border border-border/70 bg-surface/70">
+      <div className="min-h-[260px] flex-1 overflow-auto rounded-xl border border-border/70 bg-surface/70">
         <Table>
           <TableHeader>
             <TableRow className="bg-surface-hover">

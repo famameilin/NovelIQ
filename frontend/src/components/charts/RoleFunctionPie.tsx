@@ -45,6 +45,9 @@ export interface RoleFunctionPieProps {
  *
  * 2026-04-27，任务：protagonist-focus-contract
  * 修改原因：移除基于旧主角分阈值的兜底归类，避免旧中心度语义继续干扰角色功能分布
+ *
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：饼图卡片改为可填满 tab 面板高度，保证角色页单屏布局稳定
  */
 export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps) {
   const themeSignature = useChartThemeSignature();
@@ -147,9 +150,10 @@ export function RoleFunctionPie({ characters, className }: RoleFunctionPieProps)
       icon={<ChartPie className="h-4 w-4" />}
       accent="chart-2"
       className={cn(className)}
-      bodyClassName="gap-3"
+      contentClassName="flex h-full flex-col"
+      bodyClassName="min-h-0 flex-1 gap-3"
     >
-      <div className="h-[300px] w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
+      <div className="min-h-[240px] flex-1 w-full rounded-2xl border border-border/60 bg-surface/70 p-2">
         {hasData ? (
           <ReactEChartsCore
             key={themeSignature}

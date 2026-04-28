@@ -12,8 +12,7 @@ import { getTopics, getDiagnosis } from "@/api/results";
 import type { Topic } from "@/api/types";
 import { useNovelStore } from "@/store/novelStore";
 import { AnalysisNotCompleteState } from "@/components/common/AnalysisNotCompleteState";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { NovelHeader } from "@/components/common/NovelHeader";
+import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { DashboardCardShell } from "@/components/common/DashboardCardShell";
 import { Button } from "@/components/ui/button";
 import { hasCompleteFocusContract } from "@/lib/diagnosisContract";
@@ -41,6 +40,10 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
+/**
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：主题页补齐统一 tab 工作区，默认优先展示主题词云，权重和表格按需切换
+ */
 export function TopicsPage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -247,33 +250,30 @@ export function TopicsPage() {
     }
 
     return (
-      <div className="flex flex-col gap-4 flex-1 min-h-0">
-        <TopicWordCloud topics={topics} maxWords={100} />
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0">
-          <div className="h-full min-h-0">
-            <TopicBarChart topics={topics} />
-          </div>
-          <div className="h-full min-h-0">
-            <TopicTable topics={topics} />
-          </div>
-        </div>
-      </div>
+      <AnalysisWorkspace.Tabs defaultValue="wordcloud">
+        <AnalysisWorkspace.Tab value="wordcloud" label="词云">
+          <TopicWordCloud topics={topics} maxWords={100} className="h-full" />
+        </AnalysisWorkspace.Tab>
+        <AnalysisWorkspace.Tab value="weights" label="权重">
+          <TopicBarChart topics={topics} className="h-full" />
+        </AnalysisWorkspace.Tab>
+        <AnalysisWorkspace.Tab value="table" label="表格">
+          <TopicTable topics={topics} className="h-full" />
+        </AnalysisWorkspace.Tab>
+      </AnalysisWorkspace.Tabs>
     );
   };
 
   return (
-    <PageContainer className="flex flex-col">
-      <NovelHeader title="主题分布" />
-
+    <AnalysisWorkspace title="主题分布">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="mt-4 flex flex-1 flex-col min-h-0"
+        className="flex min-h-0 flex-1 flex-col"
       >
         {renderContent()}
       </motion.div>
-    </PageContainer>
+    </AnalysisWorkspace>
   );
 }

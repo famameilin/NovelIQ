@@ -3,14 +3,12 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import { AlertTriangle, GitBranch, RefreshCw, Sparkles, TrendingUp } from "lucide-react";
 import { getTimeline } from "@/api/results";
 import { getNovel } from "@/api/novels";
 import { useNovelStore } from "@/store/novelStore";
 import { MetricCard } from "@/components/common/MetricCard";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { NovelHeader } from "@/components/common/NovelHeader";
+import { AnalysisWorkspace } from "@/components/layout/AnalysisWorkspace";
 import { Button } from "@/components/ui/button";
 import {
   TimelineLegend,
@@ -71,6 +69,10 @@ function getSelectedNodeRelationEventId(node: TimelineDisplayNode | null, relati
   return belongsToSelectedNode ? relationEventId : null;
 }
 
+/**
+ * 2026-04-28，任务：分析详情页单屏 Tabs 改造
+ * 修改原因：时间轴轨道与节点详情拆成 tab，保证轨道首屏优先且详情不再撑高页面
+ */
 export function TimelinePage() {
   const { novelId } = useParams<{ novelId: string }>();
   const [searchParams] = useSearchParams();
@@ -367,7 +369,7 @@ export function TimelinePage() {
 
   if (!novelId) {
     return (
-      <PageContainer>
+      <AnalysisWorkspace title="叙事时间轴">
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">小说不存在</h3>
@@ -376,14 +378,13 @@ export function TimelinePage() {
             </p>
           </div>
         </div>
-      </PageContainer>
+      </AnalysisWorkspace>
     );
   }
 
   if (!taskScopeId) {
     return (
-      <PageContainer>
-        <NovelHeader title="叙事时间轴" />
+      <AnalysisWorkspace title="叙事时间轴">
         <div className="flex h-96 flex-col items-center justify-center gap-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold text-text">请先选择分析任务</h3>
@@ -392,87 +393,75 @@ export function TimelinePage() {
             </p>
           </div>
         </div>
-      </PageContainer>
+      </AnalysisWorkspace>
     );
   }
 
   return (
-    <PageContainer>
-      <NovelHeader title="叙事时间轴" />
-
-      <div className="mt-3 space-y-5">
-        {(selectionHint || chunkSelectionHint) && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.05 }}
-          >
-            <div className="flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
-              <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
-              <p className="text-sm text-text-muted">{selectionHint ?? chunkSelectionHint}</p>
-            </div>
-          </motion.div>
-        )}
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
-        >
-          <div className="space-y-3">
-              <div className="grid gap-3 md:grid-cols-3">
-                <MetricCard
-                  label="Overview"
-                  value={displayNodes.length}
-                  format="raw"
-                  accent="chart-1"
-                  icon={<TrendingUp className="h-4 w-4" />}
-                  description="当前视图与筛选层级下可见的时间轴节点数量。"
-                  footer={<p className="mt-2 text-xs text-text-muted">当前视图下的可见节点</p>}
-                  className="!p-4"
-                  showOrb
-                />
-                <MetricCard
-                  label="Pivot"
-                  value={pivotCount}
-                  format="raw"
-                  accent="chart-5"
-                  icon={<Sparkles className="h-4 w-4" />}
-                  description="被标记为转折点的节点数量，适合优先阅读。"
-                  footer={<p className="mt-2 text-xs text-text-muted">转折点，适合优先阅读</p>}
-                  className="!p-4"
-                  showOrb
-                />
-                <MetricCard
-                  label="Relation"
-                  value={relationChangeCount}
-                  format="raw"
-                  accent="chart-2"
-                  icon={<GitBranch className="h-4 w-4" />}
-                  description="关系变化节点数量，通常最适合联动图谱排查。"
-                  footer={<p className="mt-2 text-xs text-text-muted">关系变化节点，最适合联动图谱排查</p>}
-                  className="!p-4"
-                  showOrb
-                />
+    <AnalysisWorkspace title="叙事时间轴">
+      {/*
+        2026-04-28，任务：分析详情页单屏 Tabs 改造
+        修改原因：时间轴页以轨道为第一工作区，节点详情拆到独立 tab，由单屏工作区统一约束边界。
+      */}
+      <AnalysisWorkspace.Tabs defaultValue="timeline">
+        <AnalysisWorkspace.Tab value="timeline" label="时间轴">
+          <div className="flex h-full min-h-0 flex-col">
+            {(selectionHint || chunkSelectionHint) && (
+              <div className="mb-3 flex items-start gap-3 rounded-2xl border border-chart-negative/20 bg-chart-negative/5 p-4">
+                <AlertTriangle className="mt-0.5 h-4 w-4 text-chart-negative" />
+                <p className="text-sm text-text-muted">{selectionHint ?? chunkSelectionHint}</p>
               </div>
+            )}
 
-              {!isLoading && !isError && phases.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border/60 bg-surface/50 px-4 py-3 text-sm text-text-muted">
-                  暂无阶段数据
-                </div>
-              ) : null}
+            <div className="grid gap-3 md:grid-cols-3">
+              <MetricCard
+                label="Overview"
+                value={displayNodes.length}
+                format="raw"
+                accent="chart-1"
+                icon={<TrendingUp className="h-4 w-4" />}
+                description="当前视图与筛选层级下可见的时间轴节点数量。"
+                footer={<p className="mt-2 text-xs text-text-muted">当前视图下的可见节点</p>}
+                className="!p-4"
+                showOrb
+              />
+              <MetricCard
+                label="Pivot"
+                value={pivotCount}
+                format="raw"
+                accent="chart-5"
+                icon={<Sparkles className="h-4 w-4" />}
+                description="被标记为转折点的节点数量，适合优先阅读。"
+                footer={<p className="mt-2 text-xs text-text-muted">转折点，适合优先阅读</p>}
+                className="!p-4"
+                showOrb
+              />
+              <MetricCard
+                label="Relation"
+                value={relationChangeCount}
+                format="raw"
+                accent="chart-2"
+                icon={<GitBranch className="h-4 w-4" />}
+                description="关系变化节点数量，通常最适合联动图谱排查。"
+                footer={<p className="mt-2 text-xs text-text-muted">关系变化节点，最适合联动图谱排查</p>}
+                className="!p-4"
+                showOrb
+              />
+            </div>
 
+            {!isLoading && !isError && phases.length === 0 ? (
+              <div className="mt-3 rounded-2xl border border-dashed border-border/60 bg-surface/50 px-4 py-3 text-sm text-text-muted">
+                暂无阶段数据
+              </div>
+            ) : null}
+
+            <div className="mt-3 flex-1">
               {isLoading ? (
                 <div className="h-[360px] w-full animate-pulse rounded-[28px] border border-border/60 bg-surface-hover" />
               ) : isError ? (
                 <div className="flex h-[360px] flex-col items-center justify-center gap-3 rounded-[28px] border border-border/60 bg-surface/70 text-sm text-text-muted">
                   <span>加载失败</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleRetry}
-                    className="gap-2"
-                  >
+                  <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2">
                     <RefreshCw className="h-4 w-4" />
                     重试
                   </Button>
@@ -531,34 +520,42 @@ export function TimelinePage() {
                     totalChunks={totalChunks}
                     showTension={showTension}
                   />
-
-                  {selectedDetailNode ? (
-                    <TimelineNodeDetail
-                      node={selectedDetailNode}
-                      atomicNodes={atomicNodes}
-                      novelId={novelId}
-                      taskId={taskScopeId}
-                      selectedRelationEventId={resolvedRelationEventId}
-                      onSelectAtomicNode={handleSelectAtomicNode}
-                      onClose={() => {
-                        navigate(
-                          buildTimelinePageUrl(novelId, taskScopeId, {
-                            maxLevel,
-                            viewMode,
-                            selectedNodeId: null,
-                            selectedChunk: null,
-                            relationEventId: null,
-                          }),
-                          { replace: true }
-                        );
-                      }}
-                    />
-                  ) : null}
                 </div>
               )}
+            </div>
           </div>
-        </motion.div>
-      </div>
-    </PageContainer>
+        </AnalysisWorkspace.Tab>
+        <AnalysisWorkspace.Tab value="detail" label="节点详情">
+          <div className="h-full overflow-hidden">
+            {selectedDetailNode ? (
+              <TimelineNodeDetail
+                node={selectedDetailNode}
+                atomicNodes={atomicNodes}
+                novelId={novelId}
+                taskId={taskScopeId}
+                selectedRelationEventId={resolvedRelationEventId}
+                onSelectAtomicNode={handleSelectAtomicNode}
+                onClose={() => {
+                  navigate(
+                    buildTimelinePageUrl(novelId, taskScopeId, {
+                      maxLevel,
+                      viewMode,
+                      selectedNodeId: null,
+                      selectedChunk: null,
+                      relationEventId: null,
+                    }),
+                    { replace: true }
+                  );
+                }}
+              />
+            ) : (
+              <div className="flex h-full min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-surface/50 text-sm text-text-muted">
+                在时间轴中选择一个节点后查看详情。
+              </div>
+            )}
+          </div>
+        </AnalysisWorkspace.Tab>
+      </AnalysisWorkspace.Tabs>
+    </AnalysisWorkspace>
   );
 }

@@ -31,6 +31,10 @@ export interface CardProps
 /*  Card                                                              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 2026-04-28，任务：分析详情页单屏布局收口
+ * 修改原因：elevated 卡片 hover 位移提高到 2px，并缩短过渡时长，让位移和阴影变化更接近同时发生。
+ */
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, variant, ...props }, ref) => {
     const baseClasses = cardVariants({ variant });
@@ -40,8 +44,8 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
         <motion.div
           ref={ref}
           className={cn(baseClasses, className)}
-          whileHover={{ y: -1 }}
-          transition={{ duration: 0.3, ease: "easeOut" }}
+          whileHover={{ y: -2 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
           {...(props as React.ComponentProps<typeof motion.div>)}
         />
       );

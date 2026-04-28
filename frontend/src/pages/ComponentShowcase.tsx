@@ -148,7 +148,7 @@ export function ComponentShowcase() {
   ];
 
   return (
-    <PageContainer className="space-y-10 pb-20">
+    <PageContainer className="space-y-10 pb-20 pt-6">
       <div>
         <h1 className="text-3xl font-bold text-text">组件展示</h1>
         <p className="mt-1 text-text-muted">
