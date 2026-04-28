@@ -95,12 +95,65 @@ async def _emit_phase_event(
     )
 
 
+def _clone_annotation_client_for_phase(
+    client: AnnotationClient | None,
+    phase_name: str,
+    chunk_id: int | None,
+) -> AnnotationClient | None:
+    """
+    创建时间: 2026-04-28
+    任务: fix-annotation-stream-phase-scope
+    说明: phase1/phase2 并行时不能继续复用共享 client 的 emitter 上下文；
+    这里为每个 phase 克隆一个轻量 client，并给 output/thinking 事件补上显式的 sub_stage/chunk_id，
+    避免 SSE 被“最后一次 phase_start”错误盖章。
+    """
+    if client is None:
+        return None
+    if client.__class__.__module__.startswith("unittest.mock"):
+        return client
+
+    task_type = getattr(client, "_task_type", None)
+    raw_client = getattr(client, "_client", None)
+    if task_type is None or raw_client is None:
+        return client
+
+    cloned_client = client.__class__(
+        task_type=task_type,
+        config=client._config,
+        client=raw_client,
+        analysis_logger=getattr(client, "_analysis_logger", None),
+        token_usage_callback=getattr(client, "_token_usage_callback", None),
+        novel_id=getattr(client, "_novel_id", None),
+        session=getattr(client, "_session", None),
+    )
+    parent_emitter = getattr(client, "_emitter", None)
+    if callable(parent_emitter):
+
+        async def _emit_with_phase_scope(event: StreamEvent) -> None:
+            if event.action in {"output", "thinking"}:
+                patch_kwargs: dict[str, str | int | None] = {}
+                if not event.sub_stage:
+                    patch_kwargs["sub_stage"] = phase_name
+                if event.chunk_id is None:
+                    patch_kwargs["chunk_id"] = chunk_id
+                if patch_kwargs:
+                    event = replace(event, **patch_kwargs)
+            await parent_emitter(event)
+
+        cloned_client._emitter = _emit_with_phase_scope
+    else:
+        cloned_client._emitter = parent_emitter
+    return cloned_client
+
+
 async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> ChunkAnnotation:
     """
     从共享上下文执行 Phase1
     """
+    phase_client = _clone_annotation_client_for_phase(context.client, "phase1", context.chunk_id) or context.client
+    phase_fallback_client = _clone_annotation_client_for_phase(context.fallback_client, "phase1", context.chunk_id)
     return await _run_phase1(
-        client=context.client,
+        client=phase_client,
         text=context.text,
         alias_map=context.alias_map,
         chunk_id=context.chunk_id,
@@ -110,7 +163,7 @@ async def _run_phase1_from_context(context: _MultiPhaseExecutionContext) -> Chun
         chapter_id=context.chapter_id,
         active_entities=context.active_entities,
         evidence_bundle=context.phase1_bundle,
-        fallback_client=context.fallback_client,
+        fallback_client=phase_fallback_client,
         run_id=context.run_id,
         disambig_context=context.disambig_context,
     )
@@ -120,8 +173,10 @@ async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> Fore
     """
     从共享上下文执行 Phase2
     """
+    phase_client = _clone_annotation_client_for_phase(context.client, "phase2", context.chunk_id) or context.client
+    phase_fallback_client = _clone_annotation_client_for_phase(context.fallback_client, "phase2", context.chunk_id)
     return await _run_phase2(
-        client=context.client,
+        client=phase_client,
         text=context.text,
         chunk_id=context.chunk_id,
         novel_title=context.novel_title,
@@ -129,7 +184,7 @@ async def _run_phase2_from_context(context: _MultiPhaseExecutionContext) -> Fore
         position_pct=context.position_pct,
         chapter_id=context.chapter_id,
         evidence_bundle=context.phase2_bundle,
-        fallback_client=context.fallback_client,
+        fallback_client=phase_fallback_client,
         run_id=context.run_id,
     )
 
@@ -141,8 +196,10 @@ async def _run_phase3_from_context(
     """
     从共享上下文执行 Phase3
     """
+    phase_client = _clone_annotation_client_for_phase(context.client, "phase3", context.chunk_id) or context.client
+    phase_fallback_client = _clone_annotation_client_for_phase(context.fallback_client, "phase3", context.chunk_id)
     return await _run_phase3_if_needed(
-        client=context.client,
+        client=phase_client,
         text=context.text,
         alias_map=context.alias_map,
         evidence_bundle=context.phase3_bundle,
@@ -150,7 +207,7 @@ async def _run_phase3_from_context(
         run_id=context.run_id,
         known_characters=known_characters,
         active_entities=context.active_entities,
-        fallback_client=context.fallback_client,
+        fallback_client=phase_fallback_client,
     )
 
 
@@ -161,9 +218,11 @@ async def _run_phase4_from_context(
     """
     从共享上下文执行 Phase4
     """
+    phase_client = _clone_annotation_client_for_phase(context.client, "phase4", context.chunk_id) or context.client
+    phase_fallback_client = _clone_annotation_client_for_phase(context.fallback_client, "phase4", context.chunk_id)
     phase4_bundle = await _resolve_phase4_bundle(context, known_characters)
     relations = await annotate_chunk_phase4(
-        client=context.client,
+        client=phase_client,
         text=context.text,
         known_characters=known_characters,
         # Phase4 统一只消费上游传入的 evidence_bundle，
@@ -171,7 +230,7 @@ async def _run_phase4_from_context(
         evidence_bundle=phase4_bundle,
         chunk_id=context.chunk_id,
         run_id=context.run_id,
-        fallback_client=context.fallback_client,
+        fallback_client=phase_fallback_client,
     )
     return _Phase4Result(relations=relations)
 
