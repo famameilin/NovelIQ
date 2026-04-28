@@ -74,6 +74,10 @@ export interface UseAnalysisStatusOptions {
   onFailed?: (error: string) => void;
 }
 
+interface ApplyTaskStatusBackfillOptions {
+  notifyTerminalCallbacks: boolean;
+}
+
 export function useAnalysisStatus(
   novelId: string | null,
   taskId: string | null,
@@ -96,6 +100,7 @@ export function useAnalysisStatus(
   const flushTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const hasConnectedOnceRef = useRef(false);
   const lastForegroundSyncAtRef = useRef(0);
+  const hasHydratedTaskStatusRef = useRef(false);
   const [stableTaskId, setStableTaskId] = useState<string | null>(null);
   const sseReceivedMessageRef = useRef(false);
   const wsStable = !!taskId && stableTaskId === taskId;
@@ -128,7 +133,7 @@ export function useAnalysisStatus(
 
   /** 后台标签页恢复后，允许重新回填任务状态并同步终态 */
   const applyTaskStatusBackfill = useCallback(
-    (status: TaskStatusResponse) => {
+    (status: TaskStatusResponse, options: ApplyTaskStatusBackfillOptions) => {
       if (status.status === "pending" || status.status === "running" || status.status === "cancelling") {
         updateProgress(buildBackfillProgress(status));
         setError(null);
@@ -153,7 +158,7 @@ export function useAnalysisStatus(
           message: "分析完成",
         });
         setError(null);
-        if (prevStatusRef.current !== "completed") {
+        if (options.notifyTerminalCallbacks && prevStatusRef.current !== "completed") {
           optionsRef.current?.onCompleted?.();
         }
         prevStatusRef.current = "completed";
@@ -174,7 +179,7 @@ export function useAnalysisStatus(
           message: "任务已取消",
         });
         setError(null);
-        if (prevStatusRef.current !== "cancelled") {
+        if (options.notifyTerminalCallbacks && prevStatusRef.current !== "cancelled") {
           optionsRef.current?.onCancelled?.();
         }
         prevStatusRef.current = "cancelled";
@@ -183,7 +188,7 @@ export function useAnalysisStatus(
 
       if (status.status === "failed") {
         setError(status.error || "分析失败");
-        if (prevStatusRef.current !== "failed") {
+        if (options.notifyTerminalCallbacks && prevStatusRef.current !== "failed") {
           optionsRef.current?.onFailed?.(status.error || "分析失败");
         }
         prevStatusRef.current = "failed";
@@ -198,9 +203,11 @@ export function useAnalysisStatus(
       return Promise.resolve();
     }
 
+    const notifyTerminalCallbacks = hasHydratedTaskStatusRef.current;
     return getTaskStatus(novelId, taskId)
       .then((status) => {
-        applyTaskStatusBackfill(status);
+        applyTaskStatusBackfill(status, { notifyTerminalCallbacks });
+        hasHydratedTaskStatusRef.current = true;
       })
       .catch((error: unknown) => {
         // HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误
@@ -417,6 +424,7 @@ export function useAnalysisStatus(
     if (taskId && novelId) {
       setTaskId(taskId);
       prevStatusRef.current = null;
+      hasHydratedTaskStatusRef.current = false;
       sseReceivedMessageRef.current = false;
       stageStartTimeRef.current = null;
       hasConnectedOnceRef.current = false;
