@@ -229,9 +229,6 @@ export function ScoreOverviewCard({
               <div>
                 <p className="text-xs uppercase tracking-wide text-text-muted">伏笔回收预期</p>
                 <p className="text-lg font-semibold tabular-nums text-text">{foreshadowPct}%</p>
-                <p className="mt-1 text-[11px] leading-4 text-text-muted">
-                  基于 setup thread ledger 的加权估计
-                </p>
               </div>
             </>
           ) : (

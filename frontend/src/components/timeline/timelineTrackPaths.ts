@@ -8,9 +8,9 @@ export interface TimelineTensionPath {
 
 export const TRACK_CURVE_START_PADDING_PX = 28;
 export const TRACK_CURVE_END_PADDING_PX = 68;
-export const TRACK_HEIGHT_PX = 378;
-export const CURVE_CENTER_Y = 176;
-export const CURVE_AMPLITUDE_PX = 52;
+export const TRACK_HEIGHT_PX = 430;
+export const CURVE_CENTER_Y = 202;
+export const CURVE_AMPLITUDE_PX = 60;
 
 export function getNormalizedProgress(progress: number): number {
   return Math.min(Math.max(progress, 0), 1);

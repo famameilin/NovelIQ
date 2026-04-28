@@ -421,7 +421,6 @@ export function TimelinePage() {
                 accent="chart-1"
                 icon={<TrendingUp className="h-4 w-4" />}
                 description="当前视图与筛选层级下可见的时间轴节点数量。"
-                footer={<p className="mt-2 text-xs text-text-muted">当前视图下的可见节点</p>}
                 className="!p-4"
                 showOrb
               />
@@ -432,7 +431,6 @@ export function TimelinePage() {
                 accent="chart-5"
                 icon={<Sparkles className="h-4 w-4" />}
                 description="被标记为转折点的节点数量，适合优先阅读。"
-                footer={<p className="mt-2 text-xs text-text-muted">转折点，适合优先阅读</p>}
                 className="!p-4"
                 showOrb
               />
@@ -443,7 +441,6 @@ export function TimelinePage() {
                 accent="chart-2"
                 icon={<GitBranch className="h-4 w-4" />}
                 description="关系变化节点数量，通常最适合联动图谱排查。"
-                footer={<p className="mt-2 text-xs text-text-muted">关系变化节点，最适合联动图谱排查</p>}
                 className="!p-4"
                 showOrb
               />
@@ -455,7 +452,7 @@ export function TimelinePage() {
               </div>
             ) : null}
 
-            <div className="mt-3 flex-1">
+            <div className="mt-2 flex-1 min-h-0">
               {isLoading ? (
                 <div className="h-[360px] w-full animate-pulse rounded-[28px] border border-border/60 bg-surface-hover" />
               ) : isError ? (
@@ -471,8 +468,8 @@ export function TimelinePage() {
                   暂无时间轴节点
                 </div>
               ) : (
-                <div className="space-y-3 pb-3">
-                  <div className="rounded-[28px] border border-border/60 bg-surface/75 p-4">
+                <div className="flex h-full min-h-0 flex-col gap-3 pb-2">
+                  <div className="rounded-[24px] border border-border/60 bg-surface/75 px-3 py-3.5">
                     <TimelineControls
                       variant="inline"
                       maxLevel={maxLevel}
@@ -481,33 +478,35 @@ export function TimelinePage() {
                       onViewModeChange={handleViewModeChange}
                     />
 
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {phases.length === 0 ? (
-                        <p className="text-sm text-text-muted">暂无阶段数据</p>
-                      ) : (
-                        phases.map((phase) => {
-                          const isActive = activePhase === phase.name;
-                          return (
-                            <button
-                              key={phase.name}
-                              type="button"
-                              onClick={() => handlePhaseClick(phase)}
-                              className={[
-                                "rounded-full border px-3 py-2 text-left transition-all",
-                                isActive
-                                  ? "border-primary/35 bg-primary/10 text-text shadow-sm"
-                                  : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
-                              ].join(" ")}
-                            >
-                              <span className="text-sm font-medium">{phase.name}</span>
-                              <span className="ml-2 text-xs">{phase.start}-{phase.end}</span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
+                    <div className="mt-2 flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="flex flex-wrap gap-2">
+                        {phases.length === 0 ? (
+                          <p className="text-sm text-text-muted">暂无阶段数据</p>
+                        ) : (
+                          phases.map((phase) => {
+                            const isActive = activePhase === phase.name;
+                            return (
+                              <button
+                                key={phase.name}
+                                type="button"
+                                onClick={() => handlePhaseClick(phase)}
+                                className={[
+                                  "rounded-full border px-3 py-2 text-left transition-all",
+                                  isActive
+                                    ? "border-primary/35 bg-primary/10 text-text shadow-sm"
+                                    : "border-border/60 bg-background/70 text-text-muted hover:border-border hover:text-text",
+                                ].join(" ")}
+                              >
+                                <span className="text-sm font-medium">{phase.name}</span>
+                                <span className="ml-2 text-xs">{phase.start}-{phase.end}</span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
 
-                    <TimelineLegend className="mt-3" />
+                      <TimelineLegend className="xl:justify-end" />
+                    </div>
                   </div>
 
                   <TimelineTrack
@@ -519,6 +518,7 @@ export function TimelinePage() {
                     tensionCurve={tensionCurve}
                     totalChunks={totalChunks}
                     showTension={showTension}
+                    className="flex-1 min-h-0"
                   />
                 </div>
               )}
