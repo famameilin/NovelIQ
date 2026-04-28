@@ -13,6 +13,13 @@
  * - 按 stream group 展示 Phase3 并行流，避免多个 batch 继续拼成一段混流文本
  * - 主面板默认只展示当前活跃流，其余流收口为摘要和切换入口
  * - 详细多流查看改放进 Dialog，避免主页面高度被并行输出撑爆
+ *
+ * 修改时间: 2026-04-28
+ * 修改者: Codex
+ * 任务: 修复后台恢复后分析页卡死与白屏
+ * 修改内容:
+ * - 改为直接消费 store 中的有界文本缓冲，避免每次渲染都全量 join/split 历史片段
+ * - 细化最近流选择与摘要长度计算，减少长时间后台恢复后的主线程负担
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -54,8 +61,8 @@ const STAGE_LABELS: Record<string, string> = {
  * 任务: phase3-multi-stream-ui
  * 新建原因: 主视图和弹窗都要复用“仅保留最近 N 行”的裁剪逻辑，避免并行流文本无限增长。
  */
-function _limitMarkdownLines(parts: string[], maxLines: number): string {
-  const allLines = parts.join("\n").split("\n");
+function _limitMarkdownLines(content: string, maxLines: number): string {
+  const allLines = content.split("\n");
   return allLines.slice(-maxLines).join("\n");
 }
 
@@ -120,12 +127,12 @@ function StreamGroupDetail({
   className?: string;
 }) {
   const outputContent = useMemo(
-    () => _limitMarkdownLines(group.outputParts, maxLines),
-    [group.outputParts, maxLines],
+    () => _limitMarkdownLines(group.outputText, maxLines),
+    [group.outputText, maxLines],
   );
   const thinkingContent = useMemo(
-    () => _limitMarkdownLines(group.thinkingParts, maxLines),
-    [group.thinkingParts, maxLines],
+    () => _limitMarkdownLines(group.thinkingText, maxLines),
+    [group.thinkingText, maxLines],
   );
   const hasThinking = thinkingContent.trim().length > 0;
 
@@ -191,16 +198,13 @@ export function StreamOutput({
   }, [scopedGroups]);
 
   const latestGroupKey = useMemo(() => {
-    return scopedGroups.reduce<string | null>((latestKey, group) => {
-      if (!latestKey) {
-        return group.groupKey;
-      }
-      const latestGroup = scopedGroups.find((item) => item.groupKey === latestKey);
+    let latestGroup: LLMStreamGroup | null = null;
+    for (const group of scopedGroups) {
       if (!latestGroup || group.lastUpdatedAt >= latestGroup.lastUpdatedAt) {
-        return group.groupKey;
+        latestGroup = group;
       }
-      return latestKey;
-    }, null);
+    }
+    return latestGroup?.groupKey ?? null;
   }, [scopedGroups]);
 
   const activeGroup = useMemo(() => {
@@ -311,7 +315,7 @@ export function StreamOutput({
                   <div className="space-y-2">
                     {scopedGroups.map((group) => {
                       const streamNumber = streamNumberByGroupKey.get(group.groupKey) ?? 1;
-                      const outputLength = group.outputParts.join("").length;
+                      const outputLength = group.outputTotalChars;
                       const isActive = group.groupKey === activeGroup.groupKey;
                       const isLatest = group.groupKey === latestGroupKey;
                       return (

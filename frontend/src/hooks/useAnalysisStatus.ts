@@ -70,6 +70,24 @@ function isMockEnabled(): boolean {
   );
 }
 
+/**
+ * 修改时间: 2026-04-28
+ * 修改者: Codex
+ * 任务: 修复后台恢复后分析页卡死与白屏
+ * 修改内容:
+ * - 将同一 stream/action 的连续 LLM 输出合并进批量缓冲，避免后台恢复时逐 token 触发 store 更新。
+ * - 让前台恢复只按“每流一次”回写，减少主线程渲染风暴。
+ */
+function buildLLMOutputBufferKey(data: Pick<StreamEventData, "action" | "stage" | "sub_stage" | "chunk_id" | "stream_id">): string {
+  return [
+    data.action,
+    data.stage,
+    data.sub_stage || "default",
+    String(data.chunk_id ?? 0),
+    data.stream_id || "default",
+  ].join("|");
+}
+
 export interface UseAnalysisStatusOptions {
   enabled?: boolean;
   onRunning?: () => void;
@@ -96,8 +114,13 @@ export function useAnalysisStatus(
   const enabled = !!novelId && !!taskId && (options?.enabled ?? true);
   const prevStatusRef = useRef<string | null>(null);
   const stageStartTimeRef = useRef<number | null>(null);
-  const [wsStable, setWsStable] = useState(false);
+  const llmOutputBufferRef = useRef<Map<string, StreamEventData>>(new Map());
+  const flushTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const hasConnectedOnceRef = useRef(false);
+  const lastForegroundSyncAtRef = useRef(0);
+  const [stableTaskId, setStableTaskId] = useState<string | null>(null);
   const sseReceivedMessageRef = useRef(false);
+  const wsStable = !!taskId && stableTaskId === taskId;
 
   const optionsRef = useRef(options);
   useEffect(() => {
@@ -123,6 +146,170 @@ export function useAnalysisStatus(
       }
     },
     [updateProgress],
+  );
+
+  /**
+   * 修改时间: 2026-04-28
+   * 修改者: Codex
+   * 任务: 修复后台恢复后分析页卡死与白屏
+   * 修改内容:
+   * - 后台标签页恢复后，任务状态必须允许重新回填，不能继续依赖“初始化时那一次”HTTP 查询。
+   * - 终态回填也会同步更新 store，避免错过 task_complete/task_cancelled 事件后面板继续停在旧阶段。
+   */
+  const applyTaskStatusBackfill = useCallback(
+    (status: TaskStatusResponse) => {
+      if (status.status === "pending" || status.status === "running" || status.status === "cancelling") {
+        updateProgress(buildBackfillProgress(status));
+        setError(null);
+        if (prevStatusRef.current !== status.status) {
+          optionsRef.current?.onRunning?.();
+        }
+        prevStatusRef.current = status.status;
+        return;
+      }
+
+      if (status.status === "completed") {
+        updateProgress({
+          action: "complete",
+          stage: "completed",
+          sub_stage: "",
+          chunk_id: 0,
+          current: 0,
+          total: 0,
+          percent: 100,
+          sub_percent: 0,
+          content: "",
+          message: "分析完成",
+        });
+        setError(null);
+        if (prevStatusRef.current !== "completed") {
+          optionsRef.current?.onCompleted?.();
+        }
+        prevStatusRef.current = "completed";
+        return;
+      }
+
+      if (status.status === "cancelled") {
+        updateProgress({
+          action: "complete",
+          stage: "cancelled",
+          sub_stage: "",
+          chunk_id: 0,
+          current: 0,
+          total: 0,
+          percent: 0,
+          sub_percent: 0,
+          content: "",
+          message: "任务已取消",
+        });
+        setError(null);
+        if (prevStatusRef.current !== "cancelled") {
+          optionsRef.current?.onCancelled?.();
+        }
+        prevStatusRef.current = "cancelled";
+        return;
+      }
+
+      if (status.status === "failed") {
+        setError(status.error || "分析失败");
+        if (prevStatusRef.current !== "failed") {
+          optionsRef.current?.onFailed?.(status.error || "分析失败");
+        }
+        prevStatusRef.current = "failed";
+      }
+    },
+    [setError, updateProgress],
+  );
+
+  /**
+   * 修改时间: 2026-04-28
+   * 修改者: Codex
+   * 任务: 修复后台恢复后分析页卡死与白屏
+   * 修改内容:
+   * - 活跃任务状态同步收口成单独回调，供首次挂载、前台恢复、SSE 重连统一复用。
+   * - 失败时仍显式暴露错误，避免后台恢复后无声卡死。
+   */
+  const syncTaskStatus = useCallback(() => {
+    if (!novelId || !taskId) {
+      return Promise.resolve();
+    }
+
+    return getTaskStatus(novelId, taskId)
+      .then((status) => {
+        applyTaskStatusBackfill(status);
+      })
+      .catch((error: unknown) => {
+        // 中文注释：HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误。
+        console.warn("Failed to backfill analysis task status", error);
+        setError("任务状态同步失败，正在等待实时事件恢复");
+      });
+  }, [applyTaskStatusBackfill, novelId, setError, taskId]);
+
+  /**
+   * 修改时间: 2026-04-28
+   * 修改者: Codex
+   * 任务: 修复后台恢复后分析页卡死与白屏
+   * 修改内容:
+   * - LLM 输出先进入 ref 缓冲，按固定节奏批量刷入 Zustand。
+   * - 这样浏览器前台恢复后即便瞬时补发大量 SSE，也不会逐条触发重渲染。
+   */
+  const flushBufferedLLMOutputs = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+
+    if (llmOutputBufferRef.current.size === 0) {
+      return;
+    }
+
+    const bufferedMessages = Array.from(llmOutputBufferRef.current.values());
+    llmOutputBufferRef.current.clear();
+    bufferedMessages.forEach((message) => {
+      appendLLMOutput(message);
+    });
+  }, [appendLLMOutput]);
+
+  const scheduleBufferedLLMFlush = useCallback(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+    if (flushTimerRef.current !== null) {
+      return;
+    }
+
+    flushTimerRef.current = window.setTimeout(() => {
+      flushBufferedLLMOutputs();
+    }, appConfig.llmOutputFlushIntervalMs);
+  }, [flushBufferedLLMOutputs]);
+
+  const bufferLLMOutput = useCallback(
+    (eventData: StreamEventData) => {
+      const bufferKey = buildLLMOutputBufferKey({
+        action: eventData.action,
+        stage: eventData.stage,
+        sub_stage: eventData.sub_stage,
+        chunk_id: eventData.chunk_id,
+        stream_id: eventData.stream_id,
+      });
+      const existing = llmOutputBufferRef.current.get(bufferKey);
+      if (existing) {
+        llmOutputBufferRef.current.set(bufferKey, {
+          ...existing,
+          current: eventData.current,
+          total: eventData.total,
+          percent: eventData.percent,
+          sub_percent: eventData.sub_percent,
+          content: existing.content + eventData.content,
+          message: eventData.message,
+        });
+      } else {
+        llmOutputBufferRef.current.set(bufferKey, { ...eventData });
+      }
+
+      scheduleBufferedLLMFlush();
+    },
+    [scheduleBufferedLLMFlush],
   );
 
   const handleMessage = useCallback(
@@ -152,8 +339,7 @@ export function useAnalysisStatus(
 
         case "llm_output":
         case "llm_thinking":
-          // 统一格式：LLM 输出也从 StreamEventData 读取
-          appendLLMOutput({
+          bufferLLMOutput({
             action: eventData.action,
             stage: eventData.stage,
             sub_stage: eventData.sub_stage,
@@ -169,11 +355,14 @@ export function useAnalysisStatus(
           break;
 
         case "task_error":
+          flushBufferedLLMOutputs();
           setError((data as ErrorData).error);
+          prevStatusRef.current = "failed";
           optionsRef.current?.onFailed?.((data as ErrorData).error || "未知错误");
           break;
 
         case "task_cancelled":
+          flushBufferedLLMOutputs();
           updateProgress({
             action: "complete",
             stage: "cancelled",
@@ -187,10 +376,12 @@ export function useAnalysisStatus(
             message: "任务已取消",
           });
           setError(null);
+          prevStatusRef.current = "cancelled";
           optionsRef.current?.onCancelled?.();
           break;
 
         case "task_complete":
+          flushBufferedLLMOutputs();
           updateProgress({
             action: "complete",
             stage: "completed",
@@ -203,11 +394,12 @@ export function useAnalysisStatus(
             content: "",
             message: "分析完成",
           });
+          prevStatusRef.current = "completed";
           optionsRef.current?.onCompleted?.();
           break;
       }
     },
-    [_handleStageChange, appendLLMOutput, setError, setStageDuration, updateProgress],
+    [bufferLLMOutput, flushBufferedLLMOutputs, _handleStageChange, setError, setStageDuration, updateProgress],
   );
 
   const sseUrl =
@@ -228,7 +420,7 @@ export function useAnalysisStatus(
               message.type === "llm_thinking")
           ) {
             sseReceivedMessageRef.current = true;
-            setWsStable(true);
+            setStableTaskId(taskId);
           }
           handleMessage(message.type, message.data);
         }
@@ -241,14 +433,14 @@ export function useAnalysisStatus(
             eventType === "llm_thinking")
         ) {
           sseReceivedMessageRef.current = true;
-          setWsStable(true);
+          setStableTaskId(taskId);
         }
         handleMessage(eventType as SSEEventType, data);
       }
     },
     onError: () => {
       setConnected(false);
-      setWsStable(false);
+      setStableTaskId(null);
       sseReceivedMessageRef.current = false;
     },
   });
@@ -256,50 +448,72 @@ export function useAnalysisStatus(
   useEffect(() => {
     if (isConnected) {
       setConnected(true);
+      flushBufferedLLMOutputs();
+      if (hasConnectedOnceRef.current && enabled) {
+        void syncTaskStatus();
+      }
+      hasConnectedOnceRef.current = true;
     }
-  }, [isConnected, setConnected]);
+  }, [enabled, flushBufferedLLMOutputs, isConnected, setConnected, syncTaskStatus]);
 
   useEffect(() => {
     if (taskId && novelId) {
       setTaskId(taskId);
       prevStatusRef.current = null;
       sseReceivedMessageRef.current = false;
-      setWsStable(false);
       stageStartTimeRef.current = null;
+      hasConnectedOnceRef.current = false;
+      llmOutputBufferRef.current.clear();
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
 
-      getTaskStatus(novelId, taskId)
-        .then((status) => {
-          // 中文注释：pending/cancelling 也是当前选中的活跃任务，需要显式覆盖旧进度并恢复“分析中”UI。
-          if (status.status === "pending" || status.status === "running" || status.status === "cancelling") {
-            updateProgress(buildBackfillProgress(status));
-            optionsRef.current?.onRunning?.();
-            prevStatusRef.current = status.status;
-          } else if (status.status === "completed") {
-            optionsRef.current?.onCompleted?.();
-            prevStatusRef.current = "completed";
-          } else if (status.status === "cancelled") {
-            optionsRef.current?.onCancelled?.();
-            prevStatusRef.current = "cancelled";
-          } else if (status.status === "failed") {
-            optionsRef.current?.onFailed?.(status.error || "分析失败");
-            prevStatusRef.current = "failed";
-          }
-        })
-        .catch((error: unknown) => {
-          // 中文注释：HTTP backfill 只是 SSE 的补偿路径，失败时不终止监听，但必须显式暴露错误。
-          console.warn("Failed to backfill analysis task status", error);
-          setError("任务状态同步失败，正在等待实时事件恢复");
-        });
+      void syncTaskStatus();
     } else if (!taskId) {
+      llmOutputBufferRef.current.clear();
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
       reset();
     }
-  }, [taskId, novelId, setTaskId, reset]);
+  }, [taskId, novelId, setTaskId, reset, syncTaskStatus]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const handleForegroundResume = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastForegroundSyncAtRef.current < 300) {
+        return;
+      }
+      lastForegroundSyncAtRef.current = now;
+
+      flushBufferedLLMOutputs();
+      void syncTaskStatus();
+    };
+
+    document.addEventListener("visibilitychange", handleForegroundResume);
+    window.addEventListener("focus", handleForegroundResume);
+    return () => {
+      document.removeEventListener("visibilitychange", handleForegroundResume);
+      window.removeEventListener("focus", handleForegroundResume);
+    };
+  }, [enabled, flushBufferedLLMOutputs, syncTaskStatus]);
 
   useEffect(() => {
     return () => {
+      flushBufferedLLMOutputs();
       disconnect();
     };
-  }, [disconnect]);
+  }, [disconnect, flushBufferedLLMOutputs]);
 
   return {
     isConnected,
